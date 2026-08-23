@@ -1,24 +1,27 @@
--- Part 3 of the GUI toolkit, split from the original GUI.lua.
--- These re-declarations are aliases of the SAME objects the first part
--- created; they add no state. See docs/reorg-tools/splits.manifest.
-local addonName, DF = ...
-local GUI = DF.GUI
-local L = DF.L
-local S = GUI._state
-local P = GUI._priv
+local addonName, NS = ...
+local UI = NS.UI
+if not UI then return end
+
+local S = UI._state
+local P = UI._priv
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
-      GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
-local GetThemeColorFor = GUI.GetThemeColorFor
-local GetThemeColor = GUI.GetThemeColor
-local SnapLen = GUI.SnapLen
-local SnapHeightEven = GUI.SnapHeightEven
-local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
-local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
-local StyleScrollBar = GUI.StyleScrollBar
+      UI.Colors.panel, UI.Colors.element, UI.Colors.border, UI.Colors.hover, UI.Colors.text, UI.Colors.textDim
+local SnapLen = UI.SnapLen
+local SnapHeightEven = UI.SnapHeightEven
+local CreateElementBackdrop = UI._priv.CreateElementBackdrop
+local CreatePanelBackdrop = UI._priv.CreatePanelBackdrop
+local StyleScrollBar = UI.StyleScrollBar
+local MEDIA = UI.MEDIA
+
+local CreateFrame, PixelUtil, GameTooltip = CreateFrame, PixelUtil, GameTooltip
+local ipairs, pairs, type, format, unpack, wipe = ipairs, pairs, type, string.format, unpack, wipe
+local math, tinsert, tostring, tonumber = math, table.insert, tostring, tonumber
+local PlaySound, SOUNDKIT, InCombatLockdown, C_Timer = PlaySound, SOUNDKIT, InCombatLockdown, C_Timer
+local strtrim, _G = strtrim, _G
 
 -- Counterpart to ShowTooltip: hide the shared GameTooltip. Wrapped so callers
--- route through GUI instead of poking GameTooltip directly.
-function GUI:HideTooltip()
+-- route through the toolkit instead of poking GameTooltip directly.
+function UI:HideTooltip()
     GameTooltip:Hide()
 end
 
@@ -87,7 +90,8 @@ end
 --   widget       the frame the caller holds and sets .tooltip on (the container)
 --   label        the default title
 --   labelRegion  the label FontString — the hit frame is built over ITS rect
-function GUI:AttachTooltip(widget, label, labelRegion)
+function UI:AttachTooltip(widget, label, labelRegion)
+    local host = self
     if not labelRegion then return end
 
     local hit = CreateFrame("Frame", nil, widget)
@@ -103,29 +107,30 @@ function GUI:AttachTooltip(widget, label, labelRegion)
 
     hit:SetScript("OnEnter", function()
         -- ★ GAME-DATA TOOLTIPS ride the same hit frame: a widget stamped with
-        -- .tooltipSpellID shows the SPELL's own tooltip (via GUI:ShowGameTooltip,
+        -- .tooltipSpellID shows the SPELL's own tooltip (via host:ShowGameTooltip,
         -- which owns the cold-cache retry) instead of a text spec. Wanted first by
         -- the Tracked IDs rows, where two ids share one NAME and the tooltip
         -- body is the only thing that tells them apart. Duck-typed guard because
-        -- ShowGameTooltip lives in the Options companion: a resident-only consumer
-        -- without the panel loaded simply falls through to the text path.
-        if widget.tooltipSpellID and GUI.ShowGameTooltip then
-            GUI:ShowGameTooltip(hit, {
+        -- ShowGameTooltip is optional and consumer-supplied; a host without it
+        -- falls through to the text path.
+        if widget.tooltipSpellID and host.ShowGameTooltip then
+            host:ShowGameTooltip(hit, {
                 spellID       = widget.tooltipSpellID,
                 fallbackTitle = widget.tooltipSpellFallback,
             })
             return
         end
         local spec = ResolveTooltipSpec(widget, label)
-        if spec then GUI:ShowTooltip(hit, spec) end
+        if spec then host:ShowTooltip(hit, spec) end
     end)
-    hit:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    hit:SetScript("OnLeave", function() host:HideTooltip() end)
 
     widget.dfTooltipHit = hit   -- exposed for a caller that needs to re-anchor it
     return hit
 end
 
-function GUI:StyleButton(btn, opts)
+function UI:StyleButton(btn, opts)
+    local host = self
     opts = opts or {}
     if opts.width or opts.height then
         btn:SetSize(opts.width or btn:GetWidth(), opts.height or btn:GetHeight())
@@ -451,11 +456,11 @@ function GUI:StyleButton(btn, opts)
     -- previously-active button. Works on any StyleButton'd button.
     btn.SetActive = function(self, active)
         self.dfActive = active and true or false
-        restBackdrop(self, accent or GetThemeColor())
+        restBackdrop(self, accent or host:GetAccent())
         if isTabStyle then
             -- Underline tab: show the accent stripe + accent label when active,
             -- dim label when inactive.
-            local a = accent or GetThemeColor()
+            local a = accent or host:GetAccent()
             if self.dfTabStripe then
                 self.dfTabStripe:SetColorTexture(a.r, a.g, a.b, 1)
                 self.dfTabStripe:SetShown(self.dfActive)
@@ -505,13 +510,13 @@ function GUI:StyleButton(btn, opts)
             -- disable->enable cycle could restore the wash at FULL strength
             -- instead of 0.30 (seen live on the Filter Designer add/rename/
             -- delete buttons when switching a preset -> a custom filter).
-            local wc = accent or GetThemeColor()
+            local wc = accent or host:GetAccent()
             hl:SetVertexColor(wc.r, wc.g, wc.b, 0)
             if self.Text then self.Text:SetAlpha(0.35) end
             if self.Icon then self.Icon:SetAlpha(0.35) end
         else
-            self.ApplyThemeColor(accent or GetThemeColor())  -- re-assert the wash's rest colour + alpha (0.30 / 0.15)
-            restBackdrop(self, accent or GetThemeColor())
+            self.ApplyThemeColor(accent or host:GetAccent())  -- re-assert the wash's rest colour + alpha (0.30 / 0.15)
+            restBackdrop(self, accent or host:GetAccent())
             if self.Text then self.Text:SetAlpha(1) end
             if self.Icon then self.Icon:SetAlpha(1) end
         end
@@ -528,9 +533,9 @@ function GUI:StyleButton(btn, opts)
         self:SetAlpha(enabled and 1 or 0.4)
     end
 
-    btn.ApplyThemeColor(accent or GetThemeColor())
+    btn.ApplyThemeColor(accent or host:GetAccent())
     if not accent then
-        btn.UpdateTheme = function() btn.ApplyThemeColor(GetThemeColor()) end
+        btn.UpdateTheme = function() btn.ApplyThemeColor(host:GetAccent()) end
         local root = opts.themeRoot or btn:GetParent()
         if root then
             root.ThemeListeners = root.ThemeListeners or {}
@@ -541,8 +546,7 @@ function GUI:StyleButton(btn, opts)
     -- WHAT HOVERED LOOKS LIKE — the single implementation, so the mouse and a
     -- proxying owner cannot drift apart. OnEnter/OnLeave below are thin wrappers.
     --
-    -- ⚠ NO CURRENT CONSUMER. The Filter Designer's membership button was the one
-    -- caller and went with the filters merge (FilterRegistry/Options.lua says so).
+    -- ⚠ NO CURRENT CONSUMER. Its one caller went with a feature merge.
     -- Kept because the pattern recurs and the Lock/UnlockHighlight subtlety below
     -- is not obvious enough to want rediscovered.
     --
@@ -551,7 +555,7 @@ function GUI:StyleButton(btn, opts)
     -- The row lighting its button says "this is what clicking the row does", and
     -- it separates the button from the row's highlight by HUE, which is far more
     -- robust than the couple of hundredths of grey that sit between C_HOVER and
-    -- C_ELEMENT (the Filter Designer's spell rows are exactly that case).
+    -- C_ELEMENT (a dense list of hoverable rows is exactly that case).
     --
     -- ⚠ Only wire this where the owner's click REALLY performs this button's
     -- action. A control the owner does not fire must not light up with it —
@@ -567,7 +571,7 @@ function GUI:StyleButton(btn, opts)
         if not hovered then
             if isTabStyle or ghost then return end
             if self:IsEnabled() and not self.dfDisabled then
-                restBackdrop(self, accent or GetThemeColor())
+                restBackdrop(self, accent or host:GetAccent())
             end
             return
         end
@@ -575,11 +579,11 @@ function GUI:StyleButton(btn, opts)
         -- below (see applyWash). Skipped when the caller pinned a fixed accent, and
         -- while disabled -- SetDisabled parks the wash at alpha 0 and it must stay
         -- parked, or a disabled button would light up under the mouse.
-        if not accent and not self.dfDisabled then applyWash(GetThemeColor()) end
+        if not accent and not self.dfDisabled then applyWash(host:GetAccent()) end
         -- tab/ghost/neutral: only the auto wash, no accent border
         if isTabStyle or ghost or neutralHover then return end
         if self:IsEnabled() and not self.dfDisabled then
-            local a = accent or GetThemeColor()
+            local a = accent or host:GetAccent()
             if tinted then
                 self:SetBackdropBorderColor(a.r, a.g, a.b, 1)  -- full accent border on hover
             elseif self.dfActive then
@@ -616,7 +620,7 @@ function GUI:StyleButton(btn, opts)
     -- mid-hover comes back lit — stuck fill, border and text colour until you hover and
     -- leave it again. The SetHovered comment above already names this hazard; this is the
     -- half that actually clears it.
-    -- Reported on "+ Import Filter" (Aura Filters), which is a standing frame the page
+    -- Reported on a standing frame a page
     -- SetShown()s per tab and per Party/Raid switch — hover it, switch mode, and it is
     -- hidden before the mouse ever leaves (Krathe, 2026-08-09). Fixed here rather than
     -- there: nothing about it is specific to that button, and several pooled/standing
@@ -630,7 +634,8 @@ end
 
 
 
-function GUI:CreateCloseButton(parent, opts)
+function UI:CreateCloseButton(parent, opts)
+    local host = self
     opts = opts or {}
     local size = opts.size or 20
     -- Rest/hover glyph colours: grey→white for dismiss, red→brighter-red for inline
@@ -638,11 +643,11 @@ function GUI:CreateCloseButton(parent, opts)
     local restColor  = (opts.tone == "danger") and { r = 0.9, g = 0.45, b = 0.45 } or C_TEXT_DIM
     local hoverColor = (opts.tone == "danger") and { r = 1, g = 0.4, b = 0.4 } or { r = 1, g = 1, b = 1 }
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    GUI:StyleButton(btn, {
+    host:StyleButton(btn, {
         width = size, height = size,
         tone = "danger",
         icon = {
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+            texture = MEDIA .. "Icons\\close",
             size = math.max(8, math.floor(size * 0.55)),
             color = restColor,
         },
@@ -665,12 +670,12 @@ function GUI:CreateCloseButton(parent, opts)
     if opts.tooltip then
         btn:HookScript("OnEnter", function(self)
             if type(opts.tooltip) == "table" then
-                GUI:ShowTooltip(self, opts.tooltip)
+                host:ShowTooltip(self, opts.tooltip)
             else
-                GUI:ShowTooltip(self, { title = opts.tooltip, lines = opts.tooltipDesc and { opts.tooltipDesc } or nil })
+                host:ShowTooltip(self, { title = opts.tooltip, lines = opts.tooltipDesc and { opts.tooltipDesc } or nil })
             end
         end)
-        btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        btn:HookScript("OnLeave", function() host:HideTooltip() end)
     end
     return btn
 end
@@ -703,7 +708,8 @@ end
 --       state rather than snapping back to the original default.
 --   :SetGlyphHover(bool)  suppress the hover brighten -- an "off" state should
 --       not light up under the mouse.
-function GUI:CreateGlyphButton(parent, opts)
+function UI:CreateGlyphButton(parent, opts)
+    local host = self
     opts = opts or {}
     local size = opts.size or 16
     local iconSize = opts.iconSize or size
@@ -753,11 +759,11 @@ function GUI:CreateGlyphButton(parent, opts)
     btn:SetScript("OnEnter", function(self)
         if self._glyphHover then self.Icon:SetVertexColor(hr, hg, hb) end
         local spec = GlyphTooltipSpec()
-        if spec then GUI:ShowTooltip(self, spec) end
+        if spec then host:ShowTooltip(self, spec) end
     end)
     btn:SetScript("OnLeave", function(self)
         self.Icon:SetVertexColor(unpack(self._glyphRest))
-        if opts.tooltip then GUI:HideTooltip() end
+        if opts.tooltip then host:HideTooltip() end
     end)
     if opts.onClick then
         btn:SetScript("OnClick", function(self) opts.onClick(self) end)
@@ -769,7 +775,7 @@ end
 -- border. Centralises the inline SetBackdrop blocks scattered across dialogs and
 -- floating panels. opts = { bgAlpha (0.95), border (true), borderColor {r,g,b,a}
 -- or {r,g,b,a array} }.
-function GUI:CreatePanelBackdrop(frame, opts)
+function UI:CreatePanelBackdrop(frame, opts)
     opts = opts or {}
     local bg = opts.bgColor or C_PANEL
     -- A panel's border is a full-strength 1px line, where the element default is
@@ -791,17 +797,17 @@ end
 -- it, because a mover has the opposite job from settings chrome -- it is meant to
 -- shout. Giving movers the neutral element look would be a bug, not consistency.
 --
--- The hue comes from the GUI theme constants (C_ACCENT party purple-blue / C_RAID
--- raid orange) instead of a hardcoded literal, so retheming moves the movers too.
+-- The hue comes from the host accent (or hooks.accentFor for a pinned pole)
+-- instead of a hardcoded literal, so retheming moves the movers too.
 --
--- ⚠ Which POLE is the caller's choice, not GUI.SelectedMode's, because a mover
+-- ⚠ Which POLE is the caller choice, not the host accent, because a mover
 -- belongs to the thing it moves: the raid mover must stay orange even while the
 -- options window happens to be showing a party page. Pass isRaid where the site
 -- knows; omit it only where the mover genuinely has no mode, and it will follow
 -- the selected mode.
 --
 -- opts:
---   isRaid       true/false pins the pole; omit to follow GUI.SelectedMode
+--   isRaid       true/false pins the pole via hooks.accentFor; omit to follow the host accent
 --   color        {r,g,b} or {[1],[2],[3]} -- explicit override, for a mover whose
 --                colour is a user setting rather than the theme
 --   fillAlpha    default 0.30      borderAlpha  default 0.80
@@ -813,12 +819,12 @@ end
 -- work by a different route -- so the method was a second entry point to it, advertised
 -- and unused. opts.color / opts.fill / opts.edgeSize are likewise never passed by any
 -- of the four call sites; the defaults below are what every mover actually gets.
-function GUI:CreateMoverBackdrop(frame, opts)
+function UI:CreateMoverBackdrop(frame, opts)
     opts = opts or {}
     local c = opts.color
     if not c then
-        if opts.isRaid ~= nil then c = GetThemeColorFor(opts.isRaid)
-        else                       c = GetThemeColor() end
+        if opts.isRaid ~= nil then local f = self:Hook("accentFor"); c = (f and f(opts.isRaid)) or self:GetAccent()
+        else                       c = self:GetAccent() end
     end
     local r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
     CreateElementBackdrop(frame, {
@@ -837,34 +843,20 @@ end
 -- edgeSize and inset. (It used to list backdropEdge and omit edgeSize and inset --
 -- backwards on both counts: edgeSize and inset are passed by real callers, while
 -- backdropEdge is passed by none.)
-function GUI:CreateElementBackdrop(frame, opts)
+function UI:CreateElementBackdrop(frame, opts)
     return CreateElementBackdrop(frame, opts)
 end
 
--- ============================================================
--- DESIGNER TEMPLATE BAR (shared by the Aura / Text Designer editors)
--- Compact row: "Template: [dropdown ▾]  [New][Duplicate][Rename][Delete]".
--- NOTE: the saved keys are still auraDesignerPreset(s) / textDesignerPreset(s) --
--- only the LABELS became "template". The keys are persisted and exported, so
--- renaming them would cost a profile migration for nothing a user can see.
--- "Preset" now means only the built-in filter sets (FilterRegistry) and the
--- export/test quick-picks.
--- Picking a template assigns it to the mode (opts.getMode()) AND retargets the
--- editor; the buttons manage the library. After any change the bar calls
--- opts.onChange() so the host page can rebuild + refresh live frames.
--- opts = { kind = "aura"|"text", getMode = fn->mode, onChange = fn }.
--- Returns the bar frame; call bar:Refresh() to resync.
--- ============================================================
 
 -- The addon's ONE name prompt. This was hand-rolled twice against Blizzard's
 -- StaticPopup edit box — here and in the Filter Designer — each copy carrying
 -- the same `self.EditBox or self.editBox or self:GetEditBox()` fallback for a
 -- field name that moves between client versions. Both now come through here and
--- get DF chrome, so there is nothing left to keep in step.
+-- get toolkit chrome, so there is nothing left to keep in step.
 -- opts = { title, message, default, acceptLabel, maxLetters, onAccept(text) }
-function GUI:PromptName(opts)
+function UI:PromptName(opts)
     opts = opts or {}
-    DF:ShowPopupInput({
+    self:ShowPopupInput({
         title       = opts.title,
         message     = opts.message,
         text        = opts.default or "",
@@ -878,34 +870,6 @@ function GUI:PromptName(opts)
     })
 end
 
-local function PromptPresetName(message, default, acceptLabel, callback)
-    GUI:PromptName({
-        title       = L["Template Name"],
-        message     = message,
-        default     = default,
-        acceptLabel = acceptLabel,
-        onAccept    = callback,
-    })
-end
-
-local function ConfirmDeletePreset(kind, name, onDone)
-    DF:ShowPopupAlert({
-        title   = L["Delete Template"],
-        message = format(L["Delete template \"%s\"? Anything using it reverts to Default."], name),
-        buttons = {
-            {
-                label = L["Delete"],
-                onClick = function()
-                    if DF.DeleteDesignerPreset then
-                        DF:DeleteDesignerPreset(kind, name)
-                        if onDone then onDone() end
-                    end
-                end,
-            },
-            { label = L["Cancel"] },
-        },
-    })
-end
 
 
 
@@ -927,47 +891,25 @@ local overrideWidgets = {}
 local function IsOverrideDebugMode()
     return S.overrideDebugMode
 end
-GUI.IsOverrideDebugMode = IsOverrideDebugMode
+UI.IsOverrideDebugMode = IsOverrideDebugMode
 
 -- Function to refresh all override indicators
-local function RefreshAllOverrideIndicators()
+function UI:RefreshAllOverrideIndicators()
     for _, widget in ipairs(overrideWidgets) do
         if widget and widget.UpdateOverrideIndicators then
             widget:UpdateOverrideIndicators()
         end
     end
-    -- Also refresh position override indicator
-    if GUI.UpdatePositionOverrideIndicator then
-        GUI.UpdatePositionOverrideIndicator()
-    end
-    -- Refresh tab override stars (auto-profiles)
-    if DF.AutoProfilesUI and DF.AutoProfilesUI.RefreshTabOverrideStars then
-        DF.AutoProfilesUI:RefreshTabOverrideStars()
-    end
+    -- A position panel and tab stars are consumer chrome; both are optional.
+    if self.UpdatePositionOverrideIndicator then self.UpdatePositionOverrideIndicator() end
+    self:Call("onIndicatorsRefreshed")
 end
-GUI.RefreshAllOverrideIndicators = RefreshAllOverrideIndicators
 
 -- Allow other files to register widgets with override indicators
-function GUI.RegisterOverrideWidget(widget)
+function UI.RegisterOverrideWidget(widget)
     table.insert(overrideWidgets, widget)
 end
 
--- NOT a dump, despite what the old description ("Auto layout override table
--- dump") claimed — it prints no table. It forces every reset button / override
--- marker visible regardless of override state, so you can see which controls
--- carry the machinery at all. S.overrideDebugMode is live: read by
--- GUI.IsOverrideDebugMode and three marker call sites.
-DF:RegisterDebugSlash("DFOVERRIDEDEBUG", "Force-show every override marker and reset button", true, "/dfoverridedebug")
-SlashCmdList["DFOVERRIDEDEBUG"] = function()
-    S.overrideDebugMode = not S.overrideDebugMode
-    DF:Say("Override debug mode " .. (S.overrideDebugMode and "ENABLED" or "DISABLED"))
-    -- Refresh all override indicators
-    RefreshAllOverrideIndicators()
-    -- Also update position panel if open
-    if DF.positionPanel and DF.positionPanel.UpdatePositionOverride then
-        DF.positionPanel.UpdatePositionOverride()
-    end
-end
 
 -- ============================================================
 -- SHARED OVERRIDE CONTROLS
@@ -977,14 +919,15 @@ end
 -- them, position the returned frames, and toggle Show/Hide.
 -- ============================================================
 -- Single source of truth for the override-marker colour.
-GUI.OVERRIDE_MARKER_COLOR = { 1, 0.8, 0.2 }
+UI.OVERRIDE_MARKER_COLOR = { 1, 0.8, 0.2 }
 
 -- A coloured dot marking "this setting is overridden". Returns a hidden Button
 -- so the caller can set .tooltipText / .tooltipSubText for a hover tooltip.
 -- `size` = dot diameter in px (default 12); the hit frame is a touch larger.
-function GUI:CreateOverrideMarker(parent, size)
+function UI:CreateOverrideMarker(parent, size)
+    local host = self
     size = size or 12
-    local c = GUI.OVERRIDE_MARKER_COLOR
+    local c = UI.OVERRIDE_MARKER_COLOR
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(size + 6, size + 6)
     -- Only ever a hover-tooltip target; let clicks fall through so a marker
@@ -997,15 +940,15 @@ function GUI:CreateOverrideMarker(parent, size)
     local icon = btn:CreateTexture(nil, "OVERLAY")
     icon:SetPoint("CENTER")
     icon:SetSize(size, size)
-    icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
+    icon:SetTexture(MEDIA .. "Icons\\dot")
     icon:SetVertexColor(c[1], c[2], c[3])
     btn.icon = icon
     btn:SetScript("OnEnter", function(s)
         if s.tooltipText then
-            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipSubText and { s.tooltipSubText } or nil })
+            host:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipSubText and { s.tooltipSubText } or nil })
         end
     end)
-    btn:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    btn:SetScript("OnLeave", function() host:HideTooltip() end)
     btn:Hide()
     return btn
 end
@@ -1014,36 +957,38 @@ end
 -- A "reset to global" button — red, icon-only, danger tone (matches the Reset
 -- Page button). Returns a hidden Button. opts: { size = 18, tooltip = title,
 -- tooltipDesc = line, onClick = fn }.
-function GUI:CreateOverrideResetButton(parent, opts)
+function UI:CreateOverrideResetButton(parent, opts)
+    local host = self
     opts = opts or {}
     local size = opts.size or 18
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    GUI:StyleButton(btn, {
+    host:StyleButton(btn, {
         width = size, height = size,
         tone = "danger",
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = size - 6 },
+        icon = { texture = MEDIA .. "Icons\\refresh", size = size - 6 },
     })
     btn:Hide()
     -- StyleButton owns OnEnter (hover wash); hook the tooltip on top.
     btn:HookScript("OnEnter", function(self)
         if opts.tooltip then
-            GUI:ShowTooltip(self, { title = opts.tooltip, lines = opts.tooltipDesc and { opts.tooltipDesc } or nil })
+            host:ShowTooltip(self, { title = opts.tooltip, lines = opts.tooltipDesc and { opts.tooltipDesc } or nil })
         end
     end)
-    btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+    btn:HookScript("OnLeave", function() host:HideTooltip() end)
     if opts.onClick then btn:SetScript("OnClick", opts.onClick) end
     return btn
 end
 
-local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOffset, optionsMap, dbTable)
-    -- Skip for proxy tables (e.g. Aura Designer) that don't support per-key override tracking
+local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verticalOffset, optionsMap, dbTable)
+    local L = host.hooks.L
+    -- Skip for proxy tables (e.g. a designer proxy) that do not support per-key override tracking
     if dbTable and rawget(dbTable, "_skipOverrideIndicators") then return end
     verticalOffset = verticalOffset or 0
     container.overrideOptionsMap = optionsMap
     
     -- Reset button (red, icon-only) at top-right; the override marker (dot)
-    -- sits to its left. Both are shared helpers (GUI:CreateOverride*).
-    local resetBtn = GUI:CreateOverrideResetButton(container, {
+    -- sits to its left. Both are shared helpers (UI:CreateOverride*).
+    local resetBtn = host:CreateOverrideResetButton(container, {
         tooltip = L["Reset to Global"],
         tooltipDesc = L["Reset this setting to its global value."],
         onClick = function() if onReset then onReset() end end,
@@ -1051,7 +996,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
     resetBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, verticalOffset)
     container.overrideResetBtn = resetBtn
 
-    local starBtn = GUI:CreateOverrideMarker(container)
+    local starBtn = host:CreateOverrideMarker(container)
     starBtn:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
     container.overrideStar = starBtn
 
@@ -1065,7 +1010,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
     -- Checkmark icon for matching global value
     local checkIcon = container:CreateTexture(nil, "OVERLAY")
     checkIcon:SetSize(8, 8)
-    checkIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\check")
+    checkIcon:SetTexture(MEDIA .. "Icons\\check")
     checkIcon:SetVertexColor(0.3, 0.7, 0.3)
     checkIcon:Hide()
     container.overrideCheckIcon = checkIcon
@@ -1080,15 +1025,14 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             self.overrideStar:Show()
             self.overrideResetBtn:Show()
             self.overrideGlobalText:SetText("(debug)")
-            self.overrideGlobalText:SetTextColor(1, 0.8, 0.2)  -- Yellow for visibility
+            self.overrideGlobalText:SetTextColor(1, 0.8, 0.2)
             self.overrideGlobalText:Show()
             self.overrideCheckIcon:Hide()
             return
         end
-        
-        -- Only show when in raid mode
-        local GUI = DF.GUI
-        if not GUI or GUI.SelectedMode ~= "raid" then
+
+        local state, globalValue = host:Call("getOverrideState", dbTable, dbKey)
+        if not state or state == "none" then
             self.overrideStar:Hide()
             self.overrideResetBtn:Hide()
             self.overrideGlobalText:Hide()
@@ -1096,81 +1040,24 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             return
         end
 
-        local AutoProfilesUI = DF.AutoProfilesUI
-        local isEditing = AutoProfilesUI and AutoProfilesUI:IsEditing()
-        local isRuntimeOverridden = AutoProfilesUI and AutoProfilesUI:IsOverriddenByRuntime(dbKey)
-
-        -- Hide everything if not editing AND not runtime-overridden
-        if not isEditing and not isRuntimeOverridden then
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-            self.overrideGlobalText:Hide()
-            self.overrideCheckIcon:Hide()
-            return
-        end
-
-        -- Runtime override mode: show star + global value, but no reset button
-        if isRuntimeOverridden and not isEditing then
+        -- "runtime" is an overlay the user cannot reset from the control (the
+        -- owning profile has to be edited), so it gets the star and the value
+        -- but no reset button.
+        if state == "runtime" then
             self.overrideStar.tooltipText = L["Override active"]
             self.overrideStar.tooltipSubText = L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."]
             self.overrideStar:Show()
-            self.overrideResetBtn:Hide()  -- Can't reset runtime overrides from controls
-            self.overrideCheckIcon:Hide()
-
-            local globalValue = AutoProfilesUI:GetRuntimeGlobalValue(dbKey)
-
-            -- Format global value for display
-            local globalDisplay
-            if type(globalValue) == "boolean" then
-                globalDisplay = globalValue and L["Yes"] or L["No"]
-            elseif type(globalValue) == "number" then
-                if globalValue == math.floor(globalValue) then
-                    globalDisplay = tostring(globalValue)
-                else
-                    globalDisplay = string.format("%.2f", globalValue)
-                end
-            elseif type(globalValue) == "table" then
-                if globalValue.r then
-                    globalDisplay = L["Color"]
-                else
-                    globalDisplay = "..."
-                end
-            elseif type(globalValue) == "string" and self.overrideOptionsMap and self.overrideOptionsMap[globalValue] then
-                local mapped = self.overrideOptionsMap[globalValue]
-                if type(mapped) == "table" then
-                    globalDisplay = mapped.text or mapped.label or globalValue
-                else
-                    globalDisplay = tostring(mapped)
-                end
-            else
-                globalDisplay = tostring(globalValue or L["None"])
-            end
-
-            self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
-            self.overrideGlobalText:ClearAllPoints()
-            self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
-            self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
-            self.overrideGlobalText:Show()
-            return
-        end
-
-        -- Editing mode: existing behavior
-        -- Check if setting is overridden
-        local isOverridden = AutoProfilesUI:IsSettingOverridden(dbKey)
-        local globalValue = AutoProfilesUI:GetGlobalValue(dbKey)
-
-        -- Show/hide star and reset button
-        if isOverridden then
+            self.overrideResetBtn:Hide()
+        elseif state == "overridden" then
             self.overrideStar.tooltipText = L["Override active"]
             self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
             self.overrideStar:Show()
             self.overrideResetBtn:Show()
-        else
+        else   -- "editing", value matches the global
             self.overrideStar:Hide()
             self.overrideResetBtn:Hide()
         end
 
-        -- Format global value for display
         local globalDisplay
         if type(globalValue) == "boolean" then
             globalDisplay = globalValue and L["Yes"] or L["No"]
@@ -1178,40 +1065,31 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             if globalValue == math.floor(globalValue) then
                 globalDisplay = tostring(globalValue)
             else
-                globalDisplay = string.format("%.2f", globalValue)
+                globalDisplay = format("%.2f", globalValue)
             end
         elseif type(globalValue) == "table" then
-            -- Color table
-            if globalValue.r then
-                globalDisplay = L["Color"]
-            else
-                globalDisplay = "..."
-            end
+            globalDisplay = globalValue.r and L["Color"] or "..."
         elseif type(globalValue) == "string" and self.overrideOptionsMap and self.overrideOptionsMap[globalValue] then
             local mapped = self.overrideOptionsMap[globalValue]
-            if type(mapped) == "table" then
-                globalDisplay = mapped.text or mapped.label or globalValue
-            else
-                globalDisplay = tostring(mapped)
-            end
+            globalDisplay = (type(mapped) == "table" and (mapped.text or mapped.label or globalValue)) or tostring(mapped)
         else
             globalDisplay = tostring(globalValue or L["None"])
         end
 
-        -- Show global value inline with label
-        self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
+        self.overrideGlobalText:SetText(format(L["(Global: %s)"], globalDisplay))
         self.overrideGlobalText:ClearAllPoints()
         self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
 
-        if isOverridden then
-            self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
-            self.overrideCheckIcon:Hide()
-        else
+        -- The check icon marks "matches the global", which is only meaningful
+        -- while editing: a runtime overlay is by definition a difference.
+        if state == "editing" then
             self.overrideGlobalText:SetTextColor(0.3, 0.6, 0.3)
-            -- Position check icon after text
             self.overrideCheckIcon:ClearAllPoints()
             self.overrideCheckIcon:SetPoint("LEFT", self.overrideGlobalText, "RIGHT", 2, 0)
             self.overrideCheckIcon:Show()
+        else
+            self.overrideGlobalText:SetTextColor(0.5, 0.5, 0.5)
+            self.overrideCheckIcon:Hide()
         end
         self.overrideGlobalText:Show()
     end
@@ -1225,16 +1103,17 @@ P.AddOverrideIndicators = AddOverrideIndicators
 
 -- Override indicators for order list controls (drag lists)
 -- These don't have traditional labels, so we use a compact star + reset + "Modified" badge
-local function AddOrderListOverrideIndicators(container, dbKey, onReset)
+local function AddOrderListOverrideIndicators(host, container, dbKey, onReset, dbTable)
+    local L = host.hooks.L
     -- Reset button (red, icon-only) + override marker (dot) — shared helpers.
-    local resetBtn = GUI:CreateOverrideResetButton(container, {
+    local resetBtn = host:CreateOverrideResetButton(container, {
         tooltip = L["Reset to Global Order"],
         onClick = function() if onReset then onReset() end end,
     })
     resetBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, 14)
     container.overrideResetBtn = resetBtn
 
-    local starBtn = GUI:CreateOverrideMarker(container)
+    local starBtn = host:CreateOverrideMarker(container)
     starBtn:SetPoint("RIGHT", resetBtn, "LEFT", -2, 0)
     container.overrideStar = starBtn
     local starIcon = starBtn.icon  -- the "Modified" badge below anchors to the dot
@@ -1261,35 +1140,14 @@ local function AddOrderListOverrideIndicators(container, dbKey, onReset)
             return
         end
         
-        -- Only show when in raid mode and editing
-        local GUI = DF.GUI
-        if not GUI or GUI.SelectedMode ~= "raid" then
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-            self.overrideModifiedText:Hide()
-            return
-        end
-        
-        local AutoProfilesUI = DF.AutoProfilesUI
-        if not AutoProfilesUI or not AutoProfilesUI:IsEditing() then
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-            self.overrideModifiedText:Hide()
-            return
-        end
-        
-        local isOverridden = AutoProfilesUI:IsSettingOverridden(dbKey)
-        
-        if isOverridden then
+        local state = host:Call("getOverrideState", dbTable, dbKey)
+        local on = (state == "overridden")
+        self.overrideStar:SetShown(on)
+        self.overrideResetBtn:SetShown(on)
+        self.overrideModifiedText:SetShown(on)
+        if on then
             self.overrideStar.tooltipText = L["Override active"]
             self.overrideStar.tooltipSubText = L["This setting differs from the global profile value. Click the reset button to revert."]
-            self.overrideStar:Show()
-            self.overrideResetBtn:Show()
-            self.overrideModifiedText:Show()
-        else
-            self.overrideStar:Hide()
-            self.overrideResetBtn:Hide()
-            self.overrideModifiedText:Hide()
         end
     end
 
@@ -1314,7 +1172,8 @@ P.AddOrderListOverrideIndicators = AddOrderListOverrideIndicators
 --                  no accent is given.
 -- Returns the check texture (also stored as cb.Check).
 -- ============================================================
-function GUI:StyleCheckButton(cb, opts)
+function UI:StyleCheckButton(cb, opts)
+    local host = self
     opts = opts or {}
     PixelUtil.SetSize(cb, opts.size or 18, opts.size or 18)
     CreateElementBackdrop(cb)
@@ -1326,7 +1185,7 @@ function GUI:StyleCheckButton(cb, opts)
     PixelUtil.SetPoint(check, "CENTER", cb, "CENTER", 0, 0)
 
     local accent = opts.accent
-    local col = accent or GetThemeColor()
+    local col = accent or host:GetAccent()
     cb.Check = check
     -- Native checkboxes let WoW show/hide the check via the checked state; a few
     -- consumers (and plain Button-based pseudo-checkboxes) drive it manually via
@@ -1357,7 +1216,7 @@ function GUI:StyleCheckButton(cb, opts)
 
     if not accent then
         cb.UpdateTheme = function()
-            cb.ApplyThemeColor(GetThemeColor())
+            cb.ApplyThemeColor(host:GetAccent())
         end
         local root = opts.themeRoot or cb:GetParent()
         if root then
@@ -1378,7 +1237,7 @@ end
 -- with the track added; use it for short mutually-exclusive values
 -- that want to sit next to the field they qualify (s / %).
 --
--- API: GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
+-- API: UI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
 --   segments : ordered { value =, label =, tooltip = } — label is what
 --              shows on the button, tooltip the full name behind a terse one
 --   opts.segmentWidth (26) / opts.height (18)
@@ -1399,8 +1258,8 @@ end
 -- and the description is also surfaced as a tooltip on hover so it
 -- remains accessible even if it gets visually truncated.
 --
--- Used by the Debug > Categories sub-tab. The categoryKey writes
--- directly to DandersFramesDB_v2.debug.filters.
+-- Used by a Debug > Categories sub-tab. The categoryKey writes
+-- directly to the consumer's own debug filter table.
 -- ============================================================
 
 -- The one input "well": translucent-black fill + dim edge. Shared by StyleEditBox
@@ -1414,7 +1273,7 @@ local INPUT_EDGE = { 0.3, 0.3, 0.3, 1 }
 -- chrome used by CreateInput/CreateEditBox — translucent-black fill + dim border
 -- + standard font/insets. The caller still owns size/position/scripts. Pass
 -- opts.skipFont to keep a custom font (e.g. multi-line / monospace inputs).
-function GUI:StyleEditBox(eb, opts)
+function UI:StyleEditBox(eb, opts)
     opts = opts or {}
     CreateElementBackdrop(eb, {
         bgColor     = INPUT_FILL,
@@ -1477,7 +1336,7 @@ end
 local TEXTAREA_PAD    = 4    -- gap between the well's edge and the scroll frame
 local TEXTAREA_GUTTER = 18   -- room right of the scroll for the themed scrollbar
 
-function GUI:CreateTextArea(parent, opts)
+function UI:CreateTextArea(parent, opts)
     opts = opts or {}
 
     local well = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -1499,7 +1358,7 @@ function GUI:CreateTextArea(parent, opts)
     eb:SetMultiLine(true)
     eb:SetAutoFocus(false)
     if opts.fontSize then
-        GUI:SetSettingsFont(eb, opts.fontSize, opts.fontFlags or "")
+        self:SetSettingsFont(eb, opts.fontSize, opts.fontFlags or "")
     else
         eb:SetFontObject(opts.fontObject or DFFontHighlightSmall)
     end
@@ -1585,21 +1444,34 @@ function GUI:CreateTextArea(parent, opts)
     return well
 end
 
--- customGet / customSet (optional, matches CreateDropdown's pattern): when
--- provided, the slider routes its reads and writes through these functions
--- instead of dbTable[dbKey] directly. Used by widgets whose underlying value
--- lives inside a nested table (e.g. Border Alpha → <prefix>BorderColor.a),
--- where the plain `dbTable[dbKey] = v` path can't express the nesting.
--- Consumers that pass customSet typically pass dbKey = nil so the
--- auto-profile override system doesn't track a key that doesn't exist at the
--- top level of dbTable.
--- accentColor (optional {r,g,b}): fixed thumb/fill colour instead of the mode
--- theme — for ClickCasting (green) / Search (blue) which keep their identity.
-
-function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, callback, lightweightUpdate, usePreviewMode, customGet, customSet, accentColor)
+-- opts:
+--   label                       min, max, step        REQUIRED
+--   get() -> value / set(value) the value binding; omit both for a read-only bar
+--   onChanged()                 full-refresh callback, skipped while dragging
+--   lightweight()               per-frame callback during a drag (hooks.onDragStart takes it)
+--   previewMode                 ask the host to strip live chrome during the drag
+--   accent {r,g,b}              pinned accent instead of the host one
+--   tooltip                     as before, read at hover time off the container
+--   dbRef = { db, key }         optional settings metadata. A slider WITHOUT it
+--                               never calls getOverrideState / interceptWrite /
+--                               onSettingWritten / registerSearch, so a consumer
+--                               with no settings hooks gets a plain slider and
+--                               none of the indicator machinery.
+function UI:CreateSlider(parent, opts)
+    local host = self
+    opts = opts or {}
+    local label = opts.label or ""
+    local minVal, maxVal, step = opts.min or 0, opts.max or 1, opts.step or 1
+    local callback = opts.onChanged
+    local lightweightUpdate = opts.lightweight
+    local usePreviewMode = opts.previewMode
+    local accentColor = opts.accent
+    local customGet, customSet = opts.get, opts.set
+    local dbTable = opts.dbRef and opts.dbRef.db or nil
+    local dbKey = opts.dbRef and opts.dbRef.key or nil
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
-    container.preferredHeight = GUI.RowHeight.slider   -- factory-owned slot height (see GUI.RowHeight)
+    container.preferredHeight = UI.RowHeight.slider   -- factory-owned slot height (see UI.RowHeight)
     container.rowKind = "slider"
     container.fixedRowHeight = true
     
@@ -1613,11 +1485,8 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     -- Use vertical offset of 6 to align with label row (sliders have input box below)
     if dbKey and type(dbKey) == "string" then
         local function onReset()
-            if DF.AutoProfilesUI then
-                DF.AutoProfilesUI:ResetProfileSetting(dbKey)
-                -- Refresh to global value
-                local globalVal = DF.AutoProfilesUI:GetGlobalValue(dbKey)
-                dbTable[dbKey] = globalVal
+            local globalVal = host:Call("resetOverride", dbTable, dbKey)
+            if globalVal ~= nil then
                 -- Update slider display
                 if container.slider then
                     container.slider:SetValue(globalVal)
@@ -1625,10 +1494,10 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
                 if container.UpdateOverrideIndicators then
                     container:UpdateOverrideIndicators(globalVal)
                 end
-                DF:UpdateAll()
+                host:Call("refreshNow")
             end
         end
-        AddOverrideIndicators(container, lbl, dbKey, onReset, 6, nil, dbTable)
+        AddOverrideIndicators(host, container, lbl, dbKey, onReset, 6, nil, dbTable)
     end
 
     -- Background track.
@@ -1647,7 +1516,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     local fill = track:CreateTexture(nil, "ARTWORK")
     fill:SetPoint("LEFT", 1, 0)
     fill:SetHeight(6)
-    local c = accentColor or GetThemeColor()
+    local c = accentColor or host:GetAccent()
     fill:SetColorTexture(c.r, c.g, c.b, 0.8)
     
     -- Slider
@@ -1712,7 +1581,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         input:EnableMouse(enabled)
         input:SetEnabled(enabled)
         input:SetAlpha(enabled and 1 or 0.4)
-        local tc = accentColor or GetThemeColor()
+        local tc = accentColor or host:GetAccent()
         if enabled then
             lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
             thumb:SetColorTexture(tc.r, tc.g, tc.b, 1)
@@ -1725,7 +1594,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     end
     
     container.UpdateTheme = function()
-        local nc = accentColor or GetThemeColor()
+        local nc = accentColor or host:GetAccent()
         if slider:IsEnabled() then
             thumb:SetColorTexture(nc.r, nc.g, nc.b, 1)
             fill:SetColorTexture(nc.r, nc.g, nc.b, 0.8)
@@ -1796,7 +1665,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         if button == "LeftButton" then
             isDragging = true
             local funcName = lightweightUpdate and ((dbKey or label or "slider") .. " lightweight") or nil
-            DF:OnSliderDragStart(lightweightUpdate, funcName, sliderUsePreviewMode)
+            host:Call("onDragStart", lightweightUpdate, funcName, sliderUsePreviewMode)
         end
     end)
     
@@ -1804,7 +1673,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     slider:SetScript("OnMouseUp", function(self, button)
         if button == "LeftButton" and isDragging then
             isDragging = false
-            DF:OnSliderDragStop()
+            host:Call("onDragStop")
             -- Update override indicators after drag ends
             if container.UpdateOverrideIndicators then
                 container:UpdateOverrideIndicators(slider:GetValue())
@@ -1827,8 +1696,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         end
 
         -- Runtime override protection: redirect to baseline, skip refresh
-        if dbKey and GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-           and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, value) then
+        if dbKey and host:Call("interceptWrite", dbTable, dbKey, value) then
             if not input:HasFocus() then input:SetText(FormatValue(value)) end
             UpdateFill()
             if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(value) end
@@ -1838,18 +1706,16 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         WriteValue(value)
 
         -- If editing a profile, also set the override
-        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-            DF.AutoProfilesUI:SetProfileSetting(dbKey, value)
-        end
+        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, value) end
         
         if not input:HasFocus() then
             input:SetText(FormatValue(value))
         end
         UpdateFill()
         -- Use targeted update system - lightweight during drag, full on release
-        DF:ThrottledUpdateAll()
+        host:Call("refresh")
         -- Skip callback during drag - it will run via UpdateAll on release
-        if callback and not DF.sliderDragging then
+        if callback and not host:Call("isDragging") then
             callback()
         end
     end)
@@ -1860,8 +1726,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
             val = math.max(minVal, math.min(maxVal, val))
 
             -- Runtime override protection: redirect to baseline, skip refresh
-            if dbKey and GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-               and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, val) then
+            if dbKey and host:Call("interceptWrite", dbTable, dbKey, val) then
                 self:SetText(FormatValue(val))
                 suppressCallback = true
                 slider:SetValue(val)
@@ -1882,9 +1747,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
             UpdateFill()
 
             -- If editing a profile, also set the override
-            if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                DF.AutoProfilesUI:SetProfileSetting(dbKey, val)
-            end
+            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val) end
 
             -- Update override indicators
             if container.UpdateOverrideIndicators then
@@ -1899,7 +1762,7 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
             end
 
             -- Guaranteed full update (SetValue may not fire OnValueChanged if value didn't change)
-            DF:UpdateAll()
+            host:Call("refreshNow")
         else
             local v = ReadValue(); if v ~= nil then UpdateValue(v) end
         end
@@ -1915,26 +1778,25 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     if initial ~= nil then UpdateValue(initial) end
     
     -- SEARCH: Register this setting with slider metadata
-    if DF.Search and dbKey and type(dbKey) == "string" then
-        container.searchEntry = DF.Search:RegisterSlider(label, dbKey, minVal, maxVal, step, nil, callback)
-        -- Hand the entry a reference back so the inline search result can read the
-        -- tooltip this caller sets on us after we return.
-        -- ⚠ Guard the METHOD, not just DF.Search: Search lives in the companion
-        -- addon, so a mismatched pair would find the table and not the function.
-        if DF.Search.LinkSourceWidget then DF.Search:LinkSourceWidget(container) end
+    if dbKey and type(dbKey) == "string" then
+        -- The hook is optional: a host with no search index supplies no
+        -- registerSearch and this block is a no-op.
+        host:Call("registerSearch", "slider", label, dbKey, container, { minVal = minVal, maxVal = maxVal, step = step, callback = callback })
     end
     
     -- Expose label for dynamic updates
     container.label = lbl
 
-    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). Keeping it
+    -- Tooltip: shared attach on the LABEL only (see UI:AttachTooltip). Keeping it
     -- off the bar matters most here — a tooltip over a slider you are dragging is
     -- the worst case of the problem. Both .tooltip (title from the label) and the
     -- legacy .tooltipText/.tooltipSubText pair are honoured.
-    GUI:AttachTooltip(container, label, lbl)
+    host:AttachTooltip(container, label, lbl)
 
     return container
 end
+
+UI.CreateSliderNative = UI.CreateSlider
 
 
 
@@ -1946,17 +1808,16 @@ end
 -- Every menu frame registers here at creation; CloseAllMenus() lets a
 -- context switch dismiss whatever is open.
 -- ============================================================
-GUI._menus = GUI._menus or {}
-function GUI:RegisterMenu(frame) self._menus[frame] = true end
+UI._menus = UI._menus or {}
+function UI:RegisterMenu(frame) UI._menus[frame] = true end
 
--- ☠ Lives with the registry it iterates, deliberately. This was in the
--- companion for a while, which left resident code able to REGISTER a menu but
--- not close one -- and resident CreateDropdown below does register (the mover
--- panel's anchor dropdown is a resident caller). Nothing broke, because both
--- callers happened to be companion-side, but a bulk "dismiss whatever is open"
--- call that is nil half the time fails SILENTLY: the menu just stays floating,
--- which is the exact symptom this registry exists to prevent. Four lines is
--- not worth an addon boundary.
+-- ☠ Lives with the registry it iterates, deliberately. This was in a consumer
+-- for a while, which left the pack able to REGISTER a menu but not close one --
+-- and CreateDropdown below does register. Nothing broke, because one caller
+-- lived in the pack and one in a consumer, but a bulk "dismiss whatever is
+-- open" call that is nil half the time fails SILENTLY: the menu just stays
+-- floating, which is the exact symptom this registry exists to prevent. Four
+-- lines is not worth an addon boundary.
 -- ☠ THE ONLY RELIABLE CLOSER, and why the single-slot tracker is not.
 -- Every menu is parented to its own dropdown BUTTON, so a tab switch hides it via its
 -- ancestor. That fires the menu's OnHide, which clears S.currentOpenDropdown -- but the
@@ -1966,13 +1827,13 @@ function GUI:RegisterMenu(frame) self._menus[frame] = true end
 -- (Krathe, 2026-08-09 -- all three dropdown symptoms are this one fault).
 -- ⇒ Iterating the registry and calling Hide() clears the frame's own flag, which
 -- ancestor-hiding never does. Prefer this over CloseOpenDropdown at every open site.
-function GUI:CloseAllMenus()
-    for f in pairs(self._menus) do
+function UI:CloseAllMenus()
+    for f in pairs(UI._menus) do
         if f:IsShown() then f:Hide() end
     end
     -- Keep the single-slot tracker honest: it is still read by the toggle handlers, and a
     -- stale reference here is what made a re-shown menu invisible to them.
-    if self._state then self._state.currentOpenDropdown = nil end
+    S.currentOpenDropdown = nil
 end
 
 -- One corner picker standing in for TWO Start/End dropdowns that were really two axes
@@ -1994,8 +1855,22 @@ end
 -- ⚠ It NEVER writes the key. A UI fallback that persists its own display value is a
 -- silent second migration -- the stored END must survive being temporarily meaningless,
 -- or lowering Groups Before Wrap would not restore what the user picked.
-function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts)
+-- opts: label, getH/setH, getV/setV, onChanged, dbRef = { db, keyH, keyV },
+--       plus transposedFn, verticalInertFn, wrapMirroredFn unchanged (each is
+--       called with the db, which may be nil for a getter-only consumer).
+function UI:CreateAnchorGrid(parent, opts)
+    local host = self
+    local L = host.hooks.L
     opts = opts or {}
+    local label = opts.label or ""
+    local callback = opts.onChanged
+    local dbTable = opts.dbRef and opts.dbRef.db or nil
+    local keyH = opts.dbRef and opts.dbRef.keyH or nil
+    local keyV = opts.dbRef and opts.dbRef.keyV or nil
+    local getH = opts.getH or function() return dbTable and dbTable[keyH] end
+    local getV = opts.getV or function() return dbTable and dbTable[keyV] end
+    local setH = opts.setH or function(v) if dbTable then dbTable[keyH] = v end end
+    local setV = opts.setV or function(v) if dbTable then dbTable[keyV] = v end end
     local CELL_W, CELL_H, GUTTER = 34, 18, 2
     -- ☠ THE TWO KEYS SWAP SCREEN AXES WITH THE GROWTH DIRECTION. Do not hard-code one
     -- key to the columns. keyH (the ALIGN key, 3 values) moves things along the axis the
@@ -2028,7 +1903,7 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     }
 
     local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(260, GUI.RowHeight.anchorgrid)
+    container:SetSize(260, UI.RowHeight.anchorgrid)
     container.rowKind = "anchorgrid"
     container.fixedRowHeight = true
 
@@ -2043,11 +1918,11 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     local ROWS = transposed and ALIGN or WRAP
 
     -- ⚠ The slot height follows the ROW COUNT, which the transpose changes (2 rows one way,
-    -- 3 the other). GUI.RowHeight.anchorgrid is the untransposed case; the factory still
+    -- 3 the other). UI.RowHeight.anchorgrid is the untransposed case; the factory still
     -- owns the number, it just cannot be a single constant. The page rebuilds on a growth
     -- direction change, so this is only ever evaluated at construction.
     local gridH = #ROWS * CELL_H + (#ROWS + 1) * GUTTER
-    local rowH = 16 + gridH + GUI.RowGap
+    local rowH = 16 + gridH + UI.RowGap
     container:SetHeight(rowH)
     container.preferredHeight = rowH
 
@@ -2064,7 +1939,7 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     for r, vy in ipairs(ROWS) do
         for c, vx in ipairs(COLS) do
             local btn = CreateFrame("Button", nil, grid, "BackdropTemplate")
-            GUI:StyleButton(btn, { width = CELL_W, height = CELL_H })
+            host:StyleButton(btn, { width = CELL_W, height = CELL_H })
             btn:SetPoint("TOPLEFT", grid, "TOPLEFT",
                 GUTTER + (c - 1) * (CELL_W + GUTTER), -(GUTTER + (r - 1) * (CELL_H + GUTTER)))
             -- SCREEN position of the cell. The align half is also the key value; the wrap
@@ -2110,8 +1985,8 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
 
     function container:Refresh()
         self.wrapInert = opts.verticalInertFn and opts.verticalInertFn(dbTable) or false
-        local curAlign = dbTable[keyH] or "START"
-        local curWrap  = dbTable[keyV] or "START"
+        local curAlign = getH() or "START"
+        local curWrap  = getV() or "START"
         -- Display-only collapse: a stored value stays stored, it just cannot be shown.
         local shownWrap = self.wrapInert and "START" or self:WrapKey(curWrap)
         -- ⚠ HIDDEN, not dimmed. These cells are empty rectangles, so a 0.35 alpha on a dark
@@ -2156,14 +2031,11 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     -- when a raid-mode runtime override redirected it to the baseline, where a live
     -- refresh would only repaint the unchanged overlay.
     function container:WriteKey(key, value)
-        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-           and DF.AutoProfilesUI:HandleRuntimeWrite(key, value) then
+        if dbTable and host:Call("interceptWrite", dbTable, key, value) then
             return false
         end
-        dbTable[key] = value
-        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-            DF.AutoProfilesUI:SetProfileSetting(key, value)
-        end
+        if key == keyH then setH(value) else setV(value) end
+        if dbTable then host:Call("onSettingWritten", dbTable, key, value) end
         return true
     end
 
@@ -2173,32 +2045,34 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     -- corner caption). Both register with RefreshAllOverrideIndicators through
     -- AddOverrideIndicators, so profile edits and runtime overlays light them like any
     -- dropdown's.
-    local vHost = CreateFrame("Frame", nil, container)
-    vHost:SetSize(40, 16)
-    vHost:SetPoint("TOPRIGHT", container, "TOPRIGHT", -44, 0)
-    local function resetKey(host, key)
-        return function()
-            if not DF.AutoProfilesUI then return end
-            DF.AutoProfilesUI:ResetProfileSetting(key)
-            dbTable[key] = DF.AutoProfilesUI:GetGlobalValue(key)
-            container:Refresh()
-            if host.UpdateOverrideIndicators then host:UpdateOverrideIndicators(dbTable[key]) end
-            if callback then callback() end
+    local vHost
+    if dbTable and keyH and keyV then
+        vHost = CreateFrame("Frame", nil, container)
+        vHost:SetSize(40, 16)
+        vHost:SetPoint("TOPRIGHT", container, "TOPRIGHT", -44, 0)
+        local function resetKey(indHost, key)
+            return function()
+                local v = host:Call("resetOverride", dbTable, key)
+                if v == nil then return end
+                container:Refresh()
+                if indHost.UpdateOverrideIndicators then indHost:UpdateOverrideIndicators(key == keyH and getH() or getV()) end
+                if callback then callback() end
+            end
         end
+        local alignWords = { START = SOLO[transposed].START, CENTER = SOLO[transposed].CENTER, END = SOLO[transposed].END }
+        local wrapWords  = { START = L["Start"], END = L["End"] }
+        AddOverrideIndicators(host, container, lbl, keyH, resetKey(container, keyH), 6, alignWords, dbTable)
+        AddOverrideIndicators(host, vHost, caption, keyV, resetKey(vHost, keyV), 0, wrapWords, dbTable)
     end
-    local alignWords = { START = SOLO[transposed].START, CENTER = SOLO[transposed].CENTER, END = SOLO[transposed].END }
-    local wrapWords  = { START = L["Start"], END = L["End"] }
-    AddOverrideIndicators(container, lbl, keyH, resetKey(container, keyH), 6, alignWords, dbTable)
-    AddOverrideIndicators(vHost, caption, keyV, resetKey(vHost, keyV), 0, wrapWords, dbTable)
     function container:UpdateOverrideIndicatorsBoth()
-        if self.UpdateOverrideIndicators then self:UpdateOverrideIndicators(dbTable[keyH]) end
-        if vHost.UpdateOverrideIndicators then vHost:UpdateOverrideIndicators(dbTable[keyV]) end
+        if self.UpdateOverrideIndicators then self:UpdateOverrideIndicators(getH()) end
+        if vHost and vHost.UpdateOverrideIndicators then vHost:UpdateOverrideIndicators(getV()) end
     end
 
-    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip), matching every
+    -- Tooltip: shared attach on the LABEL only (see UI:AttachTooltip), matching every
     -- other labelled factory. Hovering the cells themselves must stay quiet -- six of them
     -- popping the same tooltip would fight the click target.
-    GUI:AttachTooltip(container, label, lbl)
+    host:AttachTooltip(container, label, lbl)
 
     container.UpdateTheme = function() container:Refresh() end
     if not parent.ThemeListeners then parent.ThemeListeners = {} end
@@ -2208,8 +2082,21 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     return container
 end
 
-function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet, opts)
+UI.CreateAnchorGridNative = UI.CreateAnchorGrid
+
+-- opts: label, options, get, set, onChanged, tooltip, dbRef = { db, key },
+--       plus the display flags carried through unchanged: accent, inline,
+--       optionsFunc, searchable, menuAlign, onRuntimeWrite.
+function UI:CreateDropdown(parent, opts)
+    local host = self
+    local L = host.hooks.L
     opts = opts or {}
+    local label = opts.label or ""
+    local options = opts.options or {}
+    local callback = opts.onChanged
+    local customGet, customSet = opts.get, opts.set
+    local dbTable = opts.dbRef and opts.dbRef.db or nil
+    local dbKey = opts.dbRef and opts.dbRef.key or nil
     local accentColor = opts.accent
     local optionsFunc = opts.optionsFunc
 
@@ -2218,7 +2105,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     -- Inline dropdowns embed in a caller-managed layout (label hidden), so only the standalone
     -- form owns a fixed slot height; inline keeps whatever height its host passes.
     if not opts.inline then
-        container.preferredHeight = GUI.RowHeight.dropdown   -- factory-owned slot (see GUI.RowHeight)
+        container.preferredHeight = UI.RowHeight.dropdown   -- factory-owned slot (see UI.RowHeight)
         container.rowKind = "dropdown"
         container.fixedRowHeight = true
     end
@@ -2237,21 +2124,18 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     -- Add override indicators if dbKey is provided (for auto profiles)
     if dbKey and type(dbKey) == "string" then
         local function onReset()
-            if DF.AutoProfilesUI then
-                DF.AutoProfilesUI:ResetProfileSetting(dbKey)
-                -- Refresh to global value
-                local globalVal = DF.AutoProfilesUI:GetGlobalValue(dbKey)
-                dbTable[dbKey] = globalVal
+            local globalVal = host:Call("resetOverride", dbTable, dbKey)
+            if globalVal ~= nil then
                 if container.UpdateText then
                     container:UpdateText()
                 end
                 if container.UpdateOverrideIndicators then
                     container:UpdateOverrideIndicators(globalVal)
                 end
-                DF:UpdateAll()
+                host:Call("refreshNow")
             end
         end
-        AddOverrideIndicators(container, lbl, dbKey, onReset, 6, options, dbTable)
+        AddOverrideIndicators(host, container, lbl, dbKey, onReset, 6, options, dbTable)
     end
 
     -- Button - use relative anchoring so it resizes with container
@@ -2279,7 +2163,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     local arrow = btn:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("RIGHT", -8, 0)
     arrow:SetSize(12, 12)
-    arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    arrow:SetTexture(MEDIA .. "Icons\\expand_more")
     arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     -- SetDisplayOverride: a fixed opener caption that wins over the selected
@@ -2334,7 +2218,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     end
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-    GUI:RegisterMenu(menuFrame)
+    host:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
     menuFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.98)
@@ -2366,7 +2250,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         local searchIcon = searchBox:CreateTexture(nil, "OVERLAY")
         searchIcon:SetPoint("LEFT", 6, 0)
         searchIcon:SetSize(12, 12)
-        searchIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+        searchIcon:SetTexture(MEDIA .. "Icons\\search")
         searchIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
         searchPlaceholder = searchBox:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -2478,7 +2362,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
 
         local itemParent = scrollChild or menuFrame
         local currentVal = customGet and customGet() or (dbTable and dbKey and dbTable[dbKey])
-        local selColor = accentColor or GetThemeColor()
+        local selColor = accentColor or host:GetAccent()
         -- Once a group header has appeared, subsequent option rows indent under
         -- it (menus without headers keep the flat 8px inset).
         local seenHeader = false
@@ -2509,23 +2393,22 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
                 menuBtn:SetScript("OnClick", function(self)
                     local optKey = self.optKey
                     -- Runtime override protection: redirect to baseline, skip refresh
-                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI then
-                        -- The baseline value BEFORE the redirect, for opts.onRuntimeWrite:
-                        -- a customSet that writes a second key in step with this one
-                        -- (e.g. the raid wrap-axis compensation) needs the baseline's own
-                        -- previous value to decide, since customSet itself is skipped on
-                        -- this path.
-                        local prevGlobal
-                        if opts.onRuntimeWrite and DF.AutoProfilesUI.GetRuntimeGlobalValue then
-                            prevGlobal = DF.AutoProfilesUI:GetRuntimeGlobalValue(dbKey)
-                        end
-                        if DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, optKey) then
-                            if opts.onRuntimeWrite then opts.onRuntimeWrite(optKey, prevGlobal) end
-                            UpdateText()
-                            menuFrame:Hide()
-                            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
-                            return
-                        end
+                    -- The baseline value BEFORE the redirect, for opts.onRuntimeWrite:
+                    -- a customSet that writes a second key in step with this one
+                    -- (e.g. the raid wrap-axis compensation) needs the baseline's own
+                    -- previous value to decide, since customSet itself is skipped on
+                    -- this path.
+                    local prevGlobal
+                    if opts.onRuntimeWrite and dbKey then
+                        local _, g = host:Call("getOverrideState", dbTable, dbKey)
+                        prevGlobal = g
+                    end
+                    if dbKey and host:Call("interceptWrite", dbTable, dbKey, optKey) then
+                        if opts.onRuntimeWrite then opts.onRuntimeWrite(optKey, prevGlobal) end
+                        UpdateText()
+                        menuFrame:Hide()
+                        if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
+                        return
                     end
 
                     if customSet then
@@ -2535,13 +2418,11 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
                     end
 
                     -- If editing a profile, also set the override
-                    if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                        DF.AutoProfilesUI:SetProfileSetting(dbKey, customGet and customGet() or optKey)
-                    end
+                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey) end
 
                     UpdateText()
                     menuFrame:Hide()
-                    DF:UpdateAll()
+                    host:Call("refreshNow")
                     if callback then callback() end
                     if parent.RefreshStates then parent:RefreshStates() end
                 end)
@@ -2637,7 +2518,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
             S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
-            GUI:CloseAllMenus()
+            host:CloseAllMenus()
             -- Dynamic dropdowns regenerate their option list each open.
             if optionsFunc then
                 container:RebuildOptions(optionsFunc())
@@ -2647,7 +2528,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
             else
                 -- Static menus: refresh selected-value colouring on the pooled rows
                 local currentVal = customGet and customGet() or (dbTable and dbKey and dbTable[dbKey])
-                local selColor = accentColor or GetThemeColor()
+                local selColor = accentColor or host:GetAccent()
                 for i, opt in ipairs(sortedOptions) do
                     local menuBtn = menuButtons[i]
                     if menuBtn and not opt.header then
@@ -2692,146 +2573,186 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         end
     end
     
-    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). The label
+    -- Tooltip: shared attach on the LABEL only (see UI:AttachTooltip). The label
     -- sits at the container's TOPLEFT, above the opener, so it is well clear of
     -- the menu you are about to click.
-    GUI:AttachTooltip(container, label, lbl)
+    host:AttachTooltip(container, label, lbl)
 
     -- SEARCH: Register this setting
-    if DF.Search and dbKey and type(dbKey) == "string" then
-        container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, options, nil, callback)
-        -- See CreateSlider: method-guarded because Search is companion-side.
-        if DF.Search.LinkSourceWidget then DF.Search:LinkSourceWidget(container) end
+    if dbKey and type(dbKey) == "string" then
+        host:Call("registerSearch", "dropdown", label, dbKey, container, { options = options, callback = callback })
     end
 
     return container
 end
 
--- ============================================================
--- OUTLINE + SHADOW CONTROLS
--- A flag dropdown and a shadow checkbox that both bind to a single stored
--- outline value (see DF:OutlineFlag / OutlineHasShadow / ComposeOutline in
--- Config.lua). Shadow is decoupled from the outline flag so any flag can be
--- combined with a drop shadow, mirroring Grid2's font options.
--- ============================================================
-
-local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "MONOCHROME, OUTLINE", "MONOCHROME, THICKOUTLINE" }
-
-
-
--- ⚠ THIS DOC BLOCK, AND THE NEXT FEW, DOCUMENT FUNCTIONS THAT ARE NOT IN THIS FILE.
--- The border, animation and text-style control sets live in
--- DandersFrames_Options/GUI/SettingsWidgets.lua, and CreateInfoBanner in Sections.lua;
--- only the constants between them (OUTLINE_FLAG_ORDER, INFO_BANNER_TONES) are still
--- here. They were left behind when the settings-only widgets moved out of the
--- resident toolkit.
---
--- Weigh that before trusting one: a spec sitting an addon away from its function is
--- not checked by anyone editing either side, and the `include` list below went stale
--- in both directions as a result.
--- ============================================================
--- UNIFIED BORDER CONTROL SET
--- Drops the canonical Show / Style / Texture / Size / Colour controls plus
--- whichever optional Phase B controls the consumer opts into (offset, inset,
--- blendMode, gradient, shadow). Saved-variable keys are built from a single
--- camelCase `prefix` (e.g. "defensiveIcon" → "defensiveIconBorderSize"), so
--- consumers add one call instead of hand-rolling ~6-15 widgets each.
---
--- Each opts.include flag is per-element: "tailor-made to what makes logical
--- sense" — the API exposes everything, but consumers opt in only to what fits
--- their element. Returns a table of widget references so the caller can add
--- per-element extras (dispel-type colour, pulsate, etc.) afterwards.
---
--- opts = {
---   parent       = the panel widget (e.g. self.child) — same first arg the
---                  underlying CreateCheckbox/Slider/etc. take
---   include      = { offset=, inset=, blendMode=, gradient=, shadow=, alpha=,
---                    animate=, classColor=, roleColor= }
---                  ⚠ THIS LIST HAS DRIFTED IN BOTH DIRECTIONS: it omitted `alpha`
---                  and `animate` (passed by ~17 and 3 callers) while still listing
---                  colorByTime / colorByType, which no caller ever passed and whose
---                  branches are now removed. It drifts because the spec and the
---                  function live in different addons -- see the note above.
---   fullUpdate   = callback for full re-render (drop / value-set)
---   lightUpdate  = callback for slider-drag (size, offsets, shadow sliders)
---   lightColors  = callback for live colour-picker preview
---   refreshStates = optional hook fired when Show/Gradient/Shadow toggles
---                   change visibility of other widgets
---   disableWhen  = optional predicate fn(db) → bool. When true, EVERY widget
---                  (including the Show toggle itself) GREYS OUT in place. This
---                  is what a consumer whose border sits under a feature toggle
---                  wants — the addon-wide rule is that a deactivated control
---                  greys where it is, so the page doesn't reflow and you can
---                  still see what turning the feature on would give you.
---   hideWhen     = optional predicate fn(db) → bool. When true, EVERY widget
---                  (including the Show toggle itself) HIDES. Reserve this for a
---                  gate that changes WHAT the page offers — a variant switch
---                  like Pinned Frames' per-set border override, where the
---                  controls belong to a mode you are not in. A plain on/off
---                  feature toggle is disableWhen, not this.
---   sizeMin / sizeMax / sizeStep      = slider range overrides
---   offsetMin / offsetMax / offsetStep
--- }
--- ============================================================
--- CreateAnimationControls — the Border Animation control set
--- (Type dropdown + every per-effect tunable), extracted so the base
--- Border Animation panel (CreateBorderControls / include.animate) AND
--- Aura Designer's Expiring Animation override render an IDENTICAL set of
--- widgets from ONE source. Add or remove an effect / tunable here and both
--- panels update together — no drift.
---
---   group       = SettingsGroup the widgets are added to
---   dbTable     = db / proxy the widgets read & write
---   animPrefix  = key namespace; widgets target dbTable[animPrefix .. suffix]
---                 (base border: "<prefix>BorderAnimation"; AD expiring:
---                 "ExpiringAnimation")
--- opts:
---   parent        = frame parent for the widgets
---   fullUpdate    = heavy refresh callback (dropdown / slider-release / colour)
---   lightUpdate   = light refresh callback (slider-drag)
---   lightColors   = live colour-picker preview callback (needed for AD's
---                   proxy, whose sub-table colour writes skip __newindex)
---   typeLabel     = label for the Type dropdown
---   hideExtra     = optional predicate; when true the WHOLE block hides
---                   (the border panel folds the block under Show Border;
---                   the always-visible Expiring override omits it)
---   onTypeChange  = runs after the Type dropdown changes (re-layout / reflow)
---   perfBanner    = show the per-border FPS warning banner (default true)
--- Returns the widget table (animationType, animationColor, … ) so the caller
--- can merge the handles into its own control table.
--- ============================================================
+UI.CreateDropdownNative = UI.CreateDropdown
 
 -- ============================================================
+-- NATIVE VALUE WIDGETS
+-- The opts-based set, built on the stylers above -- so a checkbox created here
+-- and a hand-rolled one styled with StyleCheckButton are the same control.
+-- ============================================================
 
--- ============================================================
--- SHARED TEXT-STYLE CONTROLS (pairs with DF.TextStyle — the engine consumers
--- style FontStrings through). Mirrors CreateBorderControls: one builder, every
--- text block in the addon renders the same control flow instead of a hand-rolled
--- copy per page. Emits, in the pages' established order:
---   Font, Scale, Outline, Shadow, [Color], Anchor, Offset X/Y, [Justify H, Justify V]
--- Key convention: <prefix>Font/Scale/Outline/Anchor/X/Y/JustifyH/JustifyV/Color.
---
--- opts:
---   parent         REQUIRED — the page scroll child (self.child)
---   include        = { color = false, justify = true, anchor = true, offsets = true }
---   colorLabel     colour picker label (default L["Text Color"])
---   disableOn      predicate applied to EVERY created widget (page-level gate)
---   hideOn         predicate applied to EVERY created widget
---   colorDisableOn EXTRA disable gate for the colour picker only (e.g. colour-by-time on)
---   onChange       full-update callback (dropdowns / colour commit)
---   onDrag         lightweight slider-drag callback (also colour live-preview)
---   scaleMin/Max/Step, offsetMin/Max — slider ranges (defaults 0.5–2.0 ×0.05, ±150)
--- Returns the created widgets keyed { font, scale, outline, shadow, color, anchor,
--- offsetX, offsetY, justifyH, justifyV } so pages can attach extra gates.
--- ============================================================
+-- opts: label, get() -> bool, set(bool), onChanged(bool), tooltip, accent, size
+-- Returns the container with :Refresh() and :SetEnabled(bool).
+function UI:CreateCheckbox(parent, opts)
+    local host = self
+    opts = opts or {}
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetSize(260, UI.RowHeight.checkbox)
+    container.preferredHeight = UI.RowHeight.checkbox
+    container.rowKind = "checkbox"
+    container.fixedRowHeight = true
+
+    local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
+    cb:SetPoint("TOPLEFT", 0, -3)
+    host:StyleCheckButton(cb, { accent = opts.accent, size = opts.size, themeRoot = parent })
+
+    local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    lbl:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+    lbl:SetPoint("RIGHT", container, "RIGHT", 0, 0)
+    lbl:SetJustifyH("LEFT")
+    lbl:SetText(opts.label or "")
+    lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    container.label = lbl
+    container.checkButton = cb
+
+    cb:SetScript("OnClick", function(self)
+        local v = self:GetChecked() and true or false
+        if opts.set then opts.set(v) end
+        if opts.onChanged then opts.onChanged(v) end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end)
+
+    container.Refresh = function() cb:SetChecked(opts.get and opts.get() and true or false) end
+    container.refreshContent = container.Refresh
+    container.SetEnabled = function(self, enabled)
+        cb:SetEnabled(enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        local c = enabled and C_TEXT or C_TEXT_DIM
+        lbl:SetTextColor(c.r, c.g, c.b)
+    end
+    container.tooltip = opts.tooltip
+    host:AttachTooltip(container, opts.label, lbl)
+    container:Refresh()
+    return container
+end
+
+-- opts: width, height, get() -> value, set(text), onCommit(text), numeric,
+--       tooltip, maxLetters, placeholder
+-- Returns the styled EditBox itself, with :Refresh().
+function UI:CreateEditBox(parent, opts)
+    local host = self
+    opts = opts or {}
+    local eb = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
+    eb:SetSize(opts.width or 80, opts.height or 20)
+    eb:SetAutoFocus(false)
+    host:StyleEditBox(eb)
+    if opts.maxLetters then eb:SetMaxLetters(opts.maxLetters) end
+
+    eb.Refresh = function(self)
+        local v = opts.get and opts.get()
+        self:SetText(v ~= nil and tostring(v) or "")
+        self:SetCursorPosition(0)
+    end
+
+    -- SetNumeric is NOT used for opts.numeric: it bans "-" outright, which
+    -- would make a negative offset untypeable. Validate on commit instead and
+    -- bounce a non-number back to the stored value.
+    eb:SetScript("OnEnterPressed", function(self)
+        local text = self:GetText()
+        if opts.numeric then
+            local n = tonumber(text)
+            if not n then self:Refresh() self:ClearFocus() return end
+            text = n
+        end
+        if opts.set then opts.set(text) end
+        if opts.onCommit then opts.onCommit(text) end
+        self:ClearFocus()
+    end)
+    eb:SetScript("OnEscapePressed", function(self) self:Refresh() self:ClearFocus() end)
+
+    local nativeSetEnabled = eb.SetEnabled
+    eb.SetEnabled = function(self, enabled)
+        nativeSetEnabled(self, enabled)
+        self:EnableMouse(enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+    end
+
+    if opts.placeholder then
+        local ph = eb:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        ph:SetPoint("LEFT", 6, 0)
+        ph:SetText(opts.placeholder)
+        ph:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+        eb:HookScript("OnTextChanged", function(self) ph:SetShown(self:GetText() == "") end)
+        eb.Placeholder = ph
+    end
+    if opts.tooltip then
+        eb:HookScript("OnEnter", function(self)
+            host:ShowTooltip(self, type(opts.tooltip) == "table" and opts.tooltip or { title = opts.tooltip })
+        end)
+        eb:HookScript("OnLeave", function() host:HideTooltip() end)
+    end
+    eb:Refresh()
+    return eb
+end
+
+-- opts: text, width, height, onClick(btn), style = "primary"|"ghost"|"tab"|"tinted",
+--       tone = "danger"|"success", icon, accent, align, fitText, themeRoot, tooltip
+function UI:CreateButton(parent, opts)
+    local host = self
+    opts = opts or {}
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    btn:SetSize(opts.width or 100, opts.height or 22)
+    local style = opts.style
+    host:StyleButton(btn, {
+        text = opts.text, width = opts.width, height = opts.height,
+        icon = opts.icon, align = opts.align, accent = opts.accent, tone = opts.tone,
+        primary = style == "primary" or nil,
+        ghost   = style == "ghost" or nil,
+        tab     = style == "tab" or nil,
+        tinted  = style == "tinted" or nil,
+        fitText = opts.fitText,
+        themeRoot = opts.themeRoot,
+    })
+    if opts.onClick then
+        btn:SetScript("OnClick", function(self)
+            if self.dfDisabled then return end
+            opts.onClick(self)
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        end)
+    end
+    if opts.tooltip then
+        btn:HookScript("OnEnter", function(self)
+            host:ShowTooltip(self, type(opts.tooltip) == "table" and opts.tooltip or { title = opts.tooltip })
+        end)
+        btn:HookScript("OnLeave", function() host:HideTooltip() end)
+    end
+    return btn
+end
+
+-- opts: text, size (settings font at that size), color {r,g,b}, font (a font
+--       OBJECT name, which wins over size), width (enables word wrap), justify
+function UI:CreateLabel(parent, opts)
+    opts = opts or {}
+    local fs = parent:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+    if opts.size and not opts.font then self:SetSettingsFont(fs, opts.size) end
+    local c = opts.color or C_TEXT
+    fs:SetTextColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+    fs:SetText(opts.text or "")
+    if opts.width then fs:SetWidth(opts.width) fs:SetWordWrap(true) end
+    fs:SetJustifyH(opts.justify or "LEFT")
+    return fs
+end
+
 -- ============================================================
 -- TOOLTIPS AND BANNER TONES  (moved back from the companion)
 -- ============================================================
--- ☠ These lived in DandersFrames_Options/GUI/Sections.lua while HideTooltip
--- sat here -- the pair split across an addon boundary. Live code calls
--- ShowTooltip from pinned frames, the mover panel and the icon library, so
--- with the settings panel unloaded every one of those hovers errored. Found
--- by teaching lod_gate_check.py the GUI namespace; nothing else could see it.
+-- ☠ These once lived in a consumer while HideTooltip sat here -- the pair
+-- split across an addon boundary. Live code calls ShowTooltip from surfaces
+-- the settings panel does not own, so with the panel unloaded every one of
+-- those hovers errored.
 
 -- ============================================================
 -- CreateInfoBanner
@@ -2843,7 +2764,7 @@ local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "M
 -- share one font on purpose; only the tone should vary.
 --
 -- Usage:
---   local banner = GUI:CreateInfoBanner(parent, { tone = "caution", text = "..." })
+--   local banner = UI:CreateInfoBanner(parent, { tone = "caution", text = "..." })
 --   Add(banner, banner.layoutHeight, "both")
 --
 -- Methods on the returned frame:
@@ -2906,9 +2827,9 @@ local INFO_BANNER_TONES = {
 INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
 P.INFO_BANNER_TONES = INFO_BANNER_TONES
 
--- The line grammar, shared by ShowTooltip and ShowGameTooltip so a DF line
--- appended under a spell tooltip reads exactly like one under a plain title.
-local function AddTooltipLines(lines)
+-- The line grammar, shared by ShowTooltip and ShowGameTooltip so a toolkit
+-- line appended under a spell tooltip reads exactly like one under a plain title.
+local function AddTooltipLines(host, lines)
     if not lines then return end
     local acc
     for _, line in ipairs(lines) do
@@ -2921,7 +2842,7 @@ local function AddTooltipLines(lines)
             if line.hint then
                 r, g, b = 0.55, 0.55, 0.55
             elseif line.accent then
-                acc = acc or GetThemeColor()
+                acc = acc or host:GetAccent()
                 r, g, b = acc.r, acc.g, acc.b
             elseif line.color then
                 -- Accept {r=,g=,b=} or {r,g,b}: the palette uses the first, most
@@ -2944,7 +2865,7 @@ end
 --
 -- Small on purpose. This started at 24 while the tooltip could still appear over
 -- a slider or dropdown, where it had to clear the whole control. Now that the
--- hover lives on the LABEL only (see GUI:AttachTooltip) there is nothing
+-- hover lives on the LABEL only (see UI:AttachTooltip) there is nothing
 -- underneath worth clearing — the lift just has to keep the tooltip off the
 -- words you are reading, so a nudge does it.
 --
@@ -2958,15 +2879,15 @@ end
 -- edge the anchor pins.
 local CURSOR_LIFT_X, CURSOR_LIFT_Y = 0, 8
 
--- ☠ ShowTooltip lives here; ShowGameTooltip lives in the companion. The pair
+-- ☠ ShowTooltip lives here; ShowGameTooltip is consumer-supplied. The pair
 -- straddles the addon boundary and must use the SAME lift -- a spell tooltip on
--- a settings row has to sit exactly where every other DF tooltip sits.
+-- a settings row has to sit exactly where every other toolkit tooltip sits.
 -- Published rather than duplicated so the two cannot drift apart, and because
--- the companion reading these as bare globals silently got nil (they are
+-- a consumer reading these as bare globals silently got nil (they are
 -- optional SetOwner args, so it dropped the lift with no error).
 P.CURSOR_LIFT_X, P.CURSOR_LIFT_Y = CURSOR_LIFT_X, CURSOR_LIFT_Y
 
-function GUI:ShowTooltip(owner, opts)
+function UI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
     if opts.anchor then
         GameTooltip:SetOwner(owner, opts.anchor)
@@ -2982,20 +2903,15 @@ function GUI:ShowTooltip(owner, opts)
     else
         GameTooltip:SetText(opts.title, 1, 1, 1)
     end
-    AddTooltipLines(opts.lines)
+    AddTooltipLines(self, opts.lines)
     GameTooltip:Show()
 end
-
-P.AddTooltipLines = AddTooltipLines
-
 
 -- ============================================================
 -- SHARED WITH THE SETTINGS-PANEL WIDGETS
 -- ============================================================
--- ☠ Published on _priv rather than aliased from a public GUI.X name: these
+-- ☠ Published on _priv rather than aliased from a public UI.X name: these
 -- are file locals with no public counterpart, and where a public name does
 -- exist it can be a method WRAPPER rather than the local itself. Aliasing the
 -- wrapper is what broke CreateElementBackdrop in game once already.
-P.ConfirmDeletePreset = ConfirmDeletePreset
-P.PromptPresetName = PromptPresetName
-P.OUTLINE_FLAG_ORDER = OUTLINE_FLAG_ORDER
+P.AddTooltipLines = AddTooltipLines
