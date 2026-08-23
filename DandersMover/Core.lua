@@ -108,6 +108,9 @@ function NS:ResolveElement(el)
     if not a then return false end
     local target = Registry:GetTarget(a.target)
     if not target then return false end
+    -- Unavailable target (hidden, or a getRect that reports nothing on screen):
+    -- hold the last solved position rather than snapping to a stale rect.
+    if not Registry:IsTargetAvailable(target) then return false end
     local rect = Registry:GetRect(target)
     local w, h = Registry:GetSize(el)
     if not rect or not w then return false end

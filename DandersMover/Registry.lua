@@ -170,6 +170,19 @@ function R:GetRect(entry)
     return { x = cx * ratio - ux, y = cy * ratio - uy, w = w, h = h }
 end
 
+-- Is this entry currently a usable anchor target / resolvable parent?
+-- A consumer that supplies getRect owns the "is it visible" question outright:
+-- returning nil is how it says "not meaningfully on screen right now", and that
+-- must win even when the backing frame happens to be shown (e.g. a container
+-- that is always shown but holds nothing). Without getRect, fall back to the
+-- frame's own shown state.
+function R:IsTargetAvailable(entry)
+    if not entry then return false end
+    if entry.getRect then return entry.getRect() ~= nil end
+    local f = self:GetFrame(entry)
+    return f ~= nil and f:IsShown() and true or false
+end
+
 function R:GetPos(el)
     local pos = el.getPos()
     if type(pos) ~= "table" then error("DandersMover: getPos for " .. el.id .. " must return a table") end
