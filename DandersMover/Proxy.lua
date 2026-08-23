@@ -138,6 +138,31 @@ local function layout(b, anchored)
     local showCoords = not titleOnly and w >= NO_COORDS_W and h >= NO_COORDS_H
     local showLink = anchored and not titleOnly
 
+    -- The thresholds are only the fast path. A long title can fail to fit a slab
+    -- wide enough to keep the normal layout, and its LEFT->RIGHT anchors would
+    -- ellipsise it -- so MEASURE the text and fall back in the same order the
+    -- thresholds do: coords out, then the icon, then the centred overflow title.
+    -- The title itself never truncates.
+    if b.layoutTitle ~= b.element.title then b.title:SetText(b.element.title) end
+    if not titleOnly then
+        -- Unbounded = the full text's width even while the FontString is
+        -- clipped; guarded for stubs that only have GetStringWidth.
+        local titleW
+        if b.title.GetUnboundedStringWidth then titleW = b.title:GetUnboundedStringWidth() end
+        titleW = titleW or b.title:GetStringWidth() or 0
+        local function avail()
+            local left = EDGE_W + INSET + DOT + ITEM
+            if showIcon then left = left + ICON_SZ + ITEM end
+            local right = INSET
+            if showCoords then right = right + (b.coords:GetStringWidth() or 0) + ITEM end
+            if showLink then right = right + LINK_SZ + ITEM end
+            return w - left - right
+        end
+        if titleW > avail() then showCoords = false end
+        if titleW > avail() then showIcon = false end
+        if titleW > avail() then titleOnly, showIcon, showCoords, showLink = true, false, false, false end
+    end
+
     -- Dragging re-runs this for EVERY proxy on every frame (RefreshAll ->
     -- Refresh -> Highlight), so the anchors and the SetText only get touched
     -- when the answer actually changed. Which parts are visible, plus the
@@ -166,7 +191,6 @@ local function layout(b, anchored)
     else                    b.title:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
     -- Small slabs: the full title, centred and allowed to overflow the slab --
     -- never truncated (an outlined font stays readable over the world).
-    b.title:SetText(b.element.title)
     if titleOnly then
         b.title:ClearAllPoints()
         b.title:SetPoint("CENTER", b, "CENTER", 0, 0)
