@@ -1413,11 +1413,19 @@ local function dispelSlotPlan(db)
     -- its own spec's types (Preservation 5, Aug/Dev 4, no Magic). Reported on
     -- alpha 15; the dropdown had no observable effect.
     --
-    -- Use the explicit dispel-type map instead -- the same one the debuff ROWS
-    -- use for their own ALL mode (Features/Auras.lua). It names the types
-    -- directly, so Blizzard never consults the player's spec.
+    -- ★ ALL mode rides the DISPELLABLE token, with the map as FALLBACK ONLY --
+    -- one canonical filter component instead of a local copy of Blizzard's own
+    -- five-entry type list, matching the debuff row (Features/Auras.lua, the
+    -- dispelTypeToken note). ☠ NOT a secrecy fix: the commit that made this
+    -- change claimed includeDispelTypes went dark in combat, and that is false
+    -- -- Blizzard's matcher runs under `## UseSecureEnvironment: 1` and reads
+    -- real values (evidence chain on DF:GetEngineDispelFlagGaps). This mode
+    -- was working before and works now. Read LIVE, not captured at file load
+    -- (the AuraFilters-latch lesson at the top of Features/Auras.lua).
+    local allToken = not byMe and AuraUtil and AuraUtil.AuraFilters
+        and AuraUtil.AuraFilters.Dispellable or nil
     local dispelTypes = DF.DispelTypeMap
-    if not byMe and type(dispelTypes) ~= "table" then
+    if not byMe and not allToken and type(dispelTypes) ~= "table" then
         -- Loud, not silent: an unfiltered HARMFUL slot would light the overlay
         -- on EVERY debuff, which reads as a styling bug rather than a missing
         -- map. By-me is the safe degrade. (The previous version of this guard
@@ -1429,8 +1437,15 @@ local function dispelSlotPlan(db)
         byMe = true
     end
 
-    local baseFilter = byMe and "HARMFUL|RAID_PLAYER_DISPELLABLE" or "HARMFUL"
-    local baseCF = (not byMe) and { includeDispelTypes = dispelTypes } or nil
+    local baseFilter, baseCF
+    if byMe then
+        baseFilter = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+    elseif allToken then
+        baseFilter = "HARMFUL|" .. allToken
+    else
+        baseFilter = "HARMFUL"
+        baseCF = { includeDispelTypes = dispelTypes }
+    end
 
     -- One overlay, the game's colours, engine-driven (the Custom Colors mode was
     -- removed 2026-07-11 — per-type slots with the pickers; the irreducible cost
@@ -1470,7 +1485,27 @@ local function dispelSlotPlan(db)
         badge    = db.dispelShowIcon ~= false or nil,
     }
     local slots = {}
+    -- Mode marker for the tuning signature. Explicit, because the old derivation
+    -- there ("slots[1].candidateFilters and ...") stopped distinguishing the modes
+    -- the moment token-ALL lost its candidateFilters.
+    slots.mode = byMe and "byme" or "alltypes"
     slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF, roles = roles }
+    -- ★ ENGINE-FLAG GAP REPAIR (Shaman poison via totem): a second slot for the
+    -- dispel types RAID_PLAYER_DISPELLABLE misses -- the whole story, the peer
+    -- survey and the honest secrecy limit live on DF:GetEngineDispelFlagGaps
+    -- (Features/Auras.lua). The token is NEGATED here so this slot can only fill
+    -- with an aura the main slot cannot, which keeps the two from double-lighting
+    -- one debuff; both lighting for two DIFFERENT debuffs at once is the same
+    -- rare dual-type overlap the mode already accepts. Key set is structural, so
+    -- learning/unlearning the totem rebuilds through the coalesced
+    -- PLAYER_TALENT_UPDATE -> UpdateAllFrames path.
+    if byMe and DF.GetEngineDispelFlagGaps then
+        local gap = DF:GetEngineDispelFlagGaps()
+        if gap then
+            slots[#slots + 1] = { key = "gap", filter = "HARMFUL|!RAID_PLAYER_DISPELLABLE",
+                                  candidateFilters = { includeDispelTypes = gap }, roles = roles }
+        end
+    end
     -- (Removed) the five per-type icon slots. The 2026-07-10 rejection they existed to
     -- work around was of the DEFAULT bind style, BorderWithIcon -- a button border with
     -- a badge baked in. `Icon` gives the same clean RaidFrame-Icon-Debuff* atlas those
@@ -1508,10 +1543,11 @@ local function dispelFactoryPlanAndSig(db)
     -- TUNING (tu) -> ApplyTuning in place, no teardown: the All/By-Me marker and the
     -- per-slot filter string.
     local st = {}
-    -- Mode marker. Derived from the PLAN, not the setting, so the by-me degrade
-    -- inside dispelSlotPlan is reflected here too. (Was "policy"/"nopolicy" back
-    -- when All rode a container-level ProcessAura policy.)
-    local tu = { (slots[1] and slots[1].candidateFilters) and "alltypes" or "byme" }
+    -- Mode marker. Read from the PLAN's explicit field, not inferred from
+    -- candidateFilters presence -- token-ALL carries no candidateFilters, so the
+    -- old inference would have stamped both modes "byme". Still plan-derived, so
+    -- the by-me degrade inside dispelSlotPlan is reflected here too.
+    local tu = { slots.mode or "byme" }
     for i = 1, #slots do
         st[#st + 1] = slots[i].key                             -- key set: structural
         tu[#tu + 1] = slots[i].key .. "=" .. slots[i].filter    -- string: tunable
