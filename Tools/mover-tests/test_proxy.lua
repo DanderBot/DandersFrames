@@ -10,17 +10,31 @@ local function stubFrame()
     -- dragging is read as a plain boolean by Proxy:Refresh; without a real
     -- value the __index fallback would hand back a (truthy) function and
     -- Refresh would bail before Highlight ran.
-    local f = { _shown = false, _scripts = {}, dragging = false }
+    local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10 }
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
     function f:IsShown() return self._shown end
     function f:SetShown(v) self._shown = v and true or false end
     function f:GetCenter() return 0, 0 end
-    function f:GetSize() return 10, 10 end
+    -- Real sizes, because the slab layout drops the coords/icon/title below
+    -- fixed widths -- a stub that always answered 10 would render every proxy
+    -- in its title-only form and the marker checks below would be meaningless.
+    function f:SetSize(w, h) self._w, self._h = w, h end
+    function f:GetWidth() return self._w end
+    function f:GetHeight() return self._h end
+    function f:GetSize() return self._w, self._h end
+    -- Vertex colour is how the role now reads (the dot), so it is recorded.
+    function f:SetVertexColor(r, g, b, a) self._vertex = { r, g, b, a } end
     function f:CreateTexture() return stubFrame() end
     function f:SetScript(name, fn) self._scripts[name] = fn end
     function f:GetScript(name) return self._scripts[name] end
     return setmetatable(f, { __index = function() return function() end end })
+end
+
+-- The dot's tint against a palette entry.
+local function tinted(tex, color)
+    local v = tex._vertex
+    return v and v[1] == color.r and v[2] == color.g and v[3] == color.b
 end
 CreateFrame = function() return stubFrame() end
 local cursorX, cursorY = 960, 540
@@ -29,9 +43,20 @@ GameTooltip = stubFrame()
 local shiftDown, ctrlDown = false, false
 IsShiftKeyDown = function() return shiftDown end
 IsControlKeyDown = function() return ctrlDown end
+local COLORS = {
+    textDim    = { r = 0.5,  g = 0.5,  b = 0.5 },
+    text       = { r = 0.9,  g = 0.9,  b = 0.9 },
+    anchorRoot = { r = 0,    g = 1,    b = 0 },
+    anchored   = { r = 0.55, g = 0.40, b = 0.85 },
+    accent     = { r = 0.45, g = 0.45, b = 0.95 },
+    background = { r = 0,    g = 0,    b = 0 },
+    panel      = { r = 0.12, g = 0.12, b = 0.12 },
+    border     = { r = 0.25, g = 0.25, b = 0.25 },
+    danger     = { r = 0.8,  g = 0.2,  b = 0.2 },
+}
 NS.UI = {
     MEDIA = "",
-    Colors = { textDim = { r = 0.5, g = 0.5, b = 0.5 }, anchorRoot = { r = 0, g = 1, b = 0 }, background = { r = 0, g = 0, b = 0 } },
+    Colors = COLORS,
     Space = { section = 10 }, RowGap = 14, RowGapTight = 8, RowHeight = { checkbox = 35 },
     GetAccent = function() return { r = 0, g = 0, b = 1 } end,
     CreateElementBackdrop = function() end,
@@ -181,10 +206,9 @@ do
     NS.db = nil
 end
 
--- Role markers: an element something is anchored to shows the root marker,
--- an anchored element shows the link icon, a free element shows neither.
--- (Colours go through stubbed SetBackdrop* calls, so only the markers are
--- observable here.)
+-- Role reads off the DOT's tint plus two markers: the link glyph while anchored,
+-- and the root ring for the one case the dot cannot carry -- a root that is
+-- itself anchored, whose dot already wears the anchored colour.
 do
     local wasReady = R.ready
     R.ready = true
@@ -194,11 +218,19 @@ do
     R:Register("R", "root",  elDef({ point = "CENTER", x = 0, y = 0 }))
     R:Register("R", "child", elDef({ point = "CENTER", x = 0, y = 0,
         anchor = { target = "R:root", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    R:Register("R", "grand", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "R:child", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
     R:Register("R", "free",  elDef({ point = "CENTER", x = 0, y = 0 }))
     P:Build()
-    local root, child, free = P.proxies["R:root"], P.proxies["R:child"], P.proxies["R:free"]
-    check(root.root:IsShown() and not root.link:IsShown(), "root: marker on, link off")
-    check(child.link:IsShown() and not child.root:IsShown(), "child: link on, marker off")
+    local root, child, grand, free =
+        P.proxies["R:root"], P.proxies["R:child"], P.proxies["R:grand"], P.proxies["R:free"]
+    check(tinted(root.dot, COLORS.anchorRoot), "root: dot is the anchorRoot green")
+    check(not root.root:IsShown() and not root.link:IsShown(), "root: no ring, no link")
+    check(tinted(child.dot, COLORS.anchored), "child+root: dot is the anchored purple")
+    check(child.link:IsShown() and child.root:IsShown(), "child+root: link on, ring on")
+    check(tinted(grand.dot, COLORS.anchored), "child: dot is the anchored purple")
+    check(grand.link:IsShown() and not grand.root:IsShown(), "child: link on, ring off")
+    check(tinted(free.dot, COLORS.accent), "free: dot is the accent")
     check(not free.root:IsShown() and not free.link:IsShown(), "free: neither")
     check(P.legend and P.legend:IsShown(), "legend shown for the session")
     P:DestroyAll()

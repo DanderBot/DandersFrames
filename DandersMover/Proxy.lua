@@ -17,22 +17,44 @@ local pairs, ipairs, format, sqrt, max = pairs, ipairs, string.format, math.sqrt
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local DEFAULT_ICON = MEDIA .. "DF_Icon"
 local LINK_ICON = MEDIA .. "link"
-local ROOT_ICON = UI.MEDIA .. "Icons\\dot"
--- Role colours. FREE (no anchor, nothing anchored to it) = the host accent;
--- CHILD (anchored to something) = C_ANCHORED; ROOT (free, with children) =
--- the theme's anchorRoot green. A root that is itself a child keeps the
--- anchored colour and shows the root marker.
-local C_ANCHORED = { r = 0.55, g = 0.40, b = 0.85, a = 1 }
+local DOT_ICON = UI.MEDIA .. "Icons\\dot"
+-- Role colours, all off the shared palette. FREE (no anchor, nothing anchored
+-- to it) = the party accent; CHILD (anchored to something) = the anchored
+-- purple; ROOT (free, with children) = the anchorRoot green. A root that is
+-- itself a child keeps the anchored colour and wears the root ring on its dot.
+local C_FREE = UI.Colors.accent
+local C_ANCHORED = UI.Colors.anchored
 local C_ROOT = UI.Colors.anchorRoot
 local C_MUTED = UI.Colors.textDim
+local C_BODY = UI.Colors.panel          -- the slab itself
+local C_OUTLINE = UI.Colors.border      -- neutral hairline; the ROLE never colours it
 local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
-local SWATCH = 10
+local DOT, DOT_RING = 9, 11             -- role dot, and the root ring behind it
 -- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
 local PROXIMITY = 100
 local MIN_PROXY = 24
-local C_ZONE_NEAR = { 0.3, 0.7, 1.0 }
-local C_ZONE_HOVER = { 0.3, 0.8, 1.0 }
-local C_ZONE_OCCUPIED = { 0.8, 0.2, 0.2 }
+-- Slab metrics. The theme's row rhythm (UI.Space / UI.RowGap) is page-scale, and
+-- a proxy is only ever as big as the frame it stands in for -- which can be 24px
+-- square -- so the inline art carries its own small scale.
+local EDGE_W = 3                        -- role-coloured left edge
+local ICON_SZ, LINK_SZ = 16, 12
+local INSET, ITEM = 4, 4                -- slab padding, gap between inline items
+local BODY_ALPHA, HOVER_ALPHA = 0.95, 1
+local HIDDEN_ALPHA = 0.55               -- the real frame is not on screen
+local WEIGHT, SEL_WEIGHT = 1, 2         -- outline thickness, unselected / selected
+-- Below these the slab cannot hold everything, so parts drop out in this order:
+-- the coords first, then the addon icon, then all but a shortened title.
+local NO_COORDS_H, NO_COORDS_W, NO_ICON_W, TITLE_ONLY_W = 28, 120, 80, 60
+local TITLE_MAX = 8                     -- characters, once the slab is title-only
+-- Snap zones. Same accent as the free-role dot, because a zone IS where a free
+-- drop would land; occupied ones go red. Hover is the only place a zone borrows
+-- the selection white, and the kit has no white token, so that one is a literal.
+local C_ZONE = UI.Colors.accent
+local C_ZONE_OCCUPIED = UI.Colors.danger
+local C_ZONE_HOVER = { r = 1, g = 1, b = 1 }
+local ZONE_WEIGHT, ZONE_HOVER_WEIGHT = 1, 2
+local ZONE_TICK_LEN, ZONE_TICK_W = 7, 2
+local ZONE_CORNERS = { "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
 
 -- ============================================================
 -- UNLOCK FRAME + CURSOR
@@ -104,38 +126,156 @@ local function onClick(self, button)
     NS.Session:Select(self.element.id)
 end
 
+-- Trim to n CHARACTERS. strsub counts bytes, so a naive cut through a
+-- multi-byte title renders as a black box.
+local function shorten(text, n)
+    local out, count = "", 0
+    for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        count = count + 1
+        if count > n then return out .. "\226\128\166" end   -- ellipsis
+        out = out .. ch
+    end
+    return out
+end
+
+-- Lay the slab's contents out for its CURRENT size. A proxy is exactly as big as
+-- the frame it stands in for, so one 24px icon mover and one full raid container
+-- come through here: parts drop out as the room runs out rather than overlapping.
+local function layout(b, anchored)
+    local w = b:GetWidth() or 0
+    local h = b:GetHeight() or 0
+    local titleOnly = w < TITLE_ONLY_W
+    local showIcon = not titleOnly and w >= NO_ICON_W
+    local showCoords = not titleOnly and w >= NO_COORDS_W and h >= NO_COORDS_H
+    local showLink = anchored and not titleOnly
+
+    -- Dragging re-runs this for EVERY proxy on every frame (RefreshAll ->
+    -- Refresh -> Highlight), so the anchors and the SetText only get touched
+    -- when the answer actually changed. Which parts are visible, plus the
+    -- title, is the whole of the layout's input.
+    local key = (titleOnly and 1 or 0) + (showIcon and 2 or 0)
+              + (showCoords and 4 or 0) + (showLink and 8 or 0)
+    if b.layoutKey == key and b.layoutTitle == b.element.title then return end
+    b.layoutKey, b.layoutTitle = key, b.element.title
+
+    b.icon:SetShown(showIcon)
+    b.coords:SetShown(showCoords)
+    b.link:SetShown(showLink)
+
+    -- Anchored whether or not they are shown: a region with no points is a
+    -- region nothing else can anchor OFF, and the title does exactly that.
+    b.icon:ClearAllPoints()
+    b.icon:SetPoint("LEFT", b.dot, "RIGHT", ITEM, 0)
+    b.link:ClearAllPoints()
+    if showCoords then b.link:SetPoint("RIGHT", b.coords, "LEFT", -ITEM, 0)
+    else               b.link:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
+
+    b.title:ClearAllPoints()
+    b.title:SetPoint("LEFT", showIcon and b.icon or b.dot, "RIGHT", ITEM, 0)
+    if showLink then        b.title:SetPoint("RIGHT", b.link, "LEFT", -ITEM, 0)
+    elseif showCoords then  b.title:SetPoint("RIGHT", b.coords, "LEFT", -ITEM, 0)
+    else                    b.title:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
+    b.title:SetText(titleOnly and shorten(b.element.title, TITLE_MAX) or b.element.title)
+end
+
+-- Everything about how one slab READS: role colour, markers, selection and hover
+-- chrome, and the layout that follows from its size. One function, so no state
+-- change can repaint half a slab and leave the other half saying something else.
+local function applyLook(b, selected, hovered)
+    local pos = Registry:GetPos(b.element)
+    -- Children() is alias-aware, so a target that resolves to this element's
+    -- frame counts too.
+    local isRoot = #Registry:Children(b.element.id) > 0
+    local c = pos.anchor and C_ANCHORED or (isRoot and C_ROOT or C_FREE)
+    b.edge:SetColorTexture(c.r, c.g, c.b, 1)
+    b.dot:SetVertexColor(c.r, c.g, c.b)
+    -- The ring marks the one case the dot cannot: a root that is ITSELF anchored,
+    -- whose dot is already wearing the anchored purple.
+    b.root:SetShown(isRoot and pos.anchor ~= nil)
+    layout(b, pos.anchor ~= nil)
+
+    b:SetBackdropColor(C_BODY.r, C_BODY.g, C_BODY.b, hovered and HOVER_ALPHA or BODY_ALPHA)
+    -- Selection is the OUTLINE, never the fill or the role colour: white and
+    -- twice as thick. Hover is a softer white at the same weight, and it stands
+    -- down for the selected proxy so hovering cannot make it look less selected.
+    local weight = selected and SEL_WEIGHT or WEIGHT
+    local r, g, bl, a = C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1
+    if selected then r, g, bl, a = 1, 1, 1, 1
+    elseif hovered then r, g, bl, a = 1, 1, 1, 0.6 end
+    -- Weight is baked into the border textures, so it only re-lays out when the
+    -- thickness actually changes; a recolour goes through the cheap shim.
+    if b.outlineWeight ~= weight then
+        UI:ApplyPixelBorder(b, { r, g, bl, a }, weight)
+        b.outlineWeight = weight
+    else
+        b:SetBackdropBorderColor(r, g, bl, a)
+    end
+end
+
 local function create(el)
     local b = CreateFrame("Button", nil, P:GetUnlockFrame(), "BackdropTemplate")
-    local ac = UI:GetAccent()
-    UI:CreateElementBackdrop(b, { bgColor = { ac.r, ac.g, ac.b, 0.25 }, borderColor = { ac.r, ac.g, ac.b, 1 } })
-    UI:ApplyPixelBorder(b, { ac.r, ac.g, ac.b, 1 }, 2)   -- 2px solid so the role colour reads at a glance
+    -- A solid dark slab with a neutral hairline. The role is carried by the dot
+    -- and the left edge ONLY, so the outline is free to mean "selected" and the
+    -- body is free to stay readable behind whatever the proxy is sitting on.
+    UI:CreateElementBackdrop(b, {
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
+    })
+    b.outlineWeight = WEIGHT
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
     b:SetClampedToScreen(false)
-    b.title = UI:CreateLabel(b, { text = el.title, size = 11 }); b.title:SetPoint("CENTER", 0, 6)
-    b.coords = UI:CreateLabel(b, { size = 9, color = C_MUTED }); b.coords:SetPoint("CENTER", 0, -7)
-    -- Owning addon's icon (top-left); falls back to the DF icon bundled with the lib.
+
+    -- Role edge: full height, flush left, and UNDER the pixel border (which draws
+    -- at ARTWORK sublevel 7) so the selection outline always reads over it.
+    b.edge = b:CreateTexture(nil, "ARTWORK", nil, 6)
+    b.edge:SetWidth(EDGE_W)
+    b.edge:SetPoint("TOPLEFT"); b.edge:SetPoint("BOTTOMLEFT")
+
+    -- Role dot, with the root ring behind it: the same circle one pixel larger
+    -- all round, so what shows is a 1px rim.
+    b.root = b:CreateTexture(nil, "OVERLAY", nil, 1)
+    b.root:SetTexture(DOT_ICON); b.root:SetSize(DOT_RING, DOT_RING)
+    b.root:SetVertexColor(C_ROOT.r, C_ROOT.g, C_ROOT.b); b.root:Hide()
+    b.dot = b:CreateTexture(nil, "OVERLAY", nil, 2)
+    b.dot:SetTexture(DOT_ICON); b.dot:SetSize(DOT, DOT)
+    b.dot:SetPoint("LEFT", b, "LEFT", EDGE_W + INSET, 0)
+    b.root:SetPoint("CENTER", b.dot, "CENTER")
+
+    -- Owning addon's icon; falls back to the DF icon bundled with the lib.
     b.icon = b:CreateTexture(nil, "OVERLAY")
-    b.icon:SetSize(14, 14); b.icon:SetPoint("TOPLEFT", 3, -3)
+    b.icon:SetSize(ICON_SZ, ICON_SZ)
     local addon = Registry:GetAddon(el.addon)
     if b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) == false then b.icon:SetTexture(DEFAULT_ICON) end
-    -- Link icon (bottom-left) while anchored.
+
+    b.title = UI:CreateLabel(b, { text = el.title, font = "DFFontNormal", color = UI.Colors.text })
+    b.title:SetWordWrap(false)
+    b.coords = UI:CreateLabel(b, { size = 9, color = C_MUTED, justify = "RIGHT" })
+    b.coords:SetPoint("RIGHT", b, "RIGHT", -INSET, 0)
+
+    -- Link glyph while anchored; sits just before the coords.
     b.link = b:CreateTexture(nil, "OVERLAY")
-    b.link:SetTexture(LINK_ICON); b.link:SetSize(12, 12); b.link:SetPoint("BOTTOMLEFT", 3, 3)
+    b.link:SetTexture(LINK_ICON); b.link:SetSize(LINK_SZ, LINK_SZ)
     b.link:SetVertexColor(C_ANCHORED.r, C_ANCHORED.g, C_ANCHORED.b); b.link:Hide()
-    -- Root marker (top-right) while something is anchored to this element.
-    b.root = b:CreateTexture(nil, "OVERLAY")
-    b.root:SetTexture(ROOT_ICON); b.root:SetSize(12, 12); b.root:SetPoint("TOPRIGHT", -3, -3)
-    b.root:SetVertexColor(C_ROOT.r, C_ROOT.g, C_ROOT.b); b.root:Hide()
-    -- Centre crosshair.
-    b.crossH = b:CreateTexture(nil, "OVERLAY"); b.crossH:SetColorTexture(1, 1, 1, 0.4); b.crossH:SetSize(16, 1); b.crossH:SetPoint("CENTER")
-    b.crossV = b:CreateTexture(nil, "OVERLAY"); b.crossV:SetColorTexture(1, 1, 1, 0.4); b.crossV:SetSize(1, 16); b.crossV:SetPoint("CENTER")
+
+    -- Centre crosshair, quiet enough that it marks the centre without competing
+    -- with the content beside it.
+    b.crossH = b:CreateTexture(nil, "OVERLAY"); b.crossH:SetColorTexture(1, 1, 1, 0.25); b.crossH:SetSize(16, 1); b.crossH:SetPoint("CENTER")
+    b.crossV = b:CreateTexture(nil, "OVERLAY"); b.crossV:SetColorTexture(1, 1, 1, 0.25); b.crossV:SetSize(1, 16); b.crossV:SetPoint("CENTER")
     b:SetScript("OnDragStart", onDragStart)
     b:SetScript("OnDragStop", onDragStop)
     b:SetScript("OnClick", onClick)
-    b:SetScript("OnEnter", function(s) s:SetBackdropBorderColor(1, 1, 1, 1); P:ShowTooltip(s) end)
-    b:SetScript("OnLeave", function(s) P:Highlight(NS.Session.selected); GameTooltip:Hide() end)
+    b:SetScript("OnEnter", function(s)
+        s.hovered = true
+        applyLook(s, NS.Session and NS.Session.selected == s.element.id, true)
+        P:ShowTooltip(s)
+    end)
+    b:SetScript("OnLeave", function(s)
+        s.hovered = false
+        P:Highlight(NS.Session and NS.Session.selected)
+        GameTooltip:Hide()
+    end)
     b.element = el
     return b
 end
@@ -175,32 +315,20 @@ function P:Refresh(id)
     else cx, cy = Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h) end
     b:SetSize(math.max(w, MIN_PROXY), math.max(h, MIN_PROXY))
     b:ClearAllPoints(); b:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
-    b.coords:SetText(format("%d, %d", cx, cy))
+    -- A mover whose real frame is not on screen has no meaningful position to
+    -- report, so the coords slot says so instead of quoting a stale number.
     local frame = Registry:GetFrame(el)
-    b:SetAlpha((frame and frame:IsShown()) and 1 or 0.45)
+    local shown = (frame and frame:IsShown()) and true or false
+    b.coords:SetText(shown and format("%d, %d", cx, cy) or L["hidden"])
+    b:SetAlpha(shown and 1 or HIDDEN_ALPHA)
     self:Highlight(NS.Session and NS.Session.selected)
 end
 
 function P:RefreshAll() for id in pairs(self.proxies) do self:Refresh(id) end end
 
--- The colour an element's proxy wears for its role, and whether it is a root.
--- Children() is alias-aware, so a target that resolves to this element's
--- frame counts too.
-local function roleColor(el, pos)
-    local isRoot = #Registry:Children(el.id) > 0
-    if pos.anchor then return C_ANCHORED, isRoot end
-    if isRoot then return C_ROOT, true end
-    return UI:GetAccent(), false
-end
-
 function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do
-        local pos = Registry:GetPos(b.element)
-        local c, isRoot = roleColor(b.element, pos)
-        b.link:SetShown(pos.anchor ~= nil)
-        b.root:SetShown(isRoot)
-        if id == selectedId then b:SetBackdropBorderColor(1, 1, 1, 1) else b:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
-        b:SetBackdropColor(c.r, c.g, c.b, 0.25)
+        applyLook(b, id == selectedId, b.hovered)
     end
 end
 
@@ -222,20 +350,25 @@ end
 
 -- ============================================================
 -- LEGEND
--- Docked top-centre for the session: what the three proxy colours mean plus
--- the modifier hints. Parented to the unlock frame, so suspend and lock hide
--- it with everything else.
+-- Docked top-centre for the session: what the three proxy DOTS mean plus the
+-- modifier hints. Same dot art and same slab as the proxies themselves, so the
+-- key and the thing it is a key to cannot drift apart. Parented to the unlock
+-- frame, so suspend and lock hide it with everything else.
 -- ============================================================
 local function buildLegend()
     local f = CreateFrame("Frame", "DandersMoverLegend", P:GetUnlockFrame(), "BackdropTemplate")
     f:SetFrameStrata("DIALOG")
-    UI:CreateElementBackdrop(f, { bgColor = UI.Colors.background })
+    UI:CreateElementBackdrop(f, {
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
+    })
     f:SetPoint("TOP", UIParent, "TOP", 0, -PAD)
 
     local function entry(prev, color, text)
         local swatch = f:CreateTexture(nil, "OVERLAY")
-        swatch:SetSize(SWATCH, SWATCH)
-        swatch:SetColorTexture(color.r, color.g, color.b, 1)
+        swatch:SetSize(DOT, DOT)
+        swatch:SetTexture(DOT_ICON)
+        swatch:SetVertexColor(color.r, color.g, color.b)
         local label = UI:CreateLabel(f, { text = text, size = 11 })
         if prev then swatch:SetPoint("LEFT", prev, "RIGHT", GAP, 0)
         else         swatch:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 1) end
@@ -243,9 +376,9 @@ local function buildLegend()
         return label
     end
     f.entries = {}
-    f.entries[1] = entry(nil,          UI:GetAccent(), L["Free"])
-    f.entries[2] = entry(f.entries[1], C_ANCHORED,     L["Anchored"])
-    f.entries[3] = entry(f.entries[2], C_ROOT,         L["Anchor root"])
+    f.entries[1] = entry(nil,          C_FREE,     L["Free"])
+    f.entries[2] = entry(f.entries[1], C_ANCHORED, L["Anchored"])
+    f.entries[3] = entry(f.entries[2], C_ROOT,     L["Anchor root"])
 
     f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - 12 - TIGHT)
@@ -266,7 +399,7 @@ local function buildLegend()
     function f:Layout()
         local row = PAD
         for i, label in ipairs(self.entries) do
-            row = row + SWATCH + TIGHT - 2 + (label:GetStringWidth() or 0) + (i < #self.entries and GAP or 0)
+            row = row + DOT + TIGHT - 2 + (label:GetStringWidth() or 0) + (i < #self.entries and GAP or 0)
         end
         row = row + PAD
         local hintW = (self.hint:GetStringWidth() or 0) + PAD * 2
@@ -332,10 +465,42 @@ local function zoneFrame(i)
         z = CreateFrame("Frame", nil, P:GetUnlockFrame(), "BackdropTemplate")
         z:SetFrameLevel(1)
         UI:CreateElementBackdrop(z, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
-        UI:ApplyPixelBorder(z, { 0, 0, 0, 0 }, 2)
+        z.weight = ZONE_WEIGHT
+        -- Corner ticks: an L at each corner, over a plain outline. There is no
+        -- dashed-line primitive to draw the "empty slot" read the design asked
+        -- for -- tiling a solid texture repeats a solid, and the tooltip border
+        -- art is a frame, not a dash -- so the corners do that job instead.
+        z.ticks = {}
+        for _, corner in ipairs(ZONE_CORNERS) do
+            local arm = z:CreateTexture(nil, "OVERLAY")
+            arm:SetSize(ZONE_TICK_LEN, ZONE_TICK_W); arm:SetPoint(corner)
+            z.ticks[#z.ticks + 1] = arm
+            arm = z:CreateTexture(nil, "OVERLAY")
+            arm:SetSize(ZONE_TICK_W, ZONE_TICK_LEN); arm:SetPoint(corner)
+            z.ticks[#z.ticks + 1] = arm
+        end
         P.zones[i] = z
     end
     return z
+end
+
+-- One zone's whole look: fill, outline (colour AND thickness) and the corner
+-- ticks, which always match the outline. Called for every live zone on every
+-- frame of a drag, so the weight is only re-laid out when it actually changes;
+-- a recolour goes through the pixel border's cheap shim.
+local function paintZone(z, fill, fillAlpha, line, lineAlpha, weight)
+    z:SetBackdropColor(fill.r, fill.g, fill.b, fillAlpha)
+    if z.weight ~= weight then
+        UI:ApplyPixelBorder(z, { line.r, line.g, line.b, lineAlpha }, weight)
+        z.weight = weight
+    else
+        z:SetBackdropBorderColor(line.r, line.g, line.b, lineAlpha)
+    end
+    for _, arm in ipairs(z.ticks) do arm:SetColorTexture(line.r, line.g, line.b, lineAlpha) end
+end
+
+local function clearZone(z)
+    paintZone(z, C_ZONE, 0, C_ZONE, 0, ZONE_WEIGHT)
 end
 
 function P:ShowZones(el)
@@ -363,7 +528,7 @@ function P:ShowZones(el)
                 zf:SetSize(w, h)
                 zf:ClearAllPoints(); zf:SetPoint("CENTER", UIParent, "CENTER", zone.x, zone.y)
                 zf.zone = zone
-                zf:SetBackdropColor(0, 0, 0, 0); zf:SetBackdropBorderColor(0, 0, 0, 0)
+                clearZone(zf)
                 zf:Show()
             end
         end
@@ -390,17 +555,18 @@ function P:UpdateZones(cx, cy, hovered)
         local zf = self.zones[i]
         local z = zf.zone
         if hovered and z == hovered then
-            zf:SetBackdropColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.45)
-            zf:SetBackdropBorderColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 1)
+            -- The zone that WILL take the drop: accent fill, white outline, the
+            -- same 2px the selected proxy wears.
+            paintZone(zf, C_ZONE, 0.35, C_ZONE_HOVER, 1, ZONE_HOVER_WEIGHT)
         elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < radius then
             local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
             local f = 0.2 + Solver.ProximityFactor(d, radius) * 0.8
-            if z.occupied then f = f * 0.5 end   -- occupied zones read quieter (CDM rule)
-            local c = z.occupied and C_ZONE_OCCUPIED or C_ZONE_NEAR
-            zf:SetBackdropColor(c[1], c[2], c[3], 0.22 * f)
-            zf:SetBackdropBorderColor(c[1], c[2], c[3], 0.85 * f)
+            -- Occupied zones read quieter (CDM rule) -- here that is the lower
+            -- pair of alphas rather than an extra factor on top of the accent's.
+            if z.occupied then paintZone(zf, C_ZONE_OCCUPIED, 0.10 * f, C_ZONE_OCCUPIED, 0.6 * f, ZONE_WEIGHT)
+            else               paintZone(zf, C_ZONE, 0.18 * f, C_ZONE, 0.9 * f, ZONE_WEIGHT) end
         else
-            zf:SetBackdropColor(0, 0, 0, 0); zf:SetBackdropBorderColor(0, 0, 0, 0)
+            clearZone(zf)
         end
     end
 end
