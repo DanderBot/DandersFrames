@@ -925,7 +925,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(container, lbl, dbKey, onReset, 6, nil, dbTable)
+        AddOverrideIndicators(GUI, container, lbl, dbKey, onReset, 6, nil, dbTable)
     end
     
     -- Button - use relative anchoring so it resizes with container
@@ -1288,7 +1288,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(container, lbl, dbKey, onReset, 6, nil, dbTable)
+        AddOverrideIndicators(GUI, container, lbl, dbKey, onReset, 6, nil, dbTable)
     end
     
     -- Button - use relative anchoring so it resizes with container
@@ -2117,7 +2117,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 if callback then callback() end
             end
         end
-        AddOrderListOverrideIndicators(container, dbKey, onReset)
+        AddOrderListOverrideIndicators(GUI, container, dbKey, onReset, dbTable)
 
         container:SetScript("OnShow", function()
             UpdateItemPositions()
@@ -2440,7 +2440,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 if callback then callback() end
             end
         end
-        AddOrderListOverrideIndicators(container, dbKey, onReset)
+        AddOrderListOverrideIndicators(GUI, container, dbKey, onReset, dbTable)
 
         container:SetScript("OnShow", function()
             UpdateItemPositions()
@@ -2745,7 +2745,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 if callback then callback() end
             end
         end
-        AddOrderListOverrideIndicators(container, dbKey, onReset)
+        AddOrderListOverrideIndicators(GUI, container, dbKey, onReset, dbTable)
 
         container:SetScript("OnShow", function()
             UpdateItemPositions()
@@ -3631,6 +3631,7 @@ function DF:ToggleGUI()
         else
             GUI.SelectedMode = "party"
         end
+        GUI:SetAccent(GUI.GetThemeColorFor(GUI.SelectedMode == "raid"))
         
         -- Update theme colors to match selected mode
         if GUI.UpdateThemeColors then

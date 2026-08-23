@@ -1103,6 +1103,7 @@ function DF:CreateGUI()
         end
 
         GUI.SelectedMode = "party"
+        GUI:SetAccent(GUI.GetThemeColorFor(false))
         if DF.Search then
             DF.Search:InvalidateRegistry()
             DF.Search:RefreshIfActive()
@@ -1163,6 +1164,7 @@ function DF:CreateGUI()
         end
 
         GUI.SelectedMode = "raid"
+        GUI:SetAccent(GUI.GetThemeColorFor(true))
         if DF.Search then
             DF.Search:InvalidateRegistry()
             DF.Search:RefreshIfActive()
@@ -1212,6 +1214,7 @@ function DF:CreateGUI()
         end
 
         GUI.SelectedMode = "clicks"
+        GUI:SetAccent(GUI.GetThemeColorFor(false))
         if DF.Search then 
             DF.Search:HideResults()
         end

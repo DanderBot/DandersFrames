@@ -1497,7 +1497,7 @@ function GUI:ShowGameTooltip(owner, opts)
                 GameTooltip:AddLine(format(L["Spell IDs: %s"], tostring(opts.spellID)), 0.5, 0.5, 0.5)
             end
         end
-        AddTooltipLines(opts.lines)
+        AddTooltipLines(GUI, opts.lines)
         GameTooltip:Show()
         return seeded
     end

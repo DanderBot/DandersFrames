@@ -1,29 +1,154 @@
 local addonName, DF = ...
-local GUI = {}
+
+-- ============================================================
+-- THE DANDERSFRAMES GUI HOST
+-- ------------------------------------------------------------
+-- The widget toolkit lives in DandersUI (a hard dependency -- see the TOC).
+-- This file creates DandersFrames' HOST on it and supplies the hooks the
+-- shared factories call back into: locale, fonts, the auto-profile override
+-- semantics, the settings search index, and the live-refresh throttle.
+--
+-- Everything below the host block is DandersFrames-only chrome that never
+-- belonged in a shared kit: the party/raid mode flag, the New badges, the
+-- section-prefix registry, the designer-preset prompts, and the four /df debug
+-- probes.
+--
+-- ☠ DF.GUI is now a PROXY. Reads fall through to the pack via __index; writes
+-- land on the host and SHADOW the pack. That is how the options companion can
+-- keep defining GUI:CreateCheckbox / CreateButton / CreateEditBox / CreateLabel
+-- with their positional signatures on top of the pack's native ones.
+-- ============================================================
+local L = DF.L
+local format, rawget, tostring, type = string.format, rawget, tostring, type
+
+-- ☠ Declared on its own line first. `local GUI = LibStub(...):NewHost(...)`
+-- would put the closures below in the scope BEFORE the local exists, so every
+-- one of them (accentFor, getOverrideState, interceptWrite) would capture a nil
+-- global instead of the host.
+local GUI
+GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
+    L = L,
+
+    print = function(msg) DF:Say(tostring(msg)) end,
+    error = function(msg) DF:DebugError("GUI", "%s", tostring(msg)) end,
+
+    -- ---- fonts -------------------------------------------------
+    getFontSetting = function()
+        if not DF.db then return "DF Roboto SemiBold", "" end
+        return DF.db.settingsFont or "DF Roboto SemiBold", DF.db.settingsFontOutline or ""
+    end,
+    resolveFontPath = function(name) return DF:GetFontPath(name) end,
+    -- Returns true when it handled the write. SafeSetFont builds the
+    -- multi-alphabet family, which is the whole reason DFFont inheritors do not
+    -- render CJK as boxes.
+    safeSetFont = function(obj, name, size, flags)
+        if not DF.SafeSetFont then return false end
+        DF:SafeSetFont(obj, name, size, flags)
+        return true
+    end,
+    fontFamily = function(path, outline, size)
+        return DF.GetSettingsFontFamilyName and DF:GetSettingsFontFamilyName(path, outline, size)
+    end,
+
+    -- ---- chrome ------------------------------------------------
+    getScale = function()
+        local ws = DF.GetWindowState and DF:GetWindowState()
+        return (ws and ws.scale) or 1
+    end,
+    -- A mover belongs to the thing it moves, so its pole is pinned rather than
+    -- following whichever page the window happens to be showing.
+    accentFor = function(isRaid) return GUI.GetThemeColorFor(isRaid) end,
+    onPopupOpen = function() DF:ClearSettingHighlights() end,
+
+    -- ---- auto-profile override semantics ------------------------
+    -- Four states, not three. A RUNTIME overlay (an active auto layout driving
+    -- the live raid frames outside an editing session) shows the star and the
+    -- global value but must NOT offer a reset -- the layout has to be edited
+    -- instead. Folding it into "overridden" would show a button that cannot work.
+    getOverrideState = function(db, key)
+        if not key or type(key) ~= "string" then return "none" end
+        if GUI.SelectedMode ~= "raid" then return "none" end
+        local AP = DF.AutoProfilesUI
+        if not AP then return "none" end
+        if db and rawget(db, "_skipOverrideIndicators") then return "none" end
+        local editing = AP:IsEditing()
+        local runtime = AP:IsOverriddenByRuntime(key)
+        if not editing and not runtime then return "none" end
+        if runtime and not editing then
+            return "runtime", AP:GetRuntimeGlobalValue(key)
+        end
+        if AP:IsSettingOverridden(key) then
+            return "overridden", AP:GetGlobalValue(key)
+        end
+        return "editing", AP:GetGlobalValue(key)
+    end,
+
+    -- Drops the layout override AND writes the true global back into the live
+    -- table, so the widget can redraw from db[key] straight after.
+    resetOverride = function(db, key)
+        local AP = DF.AutoProfilesUI
+        if not AP or not key then return nil end
+        AP:ResetProfileSetting(key)
+        local globalVal = AP:GetGlobalValue(key)
+        if db then db[key] = globalVal end
+        return globalVal
+    end,
+
+    -- True when the write was redirected to the baseline, in which case the
+    -- caller skips its live refresh (repainting an unchanged overlay).
+    -- The raid-mode gate lives HERE, not in the pack.
+    interceptWrite = function(db, key, value)
+        if not key then return false end
+        if GUI.SelectedMode ~= "raid" then return false end
+        local AP = DF.AutoProfilesUI
+        if not AP then return false end
+        return AP:HandleRuntimeWrite(key, value) and true or false
+    end,
+
+    -- Record the override when a layout is being edited. The plain write has
+    -- already landed in db[key] by the time this runs.
+    onSettingWritten = function(db, key, value)
+        local AP = DF.AutoProfilesUI
+        if AP and key and AP:IsEditing() then
+            AP:SetProfileSetting(key, value)
+        end
+    end,
+
+    onIndicatorsRefreshed = function()
+        local AP = DF.AutoProfilesUI
+        if AP and AP.RefreshTabOverrideStars then AP:RefreshTabOverrideStars() end
+    end,
+
+    -- ---- live refresh + slider drag -----------------------------
+    refresh    = function() DF:ThrottledUpdateAll() end,
+    refreshNow = function() DF:UpdateAll() end,
+    onDragStart = function(lightFn, name, previewMode) DF:OnSliderDragStart(lightFn, name, previewMode) end,
+    onDragStop  = function() DF:OnSliderDragStop() end,
+    isDragging  = function() return DF.sliderDragging and true or false end,
+
+    -- ---- settings search ----------------------------------------
+    -- Search lives in the options companion, so BOTH the table and the method
+    -- are guarded: a mismatched pair would find the table and not the function.
+    registerSearch = function(kind, label, key, widget, meta)
+        local Search = DF.Search
+        if not Search then return end
+        meta = meta or {}
+        local entry
+        if kind == "slider" and Search.RegisterSlider then
+            entry = Search:RegisterSlider(label, key, meta.minVal, meta.maxVal, meta.step, nil, meta.callback)
+        elseif kind == "dropdown" and Search.RegisterDropdown then
+            entry = Search:RegisterDropdown(label, key, meta.options, nil, meta.callback)
+        end
+        if entry then
+            widget.searchEntry = entry
+            -- Hand the entry a reference back so an inline search result can read
+            -- the tooltip the caller sets on the widget after the factory returns.
+            if Search.LinkSourceWidget then Search:LinkSourceWidget(widget) end
+        end
+    end,
+})
 DF.GUI = GUI
 
--- Mutable module state.
--- These four were file-scope locals, and two of them are read and written more
--- than 6,000 lines apart. That is harmless in one file and silently broken the
--- moment the file is split: a `local` re-declared in the second half becomes an
--- independent variable, so the two halves stop sharing state with no error.
--- Holding them on one table keeps a future split honest -- each part reads the
--- same table via `local S = GUI._state`. Read-only aliases (the C_* colours, L,
--- GUI itself) do not need this: re-declaring those yields the same value.
--- Private by convention -- nothing outside this file should touch GUI._state.
-local S = {}
-GUI._state = S
-
--- Shared private helpers.
--- A `local function` is invisible to any other file, so a helper used thousands
--- of lines from its declaration pins this file together: it cannot be split
--- while a later section still calls it. Publishing the wide-reaching ones here
--- lets a sibling file re-declare `local X = GUI._priv.X` -- the same function
--- object, so no call site changes and behaviour is identical.
--- Only helpers spanning >1000 lines are listed; narrow ones stay private.
--- Private by convention -- nothing outside GUI/ should touch GUI._priv.
-local P = {}
-GUI._priv = P
 
 
 
@@ -157,10 +282,42 @@ for pageId, prefixes in pairs(DF.SECTION_PREFIXES) do
         DF.SectionRegistry[pageId] = prefixes
     end
 end
-
-
--- Track selected mode
+-- ============================================================
+-- MODE + THEME (DandersFrames-only)
+-- ============================================================
+-- Track selected mode: "party" | "raid" | "clicks".
 GUI.SelectedMode = "party"
+
+local C_ACCENT = GUI.Colors.accent    -- party purple-blue
+local C_RAID   = GUI.Colors.raid      -- raid orange
+
+-- The theme colour for an EXPLICIT mode. Use this for any surface that belongs
+-- to a mode rather than to whatever page the options window happens to be
+-- showing -- movers, pinned containers -- so a raid surface stays orange while
+-- the window is on a party page. GetThemeColor() below is the follow-the-window
+-- variant.
+local function GetThemeColorFor(isRaid)
+    if isRaid then return C_RAID else return C_ACCENT end
+end
+GUI.GetThemeColorFor = GetThemeColorFor
+
+-- ☠ A BARE FUNCTION, NOT A METHOD, and it has to stay one. 132 call sites in
+-- this addon and the options companion do `local GetThemeColor = GUI.GetThemeColor`
+-- at file scope and then call it with no self. Making it a method would nil out
+-- every one of them at once, mostly inside hover handlers where the failure is
+-- silent until someone points at the control.
+--
+-- It reads the HOST ACCENT rather than deriving from SelectedMode, so there is
+-- exactly one source of truth: the pack's factories read self:GetAccent() and
+-- this reads the same table. Every SelectedMode write site is paired with a
+-- GUI:SetAccent (see Panel.lua / Controls.lua).
+local function GetThemeColor()
+    return GUI:GetAccent()
+end
+GUI.GetThemeColor = GetThemeColor
+
+-- Seed the accent to match the initial mode.
+GUI:SetAccent(GetThemeColorFor(false))
 
 -- Registry of tabs that should show a "New" badge until opened.
 -- Add tab IDs here for new features; the badge auto-hides once viewed.
@@ -199,23 +356,10 @@ GUI.AlwaysAccessiblePages = {
 }
 
 
-
-
--- Helper to get current theme color
--- The theme colour for an EXPLICIT mode. Use this for any surface that belongs to
--- a mode rather than to whatever page the options window happens to be showing --
--- movers, pinned containers -- so a raid surface stays orange while the window is
--- on a party page. GetThemeColor() below is the follow-the-window variant.
-local function GetThemeColorFor(isRaid)
-    if isRaid then return C_RAID else return C_ACCENT end
-end
-GUI.GetThemeColorFor = GetThemeColorFor
-
-local function GetThemeColor()
-    return GetThemeColorFor(GUI.SelectedMode == "raid")
-end
-GUI.GetThemeColor = GetThemeColor
-
+-- Re-declared from the pack: these probes measure the same pixel grid the
+-- widget factories snap to, so they must use the SAME function, not a copy.
+local PixelsPerUnit = GUI._priv.PixelsPerUnit
+local S = GUI._state
 
 -- ============================================================
 -- Stamped once when this file loads, so it identifies THIS session (and therefore
@@ -986,7 +1130,73 @@ end
 -- (Removed) GUI.GapCheckAll — a no-arg alias for GapCheck("all"), superseded once the
 -- dispatcher started forwarding the mode argument. Zero callers.
 
+-- ============================================================
+-- DESIGNER PRESET PROMPTS (DandersFrames-only)
+-- Used by the Aura / Text Designer template bars in the options companion,
+-- which alias them off GUI._priv. They stay here because deleting a preset is
+-- DandersFrames' own data operation.
+-- ============================================================
+local function PromptPresetName(message, default, acceptLabel, callback)
+    GUI:PromptName({
+        title       = L["Template Name"],
+        message     = message,
+        default     = default,
+        acceptLabel = acceptLabel,
+        onAccept    = callback,
+    })
+end
 
+local function ConfirmDeletePreset(kind, name, onDone)
+    DF:ShowPopupAlert({
+        title   = L["Delete Template"],
+        message = format(L["Delete template \"%s\"? Anything using it reverts to Default."], name),
+        buttons = {
+            {
+                label = L["Delete"],
+                onClick = function()
+                    if DF.DeleteDesignerPreset then
+                        DF:DeleteDesignerPreset(kind, name)
+                        if onDone then onDone() end
+                    end
+                end,
+            },
+            { label = L["Cancel"] },
+        },
+    })
+end
 
+-- Published on the HOST's _priv overlay (never the pack's shared table), which
+-- is exactly what the overlay exists for. The options companion reads them via
+-- `local P = GUI._priv`.
+GUI._priv.PromptPresetName   = PromptPresetName
+GUI._priv.ConfirmDeletePreset = ConfirmDeletePreset
 
+-- The flag/dropdown order for the outline + shadow controls. The controls
+-- themselves live in the options companion; only this constant was ever in the
+-- resident half, and it is DandersFrames' own font vocabulary.
+GUI._priv.OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "MONOCHROME, OUTLINE", "MONOCHROME, THICKOUTLINE" }
 
+-- ============================================================
+-- OVERRIDE DEBUG SLASH
+-- Forces every override marker and reset button visible regardless of state,
+-- so you can see which controls carry the machinery at all. The FLAG lives on
+-- the pack's shared _state (that is what AddOverrideIndicators reads); only the
+-- command and the position-panel nudge are DandersFrames'.
+-- ============================================================
+DF:RegisterDebugSlash("DFOVERRIDEDEBUG", "Force-show every override marker and reset button", true, "/dfoverridedebug")
+SlashCmdList["DFOVERRIDEDEBUG"] = function()
+    local S = GUI._state
+    S.overrideDebugMode = not S.overrideDebugMode
+    DF:Say("Override debug mode " .. (S.overrideDebugMode and "ENABLED" or "DISABLED"))
+    GUI:RefreshAllOverrideIndicators()
+    if DF.positionPanel and DF.positionPanel.UpdatePositionOverride then
+        DF.positionPanel.UpdatePositionOverride()
+    end
+end
+
+-- ☠ Bare-callable on purpose, like GetThemeColor: three companion sites call
+-- GUI.RefreshAllOverrideIndicators() with no self (and one aliases it at file
+-- scope). The pack implementation is a method, so this closure pins the host.
+function GUI.RefreshAllOverrideIndicators()
+    return LibStub("DandersUI-1.0").RefreshAllOverrideIndicators(GUI)
+end

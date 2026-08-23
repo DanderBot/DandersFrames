@@ -1639,7 +1639,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(container, txt, effectiveOverrideKey, onReset, nil, nil, dbTable)
+        AddOverrideIndicators(GUI, container, txt, effectiveOverrideKey, onReset, nil, nil, dbTable)
     end
     
     local function UpdateState()
@@ -2017,7 +2017,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
                 if callback then callback() end
             end
         end
-        AddOverrideIndicators(frame, lbl, dbKey, onReset, 6, nil, dbTable)
+        AddOverrideIndicators(GUI, frame, lbl, dbKey, onReset, 6, nil, dbTable)
     end
     
     local editbox = CreateFrame("EditBox", nil, frame)
@@ -2341,7 +2341,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 DF:UpdateAll()
             end
         end
-        AddOverrideIndicators(container, txt, dbKey, onReset, nil, nil, dbTable)
+        AddOverrideIndicators(GUI, container, txt, dbKey, onReset, nil, nil, dbTable)
     end
     
     local function UpdateSwatch()
