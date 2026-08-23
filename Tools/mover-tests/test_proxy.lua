@@ -6,11 +6,27 @@ local R = NS.Registry
 -- Proxy.lua only needs frames that remember shown state and swallow every
 -- other call; a __index fallback hands out no-op methods for the rest.
 -- ============================================================
+-- Fx (animation) stubs: a permissive no-op animation group so FadeIn/FadeOut
+-- run their state logic (Show/Hide, transition guards) without any animation.
+local function permissiveAnim()
+    local t = setmetatable({}, { __index = function() return function() end end })
+    t.IsPlaying = function() return false end
+    return t
+end
+local function stubAnimationGroup()
+    local g = permissiveAnim()
+    g.CreateAnimation = function() return permissiveAnim() end
+    return g
+end
+
 local function stubFrame()
     -- dragging is read as a plain boolean by Proxy:Refresh; without a real
     -- value the __index fallback would hand back a (truthy) function and
-    -- Refresh would bail before Highlight ran.
-    local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10 }
+    -- Refresh would bail before Highlight ran. fxIn/fxOut/tagShown are plain
+    -- values read by Fx and applyLook for the same reason.
+    local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10,
+                fxIn = false, fxOut = false, tagShown = false }
+    function f:CreateAnimationGroup() return stubAnimationGroup() end
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
     function f:IsShown() return self._shown end

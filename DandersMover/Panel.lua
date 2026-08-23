@@ -224,9 +224,24 @@ function Pn:Ensure()
     return self.frame
 end
 
+-- Instant hide: combat suspend, session teardown, selection loss mid-refresh.
+-- Cancels any running fade so a stale "hide when done" cannot land later.
 function Pn:Hide()
     self.holdUntil = nil          -- a hidden panel has nothing to hold in place
-    if self.frame then self.frame:Hide() end
+    self.dockedTo = nil
+    if self.frame then
+        NS.Fx.Cancel(self.frame)
+        self.frame:Hide()
+    end
+end
+
+-- Deselection: fade out (0.1s), then hide. Suspend never comes through here.
+function Pn:FadeOut()
+    self.holdUntil = nil
+    self.dockedTo = nil
+    local f = self.frame
+    if not f or not f:IsShown() then return end
+    NS.Fx.FadeOut(f, 0.1, function() f:Hide() end)
 end
 
 -- ============================================================
@@ -309,13 +324,28 @@ function Pn:Dock()
     elseif side == "below" then f:SetPoint("TOP", proxy, "BOTTOM", 0, -DOCK_GAP)
     elseif side == "above" then f:SetPoint("BOTTOM", proxy, "TOP", 0, DOCK_GAP)
     else f:SetPoint("TOPLEFT", proxy, "TOPRIGHT", DOCK_GAP, 0) end
+
+    -- Entrance: fade + slide in from the dock side (the panel emerges from the
+    -- proxy's edge onto its anchor). Target changed while the panel was
+    -- already up: a quick fade-swap, no slide. Same target: nothing -- Dock
+    -- runs on every Refresh and must not flicker the panel.
+    local wasShown = f:IsShown()
+    if not wasShown then
+        local ox, oy = 0, 0
+        if side == "right" then ox = -8 elseif side == "left" then ox = 8
+        elseif side == "below" then oy = 8 elseif side == "above" then oy = -8 end
+        NS.Fx.FadeIn(f, 0.12, ox, oy)
+    elseif self.dockedTo ~= Sess.selected then
+        NS.Fx.FadeIn(f, 0.08)
+    end
+    self.dockedTo = Sess.selected
     f:Show()
 end
 
 function Pn:Refresh()
     if not Sess:IsActive() or Sess:IsSuspended() then self:Hide() return end
     local el = selectedElement()
-    if not el then self:Hide() return end
+    if not el then self:FadeOut() return end
     local f = self:Ensure()
     local pos = Registry:GetPos(el)
 

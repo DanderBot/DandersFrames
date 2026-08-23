@@ -206,6 +206,11 @@ local function layout(b, anchored)
         b.titleFloating = true
     else
         b.titleFloating = false
+        b.tagShown = nil
+        -- A pill fade may still be running from the floating state; cancel it
+        -- so its "hide when done" cannot swallow the in-slab title.
+        NS.Fx.Cancel(b.title)
+        NS.Fx.Cancel(b.tagBg)
         b.tagBg:Hide()
         b.title:Show()
     end
@@ -231,9 +236,19 @@ local function applyLook(b, selected, hovered)
     -- one being looked at or moved, so stacked anchors do not pile pills on
     -- top of each other. The tooltip still names an idle slab on hover.
     if b.titleFloating then
-        local showTag = selected or hovered or b.dragging
-        b.title:SetShown(showTag)
-        b.tagBg:SetShown(showTag)
+        local showTag = (selected or hovered or b.dragging) and true or false
+        -- Fade rather than pop, but only on the transition: applyLook runs
+        -- every frame of a drag and must not restart the animation.
+        if b.tagShown ~= showTag then
+            b.tagShown = showTag
+            if showTag then
+                NS.Fx.FadeIn(b.title, 0.1)
+                NS.Fx.FadeIn(b.tagBg, 0.1)
+            else
+                NS.Fx.FadeOut(b.title, 0.1, function() b.title:Hide() end)
+                NS.Fx.FadeOut(b.tagBg, 0.1, function() b.tagBg:Hide() end)
+            end
+        end
     end
     b:SetBackdropColor(C_BODY.r, C_BODY.g, C_BODY.b, hovered and HOVER_ALPHA or BODY_ALPHA)
     -- Selection is the OUTLINE, never the fill or the role colour: white and

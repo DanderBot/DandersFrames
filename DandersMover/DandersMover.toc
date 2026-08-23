@@ -19,6 +19,7 @@ Solver.lua
 Registry.lua
 Core.lua
 Grid.lua
+Fx.lua
 Proxy.lua
 Session.lua
 Panel.lua
