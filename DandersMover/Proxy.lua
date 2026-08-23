@@ -65,6 +65,17 @@ function P:GetUnlockFrame()
     local f = CreateFrame("Frame", "DandersMoverUnlockFrame", UIParent)
     f:SetAllPoints(UIParent)
     f:SetFrameStrata("HIGH")
+    -- The overlay owns clicks on empty space: left deselects, right locks (the
+    -- proxies' own right-click, extended to the whole screen). Proxies, panel
+    -- and legend are children at higher frame levels, so they keep taking
+    -- their own clicks first. While a session is open the overlay therefore
+    -- captures the mouse and the world behind it is unreachable -- documented
+    -- in the README; locking gives the screen back.
+    f:EnableMouse(true)
+    f:SetScript("OnMouseDown", function(_, button)
+        if button == "RightButton" then NS.Session:Lock()
+        else NS.Session:Select(nil) end
+    end)
     f:Hide()
     self.unlockFrame = f
     return f
@@ -423,6 +434,9 @@ end
 local function buildLegend()
     local f = CreateFrame("Frame", "DandersMoverLegend", P:GetUnlockFrame(), "BackdropTemplate")
     f:SetFrameStrata("DIALOG")
+    -- Swallow clicks: the strip is chrome, not empty space -- clicking beside
+    -- its checkbox must not fall through to the overlay's deselect.
+    f:EnableMouse(true)
     UI:CreateElementBackdrop(f, {
         bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
         borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
