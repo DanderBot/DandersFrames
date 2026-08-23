@@ -362,7 +362,10 @@ function Sess:BeginDrag(el)
     -- position, which is exactly where the element sits at drag start (the
     -- record was solved). Proxy reads this table to draw the strain.
     if pos.anchor then
-        self.tether = { target = pos.anchor.target,
+        local a = pos.anchor
+        self.tether = { target = a.target,
+                        spec = { mode = a.mode, edge = a.edge, align = a.align,
+                                 point = a.point, relPoint = a.relPoint },
                         homeX = self.dragStartCx, homeY = self.dragStartCy,
                         state = "held", strain = 0, snapped = false }
     else

@@ -62,7 +62,7 @@ local TAG_PAD = 3                        -- padding of the floating title pill
 -- FADE_OUT and only then tears it down (DismissAll). Combat suspend stays
 -- instant -- Session:Suspend hides the unlock frame directly.
 local FADE_IN, FADE_OUT, STAGGER = 0.25, 0.2, 0.035
-local ZONE_DASH_W = 2                    -- dashed-edge thickness
+local ZONE_DASH_W = 3                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
 -- ============================================================
@@ -664,17 +664,12 @@ local function drawTether(n, el, b, drag)
     if not rect then return n end
     local cx, cy = proxyCenter(b)
     if not cx then return n end
-    -- The tether's far end is the ANCHOR POINT -- where the element sits when
-    -- snapped -- not the nearest point on the target, so it stays put instead
-    -- of sliding along the target's edge as the slab moves.
+    -- The tether's far end is where the anchor CONNECTS on the parent -- the
+    -- edge/align (or relPoint) spot on the target itself. Fixed: it neither
+    -- slides along the parent's surface nor floats at the child's seat.
     local tx, ty
-    if b.dragging and drag then
-        tx, ty = drag.homeX, drag.homeY
-    else
-        local a = Registry:GetPos(el).anchor
-        local w, h = Registry:GetSize(el)
-        if a and w then tx, ty = Solver.Resolve(a, w, h, rect, Solver.SPACING) end
-    end
+    local spec = (b.dragging and drag) and drag.spec or Registry:GetPos(el).anchor
+    if spec then tx, ty = Solver.AnchorPointOnTarget(spec, rect) end
     if not tx then tx, ty = nearestOnRect(rect, cx, cy) end
     local line = tetherLine(P.tethers, n + 1, 0)
     if not line then return n end
@@ -765,7 +760,9 @@ function P:SnapTether(el)
     end
     local line = self.tetherFlash
     if not line then return end
-    local tx, ty = drag.homeX or cx, drag.homeY or cy
+    local tx, ty
+    if drag.spec then tx, ty = Solver.AnchorPointOnTarget(drag.spec, rect) end
+    if not tx then tx, ty = cx, cy end
     NS.Fx.Cancel(line)
     -- The start point rides the PROXY, not a frozen coordinate: a fast drag
     -- keeps pulling the breaking tether along while it fades out.
@@ -1185,7 +1182,7 @@ function P:UpdateZones(cx, cy, hovered)
             -- Occupied zones read quieter (CDM rule) -- here that is the lower
             -- pair of alphas rather than an extra factor on top of the accent's.
             if z.occupied then paintZone(zf, C_ZONE_OCCUPIED, 0.10 * f, C_ZONE_OCCUPIED, 0.6 * f, ZONE_WEIGHT)
-            else               paintZone(zf, C_ZONE, 0.38 * f, C_ZONE, f, ZONE_WEIGHT) end
+            else               paintZone(zf, C_ZONE, 0.38 * f, C_ZONE, 1, ZONE_WEIGHT) end
         else
             clearZone(zf)
         end

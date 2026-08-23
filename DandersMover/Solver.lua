@@ -273,6 +273,30 @@ function S.NearestZone(cx, cy, w, h, zones, snapDistance)
     return nil
 end
 
+-- Where an anchor CONNECTS on the target: the edge/align point (outside mode)
+-- or the relPoint (point mode). This is the fixed spot a tether attaches to --
+-- it never slides as the child moves.
+function S.AnchorPointOnTarget(anchor, target)
+    if not target then return nil end
+    local hw, hh = target.w / 2, target.h / 2
+    if anchor.mode == "point" then
+        local rel = anchor.relPoint or "CENTER"
+        return S.CenterToPoint(rel, target.x, target.y, target.w, target.h)
+    end
+    local edge, align = anchor.edge or "right", anchor.align or "center"
+    local x, y = target.x, target.y
+    if edge == "right" then x = target.x + hw
+    elseif edge == "left" then x = target.x - hw
+    elseif edge == "top" then y = target.y + hh
+    elseif edge == "bottom" then y = target.y - hh end
+    if edge == "right" or edge == "left" then
+        if align == "start" then y = target.y + hh elseif align == "end" then y = target.y - hh end
+    else
+        if align == "start" then x = target.x - hw elseif align == "end" then x = target.x + hw end
+    end
+    return x, y
+end
+
 -- ============================================================
 -- GRAPH
 -- ============================================================

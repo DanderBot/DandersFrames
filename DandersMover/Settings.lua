@@ -119,7 +119,7 @@ local function build()
     f:SetWidth(W)
     -- Centre-right by default: the window is a side palette, and dead centre
     -- is exactly where the frames being moved usually live.
-    f:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     f:SetFrameStrata("DIALOG")
     UI:CreatePanelBackdrop(f, { bgColor = UI.Colors.background })
     f:EnableMouse(true); f:SetMovable(true); f:SetClampedToScreen(true)

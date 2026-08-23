@@ -291,3 +291,15 @@ do
     eq(S.TetherStrain(200, 25), 1, "clamped past snap")
     eq(S.TetherStrain(500, 0), 0, "snapDistance 0: no strain")
 end
+
+-- anchor connection point on the target
+do
+    local t = { x = 0, y = 0, w = 100, h = 40 }
+    local x, y = S.AnchorPointOnTarget({ edge = "right", align = "start" }, t)
+    eq(x, 50, "right edge x"); eq(y, 20, "start on right = top corner")
+    x, y = S.AnchorPointOnTarget({ edge = "bottom", align = "center" }, t)
+    eq(x, 0, "bottom centre x"); eq(y, -20, "bottom centre y")
+    x, y = S.AnchorPointOnTarget({ mode = "point", relPoint = "TOPRIGHT" }, t)
+    eq(x, 50, "point mode relPoint x"); eq(y, 20, "point mode relPoint y")
+    check(S.AnchorPointOnTarget({ edge = "left" }, nil) == nil, "nil target -> nil")
+end
