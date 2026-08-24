@@ -506,6 +506,10 @@ local function reparseContainer(c)
 end
 
 function AuraContainer._kickLiveParse()
+    -- PERF timing (debug-gated, /df debug on, category "PERF"): this runs on the
+    -- test-mode exit path (mover lock included) and each refresh is a Hide/Show
+    -- bounce that re-arms a full aura parse -- the prime hitch suspect.
+    local t0 = DF.DebugActive and DF:DebugActive("PERF") and debugprofilestop() or nil
     local nh = 0
     for h in pairs(AuraContainer._handles or {}) do
         if not h._destroyed and not h._testFrame and h.backend and h.backend.refresh then
@@ -529,6 +533,7 @@ function AuraContainer._kickLiveParse()
         end
     end
     DF:Debug(DBG, "test exit: re-parsed %d live handles, %d slot owners", nh, ns)
+    if t0 then DF:Debug("PERF", "_kickLiveParse %.1fms (%d handles, %d slot owners)", debugprofilestop() - t0, nh, ns) end
 end
 
 -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
@@ -595,13 +600,19 @@ function AuraContainer.SetTestMode(on)
     -- POSITIVE only costs one extra rebuild.
     -- (Parent-driven handles are skipped here too — see skipNested at file scope.)
     local function rebuildAll()
+        -- PERF timing (debug-gated): every test handle's container is rebuilt
+        -- across a test transition -- the other synchronous cost of SetTestMode.
+        local t0 = DF.DebugActive and DF:DebugActive("PERF") and debugprofilestop() or nil
+        local n = 0
         if AuraContainer._handles then
             for h in pairs(AuraContainer._handles) do
                 if not h._destroyed and h._testFrame and not skipNested(h) then
                     pcall(function() h:OnTestModeChanged() end)
+                    n = n + 1
                 end
             end
         end
+        if t0 then DF:Debug("PERF", "SetTestMode(%s) rebuildAll %.1fms (%d test handles)", tostring(on), debugprofilestop() - t0, n) end
     end
 
     if on then
