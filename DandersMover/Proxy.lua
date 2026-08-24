@@ -1,4 +1,7 @@
 local addonName, NS = ...
+-- A copy that lost the LibStub race (a renamed duplicate install) must go
+-- fully inert: Core.lua only sets NS.Lib on the winning copy.
+if not NS.Lib then return end
 
 -- ============================================================
 -- PROXIES

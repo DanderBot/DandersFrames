@@ -28,6 +28,7 @@ ns = lua.table()
 # lib would land it -- onto NS.__DandersUI -- so the mover's Fx.lua alias
 # below finds it (headless runs never load DandersUI/Core.lua or a host).
 ns["__DandersUI"] = lua.table()
+ns.Lib = ns.Lib or lua.eval("{ callbacks = { Fire = function() end } }")   # winner marker: the lost-copy guards check NS.Lib
 run(HERE.parents[1] / "DandersUI" / "Fx.lua", "DandersMover", ns)
 for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Fx.lua", "Registry.lua"):
     p = ADDON / name

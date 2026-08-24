@@ -113,6 +113,7 @@ NS.UI = {
     end,
 }
 NS.Grid = { HidePreview = function() end, HideMeasure = function() end, SetAxisLock = function() end }
+NS.Lib = NS.Lib or { callbacks = { Fire = function() end } }   -- the winner marker the lost-copy guard checks
 load_addon_file("Proxy.lua")
 local P = NS.Proxy
 
