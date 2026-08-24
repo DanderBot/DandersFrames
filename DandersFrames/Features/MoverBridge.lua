@@ -58,8 +58,7 @@ end
 -- The Unlock filter for DF:UnlockFrames ("party") / DF:UnlockRaidFrames ("raid"): only
 -- these keys get proxies, and they are forced relevant so raid frames can be edited
 -- solo. The list is what the LEGACY unlock showed handles for: the container plus
--- every EXISTING, ENABLED pinned set of that mode (Position.lua / Init.lua
--- SetMoversShown(true) -> mover:SetShown(set.enabled ...)), and for party the two
+-- every EXISTING, ENABLED pinned set of that mode, and for party the two
 -- targeted displays when their feature is on. A disabled set or feature has nothing
 -- on screen to frame, so it is not listed.
 --
@@ -472,9 +471,9 @@ end
 -- ============================================================
 -- One lib session shows both proxies but only ever CLAIMS the scope being edited --
 -- claiming both put the other scope's test frames on screen unasked. Owner claims are
--- idempotent (DF._testOwners[scope][owner], TestMode/Shim.lua:117-121) and the claim uses
--- the SAME owner string the legacy path uses ("unlock", Position.lua:2504/2580,
--- Init.lua:992/1084), so a double claim cannot double-count.
+-- idempotent (DF._testOwners[scope][owner], TestMode/Shim.lua:117-121), and since
+-- Phase C retired the legacy unlock paths this bridge is the only writer of the
+-- "unlock" owner string.
 
 local SCOPE_LOCK_KEY = { party = "locked", raid = "raidLocked" }
 
@@ -529,10 +528,6 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
     -- an empty screen.
     if DF.EnsureOptionsLoaded then DF:EnsureOptionsLoaded() end
-    -- The legacy pinned drag handles must never sit under the proxies. The lib path
-    -- never shows them, but a legacy unlock may have left them up; the test movers
-    -- EnterTestMode attaches below read moversShown, so this goes first.
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then DF.PinnedFrames:SetMoversShown(false) end
     -- ONE scope per session. `/mover` opens a session without going through either
     -- Unlock*Frames, so with no request outstanding pick the one the player is in.
     local scope = Bridge.requestedScope or (IsInRaid() and "raid" or "party")
@@ -548,6 +543,13 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
         claimScope(scope)
     end
     syncLockButtons()
+    -- The claim above flipped the scope's lock flag; the permanent handle keys its
+    -- visibility off that flag and nothing else re-evaluates it on the lib path.
+    -- SetMovable inside is a protected action -- skip in combat; Core.lua's
+    -- PLAYER_REGEN handler re-evaluates the handle after combat anyway.
+    if DF.UpdatePermanentMoverVisibility and not InCombatLockdown() then
+        DF:UpdatePermanentMoverVisibility()
+    end
     -- Same next-frame re-measure the lib does for its proxies (Session:Unlock).
     C_Timer.After(0, function()
         if Mover:IsUnlocked() then guarded(function() applyPinned(scope) end)() end
@@ -558,6 +560,13 @@ Mover.RegisterCallback(Bridge, "Locked", function()
     releaseScope("party")
     releaseScope("raid")
     syncLockButtons()
+    -- The release above flipped the scope's lock flag; the permanent handle keys its
+    -- visibility off that flag and nothing else re-evaluates it on the lib path.
+    -- SetMovable inside is a protected action -- skip in combat; Core.lua's
+    -- PLAYER_REGEN handler re-evaluates the handle after combat anyway.
+    if DF.UpdatePermanentMoverVisibility and not InCombatLockdown() then
+        DF:UpdatePermanentMoverVisibility()
+    end
     -- Put the options window back the way the session found it -- same page,
     -- same mode -- on EVERY finish, save or discard alike. Unlocked stores the
     -- pair only when the window was actually open, so nothing stored means the

@@ -62,7 +62,6 @@ end
 
 local function ApplyGUIScale(frame, value)
     if frame then frame:SetScale(value) end
-    if DF.positionPanel then DF.positionPanel:SetScale(value) end
     if DF.TestPanel then DF.TestPanel:SetScale(value) end
     local popup = _G and _G.DFPopupFrame
     if popup then popup:SetScale(value) end

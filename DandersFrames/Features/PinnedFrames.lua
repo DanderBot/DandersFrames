@@ -27,120 +27,6 @@ PinnedFrames.testFrames = {}    -- [setIndex] = { [1..N] = fake non-secure test 
 PinnedFrames.testContainers = {} -- [setIndex] = non-secure container at the test-mode profile's position for this set
 PinnedFrames.initialized = false
 PinnedFrames.currentMode = nil  -- Track what mode we initialized for
--- Global unlock state: pinned movers/chrome are shown only while the MAIN frames
--- are unlocked (driven from DF:UnlockFrames / DF:UnlockRaidFrames). Replaces the
--- retired per-set `set.locked`. Default false = locked (no drag handles).
-PinnedFrames.moversShown = false
-
--- Mover palette per mode (raid = orange, party = purple-blue).
---
--- All five roles are DERIVED from the GUI theme constant for the mode rather than
--- hand-picked, so retheming the addon carries the pinned movers with it and the
--- shades cannot drift apart from each other again. (They had: the old literals
--- claimed to match C_RAID / C_ACCENT but were a third, separately-tuned family.)
---
--- Keyed off IsInRaid() -- REAL group state, not the options window's selected mode
--- -- because a pinned container's identity is the group you are actually in. That
--- is why this resolves through GetThemeColorFor(isRaid) and not GetThemeColor().
---
--- The four plate roles are the base hue at descending brightness; the label is the
--- base mixed toward white so it stays readable on moverBg.
-local MODE_TINTS = {
-    containerBg     = { mul = 0.30, alpha = 0.30 },   -- faintest: the unlocked wash
-    containerBorder = { mul = 0.80, alpha = 0.80 },
-    moverBg         = { mul = 0.40, alpha = 0.90 },
-    moverBorder     = { mul = 1.00, alpha = 1.00 },   -- the full accent
-}
-local MOVER_TEXT_WHITE_MIX = 0.60
-
-local function GetModeColors(isRaid)
-    local base = DF.GUI.GetThemeColorFor(isRaid)
-    local colors = {}
-    for role, tint in pairs(MODE_TINTS) do
-        colors[role] = { base.r * tint.mul, base.g * tint.mul, base.b * tint.mul, tint.alpha }
-    end
-    -- Three components only: this is unpacked straight into SetTextColor.
-    local m = MOVER_TEXT_WHITE_MIX
-    colors.moverText = {
-        base.r + (1 - base.r) * m,
-        base.g + (1 - base.g) * m,
-        base.b + (1 - base.b) * m,
-    }
-    return colors
-end
-
--- Make a pinned drag handle read as clickable and show which set the position
--- panel is currently driving. All text stays white (addon convention); the
--- selected handle stands out by being solid + bright while the others dim.
--- States (only while the panel is in pinned mode does dimming apply):
---   active   — SOLID full accent fill + white edge (the panel targets this set)
---   hovered  — white edge + lighter fill (the "pointed at" cue)
---   resting  — accent edge + dark fill; DIMMED when another handle is active
--- Colours come from mover.dfColors so the pooled test handle can be re-themed on
--- a party<->raid flip by updating that table and calling restyle.
-local function StylePinnedHandle(mover, borderTex, innerTex, textFS, colors)
-    mover.dfColors = colors
-    mover.dfActive = false
-    mover.dfHovered = false
-
-    local DIM = 0.40  -- alpha for non-selected handles while one is selected
-
-    local function restyle()
-        local c = mover.dfColors or {}
-        local accent = c.moverBorder or { 1, 1, 1, 1 }
-        local fill = c.moverBg or { 0, 0, 0, 1 }
-        if mover.dfActive then
-            -- Selected: solid, full-brightness accent fill, white edge + text.
-            if innerTex then innerTex:SetColorTexture(accent[1], accent[2], accent[3], 1) end
-            if borderTex then borderTex:SetColorTexture(1, 1, 1, 1) end
-            if textFS then textFS:SetTextColor(1, 1, 1, 1) end
-        elseif mover.dfHovered then
-            if innerTex then innerTex:SetColorTexture(
-                math.min(fill[1] + 0.20, 1), math.min(fill[2] + 0.20, 1),
-                math.min(fill[3] + 0.20, 1), fill[4] or 1) end
-            if borderTex then borderTex:SetColorTexture(1, 1, 1, 1) end
-            if textFS then textFS:SetTextColor(1, 1, 1, 1) end
-        else
-            -- Resting. Dim only when the panel is targeting some OTHER pinned set,
-            -- so a fresh unlock (no pinned target) leaves every handle full.
-            local d = (DF.positionPanelMode == "pinned") and DIM or 1
-            if innerTex then innerTex:SetColorTexture(fill[1], fill[2], fill[3], (fill[4] or 1) * d) end
-            if borderTex then borderTex:SetColorTexture(accent[1], accent[2], accent[3], (accent[4] or 1) * d) end
-            if textFS then textFS:SetTextColor(1, 1, 1, d) end
-        end
-    end
-    mover.dfRestyle = restyle
-    mover.SetActive = function(_, on) mover.dfActive = on and true or false; restyle() end
-
-    -- Auto-size the handle to its label, with generous padding so it reads as a
-    -- solid, obvious handle rather than a thin bar.
-    mover.dfFitWidth = function()
-        local w = ((textFS and textFS:GetStringWidth()) or 0) + 28
-        if w < 48 then w = 48 end
-        mover:SetWidth(w)
-        mover:SetHeight(20)
-    end
-
-    mover:HookScript("OnEnter", function(self)
-        self.dfHovered = true
-        restyle()
-        DF.GUI:ShowTooltip(self, {
-            title = textFS and textFS:GetText() or DF.L["Pinned"],
-            lines = {
-                DF.L["Drag to move"],
-                DF.L["Click to open the position panel"],
-            },
-        })
-    end)
-    mover:HookScript("OnLeave", function(self)
-        self.dfHovered = false
-        restyle()
-        DF.GUI:HideTooltip()
-    end)
-
-    restyle()
-    mover.dfFitWidth()
-end
 
 -- ============================================================
 -- UTILITY FUNCTIONS
@@ -800,7 +686,6 @@ function PinnedFrames:ProcessAllSets()
                 local c = self.containers[i]
                 if c then
                     c:Hide()
-                    if c.mover then c.mover:Hide() end
                 end
                 if self.headers[i] then self.headers[i]:Hide() end
                 if self.labels[i] then self.labels[i]:Hide() end
@@ -1642,197 +1527,6 @@ function PinnedFrames:CreateSetFrames(setIndex)
     local initW, initH = GetSetFrameSize(set, GetPinnedModeDB())
     PositionPinnedContainer(container, set, pos, initW, initH)
     
-    -- Make draggable when unlocked
-    container:SetMovable(true)
-    container:EnableMouse(false)  -- Don't capture mouse on container - mover handles dragging
-
-    -- Mode-aware colors: raid = orange, party = purple-blue
-    local colors = GetModeColors(IsInRaid())
-
-    -- Visual background when unlocked (for visibility)
-    container.bg = container:CreateTexture(nil, "BACKGROUND")
-    container.bg:SetAllPoints()
-    container.bg:SetColorTexture(unpack(colors.containerBg))
-    container.bg:SetShown(self.moversShown)
-
-    -- Border when unlocked
-    container.border = CreateFrame("Frame", nil, container, "BackdropTemplate")
-    container.border:SetAllPoints()
-    -- Outline only -- container.bg above already paints the interior wash.
-    DF.GUI:CreateElementBackdrop(container.border, {
-        fill        = false,
-        edgeSize    = 1,
-        borderColor = colors.containerBorder,
-    })
-    container.border:SetShown(self.moversShown)
-
-    -- Mover frame (parented to UIParent for scale independence)
-    local mover = CreateFrame("Frame", "DandersPinned" .. setIndex .. "Mover", UIParent)
-    mover:SetSize(140, 16)
-    mover:SetFrameStrata("HIGH")
-    mover:SetPoint("BOTTOM", container, "TOP", 0, 2)
-
-    -- Mover background
-    mover.bg = mover:CreateTexture(nil, "BACKGROUND")
-    mover.bg:SetAllPoints()
-    mover.bg:SetColorTexture(unpack(colors.moverBg))
-
-    -- Mover border (1px)
-    mover.border = mover:CreateTexture(nil, "BORDER")
-    mover.border:SetAllPoints()
-    mover.border:SetColorTexture(unpack(colors.moverBorder))
-    local moverInner = mover:CreateTexture(nil, "ARTWORK")
-    moverInner:SetPoint("TOPLEFT", 1, -1)
-    moverInner:SetPoint("BOTTOMRIGHT", -1, 1)
-    moverInner:SetColorTexture(unpack(colors.moverBg))
-
-    -- Mover text
-    mover.text = mover:CreateFontString(nil, "OVERLAY")
-    DF.GUI:SetSettingsFont(mover.text, 10, "")
-    mover.text:SetPoint("CENTER")
-    mover.text:SetText(PinnedSetLabel(set, setIndex, IsInRaid()))
-    mover.text:SetTextColor(unpack(colors.moverText))
-
-    -- Hover highlight + tooltip + active-state styling (reads as clickable).
-    StylePinnedHandle(mover, mover.border, moverInner, mover.text, colors)
-
-    -- Mover is the drag handle
-    mover:EnableMouse(true)
-    mover:RegisterForDrag("LeftButton")
-
-    -- Clicking (or finishing a drag on) this set's mover points the shared
-    -- position panel at this set, so the X/Y nudge controls drive it.
-    mover:HookScript("OnMouseUp", function(_, button)
-        if button == "LeftButton" and DF.SetPositionPanelMode then
-            DF.positionPanelPinnedSet = setIndex
-            DF:SetPositionPanelMode("pinned")
-        end
-    end)
-
-    -- Track starting mouse and container position (+ the drag's anchor reference
-    -- and frame size, captured once so OnUpdate/OnDragStop stay consistent).
-    local startMouseX, startMouseY, startPosX, startPosY, dragRef, dragW, dragH
-
-    mover:SetScript("OnDragStart", function(self)
-        -- Re-resolve the set EVERY drag: the closure's `set` upvalue is bound at
-        -- CreateSetFrames time, but a profile switch swaps the underlying table
-        -- without recreating the frames — stale lock state would gate the drag
-        -- and (worse) OnDragStop would save the position into the DEAD profile.
-        local liveSet = GetSetDB(setIndex)
-        -- Drag is only valid while globally unlocked and out of combat (the
-        -- container can be a secure header parent — repositioning it taints).
-        if not liveSet or not PinnedFrames.moversShown or InCombatLockdown() then return end
-
-        -- Point the position panel at this set so it tracks the drag live.
-        if DF.SetPositionPanelMode then
-            DF.positionPanelPinnedSet = setIndex
-            DF:SetPositionPanelMode("pinned")
-        end
-
-        -- Keep the set's existing anchor reference (pos.point) so coords stay in
-        -- the same space; PositionPinnedContainer pins the growth corner from it.
-        dragRef = (liveSet.position and liveSet.position.point) or GetContainerAnchorPoint(liveSet)
-        dragW, dragH = GetSetFrameSize(liveSet, GetPinnedModeDB())
-
-        -- Get starting mouse position in screen coordinates
-        local uiScale = UIParent:GetEffectiveScale()
-        startMouseX, startMouseY = GetCursorPosition()
-        startMouseX = startMouseX / uiScale
-        startMouseY = startMouseY / uiScale
-
-        -- Get current container position (the glue offset while frames-glued).
-        startPosX, startPosY = PinnedFrames.ReadXY(liveSet.position)
-
-        self:SetScript("OnUpdate", function()
-            local mx, my = GetCursorPosition()
-            local ps = UIParent:GetEffectiveScale()
-            mx = mx / ps
-            my = my / ps
-
-            -- Delta in UIParent space — add directly to logical start position
-            local deltaX = mx - startMouseX
-            local deltaY = my - startMouseY
-            local newX = startPosX + deltaX
-            local newY = startPosY + deltaY
-
-            -- Snap to grid when pinned snap is enabled (its own flag, default off).
-            local sdb = DF.GetDB and DF:GetDB()
-            if sdb and sdb.pinnedSnapToGrid and DF.SnapToGrid then
-                newX, newY = DF:SnapToGrid(newX, newY)
-            end
-
-            -- Track the live drag in the DB + panel so the X/Y readouts update. In
-            -- place: the record keeps its anchor/anchorTo and its identity.
-            PinnedFrames.WriteXY(liveSet, dragRef, newX, newY)
-            PositionPinnedContainer(container, liveSet, liveSet.position, dragW, dragH)
-            if DF.UpdatePositionPanel then DF:UpdatePositionPanel() end
-        end)
-    end)
-
-    mover:SetScript("OnDragStop", function(self)
-        self:SetScript("OnUpdate", nil)
-        if not startMouseX then return end
-
-        -- Re-resolve (see OnDragStart): write the position into the LIVE set.
-        local liveSet = GetSetDB(setIndex)
-        if not liveSet then return end
-
-        -- Keep the captured anchor reference (pos.point) from drag start.
-        local anchor = dragRef or GetContainerAnchorPoint(liveSet)
-
-        -- Get final position from mouse delta
-        local uiScale = UIParent:GetEffectiveScale()
-        local mx, my = GetCursorPosition()
-        mx = mx / uiScale
-        my = my / uiScale
-
-        local deltaX = mx - startMouseX
-        local deltaY = my - startMouseY
-        local finalX = startPosX + deltaX
-        local finalY = startPosY + deltaY
-
-        -- Snap to grid when pinned snap is enabled (its own flag, default off).
-        local sdb = DF.GetDB and DF:GetDB()
-        if sdb and sdb.pinnedSnapToGrid and DF.SnapToGrid then
-            finalX, finalY = DF:SnapToGrid(finalX, finalY)
-        end
-
-        -- Save logical position (unscaled), in place.
-        PinnedFrames.WriteXY(liveSet, anchor, finalX, finalY)
-
-        -- RAID ONLY: when an auto layout is active, GetSetDB() returns a deep copy
-        -- of _realRaidDB.pinnedFrames, so the write above goes to that throwaway copy
-        -- — mirror through to the real raid DB so it survives overlay rebuilds. Party
-        -- sets ARE the real table (liveSet), and _realRaidDB.sets[setIndex] is the
-        -- RAID set, so mirroring in party mode would corrupt the raid set's position.
-        if IsInRaid() then
-            local realSet = DF._realRaidDB
-                and DF._realRaidDB.pinnedFrames
-                and DF._realRaidDB.pinnedFrames.sets
-                and DF._realRaidDB.pinnedFrames.sets[setIndex]
-            if realSet and realSet.position ~= liveSet.position then
-                PinnedFrames.WriteXY(realSet, anchor, finalX, finalY)
-            end
-        end
-
-        PositionPinnedContainer(container, liveSet, liveSet.position, dragW, dragH)
-
-        if DF.UpdatePositionPanel then DF:UpdatePositionPanel() end
-
-        -- If Test Mode is active, re-sync test container(s) to the new position.
-        -- The drag updated the current mode's set.position; the test container
-        -- may or may not be using this mode's config, but refreshing is cheap
-        -- and ensures alignment either way.
-        if PinnedFrames.testModeActive and PinnedFrames.ExitTestMode then
-            PinnedFrames:ExitTestMode()
-            PinnedFrames:EnterTestMode()
-        end
-    end)
-    
-    -- Mover shows when globally unlocked AND the set is enabled
-    mover:SetShown(set.enabled and self.moversShown)
-    container.mover = mover
-    
     -- Label (parented to UIParent for scale independence)
     local label = UIParent:CreateFontString("DandersPinned" .. setIndex .. "Label", "OVERLAY")
     DF.GUI:SetSettingsFont(label, 12, "")
@@ -1858,11 +1552,9 @@ function PinnedFrames:CreateSetFrames(setIndex)
         if set.enabled then
             container:Show()
             if label then label:SetShown(set.showLabel) end
-            if container.mover then container.mover:SetShown(self.moversShown) end
         else
             container:Hide()
             if label then label:Hide() end
-            if container.mover then container.mover:Hide() end
         end
         return
     end
@@ -1925,22 +1617,16 @@ function PinnedFrames:CreateSetFrames(setIndex)
     if set.enabled then
         container:Show()
         header:Show()
-        -- Label and mover visibility based on their settings
+        -- Label visibility based on its setting
         if label then
             label:SetShown(set.showLabel)
-        end
-        if container.mover then
-            container.mover:SetShown(self.moversShown)
         end
     else
         container:Hide()
         header:Hide()
-        -- Hide label and mover when disabled
+        -- Hide label when disabled
         if label then
             label:Hide()
-        end
-        if container.mover then
-            container.mover:Hide()
         end
         -- Unregister events from child frames (synchronous - no delays for combat safety)
         if DF.SetHeaderChildrenEventsEnabled then
@@ -2565,15 +2251,6 @@ function PinnedFrames:SetEnabled(setIndex, enabled)
         self:UpdateLabel(setIndex)
         if not inTest then
             if label then label:SetShown(set.showLabel) end
-            -- A set that becomes visible while globally unlocked gets its drag chrome.
-            if self.moversShown then
-                if container.mover then container.mover:SetShown(true) end
-                if container.bg then container.bg:SetShown(true) end
-                if container.border then container.border:SetShown(true) end
-            end
-            -- Re-assert Hide-Mover alpha + active highlight on the freshly-shown handle.
-            self:ApplyMoverOverlayAlpha()
-            self:RefreshMoverActiveStates()
         end
 
         self:RefreshChildFrames(setIndex)
@@ -2581,9 +2258,6 @@ function PinnedFrames:SetEnabled(setIndex, enabled)
         container:Hide()
         if header then header:Hide() end
         if label then label:Hide() end
-        if container.mover then container.mover:Hide() end
-        if container.bg then container.bg:Hide() end
-        if container.border then container.border:Hide() end
 
         -- #78: a set that was hiding members from the main frames must RELEASE
         -- them when it turns off — ComputeHiddenNames now skips this set, but
@@ -2610,84 +2284,6 @@ function PinnedFrames:RefreshEnabledState()
     end
 end
 
--- Show or hide the pinned drag chrome (mover + bg + border) for every set in the
--- current mode. Driven by the MAIN frames lock: DF:UnlockFrames / UnlockRaidFrames
--- → true; LockFrames / LockRaidFrames → false. Replaces the retired per-set lock,
--- so the pinned frames now lock/unlock together with everything else.
-function PinnedFrames:SetMoversShown(shown)
-    -- Showing handles only makes sense out of combat (the drag reposition path is
-    -- combat-guarded). The main Unlock paths already block in combat, so this is
-    -- just defence in depth — defer an unlock that somehow arrives mid-combat.
-    if shown and InCombatLockdown() then
-        self.pendingMoversShown = true
-        return
-    end
-
-    -- An explicit lock cancels any combat-deferred/remembered unlock intent, so a
-    -- post-combat restore can't re-show handles the user just locked. (LockAllForCombat
-    -- re-sets moversShownBeforeCombat AFTER calling this, so its own hide is unaffected.)
-    if not shown then
-        self.pendingMoversShown = nil
-        self.moversShownBeforeCombat = nil
-    end
-
-    self.moversShown = shown and true or false
-
-    if not self.initialized then return end
-
-    -- During test mode the live containers are hidden and the TEST containers
-    -- (each with its own testMover) are the preview — drive those handles instead.
-    if self.testModeActive then
-        for i = 1, PinnedFrames.MAX_SETS do
-            local tc = self.testContainers[i]
-            if tc and tc.testMover then tc.testMover:SetShown(self.moversShown) end
-        end
-        self:RefreshMoverActiveStates()
-        self:ApplyMoverOverlayAlpha()
-        return
-    end
-
-    for i = 1, PinnedFrames.MAX_SETS do
-        local set = GetSetDB(i)
-        local container = self.containers[i]
-        if set and container then
-            -- Effective visibility includes the party solo gate — chrome is
-            -- parented to UIParent, so showing it for a solo-hidden set would
-            -- float a "Drag to Move" handle over an invisible container.
-            local visible = self.moversShown and set.enabled and PinnedSoloAllowed(set)
-            if container.bg then container.bg:SetShown(visible) end
-            if container.border then container.border:SetShown(visible) end
-            if container.mover then container.mover:SetShown(visible) end
-        end
-    end
-    self:RefreshMoverActiveStates()
-    self:ApplyMoverOverlayAlpha()
-end
-
--- Hide pinned chrome on combat start, remembering the unlock intent so it can be
--- restored afterwards. Only non-secure overlay frames are touched (combat-safe).
-function PinnedFrames:LockAllForCombat()
-    if not self.initialized then return end
-
-    local was = self.moversShown
-    if was then
-        -- SetMoversShown(false) hides every set's chrome (safe in combat) and clears
-        -- the restore intent; we set it AFTER so the post-combat restore can fire.
-        self:SetMoversShown(false)
-        DF:Debug("PINNED", "Pinned movers hidden for combat")
-    end
-    self.moversShownBeforeCombat = was
-end
-
--- Restore the pre-combat unlock state (or apply an unlock requested during combat).
-function PinnedFrames:RestoreUnlockedAfterCombat()
-    if self.moversShownBeforeCombat or self.pendingMoversShown then
-        self.moversShownBeforeCombat = nil
-        self.pendingMoversShown = nil
-        self:SetMoversShown(true)
-    end
-end
-
 -- Forward declaration: GetSetDBForMode is defined further down (near the test-mode
 -- helpers) but is needed here by GetSetForPosition. Declaring the local up front
 -- lets the later `function GetSetDBForMode` assign to this same upvalue.
@@ -2703,8 +2299,8 @@ end
 
 -- Resolve the set table the shared position panel targets. In test mode this is
 -- the set for the mode being PREVIEWED (raid test while solo edits the raid set),
--- matching the test mover + the frames actually on screen; otherwise the live
--- current-mode set. Overlay-aware (same table the runtime + drag handler use).
+-- matching the frames actually on screen; otherwise the live current-mode set.
+-- Overlay-aware (same table the runtime uses).
 function PinnedFrames:GetSetForPosition(setIndex)
     if self.testModeActive then
         return GetSetDBForMode(setIndex, PositionTargetIsRaid(self))
@@ -2717,37 +2313,9 @@ function PinnedFrames:IsPositionTargetRaid()
     return PositionTargetIsRaid(self)
 end
 
--- "NPC (Raid)" style label for the position panel, matching the drag handle.
+-- "NPC (Raid)" style label for the position panel.
 function PinnedFrames:GetPositionPanelLabel(setIndex)
     return PinnedSetLabel(self:GetSetForPosition(setIndex), setIndex, PositionTargetIsRaid(self))
-end
-
--- Apply the pinned "Hide Mover" preference to every pinned handle — both live and
--- test. Its own flag (db.pinnedHideMover), independent of the main-frame drag
--- overlay. alpha 0 keeps handles draggable but invisible. Called from the panel
--- toggle and whenever handles are (re)shown so the pref sticks.
-function PinnedFrames:ApplyMoverOverlayAlpha()
-    local db = DF.GetDB and DF:GetDB()
-    local a = (db and db.pinnedHideMover) and 0 or 1
-    for i = 1, PinnedFrames.MAX_SETS do
-        local lc = self.containers[i]
-        if lc and lc.mover then lc.mover:SetAlpha(a) end
-        local tc = self.testContainers[i]
-        if tc and tc.testMover then tc.testMover:SetAlpha(a) end
-    end
-end
-
--- Highlight the drag handle of the set the position panel is currently driving
--- (and clear the others). Called whenever the panel target changes so the
--- handle<->panel link is visible. Covers both live and test handles.
-function PinnedFrames:RefreshMoverActiveStates()
-    local activeIndex = (DF.positionPanelMode == "pinned") and (DF.positionPanelPinnedSet or 1) or nil
-    for i = 1, PinnedFrames.MAX_SETS do
-        local lc = self.containers[i]
-        if lc and lc.mover and lc.mover.SetActive then lc.mover:SetActive(i == activeIndex) end
-        local tc = self.testContainers[i]
-        if tc and tc.testMover and tc.testMover.SetActive then tc.testMover:SetActive(i == activeIndex) end
-    end
 end
 
 -- Reposition a pinned set's container from its saved set.position (the nudge
@@ -2767,8 +2335,8 @@ function PinnedFrames:ApplySetPosition(setIndex)
     local w, h = GetSetFrameSize(set, db)
 
     -- Move the container the user currently sees: the TEST container in test mode
-    -- (live containers are hidden then), otherwise the LIVE container. The mover +
-    -- label are anchored to the container, so they follow. PositionPinnedContainer
+    -- (live containers are hidden then), otherwise the LIVE container. The label
+    -- is anchored to the container, so it follows. PositionPinnedContainer
     -- pins the growth corner (size-invariant) using pos.point as the screen ref.
     local container = self.testModeActive and self.testContainers[setIndex]
         or self.containers[setIndex]
@@ -3025,7 +2593,7 @@ function PinnedFrames:Initialize()
 end
 
 -- Enforce the pinned visibility invariant: nothing pinned may be visible unless
--- the CURRENT profile/mode justifies it. Pinned containers/movers/labels are
+-- the CURRENT profile/mode justifies it. Pinned containers/labels are
 -- parented to UIParent under fixed global names and can outlive the module's
 -- self.containers references (profile switch to a fewer-set profile is the
 -- confirmed case: the extra index's frames stay live but untracked, and every
@@ -3035,12 +2603,12 @@ end
 -- wrongly-shown frame is cleaned regardless of how it got that way:
 --   1. inactive-mode containers: never legitimate — always hidden
 --   2. set missing at an index: everything for that index hidden + untracked
---   3. set disabled / solo-gated: container+label hidden; mover also requires
---      the global unlock (moversShown)
+--   3. set disabled / solo-gated: container and label hidden whenever the set
+--      is not effectively visible
 -- Runs at the end of Initialize (login + every rebuild) and on profile switch
 -- (FullProfileRefresh). Skips live-frame writes during test mode (live frames
 -- are hidden then; ExitTestMode re-asserts state on the way out). Combat-safe:
--- movers/labels are genuinely non-secure and hide immediately, but the
+-- labels are genuinely non-secure and hide immediately, but the
 -- CONTAINERS are implicitly protected (the secure header is a child), so —
 -- like SetEnabled's pendingVisibilityUpdate — container and header hides are
 -- deferred to PLAYER_REGEN_ENABLED (pendingPrune re-runs the whole prune).
@@ -3074,7 +2642,6 @@ function PinnedFrames:PruneOrphanedSets()
         end
 
         local set = GetSetDB(i)
-        local mover = _G["DandersPinned" .. i .. "Mover"]
         local label = _G["DandersPinned" .. i .. "Label"]
         local activeC = _G["DandersPinned" .. i .. activeSuffix .. "Container"]
 
@@ -3101,7 +2668,6 @@ function PinnedFrames:PruneOrphanedSets()
                 end
             end
             if self.containers[i] then
-                if self.containers[i].mover then self.containers[i].mover:Hide() end
                 if inCombat then
                     self.pendingPrune = true
                 else
@@ -3111,14 +2677,12 @@ function PinnedFrames:PruneOrphanedSets()
             end
             if self.labels[i] then self.labels[i]:Hide() end
             if not inCombat then self.labels[i] = nil end
-            if mover then mover:Hide() end
             if label then label:Hide() end
             hideContainerSafe(self, activeC)
         else
             -- 3) Set exists: chrome may only show when the set is effectively
-            --    visible; the mover additionally requires the global unlock.
+            --    visible.
             local visible = set.enabled and PinnedSoloAllowed(set)
-            if mover and (not visible or not self.moversShown) then mover:Hide() end
             if label and (not visible or not set.showLabel) then label:Hide() end
             if activeC and not visible then hideContainerSafe(self, activeC) end
         end
@@ -3191,9 +2755,6 @@ function PinnedFrames:Reinitialize()
             self.testFrames[i] = nil
         end
         if self.testContainers[i] then
-            if self.testContainers[i].testMover then
-                self.testContainers[i].testMover:Hide()
-            end
             if self.testContainers[i].testLabel then
                 self.testContainers[i].testLabel:Hide()
             end
@@ -3212,9 +2773,6 @@ function PinnedFrames:Reinitialize()
             self.bossFrames[i] = nil
         end
         if self.containers[i] then
-            if self.containers[i].mover then
-                self.containers[i].mover:Hide()
-            end
             self.containers[i]:Hide()
             self.containers[i] = nil
         end
@@ -3355,12 +2913,11 @@ function PinnedFrames:RemoveSet(setIndex, mode)
         -- pinned set tab mid-pull (the settings window is usable in combat, and DoRemoveSet
         -- in Pages/Frames.lua has no combat guard of its own) raised a blocked-action error.
         --
-        -- The mover and the label are plain frames parented to UIParent, so those two hides
-        -- were always fine and stay direct. pendingReinitialize already covers the recovery
+        -- The label is a plain frame parented to UIParent, so that hide was always fine
+        -- and stays direct. pendingReinitialize already covers the recovery
         -- at combat end -- the defect was the error, not stuck state.
         local c = self.containers[setIndex]
         if c then
-            if c.mover then c.mover:Hide() end
             hideContainerSafe(self, c)
         end
         hideContainerSafe(self, self.headers[setIndex])
@@ -3550,10 +3107,6 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
     if not DF.db then return end
     
     if event == "PLAYER_REGEN_DISABLED" then
-        -- Auto-lock all unlocked pinned sets on combat start
-        if PinnedFrames.initialized then
-            PinnedFrames:LockAllForCombat()
-        end
         return
     end
     
@@ -3563,11 +3116,6 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
         -- stick true forever (killing Hide-from-Main + the solo gate).
         if PinnedFrames.pendingExitTestMode then
             PinnedFrames:ExitTestMode()
-        end
-
-        -- Restore unlock state for sets that were unlocked before combat
-        if PinnedFrames.initialized then
-            PinnedFrames:RestoreUnlockedAfterCombat()
         end
 
         -- Process pending reinitialization after combat
@@ -3994,157 +3542,10 @@ local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isB
     return frame
 end
 
--- Attach a drag mover to the test container. Lets the user reposition test
--- frames live during test mode by dragging this handle — updates the
--- TEST MODE'S profile set.position (raid profile when raid test is on).
--- Themed with GetModeColors so raid test uses orange, party test uses blue.
-local function AttachTestMover(container, set, isRaidMode, setIndex)
-    -- The test drag handle obeys the global unlock, exactly like the live pinned
-    -- movers and the main frames: test mode shows the preview frames, but you must
-    -- UNLOCK to drag them. SetMoversShown re-syncs these when the lock toggles.
-    local shouldShow = PinnedFrames.moversShown == true
-
-    if container.testMover then
-        -- Refresh refs + theme colors in case mode flipped
-        local tm = container.testMover
-        tm.dfSet = set
-        tm.dfIsRaidMode = isRaidMode
-        tm.dfSetIndex = setIndex
-        local colors = GetModeColors(isRaidMode)
-        tm.bg:SetColorTexture(unpack(colors.moverBg))
-        tm.text:SetText(PinnedSetLabel(set, setIndex, isRaidMode))
-        -- Re-theme through the styler so hover/active states pick up the new
-        -- mode's accent; restyle re-applies border/inner/text for the current state.
-        tm.dfColors = colors
-        if tm.dfRestyle then tm.dfRestyle() end
-        if tm.dfFitWidth then tm.dfFitWidth() end  -- label width may have changed
-        tm:SetShown(shouldShow)
-        return
-    end
-
-    local colors = GetModeColors(isRaidMode)
-    local mover = CreateFrame("Frame", nil, UIParent)
-    mover:SetSize(140, 16)
-    mover:SetFrameStrata("HIGH")
-    mover:SetPoint("BOTTOM", container, "TOP", 0, 2)
-    mover.dfSet = set
-    mover.dfIsRaidMode = isRaidMode
-
-    mover.bg = mover:CreateTexture(nil, "BACKGROUND")
-    mover.bg:SetAllPoints()
-    mover.bg:SetColorTexture(unpack(colors.moverBg))
-
-    mover.borderTex = mover:CreateTexture(nil, "BORDER")
-    mover.borderTex:SetAllPoints()
-    mover.borderTex:SetColorTexture(unpack(colors.moverBorder))
-    mover.inner = mover:CreateTexture(nil, "ARTWORK")
-    mover.inner:SetPoint("TOPLEFT", 1, -1)
-    mover.inner:SetPoint("BOTTOMRIGHT", -1, 1)
-    mover.inner:SetColorTexture(unpack(colors.moverBg))
-
-    mover.text = mover:CreateFontString(nil, "OVERLAY")
-    DF.GUI:SetSettingsFont(mover.text, 10, "")
-    mover.text:SetPoint("CENTER")
-    mover.text:SetText(PinnedSetLabel(set, setIndex, isRaidMode))
-    mover.text:SetTextColor(unpack(colors.moverText))
-
-    -- Hover highlight + tooltip + active-state styling (reads as clickable).
-    StylePinnedHandle(mover, mover.borderTex, mover.inner, mover.text, colors)
-
-    mover:EnableMouse(true)
-    mover:RegisterForDrag("LeftButton")
-    mover.dfSetIndex = setIndex
-
-    -- Clicking (or finishing a drag on) the test handle points the shared position
-    -- panel at this set, matching the live mover.
-    mover:HookScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and DF.SetPositionPanelMode and self.dfSetIndex then
-            DF.positionPanelPinnedSet = self.dfSetIndex
-            DF:SetPositionPanelMode("pinned")
-        end
-    end)
-
-    local startMouseX, startMouseY, startPosX, startPosY, dragRef, dragW, dragH
-
-    mover:SetScript("OnDragStart", function(self)
-        local currentSet = self.dfSet
-        if not currentSet then return end
-        -- Point the position panel at this set so it tracks the drag live.
-        if DF.SetPositionPanelMode and self.dfSetIndex then
-            DF.positionPanelPinnedSet = self.dfSetIndex
-            DF:SetPositionPanelMode("pinned")
-        end
-        -- Keep the set's existing anchor reference + capture frame size, so the
-        -- helper pins the growth corner consistently (matches the live mover).
-        dragRef = (currentSet.position and currentSet.position.point) or GetContainerAnchorPoint(currentSet)
-        local ddb = self.dfIsRaidMode and DF:GetRaidDB() or DF:GetDB()
-        dragW, dragH = GetSetFrameSize(currentSet, ddb)
-        local uiScale = UIParent:GetEffectiveScale()
-        startMouseX, startMouseY = GetCursorPosition()
-        startMouseX = startMouseX / uiScale
-        startMouseY = startMouseY / uiScale
-        startPosX, startPosY = PinnedFrames.ReadXY(currentSet.position)
-        self:SetScript("OnUpdate", function()
-            local mx, my = GetCursorPosition()
-            local ps = UIParent:GetEffectiveScale()
-            mx = mx / ps
-            my = my / ps
-            local newX = startPosX + (mx - startMouseX)
-            local newY = startPosY + (my - startMouseY)
-            -- Snap to grid when pinned snap is enabled (its own flag, default off).
-            local sdb = DF.GetDB and DF:GetDB()
-            if sdb and sdb.pinnedSnapToGrid and DF.SnapToGrid then
-                newX, newY = DF:SnapToGrid(newX, newY)
-            end
-            -- Track the live drag in the DB + panel so the X/Y readouts update (in place).
-            PinnedFrames.WriteXY(currentSet, dragRef, newX, newY)
-            PositionPinnedContainer(container, currentSet, currentSet.position, dragW, dragH)
-            if DF.UpdatePositionPanel then DF:UpdatePositionPanel() end
-        end)
-    end)
-
-    mover:SetScript("OnDragStop", function(self)
-        self:SetScript("OnUpdate", nil)
-        if not startMouseX then return end
-        local currentSet = self.dfSet
-        if not currentSet then return end
-        local anchor = dragRef or GetContainerAnchorPoint(currentSet)
-        local uiScale = UIParent:GetEffectiveScale()
-        local mx, my = GetCursorPosition()
-        mx = mx / uiScale
-        my = my / uiScale
-        local finalX = startPosX + (mx - startMouseX)
-        local finalY = startPosY + (my - startMouseY)
-        -- Snap to grid when pinned snap is enabled (its own flag, default off).
-        local sdb = DF.GetDB and DF:GetDB()
-        if sdb and sdb.pinnedSnapToGrid and DF.SnapToGrid then
-            finalX, finalY = DF:SnapToGrid(finalX, finalY)
-        end
-        PinnedFrames.WriteXY(currentSet, anchor, finalX, finalY)
-        PositionPinnedContainer(container, currentSet, currentSet.position, dragW, dragH)
-
-        -- Persist raid-set drags through to _realRaidDB (survives overlay rebuilds;
-        -- position is never overlay-overridable). Party sets need no mirror.
-        if self.dfIsRaidMode then
-            local realSet = DF._realRaidDB and DF._realRaidDB.pinnedFrames
-                and DF._realRaidDB.pinnedFrames.sets and DF._realRaidDB.pinnedFrames.sets[self.dfSetIndex]
-            if realSet and realSet.position ~= currentSet.position then
-                PinnedFrames.WriteXY(realSet, anchor, finalX, finalY)
-            end
-        end
-
-        if DF.UpdatePositionPanel then DF:UpdatePositionPanel() end
-    end)
-
-    mover:SetShown(shouldShow)
-    container.testMover = mover
-end
-
 -- Ensure the test container for a set exists and is positioned using the
 -- specified mode's profile config for that set (so raid test mode while solo
 -- anchors at the raid-profile's configured pinned position, not at the
 -- party-profile's position). Non-secure frame; can be created in combat.
--- Also attaches a drag mover so the user can reposition test frames live.
 function PinnedFrames:EnsureTestContainer(setIndex, set, isRaidMode)
     local container = self.testContainers[setIndex]
     if not container then
@@ -4170,11 +3571,9 @@ function PinnedFrames:EnsureTestContainer(setIndex, set, isRaidMode)
     PositionPinnedContainer(container, set, pos, frameWidth, frameHeight)
     container:Show()
 
-    AttachTestMover(container, set, isRaidMode, setIndex)
-
     -- Dedicated test label (parented to UIParent for scale independence).
-    -- Anchored to the test container so it follows the test mover when
-    -- dragged. Uses the test-mode profile's set name so it always reflects
+    -- Anchored to the test container so it follows the preview. Uses the
+    -- test-mode profile's set name so it always reflects
     -- what's on screen (even in cross-mode like "raid test while in party").
     local testLabel = container.testLabel
     if not testLabel then
@@ -4323,7 +3722,6 @@ function PinnedFrames:HidePlayerTestFrames(setIndex)
     end
     local container = self.testContainers[setIndex]
     if container then
-        if container.testMover then container.testMover:Hide() end
         if container.testLabel then container.testLabel:Hide() end
         container:Hide()
     end
@@ -4364,12 +3762,6 @@ function PinnedFrames:EnterTestMode()
     -- hide never reaches it). ExitTestMode restores them per live enabled state.
     for setIndex = 1, PinnedFrames.MAX_SETS do
         if self.headers[setIndex] then self.headers[setIndex]:Hide() end
-        local rc = self.containers[setIndex]
-        if rc then
-            if rc.mover then rc.mover:Hide() end
-            if rc.bg then rc.bg:Hide() end
-            if rc.border then rc.border:Hide() end
-        end
         if self.labels[setIndex] then self.labels[setIndex]:Hide() end
     end
 
@@ -4389,25 +3781,14 @@ function PinnedFrames:EnterTestMode()
             if actualModeMatches and self.headers[setIndex] and not isBossSet then
                 self.headers[setIndex]:Hide()
             end
-            -- Hide the REAL pinned container visuals (mover, bg, border,
-            -- label) when test mode matches — otherwise the user sees stale
-            -- chrome (blue box + label) anchored at the real container's
-            -- position while dragging the test mover. The test container
-            -- has its own dedicated mover + label that follow the test
-            -- frames. In cross-mode we don't touch the real visuals (they
+            -- Hide the REAL pinned label when test mode matches — otherwise the
+            -- user sees a stale label anchored at the real container's position.
+            -- The test container has its own dedicated label that follows the
+            -- test frames. In cross-mode we don't touch the real visuals (they
             -- may be in use by real frames at a different position).
             if actualModeMatches then
                 local realContainer = self.containers[setIndex]
                 if realContainer then
-                    if realContainer.mover then
-                        realContainer.mover:Hide()
-                    end
-                    if realContainer.bg then
-                        realContainer.bg:Hide()
-                    end
-                    if realContainer.border then
-                        realContainer.border:Hide()
-                    end
                 end
                 local realLabel = self.labels[setIndex]
                 if realLabel then
@@ -4517,9 +3898,8 @@ end
 -- followed by EnterTestMode, and the pool's REUSE branch
 -- (EnsurePlayerTestFramePool) is built for exactly this "the set at this index
 -- changed under us" case. EnterTestMode rebuilds only indices that still have an
--- enabled set, so whatever stays hidden is precisely the orphan. The legacy drag
--- handles are not resurrected — AttachTestMover gates on PinnedFrames.moversShown,
--- which a mover session set to false.
+-- enabled set, so whatever stays hidden is precisely the orphan. No drag chrome
+-- is resurrected — the mover session owns the only handles now.
 function PinnedFrames:RefreshTestModeSets()
     if not self.testModeActive then return end
     -- ⚠ Bail whole, don't half-do it. Hiding non-secure test frames in combat is
@@ -4577,15 +3957,14 @@ function PinnedFrames:ExitTestMode()
     for setIndex = 1, PinnedFrames.MAX_SETS do
         local set = GetSetDB(setIndex)
         -- Effective visibility includes the party solo gate (mirror SetEnabled):
-        -- the mover/label are parented to UIParent, so restoring them for a
+        -- the label is parented to UIParent, so restoring it for a
         -- solo-hidden set would float chrome over an invisible container.
         local visible = set and set.enabled and PinnedSoloAllowed(set)
         if set and not IsBossSet(set) and visible and self.headers[setIndex] then
             self.headers[setIndex]:Show()
         end
-        -- Restore real pinned container visuals (mover, bg, border, label)
-        -- based on current set state. Mover/bg/border follow the unlocked
-        -- state; label follows showLabel. Disabled sets stay hidden.
+        -- Restore the real pinned label based on current set state (it follows
+        -- showLabel). Disabled sets stay hidden.
         if set then
             local realContainer = self.containers[setIndex]
             if realContainer then
@@ -4596,15 +3975,6 @@ function PinnedFrames:ExitTestMode()
                 if set.position then
                     local cw, ch = GetSetFrameSize(set, GetPinnedModeDB())
                     PositionPinnedContainer(realContainer, set, set.position, cw, ch)
-                end
-                if realContainer.mover then
-                    realContainer.mover:SetShown(visible and self.moversShown)
-                end
-                if realContainer.bg then
-                    realContainer.bg:SetShown(visible and self.moversShown)
-                end
-                if realContainer.border then
-                    realContainer.border:SetShown(visible and self.moversShown)
                 end
             end
             local realLabel = self.labels[setIndex]

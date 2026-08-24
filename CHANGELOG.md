@@ -5,7 +5,7 @@
 ### New Features
 - (Icons) Pings now show on frames. When a group member pings a player, the ping icon appears on that player's frame, matching the default raid frames. Find it under Indicators > Icons > Ping Icon, with the usual scale, position and hide-in-combat options.
 - (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon. It is the foundation for a shared positioning system across Danders addons — frame-to-frame snapping, anchoring elements to each other, undo/redo and save/discard. This release only includes the addon and its demo (`/mover demo`); DandersFrames' own frames move over to it in a later update.
-- (Frames) Party and raid frames can now be moved with DandersMover, including snapping them to and anchoring them onto other addons' elements; the old movers are still available with `/df unlock legacy` and `/df raidunlock legacy`.
+- (Frames) Party and raid frames can now be moved with DandersMover, including snapping them to and anchoring them onto other addons' elements.
 - (Frames) Pinned sets, the personal targeted-spells block and the targeted list can now be moved with DandersMover too, including anchoring a pinned set to any other element. Unlocking party frames shows only party movers, unlocking raid frames only raid movers (other addons' movers can be shown from the legend or DandersMover's settings), and a pinned set you had anchored to the frames through the Anchor To dropdown stays anchored.
 - (DandersMover) A full editor polish pass: dark slab movers with role colours (blue free, purple anchored, green anchor-root) and a legend, anchor tether lines that stretch and snap when you drag an anchored element too far, dashed snap slots, distance-based snapping with adjustable snap and highlight ranges, an overlap-aware docked panel with undo/redo and nudge (Shift x10, Ctrl x100), smooth animations throughout, hold Alt to peek at the real frames, click-to-cycle stacked movers, a Configure button that jumps to the element's own settings page, and copy-position between party and raid variants.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
@@ -15,6 +15,7 @@
 
 ### Changes
 - The settings-panel toolkit is now a shared library built into each Danders addon, so they all share one look and get fixes at the same time.
+- The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 
 ## [5.3.0]
 

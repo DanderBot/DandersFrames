@@ -21,7 +21,6 @@ DF.ExportCategories = {
         -- so exporting it only carried a dead value between profiles.
         "anchorX",
         "anchorY",
-        "hideDragOverlay",
         "permanentMover",
         "permanentMoverActionLeft",
         "permanentMoverActionRight",
@@ -55,7 +54,6 @@ DF.ExportCategories = {
         "frameScale",
         "frameSpacing",
         "frameWidth",
-        "gridSize",
         "growDirection",
         "growthAnchor",
         "hideDefaultPlayerFrame",
@@ -88,7 +86,6 @@ DF.ExportCategories = {
         "restedIndicatorOffsetX",
         "restedIndicatorOffsetY",
         "restedIndicatorSize",
-        "snapToGrid",
         "soloMode",
         "sortAlphabetical",
         "sortByClass",
@@ -1188,8 +1185,6 @@ DF.ExportCategories = {
     -- Pinned frame sets
     pinnedFrames = {
         "pinnedFrames",
-        "pinnedHideMover",
-        "pinnedSnapToGrid",
     },
     -- Aura Designer config (preset library travels with this category)
     auraDesigner = {

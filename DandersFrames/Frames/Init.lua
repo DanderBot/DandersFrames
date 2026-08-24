@@ -29,17 +29,14 @@ local Mover = LibStub and LibStub("DandersMover-1.0", true)
 local reusableGroupCurrentPos = {}
 
 -- ============================================================
--- MOVER SYNC HELPER
--- Keeps raidMoverFrame sized to match the active container
--- (test container when in test mode, live container otherwise)
+-- RAID RECT SIGNAL
+-- Intentionally empty: the legacy raid mover this used to resize is gone, but
+-- MoverBridge hooksecurefuncs this name as its "raid rect changed" trigger
+-- (relayout, flat-grid resize, test-container sync all still call it). Keep the
+-- name and the call sites; the hook is the body now.
 -- ============================================================
 
 function DF:SyncRaidMoverToContainer()
-    if not DF.raidMoverFrame or not DF.raidMoverFrame:IsShown() then return end
-    local source = DF.raidTestMode and DF.testRaidContainer or DF.raidContainer
-    if not source then return end
-    local w, h = source:GetSize()
-    DF.raidMoverFrame:SetSize(max(w, 100), max(h, 100))
 end
 
 -- ============================================================
@@ -78,9 +75,6 @@ function DF:InitializeFrames()
     DF.container:SetScale(partyScale)
     DF.container:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / partyScale, (db.anchorY or 0) / partyScale)
     DF.container:SetSize(500, 200)
-    
-    -- Create mover frame
-    DF:CreateMoverFrame()
 
     -- Create permanent mover handle for party (skip if party mode disabled)
     if DF.db and DF.db.partyEnabled ~= false then
@@ -120,9 +114,6 @@ function DF:InitializeRaidFrames()
     -- Raid frames are children of SecureGroupHeaderTemplate headers
     -- Access via DF:GetRaidFrame(index) or DF:IterateRaidFrames(callback)
     
-    -- Create raid mover frame
-    DF:CreateRaidMoverFrame()
-
     -- Create permanent mover handle for raid (skip if raid mode disabled)
     if DF.db and DF.db.raidEnabled ~= false then
         DF:CreatePermanentMover(DF.raidContainer, "raid")
@@ -661,390 +652,33 @@ function DF:UpdateRaidGroupLabels(activeGroupsTable, db, horizontal)
     end
 end
 
-
-function DF:CreateRaidMoverFrame()
-    -- Cannot create UI elements during combat
-    if InCombatLockdown() then return end
-    
-    -- Don't recreate if already exists
-    if DF.raidMoverFrame then return end
-    
-    -- CRITICAL: Ensure raidContainer exists before creating mover
-    if not DF.raidContainer then
-        DF:Err("Cannot create raid mover - DF.raidContainer doesn't exist!")
-        return
-    end
-    
-    -- Parent to UIParent (not raidContainer) so strata works properly
-    -- Position over the container
-    local mover = CreateFrame("Frame", "DandersRaidFramesMover", UIParent, "BackdropTemplate")
-    mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; SetFrameLevel(100) puts us above them
-                                    -- NOTE: an AuraDesigner indicator set to an explicit Frame Strata
-                                    -- escapes this band entirely and will draw over the mover.
-    mover:SetFrameLevel(100)        -- Unit frame children reach ~parent+70 (AD Frame Level max); 100 clears them
-
-    -- Set initial size from container
-    local cWidth, cHeight = DF.raidContainer:GetSize()
-    mover:SetSize(math.max(cWidth, 100), math.max(cHeight, 100))
-    
-    -- Set initial position from db
-    local raidDb = DF:GetRaidDB()
-    local raidMoverScale = raidDb.frameScale or 1.0
-    mover:SetScale(raidMoverScale)
-    mover:SetPoint("CENTER", UIParent, "CENTER", (raidDb.raidAnchorX or 0) / raidMoverScale, (raidDb.raidAnchorY or 0) / raidMoverScale)
-    
-    -- Raid orange now comes from the theme. Keeps its own louder alphas (the
-    -- original "-- More visible"): the raid container is large, so the shared
-    -- 0.30/0.80 default reads too faint stretched across it.
-    DF.GUI:CreateMoverBackdrop(mover, {
-        isRaid      = true,
-        fillAlpha   = 0.4,
-        borderAlpha = 1.0,
-    })
-    mover:EnableMouse(true)
-    mover:SetMovable(true)
-    mover:RegisterForDrag("LeftButton")
-    mover:Hide()
-    
-    local label = mover:CreateFontString(nil, "OVERLAY")
-    label:SetPoint("CENTER", mover, "CENTER", 0, 0)
-    -- Use the settings font (matches the party mover) so the unlock label
-    -- follows the user's Settings Font instead of the fixed fallback.
-    DF.GUI:SetSettingsFont(label, 14, "OUTLINE")
-    label:SetText("Raid Frames\nDrag to move")
-    label:SetTextColor(1, 0.7, 0.3, 1)
-    
-    DF.raidMoverFrame = mover
-    
-    -- Shared drag state between OnDragStart/OnUpdate/OnDragStop
-    local raidDragOffsetX, raidDragOffsetY = 0, 0
-
-    -- Left-click switches the shared position panel to raid mode.
-    mover:HookScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("raid")
-        end
-    end)
-
-    mover:SetScript("OnDragStart", function(self)
-        if InCombatLockdown() then return end
-        -- Switch the position panel to raid mode so nudge buttons
-        -- affect the raid container.
-        if DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("raid")
-        end
-        -- Use saved db position as truth — avoids all GetCenter/GetLeft
-        -- ambiguity on scaled frames
-        local db = DF:GetRaidDB()
-        local pScale = UIParent:GetEffectiveScale()
-        local startCursorX, startCursorY = GetCursorPosition()
-        startCursorX = startCursorX / pScale
-        startCursorY = startCursorY / pScale
-        local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-        local frameCX = screenWidth / 2 + (db.raidAnchorX or 0)
-        local frameCY = screenHeight / 2 + (db.raidAnchorY or 0)
-        local cursorOffX = frameCX - startCursorX
-        local cursorOffY = frameCY - startCursorY
-        raidDragOffsetX = db.raidAnchorX or 0
-        raidDragOffsetY = db.raidAnchorY or 0
-
-        -- Start OnUpdate to track cursor and sync positions during drag
-        self:SetScript("OnUpdate", function()
-            if InCombatLockdown() then self:SetScript("OnUpdate", nil); return end
-            local cursorX, cursorY = GetCursorPosition()
-            local ps = UIParent:GetEffectiveScale()
-            cursorX = cursorX / ps
-            cursorY = cursorY / ps
-            local sw, sh = GetScreenWidth(), GetScreenHeight()
-            raidDragOffsetX = (cursorX + cursorOffX) - sw / 2
-            raidDragOffsetY = (cursorY + cursorOffY) - sh / 2
-
-            local scale = self:GetScale() or 1
-
-            -- Reposition the mover
-            self:ClearAllPoints()
-            self:SetPoint("CENTER", UIParent, "CENTER", raidDragOffsetX / scale, raidDragOffsetY / scale)
-
-            -- Sync raidContainer to mover position
-            DF.raidContainer:ClearAllPoints()
-            DF.raidContainer:SetPoint("CENTER", UIParent, "CENTER", raidDragOffsetX / scale, raidDragOffsetY / scale)
-
-            -- Sync testRaidContainer to mover position (for live preview)
-            if DF.testRaidContainer then
-                DF.testRaidContainer:ClearAllPoints()
-                DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", raidDragOffsetX / scale, raidDragOffsetY / scale)
-            end
-
-            -- Snap preview if enabled.
-            -- ⚠ THE PARTY DB. Grid settings are party-wide: the writer in
-            -- Frames/Position.lua stores snapToGrid via DF:GetDB() for exactly that
-            -- reason. Reading GetRaidDB() here re-opened the split it closed -- a
-            -- profile carrying a stale raid.snapToGrid=false showed the box ticked
-            -- while the raid mover never snapped.
-            local snapDb = DF:GetDB()
-            if snapDb.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-                DF:UpdateSnapPreview(self, raidDragOffsetX, raidDragOffsetY)
-            end
-        end)
-    end)
-
-    mover:SetScript("OnDragStop", function(self)
-        -- Stop OnUpdate
-        self:SetScript("OnUpdate", nil)
-
-        -- Hide snap preview lines
-        DF:HideSnapPreview()
-
-        -- Use the last computed offset from OnUpdate
-        local x, y = raidDragOffsetX, raidDragOffsetY
-
-        -- Snap to grid if enabled. Snap flag from the PARTY db (party-wide, same as
-        -- the writer); `db` below stays the RAID db for the anchor writes.
-        local db = DF:GetRaidDB()
-        if DF:GetDB().snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-            x, y = DF:SnapToGrid(x, y)
-        end
-
-        -- Save position through the ONE funnel (record + anchorX/anchorY mirror, plus
-        -- the active-layout routing and the RAIDPOS log line).
-        DF:SetPositionRecord("raid", { point = "CENTER", x = x, y = y }, "RaidMover:OnDragStop")
-
-        -- If editing an auto profile, also save as override
-        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-            DF.AutoProfilesUI:SetProfileSetting("raidAnchorX", x)
-            DF.AutoProfilesUI:SetProfileSetting("raidAnchorY", y)
-            -- Update position override indicator
-            if DF.GUI and DF.GUI.UpdatePositionOverrideIndicator then
-                DF.GUI.UpdatePositionOverrideIndicator()
-            end
-        end
-
-        -- ☠ ONE WRITER for the final position, and it is UpdateRaidContainerPosition.
-        -- The CENTER compensation (Position.lua) lives ON the containers and the
-        -- mover; the drag OnUpdate moves all three rigidly in raw-anchor space, so the
-        -- rest position has to be re-derived through the function that owns the comp
-        -- -- which is exactly what its comment says happens here. Hand-setting the raw
-        -- anchor on all three (what this used to do) dropped the comp at every release:
-        -- with Center alignment and 2+ group rows, box and content sat at the raw
-        -- anchor until the next reposition, then jumped by half a group-row.
-        DF:UpdateRaidContainerPosition()
-
-        -- Update position panel
-        DF:UpdatePositionPanel()
-    end)
-    
-    mover:SetScript("OnMouseDown", function(self, button)
-        if button == "RightButton" then
-            DF:LockRaidFrames()
-        end
-    end)
-    
-    DF.raidMoverFrame = mover
-end
-
--- `legacy` forces the old in-house overlay even when DandersMover is installed
--- (/df raidunlock legacy). See DF:UnlockFrames for why the routing lives here.
-function DF:UnlockRaidFrames(legacy)
+function DF:UnlockRaidFrames()
     if InCombatLockdown() then
         DF:Err("Cannot unlock raid frames during combat.")
         return
     end
 
+    -- No DandersMover, no editing surface: see DF:UnlockFrames.
+    if not Mover then
+        DF:Say(L["DandersMover is disabled. Re-enable it in the AddOns list, or turn on Enable Permanent Mover under Frame options for a basic drag handle."])
+        return
+    end
+
     -- Unlocking shows raid test frames, which live in the load-on-demand
-    -- companion. Deliberate user action (/df raidunlock, mover button), so
-    -- load it -- without this, ShowRaidTestFrames was a nil call and the
-    -- unlock aborted halfway: grid shown, movers never set up.
+    -- companion. Deliberate user action (/df raidunlock, mover button), so load it.
     if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then
         return
     end
 
-    -- See DF:UnlockFrames: disabled in the lib does not fall back to the legacy overlay,
-    -- it reports and stops. Legacy is reachable only via the explicit `legacy` argument.
-    if Mover and not legacy then
-        -- See DF:UnlockFrames: the raid scope's keys only, forced relevant (solo editing).
-        -- The container's own toggle does not gate the session -- only an empty list does.
-        local filter = DF.MoverBridge and DF.MoverBridge:SessionFilter("raid") or "DandersFrames"
-        if type(filter) == "table" and #filter.keys == 0 then
-            DF:Say(string.format(L["All %s movers are turned off under DandersFrames in /mover config."], L["Raid Frames"]))
-            return
-        end
-        if DF.MoverBridge then DF.MoverBridge:RequestScope("raid") end
-        Mover:Unlock(filter)
+    -- See DF:UnlockFrames: the raid scope's keys only, forced relevant (solo editing).
+    -- The container's own toggle does not gate the session -- only an empty list does.
+    local filter = DF.MoverBridge and DF.MoverBridge:SessionFilter("raid") or "DandersFrames"
+    if type(filter) == "table" and #filter.keys == 0 then
+        DF:Say(string.format(L["All %s movers are turned off under DandersFrames in /mover config."], L["Raid Frames"]))
         return
     end
-
-    if not DF.raidContainer then
-        DF:Err("Cannot unlock - raid container doesn't exist!")
-        return
-    end
-    
-    local db = DF:GetRaidDB()
-    
-    -- Ensure raid mover frame exists (create if needed)
-    if not DF.raidMoverFrame then
-        DF:CreateRaidMoverFrame()
-    end
-    
-    -- Safety check - if mover still doesn't exist, abort
-    if not DF.raidMoverFrame then
-        DF:Err("Cannot unlock - failed to create raid mover frame!")
-        return
-    end
-    
-    -- Save current position before making changes (for reset button)
-    DF.savedRaidPositionX = db.raidAnchorX or 0
-    DF.savedRaidPositionY = db.raidAnchorY or 0
-    
-    db.raidLocked = false
-    DF.positionPanelMode = "raid"  -- Set mode for position panel
-    DF.hideDragOverlay = db.hideDragOverlay or false
-    
-    local scale = db.frameScale or 1.0
-
-    -- Make container movable and visible
-    DF.raidContainer:SetMovable(true)
-    DF.raidContainer:SetScale(scale)
-    DF.raidContainer:ClearAllPoints()
-    DF.raidContainer:SetPoint("CENTER", UIParent, "CENTER", (db.raidAnchorX or 0) / scale, (db.raidAnchorY or 0) / scale)
-    DF.raidContainer:Show()
-    
-    -- Ensure container has a reasonable size
-    local cWidth, cHeight = DF.raidContainer:GetWidth(), DF.raidContainer:GetHeight()
-    if cWidth < 50 or cHeight < 50 then
-        -- Use fallback size based on settings
-        -- frameWidth / frameHeight / frameSpacing are the real keys. The
-        -- raidFrame* spellings have no default anywhere in the addon, so these
-        -- three reads always yielded nil and the fallback container was sized
-        -- 80/40/2 regardless of the user's actual frame dimensions.
-        local frameWidth = db.frameWidth or 80
-        local frameHeight = db.frameHeight or 40
-        local spacing = db.frameSpacing or 2
-        
-        -- Default to 8 groups x 5 members layout
-        DF.raidContainer:SetSize(
-            8 * (frameWidth + spacing),
-            5 * (frameHeight + spacing)
-        )
-        
-        headerDebug("Raid container size was too small, set fallback size")
-    end
-    
-    -- In flat mode, ensure container size is correct before reading it
-    -- (the secure position handler for separated mode may have overwritten it)
-    if not db.raidUseGroups and DF.FlatRaidFrames then
-        DF.FlatRaidFrames:UpdateContainerSize()
-    end
-    
-    -- When in test mode, reposition test frames first so the test container
-    -- has the correct calculated 40-player max size, then size the mover from it.
-    -- When NOT in test mode, size from the live raidContainer (existing behavior).
-    if DF.raidTestMode and DF.testRaidContainer then
-        local testFrameCount = db.raidTestFrameCount or 10
-        if DF.LightweightPositionRaidTestFrames then
-            DF:LightweightPositionRaidTestFrames(testFrameCount)
-        end
-        local tw, th = DF.testRaidContainer:GetSize()
-        DF.raidMoverFrame:SetSize(max(tw, 100), max(th, 100))
-    else
-        local cWidth, cHeight = DF.raidContainer:GetWidth(), DF.raidContainer:GetHeight()
-        DF.raidMoverFrame:SetSize(max(cWidth, 100), max(cHeight, 100))
-    end
-
-    DF.raidMoverFrame:SetScale(scale)
-    DF.raidMoverFrame:ClearAllPoints()
-    DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (db.raidAnchorX or 0) / scale, (db.raidAnchorY or 0) / scale)
-    DF.raidMoverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
-    DF.raidMoverFrame:SetFrameLevel(100)        -- Above unit frame children (which reach ~parent+70)
-    DF.raidMoverFrame:SetAlpha(1)
-    DF.raidMoverFrame:Show()
-
-    -- Sync testRaidContainer position (and size only when not in test mode,
-    -- since test mode already has the correct calculated size)
-    if DF.testRaidContainer then
-        DF.testRaidContainer:SetScale(scale)
-        DF.testRaidContainer:ClearAllPoints()
-        DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", (db.raidAnchorX or 0) / scale, (db.raidAnchorY or 0) / scale)
-        if not DF.raidTestMode then
-            DF.testRaidContainer:SetSize(DF.raidContainer:GetSize())
-        end
-    end
-
-    -- ★ CONVERGE THROUGH THE ONE POSITIONER. The hand-positioning above sets raw
-    -- anchors; UpdateRaidContainerPosition is the single owner of the CENTER
-    -- compensation (container + test container + mover, one number), so run it last
-    -- or the unlock path shows the box at the uncompensated anchor until the next
-    -- reposition happens by — the exact overlay drift this block otherwise
-    -- reintroduces. (Core.lua already routes its callers through it for the same
-    -- reason.) Safe here: unlock is OOC by construction (combat guard at the top).
-    if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
-
-    -- Debug info
-    if DF:DebugActive("HEADERS") then
-        headerDebug("Raid unlock - container size:", DF.raidContainer:GetWidth(), "x", DF.raidContainer:GetHeight())
-        headerDebug("Raid unlock - mover size:", DF.raidMoverFrame:GetWidth(), "x", DF.raidMoverFrame:GetHeight())
-        headerDebug("Raid unlock - mover shown:", DF.raidMoverFrame:IsShown() and "yes" or "no")
-        headerDebug("Raid unlock - mover strata:", DF.raidMoverFrame:GetFrameStrata())
-        headerDebug("Raid unlock - mover parent:", DF.raidMoverFrame:GetParent():GetName() or "unnamed")
-    end
-    
-    -- Always refresh grid state when unlocking. Snap flag from the PARTY db
-    -- (party-wide, same as the writer in Frames/Position.lua); `db` here is the
-    -- raid db and stays authoritative for the anchors above.
-    if DF.gridFrame then
-        if DF:GetDB().snapToGrid then
-            -- Refresh grid lines to ensure they match current settings
-            if DF.gridFrame.RefreshLines then
-                DF.gridFrame:Show()
-                DF.gridFrame.RefreshLines()
-            else
-                DF.gridFrame:Show()
-            end
-        else
-            DF.gridFrame:Hide()
-        end
-    end
-    
-    -- Unlock claims test frames for as long as it stays unlocked: you need frames
-    -- on screen to have something to drag. It deliberately does NOT snapshot what
-    -- the user had -- that is the user's own claim, tracked separately. The old
-    -- snapshot went stale whenever test mode changed mid-session, in both
-    -- directions (see TestMode/Shim.lua).
-    DF:SetTestModeOwner("raid", "unlock", true, true)   -- silent: unlock announces itself
-
-    -- Pinned frames ride the global lock: show their drag chrome too. No mode
-    -- gate — SetMoversShown shows the right handles (live movers for the current
-    -- mode, or the test movers when test mode is previewing either mode).
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then
-        DF.PinnedFrames:SetMoversShown(true)
-    end
-
-    -- Show position panel (shared with party) and update its values from db
-    if DF.positionPanel then
-        DF:UpdatePositionPanel()
-        if DF.positionPanel.UpdateTheme then
-            DF.positionPanel:UpdateTheme()
-        end
-        DF.positionPanel:Show()
-    end
-    
-    -- Update button text if it exists
-    if DF.raidLockButton and DF.raidLockButton.Text then
-        DF.raidLockButton.Text:SetText("Lock Raid Frames")
-    end
-    if DF.displayLockButton and DF.displayLockButton.Text then
-        DF.displayLockButton.Text:SetText("Lock Frames")
-    end
-    
-    -- Sync GUI toolbar buttons
-    if DF.GUI then
-        if DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
-        if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
-    end
-    
-    -- Hide permanent mover while full overlay is active
-    if DF.permanentRaidMover then DF.permanentRaidMover:Hide() end
-
-    DF:Say("Raid frames unlocked. Drag to move, right-click to lock.")
+    if DF.MoverBridge then DF.MoverBridge:RequestScope("raid") end
+    Mover:Unlock(filter)
 end
 
 function DF:LockRaidFrames()
@@ -1057,12 +691,10 @@ function DF:LockRaidFrames()
 
     if not DF.raidContainer then return end
 
-    -- ☠ COMBAT GUARD, mirroring UnlockRaidFrames. DF.raidContainer is created from
-    -- SecureFrameTemplate, so :Hide() on it further down -- and the SetMovable calls in
-    -- UpdatePermanentMoverVisibility -- are PROTECTED actions. Unlock has always refused
-    -- in combat; Lock had no guard at all, so unlocking out of combat and then locking
-    -- (right-click the mover, or the position panel's Lock button) after a pull raised a
-    -- blocked action.
+    -- ☠ COMBAT GUARD, mirroring UnlockRaidFrames. The SetMovable calls in
+    -- UpdatePermanentMoverVisibility below are PROTECTED actions on the secure raid
+    -- container. Unlock has always refused in combat; Lock had no guard at all, so
+    -- unlocking out of combat and then locking after a pull raised a blocked action.
     if InCombatLockdown() then
         DF:Err("Cannot lock raid frames during combat.")
         return
@@ -1070,56 +702,14 @@ function DF:LockRaidFrames()
 
     local db = DF:GetRaidDB()
     db.raidLocked = true
-    DF.positionPanelMode = nil  -- Clear mode
-
-    -- ⚠ Guarded like DF.raidContainer above. CreateRaidMoverFrame early-returns on
-    -- InCombatLockdown and on a missing container, so this field can legitimately be nil.
-    -- UnlockRaidFrames handles exactly that case; the lock path indexed it blind, here and
-    -- again at the SetScript below.
-    if DF.raidMoverFrame then
-        DF.raidMoverFrame:Hide()
-    end
 
     -- Restore permanent mover visibility (keeps container movable if enabled)
     DF:UpdatePermanentMoverVisibility()
 
-    -- Stop any OnUpdate for snap preview
-    if DF.raidMoverFrame then
-        DF.raidMoverFrame:SetScript("OnUpdate", nil)
-    end
-    
-    -- Hide snap preview lines
-    DF:HideSnapPreview()
-    
-    -- Hide grid
-    if DF.gridFrame then
-        DF.gridFrame:Hide()
-    end
-    
-    -- Hide position panel
-    if DF.positionPanel then
-        DF.positionPanel:Hide()
-    end
-
-    -- Hide pinned drag chrome (lock always hides, regardless of mode).
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then
-        DF.PinnedFrames:SetMoversShown(false)
-    end
-
-    -- Release unlock's claim. If the user still wants a preview it stays up; if
-    -- nobody does, this is what hides it. Nothing to go stale either way.
-    DF:SetTestModeOwner("raid", "unlock", false, true)  -- silent: lock announces itself
-    
-    -- Hide container if not in raid
-    if not IsInRaid() then
-        DF.raidContainer:Hide()
-    end
-
     -- If this lock ends a layout-edit unlock session (started from a layout's own
     -- Unlock button), exit editing so the dragged position is captured into that
     -- layout (ExitEditing's diff-scan + the live SetProfileSetting on drag) and the
-    -- layout re-applies. Fires for ANY lock path (the layout's button, the position
-    -- panel's Lock, right-click, /df raidlock).
+    -- layout re-applies. Fires for ANY lock path.
     if DF.raidLayoutEditUnlock then
         DF.raidLayoutEditUnlock = nil
         if DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing() then
@@ -1134,13 +724,13 @@ function DF:LockRaidFrames()
     if DF.displayLockButton and DF.displayLockButton.Text then
         DF.displayLockButton.Text:SetText("Unlock Frames")
     end
-    
+
     -- Sync GUI toolbar buttons
     if DF.GUI then
         if DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
         if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
     end
-    
+
     DF:Say("Raid frames locked.")
 end
 
@@ -1872,17 +1462,6 @@ function DF:UpdateAllFrames()
                 -- Unregister from click-cast addons when hidden
                 DF:UnregisterFrameWithClickCast(frame)
             end
-        end
-    end
-    
-    -- Update mover - always show full 5-player size when unlocked so user can see full group footprint
-    if DF.moverFrame then
-        DF.moverFrame:ClearAllPoints()
-        DF.moverFrame:SetAllPoints(DF.container)
-        if horizontal then
-            DF.moverFrame:SetSize(maxWidth, ppFrameHeight)
-        else
-            DF.moverFrame:SetSize(ppFrameWidth, maxHeight)
         end
     end
     

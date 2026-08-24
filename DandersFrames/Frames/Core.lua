@@ -41,12 +41,10 @@ DF.raidFrames = setmetatable({}, {
 })
 
 DF.container = nil
-DF.moverFrame = nil
 DF.testMode = false
 
 -- Raid frame containers
 DF.raidContainer = nil
-DF.raidMoverFrame = nil
 
 -- Color curve cache for gradient mode
 DF.CurveCache = {}

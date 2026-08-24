@@ -936,8 +936,6 @@ local function CreatePersonalContainer()
     personalContainer = container
     -- ☠ (Removed) the DF.personalTargetedSpellsContainer export. Write-only: the file
     -- local above is what everything here uses, and no reader existed in either addon.
-    -- Not to be confused with DF.personalTargetedSpellsMover, which IS read (four
-    -- sites in Frames/Position.lua).
 
     return container
 end
@@ -1516,18 +1514,11 @@ function DF:UpdatePersonalTargetedSpellsPosition()
     PositionPersonalIcons()
 end
 
--- Update mover size to match settings
-local function UpdateMoverSize()
-    if not DF.personalTargetedSpellsMover then return end
-    local w, h = GetPersonalMoverSize()
-    DF.personalTargetedSpellsMover:SetSize(w, h)
-end
-
 -- DandersMover accessors. The container is a file-local, so the bridge cannot measure
 -- it; and the container's CENTER is deliberately NOT the block's centre
 -- (GetPersonalContainerPoint shifts it by half the block opposite the growth
--- direction) -- what the user sees, and what the legacy mover framed, is the icon
--- BLOCK centred on the saved x/y with the mover's size. Report that. UIParent units
+-- direction) -- what the user sees is the icon BLOCK centred on the saved x/y at
+-- that size. Report that. UIParent units
 -- (the container is parented to UIParent at scale 1).
 function DF:GetPersonalTargetedSize()
     return GetPersonalMoverSize()
@@ -1541,138 +1532,6 @@ function DF:GetPersonalTargetedRect()
     if not rec then return nil end
     local w, h = GetPersonalMoverSize()
     return { x = rec.x or 0, y = rec.y or 0, w = w, h = h }
-end
-
--- Create mover for personal targeted spells
-function DF:CreatePersonalTargetedSpellsMover()
-    if DF.personalTargetedSpellsMover then return end
-    
-    CreatePersonalContainer()
-    
-    local w, h = GetPersonalMoverSize()
-    
-    local mover = CreateFrame("Frame", "DandersFramesPersonalTargetedSpellsMover", UIParent, "BackdropTemplate")
-    mover:SetSize(w, h)
-    mover:SetFrameStrata("DIALOG")
-    -- No mode of its own (this display is not party- or raid-specific), so the
-    -- mover follows whichever mode the options window is showing.
-    DF.GUI:CreateMoverBackdrop(mover)
-    mover:EnableMouse(true)
-    mover:SetMovable(true)
-    mover:RegisterForDrag("LeftButton")
-    mover:Hide()
-    
-    local label = mover:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    label:SetPoint("CENTER")
-    label:SetText("Personal\nTargeted Spells")
-    label:SetTextColor(1, 1, 1, 1)
-    mover.label = label
-
-    -- Left-click switches the shared position panel to our mode.
-    mover:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("personal")
-        end
-    end)
-
-    mover:SetScript("OnDragStart", function(self)
-        -- Switch the position panel to personal mode so nudge
-        -- buttons affect us, not the party container.
-        if DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("personal")
-        end
-        self:StartMoving()
-
-        local db = GetPersonalDB()
-        self:SetScript("OnUpdate", function()
-            -- Update icons to follow mover during drag
-            local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-            local centerX, centerY = self:GetCenter()
-            local x = centerX - screenWidth / 2
-            local y = centerY - screenHeight / 2
-            
-            -- Update container position live
-            if personalContainer then
-                personalContainer:ClearAllPoints()
-                local cx, cy = GetPersonalContainerPoint(x, y)
-                personalContainer:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
-            end
-            
-            -- Snap preview
-            if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-                DF:UpdateSnapPreview(self)
-            end
-        end)
-    end)
-    
-    mover:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        self:SetScript("OnUpdate", nil)
-        DF:HideSnapPreview()
-        
-        local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-        local centerX, centerY = self:GetCenter()
-        local x = centerX - screenWidth / 2
-        local y = centerY - screenHeight / 2
-        
-        local db = GetPersonalDB()
-        if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-            x, y = DF:SnapToGrid(x, y)
-        end
-        
-        self:ClearAllPoints()
-        self:SetPoint("CENTER", UIParent, "CENTER", x, y)
-        
-        -- Save through the record funnel (record + scalar mirror; routes to an active
-        -- raid layout's override like the raid container does). An x/y move keeps any
-        -- DandersMover anchor -- the lib re-solves it, exactly as the party drag does.
-        DF:SetPositionRecord("personal", { point = "CENTER", x = x, y = y }, "PersonalMover:drag")
-        
-        -- Update actual container
-        DF:UpdatePersonalTargetedSpellsPosition()
-    end)
-    
-    mover:SetScript("OnMouseDown", function(self, button)
-        if button == "RightButton" then
-            DF:LockFrames()
-        end
-    end)
-    
-    DF.personalTargetedSpellsMover = mover
-end
-
--- Show/hide the personal targeted spells mover
-function DF:ShowPersonalTargetedSpellsMover()
-    if not DF.personalTargetedSpellsMover then
-        DF:CreatePersonalTargetedSpellsMover()
-    end
-    
-    local db = GetPersonalDB()
-    local x = db.personalTargetedSpellX or 0
-    local y = db.personalTargetedSpellY or -150
-    
-    UpdateMoverSize()
-    DF.personalTargetedSpellsMover:ClearAllPoints()
-    DF.personalTargetedSpellsMover:SetPoint("CENTER", UIParent, "CENTER", x, y)
-    DF.personalTargetedSpellsMover:Show()
-    
-    -- Show test icons
-    DF:ShowTestPersonalTargetedSpells()
-end
-
-function DF:HidePersonalTargetedSpellsMover()
-    if DF.personalTargetedSpellsMover then
-        DF.personalTargetedSpellsMover:Hide()
-    end
-    -- Hide test icons
-    DF:HideTestPersonalTargetedSpells()
-end
-
--- Mover only — same contract as HideTargetedListMoverOnly; see the note there.
-function DF:HidePersonalTargetedSpellsMoverOnly()
-    if DF.personalTargetedSpellsMover then
-        DF.personalTargetedSpellsMover:Hide()
-    end
 end
 
 -- Test mode support for personal targeted spells
@@ -1781,17 +1640,15 @@ end
 
 -- Update test personal targeted spells (called when settings change)
 function DF:UpdateTestPersonalTargetedSpells()
-    -- Update if mover is shown OR if in test mode with personal enabled
+    -- Update while test mode is up and personal is enabled
     local db = GetPersonalDB()
-    local moverShown = DF.personalTargetedSpellsMover and DF.personalTargetedSpellsMover:IsShown()
     -- Show personal targeted spells in test mode whenever personal is enabled. This
     -- deliberately does NOT consult a test-panel toggle: the group feature's
     -- testShowTargetedSpell key is gone, and Personal's own testShowPersonalTargeted
     -- is checked by DF:UpdateAllTestTargetedSpell before it reaches here.
     local inTestMode = (DF.testMode or DF.raidTestMode) and db.personalTargetedSpellEnabled
     
-    if moverShown or inTestMode then
-        UpdateMoverSize()
+    if inTestMode then
         DF:ShowTestPersonalTargetedSpells()
     end
 end
@@ -1800,7 +1657,6 @@ end
 function DF:TogglePersonalTargetedSpells(enabled)
     if enabled then
         CreatePersonalContainer()
-        DF:CreatePersonalTargetedSpellsMover()
     else
         DF:HideAllPersonalTargetedSpells()
     end
@@ -4416,139 +4272,6 @@ DF._TargetedListTransitionToChannel = function(casterUnit, rec)
 end
 
 -- ------------------------------------------------------------
--- Mover
--- ------------------------------------------------------------
-
-local targetedListMover = nil
-
-local function TargetedList_CreateMover()
-    if targetedListMover then return targetedListMover end
-    TargetedList_EnsureContainer()
-
-    local mover = CreateFrame("Frame", "DandersFramesTargetedListMover", UIParent, "BackdropTemplate")
-    mover:SetFrameStrata("DIALOG")
-    -- No mode of its own (this display is not party- or raid-specific), so the
-    -- mover follows whichever mode the options window is showing.
-    DF.GUI:CreateMoverBackdrop(mover)
-    mover:EnableMouse(true)
-    mover:SetMovable(true)
-    mover:RegisterForDrag("LeftButton")
-    mover:Hide()
-
-    local label = mover:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-    label:SetPoint("CENTER")
-    label:SetText("Targeted List")
-    label:SetTextColor(1, 1, 1, 1)
-    mover.label = label
-
-    -- Left-click switches the shared position panel to our mode.
-    mover:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("targetedList")
-        end
-    end)
-
-    mover:SetScript("OnDragStart", function(self)
-        -- Also switch mode on drag start so the panel reflects our
-        -- position live as the user nudges.
-        if DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("targetedList")
-        end
-        self:StartMoving()
-        local db = DF:GetDB()
-        self:SetScript("OnUpdate", function()
-            local sw, sh = GetScreenWidth(), GetScreenHeight()
-            local cx, cy = self:GetCenter()
-            if cx and cy then
-                local x, y = cx - sw / 2, cy - sh / 2
-                -- Live-follow: keep container glued to mover while dragging
-                if targetedListContainer then
-                    targetedListContainer:ClearAllPoints()
-                    targetedListContainer:SetPoint("CENTER", UIParent, "CENTER", x, y)
-                end
-                -- Snap preview (matches personal mover behavior)
-                if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown()
-                   and DF.UpdateSnapPreview then
-                    DF:UpdateSnapPreview(self)
-                end
-            end
-        end)
-    end)
-
-    mover:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        self:SetScript("OnUpdate", nil)
-        if DF.HideSnapPreview then DF:HideSnapPreview() end
-
-        local sw, sh = GetScreenWidth(), GetScreenHeight()
-        local cx, cy = self:GetCenter()
-        if not cx or not cy then return end
-        local x, y = cx - sw / 2, cy - sh / 2
-
-        -- Snap to grid if enabled, mirroring the personal mover.
-        local db = DF:GetDB()
-        if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown()
-           and DF.SnapToGrid then
-            x, y = DF:SnapToGrid(x, y)
-        end
-
-        self:ClearAllPoints()
-        self:SetPoint("CENTER", UIParent, "CENTER", x, y)
-        -- Through the record funnel (record + scalar mirror). Party-only feature.
-        DF:SetPositionRecord("targetedList", { point = "CENTER", x = x, y = y }, "TargetedListMover:drag")
-        DF:UpdateTargetedListLayout()
-    end)
-
-    -- Right-click anywhere on the mover locks everything (same as
-    -- the personal targeted spells mover and the main mover frame).
-    mover:SetScript("OnMouseDown", function(self, button)
-        if button == "RightButton" and DF.LockFrames then
-            DF:LockFrames()
-        end
-    end)
-
-    targetedListMover = mover
-    DF.targetedListMoverFrame = mover  -- exposed for position panel apply()
-    return mover
-end
-
-function DF:ShowTargetedListMover()
-    TargetedList_CreateMover()
-    local db = DF.db and DF.db.party
-    if not db then return end
-    local w, h = TargetedList_ComputeContainerSize(db)
-    targetedListMover:SetSize(w, h)
-    targetedListMover:ClearAllPoints()
-    targetedListMover:SetPoint("CENTER", UIParent, "CENTER",
-        db.targetedListX or 0, db.targetedListY or -10)
-    targetedListMover:Show()
-    -- Show test bars alongside the mover so users can see the
-    -- actual bar layout while positioning.
-    DF:ShowTestTargetedList()
-end
-
-function DF:HideTargetedListMover()
-    if targetedListMover then
-        targetedListMover:Hide()
-    end
-    DF:HideTestTargetedList()
-end
-
--- ☠ MOVER ONLY — for callers that must not touch the demo bars.
--- The compound hide above also tears down the test display. That is right for
--- lock/unlock, where the bars exist so you can see what you are positioning, and
--- WRONG for the enable sync: in test mode those bars belong to TEST MODE, and
--- hiding a mover must not tear down somebody else's preview. Ticking Enable with
--- frames locked and test mode on made the preview flash up and vanish.
--- The SHOW side stays compound: while unlocked the bars ARE the positioning aid,
--- and in test mode they are already up, so showing them again costs nothing.
-function DF:HideTargetedListMoverOnly()
-    if targetedListMover then
-        targetedListMover:Hide()
-    end
-end
-
--- ------------------------------------------------------------
 -- Test mode
 -- ------------------------------------------------------------
 --
@@ -4947,14 +4670,6 @@ function DF:UpdateTargetedListLayout()
         end
     end
     TargetedList_Render()
-    -- Also resize the mover if it's visible
-    if targetedListMover and targetedListMover:IsShown() then
-        local db = DF.db and DF.db.party
-        if db then
-            local w, h = TargetedList_ComputeContainerSize(db)
-            targetedListMover:SetSize(w, h)
-        end
-    end
 end
 
 -- Lightweight updates for color picker drag. These only touch the

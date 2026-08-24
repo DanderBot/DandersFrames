@@ -1182,7 +1182,7 @@ GUI._priv.OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME"
 -- Forces every override marker and reset button visible regardless of state,
 -- so you can see which controls carry the machinery at all. The FLAG lives on
 -- the pack's shared _state (that is what AddOverrideIndicators reads); only the
--- command and the position-panel nudge are DandersFrames'.
+-- command itself is DandersFrames'.
 -- ============================================================
 DF:RegisterDebugSlash("DFOVERRIDEDEBUG", "Force-show every override marker and reset button", true, "/dfoverridedebug")
 SlashCmdList["DFOVERRIDEDEBUG"] = function()
@@ -1190,9 +1190,6 @@ SlashCmdList["DFOVERRIDEDEBUG"] = function()
     S.overrideDebugMode = not S.overrideDebugMode
     DF:Say("Override debug mode " .. (S.overrideDebugMode and "ENABLED" or "DISABLED"))
     GUI:RefreshAllOverrideIndicators()
-    if DF.positionPanel and DF.positionPanel.UpdatePositionOverride then
-        DF.positionPanel.UpdatePositionOverride()
-    end
 end
 
 -- ☠ Bare-callable on purpose, like GetThemeColor: three companion sites call

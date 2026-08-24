@@ -1071,10 +1071,5 @@ function DandersFrames_SetPosition(targetID, position)
     -- cannot drift from what DF's own dragging does.
     t.write(x, y)
 
-    -- Keep DF's own position panel honest if the user has it open: it reads the same
-    -- fields, and without this it would show the pre-move numbers until reopened.
-    if DF.UpdatePositionPanel and DF.positionPanel and DF.positionPanel:IsShown() then
-        DF:UpdatePositionPanel()
-    end
     return true
 end
