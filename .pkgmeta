@@ -45,3 +45,10 @@ ignore:
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown
+
+# CurseForge/Wago relation metadata: stamped on every upload by the packager.
+# Nothing is REQUIRED -- DandersUI is embedded and DandersMover ships in this
+# zip -- but the embedded libraries are credited so the sites link them.
+embedded-libraries:
+  - libstub
+  - callbackhandler

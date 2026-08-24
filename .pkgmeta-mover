@@ -30,3 +30,9 @@ ignore:
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown
+
+embedded-libraries:
+  - libstub
+  - callbackhandler
+optional-dependencies:
+  - danders-frames
