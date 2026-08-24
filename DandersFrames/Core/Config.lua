@@ -1868,7 +1868,6 @@ DF.PartyDefaults = {
     frameSpacing = 1,
     frameScale = 1.0,
     frameWidth = 125,
-    gridSize = 25,
     growDirection = "HORIZONTAL",
     growthAnchor = "CENTER",
     locked = true,
@@ -1889,10 +1888,6 @@ DF.PartyDefaults = {
     permanentMoverShowOnHover = false,
     permanentMoverWidth = 15,
     pixelPerfect = true,
-    snapToGrid = true,
-    pinnedSnapToGrid = false,
-    pinnedHideMover = false,
-    hideDragOverlay = false,
 
     -- Group Labels
     groupLabelColor = {r = 1, g = 1, b = 1, a = 1},

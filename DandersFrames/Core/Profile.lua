@@ -1939,6 +1939,21 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             or (type(r) == "table" and r.personalTargetedPosition == nil) then
             DF.db._moverPositionRecordsV2 = nil
         end
+        -- Phase C: an old export can carry the five deleted grid prefs (or a
+        -- RESET_POSITION quick action). Re-open the sweep so the call below cleans
+        -- the imported payload; a payload without them costs one idle pass.
+        local function carriesLegacyMoverPrefs(m)
+            if type(m) ~= "table" then return false end
+            return m.gridSize ~= nil or m.snapToGrid ~= nil or m.pinnedSnapToGrid ~= nil
+                or m.pinnedHideMover ~= nil or m.hideDragOverlay ~= nil
+                or m.permanentMoverActionLeft == "RESET_POSITION"
+                or m.permanentMoverActionRight == "RESET_POSITION"
+                or m.permanentMoverActionShiftLeft == "RESET_POSITION"
+                or m.permanentMoverActionShiftRight == "RESET_POSITION"
+        end
+        if carriesLegacyMoverPrefs(p) or carriesLegacyMoverPrefs(r) then
+            DF.db._moverLegacyPrefsRemovedV1 = nil
+        end
         -- Always run: the two blocks above are flag-gated per profile and the pinned
         -- walk is self-gated (an imported pinnedFrames table lacks its positionsV2
         -- marker), so an import that changed nothing costs one idle pass.

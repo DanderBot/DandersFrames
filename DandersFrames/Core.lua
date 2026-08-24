@@ -4020,6 +4020,38 @@ function DF:MigrateContainerPositionRecords()
             profile._moverPositionRecordsV2 = true
         end
 
+        -- Phase C: the in-house drag grid and position panel died with the legacy
+        -- movers. Delete their five per-mode prefs so stale values cannot linger in
+        -- SVs (their defaults are gone, so nothing re-stamps them and an old export
+        -- would otherwise re-introduce them), and retire the RESET_POSITION quick
+        -- action (its target, DF:ResetPosition, died with the panel).
+        if type(profile) == "table" and not profile._moverLegacyPrefsRemovedV1 then
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local m = profile[modeKey]
+                if type(m) == "table" then
+                    m.gridSize, m.snapToGrid, m.pinnedSnapToGrid = nil, nil, nil
+                    m.pinnedHideMover, m.hideDragOverlay = nil, nil
+                    if m.permanentMoverActionLeft == "RESET_POSITION" then m.permanentMoverActionLeft = "NONE" end
+                    if m.permanentMoverActionRight == "RESET_POSITION" then m.permanentMoverActionRight = "NONE" end
+                    if m.permanentMoverActionShiftLeft == "RESET_POSITION" then m.permanentMoverActionShiftLeft = "NONE" end
+                    if m.permanentMoverActionShiftRight == "RESET_POSITION" then m.permanentMoverActionShiftRight = "NONE" end
+                end
+            end
+            -- Same rule as every value migration in this battery: reach the raid
+            -- auto-layout overrides too, or a stale override key survives inside the
+            -- one place the sweep could not see.
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    layout.overrides.gridSize = nil
+                    layout.overrides.snapToGrid = nil
+                    layout.overrides.pinnedSnapToGrid = nil
+                    layout.overrides.pinnedHideMover = nil
+                    layout.overrides.hideDragOverlay = nil
+                end)
+            end
+            profile._moverLegacyPrefsRemovedV1 = true
+        end
+
         -- Pinned records: self-gated (per pinnedFrames table / per record shape), so
         -- it runs every time -- an imported pinnedFrames table is caught on the next
         -- pass without a flag to clear. See PinnedFrames.MigrateProfileRecords.
@@ -4438,6 +4470,9 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     _moverPositionRecordsV1 = true,
     -- Phase B: born with personalTargetedPosition / targetedListPosition in the defaults.
     _moverPositionRecordsV2 = true,
+    -- Phase C: born without the five grid prefs (their defaults are deleted), so the
+    -- sweep has nothing to do on a fresh profile. Stamped for the standard reason.
+    _moverLegacyPrefsRemovedV1 = true,
     -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
     -- migration: it must re-check on every login, because a file can go missing at any
     -- future update, not just once in a profile's life. Stamping a flag here would have
