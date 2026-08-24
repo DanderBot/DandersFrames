@@ -471,9 +471,9 @@ end
 -- ============================================================
 -- One lib session shows both proxies but only ever CLAIMS the scope being edited --
 -- claiming both put the other scope's test frames on screen unasked. Owner claims are
--- idempotent (DF._testOwners[scope][owner], TestMode/Shim.lua:117-121) and the claim uses
--- the SAME owner string the legacy path uses ("unlock", Position.lua:2504/2580,
--- Init.lua:992/1084), so a double claim cannot double-count.
+-- idempotent (DF._testOwners[scope][owner], TestMode/Shim.lua:117-121), and since
+-- Phase C retired the legacy unlock paths this bridge is the only writer of the
+-- "unlock" owner string.
 
 local SCOPE_LOCK_KEY = { party = "locked", raid = "raidLocked" }
 
@@ -543,6 +543,13 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
         claimScope(scope)
     end
     syncLockButtons()
+    -- The claim above flipped the scope's lock flag; the permanent handle keys its
+    -- visibility off that flag and nothing else re-evaluates it on the lib path.
+    -- SetMovable inside is a protected action -- skip in combat; Core.lua's
+    -- PLAYER_REGEN handler re-evaluates the handle after combat anyway.
+    if DF.UpdatePermanentMoverVisibility and not InCombatLockdown() then
+        DF:UpdatePermanentMoverVisibility()
+    end
     -- Same next-frame re-measure the lib does for its proxies (Session:Unlock).
     C_Timer.After(0, function()
         if Mover:IsUnlocked() then guarded(function() applyPinned(scope) end)() end
@@ -553,6 +560,13 @@ Mover.RegisterCallback(Bridge, "Locked", function()
     releaseScope("party")
     releaseScope("raid")
     syncLockButtons()
+    -- The release above flipped the scope's lock flag; the permanent handle keys its
+    -- visibility off that flag and nothing else re-evaluates it on the lib path.
+    -- SetMovable inside is a protected action -- skip in combat; Core.lua's
+    -- PLAYER_REGEN handler re-evaluates the handle after combat anyway.
+    if DF.UpdatePermanentMoverVisibility and not InCombatLockdown() then
+        DF:UpdatePermanentMoverVisibility()
+    end
     -- Put the options window back the way the session found it -- same page,
     -- same mode -- on EVERY finish, save or discard alike. Unlocked stores the
     -- pair only when the window was actually open, so nothing stored means the

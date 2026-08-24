@@ -398,6 +398,15 @@ function DF:CreatePermanentMover(container, mode)
     -- Manual cursor tracking instead of StartMoving() — WoW's StartMoving
     -- doesn't handle scaled frames correctly and causes a position jump
     handle:SetScript("OnDragStart", function(self)
+        -- Lib present: one editing surface. Open a mover session instead of
+        -- dragging raw -- SetPositionRecord PRESERVES a record's `anchor`, so a
+        -- raw drag under a live anchor moves x/y and the next Mover:Apply yanks
+        -- the container back. The raw drag below is the lib-ABSENT fallback only
+        -- (spec Decision 2).
+        if Mover then
+            if isRaid then DF:UnlockRaidFrames() else DF:UnlockFrames() end
+            return
+        end
         if InCombatLockdown() then return end
         self.isDragging = true
         -- Keep fully visible during drag
