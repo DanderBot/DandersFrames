@@ -634,7 +634,19 @@ Mover.RegisterCallback(Bridge, "Locked", function()
             openOptionsPage(mode, page)
         end)
     else
-        openOptionsPage(mode, page)
+        -- One frame later, NOT inline (mover-hitch fix, 2026-08-24): the reopen is a
+        -- full options-window show -- ToggleGUI's open half rebuilds the current page,
+        -- a mode switch rebuilds it again in the other mode -- and it used to share
+        -- the lock frame's budget with the whole test-mode teardown above plus the
+        -- proxy fade. Same visual result (the window appears as the fade starts),
+        -- hitch split across two frames instead of stacked on one.
+        C_Timer.After(0, function()
+            -- The user can unlock again before this fires; a reopen would drop the
+            -- window on top of the fresh session (whose Unlocked closed it -- or
+            -- would have, had it existed yet). The new session's own lock restores it.
+            if Mover:IsUnlocked() then return end
+            openOptionsPage(mode, page)
+        end)
     end
     perfLog(tTotal, "Locked callback total")
 end)
