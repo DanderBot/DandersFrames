@@ -58,8 +58,7 @@ end
 -- The Unlock filter for DF:UnlockFrames ("party") / DF:UnlockRaidFrames ("raid"): only
 -- these keys get proxies, and they are forced relevant so raid frames can be edited
 -- solo. The list is what the LEGACY unlock showed handles for: the container plus
--- every EXISTING, ENABLED pinned set of that mode (Position.lua / Init.lua
--- SetMoversShown(true) -> mover:SetShown(set.enabled ...)), and for party the two
+-- every EXISTING, ENABLED pinned set of that mode, and for party the two
 -- targeted displays when their feature is on. A disabled set or feature has nothing
 -- on screen to frame, so it is not listed.
 --
@@ -529,10 +528,6 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
     -- an empty screen.
     if DF.EnsureOptionsLoaded then DF:EnsureOptionsLoaded() end
-    -- The legacy pinned drag handles must never sit under the proxies. The lib path
-    -- never shows them, but a legacy unlock may have left them up; the test movers
-    -- EnterTestMode attaches below read moversShown, so this goes first.
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then DF.PinnedFrames:SetMoversShown(false) end
     -- ONE scope per session. `/mover` opens a session without going through either
     -- Unlock*Frames, so with no request outstanding pick the one the player is in.
     local scope = Bridge.requestedScope or (IsInRaid() and "raid" or "party")
