@@ -6760,13 +6760,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
                 return
             end
-            if msg == "unlock" or msg == "unlock legacy" then
-                -- "legacy" forces the old in-house overlay while DandersMover is
-                -- installed. Plain "unlock" routes to the lib when it is present.
-                if DF.UnlockFrames then DF:UnlockFrames(msg == "unlock legacy") end
+            if msg == "unlock" then
+                if DF.UnlockFrames then DF:UnlockFrames() end
             elseif msg == "lock" then
                 if DF.LockFrames then DF:LockFrames() end
-            elseif msg == "raidunlock" or msg == "raidunlock legacy" then
+            elseif msg == "raidunlock" then
                 -- While an auto layout is active, base-position unlock is blocked
                 -- (matches the disabled toolbar button) — point users to the active
                 -- layout's own Unlock button so they don't move the base by accident.
@@ -6776,7 +6774,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     local name = DF.AutoProfilesUI.GetActiveLayoutName and DF.AutoProfilesUI:GetActiveLayoutName()
                     DF:Say(string.format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
                 elseif DF.UnlockRaidFrames then
-                    DF:UnlockRaidFrames(msg == "raidunlock legacy")
+                    DF:UnlockRaidFrames()
                 end
             elseif msg == "raidlock" then
                 if DF.LockRaidFrames then DF:LockRaidFrames() end

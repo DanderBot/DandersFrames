@@ -279,159 +279,6 @@ function DF:SetPositionPanelMode(mode)
     end
 end
 
-function DF:CreateMoverFrame()
-    -- Cannot create UI elements during combat
-    if InCombatLockdown() then return end
-    
-    -- Don't recreate if already exists
-    if DF.moverFrame then return end
-    
-    -- CRITICAL: Ensure container exists before creating mover
-    if not DF.container then
-        DF:Err("Cannot create mover - DF.container doesn't exist!")
-        return
-    end
-    
-    local mover = CreateFrame("Frame", "DandersFramesMover", DF.container, "BackdropTemplate")
-    mover:SetAllPoints(DF.container)
-    mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; level 100 renders above them
-    mover:SetFrameLevel(100)        -- Unit frame children reach ~parent+70 (AD Frame Level max); 100 clears them
-    -- This is the party container's mover (raid has its own in Frames/Init.lua),
-    -- so it pins the party pole rather than following the selected mode.
-    DF.GUI:CreateMoverBackdrop(mover, { isRaid = false })
-    mover:EnableMouse(true)
-    mover:SetMovable(true)
-    mover:RegisterForDrag("LeftButton")
-    mover:Hide()
-    
-    local label = mover:CreateFontString(nil, "OVERLAY")
-    label:SetPoint("CENTER")
-    -- Set font explicitly to avoid "Font not set" errors
-    DF.GUI:SetSettingsFont(label, 14, "OUTLINE")
-    label:SetText(L["Party Frames\nDrag to move"])
-    label:SetTextColor(1, 1, 1, 1)
-    
-    DF.moverFrame = mover
-    
-    -- Shared drag state between OnDragStart/OnUpdate/OnDragStop
-    local dragOffsetX, dragOffsetY = 0, 0
-
-    -- Left-click switches the shared position panel to party mode.
-    -- This is necessary because clicking the personal or targeted-list
-    -- mover switches the panel away from party — clicking the party
-    -- mover should bring it back.
-    mover:HookScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("party")
-        end
-    end)
-
-    mover:SetScript("OnDragStart", function(self)
-        -- Switch the position panel to party mode so nudge buttons
-        -- affect the party container.
-        if DF.SetPositionPanelMode then
-            DF:SetPositionPanelMode("party")
-        end
-        DF.isDragging = true
-        -- Use saved db position as truth — avoids all GetCenter/GetLeft
-        -- ambiguity on scaled frames. Cursor position in UIParent coords.
-        local db = DF:GetDB()
-        local pScale = UIParent:GetEffectiveScale()
-        local startCursorX, startCursorY = GetCursorPosition()
-        startCursorX = startCursorX / pScale
-        startCursorY = startCursorY / pScale
-        local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
-        -- The frame's visual center in UIParent coords (known from saved position)
-        local frameCX = screenWidth / 2 + (db.anchorX or 0)
-        local frameCY = screenHeight / 2 + (db.anchorY or 0)
-        local cursorOffX = frameCX - startCursorX
-        local cursorOffY = frameCY - startCursorY
-        -- Initialize shared drag state
-        dragOffsetX = db.anchorX or 0
-        dragOffsetY = db.anchorY or 0
-
-        -- Start OnUpdate to track cursor and sync positions during drag
-        self:SetScript("OnUpdate", function()
-            local cursorX, cursorY = GetCursorPosition()
-            local ps = UIParent:GetEffectiveScale()
-            cursorX = cursorX / ps
-            cursorY = cursorY / ps
-            -- New frame center = cursor + stored offset from cursor to frame center
-            local sw, sh = GetScreenWidth(), GetScreenHeight()
-            dragOffsetX = (cursorX + cursorOffX) - sw / 2
-            dragOffsetY = (cursorY + cursorOffY) - sh / 2
-            -- Apply with frame scale compensation
-            local frameScale = DF.container:GetScale() or 1
-            DF.container:ClearAllPoints()
-            DF.container:SetPoint("CENTER", UIParent, "CENTER", dragOffsetX / frameScale, dragOffsetY / frameScale)
-
-            -- Sync testPartyContainer to container position (for live preview)
-            if DF.testPartyContainer then
-                DF.testPartyContainer:ClearAllPoints()
-                DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", dragOffsetX / frameScale, dragOffsetY / frameScale)
-            end
-
-            -- Snap preview if enabled
-            local snapDb = DF:GetDB()
-            if snapDb.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-                DF:UpdateSnapPreview(DF.container, dragOffsetX, dragOffsetY)
-            end
-        end)
-    end)
-
-    mover:SetScript("OnDragStop", function(self)
-        DF.isDragging = false
-
-        -- Stop OnUpdate
-        self:SetScript("OnUpdate", nil)
-
-        -- Hide snap preview lines
-        DF:HideSnapPreview()
-
-        -- Use the last computed offset from OnUpdate (stored in shared upvalues)
-        local x, y = dragOffsetX, dragOffsetY
-
-        -- Snap to grid if enabled
-        local db = DF:GetDB()
-        if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
-            x, y = DF:SnapToGrid(x, y)
-        end
-
-        -- Apply snapped position
-        local frameScale = DF.container:GetScale() or 1
-        DF.container:ClearAllPoints()
-        DF.container:SetPoint("CENTER", UIParent, "CENTER", x / frameScale, y / frameScale)
-
-        -- Sync testPartyContainer to final position
-        if DF.testPartyContainer then
-            DF.testPartyContainer:ClearAllPoints()
-            DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", x / frameScale, y / frameScale)
-        end
-
-        -- Save position through the ONE funnel: it writes the DandersMover record and
-        -- the anchorX/anchorY mirror together. Legacy drags are computed as CENTER
-        -- offsets, so they always stamp point = "CENTER".
-        DF:SetPositionRecord("party", { point = "CENTER", x = x, y = y })
-
-        -- Update position panel
-        DF:UpdatePositionPanel()
-    end)
-    
-    mover:SetScript("OnMouseDown", function(self, button)
-        if button == "RightButton" then
-            DF:LockFrames()
-        end
-    end)
-    
-    DF.moverFrame = mover
-    
-    -- Create grid overlay
-    DF:CreateGridOverlay()
-    
-    -- Create position control panel
-    DF:CreatePositionPanel()
-end
-
 -- ============================================================
 -- PERMANENT MOVER HANDLE
 -- Small always-visible drag handle for repositioning without unlock
@@ -2499,13 +2346,6 @@ function DF:UpdateContainerPosition()
     DF.container:ClearAllPoints()
     DF.container:SetPoint(point, UIParent, "CENTER", x / scale, y / scale)
 
-    -- Also update mover if visible (use SetAllPoints to preserve size)
-    -- Mover is a child of container, inherits scale automatically
-    if DF.moverFrame and DF.moverFrame:IsShown() then
-        DF.moverFrame:ClearAllPoints()
-        DF.moverFrame:SetAllPoints(DF.container)
-    end
-
     -- Also update test container if visible
     if DF.testPartyContainer then
         DF.testPartyContainer:SetScale(scale)
@@ -2591,13 +2431,16 @@ function DF:UpdateRaidContainerPosition()
     end
 end
 
--- `legacy` forces the old in-house overlay even when DandersMover is installed
--- (/df unlock legacy). Every other caller -- the options Lock/Unlock button
--- (Panel.lua:865), /df unlock -- passes nothing and gets the lib when it is present,
--- which is why no GUI file changes for this.
-function DF:UnlockFrames(legacy)
+function DF:UnlockFrames()
     if InCombatLockdown() then
         DF:Err(L["Cannot unlock frames during combat."])
+        return
+    end
+
+    -- No DandersMover, no editing surface. The frames still APPLY their record;
+    -- the one fallback for MOVING them is the permanent handle (spec Decision 1b).
+    if not Mover then
+        DF:Say(L["DandersMover is disabled. Re-enable it in the AddOns list, or turn on Enable Permanent Mover under Frame options for a basic drag handle."])
         return
     end
 
@@ -2609,172 +2452,23 @@ function DF:UnlockFrames(legacy)
         return
     end
 
-    -- Hand off to DandersMover. Disabled in the lib's settings is NOT a reason to fall
-    -- back to the legacy overlay: two movers for one frame is how a user ends up dragging
-    -- the overlay while the lib holds the record. Say so and stop. The legacy overlay is
-    -- reachable only through the explicit `legacy` argument.
-    if Mover and not legacy then
-        -- Only the party scope's keys get proxies (no raid proxy, dimmed or
-        -- otherwise), and they are forced relevant so this works inside a raid.
-        -- The user's per-element toggles prune that list; the container being one of the
-        -- pruned ones is not a reason to refuse, an EMPTY list is.
-        local filter = DF.MoverBridge and DF.MoverBridge:SessionFilter("party") or "DandersFrames"
-        if type(filter) == "table" and #filter.keys == 0 then
-            DF:Say(format(L["All %s movers are turned off under DandersFrames in /mover config."], L["Party Frames"]))
-            return
-        end
-        if DF.MoverBridge then DF.MoverBridge:RequestScope("party") end
-        Mover:Unlock(filter)
+    -- Only the party scope's keys get proxies (no raid proxy, dimmed or
+    -- otherwise), and they are forced relevant so this works inside a raid.
+    -- The user's per-element toggles prune that list; the container being one of the
+    -- pruned ones is not a reason to refuse, an EMPTY list is.
+    local filter = DF.MoverBridge and DF.MoverBridge:SessionFilter("party") or "DandersFrames"
+    if type(filter) == "table" and #filter.keys == 0 then
+        DF:Say(format(L["All %s movers are turned off under DandersFrames in /mover config."], L["Party Frames"]))
         return
     end
-
-    local db = DF:GetDB()
-
-    -- Ensure container exists
-    if not DF.container then
-        DF:Err(L["Cannot unlock - container doesn't exist!"])
-        return
-    end
-
-    -- Ensure mover frame exists (create if needed)
-    if not DF.moverFrame then
-        DF:CreateMoverFrame()
-    end
-
-    -- Safety check - if mover still doesn't exist, abort
-    if not DF.moverFrame then
-        DF:Err(L["Cannot unlock - failed to create mover frame!"])
-        return
-    end
-    
-    -- Save current position before making changes (for reset button)
-    DF.savedPositionX = db.anchorX or 0
-    DF.savedPositionY = db.anchorY or 0
-    
-    db.locked = false
-    DF.positionPanelMode = "party"  -- Set mode for position panel
-    DF.hideDragOverlay = db.hideDragOverlay or false
-    
-    local scale = db.frameScale or 1.0
-    DF.container:SetScale(scale)
-
-    -- Always use CENTER anchor for positioning
-    DF.container:ClearAllPoints()
-    DF.container:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
-    DF.container:Show()  -- Ensure container is visible
-    
-    -- Ensure container has a reasonable size (might be 0 if headers haven't laid out yet)
-    local cWidth, cHeight = DF.container:GetWidth(), DF.container:GetHeight()
-    if cWidth < 50 or cHeight < 50 then
-        -- Use fallback size based on settings
-        local frameWidth = db.frameWidth or 100
-        local frameHeight = db.frameHeight or 50
-        local spacing = db.frameSpacing or 2
-        local horizontal = (db.growDirection == "HORIZONTAL")
-        
-        if horizontal then
-            DF.container:SetSize(5 * (frameWidth + spacing) - spacing, frameHeight)
-        else
-            DF.container:SetSize(frameWidth, 5 * (frameHeight + spacing) - spacing)
-        end
-        
-        headerDebug("Container size was too small, set fallback size")
-    end
-    
-    DF.container:SetMovable(true)
-    
-    -- Ensure mover frame matches container before showing
-    DF.moverFrame:ClearAllPoints()
-    DF.moverFrame:SetAllPoints(DF.container)
-    DF.moverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
-    DF.moverFrame:SetFrameLevel(100)        -- Above unit frame children (which reach ~parent+70)
-    DF.moverFrame:SetAlpha(1)
-    DF.moverFrame:Show()
-
-    -- Sync testPartyContainer to current position and size
-    if DF.testPartyContainer then
-        DF.testPartyContainer:SetScale(scale)
-        DF.testPartyContainer:ClearAllPoints()
-        DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
-        DF.testPartyContainer:SetSize(DF.container:GetSize())
-    end
-    
-    -- Debug info
-    if DF:DebugActive("HEADERS") then
-        headerDebug("Unlock - container size:", DF.container:GetWidth(), "x", DF.container:GetHeight())
-        headerDebug("Unlock - mover size:", DF.moverFrame:GetWidth(), "x", DF.moverFrame:GetHeight())
-        headerDebug("Unlock - mover strata:", DF.moverFrame:GetFrameStrata())
-    end
-    
-    -- Show personal targeted spells mover if enabled
-    if db.personalTargetedSpellEnabled and DF.ShowPersonalTargetedSpellsMover then
-        DF:ShowPersonalTargetedSpellsMover()
-    end
-
-    -- Show Targeted List mover if enabled
-    if db.targetedListEnabled and DF.ShowTargetedListMover then
-        DF:ShowTargetedListMover()
-    end
-
-    -- Pinned frames ride the global lock: show their drag chrome too. No mode
-    -- gate — SetMoversShown shows the right handles (live movers for the current
-    -- mode, or the test movers when test mode is previewing either mode).
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then
-        DF.PinnedFrames:SetMoversShown(true)
-    end
-
-    -- Always refresh grid state from db when unlocking
-    if DF.gridFrame then
-        if db.snapToGrid then
-            -- Refresh grid lines to ensure they match current settings
-            if DF.gridFrame.RefreshLines then
-                DF.gridFrame:Show()
-                DF.gridFrame.RefreshLines()
-            else
-                DF.gridFrame:Show()
-            end
-        else
-            DF.gridFrame:Hide()
-        end
-    end
-    
-    -- Show position panel and update its values from db
-    if DF.positionPanel then
-        DF:UpdatePositionPanel()
-        if DF.positionPanel.UpdateTheme then
-            DF.positionPanel:UpdateTheme()
-        end
-        DF.positionPanel:Show()
-    end
-    
-    -- Update Display tab button if it exists
-    if DF.displayLockButton and DF.displayLockButton.Text then
-        DF.displayLockButton.Text:SetText(L["Lock Frames"])
-    end
-
-    -- Unlock claims test frames for as long as it stays unlocked, so there is a
-    -- full group to position against. It deliberately does NOT snapshot what the
-    -- user had -- that is the user's own claim, tracked separately. The old
-    -- snapshot went stale whenever test mode changed mid-session, in both
-    -- directions (see TestMode/Shim.lua).
-    DF:SetTestModeOwner("party", "unlock", true, true)   -- silent: unlock announces itself
-
-    -- Sync GUI toolbar buttons
-    if DF.GUI then
-        if DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
-        if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
-    end
-
-    -- Hide permanent mover while full overlay is active
-    if DF.permanentPartyMover then DF.permanentPartyMover:Hide() end
-
-    DF:Say(L["Frames unlocked. Drag to move, right-click to lock."])
+    if DF.MoverBridge then DF.MoverBridge:RequestScope("party") end
+    Mover:Unlock(filter)
 end
 
 function DF:LockFrames()
     -- A DandersMover session owns the unlock: end it there and let the Locked callback
-    -- restore db.locked + release the test claim. Returning is not optional -- the legacy
-    -- teardown below indexes DF.moverFrame, which never gets created on the lib path.
+    -- restore db.locked + release the test claim. Returning is not optional -- on the lib
+    -- path that callback is the only thing that restores db.locked.
     if Mover and Mover:IsUnlocked() then
         Mover:Lock()
         return
@@ -2782,59 +2476,10 @@ function DF:LockFrames()
 
     local db = DF:GetDB()
     db.locked = true
-    DF.positionPanelMode = nil  -- Clear mode
-
-    -- ⚠ Nil-guarded like every other DF.moverFrame touch in LockRaidFrames:
-    -- db.locked can now be false without the legacy overlay ever having been built
-    -- (a mover session set it), so this can be reached with no mover frame.
-    if DF.moverFrame then
-        DF.moverFrame:Hide()
-    end
 
     -- Restore permanent mover visibility (keeps container movable if enabled)
     DF:UpdatePermanentMoverVisibility()
 
-    -- Hide personal targeted spells mover
-    if DF.HidePersonalTargetedSpellsMover then
-        DF:HidePersonalTargetedSpellsMover()
-    end
-
-    -- Hide Targeted List mover
-    if DF.HideTargetedListMover then
-        DF:HideTargetedListMover()
-    end
-
-    -- ☠ Both hides above are UNCONDITIONAL, unlike the matching shows in
-    -- UnlockFrames which are gated on each feature's enable flag. Keep it that way:
-    -- locking must clear a mover whose feature was switched off while it was up.
-
-    -- Hide pinned drag chrome (lock always hides, regardless of mode).
-    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then
-        DF.PinnedFrames:SetMoversShown(false)
-    end
-
-    -- Stop any OnUpdate for snap preview
-    if DF.moverFrame then
-        DF.moverFrame:SetScript("OnUpdate", nil)
-    end
-    
-    -- Hide snap preview lines
-    DF:HideSnapPreview()
-    
-    -- Hide grid
-    if DF.gridFrame then
-        DF.gridFrame:Hide()
-    end
-    
-    -- Hide position panel
-    if DF.positionPanel then
-        DF.positionPanel:Hide()
-    end
-    
-    -- Update saved position for next unlock's reset button
-    DF.savedPositionX = db.anchorX or 0
-    DF.savedPositionY = db.anchorY or 0
-    
     -- Update Display tab button if it exists
     if DF.displayLockButton and DF.displayLockButton.Text then
         DF.displayLockButton.Text:SetText(L["Unlock Frames"])
@@ -2845,10 +2490,6 @@ function DF:LockFrames()
         if DF.GUI.UpdateLockButtonState then DF.GUI.UpdateLockButtonState() end
         if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
     end
-
-    -- Release unlock's claim. If the user still wants a preview it stays up; if
-    -- nobody does, this is what hides it. Nothing to go stale either way.
-    DF:SetTestModeOwner("party", "unlock", false, true)  -- silent: lock announces itself
 
     DF:Say(L["Frames locked."])
 end

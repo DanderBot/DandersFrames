@@ -786,6 +786,7 @@ L["Customize duration colors on the %s."] = true
 L["Customize resource bar colors per power type. Shared across party and raid frames."] = true
 L["Cut"] = true
 L["Auto-Profile Overrides"] = true
+L["DandersMover is disabled. Re-enable it in the AddOns list, or turn on Enable Permanent Mover under Frame options for a basic drag handle."] = true
 L["Darken Amount"] = true
 L["Darken Behind Gradient"] = true
 L["Dashed Border"] = true

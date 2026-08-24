@@ -78,9 +78,6 @@ function DF:InitializeFrames()
     DF.container:SetScale(partyScale)
     DF.container:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / partyScale, (db.anchorY or 0) / partyScale)
     DF.container:SetSize(500, 200)
-    
-    -- Create mover frame
-    DF:CreateMoverFrame()
 
     -- Create permanent mover handle for party (skip if party mode disabled)
     if DF.db and DF.db.partyEnabled ~= false then
@@ -1872,17 +1869,6 @@ function DF:UpdateAllFrames()
                 -- Unregister from click-cast addons when hidden
                 DF:UnregisterFrameWithClickCast(frame)
             end
-        end
-    end
-    
-    -- Update mover - always show full 5-player size when unlocked so user can see full group footprint
-    if DF.moverFrame then
-        DF.moverFrame:ClearAllPoints()
-        DF.moverFrame:SetAllPoints(DF.container)
-        if horizontal then
-            DF.moverFrame:SetSize(maxWidth, ppFrameHeight)
-        else
-            DF.moverFrame:SetSize(ppFrameWidth, maxHeight)
         end
     end
     

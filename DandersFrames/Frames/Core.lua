@@ -41,7 +41,6 @@ DF.raidFrames = setmetatable({}, {
 })
 
 DF.container = nil
-DF.moverFrame = nil
 DF.testMode = false
 
 -- Raid frame containers
