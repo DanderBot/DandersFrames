@@ -6127,7 +6127,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- either; these are reached THROUGH it and have to match it.
         sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
         sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
-        sub("idgate",       "container identity-gate dump", true)
+        sub("idgate",       "engine gate mirror + group canaries ('probe' toggles them)", true)
         sub("adgate",       "Aura Designer placement gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
@@ -7057,10 +7057,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- live width, flagging any that lost one. Truncated / non-wrapping label
                 -- text is always a width fault; this says WHICH frame caused it.
                 if DF.GUI and DF.GUI.DebugDumpWidths then DF.GUI:DebugDumpWidths() end
-            elseif msg == "idgate" then
-                -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
-                -- vs the stored gate verdict vs actual window visibility
-                if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
+            elseif msg == "idgate" or msg:match("^idgate%s") then
+                -- Post-demolition (69465): "idgate" prints everything — handles/slots
+                -- classification, the per-group-member engine mirror, canary readings
+                -- and the always-on gate trail; works in combat (reads only).
+                -- "idgate probe" TOGGLES group-wide canaries (no unit arg);
+                -- "idgate probe show" toggles the eyeball placement.
+                local probeArgs = msg:match("^idgate%s+probe%s*(.-)%s*$")
+                if probeArgs and DF.AuraContainer and DF.AuraContainer.DebugGateProbe then
+                    DF.AuraContainer.DebugGateProbe(probeArgs)
+                elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
+                    DF.AuraContainer.DebugDumpIdentityGate()
+                end
             elseif msg == "adgate" then
                 -- The AD half of the same question: idgate sees a placement's handle but
                 -- not its chain, its parent-driven links or its badge — so an indicator
