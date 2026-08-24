@@ -24,6 +24,18 @@ local InCombatLockdown = InCombatLockdown
 
 local ADDON_KEY = "DandersFrames"
 
+-- PERF instrumentation (debug-gated: /df debug on, category "PERF"). Deltas of
+-- debugprofilestop() around the synchronous blocks of the unlock/lock paths, so
+-- an in-game hitch can be attributed to the block that actually spent the time.
+-- Kept permanently: near-zero cost when debug is off.
+local debugprofilestop = debugprofilestop
+local function perfStart()
+    return DF.DebugActive and DF:DebugActive("PERF") and debugprofilestop() or nil
+end
+local function perfLog(t0, label)
+    if t0 then DF:Debug("PERF", "%s %.1fms", label, debugprofilestop() - t0) end
+end
+
 local Bridge = { claimed = {} }
 DF.MoverBridge = Bridge
 
@@ -227,15 +239,34 @@ end
 --  * GUI.SelectTab(pageId) (DandersFrames_Options/GUI/Panel.lua:1710) opens
 --    the page.
 local function openOptionsPage(mode, pageId)
+    local tTotal = perfStart()
     if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
-    if not (DF.GUIFrame and DF.GUIFrame:IsShown()) then DF:ToggleGUI() end
+    perfLog(tTotal, "openOptionsPage: EnsureOptionsLoaded")
+    if not (DF.GUIFrame and DF.GUIFrame:IsShown()) then
+        local t = perfStart()
+        DF:ToggleGUI()
+        perfLog(t, "openOptionsPage: ToggleGUI (window build/show + page refresh)")
+    end
     local GUI = DF.GUI
     if not (GUI and DF.GUIFrame and DF.GUIFrame:IsShown()) then return end
+    -- Skipped when the window already shows the right mode; ToggleGUI's open
+    -- half auto-detects from the live group though, so a raid-mode session
+    -- reopened while solo lands on party and does need the click (which runs a
+    -- full page rebuild in the new mode -- see the PERF line).
     if mode and GUI.SelectedMode ~= mode then
         local btn = (mode == "raid") and GUI.RaidButton or GUI.PartyButton
-        if btn and btn.Click then btn:Click() end
+        if btn and btn.Click then
+            local t = perfStart()
+            btn:Click()
+            perfLog(t, "openOptionsPage: mode button Click (page rebuild)")
+        end
     end
-    if GUI.SelectTab then GUI.SelectTab(pageId) end
+    if GUI.SelectTab then
+        local t = perfStart()
+        GUI.SelectTab(pageId)
+        perfLog(t, "openOptionsPage: SelectTab")
+    end
+    perfLog(tTotal, "openOptionsPage total")
 end
 
 -- ============================================================
@@ -511,6 +542,7 @@ local function syncLockButtons()
 end
 
 Mover.RegisterCallback(Bridge, "Unlocked", function()
+    local tTotal = perfStart()
     -- An open DF options window would sit over the session. Remember which
     -- page/mode it showed and close it -- the window is DF.GUIFrame (built in
     -- DandersFrames_Options/GUI/Panel.lua CreateGUI), closed with the same
@@ -527,7 +559,11 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- Test frames live in the load-on-demand companion. `/mover` can open a session
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
     -- an empty screen.
-    if DF.EnsureOptionsLoaded then DF:EnsureOptionsLoaded() end
+    if DF.EnsureOptionsLoaded then
+        local t = perfStart()
+        DF:EnsureOptionsLoaded()
+        perfLog(t, "Unlocked: EnsureOptionsLoaded")
+    end
     -- ONE scope per session. `/mover` opens a session without going through either
     -- Unlock*Frames, so with no request outstanding pick the one the player is in.
     local scope = Bridge.requestedScope or (IsInRaid() and "raid" or "party")
@@ -540,7 +576,9 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
         -- claimScope -> SetTestModeOwner -> ReconcileTestMode -> Show*TestFrames ->
         -- PinnedFrames:EnterTestMode (TestMode.lua:1962/2427): the pinned test
         -- containers are on screen after this line.
+        local t = perfStart()
         claimScope(scope)
+        perfLog(t, "Unlocked: claimScope (test frames up)")
     end
     syncLockButtons()
     -- The claim above flipped the scope's lock flag; the permanent handle keys its
@@ -554,11 +592,18 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     C_Timer.After(0, function()
         if Mover:IsUnlocked() then guarded(function() applyPinned(scope) end)() end
     end)
+    perfLog(tTotal, "Unlocked callback total")
 end)
 
 Mover.RegisterCallback(Bridge, "Locked", function()
+    local tTotal = perfStart()
+    -- Only the scope the session claimed does any work here (releaseScope
+    -- early-returns on the other), so there is exactly one ReconcileTestMode
+    -- per lock, not two.
+    local t = perfStart()
     releaseScope("party")
     releaseScope("raid")
+    perfLog(t, "Locked: releaseScope both (test frames down)")
     syncLockButtons()
     -- The release above flipped the scope's lock flag; the permanent handle keys its
     -- visibility off that flag and nothing else re-evaluates it on the lib path.
@@ -589,8 +634,21 @@ Mover.RegisterCallback(Bridge, "Locked", function()
             openOptionsPage(mode, page)
         end)
     else
-        openOptionsPage(mode, page)
+        -- One frame later, NOT inline (mover-hitch fix, 2026-08-24): the reopen is a
+        -- full options-window show -- ToggleGUI's open half rebuilds the current page,
+        -- a mode switch rebuilds it again in the other mode -- and it used to share
+        -- the lock frame's budget with the whole test-mode teardown above plus the
+        -- proxy fade. Same visual result (the window appears as the fade starts),
+        -- hitch split across two frames instead of stacked on one.
+        C_Timer.After(0, function()
+            -- The user can unlock again before this fires; a reopen would drop the
+            -- window on top of the fresh session (whose Unlocked closed it -- or
+            -- would have, had it existed yet). The new session's own lock restores it.
+            if Mover:IsUnlocked() then return end
+            openOptionsPage(mode, page)
+        end)
     end
+    perfLog(tTotal, "Locked callback total")
 end)
 
 -- ============================================================

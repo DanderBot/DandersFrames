@@ -16,13 +16,24 @@ local Undo = LibStub("DandersUndo-1.0")
 local Lib = NS.Lib
 local pairs, ipairs, format, wipe, sqrt = pairs, ipairs, string.format, wipe, math.sqrt
 local InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown = InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown
-local C_Timer = C_Timer
+local C_Timer, debugprofilestop = C_Timer, debugprofilestop
 
 local SCREEN_SNAP = 8
 -- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
 local SNAP_DISTANCE = 25
 
 local function panel(method) if NS.Panel then NS.Panel[method](NS.Panel) end end
+
+-- PERF instrumentation (debug-gated, /mover debug). debugprofilestop() is
+-- wall-clock ms since some epoch; deltas of it are the per-block cost. Kept
+-- permanently: it is a handful of subtractions behind the debug flag, and the
+-- unlock/lock hitch investigation needs real in-game numbers to stay honest.
+local function perfStart()
+    return NS.db and NS.db.debug and debugprofilestop and debugprofilestop() or nil
+end
+local function perfLog(t0, label)
+    if t0 then NS:Debug(format("PERF %s %.1fms", label, debugprofilestop() - t0)) end
+end
 
 function Sess:IsActive() return self.active end
 function Sess:IsSuspended() return self.suspended end
@@ -89,10 +100,15 @@ function Sess:Unlock(filter)
     -- callback, and the proxies must be measured against what the consumer ends
     -- up showing, not what was on screen a moment earlier. Snapshots are taken
     -- above so the record is captured before any consumer-side mutation.
+    local tTotal = perfStart()
     Lib.callbacks:Fire("Unlocked")
+    perfLog(tTotal, "Unlocked callbacks")
+    local tBuild = perfStart()
     Proxy:Build(filter, true)     -- animate: slabs fade in with a stagger
+    perfLog(tBuild, "Proxy:Build")
     Grid:Refresh()
     self:EnableKeyboard(true)
+    perfLog(tTotal, "Unlock total (callbacks+build+grid)")
     -- Anything the consumer only shows on the next frame (secure headers, test
     -- containers) has no rect yet at Build time; re-measure once it does.
     C_Timer.After(0, function()
@@ -111,6 +127,7 @@ end
 
 function Sess:Finish(mode)
     if not self.active then return end
+    local tTotal = perfStart()
     if mode == "discard" then
         for id, snap in pairs(self.snapshots) do
             local el = Registry:Get(id)
@@ -132,8 +149,11 @@ function Sess:Finish(mode)
     -- Clear after the state reset: Clear fires "Changed" -> panel Refresh,
     -- which must see the session as inactive so it cannot re-show the panel.
     if self.undo then self.undo:Clear() end
+    local tLocked = perfStart()
     Lib.callbacks:Fire("Locked")
+    perfLog(tLocked, "Locked callbacks")
     Lib.callbacks:Fire(mode == "discard" and "Discarded" or "Saved")
+    perfLog(tTotal, "Finish total")
 end
 
 function Sess:Toggle() if self.active then self:Lock() else self:Unlock() end end
