@@ -505,17 +505,40 @@ local function reparseContainer(c)
     end
 end
 
+-- ⚠ CHUNKED, deliberately (mover-hitch fix, 2026-08-24). The kick used to run the
+-- whole walk synchronously inside SetTestMode(false), which itself runs inside the
+-- test-mode exit — the mover's lock/Save & Exit path included. Every refresh() is a
+-- Hide/Show bounce that re-arms a full engine-side aura parse, and N of those in one
+-- frame — stacked on the rest of the exit teardown — was a visible freeze (and the
+-- shape of the bug-1090 watchdog trip). Spreading the bounces over frames bounds the
+-- per-frame cost; the purge still COMPLETES, just a few frames later, and a live row
+-- is at worst briefly stale instead of the whole client hitching.
+--
+-- Correctness contract, unchanged from the synchronous version:
+--   * Every live handle and every slot-owner container is still bounced exactly once
+--     per exit — the work list is SNAPSHOTTED up front (dedupe included), and each
+--     item is re-validated at execution time (_destroyed / backend gone are skipped).
+--   * Combat is handled per item, not per kick: refresh()/reparseContainer already
+--     fall back to mark-only UpdateAllAuras under lockdown, so combat starting
+--     mid-chunk degrades exactly like the synchronous version did.
+--   * RE-ENTERING test mode aborts the remainder: live frames are hidden again and
+--     the provider is back on the sample source, so bouncing them would arm parses
+--     of sample data. The NEXT exit snapshots and kicks everything afresh (the
+--     generation token also lets that newer kick supersede a stale pending one).
+local KICK_CHUNK = 10   -- containers bounced per frame
+
 function AuraContainer._kickLiveParse()
-    local nh = 0
+    -- Snapshot the work list synchronously — the registries can churn while the
+    -- chunks run, and pairs() over a mutating table is undefined.
+    local handles, containers = {}, {}
     for h in pairs(AuraContainer._handles or {}) do
         if not h._destroyed and not h._testFrame and h.backend and h.backend.refresh then
-            pcall(function() h.backend:refresh() end)
-            nh = nh + 1
+            handles[#handles + 1] = h
         end
     end
     -- ⚠ Test-frame owners are skipped, not because a bounce would hurt but because those
     -- frames are hidden for the rest of the session — there is nothing on screen to fix.
-    local seen, ns = nil, 0
+    local seen
     for s in pairs(AuraContainer._slotHandles or {}) do
         local owner = s.owner
         local c = owner and owner.container
@@ -523,12 +546,44 @@ function AuraContainer._kickLiveParse()
             seen = seen or {}
             if not seen[c] then
                 seen[c] = true
-                ns = ns + 1
-                reparseContainer(c)
+                containers[#containers + 1] = c
             end
         end
     end
-    DF:Debug(DBG, "test exit: re-parsed %d live handles, %d slot owners", nh, ns)
+    local nh, ns = #handles, #containers
+    local gen = (AuraContainer._kickGen or 0) + 1
+    AuraContainer._kickGen = gen
+    local t0 = DF.DebugActive and DF:DebugActive("PERF") and debugprofilestop() or nil
+    local i, frames = 0, 0
+    local function step()
+        if AuraContainer._kickGen ~= gen then return end   -- superseded by a newer exit's kick
+        if AuraContainer._testMode then return end          -- re-entered test mode; that session's exit re-kicks
+        frames = frames + 1
+        local budget = KICK_CHUNK
+        while budget > 0 and i < nh + ns do
+            i = i + 1
+            if i <= nh then
+                local h = handles[i]
+                -- Re-validate at execution time: the handle can be destroyed while queued.
+                if not h._destroyed and h.backend and h.backend.refresh then
+                    pcall(function() h.backend:refresh() end)
+                end
+            else
+                reparseContainer(containers[i - nh])
+            end
+            budget = budget - 1
+        end
+        if i < nh + ns then
+            C_Timer.After(0, step)
+        else
+            DF:Debug(DBG, "test exit: re-parsed %d live handles, %d slot owners over %d frames", nh, ns, frames)
+            if t0 then DF:Debug("PERF", "_kickLiveParse done %.1fms after exit (%d handles, %d slot owners, %d frames)", debugprofilestop() - t0, nh, ns, frames) end
+        end
+    end
+    -- First chunk on the NEXT frame, not this one: the exit frame already carries the
+    -- whole test-mode teardown (and, on the mover path, the lock fade + options-window
+    -- rebuild) — adding parse bounces to it is exactly the hitch this exists to fix.
+    C_Timer.After(0, step)
 end
 
 -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
@@ -627,9 +682,11 @@ function AuraContainer.SetTestMode(on)
             else C_UnitAuras.SwitchAuraDataProvider(true) end
         end)
         AuraContainer._ownsProviderSwitch = false
-        -- ★ The live side is re-armed BEFORE the test rebuild, matching the reset-first
-        -- ordering above: every live row parses real data on this frame's tick rather
-        -- than queueing behind a pass that does not touch them.
+        -- ★ The live-side kick is QUEUED before the test rebuild (it used to run
+        -- synchronously here — see the chunking note on _kickLiveParse). The provider
+        -- reset above has already happened, so every bounced row parses real data;
+        -- the bounces themselves land over the next few frames instead of stacking
+        -- on this one, which was the mover lock/Save & Exit hitch.
         AuraContainer._kickLiveParse()
         rebuildAll()
     end
