@@ -1096,9 +1096,6 @@ function DF:CreateContainers()
         DF.raidContainer:SetSize(600, 400)
         DF.raidContainer:SetMovable(true)
         DF.raidContainer:Hide()
-        
-        -- Create raid mover frame
-        DF:CreateRaidMoverFrame()
     end
 end
 

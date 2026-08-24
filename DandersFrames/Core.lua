@@ -8317,8 +8317,8 @@ function DF:FullProfileRefresh()
     end
 
     -- === UPDATE RAID CONTAINER POSITION ===
-    -- Use UpdateRaidContainerPosition so raidMoverFrame and testRaidContainer
-    -- are synced in the same call (and CENTER-anchor compensation is applied).
+    -- Use UpdateRaidContainerPosition so testRaidContainer and the DandersMover
+    -- bridge hook stay in sync (and CENTER-anchor compensation is applied).
     -- Falls back to direct SetPoint if the function isn't loaded yet.
     if DF.raidContainer then
         local scale = raidDB.frameScale or 1.0

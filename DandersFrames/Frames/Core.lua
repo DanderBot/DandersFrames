@@ -45,7 +45,6 @@ DF.testMode = false
 
 -- Raid frame containers
 DF.raidContainer = nil
-DF.raidMoverFrame = nil
 
 -- Color curve cache for gradient mode
 DF.CurveCache = {}
