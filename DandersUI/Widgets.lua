@@ -2234,7 +2234,12 @@ function UI:CreateDropdown(parent, opts)
             return
         end
         if customGet or (dbTable and dbKey) then
-            local val = customGet and customGet() or dbTable[dbKey]
+            -- Not `customGet and customGet() or dbTable[dbKey]`: a get that
+            -- legitimately answers nil (nothing selected yet) must NOT fall
+            -- through to a dbTable this dropdown may not have.
+            local val
+            if customGet then val = customGet()
+            elseif dbTable and dbKey then val = dbTable[dbKey] end
             local displayVal = options[val]
             -- Handle table format: {value = X, text = "text"} or {text = "text"}
             local optColor
@@ -2242,7 +2247,9 @@ function UI:CreateDropdown(parent, opts)
                 optColor = displayVal.color
                 displayVal = displayVal.text or displayVal.label or tostring(val)
             end
-            btn.Text:SetText(displayVal or tostring(val) or L["Select..."])
+            -- val can be nil now (see above); tostring(nil) would caption the
+            -- opener with the literal word "nil".
+            btn.Text:SetText(displayVal or (val ~= nil and tostring(val)) or L["Select..."])
             -- Selected label mirrors its option row's colour when the option
             -- carries one (e.g. class-coloured specs); plain options reset to
             -- the standard text colour. Skipped while disabled so the
