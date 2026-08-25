@@ -1928,9 +1928,19 @@ function DF:AuraDesigner_RefreshPage()
     RefreshPlacedIndicators()
     RefreshPreviewEffects()
 
-    -- Update enable state
+    -- Update enable state.
+    -- ☠ FROM THE MODE, NOT THE PRESET. These two reads are what broke the enable click
+    -- when the switch moved to the mode db: the click writes the mode, then calls THIS
+    -- refresh, and this re-synced the checkbox and the overlay from the preset field
+    -- the click no longer writes -- so the box unticked itself and the disabled overlay
+    -- stayed up until a page revisit ran the full build (whose reads were updated).
+    -- "when I click enable the toggle does not stick and AD does not activate" (Krathe,
+    -- 2026-08-22) was exactly these two lines. They read GetAuraDesignerDB().enabled
+    -- INLINE, which is why the sweep that fixed every named `adDB.enabled` missed them.
+    local adEnabled = DF.IsAuraDesignerEnabledForMode
+        and DF:IsAuraDesignerEnabledForMode((GUI and GUI.SelectedMode) or "party")
     if S.enableBanner then
-        S.enableBanner.checkbox:SetChecked(GetAuraDesignerDB().enabled)
+        S.enableBanner.checkbox:SetChecked(adEnabled)
     end
     -- Spec dropdown lives on the main tab strip (B2): refresh its text on
     -- My Buffs / keep the greyed "shared across specs" caption on Other Buffs.
@@ -1938,7 +1948,6 @@ function DF:AuraDesigner_RefreshPage()
 
     -- Show/hide disabled overlay on the split container
     if S.mainFrame.splitContainer then
-        local adEnabled = GetAuraDesignerDB().enabled
         if not adEnabled then
             if not S.mainFrame.disabledOverlay then
                 -- Shared with the Text Designer and Raid Auto Layouts; this S.page

@@ -1813,8 +1813,16 @@ DF.PartyDefaults = {
     -- as "DF default font" / "don't touch the colour" — which is what the old table did
     -- by omitting them. Adding either default here would restyle every existing profile.
     defensiveIconStackAnchor = "BOTTOMRIGHT",
+    -- ⚠ Seeded 2026-08-22 (Krathe): the pair had no font default and scale 1, which
+    -- rendered the stack count in the Blizzard fallback font (SafeSetFont resolves a
+    -- nil font to FRIZQT__, NOT to a DF font -- despite what a consumer comment
+    -- claimed) at a full 14pt. New profiles and untouched keys get the house font at
+    -- 0.7; the scale half of that for EXISTING profiles rides the one-shot
+    -- _defensiveStackRestyleV1 migration in Core.lua, because scale was previously
+    -- seeded 1 by this very table and the backfill will not overwrite it.
+    defensiveIconStackFont = "DF Roboto SemiBold",
     defensiveIconStackOutline = "OUTLINE",
-    defensiveIconStackScale = 1,
+    defensiveIconStackScale = 0.7,
     defensiveIconStackX = 2,
     defensiveIconStackY = -1,
     -- 26 (Krathe, 2026-08-08; was 30). ⚠ RAID keeps its own smaller value — see
@@ -2453,6 +2461,16 @@ DF.PartyDefaults = {
     resourceBarFrameLevel = 20,
     resourceBarHeight = 4,
     resourceBarMatchWidth = true,
+    -- Only consulted while resourceBarMatchWidth is on: true = the matched bar tucks
+    -- inside the FRAME border band; false = full health-bar length, the border
+    -- overlaps its ends (see the edgeInset block in Frames/Bars.lua). Deterministic
+    -- on purpose -- an earlier alpha-gated auto version of this key
+    -- (resourceBarMatchAdjustBorder, never released) read as doing nothing.
+    -- ⚠ Default TRUE, and the defaults backfill seeds it into EXISTING profiles too
+    -- -- deliberately (Krathe, 2026-08-22): stable 5.2.0 ships the always-inset
+    -- behaviour, so true is what every upgrading profile already looks like. False
+    -- here would have silently lengthened every matched bar on upgrade.
+    resourceBarMatchAdjustFrameBorder = true,
     resourceBarOrientation = "HORIZONTAL",
     resourceBarReverseFill = false,
     resourceBarShowDPS = false,

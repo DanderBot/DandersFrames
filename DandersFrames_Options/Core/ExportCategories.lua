@@ -226,6 +226,7 @@ DF.ExportCategories = {
         "resourceBarFrameLevel",
         "resourceBarHeight",
         "resourceBarMatchWidth",
+        "resourceBarMatchAdjustFrameBorder",
         "resourceBarOrientation",
         "resourceBarReverseFill",
         "resourceBarShowBorder",

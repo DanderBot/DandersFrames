@@ -1722,6 +1722,24 @@ function DF:LightweightUpdateHighlight(highlightType)
             if DF.InvalidateHighlightStyle then DF:InvalidateHighlightStyle(highlight) end
             highlight:SetAlpha(alpha)
 
+            -- ☠ SNAP THE SAME WAY THE REAL RENDERER DOES. Because this writes the
+            -- textures directly it also has to do the styler's pixel snapping, and it
+            -- did not -- so the drag/Enter preview drew an UNSNAPPED border and the
+            -- first real update after it (a mouseover, a target change) redrew the
+            -- snapped one. That is the whole of "pressing enter on the field that sets
+            -- the thickness visually fixes it, but it grows by 1 pixel again as soon as
+            -- you mouseover or target someone" (Renegade, 2026-08-22): the preview and
+            -- the render disagreed, and only the preview was wrong.
+            -- ★ Through the SHARED helpers, not a copy: a preview that snaps ALMOST
+            -- like the renderer is the same bug again, one rounding rule later. If the
+            -- helpers are missing (a partial load), fall through to the raw values --
+            -- an unsnapped preview beats no preview.
+            local hlScale = highlight.GetEffectiveScale and highlight:GetEffectiveScale()
+            if hlScale and DF.SnapHighlightThickness then
+                thickness = DF:SnapHighlightThickness(thickness, hlScale)
+                inset = DF:SnapHighlightInset(inset, hlScale)
+            end
+
             -- Update border textures - check both naming conventions
             local top = highlight.top or highlight.topLine
             local bottom = highlight.bottom or highlight.bottomLine
@@ -5163,6 +5181,81 @@ DF._MainEventDispatcher = function(self, event, arg1)
             for _, profile in pairs(DandersFramesDB_v2.profiles) do
                 for _, mode in ipairs({"party", "raid"}) do
                     mergeIconsToggle(profile[mode])
+                end
+            end
+        end
+
+        -- ☠ ALPHA-WINDOW REPAIR: force Adjust For Frame Border ON once, and drop the
+        -- dead key that caused the problem. Live has always rendered the matched
+        -- resource bar tucked inside the frame border, so ON is the state every profile
+        -- should arrive in; the checkbox is the way OUT of it, not the way in.
+        --
+        -- Why a migration is needed at all, when the defaults table already says true:
+        -- the key was renamed mid-alpha. The first cut shipped
+        -- `resourceBarMatchAdjustBorder` (alpha-gated, default true); the rename to
+        -- `resourceBarMatchAdjustFrameBorder` landed with default FALSE, and the
+        -- defaults backfill promptly seeded that false into every profile that loaded
+        -- an alpha build. Flipping the default to true afterwards does nothing for
+        -- them -- the backfill never overwrites a key that is already present. Confirmed
+        -- in Krathe's own SavedVariables: false in seven of eight profiles, and the
+        -- orphaned resourceBarMatchAdjustBorder still sitting beside it (2026-08-22).
+        -- A released build never saw either key, so this only ever repairs alpha
+        -- testers; on every other profile the backfill's true is already correct and
+        -- the assignment below is a no-op.
+        --
+        -- ⚠ UNCONDITIONAL, not equality-gated, and that is deliberate: a stored false
+        -- here is indistinguishable from a deliberate one, and the alpha window was
+        -- hours. Krathe's call -- "one time on for everyone to match how it would be on
+        -- live then they can toggle off if they want". The flag makes it once, so a
+        -- deliberate off after this login is never reverted.
+        local function repairResourceBarBorderAdjust(modeDb)
+            if modeDb and not modeDb._resourceBarBorderAdjustV1 then
+                modeDb.resourceBarMatchAdjustFrameBorder = true
+                -- The intermediate key nothing reads any more. Left in place it is just
+                -- profile cruft that a future grep would have to rule out.
+                modeDb.resourceBarMatchAdjustBorder = nil
+                modeDb._resourceBarBorderAdjustV1 = true
+            end
+        end
+        for _, mode in ipairs({"party", "raid"}) do
+            repairResourceBarBorderAdjust(DF.db[mode])
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    repairResourceBarBorderAdjust(profile[mode])
+                end
+            end
+        end
+
+        -- Defensive icon stack count restyle (Krathe, 2026-08-22): the shipped default
+        -- moved from scale 1 / no font to scale 0.7 / "DF Roboto SemiBold". The FONT
+        -- half needs no migration -- the key never had a Config default, so it is
+        -- absent on every untouched profile and the defaults backfill seeds the new
+        -- name; a user's chosen font is a present key the backfill leaves alone.
+        -- The SCALE half cannot ride the backfill, because this table itself seeded
+        -- `1` into every profile that ever loaded -- present keys are never
+        -- overwritten. Equality-gated instead: a profile still on the old default
+        -- (or, pre-backfill, on nil) moves to 0.7; any other value is a choice and
+        -- stays. One-time per mode (flag), so deliberately re-choosing scale 1
+        -- afterwards is not reverted on the next login -- the same contract as
+        -- recolorReducedMaxHealth above.
+        local function restyleDefensiveStack(modeDb)
+            if modeDb and not modeDb._defensiveStackRestyleV1 then
+                local s = modeDb.defensiveIconStackScale
+                if s == nil or s == 1 then
+                    modeDb.defensiveIconStackScale = 0.7
+                end
+                modeDb._defensiveStackRestyleV1 = true
+            end
+        end
+        for _, mode in ipairs({"party", "raid"}) do
+            restyleDefensiveStack(DF.db[mode])
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    restyleDefensiveStack(profile[mode])
                 end
             end
         end

@@ -2755,10 +2755,14 @@ function DF:BuildDefensiveRowConfig(db, unit)
             -- resized.
             -- ☠ THE DEFAULTS RENDER IDENTICALLY TO THAT TABLE: baseSize 14 × Scale 1 =
             -- 14, same anchor and offsets, Outline defaulted to "OUTLINE" in Config.
-            -- Font and Color get NO defaults on purpose — an absent key reads nil, which
-            -- BuildSpec treats as "DF default font" and "don't touch the colour", exactly
-            -- what the old table did by omission. Seeding either would silently restyle
-            -- every existing profile, which is not what a size request asked for.
+            -- Color gets NO default on purpose — an absent key reads nil and TextStyle
+            -- leaves the colour alone, exactly as the old table did by omission.
+            -- ⚠ Font DOES have a Config default now ("DF Roboto SemiBold", 2026-08-22).
+            -- This comment used to claim a nil font meant "DF default font"; it did not
+            -- — SafeSetFont resolves nil to FRIZQT__ (the Blizzard fallback), so unset
+            -- profiles were rendering the stack count in a different font from every
+            -- other DF text element. The seed makes the house font explicit, and the
+            -- deliberate restyle is the point (Krathe), not an accident to avoid.
             -- No formatter: forbidden on container rows (secret trap — see the
             -- GetStacksFormatter tombstone above). Native default = counts > 1.
             stacks = (function()

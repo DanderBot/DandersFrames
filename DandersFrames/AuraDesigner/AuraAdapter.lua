@@ -335,11 +335,27 @@ end
 -- UTILITY
 -- ============================================================
 
--- Check if Aura Designer is enabled for a frame
+-- Check if Aura Designer is enabled for a frame.
+--
+-- ☠ THE ENABLE IS A MODE PROPERTY (see DF:IsAuraDesignerEnabledForMode). This used to
+-- read `enabled` off the RESOLVED PRESET -- shared between any modes pointing at the same
+-- template -- so Party and Raid had one on/off switch between them.
+--
+-- ⚠ ONE EXCEPTION, PRESERVED ON PURPOSE: a frame carrying an explicit preset override.
+-- Pinned sets stamp dfAuraPresetOverride with their own chosen template (so does the
+-- editor preview), and for those the template IS the answer to "which designer is this
+-- frame running" -- there is no mode tab behind them to own a switch. Routing them through
+-- the mode would silently hand every pinned set the Party toggle, which is a different
+-- feature decision from the bug being fixed here and not one to make in passing. If pinned
+-- sets should own their enable, that is a deliberate change with its own storage; until
+-- then they behave exactly as they do today.
 function DF:IsAuraDesignerEnabled(frame)
-    local adDB = frame and DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if adDB then
-        return adDB.enabled
+    if not frame then return false end
+    if frame.dfAuraPresetOverride then
+        local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+        return (adDB and adDB.enabled) and true or false
     end
-    return false
+    if not DF.IsAuraDesignerEnabledForMode then return false end
+    local mode = (DF.DesignerFrameMode and DF:DesignerFrameMode(frame)) or "party"
+    return DF:IsAuraDesignerEnabledForMode(mode)
 end
