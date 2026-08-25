@@ -20,8 +20,25 @@ local pairs, ipairs, format, sqrt, max, abs, tsort = pairs, ipairs, string.forma
 
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local DEFAULT_ICON = MEDIA .. "DF_Icon"
-local LINK_ICON = MEDIA .. "link"
-local DOT_ICON = UI.MEDIA .. "Icons\\dot"
+-- ---- the three vector glyphs -------------------------------------
+-- SVG, not TGA: 12.1 loads .svg files as ordinary texture paths, and these are
+-- the three that are drawn small (9-16px). The inherited link.tga rendered
+-- broken and faded at 12px; vector art is exactly the fix. All three are flat
+-- white fills, so SetVertexColor still carries the role colour.
+--
+-- ⚠ The extension is REQUIRED. A texture path with none resolves .tga/.blp only,
+-- so `MEDIA .. "link"` silently loads the OLD art rather than erroring.
+--
+-- ☠ If SVG tinting or alpha misbehaves in-game, flip these three lines back
+-- (the TGA art all still ships) -- one line each, nothing else changes:
+--     local LINK_ICON = MEDIA .. "link"
+--     local DOT_ICON  = UI.MEDIA .. "Icons\\dot"
+--     local RING_ICON = UI.MEDIA .. "Icons\\dot"   -- the pre-ring root marker
+--         was the same disc drawn one size larger BEHIND the dot, so the kit's
+--         disc is the correct fallback for the ring too.
+local LINK_ICON = MEDIA .. "link.svg"
+local DOT_ICON = MEDIA .. "dot.svg"
+local RING_ICON = MEDIA .. "ring.svg"
 -- Role colours, all off the shared palette. FREE (no anchor, nothing anchored
 -- to it) = the party accent; CHILD (anchored to something) = the anchored
 -- purple; ROOT (free, with children) = the anchorRoot green. A root that is
@@ -410,10 +427,10 @@ local function create(el)
     b.edge:SetWidth(EDGE_W)
     b.edge:SetPoint("TOPLEFT"); b.edge:SetPoint("BOTTOMLEFT")
 
-    -- Role dot, with the root ring behind it: the same circle one pixel larger
+    -- Role dot, with the root ring behind it: a hollow circle one pixel larger
     -- all round, so what shows is a 1px rim.
     b.root = b:CreateTexture(nil, "OVERLAY", nil, 1)
-    b.root:SetTexture(DOT_ICON); b.root:SetSize(DOT_RING, DOT_RING)
+    b.root:SetTexture(RING_ICON); b.root:SetSize(DOT_RING, DOT_RING)
     b.root:SetVertexColor(C_ROOT.r, C_ROOT.g, C_ROOT.b); b.root:Hide()
     b.dot = b:CreateTexture(nil, "OVERLAY", nil, 2)
     b.dot:SetTexture(DOT_ICON); b.dot:SetSize(DOT, DOT)
@@ -1226,13 +1243,20 @@ end
 -- Every element the given one may legally be anchored to, with its rect cached
 -- for the per-frame hit test. Targets with no rect cannot be hit, so they are
 -- left out entirely.
-function P:LinkTargets(el)
+--
+-- mode mirrors Picker:Options' `kind`: a "fallback" gesture also drops the
+-- element's own PRIMARY target, because a backup that is the primary is not a
+-- backup (SetFallback refuses it, so it must not light up under the cursor).
+function P:LinkTargets(el, mode)
     local out = {}
     local descendants = {}
     for _, d in ipairs(Registry:Descendants(el.id)) do descendants[d.id] = true end
+    local anchor = Registry:GetPos(el).anchor
+    local primaryId = (mode == "fallback" and anchor) and anchor.target or nil
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)
         local usable = canon ~= el.id and not descendants[canon]
+            and target.id ~= primaryId
             and Registry:IsTargetAvailable(target)
             and Registry:IsEnabled(target.addon, target.key)
             and not Registry:WouldCreateCycle(el.id, target.id)
@@ -1273,8 +1297,9 @@ local function linkHighlight()
     return hl
 end
 
-function P:BeginLinkVisual(el)
-    self.linkList = self:LinkTargets(el)
+function P:BeginLinkVisual(el, mode)
+    self.linkMode = mode or "primary"
+    self.linkList = self:LinkTargets(el, self.linkMode)
     self.linkId = el.id
     self.linkHover = nil
     local f = self:GetUnlockFrame()
@@ -1351,7 +1376,7 @@ function P:EndLinkVisual()
     if self.linkLine then self.linkLine:Hide() end
     if self.linkGlow then self.linkGlow:Hide() end
     if self.linkHl then self.linkHl:Hide() end
-    self.linkHover, self.linkId = nil, nil
+    self.linkHover, self.linkId, self.linkMode = nil, nil, nil
     if self.linkList then wipe(self.linkList) end
 end
 

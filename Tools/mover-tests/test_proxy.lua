@@ -343,6 +343,38 @@ do
     NS.db = nil
 end
 
+-- Link-drag target list. A primary link reaches every legal target; a FALLBACK
+-- link also drops the element's own primary, because a backup that is the
+-- primary is not a backup (Session:SetFallback refuses it, so it must not light
+-- up under the cursor either).
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("K", { title = "K" })
+    R:Register("K", "host",  elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("K", "spare", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("K", "child", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "K:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    local child = R:Get("K:child")
+    local function ids(list)
+        local out = {}
+        for _, t in ipairs(list) do out[t.id] = true end
+        return out
+    end
+    local primary = ids(P:LinkTargets(child))
+    check(primary["K:host"] and primary["K:spare"], "primary link reaches the current target and the spare")
+    check(not primary["K:child"], "a link never reaches the element itself")
+    local fallback = ids(P:LinkTargets(child, "fallback"))
+    check(not fallback["K:host"], "fallback link drops the element's own primary target")
+    check(fallback["K:spare"], "fallback link still reaches everything else")
+    R:UnregisterAddon("K")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
 -- The coords slot's "hidden" comes from Registry:IsTargetAvailable, not the raw
 -- frame's IsShown: a consumer getRect owns visibility (DF's raid element measures
 -- its test-mode preview while the real container is hidden), while elements

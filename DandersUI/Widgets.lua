@@ -2562,11 +2562,28 @@ function UI:CreateDropdown(parent, opts)
         UpdateText()
     end
 
+    -- The opener is exposed for callers that need to hang state off the button
+    -- itself (see .openerTooltip below).
+    container.opener = btn
+
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+        -- ★ OPENER TOOLTIP. The shared attach (host:AttachTooltip below) builds
+        -- its hit frame over the LABEL, which an inline dropdown does not have --
+        -- the caller draws its own label in its own row and the factory's is
+        -- hidden and zero-wide, so `.tooltip` is unreachable on an inline
+        -- dropdown. `.openerTooltip` hangs the same spec off the opener instead.
+        -- Deliberately NOT a hit frame: one over the opener would eat the click
+        -- that opens the menu.
+        local spec = container.openerTooltip
+        if spec then
+            if type(spec) == "string" then spec = { title = label, lines = { spec } } end
+            host:ShowTooltip(self, spec)
+        end
     end)
     btn:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+        if container.openerTooltip then host:HideTooltip() end
     end)
     
     btn:SetScript("OnClick", function(self)

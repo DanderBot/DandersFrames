@@ -370,11 +370,24 @@ function Sess:AnchorInPlace(el, targetId)
     commit(el, before, L["Anchor %s"])
 end
 
--- Edit the live spec of an existing outside-mode anchor (the panel's edge and
--- align dropdowns). Point mode has no edge/align to set, so it is left alone.
+-- Edit the live spec of an existing anchor: the panel's second anchor row,
+-- whichever pair of fields the mode actually has -- edge/align in outside mode,
+-- point/relPoint in point mode. A change the mode has no field for is dropped
+-- rather than written, so an outside anchor can never grow a stray `point`.
+local SPEC_FIELDS = {
+    outside = { edge = true, align = true },
+    point   = { point = true, relPoint = true },
+}
+
 function Sess:SetAnchorSpec(el, changes)
     local pos = Registry:GetPos(el)
-    if not pos.anchor or pos.anchor.mode == "point" then return end
+    if not pos.anchor then return end
+    local allowed = SPEC_FIELDS[pos.anchor.mode == "point" and "point" or "outside"]
+    local any = false
+    for k in pairs(changes) do
+        if allowed[k] then any = true else changes[k] = nil end
+    end
+    if not any then return end
     local before = NS.CopyPos(pos)
     for k, v in pairs(changes) do pos.anchor[k] = v end
     NS:ResolveElement(el)
@@ -384,17 +397,25 @@ end
 
 -- ============================================================
 -- LINK DRAG
--- Press the panel's link glyph and drag a line onto another element: the
--- release anchors IN PLACE, so the relationship changes and nothing moves.
+-- Press one of the panel's link handles and drag a line onto another element:
+-- the release ties the two together, and nothing moves.
 -- The gesture owns no record state of its own -- Sess.linking is just the id
--- of the element being linked FROM, and the commit is AnchorInPlace's (one
--- undo entry, same as picking the target from the dropdown). Esc and
--- right-click cancel; the visual half lives in Proxy.
+-- of the element being linked FROM plus which of the two links is being aimed,
+-- and the commit is the same one the matching dropdown makes (one undo entry).
+-- Esc and right-click cancel; the visual half lives in Proxy.
+--
+-- mode: "primary" (default) re-anchors in place; "fallback" sets the BACKUP
+-- anchor, which takes the primary's whole spec with only the target swapped --
+-- so a backup drop never moves the element either.
 -- ============================================================
-function Sess:BeginLink(el)
+function Sess:BeginLink(el, mode)
     if not self.active or self.suspended or self.linking then return end
-    self.linking = { id = el.id }
-    Proxy:BeginLinkVisual(el)
+    -- A backup is only meaningful once there IS a primary to fall back FROM.
+    -- SetFallback would refuse the drop anyway; refusing the gesture keeps the
+    -- handle honest rather than letting a line be dragged to nowhere.
+    if mode == "fallback" and not Registry:GetPos(el).anchor then return end
+    self.linking = { id = el.id, mode = mode or "primary" }
+    Proxy:BeginLinkVisual(el, self.linking.mode)
 end
 
 function Sess:EndLink(targetId)
@@ -402,9 +423,12 @@ function Sess:EndLink(targetId)
     -- Re-read the element: a link can outlive the record it started from
     -- (RegistryChanged mid-gesture), and the visual must come down either way.
     local el = Registry:Get(self.linking.id)
+    local mode = self.linking.mode
     self.linking = nil
     Proxy:EndLinkVisual()
-    if el and targetId then self:AnchorInPlace(el, targetId) end
+    if not (el and targetId) then return end
+    if mode == "fallback" then self:SetFallback(el, targetId)
+    else self:AnchorInPlace(el, targetId) end
 end
 
 function Sess:CancelLink()

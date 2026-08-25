@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- A filled disc, one unit inside the viewBox so the edge antialiases against
+       transparency rather than against the clip. White only: the role colour
+       comes from SetVertexColor. -->
+  <path fill="#ffffff" d="M 1 32 A 31 31 0 1 0 63 32 A 31 31 0 1 0 1 32 Z"/>
+</svg>
