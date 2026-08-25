@@ -446,6 +446,13 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- CC needs its Blizzard token; skip the group entirely if unavailable
     local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
     local raidOn = db.debuffFilterRaid
+    -- ☠ THE NEGATION SIDE OF `raidOn`, AND IT IS NOT THE SAME BOOLEAN. See neg() below:
+    -- "RAID" is a CAPABILITY filter, so it empties out while the player is dead and the
+    -- records that dedupe against it must stop doing so at the same moment.
+    -- ⚠ Reads the tracked state, never UnitIsDeadOrGhost directly — same rule as
+    -- DF.playerInCombat. A raw read here would be correct only on the pass that happened
+    -- to run after the transition, and nothing would re-ask on the way back.
+    local negateRaid = raidOn and not DF.playerIsDead
     local dispelToken = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
     local maxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0 and (db.debuffMaxDurationMinutes or 0) * 60 or nil
     local keepImportant = db.debuffMaxDurationKeepImportant
@@ -470,7 +477,25 @@ local function BuildDirectDebuffFilters(db, claimed)
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
         -- "RAID" is negatable (only INCLUDE_NAME_PLATE_ONLY and MAW are not —
         -- AuraUtil.AuraFilters / IsValidFilterString).
-        if excludeRaid and raidOn then s = s .. "|!RAID" end
+        --
+        -- ☠☠ negateRaid, NOT raidOn — THE TWO SIDES MUST MOVE TOGETHER.
+        -- Blizzard's own comment on the token: "Include only helpful auras the player can
+        -- apply and harmful auras THE PLAYER CAN DISPEL". A dead or ghost player can dispel
+        -- nothing, so while you are dead the raid RECORD matches nothing — and this
+        -- negation therefore subtracts nothing. Every debuff the raid record was claiming
+        -- reappears in each record carrying `|!RAID`, several at once, and groups do NOT
+        -- dedupe against each other (see the ALL-mode note above). The row then draws the
+        -- same debuff two or three times, overlapping, with each group independently
+        -- filling toward its own Max Debuffs cap. Field-reported: "entirely fine aside from
+        -- when I die".
+        -- Dropping the negation while dead restores exclusivity, because then BOTH sides
+        -- hold no raid-flagged auras — the record by the engine, the negation by us.
+        -- ⚠ The raid RECORD is still built (it stays keyed on raidOn), so the KEY SET does
+        -- not move and this remains a filter-string change: the TUNING sig, applied in
+        -- place by ApplyTuning with no container rebuild. Gating the record itself on the
+        -- dead state would make every death a structural teardown — and the version-gated
+        -- drive bails in combat, which is precisely when you die.
+        if excludeRaid and negateRaid then s = s .. "|!RAID" end
         return s
     end
     -- candidateFilters for one record. Hands each record its OWN table (extra
@@ -2754,6 +2779,71 @@ function DF:DriveDebuffFactory(frame, db)
             end
             h:ApplyStyle(cfg.style, cfg.layout) -- cosmetics — in place, no leak
         end
+    end
+end
+
+-- ============================================================
+-- PLAYER DEAD STATE -> DEBUFF ROW RE-TUNE
+-- ============================================================
+-- ☠ SPLIT OUT of DriveDebuffFactory on purpose, exactly like RefreshMissingBuffVisibility
+-- was. The drive only re-evaluates its filter list on an aura-LAYOUT bump and bails in
+-- combat — and the player's own death is neither a settings change nor an out-of-combat
+-- event. See neg() in BuildDirectDebuffFilters for what actually goes wrong.
+--
+-- Deliberately narrow: it re-derives the filter list and applies it ONLY when the struct
+-- signature is unchanged, i.e. when nothing but the strings moved. If the struct moved,
+-- something else changed too and the version-gated drive owns it — this path must not
+-- take a structural decision on a death.
+function DF:RefreshDebuffRowDeadState(frame)
+    if not frame or not frame.unit then return end
+    local h = frame.debuffFactory
+    if not h then return end                       -- row never built on this frame
+    if DF.AuraContainer and DF.AuraContainer._testMode then return end
+
+    local db = DF:GetFrameDB(frame)
+    if not db then return end
+    -- Nothing to move unless a `|!RAID` negation is actually in play: the Raid category
+    -- has to be on, and ALL mode builds no token records at all.
+    if not db.debuffFilterRaid or db.directDebuffShowAll then return end
+
+    local filterList = BuildDirectDebuffFilters(db,
+        DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
+    filterList = applyDebuffBlacklist(filterList, db)
+    if not filterList or #filterList == 0 then return end
+
+    local cfg = DF:BuildAuraRowConfig(db, "debuff", {
+        unit = frame.unit,
+        filterList = filterList,
+    })
+    if frame.debuffFactoryStructSig ~= rowStructSig(cfg) then return end
+    local tuningSig = rowTuningSig(cfg)
+    if frame.debuffFactoryTuningSig == tuningSig then return end
+
+    DF:Debug("AURAROW", "debuff: dead-state re-tune (%s) unit=%s",
+        DF.playerIsDead and "dead" or "alive", tostring(frame.unit))
+    frame.debuffFactoryTuningSig = tuningSig
+    h.config.filter = cfg.filter
+    -- ApplyTuningNow, not ApplyTuning: you die in combat, and the ordinary path would
+    -- defer this to regen — see the note on that method.
+    h:ApplyTuningNow(cfg)
+end
+
+-- The tracked state, written ONLY by PLAYER_DEAD / PLAYER_ALIVE / PLAYER_UNGHOST and
+-- seeded at PLAYER_ENTERING_WORLD (Core.lua) — same convention as DF.playerInCombat, and
+-- for the same reason: a value a filter reads needs a refresh on BOTH transitions, or the
+-- row heals on the way into the state and stays wrong on the way out.
+function DF:SetPlayerDeadState(dead)
+    dead = dead and true or false
+    if DF.playerIsDead == dead then return end
+    DF.playerIsDead = dead
+
+    -- ☠ IterateAllFrames has NO pinned arm — pinned frames run their own iterator, and a
+    -- pinned frame has a debuff row like any other.
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(f) DF:RefreshDebuffRowDeadState(f) end)
+    end
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(f) DF:RefreshDebuffRowDeadState(f) end)
     end
 end
 

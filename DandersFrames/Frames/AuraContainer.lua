@@ -5685,6 +5685,42 @@ function Handle:ApplyTuning(tuning)
     end
 end
 
+-- ApplyTuning WITHOUT the defer-to-regen, for a tuning change whose whole point is that
+-- it has to land DURING combat.
+--
+-- ☠ NOT a general-purpose escape hatch — plain ApplyTuning stays the default and every
+-- existing caller keeps it. This exists for one caller: the player's own dead state
+-- (DF:SetPlayerDeadState). Blizzard's "RAID" filter means "harmful auras the player can
+-- dispel", so it empties the moment you die and the debuff row's dedup negations must
+-- drop with it. You die IN combat, so deferring to regen would leave the row duplicating
+-- debuffs for the rest of the pull — the defer would defeat the fix entirely.
+--
+-- ✅ Why this is safe, read at source rather than assumed: everything below the gate in
+-- ApplyTuning is `backend:applyGroupTuning()`, whose only work is the pcall'd
+-- SetAuraGroup* setters — Blizzard_AuraContainer carries no InCombatLockdown checks and
+-- no SetAttribute calls, so they are legal in lockdown — plus a partition kick that
+-- ALREADY guards itself on InCombatLockdown and is documented as mark-only in combat
+-- ("combat aura events are frequent, so the flags get picked up on the next one").
+-- Dying in a raid produces those events immediately, so the change lands on the next one.
+--
+-- ⚠ Test mode is routed back to ApplyTuning, whose preview path rebuilds and carries its
+-- own combat gate. Nothing here should reach a preview anyway.
+function Handle:ApplyTuningNow(tuning)
+    if AuraContainer._testMode then
+        return self:ApplyTuning(tuning)
+    end
+    if type(tuning) == "table" then
+        self.config.max = tuning.max
+        self.config.sort = tuning.sort
+        self.config.candidateFilters = tuning.candidateFilters
+        -- nil does NOT clear — see ApplyTuning's note on why only a supplied filter lands.
+        if tuning.filter ~= nil then self.config.filter = tuning.filter end
+    end
+    if self.backend and self.backend.applyGroupTuning then
+        self.backend:applyGroupTuning()
+    end
+end
+
 -- Force a re-scan of the container. 68569: UpdateAllAuras() is an addon-callable
 -- dirty-mark (processed on the next OnUpdate while visible) — the real refresh. Use on
 -- a dynamic-unit consumer (target/focus/mouseover) when the underlying unit changes but
