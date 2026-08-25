@@ -24,11 +24,11 @@ local GetTime, C_Timer = GetTime, C_Timer
 local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber, ipairs, pairs, math.floor, math.max, math.min
 
 -- The mover's own art, not the kit's (UI.MEDIA): the link glyph ships with this
--- addon because it is this addon's verb. SVG so it stays crisp at the 14px the
--- drag handles draw it -- see the note on Proxy.lua's copy of these constants
--- for the one-line flip back to link.tga if SVG misbehaves in-game.
+-- addon because it is this addon's verb. 64px supersampled TGA so it stays
+-- crisp at the 14px the drag handles draw it (SVG rendered as error squares
+-- in-game -- see the note on Proxy.lua's copy of these constants).
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
-local LINK_ICON = MEDIA .. "link.svg"
+local LINK_ICON = MEDIA .. "link"
 
 -- Spacing comes from the theme so this panel keeps the rhythm of every other
 -- DandersUI surface: PAD is the outer padding, GAP the gap between rows of

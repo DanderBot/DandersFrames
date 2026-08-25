@@ -20,25 +20,14 @@ local pairs, ipairs, format, sqrt, max, abs, tsort = pairs, ipairs, string.forma
 
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local DEFAULT_ICON = MEDIA .. "DF_Icon"
--- ---- the three vector glyphs -------------------------------------
--- SVG, not TGA: 12.1 loads .svg files as ordinary texture paths, and these are
--- the three that are drawn small (9-16px). The inherited link.tga rendered
--- broken and faded at 12px; vector art is exactly the fix. All three are flat
--- white fills, so SetVertexColor still carries the role colour.
---
--- ⚠ The extension is REQUIRED. A texture path with none resolves .tga/.blp only,
--- so `MEDIA .. "link"` silently loads the OLD art rather than erroring.
---
--- ☠ If SVG tinting or alpha misbehaves in-game, flip these three lines back
--- (the TGA art all still ships) -- one line each, nothing else changes:
---     local LINK_ICON = MEDIA .. "link"
---     local DOT_ICON  = UI.MEDIA .. "Icons\\dot"
---     local RING_ICON = UI.MEDIA .. "Icons\\dot"   -- the pre-ring root marker
---         was the same disc drawn one size larger BEHIND the dot, so the kit's
---         disc is the correct fallback for the ring too.
-local LINK_ICON = MEDIA .. "link.svg"
-local DOT_ICON = MEDIA .. "dot.svg"
-local RING_ICON = MEDIA .. "ring.svg"
+-- ---- the three small glyphs --------------------------------------
+-- 64px supersampled TGAs (Tools-generated, flat white so SetVertexColor
+-- carries the role colour). SVG was tried first -- 12.1's loader took the
+-- paths but rendered green error squares, so its supported subset is
+-- narrower than "any .svg"; high-res raster art gets the same crispness.
+local LINK_ICON = MEDIA .. "link"
+local DOT_ICON = MEDIA .. "dot"
+local RING_ICON = MEDIA .. "ring"
 -- Role colours, all off the shared palette. FREE (no anchor, nothing anchored
 -- to it) = the party accent; CHILD (anchored to something) = the anchored
 -- purple; ROOT (free, with children) = the anchorRoot green. A root that is
