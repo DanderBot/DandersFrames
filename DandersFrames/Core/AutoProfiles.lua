@@ -843,6 +843,49 @@ function AutoProfilesUI:UpdateProfileRange(contentKey, index, newMin, newMax)
     return true
 end
 
+-- Rename a layout. Same conflict rule as CreateProfile (case-insensitive, and the
+-- layout's own current name is exempt so re-saving without a change is not an error).
+-- ⚠ SAFE BY CONSTRUCTION: nothing keys off a layout's name. The active layout is held
+-- by REFERENCE (activeRuntimeProfile), overrides live on the profile table, and the
+-- name reaches only display strings and these conflict checks -- verified before
+-- writing this, because a rename would be a silent data-loss bug if anything did.
+-- ⚠ NO re-sort and NO re-evaluate: order is by range and activation is by player count,
+-- so neither depends on the name. The caller only needs to repaint.
+function AutoProfilesUI:RenameProfile(contentKey, index, newName)
+    self:InitDefaults()
+    newName = type(newName) == "string" and strtrim(newName) or ""
+    if newName == "" then
+        return false, L["Enter a profile name"]
+    end
+
+    -- Mythic is the single fixed layout: it has no list and no index.
+    local profile
+    if contentKey == "mythic" then
+        profile = DF.db.raidAutoProfiles.mythic and DF.db.raidAutoProfiles.mythic.profile
+    else
+        local profiles = DF.db.raidAutoProfiles[contentKey]
+            and DF.db.raidAutoProfiles[contentKey].profiles
+        profile = profiles and profiles[index]
+        if profile then
+            for i, p in ipairs(profiles) do
+                if i ~= index and p.name and p.name:lower() == newName:lower() then
+                    DF:DebugWarn("AUTOPROFILE", "RenameProfile: name conflict with \"%s\"", p.name)
+                    return false, L["Name already exists"]
+                end
+            end
+        end
+    end
+    if not profile then
+        return false, L["Profile not found"]
+    end
+
+    local oldName = profile.name
+    if oldName == newName then return true end
+    profile.name = newName
+    DF:Debug("AUTOPROFILE", "RenameProfile: \"%s\" -> \"%s\"", tostring(oldName), newName)
+    return true
+end
+
 -- ============================================================
 -- EDIT MODE STATE & FUNCTIONS
 -- ============================================================
