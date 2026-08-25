@@ -46,6 +46,8 @@ NS.DEFAULTS = {
     -- being dragged.
     showMeasures = false, showSnapPreview = false,
     keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
+    -- Interacting with a mover's side panel pins it in place automatically; off = only the pin button pins.
+    autoPinPanels = true,
     stripCollapsed = false,               -- top strip folded to its slim tab
     addons = {}, demo = {},
 }
