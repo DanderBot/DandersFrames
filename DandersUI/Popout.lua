@@ -343,8 +343,9 @@ function Popout:_EnsureBeam()
     b:SetAllPoints(UIParent)
     b:SetFrameStrata("BACKGROUND")
     b:Hide()
-    -- Guarded exactly as the mover's tethers are: a headless stub (or a client
-    -- without Line objects) leaves them false and every beam call no-ops.
+    -- Guarded, and cached as FALSE rather than nil so the guard is asked once:
+    -- a headless stub (or any surface without Line objects) simply never gets a
+    -- beam, and every beam call after this no-ops instead of erroring.
     b.glow = b.CreateLine and b:CreateLine(nil, "ARTWORK", nil, -1) or false
     b.core = b.CreateLine and b:CreateLine(nil, "ARTWORK", nil, 0) or false
     self.beam = b

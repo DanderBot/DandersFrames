@@ -404,4 +404,193 @@ do
     p:Close()
 end
 
+-- ============================================================
+-- 11. THE REST OF THE CONTRACT
+-- The claims the sections above imply but do not actually exercise: that the
+-- pool survives a close and does NOT cross hosts, that a forced side beats the
+-- auto pick, that tetherSource re-points the beam, that the exit is ordered,
+-- and that a popout without a key is refused.
+-- ============================================================
+
+-- The pool outlives a CLOSE. That is what makes it a pool rather than a cache
+-- of things currently on screen: a popout that opens on every selection must
+-- cost one build, not one per selection.
+do
+    builds = 0
+    local p = popout({ key = "revive" })
+    p:Follow(source(80, 40))
+    p:Close()
+    check(p.closed, "revive: the popout closed")
+    local again = popout({ key = "revive" })
+    check(again == p, "revive: a closed unpinned popout is revived, not rebuilt")
+    eq(builds, 1, "revive: build did not run a second time")
+    eq(again.content._built, 1, "revive: it still has the content it built")
+    check(not again.closed, "revive: reviving clears the closed flag")
+    again:Follow(source(80, 40))
+    check(again:IsShown(), "revive: and it presents again")
+    eq(again.frame:GetWidth(), FRAME_W, "revive: the frame is the content width plus the padding")
+    again:Close()
+end
+
+-- The pool is per HOST, not global. Two consumers may both call a popout
+-- "detail" and must not be handed each other's frame -- which is the whole
+-- reason the store is rawset onto the host rather than kept on the library.
+do
+    builds = 0
+    local mine = popout({ key = "shared-key" })
+    local theirs = setmetatable({ hooks = { L = L } }, { __index = UI })
+    local other = theirs:CreatePopout({ key = "shared-key", width = W, build = buildContent })
+    check(other ~= mine, "hosts: the same key on another host is another popout")
+    eq(builds, 2, "hosts: and it built its own content")
+    check(rawget(theirs, "_popouts") ~= rawget(host, "_popouts"), "hosts: each host has its own store")
+    mine:Close(); other:Close()
+end
+
+-- A key is the pool's identity, so there is no sensible popout without one.
+do
+    check(not pcall(function() return host:CreatePopout({}) end), "factory: a missing key is refused")
+    check(not pcall(function() return host:CreatePopout({ key = "" }) end), "factory: an empty key is refused")
+    check(not pcall(function() return host:CreatePopout() end), "factory: no opts at all is refused")
+end
+
+-- Pinning re-anchors to the SCREEN. Left hanging off the source, a pinned
+-- popout would still be towed around by it, which is the one thing pinning is
+-- supposed to stop -- and the beam would then never have anything to say.
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "reanchor" })
+    p:Follow(src)
+    eq(p.frame._points[1][2], src, "reanchor: a following popout is anchored to its source")
+    p:Pin()
+    eq(p.frame._points[1][1], "CENTER", "reanchor: pinning re-anchors by the centre")
+    eq(p.frame._points[1][2], UIParent, "reanchor: ...to the screen, not to the source")
+    check(not p.following, "reanchor: and it stops following")
+    p:Close()
+end
+
+-- opts.side beats the auto pick: a consumer that knows what else is on screen
+-- can say where the popout goes, which is the shell's answer to not modelling
+-- obstacles itself.
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "forced" })
+    p:Follow(src, { side = "below" })
+    eq(p.side, "below", "forced: opts.side wins over the auto pick")
+    eq(p.frame._points[1][1], "TOP", "forced: below-docked hangs its top")
+    eq(p.frame._points[1][3], "BOTTOM", "forced: ...off the source's bottom")
+    p:Follow(src, { side = "above" })
+    eq(p.side, "above", "forced: and it can be changed")
+    eq(p.frame._points[1][1], "BOTTOM", "forced: above-docked hangs its bottom")
+    eq(p.frame._points[1][3], "TOP", "forced: ...off the source's top")
+    -- Dropping the force hands the side back to the picker.
+    p:Follow(src)
+    eq(p.side, "right", "forced: without a forced side the picker decides again")
+    p:Close()
+end
+
+-- The gate is asked ONCE PER CALL and is handed the popout, so a consumer can
+-- answer differently for two popouts sharing one gate function.
+do
+    local asked, got = 0, nil
+    local p = popout({ key = "gatecount", canAutoPin = function(po) asked = asked + 1; got = po; return false end })
+    p:Follow(source(80, 40))
+    p:AutoPin()
+    eq(asked, 1, "gate: asked once")
+    p:AutoPin()
+    eq(asked, 2, "gate: asked again on the next call")
+    eq(got, p, "gate: the popout is handed to the gate")
+    p:Close()
+
+    -- No gate at all is not a closed gate.
+    local free = popout({ key = "nogate" })
+    free:Follow(source(80, 40))
+    free:AutoPin()
+    check(free:IsPinned(), "gate: no canAutoPin means AutoPin just pins")
+    free:Close()
+end
+
+-- A family claim keeps holding: the THIRD member evicts the second exactly as
+-- the second evicted the first.
+do
+    local reasons = {}
+    local function member(key)
+        local p = popout({ key = key, family = "stack", onClose = function(_, r) reasons[key] = r end })
+        p:Follow(source(80, 40))
+        return p
+    end
+    local first = member("stack1")
+    local second = member("stack2")
+    eq(reasons.stack1, "family", "stack: the second member evicted the first")
+    local third = member("stack3")
+    eq(reasons.stack2, "family", "stack: and the third evicted the second")
+    check(not third.closed, "stack: only the newcomer is left")
+    eq(third.family, "stack", "stack: the family is carried on the instance")
+    third:Close()
+end
+
+-- tetherSource: the beam's far end is not always the thing the popout DOCKED
+-- to -- a popout about a row inside a list may dock to the list.
+do
+    local src = source(80, 40, CX, CY)
+    -- Well away to the left, level with the screen centre, so the nearest faces
+    -- are unambiguous: the popout's right edge to the target's left edge.
+    local far = source(60, 40, CX - 400, CY)
+    local p = popout({ key = "tether", tetherSource = far })
+    p:Follow(src)
+    p.frame:SetFakeCenter(100, CY)          -- rect x = -860, y = 0
+    p:Pin()
+    check(p.beam:IsShown(), "tether: pinned and away, the beam shows")
+    eq(p.beam.core._start.x, -860 + FRAME_W / 2, "tether: it leaves the popout's right face")
+    eq(p.beam.core._start.y, 0, "tether: at that face's midpoint")
+    eq(p.beam.core._end.x, -430, "tether: and lands on the TETHER target's left face")
+    eq(p.beam.core._end.y, 0, "tether: at that face's midpoint, not on the dock target")
+    p:Close()
+
+    -- The function form is resolved when the beam is drawn, so the target can
+    -- change between two opens of the same popout.
+    local calls = 0
+    local q = popout({ key = "tetherfn", tetherSource = function() calls = calls + 1; return far end })
+    q:Follow(source(80, 40))
+    q.frame:SetFakeCenter(100, CY)
+    q:Pin()
+    check(calls > 0, "tether: a function tetherSource is called")
+    eq(q.beam.core._end.x, -430, "tether: and the region it returns is used")
+    q:Close()
+end
+
+-- The exit is ORDERED: the beam fades first and the popout's own pop-out waits
+-- that fade out, so the two read as one gesture instead of two events.
+do
+    local p = popout({ key = "closeorder" })
+    p:Follow(source(80, 40, CX, CY))
+    p.frame:SetFakeCenter(400, 200)
+    p:Pin()
+    check(p.beam:IsShown(), "exit: the beam is up going in")
+    local before = #delays
+    p:Close()
+    local waited = false
+    for i = before + 1, #delays do if delays[i] == 0.15 then waited = true end end
+    check(waited, "exit: the popout's exit waits out the beam's fade")
+    check(not p.beam:IsShown(), "exit: the beam went first")
+    check(not p:IsShown(), "exit: and the popout followed")
+end
+
+-- The pin button wears the kit glyph and a tooltip out of the HOST's locale --
+-- the shell adds no locale file of its own.
+do
+    local p = popout({ key = "pinglyph" })
+    eq(p.pinBtn._opts.texture, "Icons\\pin", "glyph: the pin button uses the pin art")
+    eq(p.pinBtn._opts.tooltip.title, "Pin", "glyph: with a tooltip read from the host locale")
+    p:Close()
+end
+
+-- The adjacency slack is a boundary, and boundaries are where these go wrong.
+do
+    local a = { x = 0, y = 0, w = 100, h = 50 }
+    check(UI.PopoutIsAdjacent(a, { x = 116, y = 0, w = 100, h = 50 }, 16),
+        "adjacent: exactly at the slack still counts as beside")
+    check(not UI.PopoutIsAdjacent(a, { x = 117, y = 0, w = 100, h = 50 }, 16),
+        "adjacent: one step past it does not")
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
