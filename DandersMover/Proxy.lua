@@ -1147,6 +1147,7 @@ function P:ShowZones(el)
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)
         local usable = canon ~= el.id and not descendants[canon]
+            and target.snappable                        -- opted out of snap zones; still pickable and link-droppable
             and Registry:IsTargetAvailable(target)      -- hidden/unavailable frames are not snap targets (CDM rule)
             and Registry:IsEnabled(target.addon, target.key)
             and not Registry:WouldCreateCycle(el.id, target.id)

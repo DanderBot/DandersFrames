@@ -22,7 +22,7 @@ NS.UI = LibStub("DandersUI-1.0"):NewHost("DandersMover", {
 NS.UI:SetAccent(0.18, 0.612, 0.792)   -- the mover's own blue, from the old Theme.C.accent
 
 local Registry, Solver = NS.Registry, NS.Solver
-local pairs, ipairs, type, xpcall, geterrorhandler = pairs, ipairs, type, xpcall, geterrorhandler
+local pairs, ipairs, type, pcall, xpcall, geterrorhandler = pairs, ipairs, type, pcall, xpcall, geterrorhandler
 local InCombatLockdown, CreateFrame, UIParent = InCombatLockdown, CreateFrame, UIParent
 local tinsert, wipe, strsplit, strlower = table.insert, wipe, strsplit, string.lower
 
@@ -139,16 +139,41 @@ function NS:ResolveElement(el)
     return changed
 end
 
-function NS:ReapplyDescendants(targetId, reason)
-    local list = Registry:Descendants(targetId)
-    if #list == 0 then return end
-    local ids = {}
-    for _, el in ipairs(list) do tinsert(ids, el.id) end
+-- The body of ReapplyDescendantsMany, split out so the canon memo around it can be
+-- closed on an error path as well as the normal one.
+local function reapplyMany(targetIds, reason)
+    local ids, seen = {}, {}
+    for _, targetId in ipairs(targetIds) do
+        for _, el in ipairs(Registry:Descendants(targetId)) do
+            if not seen[el.id] then
+                seen[el.id] = true
+                tinsert(ids, el.id)
+            end
+        end
+    end
+    if #ids == 0 then return end
     local order = Solver.ResolutionOrder(ids, function(id) return NS:ParentOf(id) end)
     for _, id in ipairs(order) do
         local el = Registry:Get(id)
         if el and NS:ResolveElement(el) then NS:Notify(el, reason or "parent") end
     end
+end
+
+-- Several targets moved at once (a header re-layout that shifts every sub-target):
+-- one union descendant set, ONE resolution order over it, one resolve/notify pass,
+-- so a shared descendant is solved once rather than once per target.
+function NS:ReapplyDescendantsMany(targetIds, reason)
+    -- The memo is only valid for the length of this synchronous pass, so it has to
+    -- be closed however the pass ends. Errors are reported through the usual handler
+    -- rather than swallowed.
+    Registry:BeginCanonMemo()
+    local ok, err = pcall(reapplyMany, targetIds, reason)
+    Registry:EndCanonMemo()
+    if not ok then geterrorhandler()(err) end
+end
+
+function NS:ReapplyDescendants(targetId, reason)
+    NS:ReapplyDescendantsMany({ targetId }, reason)
 end
 
 -- ============================================================
@@ -207,6 +232,13 @@ end
 
 function Lib:RefreshAnchorTarget(addon, key)
     NS:ReapplyDescendants(Registry.Id(addon, key), "parent")
+end
+
+-- Batched RefreshAnchorTarget -- one union descendant set, one resolution order, one pass.
+function Lib:RefreshAnchorTargets(addon, keys)
+    local ids = {}
+    for _, key in ipairs(keys) do tinsert(ids, Registry.Id(addon, key)) end
+    NS:ReapplyDescendantsMany(ids, "parent")
 end
 
 function Lib:Apply(addon, key)

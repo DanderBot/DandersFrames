@@ -429,3 +429,61 @@ do
     R:UnregisterAddon("RN")
     R.ready = wasReady
 end
+
+-- snappable: defaults true; the opt-out lands on the element AND its paired target
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("SN", { title = "SN" })
+    local plainT = R:RegisterAnchorTarget("SN", "sn_t", { title = "t", frame = FakeFrame(0, 0, 10, 10) })
+    check(plainT.snappable == true, "target snappable defaults to true")
+    local offT = R:RegisterAnchorTarget("SN", "sn_toff", { title = "t", frame = FakeFrame(0, 0, 10, 10),
+        snappable = false })
+    check(offT.snappable == false, "snappable = false stored on the target")
+    local plainE = R:Register("SN", "sn_e", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    check(plainE.snappable == true, "element snappable defaults to true")
+    check(R:GetTarget("SN:sn_e").snappable == true, "paired target of a plain element is snappable")
+    local offE = R:Register("SN", "sn_eoff", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { snappable = false }))
+    check(offE.snappable == false, "snappable = false stored on the element")
+    check(R:GetTarget("SN:sn_eoff").snappable == false, "paired target carries snappable = false")
+    R:UnregisterAddon("SN")
+    R.ready = wasReady
+end
+
+-- CanonicalId memo: scoped, nestable, actually memoising, and correct once closed
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("CM", { title = "CM" })
+    local frame = FakeFrame(960, 540, 100, 40)
+    R:Register("CM", "cm_el", elDef(frame, { point = "CENTER", x = 0, y = 0 }))
+    local calls = 0
+    R:RegisterAnchorTarget("CM", "cm_alias", { title = "alias",
+        getFrame = function() calls = calls + 1; return frame end })
+
+    check(R._canonMemo == nil, "no memo before Begin")
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "alias resolves to the owning element")
+    eq(calls, 1, "one getFrame call with no memo")
+
+    R:BeginCanonMemo()
+    check(R._canonMemo ~= nil, "memo open after Begin")
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "alias canonical inside the memo")
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "same value on the second call")
+    eq(calls, 2, "second call inside the memo did not re-walk")
+    eq(R:CanonicalId("CM:cm_el"), "CM:cm_el", "element id is its own canonical inside the memo")
+    eq(R:CanonicalId("CM:cm_missing"), "CM:cm_missing", "unknown target memoises as itself")
+
+    R:BeginCanonMemo()
+    R:EndCanonMemo()
+    check(R._canonMemo ~= nil, "inner End leaves the outer memo open")
+    R:EndCanonMemo()
+    check(R._canonMemo == nil, "outer End closes the memo")
+
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "still correct after EndCanonMemo")
+    eq(calls, 3, "no stale memo: the walk runs again once the scope is closed")
+    R:UnregisterAddon("CM")
+    R.ready = wasReady
+end

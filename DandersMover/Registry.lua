@@ -55,6 +55,8 @@ local function insertTarget(self, addon, key, def, element)
         frame = def.frame, getFrame = def.getFrame, getSize = def.getSize,
         getRect = def.getRect, group = def.group, element = element,
         isRelevant = def.isRelevant,
+        -- false = the target builds no snap zones; the picker and link-drag still reach it.
+        snappable = def.snappable ~= false,
     }
     return self.targets[id]
 end
@@ -69,6 +71,10 @@ local function insertElement(self, addon, key, def)
         secure = def.secure and true or false, getSize = def.getSize,
         getRect = def.getRect, anchorable = def.anchorable ~= false, group = def.group,
         isRelevant = def.isRelevant,
+        -- false = the target builds no snap zones; the picker and link-drag still reach
+        -- it. The paired insertTarget below gets the same def, so the target copy that
+        -- ShowZones reads is stamped there; this copy is for symmetry/introspection.
+        snappable = def.snappable ~= false,
         -- Consumer-side settings entry: the panel offers a Configure button
         -- that calls this (e.g. DF opens its options window on the page).
         openSettings = def.openSettings,
@@ -336,15 +342,44 @@ end
 -- A getFrame anchor target can resolve to a frame that belongs to a registered
 -- element (e.g. "first raid frame" while the roster is one frame). Graph logic
 -- must see through that alias or an element can be anchored to itself.
+--
+-- CanonicalId is O(elements) -- the alias walk calls GetFrame on every registered
+-- element -- and Children calls it once per element, so a single refresh pass can
+-- run it thousands of times. Begin/EndCanonMemo scope a memo around one such pass.
+-- Validity assumption: frames do not change identity inside one synchronous refresh
+-- pass, so an answer computed at the top of the pass is still the answer at the end.
+-- Never leave the memo open across a frame boundary or a consumer callback that can
+-- re-register.
+function R:BeginCanonMemo()
+    self._canonDepth = (self._canonDepth or 0) + 1
+    if self._canonDepth == 1 then self._canonMemo = {} end
+end
+
+function R:EndCanonMemo()
+    local depth = (self._canonDepth or 0) - 1
+    if depth < 0 then depth = 0 end
+    self._canonDepth = depth
+    if depth == 0 then self._canonMemo = nil end
+end
+
 function R:CanonicalId(targetId)
+    local m = self._canonMemo; if m and m[targetId] ~= nil then return m[targetId] end
     local target = self.targets[targetId]
-    if not target then return targetId end
-    if target.element then return target.element.id end
-    local f = self:GetFrame(target)
-    if not f then return targetId end
-    for id, el in pairs(self.elements) do
-        if self:GetFrame(el) == f then return id end
+    if not target then if m then m[targetId] = targetId end return targetId end
+    if target.element then
+        local id = target.element.id
+        if m then m[targetId] = id end
+        return id
     end
+    local f = self:GetFrame(target)
+    if not f then if m then m[targetId] = targetId end return targetId end
+    for id, el in pairs(self.elements) do
+        if self:GetFrame(el) == f then
+            if m then m[targetId] = id end
+            return id
+        end
+    end
+    if m then m[targetId] = targetId end
     return targetId
 end
 
