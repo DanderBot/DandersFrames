@@ -591,6 +591,9 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- Same next-frame re-measure the lib does for its proxies (Session:Unlock).
     C_Timer.After(0, function()
         if Mover:IsUnlocked() then guarded(function() applyPinned(scope) end)() end
+        -- claimScope swapped the live frames for the test pool, so every per-unit slot
+        -- now points at a different frame. Rebuild off the pool.
+        if Bridge.RequestUnitTargetRefresh then Bridge:RequestUnitTargetRefresh() end
     end)
     perfLog(tTotal, "Unlocked callback total")
 end)
@@ -605,6 +608,9 @@ Mover.RegisterCallback(Bridge, "Locked", function()
     releaseScope("raid")
     perfLog(t, "Locked: releaseScope both (test frames down)")
     syncLockButtons()
+    -- The test pool just went away; the per-unit slots have to go back to the live
+    -- header's children. Same guard as the unlock side.
+    if Bridge.RequestUnitTargetRefresh then Bridge:RequestUnitTargetRefresh() end
     -- The release above flipped the scope's lock flag; the permanent handle keys its
     -- visibility off that flag and nothing else re-evaluates it on the lib path.
     -- SetMovable inside is a protected action -- skip in combat; Core.lua's
@@ -656,8 +662,19 @@ end)
 -- ============================================================
 local function refreshGroup() Mover:RefreshAnchorTarget(ADDON_KEY, "group") end
 -- "group" aliases whichever of the two is live, so anything that moves one moves it too.
-local function refreshParty() Mover:RefreshAnchorTarget(ADDON_KEY, "party"); refreshGroup() end
-local function refreshRaid()  Mover:RefreshAnchorTarget(ADDON_KEY, "raid");  refreshGroup() end
+-- The per-unit / per-group targets (Features\MoverTargets.lua) sit INSIDE these rects,
+-- so anything moving a container moves every one of them too. One batched call rather
+-- than one per key. Guarded on SubTargetKeys: MoverTargets is an optional sibling and
+-- this file has to keep working without it.
+local function refreshSubTargets(scope)
+    if Bridge.SubTargetKeys then Mover:RefreshAnchorTargets(ADDON_KEY, Bridge:SubTargetKeys(scope)) end
+end
+local function refreshParty()
+    Mover:RefreshAnchorTarget(ADDON_KEY, "party"); refreshGroup(); refreshSubTargets("party")
+end
+local function refreshRaid()
+    Mover:RefreshAnchorTarget(ADDON_KEY, "raid");  refreshGroup(); refreshSubTargets("raid")
+end
 local function applyBoth()
     Mover:Apply(ADDON_KEY, "party")
     Mover:Apply(ADDON_KEY, "raid")
@@ -729,6 +746,11 @@ local function installHooks()
         C_Timer.After(0.1, function()
             rosterPending = false
             guarded(refreshGroup)()
+            -- The per-unit and per-group slot targets are a function of the roster, so
+            -- they are rebuilt off the same event. Their own debounce collapses the
+            -- burst; guarded on the method so this file never hard-depends on
+            -- Features\MoverTargets.lua.
+            if Bridge.RequestUnitTargetRefresh then Bridge:RequestUnitTargetRefresh() end
         end)
     end)
 end
@@ -744,6 +766,9 @@ function Bridge:Init()
     self.initialised = true
     registerElements()
     refreshAllPinned()
+    -- Per-unit and per-group anchor targets. Optional sibling file, and it registers
+    -- targets only -- nothing above depends on it.
+    if DF.MoverTargets then DF.MoverTargets:Init() end
     installHooks()
     -- Resolve saved anchors once at login. The record carries the anchor block, but its
     -- x/y were solved against last session's target rect. Safe when the target is not up

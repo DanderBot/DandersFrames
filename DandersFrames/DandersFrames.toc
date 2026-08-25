@@ -98,6 +98,9 @@ Frames\Position.lua
 # Frames\Position.lua's position records. It only reads DF at Init() time (called from
 # Core.lua's ADDON_LOADED), so nothing here depends on load order.
 Features\MoverBridge.lua
+# Per-unit and per-group anchor targets. Loads after MoverBridge.lua: it publishes its
+# refresh entry points onto DF.MoverBridge at file scope.
+Features\MoverTargets.lua
 Frames\Pets.lua
 
 # Test Mode
