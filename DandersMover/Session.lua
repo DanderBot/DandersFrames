@@ -656,8 +656,14 @@ end
 
 -- ============================================================
 -- KEYBOARD
--- Esc = lock, arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y = undo/redo.
+-- Esc backs out one layer at a time: a live link gesture, then the selection,
+-- then the session. Arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y =
+-- undo/redo.
 -- Only ever enabled while the unlock frame is shown, which never happens in combat.
+--
+-- Esc IS the deselect now: the unlock overlay no longer takes clicks (it covered
+-- the whole screen, so owning the mouse made the world unclickable for the whole
+-- session), and a click on empty space therefore goes to the game.
 -- ============================================================
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
 
@@ -668,10 +674,15 @@ function Sess:EnableKeyboard(on)
     f:SetScript("OnKeyDown", function(frame, key)
         local handled = false
         if key == "ESCAPE" then
-            -- Esc backs out of the link gesture first: it is the innermost
-            -- thing open, and ending the whole session under it would be a
-            -- surprise.
-            if Sess.linking then Sess:CancelLink() else Sess:Lock() end
+            -- Innermost thing first, one layer per press: the link gesture, then
+            -- the selection (the following panel closes on the Refresh that
+            -- follows), then the session itself. Ending the whole session out
+            -- from under an open gesture or a selected mover would be a
+            -- surprise -- and with the overlay no longer taking clicks, this is
+            -- the only way to deselect.
+            if Sess.linking then Sess:CancelLink()
+            elseif Sess.selected then Sess:Select(nil)
+            else Sess:Lock() end
             handled = true
         elseif ARROWS[key] and NS.db.keyboardNudge and Sess.selected then
             local el = Registry:Get(Sess.selected)

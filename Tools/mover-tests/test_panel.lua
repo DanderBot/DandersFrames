@@ -135,12 +135,17 @@ local proxies = {}
 local unlockFrame = FakeUIFrame(1920, 1080, 0, 0)
 unlockFrame:Show()
 
+-- Every slab repaint the panel asks for. The pin marker lives on the slab, so
+-- "pinning repainted the slabs" is only observable here.
+local highlights = {}
 NS.Proxy = {
     proxies = proxies,
     GetUnlockFrame = function() return unlockFrame end,
     LinkHover = function() return hover end,
     RefreshAll = function() end,
-    Highlight = function() end,
+    -- `or false`: a repaint with nothing selected is still a repaint, and a nil
+    -- would not grow the list.
+    Highlight = function(_, id) highlights[#highlights + 1] = id or false end,
 }
 NS.Session = {
     selected = nil, linking = nil, active = true, suspended = false,
@@ -737,6 +742,78 @@ do
     eq(opened, "P:cfg", "configure: the pinned panel opened ITS element's settings")
     R:Unregister("P", "cfg")
     proxies["P:cfg"] = nil
+end
+
+-- ============================================================
+-- 16. A LINK STARTED FROM A PINNED PANEL links FROM that panel's element.
+-- The handle closes over the panel's own binding, so a pinned panel's chain
+-- reaches out from ITS mover even though the selection is somewhere else --
+-- which is the only way to link two movers neither of which is selected.
+-- ============================================================
+do
+    local a = refresh("P:free")
+    a:Pin()
+    refresh("P:host")
+    eq(Sess.selected, "P:host", "pinned link: the selection has moved on")
+    wipe(calls)
+    a.ui.targetRow.handle:GetScript("OnMouseDown")(a.ui.targetRow.handle, "LeftButton")
+    eq(calls[1][1], "begin", "pinned link: the handle starts a link")
+    eq(calls[1][2], "P:free", "pinned link: FROM the pinned panel's element, not the selection")
+    hover = "P:spare"
+    a.ui.targetRow.handle:GetScript("OnMouseUp")(a.ui.targetRow.handle, "LeftButton")
+    check(calls[2][1] == "end" and calls[2][2] == "P:spare",
+        "pinned link: the release lands on whatever the cursor was over")
+    hover = nil
+    Sess.linking = nil
+end
+
+reset()
+
+-- ============================================================
+-- 17. A DRAG HIDES ONLY THE FOLLOWER
+-- The following panel is docked to the slab that is about to move; a pinned one
+-- sits at its own screen position and has no reason to go anywhere. Hiding the
+-- lot would flash every pinned panel off and on for every drag.
+-- ============================================================
+do
+    local pinned = refresh("P:free")
+    pinned:Pin()
+    local fo = refresh("P:child")
+    check(pinned.frame:IsShown() and fo.frame:IsShown(), "drag: both panels are up going in")
+    Pn:HideFollowing()
+    check(not fo.frame:IsShown(), "drag: the follower goes down with the slab it is docked to")
+    check(pinned.frame:IsShown(), "drag: the pinned panel stays on screen")
+    -- Suspend and teardown still take everything.
+    Pn:Hide()
+    check(not pinned.frame:IsShown(), "suspend: Hide still takes every panel down")
+end
+
+reset()
+
+-- ============================================================
+-- 18. THE PIN MARKER'S SOURCE
+-- The slab asks the panel module whether anything holds its element pinned, and
+-- a pin-state change has to repaint: neither pinning nor crossing goes through
+-- a selection change, which is the only other thing that repaints slabs.
+-- ============================================================
+do
+    local po = refresh("P:free")
+    check(not Pn:IsElementPinned("P:free"), "marker: a FOLLOWING panel is not a pin")
+    local before = #highlights
+    po:Pin()
+    check(Pn:IsElementPinned("P:free"), "marker: pinning makes the element read as pinned")
+    check(#highlights > before, "marker: ...and repaints the slabs so the marker appears")
+    check(not Pn:IsElementPinned("P:host"), "marker: only the element the panel is bound to")
+    check(not Pn:IsElementPinned(nil), "marker: no element, no pin")
+
+    -- Move the selection on, so what is crossed below is a purely pinned panel
+    -- and not one the mover still counts as its follower.
+    refresh("P:host")
+    check(Pn:IsElementPinned("P:free"), "marker: the pin survives a selection change")
+    before = #highlights
+    po.closeBtn._opts.onClick()
+    check(not Pn:IsElementPinned("P:free"), "marker: crossing the panel drops the pin")
+    check(#highlights > before, "marker: ...and repaints so the marker goes")
 end
 
 reset()

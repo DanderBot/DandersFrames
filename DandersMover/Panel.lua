@@ -869,6 +869,20 @@ function Pn:OnClose(po, reason)
     if reason == "cross" and wasFollowing and Sess.selected then
         Sess:Select(nil)
     end
+    -- A closed pinned panel's slab must drop its pin marker; Highlight repaints
+    -- every slab from the current selection, which is what the marker reads off.
+    Proxy:Highlight(Sess.selected)
+end
+
+-- Does any live panel hold this element pinned open? The slab's resting look
+-- asks per repaint (Proxy's applyLook), which is a walk of a handful of live
+-- panels -- there is no index to keep honest and the list is tiny.
+function Pn:IsElementPinned(id)
+    if not id then return false end
+    for _, po in ipairs(self.live) do
+        if not po.closed and po.elId == id and po:IsPinned() then return true end
+    end
+    return false
 end
 
 function Pn:Create()
@@ -883,6 +897,10 @@ function Pn:Create()
         -- what it is docked to (it is docked to nothing) and not the selection.
         tetherSource = function(p) return p.elId and Proxy.proxies[p.elId] or nil end,
         onClose = function(p, reason) Pn:OnClose(p, reason) end,
+        -- Pinning changes what a slab looks like at rest (the pin marker), and
+        -- nothing else repaints on it: auto-pin fires from a control the user
+        -- touched, not from a selection change.
+        onPin = function() Proxy:Highlight(Sess.selected) end,
     })
     local found = false
     for _, other in ipairs(self.live) do if other == po then found = true end end
@@ -890,16 +908,26 @@ function Pn:Create()
     return po
 end
 
--- Instant hide of every live panel, animations cancelled: combat suspend,
--- session teardown, and the moment a drag starts (the slab a docked panel hangs
--- off is about to move). The instances survive -- the next Refresh shows them
--- again -- because none of those three is the user closing anything.
+-- Instant hide of one panel, animations cancelled.
+local function hideInstance(po)
+    if not po then return end
+    NS.Fx.Cancel(po.frame)
+    po.frame:Hide()
+    if po.beam then NS.Fx.Cancel(po.beam); po.beam:Hide() end
+end
+
+-- Instant hide of every live panel: combat suspend and session teardown, both of
+-- which take the whole session off screen. The instances survive -- the next
+-- Refresh shows them again -- because neither is the user closing anything.
 function Pn:Hide()
-    for _, po in ipairs(self.live) do
-        NS.Fx.Cancel(po.frame)
-        po.frame:Hide()
-        if po.beam then NS.Fx.Cancel(po.beam); po.beam:Hide() end
-    end
+    for _, po in ipairs(self.live) do hideInstance(po) end
+end
+
+-- Just the follower: a drag is starting, and the following panel is docked to
+-- the slab that is about to move. Pinned panels sit at their own screen
+-- positions and have no reason to go anywhere, so they stay up for the drag.
+function Pn:HideFollowing()
+    hideInstance(self.following)
 end
 
 -- Session over: the panels go with it, pinned ones included. The unpinned one
@@ -910,9 +938,7 @@ function Pn:CloseAll()
     self.following = nil
     for _, po in ipairs(list) do
         po:Close("api")
-        NS.Fx.Cancel(po.frame)
-        po.frame:Hide()
-        if po.beam then NS.Fx.Cancel(po.beam); po.beam:Hide() end
+        hideInstance(po)
     end
     wipe(self.live)
 end
