@@ -16,7 +16,7 @@ local addonName, NS = ...
 -- Canonical source lives at <repo>/DandersUI; never edit the copies under
 -- */Libs/.
 -- ============================================================
-local MAJOR, MINOR = "DandersUI-1.0", 5
+local MAJOR, MINOR = "DandersUI-1.0", 6
 local UI = LibStub:NewLibrary(MAJOR, MINOR)
 if not UI then return end
 -- The handshake the other four files read. `NS` is the HOST addon's private
