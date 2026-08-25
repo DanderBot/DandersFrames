@@ -2364,10 +2364,12 @@ end
 -- ============================================================
 -- DANDERSMOVER ACCESSORS (mode-explicit)
 -- ============================================================
--- The lib registers one element per set per MODE (party.pinnedN / raid.pinnedN), so
--- every accessor here names its mode instead of asking "what is on screen". What is on
+-- The lib registers one element per set per MODE (party.pinned.<uid> / raid.pinned.<uid>),
+-- so every accessor here names its mode instead of asking "what is on screen". What is on
 -- screen for a mode: its test container while that mode is being previewed, its live
 -- container while that mode is the live group, nil otherwise.
+-- ⚠ The uid is the lib's KEY only (see EnsureSetUid). Every accessor below still takes
+-- the set's INDEX -- nothing in this file is looked up by uid.
 
 function PinnedFrames:GetSetForMode(setIndex, isRaid)
     return GetSetDBForMode(setIndex, isRaid and true or false)
@@ -2836,6 +2838,42 @@ local function ModePinnedDB(mode)
     return md and md.pinnedFrames
 end
 
+-- The set's STABLE id, allocated on first ask and never reused. The INDEX stays the
+-- addon's own handle everywhere (frame names, runtime arrays, pinned.N.<setting>
+-- overrides, the options tab, the Wago pinnedN alias) -- this exists for ONE reader:
+-- a DandersMover element key. RemoveSet compacts the array, so an index-keyed element
+-- silently re-points at a different set; a uid does not move.
+--
+-- Stamp-on-read, not stamp-on-create: sets seeded by Config's defaults or written by
+-- an import never went through AddSet, and the login migration only sees profiles that
+-- exist at the time it runs. `mode` is a mode string ("party"/"raid") like AddSet /
+-- RemoveSet / ModePinnedDB, and also accepts the DandersMover accessors' isRaid boolean.
+function PinnedFrames:EnsureSetUid(setIndex, mode)
+    if type(mode) == "boolean" then mode = mode and "raid" or "party" end
+    mode = mode or GetActualMode()
+    local pf = ModePinnedDB(mode)
+    local set = pf and pf.sets and pf.sets[setIndex]
+    if not set then return nil end
+    if set.uid then return set.uid end
+
+    local uid = pf.nextUid
+    if not uid then
+        -- No counter yet (a profile that dodged the migration -- an import, or a
+        -- downgrade/upgrade round trip). Derive a floor ABOVE both the highest uid in
+        -- use and the array length, so a later stamp-on-read of an unstamped set
+        -- cannot collide with one already handed out.
+        local floor = 0
+        for _, s in ipairs(pf.sets) do
+            if type(s.uid) == "number" and s.uid > floor then floor = s.uid end
+        end
+        if #pf.sets > floor then floor = #pf.sets end
+        uid = floor + 1
+    end
+    set.uid = uid
+    pf.nextUid = uid + 1
+    return uid
+end
+
 -- Add a new pinned set to ONE mode. Party and raid are INDEPENDENT — you can run,
 -- say, 4 raid sets and 1 party set. `mode` defaults to the active mode; the editor
 -- passes its selected mode, so adding to the inactive mode is a pure DB change that
@@ -2848,6 +2886,9 @@ function PinnedFrames:AddSet(mode)
     if #pf.sets >= self.MAX_SETS then return nil end
     local newIndex = #pf.sets + 1
     pf.sets[newIndex] = MakeDefaultSet(newIndex)
+    -- Stamp the uid now: the uid survives RemoveSet's compaction, the index does not,
+    -- so it is what DandersMover keys this set's element by.
+    self:EnsureSetUid(newIndex, mode)
     -- Only (re)build live frames when editing the ACTIVE mode; the inactive mode's
     -- frames are rebuilt by Reinitialize the next time you enter that mode.
     -- ⚠ "Inactive" is about the real group, not about what is on SCREEN: a test

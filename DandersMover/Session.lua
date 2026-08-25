@@ -138,6 +138,12 @@ function Sess:Finish(mode)
             if el then NS:Notify(el, "discard") end
         end
     end
+    -- A link gesture in flight owns an OnUpdate on the unlock frame; the
+    -- session must never end with that still running.
+    if self.linking then
+        self.linking = nil
+        Proxy:EndLinkVisual()
+    end
     self:EnableKeyboard(false)
     Proxy:DismissAll()            -- fade out, then destroy (combat suspend stays instant)
     Grid:Hide()
@@ -190,6 +196,10 @@ end)
 
 function Sess:Suspend()
     if not self.active or self.suspended then return end
+    -- A link gesture cannot survive combat: the unlock frame (and its
+    -- OnUpdate) hides, and a stale `linking` flag would keep the ClickSelect
+    -- guard and the glyph dead after Resume.
+    if self.linking then self:CancelLink() end
     self.suspended = true
     Proxy:GetUnlockFrame():Hide()
     Grid:Hide()
@@ -293,6 +303,18 @@ function Sess:SetAnchorPoint(el, point)
     commit(el, before, L["Anchor point %s"])
 end
 
+-- Re-anchoring to a new primary keeps whatever backup was already set: the
+-- element's fall-back plan is a separate choice from where it normally sits.
+-- Dropped only when the new primary IS the backup, which would make the two
+-- the same link.
+local function carryFallback(pos, before, targetId)
+    local fb = before.anchor and before.anchor.fallback
+    if not fb or fb.target == targetId then return end
+    pos.anchor.fallback = { target = fb.target, mode = fb.mode, edge = fb.edge, align = fb.align,
+                            point = fb.point, relPoint = fb.relPoint,
+                            offsetX = fb.offsetX, offsetY = fb.offsetY }
+end
+
 function Sess:Anchor(el, targetId, edge, align)
     if Registry:WouldCreateCycle(el.id, targetId) then
         NS:Print(L["Anchoring would create a loop."])
@@ -301,11 +323,94 @@ function Sess:Anchor(el, targetId, edge, align)
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     pos.anchor = { target = targetId, edge = edge, align = align, offsetX = 0, offsetY = 0 }
+    carryFallback(pos, before, targetId)
     pos.point = "CENTER"
     NS:ResolveElement(el)
     apply(el, "anchor")
     commit(el, before, L["Anchor %s"])
     return true
+end
+
+-- Anchor to a target WITHOUT moving: the picker's verb. Solver.AnchorInPlace
+-- derives the spec that reproduces where the element already sits, so choosing
+-- a parent from the panel is a change of relationship, not of position.
+function Sess:AnchorInPlace(el, targetId)
+    if Registry:WouldCreateCycle(el.id, targetId) then
+        NS:Print(L["Anchoring would create a loop."])
+        return
+    end
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    local childRect = Registry:GetRect(el)
+    if not childRect then
+        local cx, cy = visualCenter(el, pos)
+        local w, h = sizeOf(el)
+        childRect = { x = cx, y = cy, w = w, h = h }
+    end
+    local target = Registry:GetTarget(targetId)
+    local targetRect = target and Registry:GetRect(target) or nil
+    if not targetRect then
+        -- Anchoring in place is impossible with no rect: there is no geometry to
+        -- measure a seat against, so nothing can be reproduced. The element HOLDS
+        -- where it is (ResolveElement finds no available anchor) and takes the
+        -- centre-on-centre spec -- the one case where picking a target moves the
+        -- element later, once that target finally appears.
+        pos.anchor = { target = targetId, mode = "point", point = "CENTER", relPoint = "CENTER",
+                       offsetX = 0, offsetY = 0 }
+    else
+        local spec = Solver.AnchorInPlace(childRect, targetRect, Solver.SPACING)
+        pos.anchor = { target = targetId, mode = spec.mode, edge = spec.edge, align = spec.align,
+                       point = spec.point, relPoint = spec.relPoint,
+                       offsetX = spec.offsetX, offsetY = spec.offsetY }
+    end
+    carryFallback(pos, before, targetId)
+    pos.point = "CENTER"
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+end
+
+-- Edit the live spec of an existing outside-mode anchor (the panel's edge and
+-- align dropdowns). Point mode has no edge/align to set, so it is left alone.
+function Sess:SetAnchorSpec(el, changes)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor or pos.anchor.mode == "point" then return end
+    local before = NS.CopyPos(pos)
+    for k, v in pairs(changes) do pos.anchor[k] = v end
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+end
+
+-- ============================================================
+-- LINK DRAG
+-- Press the panel's link glyph and drag a line onto another element: the
+-- release anchors IN PLACE, so the relationship changes and nothing moves.
+-- The gesture owns no record state of its own -- Sess.linking is just the id
+-- of the element being linked FROM, and the commit is AnchorInPlace's (one
+-- undo entry, same as picking the target from the dropdown). Esc and
+-- right-click cancel; the visual half lives in Proxy.
+-- ============================================================
+function Sess:BeginLink(el)
+    if not self.active or self.suspended or self.linking then return end
+    self.linking = { id = el.id }
+    Proxy:BeginLinkVisual(el)
+end
+
+function Sess:EndLink(targetId)
+    if not self.linking then return end
+    -- Re-read the element: a link can outlive the record it started from
+    -- (RegistryChanged mid-gesture), and the visual must come down either way.
+    local el = Registry:Get(self.linking.id)
+    self.linking = nil
+    Proxy:EndLinkVisual()
+    if el and targetId then self:AnchorInPlace(el, targetId) end
+end
+
+function Sess:CancelLink()
+    if not self.linking then return end
+    self.linking = nil
+    Proxy:EndLinkVisual()
 end
 
 function Sess:Detach(el)
@@ -315,6 +420,40 @@ function Sess:Detach(el)
     pos.anchor = nil
     apply(el, "detach")
     commit(el, before, L["Detach %s"])
+end
+
+-- The backup anchor: where the element goes when its primary target is not on
+-- screen. It takes the primary's whole spec with only the target swapped --
+-- the same seat on a different parent -- so the element keeps its shape of
+-- attachment either way.
+function Sess:SetFallback(el, targetId)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor then return end
+    -- Same as the primary is a no-op, not a mistake worth a message.
+    if targetId == pos.anchor.target then return end
+    if Registry:WouldCreateCycle(el.id, targetId) then
+        NS:Print(L["Anchoring would create a loop."])
+        return
+    end
+    local before = NS.CopyPos(pos)
+    local a = pos.anchor
+    a.fallback = { target = targetId, mode = a.mode, edge = a.edge, align = a.align,
+                   point = a.point, relPoint = a.relPoint,
+                   offsetX = a.offsetX, offsetY = a.offsetY }
+    -- Only actually moves the element if the primary is already unavailable,
+    -- which is exactly when the backup is meant to take over.
+    NS:ResolveElement(el)
+    apply(el, "fallback")
+    commit(el, before, L["Backup anchor %s"])
+end
+
+function Sess:ClearFallback(el)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor or not pos.anchor.fallback then return end
+    local before = NS.CopyPos(pos)
+    pos.anchor.fallback = nil
+    apply(el, "fallback")
+    commit(el, before, L["Clear backup %s"])
 end
 
 function Sess:Center(el)
@@ -350,6 +489,10 @@ function Sess:CopyToTwin(el)
     local before = NS.CopyPos(dst)
     NS.CopyPos(Registry:GetPos(el), dst)
     if dst.anchor and Registry:WouldCreateCycle(twin.id, dst.anchor.target) then dst.anchor = nil end
+    -- The backup is dropped on its own if only IT would loop; the primary stays.
+    if dst.anchor and dst.anchor.fallback and Registry:WouldCreateCycle(twin.id, dst.anchor.fallback.target) then
+        dst.anchor.fallback = nil
+    end
     if dst.anchor then NS:ResolveElement(twin) end
     apply(twin, "copy")
     commit(twin, before, L["Copy to %s"])
@@ -458,6 +601,7 @@ function Sess:EndDrag(el, cx, cy, zone)
     if zone and Registry:WouldCreateCycle(el.id, zone.target) then zone = nil end
     if zone then
         pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
+        carryFallback(pos, before, zone.target)
         pos.point = "CENTER"
         NS:ResolveElement(el)
     elseif before.anchor and not (tether and tether.snapped) then
@@ -473,6 +617,12 @@ function Sess:EndDrag(el, cx, cy, zone)
     end
     apply(el, zone and "anchor" or "drag")
     local label = zone and L["Anchor %s"] or (before.anchor and L["Detach %s"] or L["Move %s"])
+    -- Pulled free of a record that also named a backup: the backup went with the
+    -- primary, and that is worth saying out loud -- it is a link the user set up
+    -- deliberately and would otherwise notice only much later.
+    if not zone and before.anchor and before.anchor.fallback then
+        Proxy:ShowToast(L["Detached — backup anchor cleared"])
+    end
     commit(el, before, label)
     self:Select(el.id)
 end
@@ -491,7 +641,11 @@ function Sess:EnableKeyboard(on)
     f:SetScript("OnKeyDown", function(frame, key)
         local handled = false
         if key == "ESCAPE" then
-            Sess:Lock(); handled = true
+            -- Esc backs out of the link gesture first: it is the innermost
+            -- thing open, and ending the whole session under it would be a
+            -- surprise.
+            if Sess.linking then Sess:CancelLink() else Sess:Lock() end
+            handled = true
         elseif ARROWS[key] and NS.db.keyboardNudge and Sess.selected then
             local el = Registry:Get(Sess.selected)
             if el then

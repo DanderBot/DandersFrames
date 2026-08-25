@@ -261,5 +261,162 @@ check(NEW.FoldPendingRef(pos, 0, 0) is False and pos["pendingRef"] == "TOPLEFT" 
 check(NEW.FoldPendingRef(pos, None, None) is False and pos["pendingRef"] == "TOPLEFT", "FoldPendingRef holds on nil")
 check(NEW.FoldPendingRef(pos, 1920, 1080) is True and pos["pendingRef"] is None and pos["x"] == -860 and pos["y"] == 490, "FoldPendingRef folds TOPLEFT")
 
-print(f"pinned migration: {nsets} real set placements checked, {fails} failed")
+# ============================================================
+# PHASE D -- STABLE PINNED-SET UIDS
+# ============================================================
+# Real code again, from two files:
+#   * PinnedFrames.EnsureSetUid (+ its ModePinnedDB) -- stamp-on-read allocation
+#   * Core.lua's MigratePinnedAnchorKeys, and the _pinnedUidsV1 block itself, sliced out
+#     of DF:MigrateContainerPositionRecords's profile loop and wrapped in a function so
+#     it can be called with a profile. `DF` is the block's only other free name.
+
+CORE_PATH = HERE.parents[1] / "DandersFrames" / "Core.lua"
+core_src = CORE_PATH.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+def core_grab(start, end="\nend\n"):
+    i = core_src.index(start)
+    return core_src[i:core_src.index(end, i) + len(end)]
+
+BLOCK_START = 'if type(profile) == "table" and not profile._pinnedUidsV1 then'
+BLOCK_END = "            profile._pinnedUidsV1 = true\n        end\n"
+_i = core_src.index(BLOCK_START)
+UIDS_BLOCK = core_src[_i:core_src.index(BLOCK_END, _i) + len(BLOCK_END)]
+
+CORE = lua.execute("\n".join([
+    core_grab("local function MigratePinnedAnchorKeys(pos, hasSet)"),
+    "local function RunPinnedUidsV1(profile, DF)",
+    UIDS_BLOCK,
+    "end",
+    "return { Rewrite = MigratePinnedAnchorKeys, Run = RunPinnedUidsV1 }",
+]))
+
+# EnsureSetUid reaches its DB through ModePinnedDB -> DF:GetDB(mode); the harness hands
+# it whichever profile the case under test is using.
+UID = lua.execute("\n".join([
+    "local PinnedFrames = {}",
+    "local PROFILE",
+    "local DF = {}",
+    "function DF:GetDB(mode) return PROFILE and PROFILE[mode] end",
+    'local function GetActualMode() return "party" end',
+    grab("local function ModePinnedDB(mode)"),
+    grab("function PinnedFrames:EnsureSetUid(setIndex, mode)"),
+    "function PinnedFrames.UseProfile(p) PROFILE = p end",
+    "return PinnedFrames",
+]))
+
+uid_checks = 0
+def ucheck(cond, msg):
+    global uid_checks
+    uid_checks += 1
+    check(cond, msg)
+
+def mk_profile(party_sets, raid_sets, **extra):
+    """A profile carrying only what the uid migration reads."""
+    prof = {"party": {"pinnedFrames": {"sets": {i + 1: s for i, s in enumerate(party_sets)}}},
+            "raid":  {"pinnedFrames": {"sets": {i + 1: s for i, s in enumerate(raid_sets)}}}}
+    for mode, keys in extra.items():
+        prof[mode].update(keys)
+    return lua.table_from(prof, recursive=True)
+
+NO_DF = lua.table_from({}, recursive=True)
+
+def anchor(target, fallback=None):
+    a = {"target": target}
+    if fallback:
+        a["fallback"] = {"target": fallback}
+    return {"point": "CENTER", "x": 0, "y": 0, "anchor": a}
+
+# ---- 1. backfill stamps uids in array order and sets nextUid = max + 1
+prof = mk_profile([{"name": "a"}, {"name": "b"}, {"name": "c"}], [{"name": "r1"}, {"name": "r2"}])
+CORE.Run(prof, NO_DF)
+for mode, n in (("party", 3), ("raid", 2)):
+    pfr = prof[mode]["pinnedFrames"]
+    for i in range(1, n + 1):
+        ucheck(pfr["sets"][i]["uid"] == i, f"backfill {mode} set{i}: uid {pfr['sets'][i]['uid']} != {i}")
+    ucheck(pfr["nextUid"] == n + 1, f"backfill {mode}: nextUid {pfr['nextUid']} != {n + 1}")
+ucheck(prof["_pinnedUidsV1"] is True, "backfill stamps _pinnedUidsV1")
+
+# ---- 2. the flag is honoured: a second run does not touch a set added since
+prof["party"]["pinnedFrames"]["sets"][4] = lua.table_from({"name": "d"}, recursive=True)
+CORE.Run(prof, NO_DF)
+ucheck(prof["party"]["pinnedFrames"]["sets"][4]["uid"] is None, "second run must not stamp (flag honoured)")
+ucheck(prof["party"]["pinnedFrames"]["nextUid"] == 4, "second run must not move nextUid")
+
+# ---- 3. nextUid is only ever RAISED, never lowered
+prof = mk_profile([{"uid": 5}, {"uid": 7}], [{"uid": 2}])
+prof["party"]["pinnedFrames"]["nextUid"] = 3      # stale/too low
+prof["raid"]["pinnedFrames"]["nextUid"] = 100     # already past the array
+CORE.Run(prof, NO_DF)
+ucheck(prof["party"]["pinnedFrames"]["nextUid"] == 8, f"stale nextUid raised to 8, got {prof['party']['pinnedFrames']['nextUid']}")
+ucheck(prof["raid"]["pinnedFrames"]["nextUid"] == 100, "a nextUid past the array is left alone")
+ucheck(prof["party"]["pinnedFrames"]["sets"][1]["uid"] == 5, "an existing uid is not renumbered")
+
+# ---- 4. EnsureSetUid: stamp-on-read allocates from nextUid and bumps it
+prof = mk_profile([{"name": "a"}, {"name": "b"}], [])
+prof["party"]["pinnedFrames"]["nextUid"] = 9
+UID.UseProfile(prof)
+ucheck(UID.EnsureSetUid(UID, 1, "party") == 9, "EnsureSetUid takes nextUid")
+ucheck(prof["party"]["pinnedFrames"]["sets"][1]["uid"] == 9, "EnsureSetUid stamps the set")
+ucheck(prof["party"]["pinnedFrames"]["nextUid"] == 10, "EnsureSetUid bumps nextUid")
+ucheck(UID.EnsureSetUid(UID, 1, "party") == 9, "EnsureSetUid is idempotent on a stamped set")
+ucheck(prof["party"]["pinnedFrames"]["nextUid"] == 10, "a re-read does not bump nextUid")
+ucheck(UID.EnsureSetUid(UID, 2, "party") == 10, "the next set takes the bumped counter")
+ucheck(UID.EnsureSetUid(UID, 7, "party") is None, "a set that does not exist gets no uid")
+ucheck(UID.EnsureSetUid(UID, 1, False) == 9, "the isRaid boolean is accepted as the mode")
+
+# ---- 5. EnsureSetUid derives a floor when nextUid is missing (import / round trip)
+prof = mk_profile([{"uid": 4}, {"name": "b"}, {"name": "c"}], [])
+UID.UseProfile(prof)
+ucheck(UID.EnsureSetUid(UID, 2, "party") == 5, "floor = max uid in use + 1")
+ucheck(prof["party"]["pinnedFrames"]["nextUid"] == 6, "the derived floor seeds nextUid")
+prof = mk_profile([{"name": "a"}, {"name": "b"}, {"name": "c"}], [])
+UID.UseProfile(prof)
+ucheck(UID.EnsureSetUid(UID, 1, "party") == 4, "floor is at least the array length + 1")
+ucheck(UID.EnsureSetUid(UID, 2, "party") == 5, "a later stamp cannot collide with the first")
+
+# ---- 6. the record-string rewrite
+prof = mk_profile(
+    [{"name": "a"}, {"name": "b"}, {"position": anchor("DandersFrames:party.pinned1")}],
+    [{"name": "r1"}],
+    party={"position": anchor("DandersFrames:party.pinned3", "DandersFrames:raid.pinned1"),
+           "personalTargetedPosition": anchor("DandersFrames:party.pinned4"),   # set 4 does not exist
+           "targetedListPosition": anchor("DandersFrames:party")},
+    raid={"position": anchor("SomeOtherAddon:party.pinned1")},
+)
+CORE.Run(prof, NO_DF)
+ucheck(prof["party"]["position"]["anchor"]["target"] == "DandersFrames:party.pinned.3",
+       "anchor.target rewritten to the uid format")
+ucheck(prof["party"]["position"]["anchor"]["fallback"]["target"] == "DandersFrames:raid.pinned.1",
+       "anchor.fallback.target rewritten to the uid format")
+ucheck(prof["party"]["personalTargetedPosition"]["anchor"]["target"] == "DandersFrames:party.pinned4",
+       "a string naming a set that does not exist is left as-is")
+ucheck(prof["party"]["targetedListPosition"]["anchor"]["target"] == "DandersFrames:party",
+       "a non-pinned DF key is left as-is")
+ucheck(prof["raid"]["position"]["anchor"]["target"] == "SomeOtherAddon:party.pinned1",
+       "another addon's key is left as-is")
+ucheck(prof["party"]["pinnedFrames"]["sets"][3]["position"]["anchor"]["target"] == "DandersFrames:party.pinned.1",
+       "a pinned set's OWN record is swept")
+
+# ---- 7. the raid auto-layout overrides are swept through DF.ForEachRaidLayoutOverride
+prof = mk_profile([{"name": "a"}, {"name": "b"}], [{"name": "r1"}])
+layout = lua.table_from({"overrides": {
+    "position": anchor("DandersFrames:party.pinned2"),
+    "targetedListPosition": anchor("DandersFrames:raid.pinned1"),
+}}, recursive=True)
+DF_STUB = lua.table()
+DF_STUB.ForEachRaidLayoutOverride = lua.eval("function(layouts) return function(profile, fn) fn(layouts) end end")(layout)
+CORE.Run(prof, DF_STUB)
+ucheck(layout["overrides"]["position"]["anchor"]["target"] == "DandersFrames:party.pinned.2",
+       "a layout override's record is swept")
+ucheck(layout["overrides"]["targetedListPosition"]["anchor"]["target"] == "DandersFrames:raid.pinned.1",
+       "every override record field is swept")
+
+# ---- 8. the rewrite helper on its own: a record with no anchor at all is untouched
+plain = lua.table_from({"point": "CENTER", "x": 1, "y": 2}, recursive=True)
+CORE.Rewrite(plain, lua.eval("function() return true end"))
+ucheck(plain["x"] == 1 and plain["anchor"] is None, "an anchorless record survives the rewrite")
+CORE.Rewrite(None, lua.eval("function() return true end"))
+ucheck(True, "the rewrite tolerates a nil record")
+
+print(f"pinned migration: {nsets} real set placements checked, {uid_checks} uid/rewrite checks, {fails} failed")
 sys.exit(1 if fails else 0)

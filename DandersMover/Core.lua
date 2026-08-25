@@ -22,7 +22,7 @@ NS.UI = LibStub("DandersUI-1.0"):NewHost("DandersMover", {
 NS.UI:SetAccent(0.18, 0.612, 0.792)   -- the mover's own blue, from the old Theme.C.accent
 
 local Registry, Solver = NS.Registry, NS.Solver
-local pairs, ipairs, type, xpcall, geterrorhandler = pairs, ipairs, type, xpcall, geterrorhandler
+local pairs, ipairs, type, pcall, xpcall, geterrorhandler = pairs, ipairs, type, pcall, xpcall, geterrorhandler
 local InCombatLockdown, CreateFrame, UIParent = InCombatLockdown, CreateFrame, UIParent
 local tinsert, wipe, strsplit, strlower = table.insert, wipe, strsplit, string.lower
 
@@ -70,6 +70,13 @@ function NS.CopyPos(src, dst)
                        edge = src.anchor.edge, align = src.anchor.align,
                        point = src.anchor.point, relPoint = src.anchor.relPoint,
                        offsetX = src.anchor.offsetX, offsetY = src.anchor.offsetY }
+        local fb = src.anchor.fallback
+        if fb then
+            dst.anchor.fallback = { target = fb.target, mode = fb.mode,
+                                    edge = fb.edge, align = fb.align,
+                                    point = fb.point, relPoint = fb.relPoint,
+                                    offsetX = fb.offsetX, offsetY = fb.offsetY }
+        end
     end
     return dst
 end
@@ -114,13 +121,14 @@ function NS:ParentOf(id) return Registry:ParentId(id) end
 -- Returns true when x/y changed. Missing/zero-size target: hold (no change).
 function NS:ResolveElement(el)
     local pos = Registry:GetPos(el)
-    local a = pos.anchor
+    if not pos.anchor then return false end
+    -- Primary, backup, or neither. Neither means every anchor this record names
+    -- is unavailable (hidden, or a getRect that reports nothing on screen), so
+    -- hold the last solved position rather than snapping to a stale rect.
+    local a = Registry:ActiveAnchor(el)
     if not a then return false end
     local target = Registry:GetTarget(a.target)
     if not target then return false end
-    -- Unavailable target (hidden, or a getRect that reports nothing on screen):
-    -- hold the last solved position rather than snapping to a stale rect.
-    if not Registry:IsTargetAvailable(target) then return false end
     local rect = Registry:GetRect(target)
     local w, h = Registry:GetSize(el)
     if not rect or not w then return false end
@@ -131,16 +139,41 @@ function NS:ResolveElement(el)
     return changed
 end
 
-function NS:ReapplyDescendants(targetId, reason)
-    local list = Registry:Descendants(targetId)
-    if #list == 0 then return end
-    local ids = {}
-    for _, el in ipairs(list) do tinsert(ids, el.id) end
+-- The body of ReapplyDescendantsMany, split out so the canon memo around it can be
+-- closed on an error path as well as the normal one.
+local function reapplyMany(targetIds, reason)
+    local ids, seen = {}, {}
+    for _, targetId in ipairs(targetIds) do
+        for _, el in ipairs(Registry:Descendants(targetId)) do
+            if not seen[el.id] then
+                seen[el.id] = true
+                tinsert(ids, el.id)
+            end
+        end
+    end
+    if #ids == 0 then return end
     local order = Solver.ResolutionOrder(ids, function(id) return NS:ParentOf(id) end)
     for _, id in ipairs(order) do
         local el = Registry:Get(id)
         if el and NS:ResolveElement(el) then NS:Notify(el, reason or "parent") end
     end
+end
+
+-- Several targets moved at once (a header re-layout that shifts every sub-target):
+-- one union descendant set, ONE resolution order over it, one resolve/notify pass,
+-- so a shared descendant is solved once rather than once per target.
+function NS:ReapplyDescendantsMany(targetIds, reason)
+    -- The memo is only valid for the length of this synchronous pass, so it has to
+    -- be closed however the pass ends. Errors are reported through the usual handler
+    -- rather than swallowed.
+    Registry:BeginCanonMemo()
+    local ok, err = pcall(reapplyMany, targetIds, reason)
+    Registry:EndCanonMemo()
+    if not ok then geterrorhandler()(err) end
+end
+
+function NS:ReapplyDescendants(targetId, reason)
+    NS:ReapplyDescendantsMany({ targetId }, reason)
 end
 
 -- ============================================================
@@ -184,8 +217,28 @@ function Lib:UnregisterAddon(addon)
     registryChanged(addon)
 end
 
+-- Renames an element's key in place: the user toggle, the registry entry and every
+-- registered or queued record's anchor target move with it; the position does not.
+-- Ignored while unlocked -- a live session is keyed by the ids it opened with.
+function Lib:RenameKey(addon, old, new)
+    if Lib:IsUnlocked() then
+        NS:Debug("RenameKey ignored while unlocked: " .. tostring(old))
+        return false
+    end
+    local ok = Registry:RenameKey(addon, old, new)
+    if ok then registryChanged(addon) end
+    return ok
+end
+
 function Lib:RefreshAnchorTarget(addon, key)
     NS:ReapplyDescendants(Registry.Id(addon, key), "parent")
+end
+
+-- Batched RefreshAnchorTarget -- one union descendant set, one resolution order, one pass.
+function Lib:RefreshAnchorTargets(addon, keys)
+    local ids = {}
+    for _, key in ipairs(keys) do tinsert(ids, Registry.Id(addon, key)) end
+    NS:ReapplyDescendantsMany(ids, "parent")
 end
 
 function Lib:Apply(addon, key)

@@ -303,3 +303,129 @@ do
     eq(x, 50, "point mode relPoint x"); eq(y, 20, "point mode relPoint y")
     check(S.AnchorPointOnTarget({ edge = "left" }, nil) == nil, "nil target -> nil")
 end
+
+-- anchor in place: the spec that reproduces where the child already is.
+-- Round-trip invariant used by every case below: the returned spec, fed back
+-- through Resolve, must land on the child's current centre EXACTLY.
+local function roundTrip(spec, child, target, spacing, tag)
+    local rx, ry = S.Resolve(spec, child.w, child.h, target, spacing)
+    eq(rx, child.x, tag .. ": round-trip x")
+    eq(ry, child.y, tag .. ": round-trip y")
+    check(rx == child.x and ry == child.y, tag .. ": round-trip is exact")
+end
+
+-- clear on one axis only: to the right, still overlapping vertically
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    local child = { x = 100, y = 5, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.edge, "right", "clear right -> right edge")
+    eq(spec.align, "center", "smallest cross residual is center")
+    check(spec.mode == nil, "outside spec has no mode field")
+    eq(spec.offsetX, 38, "offsetX to the current x"); eq(spec.offsetY, 5, "offsetY to the current y")
+    roundTrip(spec, child, target, 2, "clear right")
+    -- spacing defaults to S.SPACING, same as Resolve
+    local spec2 = S.AnchorInPlace(child, target)
+    eq(spec2.offsetX, 38, "nil spacing uses S.SPACING")
+    roundTrip(spec2, child, target, S.SPACING, "default spacing")
+end
+
+-- clear on both axes: the bigger clearance picks the edge
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    -- 140 clear to the right, 5 clear above -> right wins
+    local wide = { x = 200, y = 30, w = 20, h = 10 }
+    local specW = S.AnchorInPlace(wide, target, 2)
+    eq(specW.edge, "right", "larger clearance wins (right)")
+    eq(specW.align, "start", "nearest align on the right edge")
+    eq(specW.offsetX, 138, "right offsetX"); eq(specW.offsetY, 15, "right offsetY")
+    roundTrip(specW, wide, target, 2, "diagonal right")
+    -- 175 clear above, nothing clear sideways -> top wins
+    local tall = { x = 30, y = 200, w = 20, h = 10 }
+    local specT = S.AnchorInPlace(tall, target, 2)
+    eq(specT.edge, "top", "larger clearance wins (top)")
+    eq(specT.align, "end", "nearest align on the top edge")
+    eq(specT.offsetX, -10, "top offsetX"); eq(specT.offsetY, 173, "top offsetY")
+    roundTrip(specT, tall, target, 2, "diagonal top")
+end
+
+-- overlapping the target: no honest edge seat -> point mode
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    local child = { x = 40, y = 10, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "partial overlap -> point mode")
+    eq(spec.point, "CENTER", "point"); eq(spec.relPoint, "CENTER", "relPoint")
+    eq(spec.offsetX, 40, "centre delta x"); eq(spec.offsetY, 10, "centre delta y")
+    check(spec.edge == nil and spec.align == nil, "point spec carries no edge/align")
+    roundTrip(spec, child, target, 2, "partial overlap")
+end
+
+-- child fully inside the target -> point mode
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    local child = { x = 5, y = -3, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "inside -> point mode")
+    eq(spec.offsetX, 5, "inside centre delta x"); eq(spec.offsetY, -3, "inside centre delta y")
+    roundTrip(spec, child, target, 2, "inside")
+end
+
+-- child bigger than the target and swallowing it -> point mode
+do
+    local target = { x = -30, y = 45, w = 60, h = 60 }
+    local child = { x = -20, y = 50, w = 200, h = 120 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "oversize overlap -> point mode")
+    eq(spec.offsetX, 10, "oversize centre delta x"); eq(spec.offsetY, 5, "oversize centre delta y")
+    roundTrip(spec, child, target, 2, "oversize overlap")
+end
+
+-- zero-size target -> point mode (Resolve itself returns nil there, so the
+-- round trip is unavailable; the spec is still the centre delta)
+do
+    local child = { x = 30, y = 25, w = 20, h = 10 }
+    local flatW = { x = 10, y = 20, w = 0, h = 40 }
+    local specW = S.AnchorInPlace(child, flatW, 2)
+    eq(specW.mode, "point", "zero-width target -> point mode")
+    eq(specW.offsetX, 20, "zero-width centre delta x"); eq(specW.offsetY, 5, "zero-width centre delta y")
+    check(S.Resolve(specW, child.w, child.h, flatW, 2) == nil, "zero-size target has no resolve")
+    local flatH = { x = 0, y = 0, w = 100, h = 0 }
+    eq(S.AnchorInPlace(child, flatH, 2).mode, "point", "zero-height target -> point mode")
+end
+
+-- clear to the right but far past the top of that edge's span -> point mode
+do
+    local target = { x = 0, y = 0, w = 100, h = 40 }
+    -- 140 clear right beats 35 clear above, but the best align still leaves a
+    -- 45 unit residual against a 25 unit span, so "right of" would be a lie
+    local child = { x = 200, y = 60, w = 20, h = 10 }
+    local spec = S.AnchorInPlace(child, target, 2)
+    eq(spec.mode, "point", "past the edge span -> point mode")
+    eq(spec.offsetX, 200, "past-span centre delta x"); eq(spec.offsetY, 60, "past-span centre delta y")
+    roundTrip(spec, child, target, 2, "past the edge span")
+end
+
+-- the 12 exact zone seats, on two size pairs: sitting on a seat reports that
+-- seat with zero offsets
+do
+    local pairs2 = {
+        { target = { x = 0, y = 0, w = 100, h = 40 }, w = 20, h = 10 },
+        { target = { x = -30, y = 45, w = 60, h = 60 }, w = 40, h = 40 },
+    }
+    for i, c in ipairs(pairs2) do
+        for _, edge in ipairs({ "right", "left", "top", "bottom" }) do
+            for _, align in ipairs({ "start", "center", "end" }) do
+                local x, y = S.Resolve({ edge = edge, align = align }, c.w, c.h, c.target, S.SPACING)
+                local child = { x = x, y = y, w = c.w, h = c.h }
+                local spec = S.AnchorInPlace(child, c.target, S.SPACING)
+                local tag = "seat " .. i .. " " .. edge .. "/" .. align
+                eq(spec.edge, edge, tag .. ": edge")
+                eq(spec.align, align, tag .. ": align")
+                eq(spec.offsetX, 0, tag .. ": offsetX 0"); eq(spec.offsetY, 0, tag .. ": offsetY 0")
+                check(spec.mode == nil, tag .. ": no mode field")
+                roundTrip(spec, child, c.target, S.SPACING, tag)
+            end
+        end
+    end
+end

@@ -83,6 +83,10 @@ function P:GetUnlockFrame()
     -- in the README; locking (Esc, the strip, /mover) gives the screen back.
     f:EnableMouse(true)
     f:SetScript("OnMouseDown", function(_, button)
+        -- A link gesture in flight owns the mouse: the press that started it
+        -- must not also deselect, or the element being linked FROM is gone by
+        -- the time the release lands.
+        if NS.Session and NS.Session.linking then return end
         if button == "LeftButton" then P:ClickSelect() end
     end)
     -- Alt-peek. The event is only registered while a session is up (Build /
@@ -654,12 +658,17 @@ local function lerp(a, b, f) return a + (b - a) * f end
 -- there), everyone else reads their own record.
 local function drawTether(n, el, b, drag)
     local targetId, strain
+    -- The active block for a non-dragging slab, which may be the backup anchor:
+    -- the line has to show the link that is actually holding the element.
+    local active, onFallback
     if b.dragging then
         if not drag or drag.snapped then return n end   -- snapped: tether gone
         targetId, strain = drag.target, drag.strain or 0
     else
-        local a = Registry:GetPos(el).anchor
+        local a = Registry:ActiveAnchor(el)
         if not a then return n end
+        active = a
+        onFallback = a == Registry:GetPos(el).anchor.fallback
         targetId, strain = a.target, 0
     end
     local target = Registry:GetTarget(targetId)
@@ -671,7 +680,7 @@ local function drawTether(n, el, b, drag)
     -- edge/align (or relPoint) spot on the target itself. Fixed: it neither
     -- slides along the parent's surface nor floats at the child's seat.
     local tx, ty
-    local spec = (b.dragging and drag) and drag.spec or Registry:GetPos(el).anchor
+    local spec = (b.dragging and drag) and drag.spec or active
     if spec then tx, ty = Solver.AnchorPointOnTarget(spec, rect) end
     if not tx then tx, ty = nearestOnRect(rect, cx, cy) end
     local line = tetherLine(P.tethers, n + 1, 0)
@@ -679,6 +688,9 @@ local function drawTether(n, el, b, drag)
     local cr = lerp(C_TETHER.r, C_TETHER_STRAIN.r, strain)
     local cg = lerp(C_TETHER.g, C_TETHER_STRAIN.g, strain)
     local cb = lerp(C_TETHER.b, C_TETHER_STRAIN.b, strain)
+    -- Standing on the backup: a visibly lesser link -- thin and muted, not the
+    -- full accent line the primary gets.
+    if onFallback then cr, cg, cb = C_MUTED.r, C_MUTED.g, C_MUTED.b end
     local glow = tetherLine(P.tetherGlows, n + 1, -1)
     if glow then
         glow:SetStartPoint("CENTER", UIParent, cx, cy)
@@ -689,7 +701,7 @@ local function drawTether(n, el, b, drag)
     end
     line:SetStartPoint("CENTER", UIParent, cx, cy)
     line:SetEndPoint("CENTER", UIParent, tx, ty)
-    line:SetThickness(strain > 0 and TETHER_STRAIN_W or TETHER_W)
+    line:SetThickness((onFallback or strain > 0) and TETHER_STRAIN_W or TETHER_W)
     line:SetColorTexture(cr, cg, cb, lerp(TETHER_ALPHA, TETHER_STRAIN_ALPHA, strain))
     line:Show()
     return n + 1
@@ -1135,6 +1147,7 @@ function P:ShowZones(el)
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)
         local usable = canon ~= el.id and not descendants[canon]
+            and target.snappable                        -- opted out of snap zones; still pickable and link-droppable
             and Registry:IsTargetAvailable(target)      -- hidden/unavailable frames are not snap targets (CDM rule)
             and Registry:IsEnabled(target.addon, target.key)
             and not Registry:WouldCreateCycle(el.id, target.id)
@@ -1197,3 +1210,150 @@ function P:HideZones()
     self.zoneCount = 0
     wipe(self.dragZones)
 end
+
+-- ============================================================
+-- LINK DRAG
+-- The panel's link glyph, held down, draws a line from the selected element's
+-- slab to the cursor; whatever legal target the cursor is over lights up, and
+-- the release anchors in place (Session owns that half).
+--
+-- The target list is the same one a drag's snap zones are built from, MINUS
+-- the geometry: a link deliberately reaches every legal target, including ones
+-- a drag could never drop onto. It is computed once at BeginLinkVisual --
+-- registry membership does not churn inside a single gesture, and doing it per
+-- frame would re-walk every element's ancestry sixty times a second.
+-- ============================================================
+-- Every element the given one may legally be anchored to, with its rect cached
+-- for the per-frame hit test. Targets with no rect cannot be hit, so they are
+-- left out entirely.
+function P:LinkTargets(el)
+    local out = {}
+    local descendants = {}
+    for _, d in ipairs(Registry:Descendants(el.id)) do descendants[d.id] = true end
+    for _, target in ipairs(Registry:SortedTargets()) do
+        local canon = Registry:CanonicalId(target.id)
+        local usable = canon ~= el.id and not descendants[canon]
+            and Registry:IsTargetAvailable(target)
+            and Registry:IsEnabled(target.addon, target.key)
+            and not Registry:WouldCreateCycle(el.id, target.id)
+        if usable then
+            local rect = Registry:GetRect(target)
+            if rect then out[#out + 1] = { id = target.id, rect = rect } end
+        end
+    end
+    return out
+end
+
+-- The hover plate: the same dashed-edge look the snap zones wear, so "this is
+-- where the link lands" reads exactly like "this is where the drop lands".
+-- Its own frame rather than a pooled zone, because zones belong to a drag and
+-- the two gestures must not share state.
+local function linkHighlight()
+    local hl = P.linkHl
+    if not hl then
+        hl = CreateFrame("Frame", nil, P:GetUnlockFrame(), "BackdropTemplate")
+        hl:SetFrameLevel(1)
+        UI:CreateElementBackdrop(hl, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
+        hl.dashes = {}
+        local function edge(p1, p2, horizontal)
+            local t = hl:CreateTexture(nil, "OVERLAY")
+            t:SetTexture(horizontal and DASH_H or DASH_V, "REPEAT", "REPEAT")
+            if horizontal then t:SetHeight(ZONE_DASH_W); t:SetHorizTile(true)
+            else               t:SetWidth(ZONE_DASH_W);  t:SetVertTile(true) end
+            t:SetPoint(p1); t:SetPoint(p2)
+            hl.dashes[#hl.dashes + 1] = t
+        end
+        edge("TOPLEFT", "TOPRIGHT", true)
+        edge("BOTTOMLEFT", "BOTTOMRIGHT", true)
+        edge("TOPLEFT", "BOTTOMLEFT", false)
+        edge("TOPRIGHT", "BOTTOMRIGHT", false)
+        hl:Hide()
+        P.linkHl = hl
+    end
+    return hl
+end
+
+function P:BeginLinkVisual(el)
+    self.linkList = self:LinkTargets(el)
+    self.linkId = el.id
+    self.linkHover = nil
+    local f = self:GetUnlockFrame()
+    -- Same guarded creation as the tethers: a headless stub has no CreateLine.
+    if self.linkLine == nil then
+        self.linkLine = f.CreateLine and f:CreateLine(nil, "ARTWORK", nil, 0) or false
+    end
+    if self.linkGlow == nil then
+        self.linkGlow = f.CreateLine and f:CreateLine(nil, "ARTWORK", nil, -1) or false
+    end
+    local hl = linkHighlight()
+    hl:Hide()
+    f:SetScript("OnUpdate", function()
+        local cx, cy = P:CursorPos()
+        -- The line starts at the slab, falling back to the cached rect centre
+        -- when the element has no proxy (another addon's element in a filtered
+        -- session, which is still a legal thing to link FROM).
+        local b = P.proxies[P.linkId]
+        local sx, sy
+        if b then sx, sy = proxyCenter(b) end
+        if not sx then
+            local elem = Registry:Get(P.linkId)
+            local rect = elem and Registry:GetRect(elem)
+            if rect then sx, sy = rect.x, rect.y end
+        end
+        local line, glow = P.linkLine, P.linkGlow
+        if sx and line then
+            if glow then
+                glow:SetStartPoint("CENTER", UIParent, sx, sy)
+                glow:SetEndPoint("CENTER", UIParent, cx, cy)
+                glow:SetThickness(TETHER_GLOW_W)
+                glow:SetColorTexture(C_TETHER.r, C_TETHER.g, C_TETHER.b, TETHER_GLOW_ALPHA)
+                glow:Show()
+            end
+            line:SetStartPoint("CENTER", UIParent, sx, sy)
+            line:SetEndPoint("CENTER", UIParent, cx, cy)
+            line:SetThickness(TETHER_W)
+            line:SetColorTexture(C_TETHER.r, C_TETHER.g, C_TETHER.b, TETHER_ALPHA)
+            line:Show()
+        elseif line then
+            line:Hide()
+            if glow then glow:Hide() end
+        end
+        -- Smallest hit wins: nested targets (an icon inside a container) would
+        -- otherwise be unreachable behind their parent's rect.
+        local best, bestArea
+        for _, t in ipairs(P.linkList or {}) do
+            local r = t.rect
+            if cx >= r.x - r.w / 2 and cx <= r.x + r.w / 2
+               and cy >= r.y - r.h / 2 and cy <= r.y + r.h / 2 then
+                local area = r.w * r.h
+                if not bestArea or area < bestArea then best, bestArea = t, area end
+            end
+        end
+        P.linkHover = best and best.id or nil
+        local plate = P.linkHl
+        if plate then
+            if best then
+                plate:SetSize(best.rect.w, best.rect.h)
+                plate:ClearAllPoints()
+                plate:SetPoint("CENTER", UIParent, "CENTER", best.rect.x, best.rect.y)
+                paintZone(plate, C_ZONE, 0.7, C_ZONE_HOVER, 1, ZONE_HOVER_WEIGHT)
+                plate:Show()
+            else
+                plate:Hide()
+            end
+        end
+    end)
+end
+
+function P:EndLinkVisual()
+    local f = self:GetUnlockFrame()
+    f:SetScript("OnUpdate", nil)
+    if self.linkLine then self.linkLine:Hide() end
+    if self.linkGlow then self.linkGlow:Hide() end
+    if self.linkHl then self.linkHl:Hide() end
+    self.linkHover, self.linkId = nil, nil
+    if self.linkList then wipe(self.linkList) end
+end
+
+-- The target under the cursor at release, or nil for a drop over nothing.
+function P:LinkHover() return self.linkHover end

@@ -3962,6 +3962,32 @@ function DF:MigrateHealPredictionBelowAbsorb()
     end
 end
 
+-- Rewrite ONE position record's pinned anchor strings from the pre-uid key format
+-- ("DandersFrames:party.pinned3" -- no dot before the number) to the uid format
+-- ("DandersFrames:party.pinned.3"). The addon key is the literal MoverBridge registers
+-- under; a string naming any other addon is not ours to touch.
+--
+-- ⚠ A string naming a set that NO LONGER EXISTS is left exactly as it is. Rewriting it
+-- would hand it to whatever set later takes that uid; left alone it simply never
+-- resolves, and DandersMover's answer to an unresolvable target is that the child HOLDS
+-- its position. `hasSet(scope, n)` is the caller's existence test for its own profile.
+local function MigratePinnedAnchorKeys(pos, hasSet)
+    if type(pos) ~= "table" then return end
+    local function fix(block)
+        if type(block) ~= "table" or type(block.target) ~= "string" then return end
+        local scope, n = block.target:match("^DandersFrames:(party)%.pinned(%d+)$")
+        if not scope then
+            scope, n = block.target:match("^DandersFrames:(raid)%.pinned(%d+)$")
+        end
+        if not scope then return end
+        n = tonumber(n)
+        if not n or not hasSet(scope, n) then return end
+        block.target = "DandersFrames:" .. scope .. ".pinned." .. n
+    end
+    fix(pos.anchor)
+    fix(pos.anchor and pos.anchor.fallback)
+end
+
 -- ☠ SEEDS A KEY THAT HAS A SHIPPED DEFAULT, so this MUST run before the defaults
 -- backfill -- see the wiring note at the call site. `position` is in PartyDefaults
 -- (and therefore in the generated RaidDefaults), so if the backfill runs first it
@@ -4070,11 +4096,106 @@ function DF:MigrateContainerPositionRecords()
             profile._moverLegacyPrefsRemovedV1 = true
         end
 
+        -- Phase D: STABLE PINNED-SET UIDS. RemoveSet compacts pf.sets (table.remove),
+        -- so a DandersMover element keyed by INDEX silently re-points at a different
+        -- set the moment an earlier one is deleted -- and any child anchored to it
+        -- follows the wrong frames. The uid is the one thing that survives compaction.
+        -- It is ONLY a mover element key: the index stays the addon's handle everywhere
+        -- else (frame names, runtime arrays, pinned.N.<setting> overrides, the options
+        -- tab, the Wago pinnedN alias).
+        --
+        -- Stamping in ARRAY ORDER makes uid == index on this first pass, which is what
+        -- lets the saved anchor strings (and the DandersMoverDB toggles, renamed in the
+        -- account-level tail below) map straight across with nothing to look up.
+        if type(profile) == "table" and not profile._pinnedUidsV1 then
+            local function hasSet(scope, n)
+                local p = profile[scope] and profile[scope].pinnedFrames
+                return (p and p.sets and p.sets[n]) and true or false
+            end
+
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local pfr = profile[modeKey] and profile[modeKey].pinnedFrames
+                if type(pfr) == "table" and type(pfr.sets) == "table" then
+                    local maxUid = 0
+                    for i, set in ipairs(pfr.sets) do
+                        if type(set) == "table" then
+                            if type(set.uid) ~= "number" then set.uid = i end
+                            if set.uid > maxUid then maxUid = set.uid end
+                        end
+                    end
+                    -- Only ever RAISE the counter. A profile that already handed uids
+                    -- out past the array length must not re-issue them.
+                    if not pfr.nextUid or pfr.nextUid <= maxUid then
+                        pfr.nextUid = maxUid + 1
+                    end
+                end
+            end
+
+            -- Every record in this profile that can carry an anchor: the two container
+            -- records, the two targeted displays, and each pinned set's own record.
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local m = profile[modeKey]
+                if type(m) == "table" then
+                    MigratePinnedAnchorKeys(m.position, hasSet)
+                    MigratePinnedAnchorKeys(m.personalTargetedPosition, hasSet)
+                    MigratePinnedAnchorKeys(m.targetedListPosition, hasSet)
+                    local pfr = m.pinnedFrames
+                    if type(pfr) == "table" and type(pfr.sets) == "table" then
+                        for _, set in ipairs(pfr.sets) do
+                            if type(set) == "table" then
+                                MigratePinnedAnchorKeys(set.position, hasSet)
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Same rule as every migration in this battery: reach the raid auto-layout
+            -- overrides too. The V1/V2 blocks above STRIP these record keys, but an
+            -- override that leaked in from a future build or an import can still carry
+            -- one, and a layout is the one place a sweep never sees.
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    MigratePinnedAnchorKeys(layout.overrides.position, hasSet)
+                    MigratePinnedAnchorKeys(layout.overrides.personalTargetedPosition, hasSet)
+                    MigratePinnedAnchorKeys(layout.overrides.targetedListPosition, hasSet)
+                end)
+            end
+
+            profile._pinnedUidsV1 = true
+        end
+
         -- Pinned records: self-gated (per pinnedFrames table / per record shape), so
         -- it runs every time -- an imported pinnedFrames table is caught on the next
         -- pass without a flag to clear. See PinnedFrames.MigrateProfileRecords.
         if type(profile) == "table" and DF.PinnedFrames and DF.PinnedFrames.MigrateProfileRecords then
             DF.PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
+        end
+    end
+
+    -- Phase D tail: move what lives OUTSIDE the profiles across to the uid key format.
+    -- ACCOUNT-LEVEL, hence the flag on the SV root rather than on a profile: the two
+    -- things being renamed are the DandersMoverDB per-element toggle (a set the user
+    -- switched off in /mover config must stay off) and any record a third-party addon
+    -- already registered against the old key.
+    --
+    -- ☠ MUST RUN BEFORE MoverBridge:Init, and it does: this whole battery runs from
+    -- ADDON_LOADED well above the Init call. RenameKey REFUSES a rename onto a key that
+    -- is already registered, so once the bridge has registered the new dotted keys this
+    -- would silently do nothing.
+    --
+    -- The lib is optional: with it absent the flag is left unset, so a later login (with
+    -- it installed) still completes the rename. uid == index after the backfill above,
+    -- which is why 1..4 maps straight across with nothing to look up.
+    if DandersFramesDB_v2 and not DandersFramesDB_v2._pinnedUidRenameV1 then
+        local Mover = LibStub and LibStub("DandersMover-1.0", true)
+        if Mover and Mover.RenameKey then
+            for _, scope in ipairs({ "party", "raid" }) do
+                for i = 1, 4 do
+                    Mover:RenameKey("DandersFrames", scope .. ".pinned" .. i, scope .. ".pinned." .. i)
+                end
+            end
+            DandersFramesDB_v2._pinnedUidRenameV1 = true
         end
     end
 end
@@ -4491,6 +4612,10 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     -- Phase C: born without the five grid prefs (their defaults are deleted), so the
     -- sweep has nothing to do on a fresh profile. Stamped for the standard reason.
     _moverLegacyPrefsRemovedV1 = true,
+    -- Phase D: a fresh profile's sets get their uids from EnsureSetUid on first read,
+    -- and it carries no pre-uid anchor strings to rewrite. Stamped for the standard
+    -- reason -- a fresh profile must never be re-migrated.
+    _pinnedUidsV1 = true,
     -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
     -- migration: it must re-check on every login, because a file can go missing at any
     -- future update, not just once in a profile's life. Stamping a flag here would have

@@ -330,7 +330,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         Add(CreateCopyButton(self.child, {"pinnedFrames"}, L["Pinned Frames"], "general_pinnedframes"), 25, 2)
         -- Constants — mirror the runtime cap so the editor builds exactly as many
         -- tab buttons as the backend allows (sets beyond the current count are hidden).
-        local HIGHLIGHT_MAX_SETS = (DF.PinnedFrames and DF.PinnedFrames.MAX_SETS) or 5
+        local HIGHLIGHT_MAX_SETS = (DF.PinnedFrames and DF.PinnedFrames.MAX_SETS) or 4
         
         -- Initialize pinnedFrames in db if needed
         if not db.pinnedFrames then

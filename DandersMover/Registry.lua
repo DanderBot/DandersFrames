@@ -55,6 +55,8 @@ local function insertTarget(self, addon, key, def, element)
         frame = def.frame, getFrame = def.getFrame, getSize = def.getSize,
         getRect = def.getRect, group = def.group, element = element,
         isRelevant = def.isRelevant,
+        -- false = the target builds no snap zones; the picker and link-drag still reach it.
+        snappable = def.snappable ~= false,
     }
     return self.targets[id]
 end
@@ -69,6 +71,10 @@ local function insertElement(self, addon, key, def)
         secure = def.secure and true or false, getSize = def.getSize,
         getRect = def.getRect, anchorable = def.anchorable ~= false, group = def.group,
         isRelevant = def.isRelevant,
+        -- false = the target builds no snap zones; the picker and link-drag still reach
+        -- it. The paired insertTarget below gets the same def, so the target copy that
+        -- ShowZones reads is stamped there; this copy is for symmetry/introspection.
+        snappable = def.snappable ~= false,
         -- Consumer-side settings entry: the panel offers a Configure button
         -- that calls this (e.g. DF opens its options window on the page).
         openSettings = def.openSettings,
@@ -103,6 +109,27 @@ function R:RegisterAnchorTarget(addon, key, def)
     return insertTarget(self, addon, key, def, nil)
 end
 
+-- Points a record's anchor blocks (primary and backup) away from oldId. The record
+-- is the consumer's live table, so this edits it in place; the position itself does
+-- not move, which is why no rename path Notifies.
+local function rewriteRecord(pos, oldId, newId)
+    if type(pos) ~= "table" then return end
+    local a = pos.anchor
+    if not a then return end
+    if a.target == oldId then a.target = newId end
+    if a.fallback and a.fallback.target == oldId then a.fallback.target = newId end
+end
+
+-- Every registered element's record and twin string, moved off oldId. Shared by
+-- R:RenameKey and the Flush replay below (see R:RenameKey for why both need it).
+local function rewriteRegistered(self, oldId, newId)
+    for _, el in pairs(self.elements) do
+        local ok, pos = pcall(el.getPos)
+        if ok then rewriteRecord(pos, oldId, newId) end
+        if el.twin == oldId then el.twin = newId end
+    end
+end
+
 function R:Flush()
     self.ready = true
     local q = self.queue
@@ -113,6 +140,12 @@ function R:Flush()
             if not self.addons[item.addon] then self:RegisterAddon(item.addon) end
             insertTarget(self, item.addon, item.key, item.def, nil)
         end
+    end
+    -- A consumer can register between a rename and this Flush, carrying a record that
+    -- still names the old id. Replay the renames over what just landed.
+    if self.pendingRenames then
+        for oldId, newId in pairs(self.pendingRenames) do rewriteRegistered(self, oldId, newId) end
+        self.pendingRenames = nil
     end
 end
 
@@ -126,6 +159,56 @@ function R:UnregisterAddon(addon)
     for id, el in pairs(self.elements) do if el.addon == addon then self.elements[id] = nil end end
     for id, t in pairs(self.targets) do if t.addon == addon then self.targets[id] = nil end end
     self.addons[addon] = nil
+end
+
+-- ============================================================
+-- RENAME
+-- ============================================================
+-- Moves an element's key: the user toggle, the registry entry (with its paired
+-- anchor target) and every record or twin string that names the old id follow it.
+-- The element keeps its table and its position -- nothing is re-registered and
+-- nothing is Notified, so live closures and the saved position both survive.
+-- Refuses (false, no throw) a no-op rename or one onto a key already in use.
+function R:RenameKey(addon, old, new)
+    if old == new then return false end
+    local oldId, newId = R.Id(addon, old), R.Id(addon, new)
+    if self.elements[newId] or self.targets[newId] then return false end
+
+    -- The toggle outlives the registration: move it even with nothing registered.
+    local db = NS.db
+    local a = db and db.addons and db.addons[addon]
+    if a and a.elements and a.elements[old] ~= nil then
+        a.elements[new] = a.elements[old]
+        a.elements[old] = nil
+    end
+
+    local el = self.elements[oldId]
+    if el then
+        self.elements[oldId] = nil
+        el.key, el.id = new, newId
+        self.elements[newId] = el
+    end
+    -- An anchorable element's target IS this entry, so re-keying it here covers both.
+    local target = self.targets[oldId]
+    if target then
+        self.targets[oldId] = nil
+        target.key, target.id = new, newId
+        self.targets[newId] = target
+    end
+
+    rewriteRegistered(self, oldId, newId)
+    for _, item in ipairs(self.queue) do
+        if item.kind == "element" then
+            local ok, pos = pcall(item.def.getPos)
+            if ok then rewriteRecord(pos, oldId, newId) end
+            if item.def.twin == oldId then item.def.twin = newId end
+        end
+    end
+
+    -- Anything that registers after this but before Flush is caught by the replay there.
+    self.pendingRenames = self.pendingRenames or {}
+    self.pendingRenames[oldId] = newId
+    return true
 end
 
 -- ============================================================
@@ -259,37 +342,112 @@ end
 -- A getFrame anchor target can resolve to a frame that belongs to a registered
 -- element (e.g. "first raid frame" while the roster is one frame). Graph logic
 -- must see through that alias or an element can be anchored to itself.
+--
+-- CanonicalId is O(elements) -- the alias walk calls GetFrame on every registered
+-- element -- and Children calls it once per element, so a single refresh pass can
+-- run it thousands of times. Begin/EndCanonMemo scope a memo around one such pass.
+-- Validity assumption: frames do not change identity inside one synchronous refresh
+-- pass, so an answer computed at the top of the pass is still the answer at the end.
+-- Never leave the memo open across a frame boundary or a consumer callback that can
+-- re-register.
+function R:BeginCanonMemo()
+    self._canonDepth = (self._canonDepth or 0) + 1
+    if self._canonDepth == 1 then self._canonMemo = {} end
+end
+
+function R:EndCanonMemo()
+    local depth = (self._canonDepth or 0) - 1
+    if depth < 0 then depth = 0 end
+    self._canonDepth = depth
+    if depth == 0 then self._canonMemo = nil end
+end
+
 function R:CanonicalId(targetId)
+    local m = self._canonMemo; if m and m[targetId] ~= nil then return m[targetId] end
     local target = self.targets[targetId]
-    if not target then return targetId end
-    if target.element then return target.element.id end
-    local f = self:GetFrame(target)
-    if not f then return targetId end
-    for id, el in pairs(self.elements) do
-        if self:GetFrame(el) == f then return id end
+    if not target then if m then m[targetId] = targetId end return targetId end
+    if target.element then
+        local id = target.element.id
+        if m then m[targetId] = id end
+        return id
     end
+    local f = self:GetFrame(target)
+    if not f then if m then m[targetId] = targetId end return targetId end
+    for id, el in pairs(self.elements) do
+        if self:GetFrame(el) == f then
+            if m then m[targetId] = id end
+            return id
+        end
+    end
+    if m then m[targetId] = targetId end
     return targetId
 end
 
-function R:ParentId(elId)
+-- Which anchor block is actually driving this element right now: the primary,
+-- its backup, or neither (hold). The single chooser the resolver, the tether
+-- and the panel all go through, so none of them can disagree about which link
+-- is live.
+function R:ActiveAnchor(el)
+    local pos = self:GetPos(el)
+    local a = pos.anchor
+    if not a then return nil end
+    if self:IsTargetAvailable(self.targets[a.target]) then return a end
+    if a.fallback and self:IsTargetAvailable(self.targets[a.fallback.target]) then return a.fallback end
+    return nil
+end
+
+-- Both canonical parents (primary, backup), regardless of availability: graph
+-- walks must still reach a child that is currently holding.
+function R:ParentIds(elId)
     local el = self.elements[elId]
     if not el then return nil end
     local pos = self:GetPos(el)
-    return pos.anchor and self:CanonicalId(pos.anchor.target) or nil
+    local a = pos.anchor
+    if not a then return nil end
+    local primary = self:CanonicalId(a.target)
+    if a.fallback then return primary, self:CanonicalId(a.fallback.target) end
+    return primary
+end
+
+-- The ACTIVE parent: what the element is resolving against at this moment.
+function R:ParentId(elId)
+    local el = self.elements[elId]
+    if not el then return nil end
+    local a = self:ActiveAnchor(el)
+    return a and self:CanonicalId(a.target) or nil
 end
 
 function R:Children(targetId)
     local canon = self:CanonicalId(targetId)
     local out = {}
     for _, el in pairs(self.elements) do
-        if self:ParentId(el.id) == canon then tinsert(out, el) end
+        local primary, backup = self:ParentIds(el.id)
+        if primary == canon or backup == canon then tinsert(out, el) end
     end
     return out
 end
 
 -- Would anchoring elId to targetId create a loop (including through aliases)?
+-- Walks BOTH parent edges (primary and backup) STRUCTURALLY -- availability is
+-- deliberately ignored: a cycle through a currently-hidden target is still a
+-- cycle the moment that target reappears, and ParentId (the ACTIVE parent)
+-- would walk right past it while the chain is holding.
 function R:WouldCreateCycle(elId, targetId)
-    return NS.Solver.WouldCreateCycle(function(id) return self:ParentId(id) end, elId, self:CanonicalId(targetId))
+    local frontier, seen = { self:CanonicalId(targetId) }, {}
+    while #frontier > 0 do
+        local nxt = {}
+        for _, id in ipairs(frontier) do
+            if id == elId then return true end
+            if not seen[id] then
+                seen[id] = true
+                local primary, backup = self:ParentIds(id)
+                if primary then tinsert(nxt, primary) end
+                if backup then tinsert(nxt, backup) end
+            end
+        end
+        frontier = nxt
+    end
+    return false
 end
 
 function R:Descendants(targetId)

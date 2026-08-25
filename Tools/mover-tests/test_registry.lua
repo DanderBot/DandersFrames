@@ -256,3 +256,234 @@ do
     R:UnregisterAddon("GR"); R:UnregisterAddon("GR2")
     R.ready = wasReady
 end
+
+-- fallback (backup) anchor: which block is live, and who counts as a parent
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("FB", { title = "FB" })
+    local up = R:RegisterAnchorTarget("FB", "fb_up", { title = "up", frame = FakeFrame(0, 0, 10, 10) })
+    local down = R:RegisterAnchorTarget("FB", "fb_down", { title = "down", frame = FakeFrame(0, 0, 10, 10),
+        getRect = function() return nil end })
+    local down2 = R:RegisterAnchorTarget("FB", "fb_down2", { title = "down2", frame = FakeFrame(0, 0, 10, 10),
+        getRect = function() return nil end })
+    check(R:IsTargetAvailable(up), "fb_up is available")
+    check(not R:IsTargetAvailable(down), "fb_down is not available")
+
+    -- primary available: the primary block wins even with a backup set
+    local posP = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_up", edge = "right", align = "start",
+        fallback = { target = "FB:fb_down", edge = "right", align = "start" } } }
+    local elP = R:Register("FB", "fb_p", elDef(FakeFrame(0, 0, 10, 10), posP))
+    check(R:ActiveAnchor(elP) == posP.anchor, "available primary is the active anchor")
+
+    -- primary unavailable, backup available: the backup block takes over
+    local posS = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_down", edge = "left", align = "end",
+        fallback = { target = "FB:fb_up", edge = "left", align = "end" } } }
+    local elS = R:Register("FB", "fb_s", elDef(FakeFrame(0, 0, 10, 10), posS))
+    check(R:ActiveAnchor(elS) == posS.anchor.fallback, "unavailable primary falls back")
+    eq(R:ParentId("FB:fb_s"), "FB:fb_up", "ParentId is the ACTIVE parent")
+
+    -- both unavailable: nil (hold)
+    local posH = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_down", edge = "top", align = "center",
+        fallback = { target = "FB:fb_down2", edge = "top", align = "center" } } }
+    local elH = R:Register("FB", "fb_h", elDef(FakeFrame(0, 0, 10, 10), posH))
+    check(R:ActiveAnchor(elH) == nil, "both unavailable -> nil (hold)")
+    check(R:ParentId("FB:fb_h") == nil, "holding element has no active parent")
+
+    -- ParentIds returns BOTH, regardless of availability
+    local p1, p2 = R:ParentIds("FB:fb_p")
+    eq(p1, "FB:fb_up", "ParentIds primary"); eq(p2, "FB:fb_down", "ParentIds backup")
+    local h1, h2 = R:ParentIds("FB:fb_h")
+    eq(h1, "FB:fb_down", "ParentIds primary when unavailable"); eq(h2, "FB:fb_down2", "ParentIds backup when unavailable")
+
+    -- graph walks reach a child through EITHER of its two anchors
+    eq(#R:Children("FB:fb_down"), 3, "backup and held children both count")
+    eq(#R:Children("FB:fb_down2"), 1, "child reached through its backup alone")
+    eq(#R:Descendants("FB:fb_down2"), 1, "descendants go through the backup edge too")
+
+    -- no backup at all: unchanged behaviour
+    local posN = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_up", edge = "bottom", align = "start" } }
+    local elN = R:Register("FB", "fb_n", elDef(FakeFrame(0, 0, 10, 10), posN))
+    check(R:ActiveAnchor(elN) == posN.anchor, "no backup: active anchor is the primary")
+    local n1, n2 = R:ParentIds("FB:fb_n")
+    eq(n1, "FB:fb_up", "ParentIds with no backup returns one id")
+    check(n2 == nil, "no second parent id without a backup")
+
+    -- no anchor at all
+    local elF = R:Register("FB", "fb_free", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    check(R:ActiveAnchor(elF) == nil, "unanchored element has no active anchor")
+    check(R:ParentIds("FB:fb_free") == nil, "unanchored element has no parent ids")
+
+    R:UnregisterAddon("FB")
+    R.ready = wasReady
+end
+
+-- cycle detection is STRUCTURAL: hidden targets and backup edges still count
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("CY", { title = "CY" })
+    -- A's primary target is HIDDEN (A is holding); anchoring A's target's owner
+    -- to A must still be refused -- the loop closes the moment it reappears.
+    local elB = R:Register("CY", "cy_b", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { getRect = function() return nil end }))
+    local posA = { point = "CENTER", x = 0, y = 0, anchor = { target = "CY:cy_b", edge = "right", align = "start" } }
+    local elA = R:Register("CY", "cy_a", elDef(FakeFrame(0, 0, 10, 10), posA))
+    check(R:ParentId("CY:cy_a") == nil, "A holds: no ACTIVE parent")
+    check(R:WouldCreateCycle("CY:cy_b", "CY:cy_a"), "cycle through a hidden target is still refused")
+
+    -- backup edges participate: C primary->up, backup->D; anchoring D to C loops
+    R:RegisterAnchorTarget("CY", "cy_up", { title = "up", frame = FakeFrame(0, 0, 10, 10) })
+    local elD = R:Register("CY", "cy_d", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    local posC = { point = "CENTER", x = 0, y = 0, anchor = { target = "CY:cy_up", edge = "right", align = "start",
+        fallback = { target = "CY:cy_d", edge = "right", align = "start" } } }
+    local elC = R:Register("CY", "cy_c", elDef(FakeFrame(0, 0, 10, 10), posC))
+    check(R:WouldCreateCycle("CY:cy_d", "CY:cy_c"), "cycle through a backup edge is refused")
+    check(not R:WouldCreateCycle("CY:cy_d", "CY:cy_up"), "an unrelated target is still fine")
+    R:UnregisterAddon("CY")
+    R.ready = wasReady
+end
+
+-- RenameKey: the user toggle moves even when nothing is registered under the old key
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { addons = { RN = { elements = { rn_old = false } } } }
+    check(R:RenameKey("RN", "rn_old", "rn_new"), "rename with only a toggle succeeds")
+    check(NS.db.addons.RN.elements.rn_old == nil, "old toggle cleared")
+    check(NS.db.addons.RN.elements.rn_new == false, "explicit false moved to the new key")
+    NS.db = nil
+    R.pendingRenames = nil
+    R.ready = wasReady
+end
+
+-- RenameKey: registry entry, paired target, foreign records, twins; refusals
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("RN", { title = "RN" })
+    R:RegisterAddon("RNF", { title = "RNF" })
+    local el = R:Register("RN", "rn_old", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    local target = R:GetTarget("RN:rn_old")
+
+    -- a foreign addon anchored at the old id, once as primary and once as a backup
+    local posP = { point = "CENTER", x = 0, y = 0, anchor = { target = "RN:rn_old", edge = "top", align = "start" } }
+    R:Register("RNF", "rn_child", elDef(FakeFrame(0, 0, 10, 10), posP))
+    local posF = { point = "CENTER", x = 0, y = 0, anchor = { target = "RNF:rn_child", edge = "top", align = "start",
+        fallback = { target = "RN:rn_old", edge = "top", align = "start" } } }
+    R:Register("RNF", "rn_backup", elDef(FakeFrame(0, 0, 10, 10), posF))
+    local twinned = R:Register("RNF", "rn_twin", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { twin = "RN:rn_old" }))
+
+    check(R:RenameKey("RN", "rn_old", "rn_new"), "rename succeeds")
+    check(R:Get("RN:rn_new") == el, "same element table under the new id")
+    eq(el.id, "RN:rn_new", "element id updated"); eq(el.key, "rn_new", "element key updated")
+    check(R:Get("RN:rn_old") == nil, "old element id gone")
+    check(R:GetTarget("RN:rn_new") == target, "paired target moved with it")
+    eq(target.id, "RN:rn_new", "target id updated"); eq(target.key, "rn_new", "target key updated")
+    check(R:GetTarget("RN:rn_old") == nil, "old target id gone")
+    eq(posP.anchor.target, "RN:rn_new", "foreign record's anchor target rewritten in place")
+    eq(posF.anchor.fallback.target, "RN:rn_new", "backup target rewritten too")
+    eq(posF.anchor.target, "RNF:rn_child", "an unrelated target is left alone")
+    eq(twinned.twin, "RN:rn_new", "twin string rewritten")
+
+    check(R:RenameKey("RN", "rn_new", "rn_new") == false, "old == new refused")
+    R:Register("RN", "rn_taken", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    check(R:RenameKey("RN", "rn_new", "rn_taken") == false, "rename onto an existing key refused")
+    check(R:Get("RN:rn_new") == el, "refused rename left the element where it was")
+    eq(el.key, "rn_new", "refused rename left the key alone")
+
+    R:UnregisterAddon("RN"); R:UnregisterAddon("RNF")
+    R.pendingRenames = nil
+    R.ready = wasReady
+end
+
+-- RenameKey: queued registrations, both sides of the rename
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("RN", { title = "RN" })
+    R:Register("RN", "rn_old", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+
+    -- queued BEFORE the rename: rewritten on the def as the rename runs
+    R.ready = false
+    local posQ = { point = "CENTER", x = 0, y = 0, anchor = { target = "RN:rn_old", edge = "top", align = "start" } }
+    R:Register("RN", "rn_queued", elDef(FakeFrame(0, 0, 10, 10), posQ, { twin = "RN:rn_old" }))
+    check(R:RenameKey("RN", "rn_old", "rn_new"), "rename while a registration is queued")
+    eq(posQ.anchor.target, "RN:rn_new", "queued record rewritten at rename time")
+
+    -- queued AFTER the rename: only the Flush replay can catch it
+    local posL = { point = "CENTER", x = 0, y = 0, anchor = { target = "RN:rn_old", edge = "left", align = "end" } }
+    R:Register("RN", "rn_late", elDef(FakeFrame(0, 0, 10, 10), posL, { twin = "RN:rn_old" }))
+    eq(posL.anchor.target, "RN:rn_old", "late registration still names the old id before Flush")
+    R:Flush()
+    eq(posL.anchor.target, "RN:rn_new", "late record rewritten by the Flush replay")
+    eq(R:Get("RN:rn_late").twin, "RN:rn_new", "late twin rewritten by the Flush replay")
+    eq(R:Get("RN:rn_queued").twin, "RN:rn_new", "queued twin rewritten")
+    check(R.pendingRenames == nil, "pendingRenames cleared by Flush")
+
+    R:UnregisterAddon("RN")
+    R.ready = wasReady
+end
+
+-- snappable: defaults true; the opt-out lands on the element AND its paired target
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("SN", { title = "SN" })
+    local plainT = R:RegisterAnchorTarget("SN", "sn_t", { title = "t", frame = FakeFrame(0, 0, 10, 10) })
+    check(plainT.snappable == true, "target snappable defaults to true")
+    local offT = R:RegisterAnchorTarget("SN", "sn_toff", { title = "t", frame = FakeFrame(0, 0, 10, 10),
+        snappable = false })
+    check(offT.snappable == false, "snappable = false stored on the target")
+    local plainE = R:Register("SN", "sn_e", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    check(plainE.snappable == true, "element snappable defaults to true")
+    check(R:GetTarget("SN:sn_e").snappable == true, "paired target of a plain element is snappable")
+    local offE = R:Register("SN", "sn_eoff", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { snappable = false }))
+    check(offE.snappable == false, "snappable = false stored on the element")
+    check(R:GetTarget("SN:sn_eoff").snappable == false, "paired target carries snappable = false")
+    R:UnregisterAddon("SN")
+    R.ready = wasReady
+end
+
+-- CanonicalId memo: scoped, nestable, actually memoising, and correct once closed
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("CM", { title = "CM" })
+    local frame = FakeFrame(960, 540, 100, 40)
+    R:Register("CM", "cm_el", elDef(frame, { point = "CENTER", x = 0, y = 0 }))
+    local calls = 0
+    R:RegisterAnchorTarget("CM", "cm_alias", { title = "alias",
+        getFrame = function() calls = calls + 1; return frame end })
+
+    check(R._canonMemo == nil, "no memo before Begin")
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "alias resolves to the owning element")
+    eq(calls, 1, "one getFrame call with no memo")
+
+    R:BeginCanonMemo()
+    check(R._canonMemo ~= nil, "memo open after Begin")
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "alias canonical inside the memo")
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "same value on the second call")
+    eq(calls, 2, "second call inside the memo did not re-walk")
+    eq(R:CanonicalId("CM:cm_el"), "CM:cm_el", "element id is its own canonical inside the memo")
+    eq(R:CanonicalId("CM:cm_missing"), "CM:cm_missing", "unknown target memoises as itself")
+
+    R:BeginCanonMemo()
+    R:EndCanonMemo()
+    check(R._canonMemo ~= nil, "inner End leaves the outer memo open")
+    R:EndCanonMemo()
+    check(R._canonMemo == nil, "outer End closes the memo")
+
+    eq(R:CanonicalId("CM:cm_alias"), "CM:cm_el", "still correct after EndCanonMemo")
+    eq(calls, 3, "no stale memo: the walk runs again once the scope is closed")
+    R:UnregisterAddon("CM")
+    R.ready = wasReady
+end
