@@ -240,7 +240,14 @@ end
 function Popout:_Present(side)
     local f = self.frame
     self:_Resize()
-    if not f:IsShown() then
+    -- A pooled popout can be revived DURING its own close fade (cross, then
+    -- reselect inside OUT_DUR). The frame is still shown then, but the pop-out's
+    -- deferred "hide when done" is live -- without a fresh entrance it would
+    -- land on the reopened popout and swallow it. PopIn stops the pop-out group,
+    -- whose OnStop clears that callback. In-game-only path: the headless stub
+    -- has no animation groups, so the flag below is never set there.
+    local closing = f.fxPopOut and f.fxPopOut.IsPlaying and f.fxPopOut:IsPlaying()
+    if not f:IsShown() or closing then
         local ox, oy, origin = dockFx(side)
         if Fx then Fx.PopIn(f, POP_DUR, ox, oy, 0.92, origin) end
         f:Show()
@@ -324,10 +331,15 @@ end
 
 function Popout:_EnsureBeam()
     if self.beam then return self.beam end
-    -- Its own frame, parented to UIParent so the lines may span the gap, and
-    -- faded as a UNIT -- animating a Frame's alpha carries both its lines, which
-    -- is the whole reason the beam is not two loose lines on the popout.
-    local b = CreateFrame("Frame", nil, UIParent)
+    -- Its own frame so it fades as a UNIT -- animating a Frame's alpha carries
+    -- both its lines, which is the whole reason the beam is not two loose lines
+    -- on the popout. Parented to the popout's PARENT, not to UIParent: a
+    -- consumer that parents its popouts to a session overlay (so hiding the
+    -- overlay hides everything, e.g. for a combat suspend) must get the beam in
+    -- that bargain too -- a beam left glowing over a hidden UI would be the one
+    -- piece that failed to suspend. Regions are not clipped to their parent's
+    -- rect, so the lines still span the gap.
+    local b = CreateFrame("Frame", nil, self.frame:GetParent() or UIParent)
     b:SetAllPoints(UIParent)
     b:SetFrameStrata("BACKGROUND")
     b:Hide()
