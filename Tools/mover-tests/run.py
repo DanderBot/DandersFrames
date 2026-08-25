@@ -38,6 +38,10 @@ for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Fx.lua", "Registry.l
 # Tests that need a UI-facing module (Proxy.lua) load it themselves, after
 # stubbing the frame API it touches: load_addon_file("Proxy.lua").
 lua.globals().load_addon_file = lambda name: run(ADDON / name, "DandersMover", ns)
+# The same door for a DandersUI file (Popout.lua). The SAME ns goes in, so the
+# file's `NS.__DandersUI` finds the table Fx already installed onto -- the test
+# stubs the kit surface it needs onto that table first, then loads.
+lua.globals().load_ui_file = lambda name: run(HERE.parents[1] / "DandersUI" / name, "DandersUI", ns)
 
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
 for test in sorted(HERE.glob("test_*.lua")):
