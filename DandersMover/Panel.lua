@@ -9,11 +9,18 @@ if not NS.Lib then return end
 -- owns the frame, the title bar, the docking, the pin and the tether beam; this
 -- file owns what goes INSIDE it and what closing it means.
 --
--- MULTI-PIN. Selecting a mover opens the POOLED popout, which follows the
--- selected proxy. Pin it (by hand, or by touching a control while
--- DandersMoverDB.autoPinPanels is on) and it leaves the pool: it stays on
--- screen, keeps a beam back to its own mover, and the next selection gets a
--- fresh following popout. There is no limit on how many are pinned at once.
+-- ONE PANEL AT A TIME. Every element panel is opened in the family
+-- "mover.panel", and a family is an exclusivity CLAIM in the shell: opening one
+-- member closes every other, PINNED ONES INCLUDED. So there is never more than
+-- one panel on screen -- selecting a mover leaves exactly the pooled popout,
+-- following that mover's proxy.
+--
+-- PIN therefore means "stop following", not "keep a second one". A pinned panel
+-- stays where it is and keeps editing ITS mover while the selection is cleared
+-- or comes back to it; selecting a DIFFERENT mover closes it (reason "family")
+-- and opens a fresh FOLLOWING panel over there. The shell still supports
+-- several pinned members for consumers that want them -- the mover does not,
+-- because a screen full of panels was never what the editor is for.
 --
 -- ⚠ Nothing here may read Session.selected inside a control. `build` runs ONCE
 -- per instance and every closure it creates belongs to THAT instance, so a
@@ -46,9 +53,11 @@ local LINK_ICON = MEDIA .. "link"
 local GRIP_ICON = MEDIA .. "grip"
 local DEFAULT_ICON = UI.MEDIA .. "DF_Icon"
 
--- The pool key. One string for every element panel: per host+key the shell
--- keeps ONE unpinned instance, which is exactly the "one panel follows the
--- selection" behaviour, and pinning promotes an instance out of it.
+-- The pool key, and the family name -- deliberately the same string, because
+-- for the mover they say the same thing. Per host+key the shell keeps ONE
+-- unpinned instance (the panel that follows the selection); the FAMILY is what
+-- extends that to pinned ones, so opening a panel for another element closes
+-- whatever was up.
 local POPOUT_KEY = "mover.panel"
 
 -- Spacing comes from the theme so this panel keeps the rhythm of every other
@@ -874,9 +883,10 @@ function Pn:OnClose(po, reason)
     Proxy:Highlight(Sess.selected)
 end
 
--- Does any live panel hold this element pinned open? The slab's resting look
--- asks per repaint (Proxy's applyLook), which is a walk of a handful of live
--- panels -- there is no index to keep honest and the list is tiny.
+-- Does a live panel hold this element pinned open? The slab's resting look asks
+-- per repaint (Proxy's applyLook). Family exclusivity means the list is at most
+-- one long, and it is still a walk rather than a cached field because there is
+-- then no index to keep honest.
 function Pn:IsElementPinned(id)
     if not id then return false end
     for _, po in ipairs(self.live) do
@@ -888,6 +898,9 @@ end
 function Pn:Create()
     local po = UI:CreatePopout({
         key = POPOUT_KEY,
+        -- The exclusivity claim: opening this closes any panel already up, and
+        -- a pinned one is no exception. See the header.
+        family = POPOUT_KEY,
         pinnable = true,
         parent = Proxy:GetUnlockFrame(),   -- combat suspend hides the lot for free
         width = CW,
@@ -897,10 +910,18 @@ function Pn:Create()
         -- what it is docked to (it is docked to nothing) and not the selection.
         tetherSource = function(p) return p.elId and Proxy.proxies[p.elId] or nil end,
         onClose = function(p, reason) Pn:OnClose(p, reason) end,
-        -- Pinning changes what a slab looks like at rest (the pin marker), and
-        -- nothing else repaints on it: auto-pin fires from a control the user
-        -- touched, not from a selection change.
-        onPin = function() Proxy:Highlight(Sess.selected) end,
+        onPin = function(p)
+            -- ☠ Stop counting it as the follower NOW, not at the next Refresh.
+            -- Between a hand pin and whatever refreshes next, a stale
+            -- `following` makes OnClose read the cross as "done with the
+            -- selection" (and clear it), and makes HideFollowing take the
+            -- pinned panel down for a drag it is not attached to.
+            if Pn.following == p then Pn.following = nil end
+            -- Pinning changes what a slab looks like at rest (the pin marker),
+            -- and nothing else repaints on it: auto-pin fires from a control the
+            -- user touched, not from a selection change.
+            Proxy:Highlight(Sess.selected)
+        end,
     })
     local found = false
     for _, other in ipairs(self.live) do if other == po then found = true end end
@@ -913,7 +934,9 @@ local function hideInstance(po)
     if not po then return end
     NS.Fx.Cancel(po.frame)
     po.frame:Hide()
-    if po.beam then NS.Fx.Cancel(po.beam); po.beam:Hide() end
+    -- The tether beam and the source outline are not children of the popout's
+    -- frame, so hiding it does not take them; the shell's own instant path does.
+    po:HideChrome()
 end
 
 -- Instant hide of every live panel: combat suspend and session teardown, both of
@@ -924,8 +947,9 @@ function Pn:Hide()
 end
 
 -- Just the follower: a drag is starting, and the following panel is docked to
--- the slab that is about to move. Pinned panels sit at their own screen
--- positions and have no reason to go anywhere, so they stay up for the drag.
+-- the slab that is about to move. A PINNED panel sits at its own screen position
+-- and has no reason to go anywhere, so it stays up for the drag -- which is why
+-- this is not simply Hide().
 function Pn:HideFollowing()
     hideInstance(self.following)
 end
@@ -970,8 +994,12 @@ function Pn:Refresh()
     if fo and (fo.closed or fo:IsPinned()) then fo = nil; self.following = nil end
 
     local want = (el and proxy and proxy:IsShown()) and true or false
-    -- ...unless a pinned panel is already showing this very element. Two panels
-    -- for one mover is not multi-pin, it is a duplicate.
+    -- ...unless the panel already up is a pinned one on THIS VERY element.
+    --
+    -- ☠ LOAD-BEARING FOR AUTO-PIN, not a nicety. Pinning clears `following`, so
+    -- without this the next mutation -- the very nudge that auto-pinned it --
+    -- would open a fresh follower for the still-selected element, and the family
+    -- sweep would close the panel that had just been pinned.
     if want then
         for _, po in ipairs(self.live) do
             if po ~= fo and po.elId == el.id then want = false break end

@@ -283,8 +283,9 @@ end
 
 -- ============================================================
 -- 2. THE PANEL HOLDS ELEMENT CONTENT ONLY
--- The session verbs moved to the legend strip: with several panels pinned at
--- once, an Undo button on each one would be the same button drawn many times.
+-- The session verbs moved to the legend strip: they act on the SESSION, not on
+-- the element whose panel happens to be open, so a copy of each on the panel
+-- would be the same button drawn in the wrong place.
 -- ============================================================
 do
     local ui = Pn.following.ui
@@ -483,77 +484,108 @@ end
 reset()
 
 -- ============================================================
--- 8. MULTI-PIN
--- Two pinned panels bound to two different elements, while the selection has
--- moved on to a third. Each one shows ITS OWN element and each control acts on
--- ITS OWN element -- the whole point of building on per-instance bindings.
+-- 8. ONE PANEL AT A TIME
+-- Every panel opens in the family "mover.panel", and a family evicts PINNED
+-- members too -- so selecting another mover closes whatever was up and opens a
+-- fresh following panel over there. Pin means "stop following", not "keep a
+-- second one".
 -- ============================================================
+do
+    local seen = {}
+    local realOnClose = Pn.OnClose
+    Pn.OnClose = function(self, po, reason)
+        seen[#seen + 1] = { po, reason }
+        return realOnClose(self, po, reason)
+    end
+
+    local a = refresh("P:free")
+    a:Pin()
+    check(a:IsPinned(), "one: the panel is pinned")
+    -- Stood down AT ONCE, not at the next refresh: a stale `following` would
+    -- make the cross clear the selection and a drag hide the pinned panel.
+    check(Pn.following == nil, "one: pinning stood the follower down immediately")
+    eq(#Pn.live, 1, "one: it is the only panel")
+
+    -- It outlives the SELECTION being cleared -- that is what pinning is still
+    -- for -- and keeps reporting its own element.
+    Sess.selected = nil
+    Pn:Refresh()
+    check(not a.closed, "one: clearing the selection does not close a pinned panel")
+    eq(a.el.id, "P:free", "one: ...and it still reports its own element")
+    eq(a:GetTitle(), R:Get("P:free").title, "one: its title bar still names it")
+
+    -- Selecting ANOTHER mover evicts it. Family, not the cross.
+    local b = refresh("P:child")
+    check(a.closed, "one: selecting another mover closes the pinned panel")
+    eq(seen[#seen][2], "family", "one: ...with reason 'family'")
+    check(b ~= a, "one: the newcomer is a fresh instance")
+    check(not b:IsPinned(), "one: ...and it FOLLOWS")
+    eq(#Pn.live, 1, "one: still exactly one panel")
+    eq(b.el.id, "P:child", "one: bound to the newly selected element")
+
+    Pn.OnClose = realOnClose
+end
+
+reset()
+
+-- Retargeting the FOLLOWER glides it across to the new slab instead of
+-- teleporting; a family close-and-reopen (the pinned case above) does not, and
+-- is not meant to.
+do
+    local a = refresh("P:free")
+    check(not a.gliding, "glide: opening a panel is not a glide")
+    local b = refresh("P:child")
+    check(b == a, "glide: the follower was retargeted, not replaced")
+    check(a.gliding, "glide: ...and it glides to the new mover")
+    eq(a.el.id, "P:child", "glide: the content is already the new element")
+    -- Run it out so nothing is left mid-flight for the next section.
+    a.frame:GetScript("OnUpdate")(a.frame, 1)
+    check(not a.gliding, "glide: and it lands")
+end
+
+reset()
+
+-- The per-instance binding is what makes a pinned panel usable at all: with the
+-- selection cleared there is nothing else its controls COULD act on, and they
+-- must still act on the element the panel was pinned for.
 do
     local a = refresh("P:free")
     a:Pin()
-    check(a:IsPinned(), "multi: the first panel is pinned")
-
-    local b = refresh("P:child")
-    check(b ~= a, "multi: selecting another element opens a FRESH panel")
-    check(not b:IsPinned(), "multi: ...which follows until it is pinned too")
-    b:Pin()
-
-    local c = refresh("P:host")
-    check(c ~= a and c ~= b, "multi: and a third, still following")
-    eq(#Pn.live, 3, "multi: three panels are live at once")
-    eq(Sess.selected, "P:host", "multi: the selection is on the third element")
-
-    -- Each panel reports its own element.
-    eq(a.el.id, "P:free", "multi: panel A stayed bound to its element")
-    eq(b.el.id, "P:child", "multi: panel B stayed bound to its element")
-    eq(a:GetTitle(), R:Get("P:free").title, "multi: A's title bar names A's element")
-    -- A is free, B is anchored: the two panels are showing genuinely different
-    -- states at the same time.
-    childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
+    Sess.selected = nil
     Pn:Refresh()
-    check(a.ui.targetRow.picker._override:find("None", 1, true) == 1, "multi: A still reads as free")
-    eq(b.ui.targetRow.picker._override, R:Get("P:host").title, "multi: B reads as anchored")
-    check(a.ui.edgeDrop._enabled == false, "multi: A's seat pair is greyed")
-    check(b.ui.edgeDrop._enabled, "multi: B's seat pair is live")
-
-    -- Each control carries its own element, not the selection.
     wipe(calls)
-    a.ui.targetRow.picker._opts.set("P:spare")
-    check(calls[1][1] == "anchor" and calls[1][2] == "P:free", "multi: A's target picker acts on A")
-    b.ui.xBox._opts.onCommit(7)
-    check(calls[2][1] == "setxy" and calls[2][2] == "P:child" and calls[2][3] == 7,
-        "multi: B's X box acts on B")
     a.ui.nudgeButtons[1]._opts.onClick()
-    check(calls[3][1] == "nudge" and calls[3][2] == "P:free", "multi: A's nudge acts on A")
-    c.ui.btnCenter._opts.onClick()
-    check(calls[4][1] == "center" and calls[4][2] == "P:host", "multi: the follower acts on the selection")
-    b.ui.btnDetach._opts.onClick()
-    check(calls[5][1] == "detach" and calls[5][2] == "P:child", "multi: B's Detach acts on B")
-
-    -- The tether beam's far end is each panel's OWN mover, not what it docked to.
-    eq(a.tetherSource(a), proxies["P:free"], "multi: A tethers back to A's proxy")
-    eq(b.tetherSource(b), proxies["P:child"], "multi: B tethers back to B's proxy")
-
-    childPos.anchor = nil
+    check(calls[1][1] == "nudge" and calls[1][2] == "P:free", "binding: the nudge acts on the panel's own element")
+    a.ui.xBox._opts.onCommit(7)
+    check(calls[2][1] == "setxy" and calls[2][2] == "P:free" and calls[2][3] == 7,
+        "binding: so does the X box")
+    a.ui.btnDetach._opts.onClick()
+    check(calls[3][1] == "detach" and calls[3][2] == "P:free", "binding: and Detach")
+    a.ui.targetRow.picker._opts.set("P:spare")
+    check(calls[4][1] == "anchor" and calls[4][2] == "P:free", "binding: and the target picker")
+    -- The tether beam's far end is the panel's OWN mover, not what it docked to.
+    eq(a.tetherSource(a), proxies["P:free"], "binding: it tethers back to its own proxy")
 end
 
--- Crossing a PINNED panel closes that one only; the selection is untouched.
+reset()
+
+-- Crossing a PINNED panel closes that one and leaves the selection alone -- it
+-- was never the follower.
 do
-    local pinnedA, pinnedB
-    for _, po in ipairs(Pn.live) do
-        if po.elId == "P:free" then pinnedA = po elseif po.elId == "P:child" then pinnedB = po end
-    end
+    local a = refresh("P:host")
+    a:Pin()
     local before = Sess.selected
-    pinnedA.closeBtn._opts.onClick()
-    check(pinnedA.closed, "cross/pinned: the pinned panel closed")
+    a.closeBtn._opts.onClick()
+    check(a.closed, "cross/pinned: the pinned panel closed")
     eq(Sess.selected, before, "cross/pinned: the selection is intact")
-    check(not pinnedB.closed and not Pn.following.closed, "cross/pinned: the others are untouched")
-    eq(#Pn.live, 2, "cross/pinned: only that one left the live set")
+    eq(#Pn.live, 0, "cross/pinned: and nothing is left")
 end
+
+reset()
 
 -- Crossing the FOLLOWING panel is "I am done": it deselects and closes.
 do
-    local following = Pn.following
+    local following = refresh("P:host")
     check(following ~= nil, "cross/following: there is one to cross")
     following.closeBtn._opts.onClick()
     check(following.closed, "cross/following: the panel closed")
@@ -562,11 +594,15 @@ do
     check(not following.frame:IsShown(), "cross/following: the frame is down")
 end
 
+reset()
+
 -- ============================================================
--- 9. SESSION END closes the pinned panels too -- the next session starts clean.
+-- 9. SESSION END closes the pinned panel too -- the next session starts clean.
 -- ============================================================
 do
-    check(#Pn.live > 0, "end: a pinned panel is still up going in")
+    local po = refresh("P:free")
+    po:Pin()
+    check(#Pn.live > 0, "end: a pinned panel is up going in")
     Sess.active = false
     Pn:Refresh()
     eq(#Pn.live, 0, "end: an inactive session leaves no panel behind")
@@ -586,8 +622,9 @@ do
     proxyFor("P:temp", 40, 40)
     local po = refresh("P:temp")
     po:Pin()
-    refresh("P:free")
-    check(not po.closed, "unregister: the pinned panel survives a selection change")
+    Sess.selected = nil
+    Pn:Refresh()
+    check(not po.closed, "unregister: the pinned panel survives the selection being cleared")
 
     R:Unregister("P", "temp")
     proxies["P:temp"] = nil
@@ -669,13 +706,28 @@ do
     local c = refresh("P:host")
     check(c ~= a, "pool: once pinned, the next selection gets a new instance")
     eq(groupBoxes, before + 1, "pool: ...and that one built")
-    eq(#Pn.live, 2, "pool: both are live")
-    -- The element already wearing a pinned panel does not get a second one --
-    -- two panels for one mover is a duplicate, not multi-pin.
-    refresh("P:child")
-    eq(#Pn.live, 1, "pool: an element with a pinned panel gets no duplicate follower")
-    check(Pn.following == nil, "pool: ...the follower stood down instead")
-    check(a:IsPinned() and not a.closed, "pool: the pinned one is what is left")
+    check(a.closed, "pool: ...while the family evicted the pinned one")
+    eq(#Pn.live, 1, "pool: one panel, always")
+end
+
+reset()
+
+-- ☠ Re-selecting the element a PINNED panel is already on must NOT open a
+-- second one -- and this is not cosmetic. Pinning clears `following`, so
+-- without the guard the very next refresh would build a follower for the
+-- still-selected element and the family sweep would close the panel that had
+-- just been pinned. Which is exactly what auto-pin does.
+do
+    local a = refresh("P:free")
+    a:Pin()
+    local again = refresh("P:free")
+    check(again == nil, "pin: re-selecting its own element opens no follower")
+    check(not a.closed, "pin: ...so the pinned panel survives")
+    eq(#Pn.live, 1, "pin: still just the one")
+    Pn:Refresh()
+    Pn:Refresh()
+    check(not a.closed, "pin: and further refreshes leave it alone too")
+    eq(#Pn.live, 1, "pin: without ever stacking up a second")
 end
 
 reset()
@@ -688,18 +740,30 @@ reset()
 do
     local po = refresh("P:free")
     po:Pin()
-    refresh("P:child")
     local built = groupBoxes
     Sess.suspended = true
     Pn:Refresh()
     check(not po.frame:IsShown(), "suspend: the pinned panel is hidden")
-    check(not Pn.following.frame:IsShown(), "suspend: the follower is hidden too")
-    eq(#Pn.live, 2, "suspend: nothing was closed")
+    eq(#Pn.live, 1, "suspend: nothing was closed")
     Sess.suspended = false
     Pn:Refresh()
     check(po.frame:IsShown(), "resume: the pinned panel is back")
-    check(Pn.following.frame:IsShown(), "resume: and so is the follower")
     eq(groupBoxes, built, "resume: nothing was rebuilt")
+end
+
+reset()
+
+do
+    local fo = refresh("P:child")
+    local built = groupBoxes
+    Sess.suspended = true
+    Pn:Refresh()
+    check(not fo.frame:IsShown(), "suspend: the follower is hidden too")
+    Sess.suspended = false
+    Pn:Refresh()
+    check(Pn.following == fo, "resume: the same follower is still the follower")
+    check(fo.frame:IsShown(), "resume: and it is back on screen")
+    eq(groupBoxes, built, "resume: nothing was rebuilt for it either")
 end
 
 reset()
@@ -739,10 +803,15 @@ do
     local po = refresh("P:cfg")
     check(po.ui.btnConfigure:IsShown(), "configure: shown for an element that offers it")
     po:Pin()
-    refresh("P:free")
-    check(not Pn.following.ui.btnConfigure:IsShown(), "configure: hidden on the panel next door")
+    Sess.selected = nil
+    Pn:Refresh()
     po.ui.btnConfigure._opts.onClick()
     eq(opened, "P:cfg", "configure: the pinned panel opened ITS element's settings")
+    -- Selecting an element that offers none evicts that panel and the fresh one
+    -- hides the button again.
+    local other = refresh("P:free")
+    check(po.closed, "configure: the pinned panel was evicted by the family")
+    check(not other.ui.btnConfigure:IsShown(), "configure: hidden for an element with no openSettings")
     R:Unregister("P", "cfg")
     proxies["P:cfg"] = nil
 end
@@ -750,14 +819,15 @@ end
 -- ============================================================
 -- 16. A LINK STARTED FROM A PINNED PANEL links FROM that panel's element.
 -- The handle closes over the panel's own binding, so a pinned panel's chain
--- reaches out from ITS mover even though the selection is somewhere else --
--- which is the only way to link two movers neither of which is selected.
+-- reaches out from ITS mover with NOTHING selected -- which is the only way to
+-- link two movers neither of which is selected.
 -- ============================================================
 do
     local a = refresh("P:free")
     a:Pin()
-    refresh("P:host")
-    eq(Sess.selected, "P:host", "pinned link: the selection has moved on")
+    Sess.selected = nil
+    Pn:Refresh()
+    eq(Sess.selected, nil, "pinned link: nothing is selected any more")
     wipe(calls)
     a.ui.targetRow.handle:GetScript("OnMouseDown")(a.ui.targetRow.handle, "LeftButton")
     eq(calls[1][1], "begin", "pinned link: the handle starts a link")
@@ -775,17 +845,23 @@ reset()
 -- ============================================================
 -- 17. A DRAG HIDES ONLY THE FOLLOWER
 -- The following panel is docked to the slab that is about to move; a pinned one
--- sits at its own screen position and has no reason to go anywhere. Hiding the
--- lot would flash every pinned panel off and on for every drag.
+-- sits at its own screen position and has no reason to go anywhere. Hiding it
+-- for every drag would flash it off and on for a slab it is not attached to.
 -- ============================================================
+do
+    local fo = refresh("P:child")
+    check(fo.frame:IsShown(), "drag: the follower is up going in")
+    Pn:HideFollowing()
+    check(not fo.frame:IsShown(), "drag: the follower goes down with the slab it is docked to")
+end
+
+reset()
+
 do
     local pinned = refresh("P:free")
     pinned:Pin()
-    local fo = refresh("P:child")
-    check(pinned.frame:IsShown() and fo.frame:IsShown(), "drag: both panels are up going in")
     Pn:HideFollowing()
-    check(not fo.frame:IsShown(), "drag: the follower goes down with the slab it is docked to")
-    check(pinned.frame:IsShown(), "drag: the pinned panel stays on screen")
+    check(pinned.frame:IsShown(), "drag: a pinned panel is docked to nothing and stays up")
     -- Suspend and teardown still take everything.
     Pn:Hide()
     check(not pinned.frame:IsShown(), "suspend: Hide still takes every panel down")
@@ -809,14 +885,24 @@ do
     check(not Pn:IsElementPinned("P:host"), "marker: only the element the panel is bound to")
     check(not Pn:IsElementPinned(nil), "marker: no element, no pin")
 
-    -- Move the selection on, so what is crossed below is a purely pinned panel
-    -- and not one the mover still counts as its follower.
-    refresh("P:host")
-    check(Pn:IsElementPinned("P:free"), "marker: the pin survives a selection change")
+    -- Clear the selection, so what is crossed below is a purely pinned panel and
+    -- not one the mover still counts as its follower.
+    Sess.selected = nil
+    Pn:Refresh()
+    check(Pn:IsElementPinned("P:free"), "marker: the pin survives the selection being cleared")
     before = #highlights
     po.closeBtn._opts.onClick()
     check(not Pn:IsElementPinned("P:free"), "marker: crossing the panel drops the pin")
     check(#highlights > before, "marker: ...and repaints so the marker goes")
+
+    -- A family eviction drops it too, with nobody crossing anything.
+    local q = refresh("P:free")
+    q:Pin()
+    check(Pn:IsElementPinned("P:free"), "marker: pinned again")
+    before = #highlights
+    refresh("P:host")
+    check(not Pn:IsElementPinned("P:free"), "marker: selecting another mover evicts the pin")
+    check(#highlights > before, "marker: ...and repaints for that too")
 end
 
 reset()
