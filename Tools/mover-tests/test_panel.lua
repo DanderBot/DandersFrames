@@ -31,6 +31,9 @@ KIT.RowHeight = { groupTitle = 26, checkbox = 35 }
 function KIT:GetAccent() return COLORS.accent end
 function KIT:CreatePanelBackdrop() end
 function KIT:CreateElementBackdrop() end
+-- The shell paints the popout's accent border and the source outline through
+-- this; the panel asserts nothing about either, so recording is enough.
+function KIT:ApplyPixelBorder(frame, color) frame._pxColor = color end
 
 -- A FontString that records whether its caption clips or wraps: the difference
 -- between a long string staying in its row and falling through the one below.

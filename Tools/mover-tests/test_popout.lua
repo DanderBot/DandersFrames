@@ -25,7 +25,16 @@ UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5
 
 local ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
 function UI:GetAccent() return ACCENT end
-function UI:CreatePanelBackdrop() end
+-- Both backdrop factories RECORD what they were asked to paint: the accent
+-- chrome is only observable as the colour these were handed.
+function UI:CreatePanelBackdrop(frame, opts)
+    frame._panelOpts = opts
+    return frame
+end
+function UI:ApplyPixelBorder(frame, color, weight)
+    frame._pxColor, frame._pxWeight = color, weight
+    return frame
+end
 function UI:CreateLabel(parent, opts)
     local fs = FakeUIFrame()
     if opts and opts.text then fs:SetText(opts.text) end
@@ -358,6 +367,139 @@ do
     p.titleBar:GetScript("OnDragStop")()
     check(not p.frame._flags.moving, "beam: the drag released the frame")
     p:Close()
+end
+
+-- ============================================================
+-- 8b. ACCENT CHROME
+-- The popout, the connection point and the source outline are all drawn in ONE
+-- colour, so the two ends read as two halves of one object. The host accent by
+-- default; opts.accent overrides it per popout.
+-- ============================================================
+do
+    local p = popout({ key = "accent" })
+    local bc = p.frame._panelOpts and p.frame._panelOpts.borderColor
+    check(bc ~= nil, "accent: the popout's backdrop was given a border colour")
+    eq(bc.r, ACCENT.r, "accent: the border takes the host accent")
+    eq(bc.b, ACCENT.b, "accent: ...on every channel")
+    p:Close()
+
+    local mine = { 1, 0.5, 0 }
+    local q = popout({ key = "accentopt", accent = mine })
+    eq(q.frame._panelOpts.borderColor.r, 1, "accent: opts.accent overrides the host")
+    eq(q.frame._panelOpts.borderColor.g, 0.5, "accent: ...as an array triple")
+    eq(q:GetAccent().b, 0, "accent: GetAccent answers the override")
+    q:Close()
+
+    -- The override is per ADOPT, so a pooled popout re-opened without one falls
+    -- back to the host again rather than keeping the last consumer's colour.
+    local back = popout({ key = "accentopt" })
+    check(back == q, "accent: the pooled instance came back")
+    eq(back:GetAccent().r, ACCENT.r, "accent: ...and dropped the override with the opts")
+    back:Close()
+end
+
+-- ============================================================
+-- 8c. THE CONNECTION POINT
+-- A small accent diamond centred on the edge the popout docked against. It
+-- re-sides with the dock and it is gone the moment the popout is pinned, which
+-- is when the relationship it describes stops holding.
+-- ============================================================
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "notch" })
+    check(not p.notch:IsShown(), "notch: a built popout has no connection point yet")
+    p:Follow(src)
+    check(p.notch:IsShown(), "notch: following, the point is up")
+    eq(p.notch:GetTexture(), "Icons\\notch", "notch: it wears the diamond")
+    eq(p.notch._vertex.r, ACCENT.r, "notch: tinted with the accent")
+    eq(p.notch:GetWidth(), 10, "notch: ~10px")
+    local pt = p.notch._points[#p.notch._points]
+    eq(pt[1], "CENTER", "notch: its CENTRE sits on the edge")
+    eq(pt[3], "LEFT", "notch: right-docked, that is the popout's LEFT edge")
+
+    -- Flip the dock and the point crosses with it.
+    src:SetFakeCenter(1850, CY)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(p.side, "left", "notch: the dock flipped")
+    eq(p.notch._points[#p.notch._points][3], "RIGHT",
+        "notch: left-docked, the point moves to the popout's RIGHT edge")
+
+    p:Follow(src, { side = "above" })
+    eq(p.notch._points[#p.notch._points][3], "BOTTOM", "notch: above-docked points DOWN")
+    p:Follow(src, { side = "below" })
+    eq(p.notch._points[#p.notch._points][3], "TOP", "notch: below-docked points UP")
+
+    p:Pin()
+    check(not p.notch:IsShown(), "notch: pinning takes the connection point away")
+    p:Close()
+
+    -- PlaceFree has no dock side, so there is nothing to point at.
+    local free = popout({ key = "notchfree" })
+    free:PlaceFree(0, 0)
+    check(not free.notch:IsShown(), "notch: a free-placed popout draws none")
+    free:Close()
+end
+
+-- The tip geometry, head-on: the outer vertex of a diamond straddling the
+-- source-facing edge, half its size proud of it.
+do
+    local pr = { x = 100, y = 20, w = 120, h = 92 }
+    local x, y = UI.PopoutNotchTip(pr, "right", 10)
+    eq(x, 100 - 60 - 5, "tip: right-docked, the tip is left of the popout's left edge")
+    eq(y, 20, "tip: on that edge's midpoint")
+    x, y = UI.PopoutNotchTip(pr, "left", 10)
+    eq(x, 100 + 60 + 5, "tip: left-docked, the tip is right of the right edge")
+    x, y = UI.PopoutNotchTip(pr, "above", 10)
+    eq(y, 20 - 46 - 5, "tip: above-docked, the tip is below the bottom edge")
+    x, y = UI.PopoutNotchTip(pr, "below", 10)
+    eq(y, 20 + 46 + 5, "tip: below-docked, the tip is above the top edge")
+    eq(UI.PopoutNotchTip(pr, nil, 10), nil, "tip: no dock side, no tip")
+    eq(UI.PopoutNotchTip(nil, "right", 10), nil, "tip: no rect, no tip")
+end
+
+-- Nearest point on a rect's outline. The tip is always OUTSIDE the source, so
+-- clamping onto the rect lands on its perimeter.
+do
+    local r = { x = 0, y = 0, w = 100, h = 50 }
+    local x, y = UI.PopoutNearestOnRect(r, 200, 0)
+    eq(x, 50, "nearest: clamped onto the right face")
+    eq(y, 0, "nearest: ...at the height it came from")
+    x, y = UI.PopoutNearestOnRect(r, -200, 100)
+    eq(x, -50, "nearest: the left face")
+    eq(y, 25, "nearest: ...and the top, for a point off the corner")
+    eq(UI.PopoutNearestOnRect(nil, 0, 0), nil, "nearest: no rect, no point")
+end
+
+-- ============================================================
+-- 8d. THE SOURCE OUTLINE
+-- While following, the shell draws the SAME 1px accent border over the tether
+-- source that the popout wears, so the two visibly share an edge.
+-- ============================================================
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "outline" })
+    check(p.srcOutline == nil, "outline: nothing is built until the popout is placed")
+    p:Follow(src)
+    check(p.srcOutline ~= nil and p.srcOutline:IsShown(), "outline: following, it is up")
+    eq(p.srcOutline._pxColor[1], ACCENT.r, "outline: the same accent as the popout's border")
+    eq(p.srcOutline._points[1][1], "TOPLEFT", "outline: it covers the source rect")
+    eq(p.srcOutline._points[1][2], src, "outline: ...anchored to the source itself")
+    eq(p.srcOutline._points[2][1], "BOTTOMRIGHT", "outline: on both corners")
+
+    p:Pin()
+    check(not p.srcOutline:IsShown(), "outline: pinning is visually detached, so it goes")
+    p:Close()
+end
+
+-- It follows the TETHER source, not the dock source, and it leaves on close.
+do
+    local src = source(80, 40, CX, CY)
+    local far = source(60, 40, CX - 400, CY)
+    local p = popout({ key = "outlinetether", tetherSource = far })
+    p:Follow(src)
+    eq(p.srcOutline._points[1][2], far, "outline: it outlines the TETHER target")
+    p:Close()
+    check(not p.srcOutline:IsShown(), "outline: closing takes it down")
 end
 
 -- ============================================================

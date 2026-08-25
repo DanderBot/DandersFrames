@@ -36,7 +36,7 @@ local Fx = UI.Fx
 local PAD        = 10        -- outer inset around the content
 local TITLE_H    = 22        -- the title bar strip
 local DOCK_GAP   = 12        -- popout <-> source distance when docked
-local ADJ_GAP    = 16        -- "still beside it": beyond this the beam appears
+local ADJ_GAP    = 16        -- "still beside it" slack, for UI.PopoutIsAdjacent
 local POP_DUR    = 0.22      -- entrance
 local OUT_DUR    = 0.18      -- exit, the entrance run backwards
 local PIN_DUR    = 0.12      -- the little confirm pop when pinning by hand
@@ -44,6 +44,13 @@ local BEAM_DUR   = 0.15      -- beam fade in / out
 local CLOSE_SIZE = 18
 local PIN_SIZE   = 14
 local ICON_SIZE  = 14
+-- The connection point: a small accent diamond centred on the edge the popout
+-- docked against, half of it proud of the border. 10 is the size at which the
+-- tip still reads as a POINT against a 2-device-pixel border without becoming a
+-- shape in its own right. Square corners everywhere -- the popout's border, the
+-- source outline and this notch are all straight lines, so the three read as one
+-- piece of chrome rather than three decorations.
+local NOTCH_SIZE = 10
 -- Two layered lines, not one: a wide soft under-glow so the beam reads over
 -- busy art, and a thin bright core so it still reads as a LINE.
 local BEAM_GLOW_W, BEAM_GLOW_A = 5, 0.15
@@ -129,6 +136,48 @@ local function rectOf(region)
     if not cx then return nil end
     local ux, uy = UIParent:GetCenter()
     return { x = cx - ux, y = cy - uy, w = region:GetWidth() or 0, h = region:GetHeight() or 0 }
+end
+
+-- Per dock side: the popout's OWN edge that faces the source, and the outward
+-- unit direction from it. The connection point is centred on that edge and the
+-- beam leaves from its tip, so both re-side for free when the dock flips.
+local NOTCH_SIDE = {
+    right = { "LEFT",   -1,  0 },
+    left  = { "RIGHT",   1,  0 },
+    below = { "TOP",     0,  1 },
+    above = { "BOTTOM",  0, -1 },
+}
+
+-- The tip of the connection point, in UIParent-centre units: the outer vertex of
+-- the diamond sitting half-proud of the popout's source-facing edge. nil for a
+-- popout with no dock side (PlaceFree), which has nothing to point at.
+--
+-- Exposed on the library for the same reason PopoutPickSide is: it is a pure
+-- function of its arguments and both the beam and its tests want it.
+function UI.PopoutNotchTip(pr, side, size)
+    local spec = pr and side and NOTCH_SIDE[side]
+    if not spec then return nil end
+    size = size or NOTCH_SIZE
+    return pr.x + spec[2] * (pr.w / 2 + size / 2),
+           pr.y + spec[3] * (pr.h / 2 + size / 2)
+end
+
+-- The point on `r`'s outline closest to (px, py). For a point OUTSIDE the rect
+-- -- which the connection point's tip always is, sitting across the dock gap --
+-- clamping onto the rect lands on its perimeter, which is where the beam wants
+-- to arrive: the face that is actually looking back at it.
+function UI.PopoutNearestOnRect(r, px, py)
+    if not r then return nil end
+    return min(max(px, r.x - r.w / 2), r.x + r.w / 2),
+           min(max(py, r.y - r.h / 2), r.y + r.h / 2)
+end
+
+-- {r,g,b[,a]} or {[1],[2],[3][,4]} -> a plain {r,g,b,a}; nil for anything else.
+local function normColor(c)
+    if type(c) ~= "table" then return nil end
+    local r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+    if not (r and g and b) then return nil end
+    return { r = r, g = g, b = b, a = c.a or c[4] or 1 }
 end
 
 -- The entrance drift and scale origin for a dock side: the popout pops out of
@@ -254,7 +303,9 @@ function Popout:_Present(side)
         self._popDur = POP_DUR      -- the beam waits this long before fading in
     end
     self:_StartTick()
+    self:_UpdateNotch()
     self:_UpdateBeam()
+    self:_UpdateSourceOutline()
 end
 
 -- Height follows the content the consumer mounted; width was fixed at build.
@@ -264,6 +315,113 @@ function Popout:_Resize()
     return self
 end
 Popout.Resize = Popout._Resize      -- public: call after changing content height
+
+-- ---- accent chrome -----------------------------------------------
+
+-- The colour every piece of this popout's chrome is drawn in: the border, the
+-- connection point and the source outline. `opts.accent` overrides the host's,
+-- so a consumer whose surface carries its own theme colour can hand that in per
+-- popout. Without one it is the HOST accent -- and that table is mutated in
+-- place by SetAccent, so re-reading it here is all it takes to track a change.
+function Popout:GetAccent()
+    return self.accent or self.host:GetAccent()
+end
+
+-- Repaint everything the accent colours. Called on every adopt, so a pooled
+-- popout re-opened after a theme change comes up in the current colour rather
+-- than in whatever it was built in.
+function Popout:_ApplyAccent()
+    local c = self:GetAccent()
+    -- The accent goes on as the panel's own 1px BORDER, which is the whole
+    -- "the popout and the thing it is about share an edge" idea -- and it runs
+    -- through the pixel-border machinery, so it lands on the device grid like
+    -- every other outlined surface in the kit, with square corners.
+    self.host:CreatePanelBackdrop(self.frame, { borderColor = c })
+    if self.notch then self.notch:SetVertexColor(c.r, c.g, c.b, c.a or 1) end
+    if self.srcOutline then
+        self.host:ApplyPixelBorder(self.srcOutline, { c.r, c.g, c.b, c.a or 1 })
+    end
+end
+
+-- ---- the connection point ----------------------------------------
+
+-- The accent diamond centred on the source-facing edge. Shown only while the
+-- popout is FOLLOWING: a pinned popout has been taken off its leash by hand and
+-- is docked to nothing, so a point aimed at the source would be pointing at a
+-- relationship that no longer holds.
+function Popout:_UpdateNotch()
+    local n = self.notch
+    if not n then return end
+    local spec = (not self.closed) and self.following and not self.pinned
+                 and NOTCH_SIDE[self.side] or nil
+    if not spec then n:Hide() return end
+    n:ClearAllPoints()
+    -- CENTRE on the edge, so exactly half the diamond stands proud of the
+    -- border and the other half sits over it -- one shape crossing the line
+    -- rather than a marker parked beside it.
+    n:SetPoint("CENTER", self.frame, spec[1], 0, 0)
+    n:Show()
+end
+
+-- ---- the source outline ------------------------------------------
+
+-- A 1px accent outline laid over the tether source, so the popout and the thing
+-- it is about wear the SAME border and the beam reads as a join between two
+-- pieces of one object rather than a line to something unrelated.
+--
+-- Its own frame, parented to the popout's PARENT for the same reason the beam
+-- is: a consumer that parents its popouts to a session overlay (so hiding the
+-- overlay suspends everything) must get this in that bargain too.
+function Popout:_EnsureSourceOutline()
+    if self.srcOutline ~= nil then return self.srcOutline end
+    local o = CreateFrame("Frame", nil, self.frame:GetParent() or UIParent)
+    o:SetFrameStrata("DIALOG")
+    o:Hide()
+    self.srcOutline = o
+    return o
+end
+
+-- The outline is ANCHORED to the region, so it tracks a moving source for free;
+-- this only has to run when the state or the target changes.
+function Popout:_UpdateSourceOutline()
+    local want = self.following and not self.pinned and not self.closed
+                 and self.frame:IsShown()
+    local region = want and self:_TetherRegion() or nil
+    if region and not rectOf(region) then region = nil end
+    if not region then
+        self:_HideSourceOutline()
+        return
+    end
+    local o = self:_EnsureSourceOutline()
+    o:ClearAllPoints()
+    o:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 0)
+    o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
+    local c = self:GetAccent()
+    self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
+    if o:IsShown() then return end
+    if Fx then Fx.FadeIn(o, BEAM_DUR) else o:Show() end
+end
+
+function Popout:_HideSourceOutline()
+    local o = self.srcOutline
+    if not o or not o:IsShown() then return end
+    if Fx then Fx.FadeOut(o, BEAM_DUR, function() o:Hide() end) else o:Hide() end
+end
+
+-- Take every piece of connected chrome down AT ONCE, animations cancelled. For
+-- the paths that must be instant -- a consumer hiding the popout by hand for a
+-- combat suspend or a drag -- where a fading beam left behind would be the one
+-- thing that failed to suspend.
+function Popout:HideChrome()
+    if self.beam then
+        if Fx then Fx.Cancel(self.beam) end
+        self.beam:Hide()
+    end
+    if self.srcOutline then
+        if Fx then Fx.Cancel(self.srcOutline) end
+        self.srcOutline:Hide()
+    end
+end
 
 -- ---- the follow / beam ticker ------------------------------------
 
@@ -368,7 +526,7 @@ function Popout:_UpdateBeam()
 
     local b = self:_EnsureBeam()
     local ax, ay, bx, by = nearestEdgePair(pr, tr)
-    local c = self.host:GetAccent()
+    local c = self:GetAccent()
     for _, line in ipairs({ b.glow, b.core }) do
         if line then
             line:SetStartPoint("CENTER", UIParent, ax, ay)
@@ -451,6 +609,11 @@ function Popout:Pin(silent)
     if self.pinBtn then self.pinBtn:Hide() end
 
     if not silent and Fx then Fx.PopIn(f, PIN_DUR, 0, 0, 0.96, "CENTER") end
+    -- Pin is VISUALLY DETACHED, full stop: the connection point and the source
+    -- outline both go, because the thing they describe -- "this panel is docked
+    -- to that" -- has just stopped being true.
+    self:_UpdateNotch()
+    self:_HideSourceOutline()
     self:_UpdateBeam()
     safeCall(self.onPin, self)
     return self
@@ -517,13 +680,14 @@ function Popout:Close(reason)
             f:Hide()
         end
     end
-    local b = self.beam
-    if b and b:IsShown() then
-        self:_HideBeam()
-        after(BEAM_DUR, popOut)
-    else
-        popOut()
-    end
+    -- The connection point is part of the FRAME, so it leaves with it; the beam
+    -- and the source outline are not, and both go first.
+    if self.notch then self.notch:Hide() end
+    local b, o = self.beam, self.srcOutline
+    local hadChrome = (b and b:IsShown()) or (o and o:IsShown())
+    self:_HideBeam()
+    self:_HideSourceOutline()
+    if hadChrome then after(BEAM_DUR, popOut) else popOut() end
 
     safeCall(self.onClose, self, reason or "api")
     return self
@@ -539,6 +703,7 @@ function Popout:IsShown() return self.frame:IsShown() end
 -- the content was mounted once and is what makes the pooled frame worth keeping.
 local function adopt(po, opts)
     po.family      = opts.family
+    po.accent      = normColor(opts.accent)
     po.onClose     = opts.onClose
     po.onPin       = opts.onPin
     po.onUnpin     = opts.onUnpin          -- accepted; v1 never unpins
@@ -549,6 +714,7 @@ local function adopt(po, opts)
     po.actions     = opts.actions
     po.badge       = opts.badge
     po:SetHeader(opts.title, opts.icon)
+    po:_ApplyAccent()
 end
 
 -- Opening a popout in a family closes every OTHER popout in that family --
@@ -578,6 +744,8 @@ end
 --   onPin(popout) / onUnpin(popout)
 --   canAutoPin    boolean or function(popout); false makes AutoPin a no-op
 --   tetherSource  region or function -> region; the beam's far end
+--   accent        {r,g,b[,a]} overriding the HOST accent for this popout's
+--                 border, connection point, beam and source outline
 --   actions / badge          reserved, accepted and ignored
 function UI:CreatePopout(opts)
     local host = self
@@ -613,8 +781,22 @@ function UI:CreatePopout(opts)
     f:EnableMouse(true)                       -- a panel must not leak clicks through
     f:Hide()
     f._popout = po                            -- the OnUpdate script's way back
-    host:CreatePanelBackdrop(f)
     po.frame = f
+    -- Hiding the frame by hand (a consumer's combat suspend, or the tail of the
+    -- exit) must take the beam and the source outline with it: they are not
+    -- children of this frame, so nothing else would.
+    if f.HookScript then
+        f:HookScript("OnHide", function() po:HideChrome() end)
+    end
+
+    -- The connection point. OVERLAY, so it draws over the pixel border it
+    -- straddles (which is ARTWORK sublevel 7). A diamond, so ONE piece of art
+    -- serves all four dock sides -- it is symmetric under a quarter turn.
+    local notch = f:CreateTexture(nil, "OVERLAY", nil, 2)
+    notch:SetTexture(UI.MEDIA .. "Icons\\notch")
+    notch:SetSize(NOTCH_SIZE, NOTCH_SIZE)
+    notch:Hide()
+    po.notch = notch
 
     -- ---- title bar ------------------------------------------------
     -- Its own frame because it is the DRAG surface once pinned; mouse is only
