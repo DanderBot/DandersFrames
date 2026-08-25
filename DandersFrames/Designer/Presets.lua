@@ -233,7 +233,17 @@ end
 -- template says. Nobody's setup changes on upgrade: each mode keeps rendering exactly what
 -- it rendered before, including a value it only held because the other mode set it. The two
 -- simply stop being the same storage.
+-- ☠☠ AND THE `not DF.db` GUARD IS PART OF THAT — absence from defaults only works if
+-- nothing WRITES the key into the defaults table by the back door. DF:GetDB returns
+-- DF.PartyDefaults / DF.RaidDefaults when DF.db is nil (any call before ADDON_LOADED
+-- adopts the SV), and the seed below writes THROUGH that handle: one pre-profile read
+-- would stamp auraDesignerEnabled into the defaults table itself, the backfill would
+-- copy it into every profile, and this nil-gate could never fire again — the mode
+-- enable frozen at whatever the first early caller happened to compute. Same family as
+-- the migration-after-backfill trap above, one level up: there the defaults table
+-- poisons profiles, here a getter poisons the defaults table.
 function DF:IsAuraDesignerEnabledForMode(mode)
+    if not DF.db then return false end
     local modeDB = DF:GetDB(mode)
     if not modeDB then return false end
     if modeDB.auraDesignerEnabled == nil then
@@ -246,7 +256,10 @@ end
 -- ⚠ Writes the MODE only. The preset's own `enabled` is left where it is rather than
 -- cleaned up: an older build still reads it, and a profile carried between builds should
 -- not come back with the designer silently off. It is inert for mode resolution from here.
+-- ☠ Same defaults-poisoning guard as the getter — this one writes unconditionally, so
+-- without it a pre-profile setter call lands the value straight in the defaults table.
 function DF:SetAuraDesignerEnabledForMode(mode, on)
+    if not DF.db then return end
     local modeDB = DF:GetDB(mode)
     if not modeDB then return end
     modeDB.auraDesignerEnabled = on and true or false

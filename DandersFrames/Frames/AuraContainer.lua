@@ -5973,6 +5973,25 @@ function Handle:_readoptParked()
             c:ClearAllPoints()
             c:SetPoint("TOPRIGHT", self.frame, "TOPLEFT", -MISSING_PAD, 0)
         end)
+        -- ☠☠ RE-ARM THE BADGE. _teardownContainer — including the PARK teardown that
+        -- fed this re-adopt — parks the badge HIDDEN and WINDOW-anchored ("never claim
+        -- missing without a live container"), and the only badge:Show() in the codebase
+        -- is :build()'s. This path re-armed everything EXCEPT the badge, so one
+        -- park/re-adopt cycle (entering and leaving test mode is the standard trigger)
+        -- left every missing-mode effect on the handle PERMANENTLY DARK until reload —
+        -- the "hidden and never comes back" class, wearing rebuild recycling as its
+        -- trigger. Mirror :build()'s missing arm exactly: container anchor for the live
+        -- push, window anchor for test mode / the ppbadge diagnostic, then Show.
+        if self.badge then
+            local sp = (config.badge and config.badge.spill) or 0
+            self.badge:ClearAllPoints()
+            if AuraContainer._testMode or AuraContainer._badgeParkDebug then
+                self.badge:SetPoint("TOPLEFT", self.frame, "TOPLEFT", sp, -sp)
+            else
+                self.badge:SetPoint("TOPLEFT", c, "TOPLEFT", MISSING_PAD + sp + MISSING_EMPTY_W, -sp)
+            end
+            self.badge:Show()
+        end
     else
         applyContainerLayout(c, self)
     end

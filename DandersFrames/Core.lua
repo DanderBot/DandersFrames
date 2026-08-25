@@ -4848,6 +4848,74 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:MigrateHealthColorStops()
         end
 
+        -- ★ Tooltip visibility folded into ONE vocabulary per combat state: a boolean
+        -- DisableInCombat plus a hold-to-show modifier became tooltip<Kind>OutOfCombat /
+        -- tooltip<Kind>Combat, each SHOW | SHIFT | CTRL | ALT | HIDE. The old pair could
+        -- express contradictory instructions; the new one cannot.
+        --
+        -- ☠ ABSENCE OF DisableInCombat IS NOT "false" FOR THE FRAME BOX. Its default was
+        -- TRUE, so a profile that never touched it was getting "no frame tooltip in
+        -- combat" -- reading the missing key as SHOW would hand every one of them a
+        -- behaviour change they never asked for. Hence the per-kind old default below
+        -- (frame true, binding false).
+        --
+        -- ☠☠ AND THIS IS WHY IT LIVES UP HERE. It shipped below the defaults backfill,
+        -- presence-gated on the NEW keys being nil -- and the new keys DO have Config
+        -- defaults ("SHOW"), unlike the retired ones. So the backfill seeded them first,
+        -- the nil-gate never passed, and the block still deleted the old keys on its way
+        -- past: every existing profile silently flipped from "no frame tooltip in combat"
+        -- to showing one. Caught in review before merge (Danders-side agent, lab thread
+        -- 08ac7310) -- the FOURTH time this codebase has been bitten by a presence-gated
+        -- migration running after the backfill, and the first where the retired keys were
+        -- correctly absent but the gate tested the seeded ones. The comment even asserted
+        -- both keys were absent from defaults; only the retired pair was.
+        -- ⇒ The gate is on the OLD key existing, not the new one being nil, so the pass is
+        -- idempotent no matter how often it runs, and it cannot be re-broken by a default.
+        -- ⚠ THE PAGE-WIDE FAN-OUT MOVED UP WITH IT, and had to. Hold To Show went out
+        -- for one build as a single page-wide key before becoming per tooltip type;
+        -- that fan-out WRITES tooltip<Kind>Modifier, which the per-kind conversion
+        -- below READS. Leaving it behind at its old site would have put the producer
+        -- after the consumer and silently dropped the modifier for anyone upgrading
+        -- from that interim build. Equality-gated on the old key being MEANINGFUL, not
+        -- merely present: it shipped with a "NONE" default, so a presence gate would
+        -- fire for every profile that ever loaded that build. Per-type values win --
+        -- only fill a box still unset or at its default, so re-running never undoes a
+        -- choice.
+        function DF:MigrateTooltipVisibility(modeDb)
+            if type(modeDb) ~= "table" then return end
+            if modeDb.tooltipModifier then
+                local old = modeDb.tooltipModifier
+                if old ~= "NONE" then
+                    if (modeDb.tooltipFrameModifier or "NONE") == "NONE" then
+                        modeDb.tooltipFrameModifier = old
+                    end
+                    if (modeDb.tooltipBindingModifier or "NONE") == "NONE" then
+                        modeDb.tooltipBindingModifier = old
+                    end
+                end
+                modeDb.tooltipModifier = nil
+            end
+            local KINDS = { Frame = true, Binding = false }
+            for kind, oldDefault in pairs(KINDS) do
+                local disableKey = "tooltip" .. kind .. "DisableInCombat"
+                local modKey     = "tooltip" .. kind .. "Modifier"
+                local disable, mod = modeDb[disableKey], modeDb[modKey]
+                -- Nothing legacy left on this profile: already migrated (or born new).
+                if disable ~= nil or mod ~= nil then
+                    if disable == nil then disable = oldDefault end
+                    modeDb["tooltip" .. kind .. "Combat"] = disable and "HIDE" or "SHOW"
+                    -- The hold-to-show key only ever governed out of combat in practice,
+                    -- so it lands there verbatim.
+                    modeDb["tooltip" .. kind .. "OutOfCombat"] =
+                        (mod and mod ~= "NONE") and mod or "SHOW"
+                    -- ⚠ Cleared only AFTER both reads, or the second key would migrate
+                    -- from a value the first just deleted.
+                    modeDb[disableKey] = nil
+                    modeDb[modKey] = nil
+                end
+            end
+        end
+
         -- ☠ THESE MUST RUN FOR EVERY PROFILE, AND BEFORE THE DEFAULTS BACKFILL.
         --
         -- All of these adopt legacy -> canonical keys and are guarded on "only if the
@@ -4870,6 +4938,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if DF.MigrateResourceBarBorderKeys then DF:MigrateResourceBarBorderKeys(modeDb) end
                     if DF.MigrateResourceBarColorMode then DF:MigrateResourceBarColorMode(modeDb) end
                     if DF.MigrateAuraBorderKeys then DF:MigrateAuraBorderKeys(modeDb) end
+                    DF:MigrateTooltipVisibility(modeDb)
                 end
             end
             -- Profile-level, and reads both modes itself, so it runs once per profile
@@ -5592,67 +5661,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if modeDb and modeDb.directDebuffDispellableMode == "ANY" then
                         modeDb.directDebuffDispellableMode = "ALL"
                     end
-                    -- Hold To Show went out for one build as a single page-wide key
-                    -- before becoming per tooltip type. Fan a set value out to both
-                    -- boxes it used to govern, then delete the interim key so it is
-                    -- not left as profile cruft nothing reads.
-                    -- ⚠ EQUALITY-GATED on the old key being MEANINGFUL, not merely
-                    -- present: it shipped with a "NONE" default, so the defaults
-                    -- backfill seeded it into every profile that loaded that build
-                    -- and a presence gate would fire for all of them. Copying "NONE"
-                    -- would be harmless but would also stomp a per-type value the
-                    -- user had already set on the newer build.
-                    -- ⚠ Per-type values win: only fill a box that is still unset or
-                    -- at its default, so re-running this can never undo a choice.
-                    if modeDb and modeDb.tooltipModifier then
-                        local old = modeDb.tooltipModifier
-                        if old ~= "NONE" then
-                            if (modeDb.tooltipFrameModifier or "NONE") == "NONE" then
-                                modeDb.tooltipFrameModifier = old
-                            end
-                            if (modeDb.tooltipBindingModifier or "NONE") == "NONE" then
-                                modeDb.tooltipBindingModifier = old
-                            end
-                        end
-                        modeDb.tooltipModifier = nil
-                    end
-
-                    -- ★ Tooltip visibility folded into ONE vocabulary per combat
-                    -- state: a boolean DisableInCombat plus a hold-to-show modifier
-                    -- became tooltip<Kind>OutOfCombat / tooltip<Kind>Combat, each
-                    -- SHOW | SHIFT | CTRL | ALT | HIDE. The old pair could express
-                    -- contradictory instructions; the new one cannot.
-                    --
-                    -- ☠ ABSENCE OF DisableInCombat IS NOT "false" FOR THE FRAME BOX.
-                    -- Its default was TRUE, so a profile that never touched it was
-                    -- getting "no frame tooltip in combat" -- reading the missing key
-                    -- as SHOW would hand every one of them a behaviour change they
-                    -- never asked for. Per-kind default below, matching each key's
-                    -- own old default (frame true, binding false). Both keys are now
-                    -- absent from the defaults table so this can tell a stored value
-                    -- from a seeded one.
-                    if modeDb then
-                        local KINDS = { Frame = true, Binding = false }
-                        for kind, oldDefault in pairs(KINDS) do
-                            local combatKey = "tooltip" .. kind .. "Combat"
-                            local oocKey    = "tooltip" .. kind .. "OutOfCombat"
-                            if modeDb[combatKey] == nil then
-                                local disable = modeDb["tooltip" .. kind .. "DisableInCombat"]
-                                if disable == nil then disable = oldDefault end
-                                modeDb[combatKey] = disable and "HIDE" or "SHOW"
-                            end
-                            if modeDb[oocKey] == nil then
-                                -- The hold-to-show key only ever governed out of
-                                -- combat in practice, so it lands here verbatim.
-                                local mod = modeDb["tooltip" .. kind .. "Modifier"]
-                                modeDb[oocKey] = (mod and mod ~= "NONE") and mod or "SHOW"
-                            end
-                            -- ⚠ Cleared only AFTER both reads above, or the second
-                            -- key would migrate from a value the first just deleted.
-                            modeDb["tooltip" .. kind .. "DisableInCombat"] = nil
-                            modeDb["tooltip" .. kind .. "Modifier"] = nil
-                        end
-                    end
+                    -- ☠ THE TOOLTIP VISIBILITY MIGRATION MOVED OUT OF HERE, and the
+                    -- page-wide Hold To Show fan-out went with it (it produces what
+                    -- the conversion consumes) — see DF:MigrateTooltipVisibility,
+                    -- called from RunLegacyKeyAdoption ABOVE the defaults backfill.
+                    -- Down here the new keys were already seeded, so the presence
+                    -- gate could never pass.
                 end
             end
         end

@@ -1190,9 +1190,17 @@ DF.ExportCategories = {
         "pinnedFrames",
     },
     -- Aura Designer config (preset library travels with this category)
+    -- ☠ auraDesignerEnabled MUST travel with it. The enable moved off the preset and
+    -- onto the MODE, so the preset's own `enabled` no longer decides anything -- an
+    -- Aura Designer export that carries the config and the preset but not the mode
+    -- enable lands with the whole designer switched off on the importing profile,
+    -- looking like the import failed. It has no Config default (deliberately lazy --
+    -- see DF:IsAuraDesignerEnabledForMode), so it also needs the
+    -- EXPORT_KEYS_WITHOUT_DEFAULTS entry below or the audit reports it as a phantom.
     auraDesigner = {
         "auraDesigner",
         "auraDesignerPreset",
+        "auraDesignerEnabled",
     },
     -- Auto layouts (pulls both preset libraries)
     autoLayout = {
@@ -1485,6 +1493,7 @@ DF.ExportLocalOnly = {
 local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     afkIconTimerFont = true, afkIconTimerOutline = true,
     auraDesignerPreset = true, textDesignerPreset = true,
+    auraDesignerEnabled = true,                         -- lazy by design, no Config default
     textDesigner = true,                                -- legacy inline table
     -- (Removed) auraDesigner, defensiveIconBorderColorSource and
     -- missingBuffIconBorderColorSource. All three now HAVE Config defaults, so the
