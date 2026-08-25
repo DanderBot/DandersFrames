@@ -142,6 +142,35 @@ answer for grey out rather than vanishing.
 
 Either one commits exactly one undo entry, the same as dropping into a snap zone.
 
+## Pinning panels
+
+Selecting an element opens its panel docked beside the slab. That panel *follows*
+the slab, and the next selection takes it over — one panel, always about whatever
+is selected.
+
+**Pin** it and it stops following: it stays where it is, the next selection opens
+a fresh following panel beside its own slab, and the pinned one carries on. Two
+ways in — the pin button in the panel's title bar, or simply **start editing**
+(focus an X/Y box, press a nudge arrow, open a dropdown or the 9-point picker,
+grab a chain handle). That second route is what **Settings › Editor ›
+Auto-pin panels when editing** gates; turn it off and only the button pins.
+
+There is no limit on how many are pinned at once. Each stays bound to the element
+it was opened for — its readouts, its anchor rows and its buttons keep acting on
+*that* element no matter what is selected now — and draws an accent **tether
+beam** back to its own slab whenever it is not sitting against it. A slab whose
+panel is pinned wears a dim white outline at rest, so the movers with one open
+are visible without hunting. Drag a pinned panel by its title bar; dragging a
+*slab* hides only the following panel, since the pinned ones are not going
+anywhere.
+
+The cross is the only way to close a pinned panel. On the **following** panel the
+cross means "done with this one" and clears the selection with it; on a pinned
+panel it closes just that panel. Locking the session closes them all.
+
+**Esc** backs out one layer at a time — a live link gesture first, then the
+selection (the following panel goes with it), then the session.
+
 ## Behaviour rules worth knowing
 
 - Dragging an anchored element shows a **tether** to its target. Within 3× the snap distance of its resolved anchor position the anchor holds: dropped outside every snap zone it springs back (dropping into a zone re-anchors). Pull further and the tether strains (reddens and thins); past 4× the snap distance it **snaps** — the element is free from that moment and the drop commits one "Detach" undo entry. The panel's Detach still frees it without the drag. Selecting or hovering a slab also shows its tether; hovering shows the whole chain (its parent's and all of its children's).
@@ -155,4 +184,4 @@ Either one commits exactly one undo entry, the same as dropping into a snap zone
 - Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. On slabs too narrow for both, the addon icon wins and the dot drops (the left edge still carries the role, and a root's green ring moves onto the icon). Selection is a white outline; a faded slab means the real frame is hidden.
 - Hold Shift while dragging to move horizontally only, Ctrl to move vertically only (both held = free drag). A nudge (arrow keys or the panel arrows) steps by 1; Shift makes it 10, Ctrl 100.
 - Hold Alt (while not dragging) to peek: the slabs, strip and panel fade almost out so you can see the UI underneath; release restores them.
-- While a session is open the unlock overlay captures the mouse across the whole screen: left-click on empty space deselects, and the world/camera behind it is not interactable. Lock the session to get the screen back: press Esc, use the top strip's Save & Exit / Discard, or type `/mover`.
+- The unlock overlay does **not** take the mouse. The world and the camera stay interactable for the whole session, and a click on empty space reaches the game rather than deselecting — Esc is the deselect (see Pinning panels). The session's own verbs all live on the top strip: **Save & Exit**, **Discard**, **Undo**, **Redo**, **Settings** and **Grid**. `/mover` and Esc (with nothing selected and no gesture running) also lock.

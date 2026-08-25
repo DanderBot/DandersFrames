@@ -892,7 +892,7 @@ local function buildLegend()
     f.btnRedo:SetPoint("RIGHT", f.btnSave, "LEFT", -TIGHT, 0)
     f.btnUndo:SetPoint("RIGHT", f.btnRedo, "LEFT", -TIGHT, 0)
 
-    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Esc: lock"], size = 10, color = C_MUTED })
+    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Esc: back out"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - LEGEND_ROW - TIGHT)
 
     -- Third row, consumer-initiated sessions only: other addons' enabled+relevant

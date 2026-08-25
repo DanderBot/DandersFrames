@@ -1,7 +1,8 @@
 # DandersUI
 
 The shared settings-UI toolkit behind DandersFrames and DandersMover: one palette,
-one set of widget factories, one popup dialog, one pixel-border implementation.
+one set of widget factories, one popup dialog, one popout shell, one pixel-border
+implementation.
 
 It is a LibStub **library, not an addon** — it is embedded in each addon that uses
 it rather than installed on its own.
@@ -117,6 +118,53 @@ tooltip to their label, and read the spec off the returned widget. Set
 
 Scroll frames must use `ScrollFrameTemplate` (not `UIPanelScrollFrameTemplate`) for
 `StyleScrollBar` to find their parts.
+
+## Popouts
+
+`UI:CreatePopout(opts)` is a small panel that **docks beside a region**: it picks
+the side that fits, follows the region while it moves, and can be pinned loose —
+at which point an accent tether beam keeps saying which region it belongs to. The
+shell owns the frame, the title bar, the docking, the pin and the beam; you mount
+the content in `build` and decide in `onClose` what closing means.
+
+Per host and `key` there is **one unpinned popout**, pooled: asking for a key that
+already has one hands the same object back, re-targeted, without re-running
+`build`. Pinning promotes an instance out of the pool and the next request for
+that key builds a fresh one — so `build` has to be re-runnable, and per-instance
+state belongs on the popout object, never in a file-scope local.
+
+A popout is built **hidden**: placing it is what presents it, because the entrance
+pops out of the edge it docked against and that edge is not known until it has
+something to dock to.
+
+| Opt | Purpose |
+|---|---|
+| `key` | **required** identity string; the pool is per host + key |
+| `family` | exclusivity group — opening one closes every other popout in its family, pinned ones included. A nil family coexists with everything |
+| `pinnable` | default true. `false`: no pin button, `AutoPin` no-ops, and the popout dies with its source |
+| `title` / `icon` | title bar; changeable later with `:SetHeader` |
+| `parent` | frame to parent to (default `UIParent`). The beam is parented alongside it, so a consumer that hides its own overlay hides the beam too |
+| `width` | CONTENT width; the height follows what `build` mounted |
+| `build(popout, content)` | called ONCE per instance to mount the content |
+| `onClose(popout, reason)` | `reason`: `"cross"`, `"family"`, `"source"`, `"api"` |
+| `onPin(popout)` | fired by a hand pin and an auto-pin alike |
+| `canAutoPin` | boolean or `function(popout)`, evaluated per call; false makes `AutoPin` a no-op |
+| `tetherSource` | region or `function(popout) -> region` — the beam's far end, for when the thing the popout is *about* is not the thing it docked to |
+
+`onUnpin`, `actions` and `badge` are accepted and reserved: v1 never unpins and
+draws neither.
+
+| Call | Purpose |
+|---|---|
+| `po:Follow(region, opts)` | Dock beside `region` and track it. `opts.side` forces `"left"` / `"right"` / `"above"` / `"below"`; without it the side is whichever fits on screen. On a pinned popout it only re-points the beam |
+| `po:PlaceFree(x, y)` | Absolute placement, for consumers that own their own layout: no source, so nothing to follow and nothing to tether to |
+| `po:Pin([silent])`, `po:AutoPin()`, `po:IsPinned()` | Take it off its leash: it stops following, becomes draggable by its title bar, and from there the only way out is the cross. `AutoPin` is the same thing gated on `canAutoPin` and without the confirm pop |
+| `po:SetHeader(title, icon)`, `po:GetTitle()` | Title bar contents |
+| `po:Resize()` | Re-fit the height after changing the content's height |
+| `po:Close([reason])`, `po:IsShown()` | Close hands `reason` to `onClose`. A pinned instance is discarded; an unpinned one goes back to the pool |
+| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units |
+
+`po.frame` is the shell, `po.content` the frame `build` was handed.
 
 ## Fx
 
