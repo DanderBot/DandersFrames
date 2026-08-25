@@ -155,18 +155,36 @@ local NOTCH_SIDE = {
     above = { "BOTTOM",  0, -1 },
 }
 
+-- How close to a corner the connection point may slide (centre-to-corner).
+local NOTCH_EDGE_INSET = 14
+
 -- The tip of the connection point, in UIParent-centre units: the outer vertex of
 -- the diamond sitting half-proud of the popout's source-facing edge. nil for a
 -- popout with no dock side (PlaceFree), which has nothing to point at.
 --
+-- With `src` (the source's rect), the point SLIDES along the edge to line up
+-- with the source's centre, clamped clear of the corners -- a tall popout
+-- beside a small mover keeps its point (and beam) level with the mover instead
+-- of leaving a long accent line crawling up from the edge's midpoint.
+--
 -- Exposed on the library for the same reason PopoutPickSide is: it is a pure
 -- function of its arguments and both the beam and its tests want it.
-function UI.PopoutNotchTip(pr, side, size)
+function UI.PopoutNotchTip(pr, side, size, src)
     local spec = pr and side and NOTCH_SIDE[side]
     if not spec then return nil end
     size = size or NOTCH_SIZE
-    return pr.x + spec[2] * (pr.w / 2 + size / 2),
-           pr.y + spec[3] * (pr.h / 2 + size / 2)
+    local x = pr.x + spec[2] * (pr.w / 2 + size / 2)
+    local y = pr.y + spec[3] * (pr.h / 2 + size / 2)
+    if src then
+        if spec[2] ~= 0 then    -- left/right dock: slide vertically
+            local half = max(pr.h / 2 - NOTCH_EDGE_INSET, 0)
+            y = min(max(src.y, pr.y - half), pr.y + half)
+        else                    -- above/below dock: slide horizontally
+            local half = max(pr.w / 2 - NOTCH_EDGE_INSET, 0)
+            x = min(max(src.x, pr.x - half), pr.x + half)
+        end
+    end
+    return x, y
 end
 
 -- The point on `r`'s outline closest to (px, py). For a point OUTSIDE the rect
@@ -463,11 +481,22 @@ function Popout:_UpdateNotch()
     local spec = (not self.closed) and self.following and not self.pinned
                  and NOTCH_SIDE[self.side] or nil
     if not spec then n:Hide() return end
+    -- Slide along the edge to meet the source (see PopoutNotchTip): the offset
+    -- is the slid tip minus the edge's own midpoint, in the same rect units.
+    local ox, oy = 0, 0
+    local target = self._TetherRegion and self:_TetherRegion()
+    local tr = target and rectOf(target) or nil
+    local pr = tr and self:_FrameRect() or nil
+    if pr then
+        local tx, ty = UI.PopoutNotchTip(pr, self.side, NOTCH_SIZE, tr)
+        local cx, cy = UI.PopoutNotchTip(pr, self.side, NOTCH_SIZE)
+        if tx then ox, oy = tx - cx, ty - cy end
+    end
     n:ClearAllPoints()
     -- CENTRE on the edge, so exactly half the diamond stands proud of the
     -- border and the other half sits over it -- one shape crossing the line
     -- rather than a marker parked beside it.
-    n:SetPoint("CENTER", self.frame, spec[1], 0, 0)
+    n:SetPoint("CENTER", self.frame, spec[1], ox, oy)
     n:Show()
 end
 
@@ -674,12 +703,15 @@ function Popout:_UpdateBeam()
     -- ⚠ Not `local ax, ay = pr and PopoutNotchTip(...)` -- `and` truncates to ONE
     -- value, so ay would silently be nil and the clamp below would error.
     local ax, ay
-    if pr then ax, ay = UI.PopoutNotchTip(pr, self.side, NOTCH_SIZE) end
+    if pr then ax, ay = UI.PopoutNotchTip(pr, self.side, NOTCH_SIZE, tr) end
     if not (tr and pr and ax) then
         self:_HideBeam()
         return
     end
     local bx, by = UI.PopoutNearestOnRect(tr, ax, ay)
+    -- The point slid with the beam: re-place it so tip and beam stay one shape
+    -- while the source (or a glide) moves.
+    self:_UpdateNotch()
 
     local b = self:_EnsureBeam()
     local c = self:GetAccent()

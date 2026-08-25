@@ -350,12 +350,14 @@ do
     -- The popout's rect is { x = 112, y = -26, 120 x 92 }; right-docked, the
     -- connection point's tip is half a notch left of its left edge.
     eq(core._start.x, 112 - FRAME_W / 2 - 5, "beam: it leaves the connection point's TIP")
-    eq(core._start.y, -26, "beam: at the source-facing edge's midpoint")
+    -- The tip SLIDES along the edge to meet the source: the source's centre
+    -- (y = 0) is inside the edge's clamp range, so the tip sits level with it
+    -- rather than at the edge's midpoint (-26).
+    eq(core._start.y, 0, "beam: slid level with the source's centre")
     -- ...and lands on the nearest point of the source's outline: its right face
-    -- (x = 40), clamped down to the bottom of that face (y = -20) because the
-    -- popout hangs below it.
+    -- (x = 40), dead level, so the beam crosses the dock gap horizontally.
     eq(core._end.x, 40, "beam: and lands on the source outline's near face")
-    eq(core._end.y, -20, "beam: clamped onto the outline, not aimed at its centre")
+    eq(core._end.y, 0, "beam: level -- straight across the dock gap")
 
     -- The reveal waited out the entrance rather than racing it.
     local waited = false
@@ -599,6 +601,21 @@ do
     eq(UI.PopoutNotchTip(nil, "right", 10), nil, "tip: no rect, no tip")
 end
 
+-- With a source rect the tip SLIDES along the edge to meet it, clamped 14
+-- (NOTCH_EDGE_INSET) clear of the corners.
+do
+    local pr = { x = 100, y = 20, w = 120, h = 92 }   -- edge spans y 20 ± 32 after inset
+    local src = function(sx, sy) return { x = sx, y = sy, w = 40, h = 20 } end
+    local _, y = UI.PopoutNotchTip(pr, "right", 10, src(0, 30))
+    eq(y, 30, "slide: level with a source inside the range")
+    _, y = UI.PopoutNotchTip(pr, "right", 10, src(0, 200))
+    eq(y, 52, "slide: clamped at the top inset for a source far above")
+    _, y = UI.PopoutNotchTip(pr, "right", 10, src(0, -200))
+    eq(y, -12, "slide: clamped at the bottom inset for a source far below")
+    local x = UI.PopoutNotchTip(pr, "above", 10, src(-500, 0))
+    eq(x, 100 - 60 + 14, "slide: above/below docks slide horizontally, same clamp")
+end
+
 -- Nearest point on a rect's outline. The tip is always OUTSIDE the source, so
 -- clamping onto the rect lands on its perimeter.
 do
@@ -837,7 +854,7 @@ do
     check(p.beam:IsShown(), "tether: following, the beam shows")
     eq(p.beam.core._start.x, 112 - FRAME_W / 2 - 5, "tether: it leaves the connection point's tip")
     eq(p.beam.core._end.x, -370, "tether: and lands on the TETHER target's near face")
-    eq(p.beam.core._end.y, -20, "tether: clamped onto its outline, not on the dock target")
+    eq(p.beam.core._end.y, 0, "tether: level with the tether target, not the dock target")
     -- The outline follows the same target, so both ends of the "connected" look
     -- agree about what the popout is about.
     eq(p.srcOutline._points[1][2], far, "tether: the source outline is on the tether target too")
