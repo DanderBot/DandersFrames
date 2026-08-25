@@ -4,7 +4,13 @@
 
 ### New Features
 
+* (Tooltips) Every DF tooltip type now has its own **Show Out of Combat** and **Show In Combat** setting, each offering Show, Hold Shift, Hold Ctrl, Hold Alt or Hidden — so frame tooltips can, for example, appear only while holding Alt out of combat and never in combat. This replaces the Disable In Combat checkboxes for frame and binding tooltips; existing choices carry over. (by Krathe)
+
 ### Bug Fixes
+
+* (Targeted Spells) The Targeted List drops a caster's bar the moment it dies — bars no longer linger for a second or two on dead mobs, and a cast with no cast time no longer shows a huge garbage countdown. (by Krathe)
+* (Targeted Spells) Personal targeted icons no longer shuffle sideways as casts start and expire: new casts join at the end, showing icons hold their place, and the row re-centres as icons come and go. Also fixes the Max Icons cap being able to hide the one cast that was actually aimed at you. (by Krathe)
+* (Tooltips) Fix a suppressed frame tooltip re-appearing a moment later, fix pet frame tooltips ignoring the tooltip settings entirely, and fix the tooltip flashing up when a modifier key is pressed while the mouse is already on a frame. (by Krathe)
 
 ### Changes
 
