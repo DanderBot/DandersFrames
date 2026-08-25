@@ -142,31 +142,32 @@ answer for grey out rather than vanishing.
 
 Either one commits exactly one undo entry, the same as dropping into a snap zone.
 
-## Pinning panels
+## The element panel
 
-Selecting an element opens its panel docked beside the slab. That panel *follows*
-the slab, and the next selection takes it over — one panel, always about whatever
-is selected.
+Selecting an element opens its panel docked beside the slab. **There is only ever
+one panel.** It *follows* the selection: pick another mover and the same panel
+glides across to it, and while it is docked the panel, the slab and the gap
+between them are drawn as one piece — matching accent outlines on both, a small
+diamond on the panel's edge pointing at the slab, and a short beam joining them.
 
-**Pin** it and it stops following: it stays where it is, the next selection opens
-a fresh following panel beside its own slab, and the pinned one carries on. Two
-ways in — the pin button in the panel's title bar, or simply **start editing**
-(focus an X/Y box, press a nudge arrow, open a dropdown or the 9-point picker,
-grab a chain handle). That second route is what **Settings › Editor ›
+**Pin** it and it stops following: it stays where it is, drops all of that chrome
+(pinned means detached), and keeps editing *its* element — its readouts, its
+anchor rows and its buttons all keep acting on that mover even with nothing
+selected. A slab whose panel is pinned wears a dim white outline at rest, so the
+mover it belongs to is visible without hunting. Drag the pinned panel by its title
+bar; dragging a *slab* hides only a following panel, since a pinned one is not
+attached to anything.
+
+Two ways to pin — the pin button in the panel's title bar, or simply **start
+editing** (focus an X/Y box, press a nudge arrow, open a dropdown or the 9-point
+picker, grab a chain handle). That second route is what **Settings › Editor ›
 Auto-pin panels when editing** gates; turn it off and only the button pins.
 
-There is no limit on how many are pinned at once. Each stays bound to the element
-it was opened for — its readouts, its anchor rows and its buttons keep acting on
-*that* element no matter what is selected now — and draws an accent **tether
-beam** back to its own slab whenever it is not sitting against it. A slab whose
-panel is pinned wears a dim white outline at rest, so the movers with one open
-are visible without hunting. Drag a pinned panel by its title bar; dragging a
-*slab* hides only the following panel, since the pinned ones are not going
-anywhere.
-
-The cross is the only way to close a pinned panel. On the **following** panel the
-cross means "done with this one" and clears the selection with it; on a pinned
-panel it closes just that panel. Locking the session closes them all.
+Selecting a **different** mover while a panel is pinned closes the pinned one and
+opens a fresh following panel at the new slab. Coming back to the pinned panel's
+own mover leaves it alone. The cross closes a pinned panel outright; on a
+*following* panel the cross means "done with this one" and clears the selection
+with it. Locking the session closes the panel.
 
 **Esc** backs out one layer at a time — a live link gesture first, then the
 selection (the following panel goes with it), then the session.
@@ -184,4 +185,4 @@ selection (the following panel goes with it), then the session.
 - Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. On slabs too narrow for both, the addon icon wins and the dot drops (the left edge still carries the role, and a root's green ring moves onto the icon). Selection is a white outline; a faded slab means the real frame is hidden.
 - Hold Shift while dragging to move horizontally only, Ctrl to move vertically only (both held = free drag). A nudge (arrow keys or the panel arrows) steps by 1; Shift makes it 10, Ctrl 100.
 - Hold Alt (while not dragging) to peek: the slabs, strip and panel fade almost out so you can see the UI underneath; release restores them.
-- The unlock overlay does **not** take the mouse. The world and the camera stay interactable for the whole session, and a click on empty space reaches the game rather than deselecting — Esc is the deselect (see Pinning panels). The session's own verbs all live on the top strip: **Save & Exit**, **Discard**, **Undo**, **Redo**, **Settings** and **Grid**. `/mover` and Esc (with nothing selected and no gesture running) also lock.
+- The unlock overlay does **not** take the mouse. The world and the camera stay interactable for the whole session, and a click on empty space reaches the game rather than deselecting — Esc is the deselect (see The element panel). The session's own verbs all live on the top strip: **Save & Exit**, **Discard**, **Undo**, **Redo**, **Settings** and **Grid**. `/mover` and Esc (with nothing selected and no gesture running) also lock.
