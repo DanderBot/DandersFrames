@@ -192,6 +192,62 @@ function S.Resolve(anchor, childW, childH, parent, spacing)
 end
 
 -- ============================================================
+-- ANCHOR IN PLACE
+-- The anchor spec that reproduces where the child ALREADY is: feeding it back
+-- through S.Resolve returns the child's current centre, so attaching an element
+-- to a parent never moves it.
+--
+-- Outside mode when the child is genuinely clear of one of the target's edges.
+-- The edge is picked by CLEARANCE (the edge-to-edge gap), not by which residual
+-- offset is smallest, so an element parked far out to the right stays "right of"
+-- its target however far out it is. Ties go right > left > top > bottom. The
+-- align is then whichever of start/center/end leaves the smallest cross-axis
+-- residual, ties keeping the earlier one.
+--
+-- Everything else has no honest edge/align seat -- overlapping the target, sitting
+-- inside it, sitting entirely past the edge's span, or a zero-size target -- and
+-- falls back to point mode CENTER/CENTER with the centre delta as the offsets.
+-- ============================================================
+local IN_PLACE_ALIGNS = { "start", "center", "end" }
+
+function S.AnchorInPlace(child, target, spacing)
+    spacing = spacing or S.SPACING
+    local function asPoint()
+        return {
+            mode = "point", point = "CENTER", relPoint = "CENTER",
+            offsetX = child.x - target.x, offsetY = child.y - target.y,
+        }
+    end
+    if target.w <= 0 or target.h <= 0 then return asPoint() end
+
+    local gapR = (child.x - target.x) - (target.w + child.w) / 2
+    local gapL = (target.x - child.x) - (target.w + child.w) / 2
+    local gapT = (child.y - target.y) - (target.h + child.h) / 2
+    local gapB = (target.y - child.y) - (target.h + child.h) / 2
+    local edge, gap = "right", gapR
+    if gapL > gap then edge, gap = "left", gapL end
+    if gapT > gap then edge, gap = "top", gapT end
+    if gapB > gap then edge, gap = "bottom", gapB end
+    if gap < 0 then return asPoint() end   -- overlapping or inside: outside mode would be a lie
+
+    local sideways = (edge == "right" or edge == "left")
+    local bestAlign, bestCost, bestX, bestY
+    for _, align in ipairs(IN_PLACE_ALIGNS) do
+        local rx, ry = S.Resolve({ edge = edge, align = align }, child.w, child.h, target, spacing)
+        local cost = sideways and abs(child.y - ry) or abs(child.x - rx)
+        if not bestCost or cost < bestCost then
+            bestAlign, bestCost, bestX, bestY = align, cost, rx, ry
+        end
+    end
+    -- Past the far end of the edge's span even at the best align: the child is
+    -- not beside that edge in any meaningful sense.
+    local span = sideways and (target.h + child.h) / 2 or (target.w + child.w) / 2
+    if bestCost > span then return asPoint() end
+
+    return { edge = edge, align = bestAlign, offsetX = child.x - bestX, offsetY = child.y - bestY }
+end
+
+-- ============================================================
 -- SNAP ZONES
 -- 12 per target: 4 edges x start/center/end. isOccupied(edge, align) -> bool.
 -- ============================================================
