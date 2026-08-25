@@ -1039,7 +1039,26 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         end
     end
     DF:Debug("AUTOPROFILE", "EnterEditing: applied %d overrides for live preview", overrideCount)
-    
+
+    -- ☠☠ THE OVERRIDES JUST BYPASSED EVERY GUI CALLBACK, SO NOTHING BUMPED THE AURA
+    -- LAYOUT VERSION. The row drives are version-gated (dfBuffFactoryVersion /
+    -- dfDebuffFactoryVersion / dfDefFactoryVersion / dfMissingFactoryVersion vs
+    -- DF.auraLayoutVersion) and re-apply sizing, spacing and counts ONLY on a bump --
+    -- normally supplied by the settings control that changed the value. These writes
+    -- come straight from the stored overrides, so the drives saw an unchanged version
+    -- and skipped: an auto layout carrying a smaller debuffSize opened with the GLOBAL
+    -- icon size still on the preview frames, and only nudging that slider in the editor
+    -- (LightweightUpdateAuraPosition -> InvalidateAuraLayout) made it take
+    -- (Krathe, 2026-08-25).
+    --
+    -- ⚠ EXITING was never affected, which is why this looked one-way: ExitEditing calls
+    -- DF:UpdateAll, which invalidates. Only the entry lacked it.
+    -- InvalidateAuraLayout also runs the test-mode passes itself, so the preview picks
+    -- the new values up here rather than waiting for RefreshTestFramesWithLayout below;
+    -- it is combat-safe (RefreshFactoryRows re-queues at regen) and cheap when nothing
+    -- moved (every drive is signature-gated under the version gate).
+    if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+
     -- Refresh pinned frames to show overridden settings in live preview.
     --   * In an actual raid: re-apply each set's enabled + layout to the LIVE
     --     pinned frames (their methods key off live IsInRaid()).
