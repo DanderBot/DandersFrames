@@ -256,3 +256,92 @@ do
     R:UnregisterAddon("GR"); R:UnregisterAddon("GR2")
     R.ready = wasReady
 end
+
+-- fallback (backup) anchor: which block is live, and who counts as a parent
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("FB", { title = "FB" })
+    local up = R:RegisterAnchorTarget("FB", "fb_up", { title = "up", frame = FakeFrame(0, 0, 10, 10) })
+    local down = R:RegisterAnchorTarget("FB", "fb_down", { title = "down", frame = FakeFrame(0, 0, 10, 10),
+        getRect = function() return nil end })
+    local down2 = R:RegisterAnchorTarget("FB", "fb_down2", { title = "down2", frame = FakeFrame(0, 0, 10, 10),
+        getRect = function() return nil end })
+    check(R:IsTargetAvailable(up), "fb_up is available")
+    check(not R:IsTargetAvailable(down), "fb_down is not available")
+
+    -- primary available: the primary block wins even with a backup set
+    local posP = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_up", edge = "right", align = "start",
+        fallback = { target = "FB:fb_down", edge = "right", align = "start" } } }
+    local elP = R:Register("FB", "fb_p", elDef(FakeFrame(0, 0, 10, 10), posP))
+    check(R:ActiveAnchor(elP) == posP.anchor, "available primary is the active anchor")
+
+    -- primary unavailable, backup available: the backup block takes over
+    local posS = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_down", edge = "left", align = "end",
+        fallback = { target = "FB:fb_up", edge = "left", align = "end" } } }
+    local elS = R:Register("FB", "fb_s", elDef(FakeFrame(0, 0, 10, 10), posS))
+    check(R:ActiveAnchor(elS) == posS.anchor.fallback, "unavailable primary falls back")
+    eq(R:ParentId("FB:fb_s"), "FB:fb_up", "ParentId is the ACTIVE parent")
+
+    -- both unavailable: nil (hold)
+    local posH = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_down", edge = "top", align = "center",
+        fallback = { target = "FB:fb_down2", edge = "top", align = "center" } } }
+    local elH = R:Register("FB", "fb_h", elDef(FakeFrame(0, 0, 10, 10), posH))
+    check(R:ActiveAnchor(elH) == nil, "both unavailable -> nil (hold)")
+    check(R:ParentId("FB:fb_h") == nil, "holding element has no active parent")
+
+    -- ParentIds returns BOTH, regardless of availability
+    local p1, p2 = R:ParentIds("FB:fb_p")
+    eq(p1, "FB:fb_up", "ParentIds primary"); eq(p2, "FB:fb_down", "ParentIds backup")
+    local h1, h2 = R:ParentIds("FB:fb_h")
+    eq(h1, "FB:fb_down", "ParentIds primary when unavailable"); eq(h2, "FB:fb_down2", "ParentIds backup when unavailable")
+
+    -- graph walks reach a child through EITHER of its two anchors
+    eq(#R:Children("FB:fb_down"), 3, "backup and held children both count")
+    eq(#R:Children("FB:fb_down2"), 1, "child reached through its backup alone")
+    eq(#R:Descendants("FB:fb_down2"), 1, "descendants go through the backup edge too")
+
+    -- no backup at all: unchanged behaviour
+    local posN = { point = "CENTER", x = 0, y = 0, anchor = { target = "FB:fb_up", edge = "bottom", align = "start" } }
+    local elN = R:Register("FB", "fb_n", elDef(FakeFrame(0, 0, 10, 10), posN))
+    check(R:ActiveAnchor(elN) == posN.anchor, "no backup: active anchor is the primary")
+    local n1, n2 = R:ParentIds("FB:fb_n")
+    eq(n1, "FB:fb_up", "ParentIds with no backup returns one id")
+    check(n2 == nil, "no second parent id without a backup")
+
+    -- no anchor at all
+    local elF = R:Register("FB", "fb_free", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    check(R:ActiveAnchor(elF) == nil, "unanchored element has no active anchor")
+    check(R:ParentIds("FB:fb_free") == nil, "unanchored element has no parent ids")
+
+    R:UnregisterAddon("FB")
+    R.ready = wasReady
+end
+
+-- cycle detection is STRUCTURAL: hidden targets and backup edges still count
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("CY", { title = "CY" })
+    -- A's primary target is HIDDEN (A is holding); anchoring A's target's owner
+    -- to A must still be refused -- the loop closes the moment it reappears.
+    local elB = R:Register("CY", "cy_b", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { getRect = function() return nil end }))
+    local posA = { point = "CENTER", x = 0, y = 0, anchor = { target = "CY:cy_b", edge = "right", align = "start" } }
+    local elA = R:Register("CY", "cy_a", elDef(FakeFrame(0, 0, 10, 10), posA))
+    check(R:ParentId("CY:cy_a") == nil, "A holds: no ACTIVE parent")
+    check(R:WouldCreateCycle("CY:cy_b", "CY:cy_a"), "cycle through a hidden target is still refused")
+
+    -- backup edges participate: C primary->up, backup->D; anchoring D to C loops
+    R:RegisterAnchorTarget("CY", "cy_up", { title = "up", frame = FakeFrame(0, 0, 10, 10) })
+    local elD = R:Register("CY", "cy_d", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    local posC = { point = "CENTER", x = 0, y = 0, anchor = { target = "CY:cy_up", edge = "right", align = "start",
+        fallback = { target = "CY:cy_d", edge = "right", align = "start" } } }
+    local elC = R:Register("CY", "cy_c", elDef(FakeFrame(0, 0, 10, 10), posC))
+    check(R:WouldCreateCycle("CY:cy_d", "CY:cy_c"), "cycle through a backup edge is refused")
+    check(not R:WouldCreateCycle("CY:cy_d", "CY:cy_up"), "an unrelated target is still fine")
+    R:UnregisterAddon("CY")
+    R.ready = wasReady
+end

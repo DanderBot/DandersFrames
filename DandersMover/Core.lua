@@ -70,6 +70,13 @@ function NS.CopyPos(src, dst)
                        edge = src.anchor.edge, align = src.anchor.align,
                        point = src.anchor.point, relPoint = src.anchor.relPoint,
                        offsetX = src.anchor.offsetX, offsetY = src.anchor.offsetY }
+        local fb = src.anchor.fallback
+        if fb then
+            dst.anchor.fallback = { target = fb.target, mode = fb.mode,
+                                    edge = fb.edge, align = fb.align,
+                                    point = fb.point, relPoint = fb.relPoint,
+                                    offsetX = fb.offsetX, offsetY = fb.offsetY }
+        end
     end
     return dst
 end
@@ -114,13 +121,14 @@ function NS:ParentOf(id) return Registry:ParentId(id) end
 -- Returns true when x/y changed. Missing/zero-size target: hold (no change).
 function NS:ResolveElement(el)
     local pos = Registry:GetPos(el)
-    local a = pos.anchor
+    if not pos.anchor then return false end
+    -- Primary, backup, or neither. Neither means every anchor this record names
+    -- is unavailable (hidden, or a getRect that reports nothing on screen), so
+    -- hold the last solved position rather than snapping to a stale rect.
+    local a = Registry:ActiveAnchor(el)
     if not a then return false end
     local target = Registry:GetTarget(a.target)
     if not target then return false end
-    -- Unavailable target (hidden, or a getRect that reports nothing on screen):
-    -- hold the last solved position rather than snapping to a stale rect.
-    if not Registry:IsTargetAvailable(target) then return false end
     local rect = Registry:GetRect(target)
     local w, h = Registry:GetSize(el)
     if not rect or not w then return false end

@@ -654,12 +654,17 @@ local function lerp(a, b, f) return a + (b - a) * f end
 -- there), everyone else reads their own record.
 local function drawTether(n, el, b, drag)
     local targetId, strain
+    -- The active block for a non-dragging slab, which may be the backup anchor:
+    -- the line has to show the link that is actually holding the element.
+    local active, onFallback
     if b.dragging then
         if not drag or drag.snapped then return n end   -- snapped: tether gone
         targetId, strain = drag.target, drag.strain or 0
     else
-        local a = Registry:GetPos(el).anchor
+        local a = Registry:ActiveAnchor(el)
         if not a then return n end
+        active = a
+        onFallback = a == Registry:GetPos(el).anchor.fallback
         targetId, strain = a.target, 0
     end
     local target = Registry:GetTarget(targetId)
@@ -671,7 +676,7 @@ local function drawTether(n, el, b, drag)
     -- edge/align (or relPoint) spot on the target itself. Fixed: it neither
     -- slides along the parent's surface nor floats at the child's seat.
     local tx, ty
-    local spec = (b.dragging and drag) and drag.spec or Registry:GetPos(el).anchor
+    local spec = (b.dragging and drag) and drag.spec or active
     if spec then tx, ty = Solver.AnchorPointOnTarget(spec, rect) end
     if not tx then tx, ty = nearestOnRect(rect, cx, cy) end
     local line = tetherLine(P.tethers, n + 1, 0)
@@ -679,6 +684,9 @@ local function drawTether(n, el, b, drag)
     local cr = lerp(C_TETHER.r, C_TETHER_STRAIN.r, strain)
     local cg = lerp(C_TETHER.g, C_TETHER_STRAIN.g, strain)
     local cb = lerp(C_TETHER.b, C_TETHER_STRAIN.b, strain)
+    -- Standing on the backup: a visibly lesser link -- thin and muted, not the
+    -- full accent line the primary gets.
+    if onFallback then cr, cg, cb = C_MUTED.r, C_MUTED.g, C_MUTED.b end
     local glow = tetherLine(P.tetherGlows, n + 1, -1)
     if glow then
         glow:SetStartPoint("CENTER", UIParent, cx, cy)
@@ -689,7 +697,7 @@ local function drawTether(n, el, b, drag)
     end
     line:SetStartPoint("CENTER", UIParent, cx, cy)
     line:SetEndPoint("CENTER", UIParent, tx, ty)
-    line:SetThickness(strain > 0 and TETHER_STRAIN_W or TETHER_W)
+    line:SetThickness((onFallback or strain > 0) and TETHER_STRAIN_W or TETHER_W)
     line:SetColorTexture(cr, cg, cb, lerp(TETHER_ALPHA, TETHER_STRAIN_ALPHA, strain))
     line:Show()
     return n + 1

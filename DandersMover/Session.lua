@@ -293,6 +293,18 @@ function Sess:SetAnchorPoint(el, point)
     commit(el, before, L["Anchor point %s"])
 end
 
+-- Re-anchoring to a new primary keeps whatever backup was already set: the
+-- element's fall-back plan is a separate choice from where it normally sits.
+-- Dropped only when the new primary IS the backup, which would make the two
+-- the same link.
+local function carryFallback(pos, before, targetId)
+    local fb = before.anchor and before.anchor.fallback
+    if not fb or fb.target == targetId then return end
+    pos.anchor.fallback = { target = fb.target, mode = fb.mode, edge = fb.edge, align = fb.align,
+                            point = fb.point, relPoint = fb.relPoint,
+                            offsetX = fb.offsetX, offsetY = fb.offsetY }
+end
+
 function Sess:Anchor(el, targetId, edge, align)
     if Registry:WouldCreateCycle(el.id, targetId) then
         NS:Print(L["Anchoring would create a loop."])
@@ -301,6 +313,7 @@ function Sess:Anchor(el, targetId, edge, align)
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     pos.anchor = { target = targetId, edge = edge, align = align, offsetX = 0, offsetY = 0 }
+    carryFallback(pos, before, targetId)
     pos.point = "CENTER"
     NS:ResolveElement(el)
     apply(el, "anchor")
@@ -315,6 +328,40 @@ function Sess:Detach(el)
     pos.anchor = nil
     apply(el, "detach")
     commit(el, before, L["Detach %s"])
+end
+
+-- The backup anchor: where the element goes when its primary target is not on
+-- screen. It takes the primary's whole spec with only the target swapped --
+-- the same seat on a different parent -- so the element keeps its shape of
+-- attachment either way.
+function Sess:SetFallback(el, targetId)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor then return end
+    -- Same as the primary is a no-op, not a mistake worth a message.
+    if targetId == pos.anchor.target then return end
+    if Registry:WouldCreateCycle(el.id, targetId) then
+        NS:Print(L["Anchoring would create a loop."])
+        return
+    end
+    local before = NS.CopyPos(pos)
+    local a = pos.anchor
+    a.fallback = { target = targetId, mode = a.mode, edge = a.edge, align = a.align,
+                   point = a.point, relPoint = a.relPoint,
+                   offsetX = a.offsetX, offsetY = a.offsetY }
+    -- Only actually moves the element if the primary is already unavailable,
+    -- which is exactly when the backup is meant to take over.
+    NS:ResolveElement(el)
+    apply(el, "fallback")
+    commit(el, before, L["Backup anchor %s"])
+end
+
+function Sess:ClearFallback(el)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor or not pos.anchor.fallback then return end
+    local before = NS.CopyPos(pos)
+    pos.anchor.fallback = nil
+    apply(el, "fallback")
+    commit(el, before, L["Clear backup %s"])
 end
 
 function Sess:Center(el)
@@ -350,6 +397,10 @@ function Sess:CopyToTwin(el)
     local before = NS.CopyPos(dst)
     NS.CopyPos(Registry:GetPos(el), dst)
     if dst.anchor and Registry:WouldCreateCycle(twin.id, dst.anchor.target) then dst.anchor = nil end
+    -- The backup is dropped on its own if only IT would loop; the primary stays.
+    if dst.anchor and dst.anchor.fallback and Registry:WouldCreateCycle(twin.id, dst.anchor.fallback.target) then
+        dst.anchor.fallback = nil
+    end
     if dst.anchor then NS:ResolveElement(twin) end
     apply(twin, "copy")
     commit(twin, before, L["Copy to %s"])
@@ -458,6 +509,7 @@ function Sess:EndDrag(el, cx, cy, zone)
     if zone and Registry:WouldCreateCycle(el.id, zone.target) then zone = nil end
     if zone then
         pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
+        carryFallback(pos, before, zone.target)
         pos.point = "CENTER"
         NS:ResolveElement(el)
     elseif before.anchor and not (tether and tether.snapped) then
@@ -473,6 +525,12 @@ function Sess:EndDrag(el, cx, cy, zone)
     end
     apply(el, zone and "anchor" or "drag")
     local label = zone and L["Anchor %s"] or (before.anchor and L["Detach %s"] or L["Move %s"])
+    -- Pulled free of a record that also named a backup: the backup went with the
+    -- primary, and that is worth saying out loud -- it is a link the user set up
+    -- deliberately and would otherwise notice only much later.
+    if not zone and before.anchor and before.anchor.fallback then
+        Proxy:ShowToast(L["Detached — backup anchor cleared"])
+    end
     commit(el, before, label)
     self:Select(el.id)
 end

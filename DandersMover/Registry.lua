@@ -271,25 +271,71 @@ function R:CanonicalId(targetId)
     return targetId
 end
 
-function R:ParentId(elId)
+-- Which anchor block is actually driving this element right now: the primary,
+-- its backup, or neither (hold). The single chooser the resolver, the tether
+-- and the panel all go through, so none of them can disagree about which link
+-- is live.
+function R:ActiveAnchor(el)
+    local pos = self:GetPos(el)
+    local a = pos.anchor
+    if not a then return nil end
+    if self:IsTargetAvailable(self.targets[a.target]) then return a end
+    if a.fallback and self:IsTargetAvailable(self.targets[a.fallback.target]) then return a.fallback end
+    return nil
+end
+
+-- Both canonical parents (primary, backup), regardless of availability: graph
+-- walks must still reach a child that is currently holding.
+function R:ParentIds(elId)
     local el = self.elements[elId]
     if not el then return nil end
     local pos = self:GetPos(el)
-    return pos.anchor and self:CanonicalId(pos.anchor.target) or nil
+    local a = pos.anchor
+    if not a then return nil end
+    local primary = self:CanonicalId(a.target)
+    if a.fallback then return primary, self:CanonicalId(a.fallback.target) end
+    return primary
+end
+
+-- The ACTIVE parent: what the element is resolving against at this moment.
+function R:ParentId(elId)
+    local el = self.elements[elId]
+    if not el then return nil end
+    local a = self:ActiveAnchor(el)
+    return a and self:CanonicalId(a.target) or nil
 end
 
 function R:Children(targetId)
     local canon = self:CanonicalId(targetId)
     local out = {}
     for _, el in pairs(self.elements) do
-        if self:ParentId(el.id) == canon then tinsert(out, el) end
+        local primary, backup = self:ParentIds(el.id)
+        if primary == canon or backup == canon then tinsert(out, el) end
     end
     return out
 end
 
 -- Would anchoring elId to targetId create a loop (including through aliases)?
+-- Walks BOTH parent edges (primary and backup) STRUCTURALLY -- availability is
+-- deliberately ignored: a cycle through a currently-hidden target is still a
+-- cycle the moment that target reappears, and ParentId (the ACTIVE parent)
+-- would walk right past it while the chain is holding.
 function R:WouldCreateCycle(elId, targetId)
-    return NS.Solver.WouldCreateCycle(function(id) return self:ParentId(id) end, elId, self:CanonicalId(targetId))
+    local frontier, seen = { self:CanonicalId(targetId) }, {}
+    while #frontier > 0 do
+        local nxt = {}
+        for _, id in ipairs(frontier) do
+            if id == elId then return true end
+            if not seen[id] then
+                seen[id] = true
+                local primary, backup = self:ParentIds(id)
+                if primary then tinsert(nxt, primary) end
+                if backup then tinsert(nxt, backup) end
+            end
+        end
+        frontier = nxt
+    end
+    return false
 end
 
 function R:Descendants(targetId)
