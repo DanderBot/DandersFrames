@@ -1500,15 +1500,57 @@ function AutoProfilesUI:ResetProfileSetting(key)
     return true
 end
 
+-- ☠☠ growDirection IS MODE-RELATIVE, AND ITS MEANING IS SET BY A KEY A LAYOUT CAN
+-- OVERRIDE. Flat HORIZONTAL lays frames left-to-right (rows); grouped HORIZONTAL stacks
+-- each group five deep and runs the groups across (columns). So the SAME orientation
+-- needs OPPOSITE raw values in the two modes -- which is why toggling Use Group-Based
+-- Layout rewrites growDirection to keep the layout looking the same.
+--
+-- The consequence for auto layouts: a flat layout matching a grouped global MUST store
+-- the opposite raw value, and every value-based comparison then reports a difference
+-- that does not exist for the user. Field-captured: profile flat+HORIZONTAL against
+-- global grouped+VERTICAL -- both read "Rows", both drew rows, and the row still showed
+-- an override dot, a reset button, and a global of "Columns" (Krathe, 2026-08-25).
+--
+-- ★ THE FIX LIVES HERE, NOT IN THE WIDGETS. Three separate widget-level attempts to
+-- explain or suppress it did not hold, and the reason is that this is not a display
+-- question: "what is the global, for this profile" is a profile-layer question, and
+-- every consumer (the dot, the reset, the readout, the tab stars) wants the same answer.
+-- Translating once at the source fixes all of them, and fixes Reset as a bonus -- it
+-- writes the value that reproduces the global's LOOK rather than a raw value that means
+-- the opposite thing in this mode.
+-- ⚠ The maps are exact inverses, which is what makes a plain flip correct; if a third
+-- orientation is ever added this needs a real mapping instead.
+-- ⚠ The real cure is splitting the key per mode, which retires this, the toggle rewrite
+-- and the inverted dropdown labels together.
+local GROW_INVERSE = { HORIZONTAL = "VERTICAL", VERTICAL = "HORIZONTAL" }
+
+-- True when the profile and the global disagree about grouped-vs-flat, i.e. when the two
+-- ends of a growDirection comparison are speaking different modes.
+-- ⚠ Reads raidUseGroups through GetGlobalValue, which does NOT translate (only
+-- growDirection is mode-relative), so there is no recursion.
+function AutoProfilesUI:GrowDirectionModesDiffer()
+    local profileGroups = GetRaidValue("raidUseGroups") and true or false
+    local globalGroups  = self:GetGlobalValue("raidUseGroups") and true or false
+    return profileGroups ~= globalGroups
+end
+
 -- Get the global value for a setting (for display purposes)
 -- Returns a deep copy to prevent callers from mutating the snapshot
 function AutoProfilesUI:GetGlobalValue(key)
     -- When editing, return the true global from snapshot (db.raid may have overridden values)
     local snapshotVal, found = GetSnapshotValue(self.globalSnapshot, key)
+    local value
     if found then
-        return DeepCopyValue(snapshotVal)
+        value = DeepCopyValue(snapshotVal)
+    else
+        value = GetRaidValue(key)
     end
-    return GetRaidValue(key)
+    -- Expressed in THIS profile's mode -- see the note above.
+    if key == "growDirection" and GROW_INVERSE[value] and self:GrowDirectionModesDiffer() then
+        return GROW_INVERSE[value]
+    end
+    return value
 end
 
 -- Check if a setting is currently overridden
@@ -1517,7 +1559,16 @@ function AutoProfilesUI:IsSettingOverridden(key)
     if not self.editingProfile or not self.editingProfile.overrides then
         return false
     end
-    return self.editingProfile.overrides[key] ~= nil
+    if self.editingProfile.overrides[key] == nil then return false end
+    -- ★ growDirection answers by MEANING, not by storage. The override is genuinely
+    -- stored (and must be -- it is what keeps the layout looking right), but it only
+    -- counts as an override if the orientation actually differs from the global's.
+    -- GetGlobalValue has already translated into this profile's mode, so this is a
+    -- straight comparison.
+    if key == "growDirection" then
+        return GetRaidValue(key) ~= self:GetGlobalValue(key)
+    end
+    return true
 end
 
 -- Is a pinned-frame SETTING (bare name, e.g. "enabled" / "scale") overridable
