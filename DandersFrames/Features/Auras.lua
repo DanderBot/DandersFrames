@@ -183,9 +183,6 @@ local function KnowsPoisonCleansingTotem()
         if sb.IsSpellInSpellBook then
             return sb.IsSpellInSpellBook(POISON_CLEANSING_TOTEM, bank, true) and true or false
         end
-        if sb.IsSpellKnown then
-            return sb.IsSpellKnown(POISON_CLEANSING_TOTEM, bank) and true or false
-        end
     end
     -- Deprecation shim; present only with loadDeprecationFallbacks on.
     if IsPlayerSpell then
@@ -525,11 +522,16 @@ local function BuildDirectDebuffFilters(db, claimed)
             filters[#filters + 1] = { filter = "HARMFUL|" .. dispelTypeToken,
                                       key = "dispel", candidateFilters = cfFor(false, notImportant()) }
         else
-            -- ☠ TOKEN-LESS FALLBACK ONLY -- never the primary path on a live client.
-            -- includeDispelTypes is a Blizzard LUA-side raw index by dispelName
-            -- (Blizzard_AuraContainerUtil.lua:67) and matches NOTHING once dispel
-            -- names go secret. See the dispelTypeToken note above for the field
-            -- report this caused when it was the primary ALL-mode path.
+            -- ⚠ TOKEN-LESS FALLBACK ONLY -- never the primary path on a live client.
+            -- The map form works: the matcher (DoesAuraPassCandidateFilters, in
+            -- Blizzard_AuraContainerUtil.lua INSIDE the Blizzard_AuraContainer addon,
+            -- whose TOC declares UseSecureEnvironment) reads real values, not secrets
+            -- -- see the evidence chain on DF:GetEngineDispelFlagGaps. An earlier
+            -- version of this comment claimed the map "matches NOTHING once dispel
+            -- names go secret"; that secrecy theory was falsified (lab discussion
+            -- 08ac7310, 2026-08-25). The token is preferred only because it is
+            -- Blizzard's own canonical filter component, with no local copy of the
+            -- type list to keep in step.
             local cf = notImportant({ includeDispelTypes = DISPEL_TYPES })
             if maxDur then cf.maxDuration = maxDur end
             filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
