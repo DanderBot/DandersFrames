@@ -1226,13 +1226,20 @@ end
 -- Every element the given one may legally be anchored to, with its rect cached
 -- for the per-frame hit test. Targets with no rect cannot be hit, so they are
 -- left out entirely.
-function P:LinkTargets(el)
+--
+-- mode mirrors Picker:Options' `kind`: a "fallback" gesture also drops the
+-- element's own PRIMARY target, because a backup that is the primary is not a
+-- backup (SetFallback refuses it, so it must not light up under the cursor).
+function P:LinkTargets(el, mode)
     local out = {}
     local descendants = {}
     for _, d in ipairs(Registry:Descendants(el.id)) do descendants[d.id] = true end
+    local anchor = Registry:GetPos(el).anchor
+    local primaryId = (mode == "fallback" and anchor) and anchor.target or nil
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)
         local usable = canon ~= el.id and not descendants[canon]
+            and target.id ~= primaryId
             and Registry:IsTargetAvailable(target)
             and Registry:IsEnabled(target.addon, target.key)
             and not Registry:WouldCreateCycle(el.id, target.id)
@@ -1273,8 +1280,9 @@ local function linkHighlight()
     return hl
 end
 
-function P:BeginLinkVisual(el)
-    self.linkList = self:LinkTargets(el)
+function P:BeginLinkVisual(el, mode)
+    self.linkMode = mode or "primary"
+    self.linkList = self:LinkTargets(el, self.linkMode)
     self.linkId = el.id
     self.linkHover = nil
     local f = self:GetUnlockFrame()
@@ -1351,7 +1359,7 @@ function P:EndLinkVisual()
     if self.linkLine then self.linkLine:Hide() end
     if self.linkGlow then self.linkGlow:Hide() end
     if self.linkHl then self.linkHl:Hide() end
-    self.linkHover, self.linkId = nil, nil
+    self.linkHover, self.linkId, self.linkMode = nil, nil, nil
     if self.linkList then wipe(self.linkList) end
 end
 

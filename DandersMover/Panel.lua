@@ -32,7 +32,10 @@ local LINK_ICON = MEDIA .. "link"
 -- DandersUI surface: PAD is the outer padding, GAP the gap between rows of
 -- different kinds, TIGHT the gap inside a run of like things (buttons in a
 -- row, the two X/Y pairs).
-local W = 236
+-- 260, not the old 236: the anchor block now carries a label column and a drag
+-- handle on the same row as its picker, and at 236 the picker was down to about
+-- half the row.
+local W = 260
 local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
 local CW = W - PAD * 2            -- content width
 local DOCK_GAP = 12               -- panel <-> proxy distance
@@ -44,10 +47,28 @@ local BOX_W = 62                  -- X / Y edit boxes
 local NUDGE_CELL, NUDGE_ICON = 22, 14
 local DOT, DOT_GAP = 16, 4        -- 9-point picker cells
 local BTN_H, CTA_H = 20, 22
--- The anchor block's three rows. Only the first is always there, so these are
--- named heights rather than numbers baked into one total (layoutAnchorBlock).
-local ANCHOR_H = 20               -- the anchor-target opener
-local BACKUP_H, SPEC_H = 18, 18   -- backup-anchor row, edge/align pair
+-- ---- the anchor block --------------------------------------------
+-- Its own group box, so "Anchor" reads as one subject rather than as three
+-- dropdowns that happen to be stacked. UI.Space.section is a PAGE inset and a
+-- 260px panel cannot spare 10px a side, so the box takes a tighter one.
+local ANCHOR_PAD = 6
+local ROW_H = 20                  -- the Target and Backup rows
+local SPEC_H = 18                 -- the edge/align (or point/relPoint) pair
+local HANDLE = 16                 -- link-drag handle at a picker row's right end
+-- The label column of the Target/Backup rows, measured from the labels
+-- themselves (layoutAnchorBlock) and held between these: below the minimum the
+-- rows stop lining up, above the maximum a long translation would eat the
+-- picker instead of wrapping.
+local LABEL_MIN, LABEL_MAX = 34, 96
+-- What the seat pair's dropdowns keep for themselves whatever their labels
+-- measure. Point mode is the tight case ("Rel point" beside "BOTTOMLEFT"), and
+-- a clipped VALUE is a worse read than a clipped label -- the value is the thing
+-- being set.
+local SPEC_DROP_MIN = 56
+local ACW = CW - ANCHOR_PAD * 2   -- the group box's inner content width
+-- The kit's own grey-when-disabled dim (UI:CreateDropdown SetEnabled), matched
+-- so a disabled label and the disabled dropdown beside it fade to the same depth.
+local DISABLED_ALPHA = 0.4
 local POINTS = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
 
 local function selectedElement()
@@ -74,31 +95,47 @@ end
 
 -- ============================================================
 -- ANCHOR BLOCK LAYOUT
--- The target picker is always there; the backup row and the edge/align pair
--- come and go with the element's anchor state. A hidden row gives its height
--- back rather than leaving a hole, so everything below the block (f.rest) and
--- the panel's own height both follow. Returns the height the block consumes,
--- gap to the rows below included -- the same trick layoutHeader plays on f.body.
+-- Every row is always there now -- an unanchored element greys the ones it has
+-- no answer for rather than dropping them, so the block never changes height
+-- and the panel never jumps as you anchor and detach. What IS measured here is
+-- the label columns: a FontString reads 0 wide until its font resolves, and the
+-- labels also swap with the anchor mode, so the columns are re-measured on every
+-- layout rather than fixed at build.
+--
+-- Returns the height the block consumes, gap to the rows below included -- the
+-- same trick layoutHeader plays on f.body.
 -- ============================================================
-local function layoutAnchorBlock(f, showBackup, showSpec)
-    local h = ANCHOR_H
-    f.anchorPicker:ClearAllPoints()
-    f.anchorPicker:SetPoint("TOPLEFT", PAD, 0)
-    f.backupRow:ClearAllPoints()
-    if showBackup then
-        h = h + TIGHT
-        f.backupRow:SetPoint("TOPLEFT", PAD, -h)
-        h = h + BACKUP_H
-    end
-    f.specRow:ClearAllPoints()
-    if showSpec then
-        h = h + TIGHT
-        f.specRow:SetPoint("TOPLEFT", PAD, -h)
-        h = h + SPEC_H
-    end
-    f.backupRow:SetShown(showBackup)
-    f.specRow:SetShown(showSpec)
-    h = h + GAP
+-- Grey a whole picker row: the kit dims the dropdown itself, the label and the
+-- handle are ours to match. A disabled Button already refuses OnMouseDown, and
+-- Sess:BeginLink refuses a fallback link with no primary anyway -- the alpha is
+-- there to say so before the user tries.
+local function setRowEnabled(row, enabled)
+    row.picker:SetEnabled(enabled)
+    row.label:SetAlpha(enabled and 1 or DISABLED_ALPHA)
+    row.handle:SetEnabled(enabled)
+    row.handle:SetAlpha(enabled and 1 or DISABLED_ALPHA)
+end
+
+-- Both labels of a pair take the wider of the two, so the two pickers start on
+-- the same column and the rows read as a table.
+local function labelColumn(a, b, floorW, ceilW)
+    local w = max(a:GetStringWidth() or 0, b:GetStringWidth() or 0)
+    w = min(max(w, floorW), max(floorW, ceilW))
+    a:SetWidth(w); b:SetWidth(w)
+    return w
+end
+
+local function layoutAnchorBlock(f)
+    labelColumn(f.targetRow.label, f.backupRow.label, LABEL_MIN, LABEL_MAX)
+    -- The seat pair sits in half a row each, and its labels swap with the mode
+    -- ("Rel point" is twice "Align"), so the column is capped at whatever leaves
+    -- the dropdown its own minimum rather than at a fixed number.
+    local halfW = floor((ACW - GAP) / 2)
+    labelColumn(f.edgeLabel, f.alignLabel, 24, halfW - SPEC_DROP_MIN)
+
+    local contentH = ROW_H + TIGHT + SPEC_H + TIGHT + ROW_H
+    f.anchorBox:SetContentHeight(contentH)
+    local h = (f.anchorBox:GetHeight() or contentH) + GAP
     f.rest:ClearAllPoints()
     f.rest:SetPoint("TOPLEFT", 0, -h)
     return h
@@ -159,133 +196,181 @@ local function build()
     f.body = body
 
     -- ---- anchor block ------------------------------------------------
+    -- One titled sub-section, three labelled rows: what this element is
+    -- anchored TO, how it sits on it, and where it goes when that target is off
+    -- screen. Every row is labelled, because three unlabelled dropdowns in a
+    -- column tell you nothing about which is which.
+    f.anchorBox = UI:CreateGroupBox(body, { title = L["Anchor"], width = CW, padding = ANCHOR_PAD })
+    f.anchorBox:SetPoint("TOPLEFT", PAD, 0)
+    local ac = f.anchorBox.content
+
+    -- ---- Target / Backup rows ----------------------------------------
+    -- Both are built by the same helper so they line up without either one
+    -- knowing about the other. Each is a muted label, a picker taking the rest
+    -- of the row, and a link-drag handle at the right end.
+    --
+    -- The handle is the aimed form of what the picker chooses: hold it, drag
+    -- the line onto a target and let go. Press and release are deliberately
+    -- OnMouseDown/OnMouseUp rather than an onClick -- the gesture has to START
+    -- on the press and FINISH wherever the cursor ended up, which a click (down
+    -- and up on the same button) cannot express. The button keeps mouse capture
+    -- between the two, so the release comes back here even though the cursor is
+    -- over a proxy by then.
+    local function pickerRow(parent, o)
+        local row = CreateFrame("Frame", nil, parent)
+        row:SetSize(ACW, ROW_H)
+        row.label = UI:CreateLabel(row, { text = o.label, size = 10, color = UI.Colors.textDim })
+        -- The column is capped (labelColumn), so a long translation has to clip
+        -- rather than wrap: a second line would fall through the row below it.
+        row.label:SetWordWrap(false)
+        row.label:SetPoint("LEFT", 0, 0)
+        row.handle = UI:CreateGlyphButton(row, {
+            texture = LINK_ICON, size = HANDLE, iconSize = HANDLE - 2, tooltip = o.handleTooltip,
+        })
+        row.handle:SetPoint("RIGHT", 0, 0)
+        row.handle:RegisterForClicks("AnyUp", "AnyDown")
+        row.handle:SetScript("OnMouseDown", function(_, button)
+            local el = selectedElement()
+            if not el then return end
+            if button == "LeftButton" then Sess:BeginLink(el, o.mode)
+            elseif button == "RightButton" and Sess.linking then Sess:CancelLink() end
+        end)
+        row.handle:SetScript("OnMouseUp", function(_, button)
+            if button == "LeftButton" and Sess.linking then
+                Sess:EndLink(Proxy.LinkHover and Proxy:LinkHover() or nil)
+            end
+        end)
+        row.picker = UI:CreateDropdown(row, o.dropdown)
+        row.picker:SetHeight(ROW_H)
+        -- Two-point anchored rather than sized, so the picker absorbs whatever
+        -- the measured label column leaves it.
+        row.picker:SetPoint("LEFT", row.label, "RIGHT", TIGHT, 0)
+        row.picker:SetPoint("RIGHT", row.handle, "LEFT", -TIGHT, 0)
+        return row
+    end
+
     -- Anchoring without dragging: pick a target and the element stays exactly
     -- where it is (Sess:AnchorInPlace derives the spec that reproduces its
     -- current seat). The list is rebuilt on every open (optionsFunc) because
     -- what is legal changes with the graph and with what is on screen.
-    f.anchorPicker = UI:CreateDropdown(body, {
-        inline = true, searchable = true,
-        optionsFunc = function()
-            local el = selectedElement()
-            return el and NS.Picker:Options(el) or { _order = {} }
-        end,
-        get = function()
-            local el = selectedElement(); if not el then return nil end
-            local a = Registry:GetPos(el).anchor
-            return a and a.target or nil
-        end,
-        set = function(targetId)
-            local el = selectedElement()
-            if el then Sess:AnchorInPlace(el, targetId) end
-        end,
+    f.targetRow = pickerRow(ac, {
+        label = L["Target"], mode = "primary",
+        handleTooltip = { title = L["Anchor"], lines = { L["Drag onto another mover to attach"] } },
+        dropdown = {
+            inline = true, searchable = true,
+            optionsFunc = function()
+                local el = selectedElement()
+                return el and NS.Picker:Options(el) or { _order = {} }
+            end,
+            get = function()
+                local el = selectedElement(); if not el then return nil end
+                local a = Registry:GetPos(el).anchor
+                return a and a.target or nil
+            end,
+            set = function(targetId)
+                local el = selectedElement()
+                if el then Sess:AnchorInPlace(el, targetId) end
+            end,
+        },
     })
-    -- The picker gives up the glyph's width on its right so the two share the
-    -- anchor row; the glyph itself hangs off the picker, so layoutAnchorBlock
-    -- still only has to move the picker.
-    f.anchorPicker:SetSize(CW - ANCHOR_H - TIGHT, ANCHOR_H)
+    f.targetRow:SetPoint("TOPLEFT", 0, 0)
     -- Refresh owns this caption from here on; set once so the opener never
     -- renders the raw value between build and the Refresh that follows it.
-    f.anchorPicker:SetDisplayOverride(L["Anchor to…"])
+    f.targetRow.picker:SetDisplayOverride(L["None"])
 
-    -- ---- link drag ---------------------------------------------------
-    -- The same relationship the picker sets, aimed instead of chosen: hold the
-    -- glyph, drag the line onto a target and let go. Press and release are
-    -- deliberately OnMouseDown/OnMouseUp rather than an onClick -- the gesture
-    -- has to START on the press and FINISH wherever the cursor ended up, which
-    -- a click (down and up on the same button) cannot express. The button keeps
-    -- mouse capture between the two, so the release comes back here even though
-    -- the cursor is over a proxy by then.
-    f.linkBtn = UI:CreateGlyphButton(body, {
-        texture = LINK_ICON, size = ANCHOR_H, iconSize = 14,
-        tooltip = { title = L["Link"],
-                    lines = { L["Drag onto another element to anchor this one where it sits. Esc or right-click cancels."] } },
-    })
-    f.linkBtn:SetPoint("LEFT", f.anchorPicker, "RIGHT", TIGHT, 0)
-    f.linkBtn:RegisterForClicks("AnyUp", "AnyDown")
-    f.linkBtn:SetScript("OnMouseDown", function(_, button)
-        local el = selectedElement()
-        if not el then return end
-        if button == "LeftButton" then Sess:BeginLink(el)
-        elseif button == "RightButton" and Sess.linking then Sess:CancelLink() end
-    end)
-    f.linkBtn:SetScript("OnMouseUp", function(_, button)
-        if button == "LeftButton" and Sess.linking then
-            Sess:EndLink(Proxy.LinkHover and Proxy:LinkHover() or nil)
-        end
-    end)
-
-    -- ---- backup anchor -----------------------------------------------
     -- Where the element goes when the primary target is not on screen. Only
-    -- meaningful once there IS a primary, so the whole row hides while free.
-    f.backupRow = CreateFrame("Frame", nil, body)
-    f.backupRow:SetSize(CW, BACKUP_H)
-    local backupLabel = UI:CreateLabel(f.backupRow, { text = L["Backup anchor"], size = 10, color = UI.Colors.textDim })
-    backupLabel:SetPoint("LEFT", 0, 0)
-    f.backupPicker = UI:CreateDropdown(f.backupRow, {
-        inline = true, searchable = true,
-        optionsFunc = function()
-            local el = selectedElement()
-            return el and NS.Picker:Options(el, "fallback") or { _order = {} }
-        end,
-        get = function()
-            local el = selectedElement(); if not el then return NS.Picker.NONE end
-            local a = Registry:GetPos(el).anchor
-            return a and a.fallback and a.fallback.target or NS.Picker.NONE
-        end,
-        set = function(targetId)
-            local el = selectedElement(); if not el then return end
-            if targetId == NS.Picker.NONE then Sess:ClearFallback(el) else Sess:SetFallback(el, targetId) end
-        end,
+    -- meaningful once there IS a primary, so both the picker and its handle go
+    -- grey while the element is free.
+    f.backupRow = pickerRow(ac, {
+        label = L["Backup"], mode = "fallback",
+        handleTooltip = { title = L["Backup"], lines = { L["Drag onto another mover to set the backup anchor"] } },
+        dropdown = {
+            inline = true, searchable = true,
+            optionsFunc = function()
+                local el = selectedElement()
+                return el and NS.Picker:Options(el, "fallback") or { _order = {} }
+            end,
+            get = function()
+                local el = selectedElement(); if not el then return NS.Picker.NONE end
+                local a = Registry:GetPos(el).anchor
+                return a and a.fallback and a.fallback.target or NS.Picker.NONE
+            end,
+            set = function(targetId)
+                local el = selectedElement(); if not el then return end
+                if targetId == NS.Picker.NONE then Sess:ClearFallback(el) else Sess:SetFallback(el, targetId) end
+            end,
+        },
     })
-    f.backupPicker:SetHeight(BACKUP_H)
-    f.backupPicker:SetPoint("LEFT", backupLabel, "RIGHT", TIGHT, 0)
-    f.backupPicker:SetPoint("RIGHT", 0, 0)
-    f.backupPicker:SetDisplayOverride(L["None"])
-    f.backupRow:Hide()
+    f.backupRow:SetPoint("TOPLEFT", 0, -(ROW_H + TIGHT + SPEC_H + TIGHT))
+    f.backupRow.picker:SetDisplayOverride(L["None"])
 
-    -- ---- edge / align ------------------------------------------------
-    -- Outside mode only: point mode has no edge or align to set, and a free
-    -- element has no anchor at all.
-    local EDGES = { _order = { "right", "left", "top", "bottom" },
-                    right = L["Right"], left = L["Left"], top = L["Top"], bottom = L["Bottom"] }
-    local ALIGNS = { _order = { "start", "center", "end" },
-                     start = L["Start"], center = L["Center"], ["end"] = L["End"] }
-    f.specRow = CreateFrame("Frame", nil, body)
-    f.specRow:SetSize(CW, SPEC_H)
-    local specW = floor((CW - TIGHT) / 2)
-    f.edgeDrop = UI:CreateDropdown(f.specRow, {
-        inline = true, options = EDGES,
-        get = function()
-            local el = selectedElement(); if not el then return "right" end
-            local a = Registry:GetPos(el).anchor
-            return a and a.edge or "right"
-        end,
-        set = function(v)
-            local el = selectedElement()
-            if el then Sess:SetAnchorSpec(el, { edge = v }) end
-        end,
-    })
-    f.edgeDrop:SetSize(specW, SPEC_H)
-    f.edgeDrop:SetPoint("TOPLEFT", 0, 0)
-    f.alignDrop = UI:CreateDropdown(f.specRow, {
-        inline = true, options = ALIGNS,
-        get = function()
-            local el = selectedElement(); if not el then return "center" end
-            local a = Registry:GetPos(el).anchor
-            return a and a.align or "center"
-        end,
-        set = function(v)
-            local el = selectedElement()
-            if el then Sess:SetAnchorSpec(el, { align = v }) end
-        end,
-    })
-    f.alignDrop:SetSize(specW, SPEC_H)
-    f.alignDrop:SetPoint("TOPLEFT", specW + TIGHT, 0)
-    f.specRow:Hide()
+    -- ---- the seat: edge/align, or point/relPoint ---------------------
+    -- One pair of dropdowns whose SUBJECT follows the anchor's mode, because the
+    -- two modes describe a seat with different fields and only one of them is
+    -- ever live. Refresh swaps both the labels and the option sets (specMode).
+    f.specRow = CreateFrame("Frame", nil, ac)
+    f.specRow:SetSize(ACW, SPEC_H)
+    f.specRow:SetPoint("TOPLEFT", 0, -(ROW_H + TIGHT))
+    local halfW = floor((ACW - GAP) / 2)
+    -- Which of the anchor block's two fields a dropdown edits, per mode. The
+    -- pair is positional -- left dropdown, right dropdown -- and the mode
+    -- decides what each one means.
+    local SPEC_KEYS = { outside = { "edge", "align" }, point = { "point", "relPoint" } }
+    local SPEC_FALLBACK = { edge = "right", align = "center", point = "CENTER", relPoint = "CENTER" }
+    -- The 9 anchor points are API identifiers, not prose -- they read the same
+    -- in every locale and the panel already spells them out raw elsewhere, so
+    -- the same table serves both point-mode slots.
+    local POINT_OPTS = { _order = POINTS }
+    for _, p in ipairs(POINTS) do POINT_OPTS[p] = p end
+    f.specOptions = {
+        outside = {
+            { _order = { "right", "left", "top", "bottom" },
+              right = L["Right"], left = L["Left"], top = L["Top"], bottom = L["Bottom"] },
+            { _order = { "start", "center", "end" },
+              start = L["Start"], center = L["Center"], ["end"] = L["End"] },
+        },
+        point = { POINT_OPTS, POINT_OPTS },
+    }
+    local function specMode()
+        local el = selectedElement(); if not el then return "outside" end
+        local a = Registry:GetPos(el).anchor
+        return (a and a.mode == "point") and "point" or "outside"
+    end
+    local function specDrop(slot)
+        local drop = UI:CreateDropdown(f.specRow, {
+            inline = true, options = f.specOptions.outside[slot],
+            get = function()
+                local key = SPEC_KEYS[specMode()][slot]
+                local el = selectedElement(); if not el then return SPEC_FALLBACK[key] end
+                local a = Registry:GetPos(el).anchor
+                return (a and a[key]) or SPEC_FALLBACK[key]
+            end,
+            set = function(v)
+                local el = selectedElement(); if not el then return end
+                Sess:SetAnchorSpec(el, { [SPEC_KEYS[specMode()][slot]] = v })
+            end,
+        })
+        drop:SetHeight(SPEC_H)
+        return drop
+    end
+    f.edgeLabel = UI:CreateLabel(f.specRow, { text = L["Edge"], size = 10, color = UI.Colors.textDim })
+    f.edgeLabel:SetWordWrap(false)
+    f.edgeLabel:SetPoint("LEFT", 0, 0)
+    f.edgeDrop = specDrop(1)
+    f.edgeDrop:SetPoint("LEFT", f.edgeLabel, "RIGHT", TIGHT, 0)
+    f.edgeDrop:SetPoint("RIGHT", f.specRow, "LEFT", halfW, 0)
+    f.alignLabel = UI:CreateLabel(f.specRow, { text = L["Align"], size = 10, color = UI.Colors.textDim })
+    f.alignLabel:SetWordWrap(false)
+    f.alignLabel:SetPoint("LEFT", f.specRow, "LEFT", halfW + GAP, 0)
+    f.alignDrop = specDrop(2)
+    f.alignDrop:SetPoint("LEFT", f.alignLabel, "RIGHT", TIGHT, 0)
+    f.alignDrop:SetPoint("RIGHT", f.specRow, "RIGHT", 0, 0)
+    f.specMode = "outside"
 
     -- ---- everything below the anchor block ---------------------------
-    -- Its own frame so the block above can grow and shrink under it: these rows
-    -- keep their build-time offsets and only f.rest's single anchor moves.
+    -- Its own frame so the block above can sit at whatever height the group box
+    -- measures: these rows keep their build-time offsets and only f.rest's
+    -- single anchor moves.
     local rest = CreateFrame("Frame", nil, body)
     rest:SetWidth(W)
     rest:SetPoint("TOPLEFT", 0, 0)          -- layoutAnchorBlock re-anchors it
@@ -424,7 +509,7 @@ local function build()
     f.restFullH = -y
     f.restBaseH = f.restFullH - BTN_H - GAP
     rest:SetHeight(f.restBaseH)
-    local blockH = layoutAnchorBlock(f, false, false)
+    local blockH = layoutAnchorBlock(f)
     body:SetHeight(blockH + f.restBaseH)
     f:SetHeight(PAD + ICON + TIGHT + HEADER_BTN_H + GAP + blockH + f.restBaseH + PAD)
     f:Hide()
@@ -650,25 +735,22 @@ function Pn:Refresh()
 
     local a = pos.anchor
     if a then
-        -- Describe whichever block is actually driving the element: the backup
+        -- Name whichever block is actually driving the element: the backup
         -- taking over is the one thing the panel must not stay quiet about, and
-        -- naming the primary's seat while the backup holds it would be a lie.
+        -- naming the primary's target while the backup holds it would be a lie.
+        -- Just the NAME now -- the seat has its own labelled row underneath, so
+        -- the old "(right/center)" tail is said twice over.
         local active = Registry:ActiveAnchor(el)
-        local isBackup = active ~= nil and active == a.fallback
         local blk = active or a
         local target = Registry:GetTarget(blk.target)
-        local name = target and target.title or L["(unavailable)"]
-        local detail
-        if blk.mode == "point" then detail = format("%s (%s → %s)", name, blk.point, blk.relPoint)
-        else detail = format("%s (%s/%s)", name, blk.edge, blk.align) end
-        local text = format(L["Anchored to %s"], detail)
-        if isBackup then text = L["(backup)"] .. " " .. text end
-        f.anchorPicker:SetDisplayOverride(text)
+        local text = target and target.title or L["(unavailable)"]
+        if active ~= nil and active == a.fallback then text = L["(backup)"] .. " " .. text end
+        f.targetRow.picker:SetDisplayOverride(text)
         f.xLabel:SetText(L["Offset X"]); f.yLabel:SetText(L["Offset Y"])
         f.btnDetach:SetEnabled(true)
         for _, b in ipairs(f.points) do b:Hide() end
     else
-        f.anchorPicker:SetDisplayOverride(L["Anchor to…"])
+        f.targetRow.picker:SetDisplayOverride(L["None"])
         f.xLabel:SetText(L["X"]); f.yLabel:SetText(L["Y"])
         f.btnDetach:SetEnabled(false)
         local cur = pos.point or "CENTER"
@@ -680,22 +762,41 @@ function Pn:Refresh()
         end
     end
 
-    -- Backup row: only meaningful once there IS a primary to fall back FROM.
-    -- Edge/align: outside mode only -- point mode has neither.
-    local showBackup = a ~= nil
-    local showSpec = a ~= nil and a.mode ~= "point"
-    if showBackup then
-        local fb = a.fallback
-        local ftext = L["None"]
-        if fb then
-            local ft = Registry:GetTarget(fb.target)
-            ftext = ft and ft.title or L["(unavailable)"]
-            if ft and not Registry:IsTargetAvailable(ft) then ftext = ftext .. " " .. L["(hidden)"] end
-        end
-        f.backupPicker:SetDisplayOverride(ftext)
+    -- Backup: only meaningful once there IS a primary to fall back FROM, so the
+    -- row greys rather than vanishing -- an empty row you can see is what tells
+    -- you the setting exists at all.
+    local ftext = L["None"]
+    local fb = a and a.fallback
+    if fb then
+        local ft = Registry:GetTarget(fb.target)
+        ftext = ft and ft.title or L["(unavailable)"]
+        if ft and not Registry:IsTargetAvailable(ft) then ftext = ftext .. " " .. L["(hidden)"] end
     end
-    if showSpec then f.edgeDrop:UpdateText(); f.alignDrop:UpdateText() end
-    local blockH = layoutAnchorBlock(f, showBackup, showSpec)
+    f.backupRow.picker:SetDisplayOverride(ftext)
+
+    -- The seat pair follows the mode. Swapping the option set rebuilds the menu
+    -- rows, so it is done only when the mode actually CHANGED -- Refresh runs on
+    -- every nudge and a rebuild per keypress would be pure churn.
+    local mode = (a and a.mode == "point") and "point" or "outside"
+    if f.specMode ~= mode then
+        f.specMode = mode
+        f.edgeLabel:SetText(mode == "point" and L["Point"] or L["Edge"])
+        f.alignLabel:SetText(mode == "point" and L["Rel point"] or L["Align"])
+        f.edgeDrop:RebuildOptions(f.specOptions[mode][1])
+        f.alignDrop:RebuildOptions(f.specOptions[mode][2])
+    else
+        f.edgeDrop:UpdateText(); f.alignDrop:UpdateText()
+    end
+
+    -- Grey-when-disabled: a free element has no seat and no backup to set, but
+    -- the PRIMARY handle stays live -- dragging it is the way in.
+    local anchored = a ~= nil
+    setRowEnabled(f.backupRow, anchored)
+    f.edgeDrop:SetEnabled(anchored); f.alignDrop:SetEnabled(anchored)
+    f.edgeLabel:SetAlpha(anchored and 1 or DISABLED_ALPHA)
+    f.alignLabel:SetAlpha(anchored and 1 or DISABLED_ALPHA)
+
+    local blockH = layoutAnchorBlock(f)
 
     layoutXY(f)
     f.xBox:Refresh(); f.yBox:Refresh()
