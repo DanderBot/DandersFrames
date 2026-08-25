@@ -3890,9 +3890,21 @@ end
 -- The health-bar consumer passes the real bar's fill texture so a missing-mode tint
 -- covers current health only, exactly as the present-mode cover does; the background
 -- consumer passes nothing, because a background has no fill to track.
+--
+-- ☠☠ A clampTo'd FILL ESCAPES THE PUSH — the badge must CLIP it. The missing mechanism
+-- hides the effect by pushing the BADGE out of the clip window, but a texture anchored
+-- to the bar's fill never moves with the badge, and the WINDOW's own clip contains the
+-- bar — so the tint rendered regardless of presence: "recolour when missing" fired 100%
+-- of the time, while border/background-when-missing (badge-anchored) pushed correctly
+-- (field report, 2026-08-24, Atonement). SetClipsChildren on the BADGE restores the
+-- geometry: parked, the badge's rect covers the window (== the bar region) and the
+-- clamped tint shows over current health; pushed, the badge's rect leaves the bar and
+-- the tint clips to nothing. Render-side only — no reads. Harmless for the background
+-- variant (its fill is badge-anchored, always inside the badge rect).
 local function styleTintMissingBadge(h, r, g, b, blend, clampTo)
     local badge = h.GetBadgeFrame and h:GetBadgeFrame()
     if not badge then return end
+    badge:SetClipsChildren(true)
     if not badge.dfADFill then badge.dfADFill = badge:CreateTexture(nil, "ARTWORK") end
     badge.dfADFill:SetColorTexture(r, g, b, blend)
     badge.dfADFill:ClearAllPoints()
