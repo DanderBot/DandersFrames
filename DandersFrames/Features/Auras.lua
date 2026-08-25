@@ -4435,6 +4435,99 @@ local function dumpRow(o, label, h)
 end
 
 DF:RegisterDebugSlash("DFAURAS", "Aura pipeline dump — filters, groups, dedup (add a unit token)", false, "/dfauras")
+-- ============================================================
+-- AURA ROW OVERFLOW WATCH (debug console, AURAROW category)
+-- ============================================================
+-- ☠ `max` IS PER GROUP, NOT PER ROW — Blizzard caps at AddAuraGroup /
+-- SetAuraGroupMaxFrameCount — so a row built from N filter records can draw up to N x max
+-- and nothing on screen tells you which number you are looking at.
+--
+-- ★ WHY A WATCH AND NOT A COMMAND. /dfauras answers for ONE unit, and the failure shows up
+-- mid-pull on a raider you cannot identify in advance — by the time you have picked a unit
+-- and typed the token, the moment is gone. Krathe's point exactly. So the console watches
+-- every frame and records the anomaly when it happens; the log is read afterwards.
+--
+-- Costs nothing unless the AURAROW category is on. DF:DebugActive is the documented
+-- predicate for this shape: DF:Debug short-circuits, but its ARGUMENTS are evaluated by
+-- the caller first, so an unguarded table walk is paid whether logging is on or off.
+local WATCH_INTERVAL = 1
+local WATCH_ROWS = {
+    { "debuff",    "debuffFactory"    },
+    { "buff",      "buffFactory"      },
+    { "defensive", "defensiveFactory" },
+}
+-- unit/row -> the total last logged, so a steady overflow reports ONCE rather than once
+-- per tick, and a recovery reports too (the clear is as diagnostic as the break).
+local overflowState = {}
+
+-- Totals for one row: what it drew, what each group is allowed, and the per-group
+-- breakdown. Returns nil if any group's count is unreadable — a partial total would be a
+-- worse answer than no answer, because it reads as "under the cap".
+local function rowTotals(h)
+    local cfg = h.config
+    local filter = cfg and cfg.filter
+    if type(filter) ~= "table" then return nil end
+    local total, parts = 0, {}
+    for i, f in ipairs(filter) do
+        local key = (type(f) == "table" and f.key) or ("df" .. i)
+        local n = groupFrameCount(h, key)
+        if type(n) ~= "number" then return nil end
+        total = total + n
+        if n > 0 then parts[#parts + 1] = key .. "=" .. n end
+    end
+    return total, tonumber(cfg.max), #filter, (#parts > 0) and table.concat(parts, " ") or "none"
+end
+
+-- File-local, not a closure built per tick: this runs once per frame per row per second
+-- while the category is on, and a fresh closure each pass is garbage for nothing.
+local function checkFrameOverflow(frame)
+    if not frame or not frame.unit then return end
+    for i = 1, #WATCH_ROWS do
+        local label, field = WATCH_ROWS[i][1], WATCH_ROWS[i][2]
+        local h = frame[field]
+        if type(h) == "table" and type(h.GetUnit) == "function" and h.config then
+            local total, cap, groups, parts = rowTotals(h)
+            if total and cap and cap > 0 then
+                local stateKey = tostring(frame.unit) .. "/" .. label
+                local prev = overflowState[stateKey]
+                if total > cap then
+                    -- Re-log when the total MOVES, so a row climbing 4 -> 5 -> 6 is visible
+                    -- as a progression rather than collapsing into one line.
+                    if prev ~= total then
+                        overflowState[stateKey] = total
+                        -- The per-group breakdown is the whole diagnosis: it separates "one
+                        -- group overfilled" from "the same aura landed in two groups", which
+                        -- are indistinguishable on screen and have different causes.
+                        DF:DebugWarn("AURAROW",
+                            "OVERFLOW %s %s row: showing %d vs max %d per group over %d groups [%s] dead=%s combat=%s",
+                            tostring(frame.unit), label, total, cap, groups, parts,
+                            tostring(DF.playerIsDead), tostring(DF.playerInCombat))
+                    end
+                elseif prev then
+                    overflowState[stateKey] = nil
+                    DF:Debug("AURAROW",
+                        "overflow cleared %s %s row: showing %d vs max %d [%s] dead=%s",
+                        tostring(frame.unit), label, total, cap, parts, tostring(DF.playerIsDead))
+                end
+            end
+        end
+    end
+end
+
+-- ☠ IterateAllFrames has NO pinned arm — a pinned frame has rows like any other.
+function DF:ScanAuraRowOverflow()
+    if DF.IterateAllFrames then DF:IterateAllFrames(checkFrameOverflow) end
+    if DF.IteratePinnedFrames then DF.IteratePinnedFrames(checkFrameOverflow) end
+end
+
+-- One ticker for the life of the session. The body is a single boolean test until the
+-- category is switched on, which is cheaper than arming and disarming it from every event
+-- that could change the answer (and cannot go stale the way that would).
+C_Timer.NewTicker(WATCH_INTERVAL, function()
+    if not DF.DebugActive or not DF:DebugActive("AURAROW") then return end
+    DF:ScanAuraRowOverflow()
+end)
+
 SlashCmdList["DFAURAS"] = function(msg)
     local unit = (msg or ""):lower():trim()
     if unit == "" then unit = "player" end
