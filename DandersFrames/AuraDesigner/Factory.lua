@@ -6027,18 +6027,16 @@ function Factory:DebugDumpADGate()
                         if n <= CAP then
                             local h = entry.handle
                             local chain = entry.chain
-                            -- ☠ TWO HANDLE KINDS, DIFFERENT FIELDS. A slot-backed placement
-                            -- is a SlotHandle: no .frame, no GetBadgeFrame, and its verdict
-                            -- lives in _gateHidden -- NOT _idGateHidden, which is the
-                            -- Handle's. Reading the Handle fields on a slot printed
-                            -- gate=false shown=- badge=- for a slot that /df debug idgate
-                            -- simultaneously reported gateHidden=true. A dump that
-                            -- contradicts the other dump is worse than no dump.
+                            -- ☠ TWO HANDLE KINDS, DIFFERENT FIELDS (a slot-backed placement
+                            -- is a SlotHandle: no .frame, no GetBadgeFrame). Post-demolition
+                            -- (69465, the identity gate is gone) the unit-level hide column
+                            -- is the DEATH LATCH — the one surviving reason DF darkens a
+                            -- placement's owner anchor or window.
                             local isSlot = isSlotHandle and isSlotHandle(h) or false
                             local hGate, hShown, bShown, extra
                             local oShown = "-"
                             if isSlot then
-                                hGate = (h and h._gateHidden) and true or false
+                                hGate = (h and h._deathLatched) and true or false
                                 -- "shown" for a slot = is a LIVE filter pushed (vs the park
                                 -- string). ⚠ Compare against SLOT_PARK_FILTER, not "" --
                                 -- the empty-string park is retired, and deriving from ""
@@ -6058,12 +6056,10 @@ function Factory:DebugDumpADGate()
                                 -- outlived the aura that justified it.
                                 local btn = (h and h.GetButton) and h:GetButton() or nil
                                 bShown = btn and adGateShown(btn) or "-"
-                                -- ★ owner= is the ACTUATION for a gated slot. The engine
-                                -- fails open for a distrusted unit and never re-parses, so
-                                -- the filter push cannot clear a stale bound aura; the gate
-                                -- hides the DF-owned owner ANCHOR instead (see
-                                -- SlotHandle:_pushFilter). gate=true with owner=true is the
-                                -- fault; owner=false is the gate working.
+                                -- ★ owner= is the ACTUATION for the death latch: it hides
+                                -- the DF-owned owner ANCHOR (see SlotHandle:_pushFilter).
+                                -- death=true with owner=true is the fault; owner=false is
+                                -- the latch working.
                                 local oAnchor = h and h.owner and h.owner.anchor
                                 oShown = oAnchor and adGateShown(oAnchor) or "-"
                                 extra = ("SLOT pushed=[%s] pushOK=%s parked=%s btn=%s owner=%s"):format(
@@ -6072,22 +6068,22 @@ function Factory:DebugDumpADGate()
                                     tostring((h and h.parked) or false),
                                     bShown, oShown)
                             else
-                                hGate = (h and h._idGateHidden) and true or false
+                                hGate = (h and h._deathLatched) and true or false
                                 hShown = adGateShown(h and h.frame)
                                 local badge = (h and h.GetBadgeFrame) and h:GetBadgeFrame() or nil
                                 bShown = badge and adGateShown(badge) or "-"
                                 extra = ("pdv=%s"):format(
                                     tostring((h and h.config and h.config.parentDrivenVisibility) or false))
                             end
-                            -- The fault signature: gate believes hidden, something is up.
-                            -- For a slot the decisive column is owner= -- btn is SECRET on
-                            -- a distrusted unit, but the owner anchor is DF-owned and
-                            -- always readable, so gate=true owner=true is a real fault.
+                            -- The fault signature: latch believes hidden, something is up.
+                            -- For a slot the decisive column is owner= -- btn is SECRET in
+                            -- restricted regimes, but the owner anchor is DF-owned and
+                            -- always readable, so death=true owner=true is a real fault.
                             if hGate and (hShown == "true" or bShown == "true"
                                 or oShown == "true") then
                                 suspects = suspects + 1
                             end
-                            print(("    " .. DF.OUT.SECTION .. "%d|r %s key=%s unit=%s chain=%s gate=%s shown=%s badge=%s %s"):format(
+                            print(("    " .. DF.OUT.SECTION .. "%d|r %s key=%s unit=%s chain=%s death=%s shown=%s badge=%s %s"):format(
                                 n, adGateSafe(fam), adGateSafe(key), adGateSafe(unit),
                                 chain and tostring(#chain) or "-",
                                 tostring(hGate), hShown, bShown, extra))
@@ -6095,10 +6091,9 @@ function Factory:DebugDumpADGate()
                                 for i = 1, #chain do
                                     local L = chain[i]
                                     if L then
-                                        print(("        L%d gate=%s parked=%s shown=%s pdv=%s mode=%s"):format(
+                                        print(("        L%d death=%s shown=%s pdv=%s mode=%s"):format(
                                             i,
-                                            tostring((L._idGateHidden) and true or false),
-                                            tostring((L._idGateParked) and true or false),
+                                            tostring((L._deathLatched) and true or false),
                                             adGateShown(L.frame),
                                             tostring((L.config and L.config.parentDrivenVisibility) or false),
                                             adGateSafe(L.config and L.config.mode or "?")))

@@ -842,18 +842,33 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Which dispels count: a sub-option of the Dispellable Debuffs row above.
             -- ⚠ BOTH its gates live in this group now, so unlike its previous home it
             -- can never be greyed with nothing on the page able to lift it.
+            --
+            -- ★ TWO ENTRIES, NOT THREE. "Any Dispel Type" (ANY) was collapsed into
+            -- "All Dispellable" (2026-08-22): the two were one query wearing two rows
+            -- -- ANY was added when the PTR-5 DISPELLABLE token appeared, beside the
+            -- old map-based ALL instead of underneath it, and once ALL moved onto the
+            -- token (the secrecy fix in Features/Auras.lua) they were byte-identical.
+            -- Every peer offers exactly two modes, as does DF's own dispel overlay.
+            --
+            -- Self-heal, not just startup migration: the Core.lua one-shot rewrites
+            -- every profile at login, but a profile or template IMPORTED mid-session
+            -- can carry "ANY" back in, and this page is the only surface where the
+            -- stale value would show (as a blank dropdown). Equality-gated and
+            -- identical to the migration, so the two can never diverge.
+            if db.directDebuffDispellableMode == "ANY" then
+                db.directDebuffDispellableMode = "ALL"
+            end
             local dispelDD = filterGroup:AddWidget(GUI:CreateDropdown(self.child, L["Dispellable Debuffs"], {
                 PLAYER = L["Dispellable By Me"],
                 ALL    = L["All Dispellable"],
-                ANY    = L["Any Dispel Type"],
-                _order = { "PLAYER", "ALL", "ANY" },
+                _order = { "PLAYER", "ALL" },
             }, db, "directDebuffDispellableMode", function()
                 DebuffFilterChanged()
             end), 55)
             dispelDD.disableOn = function(d)
                 return d.directDebuffShowAll or not d.debuffFilterDispellable
             end
-            dispelDD.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."]
+            dispelDD.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
 
             Add(filterGroup, nil, 1)
         end

@@ -448,16 +448,48 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             BOTTOMRIGHT = L["Bottom Right"],
         }
         
+        -- Hold To Show is PER BOX, declared once here and added inside each group
+        -- that supports it, directly under that group's Disable In Combat. Sharing
+        -- the value list and tooltip keeps the two identical without repeating them.
+        -- ⚠ Only Frame and Binding get one. The buff / debuff / defensive rows are
+        -- drawn by the game's own aura buttons and DF cannot gate them on a keypress
+        -- (the mouse-motion lever is write-locked in combat) -- so rather than show
+        -- a permanently dead control in those boxes, they simply do not have one.
+        -- ★ ONE VOCABULARY, ASKED TWICE -- once for out of combat, once for in
+        -- combat. "Alt out of combat, never in combat" is then two picks that cannot
+        -- contradict each other, which a Disable-In-Combat checkbox plus a separate
+        -- hold-to-show dropdown genuinely could. Same shape ElvUI uses (its
+        -- visibility.unitFrames + visibility.combatOverride take these five values);
+        -- Ellesmere reaches the same place with a single always/outOfCombat/never
+        -- mode. Only the two DF-drawn boxes get it -- see the config comment for why
+        -- the aura rows cannot.
+        local VIS_VALUES = {
+            SHOW  = L["Always"],
+            SHIFT = L["Hold Shift"],
+            CTRL  = L["Hold Ctrl"],
+            ALT   = L["Hold Alt"],
+            HIDE  = L["Never"],
+            _order = { "SHOW", "SHIFT", "CTRL", "ALT", "HIDE" },
+        }
+        local TIP_VIS_OOC = L["When this tooltip appears while you are out of combat. Always shows it on hover; a Hold option requires that key; Never suppresses it."]
+        local TIP_VIS_COMBAT = L["When this tooltip appears while you are in combat, independently of the out-of-combat setting. Set this to Never and no key will reveal it mid-fight. Press or release a Hold key while already hovering and the tooltip follows immediately."]
+
         -- ===== ROW 1: Frame Tooltips + Buff Tooltips =====
-        
+
         -- Frame Tooltips (Column 1)
         local frameTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
         frameTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Tooltips"]), 40)
         local frameTooltipEnable = frameTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Frame Tooltips"], db, "tooltipFrameEnabled", nil), 30)
         frameTooltipEnable.keepEnabled = true
         frameTooltipGroup.disableChildrenOn = function(d) return not d.tooltipFrameEnabled end
-        frameTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipFrameDisableInCombat", function() end), 30)
-        
+        local frameVisOOC = frameTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Out of Combat"],
+            VIS_VALUES, db, "tooltipFrameOutOfCombat", function() end), 55)
+        frameVisOOC.tooltip = TIP_VIS_OOC
+
+        local frameVisCombat = frameTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show In Combat"],
+            VIS_VALUES, db, "tooltipFrameCombat", function() end), 55)
+        frameVisCombat.tooltip = TIP_VIS_COMBAT
+
         local frameAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
@@ -485,7 +517,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local bindTooltipEnable = bindTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Binding Tooltips"], db, "tooltipBindingEnabled", nil), 30)
         bindTooltipEnable.keepEnabled = true
         bindTooltipGroup.disableChildrenOn = function(d) return not d.tooltipBindingEnabled end
-        bindTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBindingDisableInCombat", function() end), 30)
+        local bindVisOOC = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Out of Combat"],
+            VIS_VALUES, db, "tooltipBindingOutOfCombat", function() end), 55)
+        bindVisOOC.tooltip = TIP_VIS_OOC
+
+        local bindVisCombat = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show In Combat"],
+            VIS_VALUES, db, "tooltipBindingCombat", function() end), 55)
+        bindVisCombat.tooltip = TIP_VIS_COMBAT
 
         local bindAnchorValues = {
             DEFAULT = L["Game Default"],

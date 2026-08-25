@@ -1583,7 +1583,7 @@ DF.PartyDefaults = {
         [447960] = true,  -- Ride Along Inactive
         [206151] = true,  -- Challenger's Burden
     },
-    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (dispellable type map) / "ANY" (native DISPELLABLE token, PTR-5+)
+    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (native DISPELLABLE token). "ANY" is a retired legacy value: same token as ALL, dropdown row removed 2026-08-22; Core.lua rewrites stored ones and the engine still accepts strays from imports.
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
     debuffMaxDurationKeepImportant = true,    -- ... but keep Boss/Role/Priority visible
@@ -2786,6 +2786,35 @@ DF.PartyDefaults = {
     testShowLabels = true,
 
     -- Tooltip settings
+    -- ★ VISIBILITY IS ONE VOCABULARY, EVALUATED PER COMBAT STATE.
+    --   SHOW | SHIFT | CTRL | ALT | HIDE
+    -- Two keys per tooltip type: which of those applies out of combat, and which
+    -- applies in combat. "Alt out of combat, never in combat" is then just
+    -- OutOfCombat = ALT, Combat = HIDE.
+    --
+    -- ☠ REPLACES a boolean DisableInCombat plus a separate hold-to-show key. That
+    -- pair could not express the above without the two controls silently arguing:
+    -- one said "never in combat", the other said "show when Alt is held", and
+    -- which won depended on the order the checks happened to sit in. A single
+    -- vocabulary resolved against the current combat state has no such gap --
+    -- exactly the shape ElvUI settled on (visibility.unitFrames plus
+    -- visibility.combatOverride, same five values). Ellesmere reaches the same
+    -- place from the other side with one always/outOfCombat/never mode.
+    --
+    -- SHOW in both is today's default and must stay a perfect no-op.
+    --
+    -- ⚠ ONLY THE TWO DF-DRAWN TYPES GET THIS, and that is a capability limit
+    -- rather than a decision. The buff / debuff / defensive rows are drawn by
+    -- Blizzard's own AuraButton mixin (ShouldShowTooltip -> ShowTooltip, a PRIVATE
+    -- mixin behind UseSecureEnvironment, so not overridable), and DF's only lever
+    -- over those buttons is SetMouseMotionEnabled -- secret and WRITE-LOCKED IN
+    -- COMBAT (see the note at that call in Frames/AuraContainer.lua). They keep a
+    -- plain Disable In Combat, which is exactly the one thing the engine does
+    -- expose for them via SetHideTooltipInCombat.
+    tooltipFrameOutOfCombat = "SHOW",     -- SHOW | SHIFT | CTRL | ALT | HIDE
+    tooltipFrameCombat = "SHOW",
+    tooltipBindingOutOfCombat = "SHOW",
+    tooltipBindingCombat = "SHOW",
     tooltipBuffAnchor = "FRAME",
     tooltipBuffAnchorPos = "BOTTOMRIGHT",
     tooltipBuffDisableInCombat = true,
@@ -2816,13 +2845,20 @@ DF.PartyDefaults = {
     tooltipADBarsEnabled = false,         -- the Aura Designer bar
     tooltipBindingAnchor = "FRAME",
     tooltipBindingAnchorPos = "TOPRIGHT",
-    tooltipBindingDisableInCombat = false,
+    -- (Retired) tooltipBindingDisableInCombat -> tooltipBindingCombat. Absent from
+    -- defaults on purpose so the one-shot migration can tell a value the user set
+    -- from one the backfill seeded; see the note in Core.lua.
     tooltipBindingEnabled = false,
     tooltipBindingX = 4,
     tooltipBindingY = 0,
     tooltipFrameAnchor = "DEFAULT",
     tooltipFrameAnchorPos = "BOTTOMRIGHT",
-    tooltipFrameDisableInCombat = true,
+    -- (Retired) tooltipFrameDisableInCombat -> tooltipFrameCombat. Same reason as
+    -- the binding key above -- absent from defaults on purpose.
+    -- ☠ Its default was TRUE, so the migration must map a MISSING key to HIDE, not
+    -- to SHOW: every profile that never touched it was silently getting "no frame
+    -- tooltip in combat", and reading absence as SHOW would hand them all a
+    -- behaviour change they never asked for.
     tooltipFrameEnabled = true,
     tooltipFrameX = 0,
     tooltipFrameY = 0,

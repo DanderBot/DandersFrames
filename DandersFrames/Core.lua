@@ -5575,6 +5575,84 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         modeDb.directDebuffFilterRaidPlayerDispellable = nil
                         modeDb.directDebuffFilterAllDispellable = nil
                     end
+                    -- "Any Dispel Type" collapsed into "All Dispellable" (v5.4.x):
+                    -- once ALL moved onto the DISPELLABLE token (the secrecy fix)
+                    -- the two modes were the same query, so ANY's dropdown row was
+                    -- removed. EQUALITY-gated, not presence-gated -- the key is
+                    -- seeded by defaults ("PLAYER") so it is present everywhere,
+                    -- and only an explicit stored "ANY" is rewritten. Behaviour is
+                    -- identical before and after (the engine maps both to the same
+                    -- token); this exists so the two-entry dropdown never shows a
+                    -- blank row. Unconditional each login rather than one-shot
+                    -- flagged: it is a cheap equality check, and a profile import
+                    -- can re-introduce "ANY" at any time. The Aura Designer's
+                    -- group-scoped copy of this value self-heals in the editor
+                    -- instead (groups have no startup walk; the engine reads the
+                    -- stored value correctly either way).
+                    if modeDb and modeDb.directDebuffDispellableMode == "ANY" then
+                        modeDb.directDebuffDispellableMode = "ALL"
+                    end
+                    -- Hold To Show went out for one build as a single page-wide key
+                    -- before becoming per tooltip type. Fan a set value out to both
+                    -- boxes it used to govern, then delete the interim key so it is
+                    -- not left as profile cruft nothing reads.
+                    -- ⚠ EQUALITY-GATED on the old key being MEANINGFUL, not merely
+                    -- present: it shipped with a "NONE" default, so the defaults
+                    -- backfill seeded it into every profile that loaded that build
+                    -- and a presence gate would fire for all of them. Copying "NONE"
+                    -- would be harmless but would also stomp a per-type value the
+                    -- user had already set on the newer build.
+                    -- ⚠ Per-type values win: only fill a box that is still unset or
+                    -- at its default, so re-running this can never undo a choice.
+                    if modeDb and modeDb.tooltipModifier then
+                        local old = modeDb.tooltipModifier
+                        if old ~= "NONE" then
+                            if (modeDb.tooltipFrameModifier or "NONE") == "NONE" then
+                                modeDb.tooltipFrameModifier = old
+                            end
+                            if (modeDb.tooltipBindingModifier or "NONE") == "NONE" then
+                                modeDb.tooltipBindingModifier = old
+                            end
+                        end
+                        modeDb.tooltipModifier = nil
+                    end
+
+                    -- ★ Tooltip visibility folded into ONE vocabulary per combat
+                    -- state: a boolean DisableInCombat plus a hold-to-show modifier
+                    -- became tooltip<Kind>OutOfCombat / tooltip<Kind>Combat, each
+                    -- SHOW | SHIFT | CTRL | ALT | HIDE. The old pair could express
+                    -- contradictory instructions; the new one cannot.
+                    --
+                    -- ☠ ABSENCE OF DisableInCombat IS NOT "false" FOR THE FRAME BOX.
+                    -- Its default was TRUE, so a profile that never touched it was
+                    -- getting "no frame tooltip in combat" -- reading the missing key
+                    -- as SHOW would hand every one of them a behaviour change they
+                    -- never asked for. Per-kind default below, matching each key's
+                    -- own old default (frame true, binding false). Both keys are now
+                    -- absent from the defaults table so this can tell a stored value
+                    -- from a seeded one.
+                    if modeDb then
+                        local KINDS = { Frame = true, Binding = false }
+                        for kind, oldDefault in pairs(KINDS) do
+                            local combatKey = "tooltip" .. kind .. "Combat"
+                            local oocKey    = "tooltip" .. kind .. "OutOfCombat"
+                            if modeDb[combatKey] == nil then
+                                local disable = modeDb["tooltip" .. kind .. "DisableInCombat"]
+                                if disable == nil then disable = oldDefault end
+                                modeDb[combatKey] = disable and "HIDE" or "SHOW"
+                            end
+                            if modeDb[oocKey] == nil then
+                                -- The hold-to-show key only ever governed out of
+                                -- combat in practice, so it lands here verbatim.
+                                local mod = modeDb["tooltip" .. kind .. "Modifier"]
+                                modeDb[oocKey] = (mod and mod ~= "NONE") and mod or "SHOW"
+                            end
+                            -- ⚠ Cleared only AFTER both reads above, or the second
+                            -- key would migrate from a value the first just deleted.
+                            modeDb["tooltip" .. kind .. "DisableInCombat"] = nil
+                            modeDb["tooltip" .. kind .. "Modifier"] = nil
+                        end
+                    end
                 end
             end
         end
@@ -6217,7 +6295,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- either; these are reached THROUGH it and have to match it.
         sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
         sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
-        sub("idgate",       "container identity-gate dump", true)
+        sub("idgate",       "engine gate mirror + group canaries ('probe' toggles them)", true)
         sub("adgate",       "Aura Designer placement gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
@@ -7149,10 +7227,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- live width, flagging any that lost one. Truncated / non-wrapping label
                 -- text is always a width fault; this says WHICH frame caused it.
                 if DF.GUI and DF.GUI.DebugDumpWidths then DF.GUI:DebugDumpWidths() end
-            elseif msg == "idgate" then
-                -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
-                -- vs the stored gate verdict vs actual window visibility
-                if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
+            elseif msg == "idgate" or msg:match("^idgate%s") then
+                -- Post-demolition (69465): "idgate" prints everything — handles/slots
+                -- classification, the per-group-member engine mirror, canary readings
+                -- and the always-on gate trail; works in combat (reads only).
+                -- "idgate probe" TOGGLES group-wide canaries (no unit arg);
+                -- "idgate probe show" toggles the eyeball placement.
+                local probeArgs = msg:match("^idgate%s+probe%s*(.-)%s*$")
+                if probeArgs and DF.AuraContainer and DF.AuraContainer.DebugGateProbe then
+                    DF.AuraContainer.DebugGateProbe(probeArgs)
+                elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
+                    DF.AuraContainer.DebugDumpIdentityGate()
+                end
             elseif msg == "adgate" then
                 -- The AD half of the same question: idgate sees a placement's handle but
                 -- not its chain, its parent-driven links or its badge — so an indicator

@@ -112,6 +112,102 @@ local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true
 -- every consumer -- see the note above.
 DF.DispelTypeMap = DISPEL_TYPES
 
+-- ============================================================
+-- ☠ THE ENGINE'S DISPEL FLAGS MISS TOTEM-BASED REMOVAL.
+-- RAID_PLAYER_DISPELLABLE (and the older RAID flag) are computed from the
+-- player's direct dispel SPELLS, and a Shaman's poison answer is Poison
+-- Cleansing Totem -- not a targeted dispel, so the engine never counts it.
+-- Field report: a Shaman's dispel overlay stayed dark on poisons (Krathe,
+-- 2026-08-22). VuhDo and ElvUI both hand-count the totem for exactly this
+-- reason (VuhDoDebuffConst SHAMAN Poison = {383013}; LibDispel CheckSpell
+-- 383013); Grid2 and Ellesmere trust the flag and share the gap.
+--
+-- This helper is the ONE place that knowledge lives. Returns the dispel-type
+-- map the engine flag misses for the current character, or nil when there is
+-- no gap -- consumed by the overlay's by-me slot plan (Features/Dispel.lua)
+-- and the debuff row's by-me records (below), each of which pairs it with a
+-- "|!RAID_PLAYER_DISPELLABLE" negation so the repair never double-renders
+-- what the flag already catches.
+--
+-- ★ THIS WORKS IN COMBAT, and the reason is worth stating because I twice
+-- claimed the opposite. ADDON Lua genuinely cannot read aura data in combat
+-- (~450k spells secret against a ~60 entry NeverSecret whitelist -- Krathe,
+-- 2026-08-22, and he is right about that). But candidateFilters are NOT
+-- evaluated by us: the container hands them to
+-- AuraContainerUtil.DoesAuraPassCandidateFilters, and Blizzard_AuraContainer
+-- declares `## UseSecureEnvironment: 1`, so that matcher is TRUSTED code
+-- reading REAL values. Proof by something already shipping: maxDuration is
+-- compared in the very same function, and Hide Long Debuffs works in combat.
+-- ☠ "Secret to addons" and "secret to Blizzard's own filter" are different
+-- questions -- do not collapse them again.
+--
+-- ⚠ Real limits, which are narrower: includeSpellIDs / excludeSpellIDs (NOT
+-- the dispel-type maps) are the pair gated by CanApplyIdentityCandidateFilters,
+-- so a spell-ID filter is refused on a harmful aura on an assistable unit --
+-- see [[identity_gate_reference]]. Type maps are outside that gate.
+--
+-- The peers hold the same knowledge but wire it into their own LEGACY Lua
+-- scan paths (VuhDo VUHDO_PLAYER_DISPEL_ABILITIES; ElvUI UF:AuraDispellable),
+-- which read aura data in ADDON code and therefore really do go dark in
+-- combat. VuhDo's container path narrows RAID_PLAYER_DISPELLABLE by
+-- includeDispelTypes -- an intersection, which cannot add back a type the
+-- token already dropped. So DF's ADDITIVE record is the only shape in the
+-- surveyed set that repairs the gap where it matters.
+--
+-- ⚠ Re-checked on every call, never cached: the totem is a TALENT, and talent
+-- swaps re-drive the factories through the coalesced PLAYER_TALENT_UPDATE ->
+-- UpdateAllFrames path, which rebuilds the plans that call this. A cached
+-- answer would survive exactly the event that changes it.
+--
+-- ☠☠ NOT IsPlayerSpell. The first cut used it, and on a 12.1 client that
+-- function EXISTS ONLY IF A CVAR IS ON: it lives in Blizzard_DeprecatedSpellBook
+-- behind `if not GetCVarBool("loadDeprecationFallbacks") then return end`, is
+-- absent from the 12.1 API documentation entirely, and is slated for removal
+-- next expansion. With the CVar off it is nil, the `IsPlayerSpell and ...`
+-- guard short-circuits, and the whole repair becomes a SILENT NO-OP with no
+-- error and no log -- the silent-capability-skip antipattern, shipped by me.
+-- C_SpellBook.IsSpellInSpellBook is the documented call and the one BOTH peers
+-- use on current builds (ElvUI LibDispel CheckSpell, VuhDo VUHDO_isSpellKnown),
+-- with includeOverrides = true so a talent-granted override still counts.
+--
+-- ★ THREE OUTCOMES, NOT TWO. nil means "cannot tell" and is logged once --
+-- distinct from a confident false. A capability probe that cannot run must say
+-- so rather than quietly answering "no".
+local ENGINE_GAP_POISON = { Poison = true }
+local POISON_CLEANSING_TOTEM = 383013
+local warnedNoSpellProbe = false
+local function KnowsPoisonCleansingTotem()
+    local sb = C_SpellBook
+    local bank = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
+    if sb and bank then
+        if sb.IsSpellInSpellBook then
+            return sb.IsSpellInSpellBook(POISON_CLEANSING_TOTEM, bank, true) and true or false
+        end
+        if sb.IsSpellKnown then
+            return sb.IsSpellKnown(POISON_CLEANSING_TOTEM, bank) and true or false
+        end
+    end
+    -- Deprecation shim; present only with loadDeprecationFallbacks on.
+    if IsPlayerSpell then
+        return IsPlayerSpell(POISON_CLEANSING_TOTEM) and true or false
+    end
+    if not warnedNoSpellProbe then
+        warnedNoSpellProbe = true
+        if DF.DebugError then
+            DF:DebugError("DISPEL", "no spellbook API available - cannot test for "
+                .. "Poison Cleansing Totem; the Shaman dispel-flag repair is inactive")
+        end
+    end
+    return nil
+end
+
+function DF:GetEngineDispelFlagGaps()
+    local _, class = UnitClass("player")
+    if class ~= "SHAMAN" then return nil end
+    if KnowsPoisonCleansingTotem() then return ENGINE_GAP_POISON end
+    return nil
+end
+
 -- Build the debuff filter records (native 12.1 category filters).
 -- Returns nil (show all) or an array of records { filter, key, candidateFilters }
 -- — the record form normalizeFilters accepts; each record becomes one container
@@ -120,11 +216,13 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- Dedup at build time (token ownership order: dispel > cc > raid): a group's
 -- filterString appends "|!TOKEN" for every enabled token-backed filter with
 -- higher priority than itself; the boolean-backed groups (bossrole, priority)
--- negate ALL enabled token filters. Dispellable in "ALL" mode has no token —
--- it dedups by merging excludeDispelTypes into every OTHER record instead
--- (same ownership outcome: the dispel group owns the overlap). "ANY" mode is
--- token-backed (PTR-5 DISPELLABLE) and dedups like PLAYER via "|!DISPELLABLE"
--- negations; without the token it degrades to the ALL map form. A record never
+-- negate ALL enabled token filters. Dispellable "ALL" and "ANY" modes are BOTH
+-- token-backed (DISPELLABLE) and dedup via "|!DISPELLABLE" negations -- ALL
+-- moved off the includeDispelTypes map because one canonical filter component
+-- beats a five-entry copy of Blizzard's own type list (NOT for the secrecy
+-- reason the introducing commit gave -- see the dispelTypeToken note in
+-- BuildDirectDebuffFilters). Only a token-less client degrades to the map
+-- form, includes and excludes together, which is equivalent. A record never
 -- negates its own token. Priority×Boss/Role overlap is accepted (bools can't
 -- be negated).
 --
@@ -269,12 +367,43 @@ local function BuildDirectDebuffFilters(db, claimed)
     end
     local dispelOn = db.debuffFilterDispellable
     local dispelMode = db.directDebuffDispellableMode
-    -- ANY mode rides the PTR-5 DISPELLABLE token (any dispel type, regardless
-    -- of whether anyone can dispel it). Defensive read like CrowdControl: on a
-    -- client without the token this stays nil and ANY falls back to the ALL
-    -- map form below (closest semantics).
-    local anyToken = dispelOn and dispelMode == "ANY" and AuraFilters.Dispellable or nil
+    -- ★ BOTH non-player modes ride the DISPELLABLE token, not just ANY. ALL mode
+    -- used to build the Lua map form (includeDispelTypes = DISPEL_TYPES); the token
+    -- says the same thing in Blizzard's own words -- "Include only auras that are
+    -- dispellable, regardless of whether the player's raid can dispel them"
+    -- (Blizzard_FrameXMLUtil/AuraUtil.lua) -- in one filter component, with no
+    -- five-entry table to keep in step with Blizzard's own list. That is the whole
+    -- justification: it is simpler and canonical.
+    --
+    -- ☠☠ IT IS **NOT** A SECRECY FIX, whatever the commit that introduced it said.
+    -- I claimed the map was secrecy-blind (dispelName secret => raw index never
+    -- matches) and that this is why "All Dispellable" showed nothing. That is
+    -- FALSE: the matcher lives in Blizzard_AuraContainer, which is
+    -- `## UseSecureEnvironment: 1`, so it reads real values -- and maxDuration,
+    -- compared in the same function, demonstrably works in combat (Hide Long
+    -- Debuffs). ⚠ SO THE ORIGINAL REPORT IS STILL UNDIAGNOSED: dispellable debuffs
+    -- missing from the row while the overlay showed them (Krathe, 2026-08-22).
+    -- Do not treat it as closed, and do not re-derive the secrecy theory --
+    -- see DF:GetEngineDispelFlagGaps below for the evidence chain.
+    --
+    -- Defensive read like CrowdControl: on a client without the token this stays
+    -- nil and both modes fall back to the map form below, which is equivalent.
+    -- ⚠ "ANY" is a RETIRED stored value, not a live mode: its dropdown row was
+    -- collapsed into ALL (2026-08-22) once both rode this token and became one
+    -- query. It stays accepted here because an imported profile or shared
+    -- template can carry it forever; Core.lua rewrites it in profiles and the
+    -- editors self-heal group copies, but the engine must never depend on that.
+    local dispelTypeToken = dispelOn and (dispelMode == "ALL" or dispelMode == "ANY")
+        and AuraFilters.Dispellable or nil
     local playerMode = dispelOn and dispelMode ~= "ALL" and dispelMode ~= "ANY"
+    -- Engine-flag gap (Shaman poison via totem): resolved once per build, consumed
+    -- by the by-me repair record below AND the non-player record's dedup exclude.
+    -- Deliberately NOT gated on the claim: a claimed dispellable category renders
+    -- in its AD group (whose facade builds its own repair record), and the row's
+    -- other records must keep excluding what the group displays -- same rule as
+    -- every other claim-kept negation in this function.
+    local dispelGap = dispelOn and playerMode
+        and DF.GetEngineDispelFlagGaps and DF:GetEngineDispelFlagGaps() or nil
     -- CC needs its Blizzard token; skip the group entirely if unavailable
     local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
     local raidOn = db.debuffFilterRaid
@@ -297,7 +426,7 @@ local function BuildDirectDebuffFilters(db, claimed)
         local s = ""
         if excludeDispel then
             if playerMode then s = s .. "|!" .. dispelToken
-            elseif anyToken then s = s .. "|!" .. anyToken end
+            elseif dispelTypeToken then s = s .. "|!" .. dispelTypeToken end
         end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
         -- "RAID" is negatable (only INCLUDE_NAME_PLATE_ONLY and MAW are not —
@@ -310,7 +439,9 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- maxDuration when Keep Important is on.
     local function cfFor(important, extra)
         local cf = extra or {}
-        if dispelOn and not playerMode and not anyToken then cf.excludeDispelTypes = DISPEL_TYPES end
+        -- Map-form dedup, paired with the map-form include record: both are used
+        -- only on a token-less client, and they are exact complements there.
+        if dispelOn and not playerMode and not dispelTypeToken then cf.excludeDispelTypes = DISPEL_TYPES end
         if maxDur and not (important and keepImportant) then cf.maxDuration = maxDur end
         if next(cf) == nil then return nil end
         return cf
@@ -377,10 +508,28 @@ local function BuildDirectDebuffFilters(db, claimed)
         if playerMode then
             filters[#filters + 1] = { filter = "HARMFUL|" .. dispelToken,
                                       key = "dispel", candidateFilters = cfFor(false, notImportant()) }
-        elseif anyToken then
-            filters[#filters + 1] = { filter = "HARMFUL|" .. anyToken,
+            -- ★ ENGINE-FLAG GAP REPAIR (Shaman poison via totem -- see
+            -- DF:GetEngineDispelFlagGaps above for the whole story). A sibling
+            -- record for the types the flag misses: negates the flag token so it
+            -- never doubles what the flag already catches, and negates the CC and
+            -- RAID tokens per the standard precedence (dispel owns its overlap).
+            -- The NON-PLAYER overlap is handled on that record instead (it
+            -- excludes these types while a gap is active), so the include here
+            -- and the exclude there are exact complements.
+            if dispelGap then
+                filters[#filters + 1] = { filter = "HARMFUL|!" .. dispelToken .. neg(false, true, true),
+                                          key = "dispelgap",
+                                          candidateFilters = cfFor(false, notImportant({ includeDispelTypes = dispelGap })) }
+            end
+        elseif dispelTypeToken then
+            filters[#filters + 1] = { filter = "HARMFUL|" .. dispelTypeToken,
                                       key = "dispel", candidateFilters = cfFor(false, notImportant()) }
         else
+            -- ☠ TOKEN-LESS FALLBACK ONLY -- never the primary path on a live client.
+            -- includeDispelTypes is a Blizzard LUA-side raw index by dispelName
+            -- (Blizzard_AuraContainerUtil.lua:67) and matches NOTHING once dispel
+            -- names go secret. See the dispelTypeToken note above for the field
+            -- report this caused when it was the primary ALL-mode path.
             local cf = notImportant({ includeDispelTypes = DISPEL_TYPES })
             if maxDur then cf.maxDuration = maxDur end
             filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
@@ -412,9 +561,13 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- ⚠ In ALL-mode dispel the exclusion rides cfFor's excludeDispelTypes instead, so
     -- neg's dispel half is correctly inert there — the two paths must not double up.
     if db.debuffFilterNonPlayer then
+        local npCf = notImportant({ isFromPlayerOrPlayerPet = false })
+        -- Gap-repair dedup, the other half (see the dispelgap record above): while
+        -- the by-me repair is active, the types it covers are ITS overlap to own,
+        -- so this record excludes them -- the exact complement of that include.
+        if dispelGap then npCf.excludeDispelTypes = dispelGap end
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "nonplayer",
-                                  candidateFilters = cfFor(false,
-                                      notImportant({ isFromPlayerOrPlayerPet = false })) }
+                                  candidateFilters = cfFor(false, npCf) }
     end
     if #filters == 0 then
         -- Claims emptied a NON-empty selection: EMPTY array = render nothing

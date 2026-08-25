@@ -365,7 +365,22 @@ local function ProcessCastInternal(casterUnit, isChannel)
     -- Only casterUnit and the channel flag are clean enough to log here; spellID,
     -- texture and durationObject are secret-tainted on nameplates (see the gotcha #0
     -- note in the Targeted List section) and must never reach a format string.
+    -- ★ PLAIN PRE-FILTER: a cast with NO target cannot be aimed at the player, so
+    -- it never needs an icon. UnitShouldDisplaySpellTargetName is the one readable
+    -- question in this area -- no SecretReturns, documented as "returns false if
+    -- the unit is not casting a spell or the spell has no target". Every icon we
+    -- skip here is one fewer invisible frame holding a rank in the row.
+    -- ☠ UnitInParty(casterUnit.."target") is NOT usable as a second filter even
+    -- though it is plain and the Targeted List uses it: UnitInParty is FALSE when
+    -- you are solo, so it would drop every cast aimed at you outside a group.
+    -- The list can afford it because it only ever displays party members.
+    -- ⚠ Guarded on the API existing: absence must mean "keep the cast", never
+    -- "drop it" -- a missing probe should not silently disable the feature.
     local personalOk, personalWhy = ShouldShowPersonalTargetedSpells(GetPersonalDB())
+    if personalOk and UnitShouldDisplaySpellTargetName
+        and not UnitShouldDisplaySpellTargetName(casterUnit) then
+        personalOk, personalWhy = false, "cast has no target"
+    end
     if personalOk then
         if DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
             DF:Debug("PERSONALTARGET", "pickup %s (channel=%s)", casterUnit, isChannel and "y" or "n")
@@ -1084,8 +1099,23 @@ local function CreatePersonalIcon(index)
         -- Update duration text from duration object
         -- TODO: Can use durationObject:EvaluateRemainingPercent(colorCurve) for dynamic color-by-time
         if self.durationObject and self.durationText and self.durationText:IsShown() then
+            -- ★ SAME GATE AS THE TARGETED LIST'S BAR COUNTDOWN, and the same hard-won
+            -- shape twice over: the returned boolean is SECRET, so it is spent into
+            -- SetAlphaFromBoolean and never tested; and it is IsActive, not IsZero,
+            -- because the broken clocks in the wild are NON-zero garbage spans (parked
+            -- at endTime 0, remaining = minus-uptime), which only "is a real span
+            -- running right now" excludes. See the long note at the list site.
+            if self.durationObject.IsActive and self.durationText.SetAlphaFromBoolean then
+                self.durationText:SetAlphaFromBoolean(self.durationObject:IsActive(), 1, 0)
+            end
             local ok, remaining = pcall(self.durationObject.GetRemainingDuration, self.durationObject)
-            if ok and remaining then
+            -- ⚠ `ok` ONLY. The old test was `ok and remaining`, which truth-tests the
+            -- returned value -- and that value is secret on a nameplate, where using it
+            -- in a condition is the exact thing that throws. It was also pointless:
+            -- GetRemainingDuration is documented Nilable = false, so a successful call
+            -- never returns nil and the second half of the test could only ever fail by
+            -- erroring. Outside the pcall, so the pcall would not have caught it either.
+            if ok then
                 self.durationText:SetFormattedText("%.1f", remaining)
                 if self.durationColor then
                     self.durationText:SetTextColor(self.durationColor.r, self.durationColor.g, self.durationColor.b, 1)
@@ -1254,6 +1284,20 @@ local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
     end
 end
 
+-- Row order: OLDEST CAST FIRST, so a new cast can only ever append to the end
+-- and never insert between icons already on screen. casterKey is the tiebreak
+-- only -- two casts starting in the same frame still need a total order, but it
+-- must not be the primary key (see the note in PositionPersonalIcons for what
+-- ordering by it did).
+local function PersonalIconOrder(a, b)
+    local sa, sb = a.startTime or 0, b.startTime or 0
+    if sa ~= sb then return sa < sb end
+    return (a.casterKey or "") < (b.casterKey or "")
+end
+
+-- Scratch, reused: this runs on every add and every expiry.
+local personalOrderBuf = {}
+
 -- Position personal icons
 local function PositionPersonalIcons()
     local db = GetPersonalDB()
@@ -1263,8 +1307,9 @@ local function PositionPersonalIcons()
     local scale = db.personalTargetedSpellScale or 1.0
     local growthDirection = db.personalTargetedSpellGrowth or "RIGHT"
     local spacing = db.personalTargetedSpellSpacing or 4
-    local maxIcons = db.personalTargetedSpellMaxIcons or 5
-    
+    -- (Removed) the maxIcons local: nothing in this function reads it any more now
+    -- that the row is not trimmed by rank. See the note above the layout loop.
+
     -- Apply pixel perfect
     if db.pixelPerfect then
         iconSize = DF:PixelPerfect(iconSize)
@@ -1274,62 +1319,77 @@ local function PositionPersonalIcons()
     local scaledSize = iconSize * scale
     local scaledSpacing = spacing * scale
     
-    -- Collect active spells
-    local casterData = {}
-    for casterKey, iconIndex in pairs(personalActiveSpells) do
+    -- ★ THE ROW IS ALWAYS PACKED AND ALWAYS CENTRED ON WHAT IS ACTUALLY SHOWING.
+    -- Two requirements that sound opposed and are not:
+    --   1. "the icons jump around as they add/expire" (Krathe, 2026-08-22)
+    --   2. "I really wanted it to recenter icons if there are only 1-2" (same day)
+    -- (2) REQUIRES the group to re-measure as membership changes, so a
+    -- fixed-slot layout that leaves holes cannot satisfy it -- one icon left
+    -- alive in slot 3 would sit off to the right of centre with two gaps beside
+    -- it. An earlier cut of this function did exactly that and had to be undone.
+    --
+    -- ☠ SO THE FIX FOR (1) IS THE SORT KEY, NOT THE PACKING. The original bug was
+    -- ordering by casterKey: "nameplate3" sorts BETWEEN "nameplate1" and
+    -- "nameplate5", so a new cast could appear in the MIDDLE of the row and shove
+    -- every icon after it sideways -- unpredictable, and unrelated to anything the
+    -- player did. Ordering by startTime instead means a new cast can only ever
+    -- APPEND: existing icons never reorder among themselves, whatever the unit
+    -- tokens happen to be. (casterKey survives only as the tiebreak for two casts
+    -- that start in the same frame, so the order is still total and stable.)
+    --
+    -- What still moves, by design: an expiry packs the survivors up one place, and
+    -- in the CENTER modes the group re-centres on the new count. That is the
+    -- behaviour (2) asks for, and it is the same shape every peer ships.
+    --
+    -- ☠☠ AND THE ROW CANNOT BE TRIMMED BY RANK -- Max Icons used to Hide() anything
+    -- past its count, which is a CORRECTNESS bug, not a cosmetic one. Every cast
+    -- gets an icon and visibility is decided by SetAlphaFromBoolean against
+    -- "is this aimed at the player" -- a SECRET boolean, so we cannot know which
+    -- icons are the visible ones. Rank is therefore unrelated to visibility, and
+    -- capping by rank could hide the ONE icon aimed at the player behind five
+    -- invisible ones. Hiding costs nothing to remove: an icon not aimed at you is
+    -- already alpha 0, so an "uncapped" row is exactly as clean on screen and can
+    -- no longer suppress the cast that matters.
+    -- ⚠ Max Icons still bounds the icon POOL in ShowPersonalTargetedSpellIcon; it
+    -- just no longer decides what renders. Fixing the label is a separate call.
+    wipe(personalOrderBuf)
+    for _, iconIndex in pairs(personalActiveSpells) do
         local icon = personalIcons[iconIndex]
         if icon and icon.isActive then
-            table.insert(casterData, {
-                casterKey = casterKey,
-                iconIndex = iconIndex,
-                startTime = icon.startTime or 0
-            })
+            personalOrderBuf[#personalOrderBuf + 1] = icon
         end
     end
-    
-    -- Sort for consistent order
-    table.sort(casterData, function(a, b)
-        return a.casterKey < b.casterKey
-    end)
-    
-    local numIcons = math.min(#casterData, maxIcons)
-    
-    for i = 1, #casterData do
-        local data = casterData[i]
-        local icon = personalIcons[data.iconIndex]
-        
-        if icon then
-            if i <= maxIcons then
-                local offsetX, offsetY = 0, 0
-                local index = i - 1
-                
-                if growthDirection == "UP" then
-                    offsetY = index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "DOWN" then
-                    offsetY = -index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "LEFT" then
-                    offsetX = -index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "RIGHT" then
-                    offsetX = index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "CENTER_H" then
-                    local centerOffset = (numIcons - 1) * (scaledSize + scaledSpacing) / 2
-                    offsetX = index * (scaledSize + scaledSpacing) - centerOffset
-                elseif growthDirection == "CENTER_V" then
-                    local centerOffset = (numIcons - 1) * (scaledSize + scaledSpacing) / 2
-                    offsetY = index * (scaledSize + scaledSpacing) - centerOffset
-                end
-                
-                icon:ClearAllPoints()
-                icon:SetPoint("CENTER", personalContainer, "CENTER", offsetX, offsetY)
-                DF:SnapPointToPixelGrid(icon, db.pixelPerfect)
-                icon:SetSize(scaledSize, scaledSize)
-                icon.iconFrame:SetAllPoints(icon)
-                
-                icon:Show()
-            else
-                icon:Hide()
-            end
+    table.sort(personalOrderBuf, PersonalIconOrder)
+
+    local step = scaledSize + scaledSpacing
+    local centerOffset = (#personalOrderBuf - 1) * step / 2
+
+    for i = 1, #personalOrderBuf do
+        local icon = personalOrderBuf[i]
+        local offsetX, offsetY = 0, 0
+        local index = i - 1
+
+        if growthDirection == "UP" then
+            offsetY = index * step
+        elseif growthDirection == "DOWN" then
+            offsetY = -index * step
+        elseif growthDirection == "LEFT" then
+            offsetX = -index * step
+        elseif growthDirection == "RIGHT" then
+            offsetX = index * step
+        elseif growthDirection == "CENTER_H" then
+            offsetX = index * step - centerOffset
+        elseif growthDirection == "CENTER_V" then
+            offsetY = index * step - centerOffset
         end
+
+        icon:ClearAllPoints()
+        icon:SetPoint("CENTER", personalContainer, "CENTER", offsetX, offsetY)
+        DF:SnapPointToPixelGrid(icon, db.pixelPerfect)
+        icon:SetSize(scaledSize, scaledSize)
+        icon.iconFrame:SetAllPoints(icon)
+
+        icon:Show()
     end
 end
 
@@ -1362,13 +1422,15 @@ function DF:ShowPersonalTargetedSpellIcon(casterUnit, casterKey, spellID, textur
     
     local icon = personalIcons[iconIndex]
     personalActiveSpells[casterKey] = iconIndex
-    
+
     -- Setup icon
     icon.casterUnit = casterUnit
     icon.casterKey = casterKey
     icon.spellID = spellID
     icon.isChannel = isChannel
     icon.durationObject = durationObject
+    -- ⚠ Row ORDER is keyed off this (PersonalIconOrder), so a caller passing a
+    -- stale startTime would place the icon mid-row instead of appending.
     icon.startTime = startTime or GetTime()
     icon.isActive = true
     icon.isInterrupted = false
@@ -1447,9 +1509,9 @@ function DF:HidePersonalTargetedSpellIcon(casterKey, immediate, fromTimer)
     end
     
     personalActiveSpells[casterKey] = nil
-    
+
     PositionPersonalIcons()
-    
+
     -- Hide container if no active spells
     local hasActive = false
     for _ in pairs(personalActiveSpells) do
@@ -1574,7 +1636,11 @@ function DF:ShowTestPersonalTargetedSpells()
             icon.spellID = testData.id
             icon.isChannel = false
             icon.durationObject = nil
-            icon.startTime = GetTime()
+            -- Stagger by loop index so the preview row orders 1..N deterministically:
+            -- these all start in the same frame, and the live path's tiebreak would
+            -- otherwise sort "test-personal-10" before "test-personal-2". Same layout
+            -- code as live -- only the DATA differs.
+            icon.startTime = GetTime() + i * 0.001
             icon.isActive = true
             icon.isInterrupted = false
             icon.interruptTimer = 0
@@ -2857,6 +2923,30 @@ local function TargetedList_OnCastStop(casterUnit, event, ...)
     local active = activeTargetedListCasts[casterUnit]
     if not active then return end
 
+    -- ☠☠ NAMEPLATE REMOVAL IS UNCONDITIONAL AND BEATS EVERY GUARD BELOW -- including
+    -- the wasInterrupted+fading early-return, which is exactly where the "slow to
+    -- remove dead bars" report survived my first fix. The real death sequence, read
+    -- from Krathe's 19:24-19:52 log (77 INTERRUPTED events, ZERO dead-drops): the
+    -- engine fires INTERRUPTED while the unit still READS alive -- UnitIsDead lags
+    -- the event, so the event-time check below never fires -- the record enters the
+    -- 1.0s interrupted flash, the nameplate is removed a frame later, and this event
+    -- arrived here only to be swallowed by the fading guard. The sweep couldn't save
+    -- it either: once the token unmaps, UnitIsDead(token) is false forever.
+    --
+    -- ★ A removed nameplate is terminal no matter why it was removed: the token no
+    -- longer refers to this mob (and can be RECYCLED to a different one, at which
+    -- point a lingering record would eat the new mob's events). Any fade or flash
+    -- tied to it is painting a dead token. Drop now, render now.
+    if event == "NAME_PLATE_UNIT_REMOVED" then
+        activeTargetedListCasts[casterUnit] = nil
+        if DF._TargetedListRender then DF._TargetedListRender() end
+        if DF.Debug then
+            DF:Debug("TARGETEDLIST", "-cast %s: nameplate removed - dropped%s", casterUnit,
+                active.fadingStartedAt and " (was fading)" or "")
+        end
+        return
+    end
+
     -- Gotcha #3: some channel spells (pulse DoTs, ground-effect zones)
     -- emit SUCCEEDED once per tick while still channeling. Also covers
     -- cast-to-channel transitions — the channel data may not be ready
@@ -2879,6 +2969,38 @@ local function TargetedList_OnCastStop(casterUnit, event, ...)
     local active = activeTargetedListCasts[casterUnit]
     if not active then return end
 
+    -- ☠ A DEAD CASTER GETS NO FADE AND NO FLASH -- IT IS DROPPED IN THIS FRAME.
+    -- Death is itself a "cast stopped" event: the mob is killed mid-cast, the engine
+    -- fires INTERRUPTED, and the branch below hands the record the interrupted-flash
+    -- duration -- 1.0s by default and configurable higher. So the row outlived its
+    -- caster by a whole second wearing an "Interrupted:" state with no interrupter
+    -- behind it and every read empty: "it does now seem to hide when a mob dies mid
+    -- cast but it seems to take 1-2s to fade out ... it still shows blank bars for a
+    -- few seconds" (Krathe, 2026-08-22).
+    --
+    -- ⚠ THE LIVENESS BACKSTOP CANNOT COVER THIS ONE, BY DESIGN. It skips any record
+    -- that is already fading -- deliberately, because a fade in progress is a bar on
+    -- its way out and re-testing it every tick would cut legitimate fades short. So
+    -- once death routed the record into the fade, nothing could take it back, and the
+    -- 0.25s deadline that backstop promises never applied to the very case it was
+    -- added for. The gap is HERE, at the fork -- which is why the fix is here. The
+    -- sweep gained a death check for fading records too, but only as a race-cover for
+    -- a stop event that beats UnitIsDead by a tick; it is not the primary path.
+    --
+    -- ★ The flash exists to say "a PLAYER kicked this" -- worth a second of screen
+    -- time because someone did something and wants to see it land. Death is not that.
+    -- The bar's whole job is to describe an incoming cast you might react to, and once
+    -- the caster is dead there is nothing left to react to; the honest move is to give
+    -- the slot back to a cast that still matters.
+    -- ☠ (Removed) the event-time death check. It tested UnitExists/UnitIsDead right
+    -- here and fired ZERO times in 576 tracked casts across three logged sessions --
+    -- the instrumented fade line proved why: every one of 384 fade starts recorded
+    -- `dead=n`, because the death state LAGS the cast-stop event without exception.
+    -- It was never a weak check, it was an impossible one, and removing it costs
+    -- nothing measurable. The two paths that actually do the work stay: the
+    -- NAME_PLATE_UNIT_REMOVED drop above (11 culls) and the sweep's fading arm
+    -- (11 culls, landing 0.01s-0.22s into the fade).
+
     -- Store interrupter GUID for display. The GUID is secret-tainted
     -- on nameplates but UnitNameFromGUID → SetText is a secret-safe
     -- sink chain — we never inspect the value in Lua. For non-
@@ -2893,6 +3015,9 @@ local function TargetedList_OnCastStop(casterUnit, event, ...)
         fadeDuration = (party and party.targetedListFadeOutDuration) or 0.25
     end
 
+    -- (Removed) the per-fade debug line. It answered its question -- 384 samples,
+    -- every one `dead=n` -- and then it was 384 lines of noise per session. The
+    -- sweep's cull line stays: that one fires ~11 times and reports an outcome.
     if fadeDuration and fadeDuration > 0 then
         active.fadingStartedAt = TL_GetTime()
         active.fadingDuration  = fadeDuration
@@ -3017,7 +3142,31 @@ end
 local function TargetedList_ValidateTrackedBars()
     local anyRemoved = false
     for unit, rec in pairs(activeTargetedListCasts) do
-        if not rec.isTestCast and not rec.fadingStartedAt then
+        -- ★ DEATH IS THE ONE THING THAT CAN CUT A FADE SHORT. Every other check below
+        -- is skipped for a fading record on purpose: a fade is a bar already on its way
+        -- out, and re-testing "is it still casting" against one would end every fade on
+        -- the first tick. Death is different because it is not a symptom -- it is the
+        -- terminal answer, and a bar that outlives its caster is exactly the blank row
+        -- being reported. OnCastStop drops these in the same frame; this only covers
+        -- the ordering race where the stop event beats UnitIsDead by a tick or two.
+        if rec.isTestCast then
+            -- Test bars are driven by the preview, never by the game. Skip entirely.
+        elseif rec.fadingStartedAt then
+            -- ☠ `not TL_UnitExists` is the half that actually fires: once a dead mob's
+            -- nameplate unmaps, UnitIsDead(token) is false FOREVER, so an IsDead-only
+            -- check here was armed for a state the token can no longer report. A fade
+            -- whose token has vanished is painting nothing real -- cull it. Cost to a
+            -- legit interrupt flash: none while the mob lives (its nameplate stays).
+            if not TL_UnitExists(unit) or TL_UnitIsDead(unit) then
+                activeTargetedListCasts[unit] = nil
+                anyRemoved = true
+                if DF.Debug then
+                    DF:Debug("TARGETEDLIST", "sweep %s: fading + %s - culled after %.2fs of a %.2fs fade",
+                        unit, TL_UnitExists(unit) and "dead" or "gone",
+                        TL_GetTime() - (rec.fadingStartedAt or 0), rec.fadingDuration or 0)
+                end
+            end
+        else
             -- Check: does the nameplate still exist?
             if not TL_UnitExists(unit) then
                 activeTargetedListCasts[unit] = nil
@@ -3062,9 +3211,10 @@ end
 -- missed EDGE rather than a wrong verdict.
 --
 -- ⚠ Cheap by construction and self-stopping. It runs ONLY while there is at least one
--- live (non-test, non-fading) record, costs a handful of unit reads per record per
--- tick, and cancels itself the moment the list empties -- so the steady state with no
--- enemy casting is no timer at all. 0.25s rather than the fade ticker's 0.05s: this is
+-- non-test record -- fading ones included, see the note at the anyLive scan -- costs a
+-- handful of unit reads per record per tick, and cancels itself the moment the list
+-- empties, so the steady state with no enemy casting is no timer at all. 0.25s rather
+-- than the fade ticker's 0.05s: this is
 -- a cleanup deadline, not an animation, and a blank bar surviving a quarter second is
 -- not what anyone reported.
 local targetedListLivenessTicker
@@ -3083,9 +3233,17 @@ TargetedList_StartLivenessTicker = function()
     targetedListLivenessTicker = C_Timer.NewTicker(0.25, function()
         -- Stop as soon as nothing needs watching. Checked BEFORE validating so an
         -- empty list costs one next() and cancels, rather than a full sweep.
+        --
+        -- ⚠ A FADING RECORD COUNTS AS LIVE HERE, even though the sweep below now has
+        -- exactly one question to ask about it (is the caster dead?). Without that, a
+        -- list whose last record had just entered its fade would cancel the ticker and
+        -- the death check would never get its tick -- the sweep would be armed for
+        -- precisely the state it can no longer observe. The cost is bounded and tiny:
+        -- a fade lasts at most the interrupted-flash duration, so this is a handful of
+        -- extra ticks at the tail of a fight, not a timer that outlives the pull.
         local anyLive = false
         for _, rec in pairs(activeTargetedListCasts) do
-            if not rec.isTestCast and not rec.fadingStartedAt then anyLive = true break end
+            if not rec.isTestCast then anyLive = true break end
         end
         if not anyLive then
             TargetedList_StopLivenessTicker()
@@ -3327,11 +3485,55 @@ local function TargetedList_BuildBar(parent)
             else
                 self.duration:SetText("")
             end
+        elseif not self._hasTimerDuration then
+            -- ☠ NOTHING VALID IS BOUND TO THIS BAR'S TIMER -- PRINT NOTHING.
+            -- UnitCastingDuration / UnitChannelDuration are both MayReturnNothing: a
+            -- cast the engine reports no cast time for hands back no duration object
+            -- at all, so the record's `duration` is nil and ApplyBarContent's
+            -- SetTimerDuration branch never runs. The bar, however, came out of the
+            -- pool still carrying the PREVIOUS occupant's timer -- SetValue(0) on
+            -- release resets the fill but does not touch the timer channel -- and this
+            -- OnUpdate re-reads GetTimerDuration() every tick, so it found that stale
+            -- object and printed its long-expired remaining time. That is the
+            -- "9999999s" (Krathe, 2026-08-22): not a huge cast, a dead clock.
+            self.duration:SetText("")
         else
             -- Live bar: read duration fresh from the StatusBar each tick
             local durationObj = self.progress:GetTimerDuration()
             if durationObj == nil then return end
             self.duration:SetFormattedText("%.1f", durationObj:GetRemainingDuration())
+            -- ☠☠ A ZERO-SPAN DURATION HAS NO COUNTDOWN -- AND IsZero() IS ITSELF SECRET,
+            -- so the answer can only ever be SPENT INTO A SINK, never read. Testing it
+            -- threw "attempt to perform boolean test on a secret boolean value" at this
+            -- line in game (Krathe, 2026-08-22).
+            --
+            -- ⚠ THE MISREAD THAT CAUSED IT, recorded so it is not repeated: Blizzard's
+            -- Blizzard_CustomAuraButton.lua:528 is
+            -- `binding:SetEnabled(not auraDuration:IsZero())`, and I read that as a
+            -- truth test proving the return was plain. It is not one. That line NEGATES
+            -- and FORWARDS -- SetEnabled is the sink and the value is never branched on.
+            -- ☠ A secret value appearing in an expression is not evidence it can be
+            -- tested; only an `if` / `and` / `or` on it is, and Blizzard writes none.
+            --
+            -- ★ So take the same route Blizzard did: hand the secret straight to a sink.
+            -- Alpha rather than SetText because the text has already been written above
+            -- and the sink can only choose between two prepared values, not suppress a
+            -- call.
+            --
+            -- ☠ IsActive, NOT IsZero. IsZero only catches a span measuring nothing; the
+            -- clock Krathe photographed ("6047947.9...", the minus clipped off-screen)
+            -- is a NON-zero garbage state -- an object parked at endTime 0, whose
+            -- remaining is minus-GetTime(), i.e. minus his system uptime (~70 days).
+            -- IsActive ("at or after start AND before end") is false for every bad
+            -- shape at once -- zero span, expired/garbage, not started -- and true only
+            -- while a real cast is actually running, which is the only time this text
+            -- has anything worth saying. Direct argument order, no `not`, so nothing
+            -- rests on anything beyond SetAlphaFromBoolean itself -- the same
+            -- secret-safe sink this file already uses for importance borders and
+            -- self-target overlays.
+            if durationObj.IsActive and self.duration.SetAlphaFromBoolean then
+                self.duration:SetAlphaFromBoolean(durationObj:IsActive(), 1, 0)
+            end
         end
     end)
 
@@ -3556,8 +3758,20 @@ local function TargetedList_ResetBar(pool, bar)
     bar.targetName:SetText("")
     if bar.duration then
         bar.duration:SetText("")
+        -- The countdown's alpha is driven by SetAlphaFromBoolean off the duration's
+        -- zero-ness, so a bar released while showing a zero-span cast carries alpha 0
+        -- into its next owner. The OnUpdate re-applies it every tick and would correct
+        -- itself, but only for a cast that HAS a duration object -- clear it here so a
+        -- recycled bar never starts invisible.
+        bar.duration:SetAlpha(1)
     end
     bar._testDuration = nil
+    -- ☠ THE TIMER CHANNEL SURVIVES RELEASE AND CANNOT BE CLEARED. SetValue(0) above
+    -- resets the fill, but SetTimerDuration is a separate channel with no nil overload,
+    -- so GetTimerDuration() on a recycled bar still hands back the previous cast's
+    -- object. Same reason _lastTexturePath and _appearanceVersion are cleared here:
+    -- what a pooled bar remembers between owners is exactly what goes wrong.
+    bar._hasTimerDuration = nil
     bar.icon:SetTexture(nil)
     bar._lastTexturePath = nil
     -- Same reason as _lastTexturePath above: drop the cached appearance stamp so a
@@ -3784,6 +3998,18 @@ function TargetedList_ApplyBarContent(bar, activeRec)
         bar.progress:SetTimerDuration(activeRec.duration,
             Enum.StatusBarInterpolation.Immediate, direction)
         bar._testDuration = nil
+        -- ★ The ONE place a real timer gets bound, so the one place that may claim it.
+        -- The OnUpdate countdown reads this rather than GetTimerDuration()'s nil-ness,
+        -- because a pooled bar's timer channel cannot be cleared on release --
+        -- SetTimerDuration's duration argument is Nilable = false, so there is no
+        -- "unbind" call to make. The flag is the unbind.
+        bar._hasTimerDuration = true
+    else
+        -- No duration object on the record (an instant / no-cast-time cast), or no
+        -- SetTimerDuration on this build. Either way the bar keeps whatever its
+        -- previous occupant bound, so say so explicitly rather than falling through
+        -- and letting the countdown trust a stale clock.
+        bar._hasTimerDuration = nil
     end
 
     -- Interruptible color: test records have a clean bool so we can

@@ -253,16 +253,34 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     -- RETIRED table. Pet frames are created once and reused, so the Pet Tooltip checkbox
     -- silently stopped responding on that frame for the rest of the session. Every other
     -- function in this file already re-resolves through DF:GetFrameDB(frame) per call.
-    frame:HookScript("OnEnter", function(self)
+    -- ☠☠ THE THIRD HOVER PATH. Pet frames are built here, not by Frames/Create.lua and
+    -- not by the header child in Frames/Headers.lua, so every visibility rule those two
+    -- grew had to be repeated here by hand -- and none ever were. This checked
+    -- `tooltipFrameEnabled` and nothing else, so it ignored the ORIGINAL Disable In
+    -- Combat boolean just as completely as it ignored the modifier that replaced it.
+    -- A long-standing hole, not a regression of the 2026-08-23 visibility rework.
+    -- ★ Named and registered like the other two, so the modifier/combat watcher can
+    -- re-decide a hovered pet in place AND the GameTooltip OnShow refusal (which keys
+    -- off the registered hover frame) covers pets too -- without that registration a
+    -- pet would still flash. Hides rather than skipping, ownership-checked, via the
+    -- shared helper.
+    local function OnPetFrameEnter(self)
         local fdb = DF:GetFrameDB(self)
-        if fdb and fdb.tooltipFrameEnabled then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetUnit(self.unit)
-            GameTooltip:Show()
+        if DF.NoteTooltipHover then DF:NoteTooltipHover(self, OnPetFrameEnter) end
+        if not fdb or not fdb.tooltipFrameEnabled then return end
+        if DF.TooltipAllowed and not DF:TooltipAllowed(fdb, "Frame", "pet") then
+            if DF.HideOwnedTooltip then DF:HideOwnedTooltip(self, "pet") end
+            return
         end
-    end)
-    
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetUnit(self.unit)
+        GameTooltip:Show()
+    end
+
+    frame:HookScript("OnEnter", OnPetFrameEnter)
+
     frame:HookScript("OnLeave", function(self)
+        if DF.ClearTooltipHover then DF:ClearTooltipHover(self) end
         GameTooltip:Hide()
     end)
     

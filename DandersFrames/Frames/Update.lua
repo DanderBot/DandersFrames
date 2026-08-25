@@ -677,6 +677,14 @@ function DF:UpdateUnitFrame(frame, source)
         frame.dfLastKnownDead = nil
     end
     frame.dfLastKnownConnected = true
+    -- ☠ RE-ASK THE MISSING-BUFF GATE ON THE ALIVE PATH — see the fast path's alive
+    -- edge for the wipe mechanism (rez with no buffs = no aura event = nothing else
+    -- re-shows the strip). Unconditional here on purpose: this path is event-driven
+    -- (roster/PEW), the function no-ops when nothing changed, and an unconditional
+    -- call also heals the OBSERVER-side case — strips hidden because YOU were a
+    -- ghost (UnitCanAssist false for everyone) on frames that never had a dead edge
+    -- of their own.
+    if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
 
     -- Clear status text for alive units
     if frame.statusText then
@@ -951,6 +959,16 @@ function DF:UpdateHealthFast(frame)
 
     -- Unit is alive and connected - reset dead fade if it was applied
     DF:ResetDeadFade(frame)
+    -- ☠ THE ALIVE/RECONNECT EDGE MUST RE-ASK THE MISSING-BUFF GATE. The dead and
+    -- offline branches above both call RefreshMissingBuffVisibility (hide), and no
+    -- alive path anywhere did — the only other re-show route is the factory drive,
+    -- which runs on UNIT_AURA. A player rezzing after a wipe has NO buffs and nobody
+    -- buffing yet, so the very state the badge exists to report produces no aura
+    -- event to wake it: every strip stayed hidden until /reload. A mid-fight battle
+    -- rez worked by accident — the rez lands auras, and that event re-drove it.
+    -- Edge-gated HERE because this is the per-tick path; the full-update twin calls
+    -- it unconditionally (event-driven, and the function no-ops when unchanged).
+    local wasGone = frame.dfLastKnownDead or frame.dfLastKnownConnected == false
     if frame.dfLastKnownDead then
         -- Alive edge: clear the death latch — the rows come back re-parsed
         -- (the latch clear bounces the containers; see _setDeathLatch).
@@ -960,6 +978,9 @@ function DF:UpdateHealthFast(frame)
     end
     frame.dfLastKnownDead = nil
     frame.dfLastKnownConnected = true
+    if wasGone and DF.RefreshMissingBuffVisibility then
+        DF:RefreshMissingBuffVisibility(frame)
+    end
 
     -- Clear resurrection icon if unit was pending a res and is now alive
     if DF.HasPendingResurrection and DF:HasPendingResurrection(unit) then

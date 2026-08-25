@@ -89,6 +89,14 @@ local CATEGORY_GROUPS = {
             -- flips with the probe that broke trust, latches, recovery re-parses.
             -- Edge-triggered only, so it is quiet outside actual gate activity.
             { key = "IDGATE",        desc = "Identity gate: park/hide verdicts with reasons, latches, recovery" },
+            -- ☠ REGISTERED BECAUSE THE PATHS OUTNUMBERED THE MEMORY OF THEM. A unit
+            -- tooltip can be raised from FOUR places -- the standalone frame's OnEnter,
+            -- the header child's own, the pet frame's own, and the 0.25s refresh ticker
+            -- -- and a visibility rule has to be honoured by every one. Three separate
+            -- rounds of "it still shows sometimes" were three different paths that had
+            -- never been taught the rule. This category names the path and the verdict
+            -- so the next report identifies itself instead of being guessed at.
+            { key = "TOOLTIP",       desc = "Frame/binding tooltips: which path decided, and what it decided" },
             -- ⚠ Was EMITTED BUT NOT REGISTERED, which defeats the point of this table:
             -- both of its sites are DebugWarn -- custom-filter import skipping an
             -- entry, and a scrub that could not reach ParseADFilterRef -- i.e. exactly
