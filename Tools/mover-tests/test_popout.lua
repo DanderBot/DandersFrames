@@ -391,6 +391,127 @@ do
 end
 
 -- ============================================================
+-- 8a. THE RETARGET GLIDE
+-- Pointing an OPEN following popout at a different thing slides it across
+-- instead of teleporting. The re-dock is suspended for the duration -- a
+-- following popout is anchored to its source and cannot be driven while that
+-- anchor holds -- and the landing is exact.
+-- ============================================================
+do
+    local a = source(80, 40, CX, CY)
+    local b = source(80, 40, CX - 500, CY)
+    local p = popout({ key = "glide" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(a)
+    check(not p.gliding, "glide: the first placement is not a glide -- there is nowhere to come from")
+    eq(p.frame._points[1][2], a, "glide: ...it is anchored straight to its source")
+
+    -- Record every re-anchor, so "it took an explicit screen anchor while
+    -- gliding and a source anchor when it landed" is observable rather than
+    -- inferred from a position the stub does not resolve.
+    local moves = {}
+    local realSetPoint = p.frame.SetPoint
+    p.frame.SetPoint = function(s, ...) moves[#moves + 1] = { ... } return realSetPoint(s, ...) end
+
+    p:Follow(b)
+    check(p.gliding, "glide: retargeting a shown following popout glides")
+    local first = moves[#moves]
+    eq(first[1], "CENTER", "glide: it takes an explicit screen anchor for the ride")
+    eq(first[2], UIParent, "glide: ...off UIParent, not the source")
+    eq(first[4], 112, "glide: starting exactly where it already was")
+    eq(first[5], -26, "glide: ...on both axes")
+    -- The connected chrome commits to the NEW source at once.
+    eq(p.srcOutline._points[1][2], b, "glide: the source outline snaps to the new source at once")
+
+    -- Part-way: still gliding, still on its own anchor, and the beam's near end
+    -- has travelled with the frame.
+    local midStart = p.beam.core._start.x
+    p.frame:GetScript("OnUpdate")(p.frame, 0.06)
+    check(p.gliding, "glide: part-way through, it is still gliding")
+    check(p._gX < 112 and p._gX > -388, "glide: ...and somewhere between the two docks")
+    eq(moves[#moves][1], "CENTER", "glide: still driving its own anchor")
+    check(p.beam.core._start.x < midStart, "glide: the beam's near end tracks the gliding frame")
+
+    -- ☠ The re-dock is SUSPENDED. A source move mid-glide must not yank the
+    -- frame onto the destination on the very next frame.
+    b:SetFakeCenter(CX - 500, CY + 100)
+    p.frame:GetScript("OnUpdate")(p.frame, 0.02)
+    check(p.gliding, "glide: a source move mid-glide does not end the glide")
+    eq(moves[#moves][1], "CENTER", "glide: ...and does not re-dock underneath it")
+    b:SetFakeCenter(CX - 500, CY)
+
+    -- Run it out. It lands on the computed dock point and hands the anchor back
+    -- to the source, so the ordinary follow works again from there.
+    p.frame:GetScript("OnUpdate")(p.frame, 1)
+    check(not p.gliding, "glide: it finishes")
+    local landed, docked
+    for i = #moves, 1, -1 do
+        if not docked then docked = moves[i] end
+        if moves[i][1] == "CENTER" and moves[i][2] == UIParent then landed = moves[i] break end
+    end
+    local tx, ty = UI.PopoutDockPos({ x = -500, y = 0, w = 80, h = 40 },
+                                    "right", FRAME_W, FRAME_H, DOCK_GAP)
+    eq(landed[4], tx, "glide: the last driven position IS the dock point")
+    eq(landed[5], ty, "glide: ...on both axes")
+    eq(docked[1], "TOPLEFT", "glide: and it ends re-anchored to the source")
+    eq(docked[2], b, "glide: ...to the NEW source")
+    p.frame.SetPoint = realSetPoint
+    p:Close()
+end
+
+-- The dock position as a pure function -- the same point the SetPoint in _Dock
+-- resolves to, which is what makes the glide's landing exact.
+do
+    local src = { x = 0, y = 0, w = 80, h = 40 }
+    local x, y = UI.PopoutDockPos(src, "right", 120, 92, 12)
+    eq(x, 112, "dockpos: right of the source, a gap away")
+    eq(y, -26, "dockpos: hanging from the source's top edge")
+    x, y = UI.PopoutDockPos(src, "left", 120, 92, 12)
+    eq(x, -112, "dockpos: mirrored on the left")
+    x, y = UI.PopoutDockPos(src, "above", 120, 92, 12)
+    eq(x, 0, "dockpos: above centres on the source")
+    eq(y, 20 + 12 + 46, "dockpos: ...clear of its top edge")
+    x, y = UI.PopoutDockPos(src, "below", 120, 92, 12)
+    eq(y, -20 - 12 - 46, "dockpos: and below clears its bottom")
+    eq(UI.PopoutDockPos(src, "sideways", 120, 92, 12), nil, "dockpos: an unknown side has no position")
+    eq(UI.PopoutDockPos(nil, "right", 120, 92, 12), nil, "dockpos: no source, no position")
+end
+
+-- What does NOT glide.
+do
+    local a = source(80, 40, CX, CY)
+    local p = popout({ key = "noglide" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(a)
+    p:Follow(a)
+    check(not p.gliding, "glide: re-Following the SAME source re-docks, it does not glide")
+    p:Follow(a, { side = "below" })
+    check(not p.gliding, "glide: nor does changing the forced side on one source")
+    eq(p.side, "below", "glide: ...which still re-docks")
+    p:Close()
+
+    -- A pinned popout is off its leash; Follow only re-points its beam.
+    local q = popout({ key = "glidepin" })
+    q.frame:SetFakeCenter(dockedRightOfCentre())
+    q:Follow(a)
+    q:Pin()
+    q:Follow(source(80, 40, CX - 500, CY))
+    check(not q.gliding, "glide: a pinned popout does not glide anywhere")
+    q:Close()
+
+    -- PlaceFree owns its own position, so it cancels a glide outright.
+    local r = popout({ key = "glidefree" })
+    r.frame:SetFakeCenter(dockedRightOfCentre())
+    r:Follow(a)
+    r:Follow(source(80, 40, CX - 500, CY))
+    check(r.gliding, "glide: gliding going in")
+    r:PlaceFree(0, 0)
+    check(not r.gliding, "glide: PlaceFree stops it dead")
+    eq(r.frame._points[1][4], 0, "glide: ...at the position it was given")
+    r:Close()
+end
+
+-- ============================================================
 -- 8b. ACCENT CHROME
 -- The popout, the connection point and the source outline are all drawn in ONE
 -- colour, so the two ends read as two halves of one object. The host accent by

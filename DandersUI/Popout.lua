@@ -45,6 +45,11 @@ local DOCK_GAP   = 12        -- popout <-> source distance when docked
 local ADJ_GAP    = 16        -- "still beside it" slack, for UI.PopoutIsAdjacent
 local POP_DUR    = 0.22      -- entrance
 local OUT_DUR    = 0.18      -- exit, the entrance run backwards
+-- The retarget glide: long enough that the eye follows the SAME panel across to
+-- the new thing, short enough that a run of selections never queues up. Below
+-- ~0.12 it reads as a teleport again; above ~0.25 clicking down a list feels
+-- like waiting for the panel.
+local GLIDE_DUR  = 0.18
 local PIN_DUR    = 0.12      -- the little confirm pop when pinning by hand
 local BEAM_DUR   = 0.15      -- beam fade in / out
 local CLOSE_SIZE = 18
@@ -97,6 +102,19 @@ function UI.PopoutPickSide(src, w, h, gap, screenW, screenH)
         and c.y - h / 2 >= -halfH and c.y + h / 2 <= halfH then
             return c.side
         end
+    end
+    return nil
+end
+
+-- Where a popout of (w, h) sits when docked on `side` of `src`, in the same
+-- units -- i.e. the centre the SetPoint in _Dock resolves to. Its own function
+-- because the retarget glide has to know the destination BEFORE it gets there,
+-- and re-deriving it from the anchor would be re-deriving it from the answer.
+-- nil for an unknown side.
+function UI.PopoutDockPos(src, side, w, h, gap)
+    if not (src and side) then return nil end
+    for _, c in ipairs(dockCandidates(src, w, h, gap or DOCK_GAP)) do
+        if c.side == side then return c.x, c.y end
     end
     return nil
 end
@@ -221,8 +239,12 @@ local popoutMeta = { __index = Popout }
 -- Dock beside `region`. opts.side forces a side ("left"/"right"/"above"/
 -- "below"); without it the side is picked by what fits. Re-docks for free
 -- whenever the region moves -- see _Tick.
+--
+-- RETARGETING a popout that is already up (a different region while it is
+-- following) GLIDES it across instead of teleporting: see _StartGlide.
 function Popout:Follow(region, opts)
     if not region then return end
+    local prev = self.source
     self.source = region
     self.forcedSide = opts and opts.side or nil
     self.free = false
@@ -230,6 +252,13 @@ function Popout:Follow(region, opts)
     -- SOURCE (so the beam knows where to land) must not drag it back to it.
     if self.pinned then
         self:_UpdateBeam()
+        return self
+    end
+    -- Already up and being pointed at something ELSE. _StartGlide answers false
+    -- if it cannot work out where it is or where it is going, and then this
+    -- falls through to the plain dock rather than refusing to move.
+    if self.following and prev and prev ~= region and self.frame:IsShown()
+       and self:_StartGlide() then
         return self
     end
     self.following = true
@@ -242,6 +271,7 @@ end
 function Popout:PlaceFree(x, y)
     self.free = true
     self.following = false
+    self.gliding = false
     local f = self.frame
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", x or 0, y or 0)
@@ -249,21 +279,33 @@ function Popout:PlaceFree(x, y)
     return self
 end
 
-function Popout:_Dock()
-    local f, src = self.frame, self.source
-    local sr = rectOf(src)
-    if not sr then return end
-    -- The ticker's baseline is taken HERE, not on the first tick: without it the
-    -- very next frame would read "the source moved" and re-dock for nothing.
-    self._srcX, self._srcY, self._srcW, self._srcH = sr.x, sr.y, sr.w, sr.h
+-- The side this popout would dock on for a source rect of `sr`: the consumer's
+-- forced side, else whatever fits, else the screen-edge flip. Shared by the dock
+-- and the glide so the two cannot disagree about where the panel belongs.
+function Popout:_PickSide(sr, w, h)
     local side = self.forcedSide
     if not side then
-        side = UI.PopoutPickSide(sr, f:GetWidth() or 0, f:GetHeight() or 0, DOCK_GAP,
+        side = UI.PopoutPickSide(sr, w, h, DOCK_GAP,
                                  UIParent:GetWidth() or 0, UIParent:GetHeight() or 0)
         -- Nothing fits: flip onto whichever side of the screen has more room,
         -- and let SetClampedToScreen deal with the overhang.
         if not side then side = (sr.x > 0) and "left" or "right" end
     end
+    return side
+end
+
+function Popout:_Dock()
+    local f, src = self.frame, self.source
+    local sr = rectOf(src)
+    if not sr then return end
+    -- Anchoring to the source is the END of a glide by definition: from here the
+    -- frame moves because the source does, not because we are driving it.
+    self.gliding = false
+    self._gX, self._gY = nil, nil
+    -- The ticker's baseline is taken HERE, not on the first tick: without it the
+    -- very next frame would read "the source moved" and re-dock for nothing.
+    self._srcX, self._srcY, self._srcW, self._srcH = sr.x, sr.y, sr.w, sr.h
+    local side = self:_PickSide(sr, f:GetWidth() or 0, f:GetHeight() or 0)
     f:ClearAllPoints()
     if side == "left" then f:SetPoint("TOPRIGHT", src, "TOPLEFT", -DOCK_GAP, 0)
     elseif side == "below" then f:SetPoint("TOP", src, "BOTTOM", 0, -DOCK_GAP)
@@ -304,6 +346,83 @@ function Popout:_Resize()
     return self
 end
 Popout.Resize = Popout._Resize      -- public: call after changing content height
+
+-- ---- the retarget glide ------------------------------------------
+
+-- Pointing an OPEN popout at a different thing used to teleport it, and a panel
+-- that vanishes here and reappears there reads as a NEW panel rather than as the
+-- same one now about something else -- which is exactly the wrong story when the
+-- whole point of a single following panel is that there is only ever one of it.
+--
+-- So it slides. Automatic in Follow whenever a SHOWN, FOLLOWING popout is handed
+-- a new region; PlaceFree and a pinned popout are untouched.
+--
+-- ☠ THE RE-DOCK IS SUSPENDED FOR THE DURATION. A following popout is anchored to
+-- its source, so it cannot be driven independently while that anchor holds --
+-- the glide takes an EXPLICIT screen anchor, and _Tick's "the source moved,
+-- re-dock" arm must not fire underneath it or the frame would be yanked onto the
+-- destination on the first frame of the slide. Landing hands the anchor back.
+function Popout:_StartGlide()
+    local f = self.frame
+    local sr = rectOf(self.source)
+    local from = rectOf(f)
+    if not (sr and from) then return false end
+    local w, h = f:GetWidth() or 0, f:GetHeight() or 0
+    local side = self:_PickSide(sr, w, h)
+    local tx, ty = UI.PopoutDockPos(sr, side, w, h, DOCK_GAP)
+    if not tx then return false end
+
+    -- The ticker's baseline moves to the NEW source now, so the first tick of
+    -- the glide does not read the retarget itself as "the source moved".
+    self._srcX, self._srcY, self._srcW, self._srcH = sr.x, sr.y, sr.w, sr.h
+    self.side = side
+    self.gliding = true
+    self._gT = 0
+    self._gFromX, self._gFromY = from.x, from.y
+    self._gToX, self._gToY = tx, ty
+    self._gX, self._gY = from.x, from.y
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "CENTER", from.x, from.y)
+    self:_StartTick()
+    -- The connected chrome commits to the NEW source at once -- beam and outline
+    -- both -- so the slide is the panel travelling TOWARDS something already
+    -- marked, rather than dragging the old relationship along with it.
+    self:_UpdateNotch()
+    self:_UpdateBeam()
+    self:_UpdateSourceOutline()
+    return true
+end
+
+function Popout:_AdvanceGlide(elapsed)
+    local t = (self._gT or 0) + (elapsed or 0)
+    self._gT = t
+    local k = min(t / GLIDE_DUR, 1)
+    -- Cubic ease-out: away quickly, settling onto the dock point. The entrance
+    -- and exit are eased the same way, so the panel always decelerates into
+    -- wherever it is going.
+    local e = 1 - (1 - k) ^ 3
+    local x = self._gFromX + (self._gToX - self._gFromX) * e
+    local y = self._gFromY + (self._gToY - self._gFromY) * e
+    self._gX, self._gY = x, y
+    local f = self.frame
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    -- The beam's near end is on the moving frame, so it is redrawn per frame;
+    -- the source outline is anchored to the source and does not move at all.
+    self:_UpdateBeam()
+    if k >= 1 then self:_EndGlide() end
+end
+
+-- Land, and hand the anchor back to the source so the follow works for free
+-- again. With nothing else moved _Dock resolves to exactly the point the glide
+-- was aimed at, which is what makes the landing exact rather than approximately
+-- exact.
+function Popout:_EndGlide()
+    if not self.gliding then return end
+    self.gliding = false
+    self._gX, self._gY = nil, nil
+    if self.following and not self.closed then self:_Dock() end
+end
 
 -- ---- accent chrome -----------------------------------------------
 
@@ -415,14 +534,14 @@ end
 -- ---- the follow ticker -------------------------------------------
 
 -- ONE OnUpdate drives everything that has to react to movement: the re-dock
--- when the source moves and the source-death close.
+-- when the source moves, the source-death close, and the retarget glide.
 --
 -- It early-outs the moment nothing has moved, which is the overwhelmingly
 -- common case, and it is a plain script so a headless test can drive one tick
--- by hand: popout.frame:GetScript("OnUpdate")(popout.frame).
-local function onUpdate(frame)
+-- by hand: popout.frame:GetScript("OnUpdate")(popout.frame, elapsed).
+local function onUpdate(frame, elapsed)
     local po = frame._popout
-    if po then po:_Tick() end
+    if po then po:_Tick(elapsed) end
 end
 
 function Popout:_StartTick()
@@ -433,7 +552,7 @@ function Popout:_StopTick()
     self.frame:SetScript("OnUpdate", nil)
 end
 
-function Popout:_Tick()
+function Popout:_Tick(elapsed)
     if self.closed then return end
     local f = self.frame
     if not f:IsShown() then return end
@@ -443,6 +562,13 @@ function Popout:_Tick()
     -- deciding what that means is the consumer's call, not the shell's.
     if not self.pinnable and self.source and not self:_SourceAlive() then
         self:Close("source")
+        return
+    end
+
+    -- A glide OWNS the position while it runs, so the re-dock below is
+    -- suspended: see _StartGlide.
+    if self.gliding then
+        self:_AdvanceGlide(elapsed)
         return
     end
 
@@ -476,9 +602,15 @@ function Popout:_TetherRegion()
 end
 
 -- The popout's own rect, in the same UIParent-centre units as everything else
--- here. Its own method rather than a bare rectOf(self.frame) call because the
--- glide overrides it: see _FrameRect's glide arm in the retarget section.
+-- here. Its own method rather than a bare rectOf(self.frame) because a GLIDING
+-- popout is authoritative about where it is: the anchor it was just handed will
+-- not be reflected by GetCenter until the frame is next laid out, and a beam
+-- drawn from last frame's position lags visibly behind the panel it leaves.
 function Popout:_FrameRect()
+    if self.gliding and self._gX then
+        local f = self.frame
+        return { x = self._gX, y = self._gY, w = f:GetWidth() or 0, h = f:GetHeight() or 0 }
+    end
     return rectOf(self.frame)
 end
 
@@ -585,6 +717,13 @@ function Popout:Pin(silent)
     if self.pinned or not self.pinnable or self.closed then return self end
     self.pinned = true
     self.following = false
+    -- Pinned mid-glide: it stops dead WHERE IT IS. Carrying on to a dock point
+    -- it is no longer docked to would be the panel finishing a journey the user
+    -- just cancelled. The position is taken BEFORE the glide is cleared, because
+    -- mid-glide the frame's own GetCenter lags the anchor it was just handed.
+    local at = self:_FrameRect()
+    self.gliding = false
+    self._gX, self._gY = nil, nil
 
     -- Out of the pool: this instance keeps the content it was built with, and
     -- the next request for the key gets a fresh one.
@@ -595,10 +734,9 @@ function Popout:Pin(silent)
     -- anchored to the source it would keep travelling with it, which is the one
     -- thing pinning is supposed to stop.
     local f = self.frame
-    local pr = rectOf(f)
-    if pr then
+    if at then
         f:ClearAllPoints()
-        f:SetPoint("CENTER", UIParent, "CENTER", pr.x, pr.y)
+        f:SetPoint("CENTER", UIParent, "CENTER", at.x, at.y)
     end
 
     -- Draggable ONLY now: a docked popout that could be dragged would fight the
@@ -667,6 +805,7 @@ function Popout:Close(reason)
     if self.closed then return self end
     self.closed = true
     self.following = false
+    self.gliding = false
     self:_StopTick()
 
     local store = storeFor(self.host)
