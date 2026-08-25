@@ -2,87 +2,18 @@ local NS = ...
 local R = NS.Registry
 
 -- ============================================================
--- FRAME + KIT STUBS
--- Panel.lua is UI-facing, so it is loaded here rather than by run.py, after
--- enough of the frame API and the DandersUI kit to build the panel for real.
--- Only the widgets the panel actually reads back are modelled; everything else
--- falls through to a no-op via __index.
+-- KIT + SHELL STUBS
+-- Panel.lua is a CONSUMER of DandersUI's popout shell, so the real Popout.lua
+-- is loaded here too and driven for real -- pooling, pinning, the cross and the
+-- tether all come from it, and a panel test that stubbed them would be testing
+-- a drawing of the thing.
+--
+-- Shape mirrors the runtime: the LIBRARY table is NS.__DandersUI (run.py already
+-- put Fx on it), the HOST is a small table whose __index is the library, and
+-- factories are called on the host. Only the widget surface the panel actually
+-- reads back is modelled; everything else falls through FakeUIFrame's __index.
 -- ============================================================
-local function stubFrame()
-    -- fxIn/fxOut/... are plain values because Fx reads them as booleans; a
-    -- __index fallback would hand back a (truthy) function and Fx.Cancel would
-    -- try to :Stop() it.
-    local f = { _shown = false, _alpha = 1, _scale = 1, _scripts = {}, _points = {}, _w = 0, _h = 0,
-                fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false,
-                fxScale = false }
-    function f:Show() self._shown = true end
-    function f:Hide() self._shown = false end
-    function f:IsShown() return self._shown end
-    function f:SetShown(v) self._shown = v and true or false end
-    function f:SetAlpha(v) self._alpha = v end
-    function f:GetAlpha() return self._alpha end
-    -- Real values, because Fx.ScaleTo rests wherever it is put: the hover lift
-    -- is only observable as the scale it leaves behind.
-    function f:SetScale(v) self._scale = v end
-    function f:GetScale() return self._scale end
-    function f:SetVertexColor(r, g, b, a) self._vertex = { r, g, b, a } end
-    function f:SetSize(w, h) self._w, self._h = w, h end
-    function f:SetWidth(w) self._w = w end
-    function f:SetHeight(h) self._h = h end
-    function f:GetWidth() return self._w end
-    function f:GetHeight() return self._h end
-    function f:GetSize() return self._w, self._h end
-    function f:GetCenter() return 0, 0 end
-    function f:CreateTexture() return stubFrame() end
-    function f:CreateAnimationGroup() return nil end     -- Fx takes its headless path
-    function f:ClearAllPoints() wipe(self._points) end
-    function f:SetPoint(...) self._points[#self._points + 1] = { ... } end
-    function f:SetScript(name, fn) self._scripts[name] = fn end
-    function f:GetScript(name) return self._scripts[name] end
-    function f:SetEnabled(v) self._enabled = v and true or false end
-    function f:IsEnabled() return self._enabled ~= false end
-    return setmetatable(f, { __index = function() return function() end end })
-end
-
--- 7px per character, as in test_proxy, so the measured label columns are
--- deterministic.
-local function stubFontString()
-    local f = stubFrame()
-    f._text = ""
-    function f:SetText(t) self._text = t or "" end
-    function f:GetText() return self._text end
-    function f:GetStringWidth() return 7 * #self._text end
-    function f:GetStringHeight() return 12 end
-    -- Recorded: whether a caption clips or wraps is the difference between a
-    -- long string staying in its row and falling through the one below.
-    function f:SetWordWrap(v) self._wordWrap = v and true or false end
-    return f
-end
-
--- The dropdown surface the panel actually drives: a caption override, an
--- option set that can be swapped, and the enable state.
-local function stubDropdown(opts)
-    local d = stubFrame()
-    d._opts = opts or {}
-    d._options = d._opts.options
-    d._enabled = true
-    -- The kit always hands the opener button back on the container
-    -- (container.opener); the panel reaches through it for the caption's
-    -- FontString.
-    d.opener = stubFrame()
-    d.opener.Text = stubFontString()
-    function d:SetDisplayOverride(text) self._override = text end
-    function d:UpdateText() end
-    function d:RebuildOptions(newOptions) if newOptions then self._options = newOptions end end
-    return d
-end
-
-CreateFrame = function() return stubFrame() end
-GameTooltip = stubFrame()
-GetTime = function() return 0 end
-IsShiftKeyDown = function() return false end
-IsControlKeyDown = function() return false end
-C_Timer = { After = function() end }     -- the header's deferred re-measure never fires
+local KIT = NS.__DandersUI
 
 local COLORS = {
     textDim = { r = 0.5, g = 0.5, b = 0.5 }, text = { r = 0.9, g = 0.9, b = 0.9 },
@@ -90,76 +21,136 @@ local COLORS = {
     border  = { r = 0.25, g = 0.25, b = 0.25 }, anchored = { r = 0.55, g = 0.4, b = 0.85 },
     anchorRoot = { r = 0, g = 1, b = 0 }, danger = { r = 0.8, g = 0.2, b = 0.2 },
 }
-NS.UI = {
-    MEDIA = "", Colors = COLORS,
-    Space = { section = 10 }, RowGap = 14, RowGapTight = 8,
-    RowHeight = { groupTitle = 26 },
-    GetAccent = function() return COLORS.accent end,
-    CreatePanelBackdrop = function() end,
-    CreateElementBackdrop = function() end,
-    CreateLabel = function(_, _, opts)
-        local fs = stubFontString()
-        if opts and opts.text then fs:SetText(opts.text) end
-        return fs
-    end,
-    CreateButton = function(_, _, opts)
-        local b = stubFrame()
-        b._opts = opts
-        if opts and opts.width then b._w = opts.width end
-        function b:SetText(t) self._text = t end
-        return b
-    end,
-    CreateGlyphButton = function(_, _, opts)
-        local b = stubFrame()
-        b._opts = opts
-        if opts and opts.size then b._w, b._h = opts.size, opts.size end
-        if opts and opts.width then b._w = opts.width end
-        if opts and opts.height then b._h = opts.height end
-        -- The kit's glyph texture, which the panel re-anchors to make room for
-        -- the grip dots beside it.
-        b.Icon = stubFrame()
-        return b
-    end,
-    CreateEditBox = function(_, _, opts)
-        local e = stubFrame()
-        e._opts = opts
-        function e:GetText() return "0" end
-        function e:Refresh() end
-        return e
-    end,
-    CreateDropdown = function(_, _, opts) return stubDropdown(opts) end,
-    CreateGroupBox = function(_, _, opts)
-        local box = stubFrame()
-        box._opts = opts
-        box.content = stubFrame()
-        box.title = stubFontString()
-        box.title:SetText(opts and opts.title or "")
-        -- The real box is pad + title + content + pad; mirrored so the panel's
-        -- measured height is the one the kit would give it.
-        local pad = (opts and opts.padding) or 10
-        function box:SetContentHeight(h)
-            self.content:SetHeight(h)
-            self:SetHeight(pad + 26 + h + pad)
-        end
-        box:SetContentHeight(1)
-        return box
-    end,
-}
+KIT.MEDIA = ""
+KIT.Colors = COLORS
+KIT.Space = { section = 10 }
+KIT.RowGap = 14
+KIT.RowGapTight = 8
+KIT.RowHeight = { groupTitle = 26, checkbox = 35 }
 
--- Session/Proxy stand-ins: everything the panel calls is recorded rather than
--- performed, so what is under test is the panel's own wiring.
+function KIT:GetAccent() return COLORS.accent end
+function KIT:CreatePanelBackdrop() end
+function KIT:CreateElementBackdrop() end
+
+-- A FontString that records whether its caption clips or wraps: the difference
+-- between a long string staying in its row and falling through the one below.
+local function stubFontString(text)
+    local fs = FakeUIFrame()
+    fs:SetText(text or "")
+    function fs:SetWordWrap(v) self._wordWrap = v and true or false end
+    return fs
+end
+
+function KIT:CreateLabel(_, opts)
+    return stubFontString(opts and opts.text)
+end
+
+-- Every button ever built by the panel, so "the panel has no session verbs on
+-- it" can be asserted over the whole set rather than over the handful of fields
+-- the panel happens to keep.
+local builtButtons = {}
+local function stubButton(opts, w, h)
+    local b = FakeUIFrame(w or (opts and opts.width) or 0, h or (opts and opts.height) or 0)
+    b._opts = opts
+    b:Show()
+    return b
+end
+function KIT:CreateButton(_, opts)
+    builtButtons[#builtButtons + 1] = opts
+    return stubButton(opts)
+end
+function KIT:CreateGlyphButton(_, opts)
+    local b = stubButton(opts, opts and (opts.width or opts.size), opts and (opts.height or opts.size))
+    -- The kit's glyph texture, which the panel re-anchors to make room for the
+    -- grip dots beside it.
+    b.Icon = FakeUIFrame()
+    return b
+end
+function KIT:CreateCloseButton(_, opts) return stubButton(opts, 18, 18) end
+
+function KIT:CreateEditBox(_, opts)
+    local e = FakeUIFrame(opts and opts.width or 0, 20)
+    e._opts = opts
+    e:SetText("0")
+    function e:Refresh() self:SetText(tostring((opts.get and opts.get()) or 0)) end
+    return e
+end
+
+-- The dropdown surface the panel actually drives: a caption override, an option
+-- set that can be swapped, and the enable state.
+function KIT:CreateDropdown(_, opts)
+    local d = FakeUIFrame()
+    d._opts = opts or {}
+    d._options = d._opts.options
+    d.opener = FakeUIFrame()
+    d.opener.Text = stubFontString()
+    function d:SetDisplayOverride(text) self._override = text end
+    function d:UpdateText() end
+    function d:RebuildOptions(newOptions) if newOptions then self._options = newOptions end end
+    -- What "opening the menu" is, headlessly: the kit calls optionsFunc on the
+    -- opener's click and rebuilds from what comes back.
+    function d:Open() if self._opts.optionsFunc then self:RebuildOptions(self._opts.optionsFunc()) end end
+    return d
+end
+
+local groupBoxes = 0
+function KIT:CreateGroupBox(_, opts)
+    groupBoxes = groupBoxes + 1
+    local box = FakeUIFrame()
+    box._opts = opts
+    box.content = FakeUIFrame()
+    box.title = stubFontString(opts and opts.title or "")
+    -- The real box is pad + title + content + pad; mirrored so the panel's
+    -- measured height is the one the kit would give it.
+    local pad = (opts and opts.padding) or 10
+    function box:SetContentHeight(h)
+        self.content:SetHeight(h)
+        self:SetHeight(pad + 26 + h + pad)
+    end
+    box:SetContentHeight(1)
+    return box
+end
+
+-- The host: hooks (the shell reads the Pin tooltip out of it) plus the library
+-- behind __index.
+NS.UI = setmetatable({ hooks = { L = NS.L } }, { __index = KIT })
+
+-- ---- WoW globals ---------------------------------------------------
+CreateFrame = function() return FakeUIFrame() end
+GameTooltip = FakeUIFrame()
+GetTime = function() return 0 end
+IsShiftKeyDown = function() return false end
+IsControlKeyDown = function() return false end
+-- Fires immediately: the shell's beam/exit sequencing is about ORDER, and a
+-- headless run wants that order in one frame.
+C_Timer = { After = function(_, fn) fn() end }
+
+-- ---- Session / Proxy stand-ins -------------------------------------
+-- Everything the panel calls is recorded rather than performed, so what is
+-- under test is the panel's own wiring -- and, crucially, WHICH element each
+-- control carried.
 local calls = {}
 local hover = nil
+local proxies = {}
+local unlockFrame = FakeUIFrame(1920, 1080, 0, 0)
+unlockFrame:Show()
+
 NS.Proxy = {
-    proxies = {},
-    GetUnlockFrame = function() return stubFrame() end,
+    proxies = proxies,
+    GetUnlockFrame = function() return unlockFrame end,
     LinkHover = function() return hover end,
     RefreshAll = function() end,
+    Highlight = function() end,
 }
 NS.Session = {
-    selected = nil, linking = nil,
-    IsActive = function() return true end,
-    IsSuspended = function() return false end,
+    selected = nil, linking = nil, active = true, suspended = false,
+    IsActive = function(self) return self.active end,
+    IsSuspended = function(self) return self.suspended end,
+    Select = function(self, id)
+        self.selected = id
+        calls[#calls + 1] = { "select", id }
+        NS.Panel:Refresh()
+    end,
     BeginLink = function(self, el, mode)
         calls[#calls + 1] = { "begin", el.id, mode }
         self.linking = { id = el.id, mode = mode or "primary" }
@@ -169,23 +160,35 @@ NS.Session = {
     SetAnchorSpec = function(_, el, changes) calls[#calls + 1] = { "spec", el.id, changes } end,
     AnchorInPlace = function(_, el, t) calls[#calls + 1] = { "anchor", el.id, t } end,
     SetFallback = function(_, el, t) calls[#calls + 1] = { "fallback", el.id, t } end,
+    ClearFallback = function(_, el) calls[#calls + 1] = { "clearfallback", el.id } end,
+    SetXY = function(_, el, x, y) calls[#calls + 1] = { "setxy", el.id, x, y } end,
+    SetAnchorPoint = function(_, el, p) calls[#calls + 1] = { "point", el.id, p } end,
+    Nudge = function(_, el, dx, dy) calls[#calls + 1] = { "nudge", el.id, dx, dy } end,
+    Center = function(_, el) calls[#calls + 1] = { "center", el.id } end,
+    Reset = function(_, el) calls[#calls + 1] = { "reset", el.id } end,
+    Detach = function(_, el) calls[#calls + 1] = { "detach", el.id } end,
+    CopyToTwin = function(_, el) calls[#calls + 1] = { "copytwin", el.id } end,
 }
 NS.Lib = NS.Lib or { callbacks = { Fire = function() end } }
+
+load_ui_file("Popout.lua")
 load_addon_file("Picker.lua")
 load_addon_file("Panel.lua")
-local Pn, Sess = NS.Panel, NS.Session
+local Pn, Sess, Proxy = NS.Panel, NS.Session, NS.Proxy
 local L = NS.L
 
 local wasReady = R.ready
 R.ready = true
-NS.db = { showHiddenMovers = true, panelSide = "auto", addons = {} }
+NS.db = { showHiddenMovers = true, panelSide = "auto", autoPinPanels = false, addons = {} }
 
-local function elDef(pos)
-    return { title = "x", frame = FakeFrame(960, 540, 100, 40),
-             getPos = function() return pos end, onChanged = function() end }
+local function elDef(pos, extra)
+    local def = { title = "x", frame = FakeFrame(960, 540, 100, 40),
+                  getPos = function() return pos end, onChanged = function() end }
+    for k, v in pairs(extra or {}) do def[k] = v end
+    return def
 end
 
-R:RegisterAddon("P", { title = "P" })
+R:RegisterAddon("P", { title = "Panels" })
 local freePos = { point = "CENTER", x = 0, y = 0 }
 local childPos = { point = "CENTER", x = 0, y = 0 }
 R:Register("P", "host", elDef({ point = "CENTER", x = 200, y = 0 }))
@@ -193,132 +196,195 @@ R:Register("P", "spare", elDef({ point = "CENTER", x = -200, y = 0 }))
 R:Register("P", "free", elDef(freePos))
 R:Register("P", "child", elDef(childPos))
 
+-- Proxies near the screen centre, so the dock-side solver has a side that fits
+-- and the panel never falls back to the screen-edge flip.
+local function proxyFor(id, x, y)
+    local b = FakeUIFrame(80, 40, 960 + (x or 0), 540 + (y or 0))
+    b:Show()
+    proxies[id] = b
+    return b
+end
+proxyFor("P:host", 200, 0)
+proxyFor("P:spare", -200, 0)
+proxyFor("P:free", 0, 0)
+proxyFor("P:child", 0, -80)
+
+-- Select an element and return the panel that ends up following it.
 local function refresh(id)
     Sess.selected = id
     Pn:Refresh()
-    return Pn.frame
+    return Pn.following
 end
 
--- Free element: the block is all there, the Target row reads "None", and only
--- the primary handle stays live -- it is the way IN to anchoring.
+local function reset()
+    Pn:CloseAll()
+    Sess.selected = nil
+    Sess.linking = nil
+    wipe(calls)
+end
+
+-- ============================================================
+-- 1. FREE ELEMENT: the block is all there, the Target row reads "None", and
+-- only the primary handle stays live -- it is the way IN to anchoring.
+-- ============================================================
 do
-    local f = refresh("P:free")
+    local po = refresh("P:free")
+    check(po ~= nil, "free: selecting an element opens a following panel")
+    local ui = po.ui
+    eq(po:GetTitle(), R:Get("P:free").title, "free: the shell title bar names the element")
+    eq(ui.addon:GetText(), "Panels", "free: the addon line names the addon")
+    check(not po:IsPinned(), "free: a freshly opened panel follows, it is not pinned")
+
     -- The Target row's empty state TEACHES: the word plus the chain glyph
     -- inline, so the sentence points at the handle beside it. The Backup row
     -- stays a bare "None" -- it is greyed here and has no gesture to offer.
-    local cap = f.targetRow.picker._override
+    local cap = ui.targetRow.picker._override
     check(cap:find("None", 1, true) == 1, "free: the target caption still opens with None")
     check(cap:find("|TInterface\\AddOns\\DandersMover\\Media\\link.tga:12:12|t", 1, true) ~= nil,
         "free: the target caption carries the chain glyph inline")
     check(cap:find("link", 1, true) ~= nil, "free: the target caption names the gesture")
-    eq(f.backupRow.picker._override, L["None"], "free: backup reads None")
+    eq(ui.backupRow.picker._override, L["None"], "free: backup reads None")
     -- ...and that caption has to CLIP. Word wrap on a both-edges-anchored
     -- FontString would put the overflow on a second line, straight through the
     -- row below it.
-    eq(f.targetRow.picker.opener.Text._wordWrap, false, "free: the target caption clips, not wraps")
-    eq(f.backupRow.picker.opener.Text._wordWrap, false, "free: the backup caption clips, not wraps")
-    check(f.targetRow.handle:IsEnabled(), "free: primary handle stays enabled")
-    check(not f.backupRow.handle:IsEnabled(), "free: backup handle disabled")
-    check(f.backupRow.picker._enabled == false, "free: backup picker disabled")
-    check(f.edgeDrop._enabled == false and f.alignDrop._enabled == false, "free: seat pair disabled")
-    eq(f.edgeLabel:GetText(), L["Edge"], "free: seat labels default to Edge/Align")
-    eq(f.alignLabel:GetText(), L["Align"], "free: align label")
-    eq(f.targetRow.label:GetText(), L["Target"], "free: target row is labelled")
-    eq(f.backupRow.label:GetText(), L["Backup"], "free: backup row is labelled")
-    eq(f.anchorBox.title:GetText(), L["Anchor"], "the block is a titled sub-section")
+    eq(ui.targetRow.picker.opener.Text._wordWrap, false, "free: the target caption clips, not wraps")
+    eq(ui.backupRow.picker.opener.Text._wordWrap, false, "free: the backup caption clips, not wraps")
+    check(ui.targetRow.handle:IsEnabled(), "free: primary handle stays enabled")
+    check(not ui.backupRow.handle:IsEnabled(), "free: backup handle disabled")
+    check(ui.backupRow.picker._enabled == false, "free: backup picker disabled")
+    check(ui.edgeDrop._enabled == false and ui.alignDrop._enabled == false, "free: seat pair disabled")
+    eq(ui.edgeLabel:GetText(), L["Edge"], "free: seat labels default to Edge/Align")
+    eq(ui.alignLabel:GetText(), L["Align"], "free: align label")
+    eq(ui.targetRow.label:GetText(), L["Target"], "free: target row is labelled")
+    eq(ui.backupRow.label:GetText(), L["Backup"], "free: backup row is labelled")
+    eq(ui.anchorBox.title:GetText(), L["Anchor"], "the block is a titled sub-section")
     -- An inline dropdown's factory label is hidden, so the kit's usual
     -- label-hover tooltip has nothing to sit on: the OPENER carries one.
-    eq(f.targetRow.picker.openerTooltip.title, L["Target"], "the target opener names itself")
-    eq(f.backupRow.picker.openerTooltip.title, L["Backup"], "the backup opener names itself")
-    eq(f.targetRow.handle._opts.tooltip.lines[1], L["Drag onto another mover to attach"],
+    eq(ui.targetRow.picker.openerTooltip.title, L["Target"], "the target opener names itself")
+    eq(ui.backupRow.picker.openerTooltip.title, L["Backup"], "the backup opener names itself")
+    eq(ui.targetRow.handle._opts.tooltip.lines[1], L["Drag onto another mover to attach"],
         "the primary handle says what dragging it does")
-    eq(f.backupRow.handle._opts.tooltip.lines[1], L["Drag onto another mover to set the backup anchor"],
+    eq(ui.backupRow.handle._opts.tooltip.lines[1], L["Drag onto another mover to set the backup anchor"],
         "the backup handle says what dragging it does")
+
+    -- Both label columns are measured to the wider of their pair, so the two
+    -- pickers start on the same column.
+    eq(ui.targetRow.label:GetWidth(), ui.backupRow.label:GetWidth(), "Target/Backup share a label column")
+    eq(ui.edgeLabel:GetWidth(), ui.alignLabel:GetWidth(), "Edge/Align share a label column")
 end
 
--- Both label columns are measured to the wider of their pair, so the two
--- pickers start on the same column.
+-- ============================================================
+-- 2. THE PANEL HOLDS ELEMENT CONTENT ONLY
+-- The session verbs moved to the legend strip: with several panels pinned at
+-- once, an Undo button on each one would be the same button drawn many times.
+-- ============================================================
 do
-    local f = Pn.frame
-    eq(f.targetRow.label:GetWidth(), f.backupRow.label:GetWidth(), "Target/Backup share a label column")
-    eq(f.edgeLabel:GetWidth(), f.alignLabel:GetWidth(), "Edge/Align share a label column")
+    local ui = Pn.following.ui
+    check(ui.btnUndo == nil and ui.btnRedo == nil, "verbs: no undo/redo on the panel")
+    check(ui.btnSave == nil and ui.btnDiscard == nil, "verbs: no save/discard on the panel")
+    check(ui.btnSettings == nil, "verbs: no Settings button on the panel")
+    local banned = { [L["Undo"]] = true, [L["Redo"]] = true, [L["Save & Exit"]] = true,
+                     [L["Discard"]] = true, [L["Settings"]] = true }
+    local found
+    for _, opts in ipairs(builtButtons) do
+        if opts and opts.text and banned[opts.text] then found = opts.text end
+    end
+    eq(found, nil, "verbs: no session verb was built anywhere in the panel")
+    -- What IS there is element content.
+    check(ui.btnCenter and ui.btnReset and ui.btnDetach, "content: Center/Reset/Detach are still here")
+    check(ui.btnCopy ~= nil, "content: the copy-to-twin row is still here")
+    check(ui.btnConfigure ~= nil, "content: Configure is still here")
+    check(not ui.btnConfigure:IsShown(), "content: ...and hidden for an element with no openSettings")
 end
 
--- Anchoring must not change the panel's height: every row is always there.
+-- ============================================================
+-- 3. ANCHORED: the height does not change, and the caption names the target.
+-- ============================================================
 local freeH
 do
-    freeH = Pn.frame:GetHeight()
+    freeH = Pn.following.content:GetHeight()
     childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
-    local f = refresh("P:child")
-    eq(f:GetHeight(), freeH, "anchoring does not resize the panel")
+    local po = refresh("P:child")
+    local ui = po.ui
+    eq(po.content:GetHeight(), freeH, "anchoring does not resize the panel")
     -- Anchored, the caption is the bare target name: the teaching line is the
     -- EMPTY state's job and would be noise once the row has an answer.
-    eq(f.targetRow.picker._override, R:Get("P:host").title, "anchored: target names the target")
-    check(f.targetRow.picker._override:find("|T", 1, true) == nil,
+    eq(ui.targetRow.picker._override, R:Get("P:host").title, "anchored: target names the target")
+    check(ui.targetRow.picker._override:find("|T", 1, true) == nil,
         "anchored: no inline glyph in the caption")
-    check(f.backupRow.picker._enabled, "anchored: backup picker enabled")
-    check(f.backupRow.handle:IsEnabled(), "anchored: backup handle enabled")
-    check(f.edgeDrop._enabled and f.alignDrop._enabled, "anchored: seat pair enabled")
-    eq(f.edgeDrop._opts.get(), "bottom", "edge reads the record")
-    eq(f.alignDrop._opts.get(), "start", "align reads the record")
-    f.edgeDrop._opts.set("top")
+    check(ui.backupRow.picker._enabled, "anchored: backup picker enabled")
+    check(ui.backupRow.handle:IsEnabled(), "anchored: backup handle enabled")
+    check(ui.edgeDrop._enabled and ui.alignDrop._enabled, "anchored: seat pair enabled")
+    eq(ui.edgeDrop._opts.get(), "bottom", "edge reads the record")
+    eq(ui.alignDrop._opts.get(), "start", "align reads the record")
+    ui.edgeDrop._opts.set("top")
     local last = calls[#calls]
-    check(last[1] == "spec" and last[3].edge == "top", "outside mode writes `edge`")
+    check(last[1] == "spec" and last[2] == "P:child" and last[3].edge == "top",
+        "outside mode writes `edge`, for the panel's own element")
 end
 
--- Point mode: the same pair of dropdowns, relabelled, with the 9 anchor points.
+-- ============================================================
+-- 4. POINT MODE: the same pair of dropdowns, relabelled, with the 9 points.
+-- ============================================================
 do
     childPos.anchor = { target = "P:host", mode = "point", point = "TOPLEFT",
                         relPoint = "BOTTOMLEFT", offsetX = 0, offsetY = 0 }
-    local f = refresh("P:child")
-    eq(f.edgeLabel:GetText(), L["Point"], "point mode: left label is Point")
-    eq(f.alignLabel:GetText(), L["Rel point"], "point mode: right label is Rel point")
-    eq(f.edgeDrop._options.TOPLEFT, "TOPLEFT", "point mode: the 9 points are the option set")
-    eq(f.edgeDrop._opts.get(), "TOPLEFT", "point reads the record")
-    eq(f.alignDrop._opts.get(), "BOTTOMLEFT", "relPoint reads the record")
-    f.alignDrop._opts.set("TOP")
+    local po = refresh("P:child")
+    local ui = po.ui
+    eq(ui.edgeLabel:GetText(), L["Point"], "point mode: left label is Point")
+    eq(ui.alignLabel:GetText(), L["Rel point"], "point mode: right label is Rel point")
+    eq(ui.edgeDrop._options.TOPLEFT, "TOPLEFT", "point mode: the 9 points are the option set")
+    eq(ui.edgeDrop._opts.get(), "TOPLEFT", "point reads the record")
+    eq(ui.alignDrop._opts.get(), "BOTTOMLEFT", "relPoint reads the record")
+    ui.alignDrop._opts.set("TOP")
     local last = calls[#calls]
     check(last[1] == "spec" and last[3].relPoint == "TOP" and last[3].align == nil,
         "point mode writes `relPoint`, not `align`")
-    eq(f:GetHeight(), freeH, "point mode does not resize the panel either")
+    eq(po.content:GetHeight(), freeH, "point mode does not resize the panel either")
     -- ...and back, so the swap is not one-way.
     childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
-    f = refresh("P:child")
-    eq(f.edgeLabel:GetText(), L["Edge"], "back to outside mode: labels swap back")
-    eq(f.edgeDrop._options.right, L["Right"], "back to outside mode: edges are the option set")
+    po = refresh("P:child")
+    eq(po.ui.edgeLabel:GetText(), L["Edge"], "back to outside mode: labels swap back")
+    eq(po.ui.edgeDrop._options.right, L["Right"], "back to outside mode: edges are the option set")
 end
 
--- The two handles run the same gesture with different modes, and both end it
--- on whatever the cursor was over.
+-- ============================================================
+-- 5. LINK HANDLES: the same gesture with different modes, ended on whatever
+-- the cursor was over.
+-- ============================================================
 do
-    local f = refresh("P:child")
+    local ui = refresh("P:child").ui
     wipe(calls)
-    f.targetRow.handle:GetScript("OnMouseDown")(f.targetRow.handle, "LeftButton")
+    ui.targetRow.handle:GetScript("OnMouseDown")(ui.targetRow.handle, "LeftButton")
     eq(calls[1][3], "primary", "the target handle begins a PRIMARY link")
+    eq(calls[1][2], "P:child", "...for the panel's own element")
     hover = "P:spare"
-    f.targetRow.handle:GetScript("OnMouseUp")(f.targetRow.handle, "LeftButton")
+    ui.targetRow.handle:GetScript("OnMouseUp")(ui.targetRow.handle, "LeftButton")
     check(calls[2][1] == "end" and calls[2][2] == "P:spare", "release ends the link on the hovered target")
 
     wipe(calls)
-    f.backupRow.handle:GetScript("OnMouseDown")(f.backupRow.handle, "LeftButton")
+    ui.backupRow.handle:GetScript("OnMouseDown")(ui.backupRow.handle, "LeftButton")
     eq(calls[1][3], "fallback", "the backup handle begins a FALLBACK link")
-    f.backupRow.handle:GetScript("OnMouseUp")(f.backupRow.handle, "LeftButton")
+    ui.backupRow.handle:GetScript("OnMouseUp")(ui.backupRow.handle, "LeftButton")
     check(calls[2][1] == "end", "the backup release ends the same gesture")
 
     -- Right-click during a gesture cancels from either handle.
     wipe(calls)
     Sess.linking = { id = "P:child", mode = "primary" }
-    f.backupRow.handle:GetScript("OnMouseDown")(f.backupRow.handle, "RightButton")
+    ui.backupRow.handle:GetScript("OnMouseDown")(ui.backupRow.handle, "RightButton")
     eq(calls[1][1], "cancel", "right-click cancels")
     hover = nil
+    Sess.linking = nil
 end
 
--- The handles read as grips: dots beside the chain, and a hover state that
--- lifts, brightens and takes the move cursor. Both handles get the same
--- treatment -- they are the same gesture.
+-- ============================================================
+-- 6. THE HANDLES READ AS GRIPS: dots beside the chain, and a hover that lifts,
+-- brightens and takes the move cursor. Both handles get the same treatment --
+-- they are the same gesture.
+-- ============================================================
 do
-    local f = refresh("P:free")
-    for _, row in ipairs({ f.targetRow, f.backupRow }) do
+    local ui = refresh("P:free").ui
+    for _, row in ipairs({ ui.targetRow, ui.backupRow }) do
         local h = row.handle
         check(h.Grip ~= nil, "the handle carries grip dots beside the chain")
         check(h:GetScript("OnEnter") and h:GetScript("OnLeave"), "the handle has hover scripts")
@@ -326,8 +392,8 @@ do
     end
     -- The picker must NOT be pinned to the handle: a lift would drag it along.
     local pinnedToHandle = false
-    for _, p in ipairs(f.targetRow.picker._points) do
-        if p[2] == f.targetRow.handle then pinnedToHandle = true end
+    for _, p in ipairs(ui.targetRow.picker._points) do
+        if p[2] == ui.targetRow.handle then pinnedToHandle = true end
     end
     check(not pinnedToHandle, "the picker is anchored to the row, not to the lifting handle")
 end
@@ -336,8 +402,8 @@ end
 -- out. SetCursor is probed and pcall'd, so neither a missing path nor a
 -- throwing API may escape into the hover.
 do
-    local f = refresh("P:free")
-    local h = f.targetRow.handle
+    local ui = refresh("P:free").ui
+    local h = ui.targetRow.handle
     local cur = {}
     -- Probe surface: a texture whose SetTexture answers "not false", i.e. the
     -- cursor file resolved.
@@ -374,7 +440,7 @@ do
 
     -- A greyed handle refuses the gesture, so it must not advertise it.
     cur = {}
-    local b = f.backupRow.handle
+    local b = ui.backupRow.handle
     check(not b:IsEnabled(), "free: the backup handle is the disabled case")
     b:GetScript("OnEnter")(b)
     eq(b:GetScale(), 1, "a disabled handle does not lift")
@@ -384,25 +450,296 @@ do
     SetCursor, ResetCursor = nil, nil
 end
 
--- The backup row names its own target, and the Target row says so when the
+-- ============================================================
+-- 7. THE BACKUP ROW names its own target, and the Target row says so when the
 -- backup is the block actually holding the element.
+-- ============================================================
 do
     childPos.anchor = { target = "P:host", edge = "bottom", align = "start",
                         offsetX = 0, offsetY = 0,
                         fallback = { target = "P:spare", edge = "bottom", align = "start",
                                      offsetX = 0, offsetY = 0 } }
-    local f = refresh("P:child")
-    eq(f.backupRow.picker._override, R:Get("P:spare").title, "backup row names the backup target")
-    check(f.targetRow.picker._override:find(L["(backup)"], 1, true) == nil,
+    local ui = refresh("P:child").ui
+    eq(ui.backupRow.picker._override, R:Get("P:spare").title, "backup row names the backup target")
+    check(ui.targetRow.picker._override:find(L["(backup)"], 1, true) == nil,
         "primary available: no (backup) marker")
     -- Hide the primary: the backup takes over and the Target row says which.
     R:Get("P:host").frame._shown = false
-    f = refresh("P:child")
-    check(f.targetRow.picker._override:find(L["(backup)"], 1, true) == 1,
+    ui = refresh("P:child").ui
+    check(ui.targetRow.picker._override:find(L["(backup)"], 1, true) == 1,
         "backup driving: the Target row is marked (backup)")
     R:Get("P:host").frame._shown = true
+    childPos.anchor = nil
 end
 
+reset()
+
+-- ============================================================
+-- 8. MULTI-PIN
+-- Two pinned panels bound to two different elements, while the selection has
+-- moved on to a third. Each one shows ITS OWN element and each control acts on
+-- ITS OWN element -- the whole point of building on per-instance bindings.
+-- ============================================================
+do
+    local a = refresh("P:free")
+    a:Pin()
+    check(a:IsPinned(), "multi: the first panel is pinned")
+
+    local b = refresh("P:child")
+    check(b ~= a, "multi: selecting another element opens a FRESH panel")
+    check(not b:IsPinned(), "multi: ...which follows until it is pinned too")
+    b:Pin()
+
+    local c = refresh("P:host")
+    check(c ~= a and c ~= b, "multi: and a third, still following")
+    eq(#Pn.live, 3, "multi: three panels are live at once")
+    eq(Sess.selected, "P:host", "multi: the selection is on the third element")
+
+    -- Each panel reports its own element.
+    eq(a.el.id, "P:free", "multi: panel A stayed bound to its element")
+    eq(b.el.id, "P:child", "multi: panel B stayed bound to its element")
+    eq(a:GetTitle(), R:Get("P:free").title, "multi: A's title bar names A's element")
+    -- A is free, B is anchored: the two panels are showing genuinely different
+    -- states at the same time.
+    childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
+    Pn:Refresh()
+    check(a.ui.targetRow.picker._override:find("None", 1, true) == 1, "multi: A still reads as free")
+    eq(b.ui.targetRow.picker._override, R:Get("P:host").title, "multi: B reads as anchored")
+    check(a.ui.edgeDrop._enabled == false, "multi: A's seat pair is greyed")
+    check(b.ui.edgeDrop._enabled, "multi: B's seat pair is live")
+
+    -- Each control carries its own element, not the selection.
+    wipe(calls)
+    a.ui.targetRow.picker._opts.set("P:spare")
+    check(calls[1][1] == "anchor" and calls[1][2] == "P:free", "multi: A's target picker acts on A")
+    b.ui.xBox._opts.onCommit(7)
+    check(calls[2][1] == "setxy" and calls[2][2] == "P:child" and calls[2][3] == 7,
+        "multi: B's X box acts on B")
+    a.ui.nudgeButtons[1]._opts.onClick()
+    check(calls[3][1] == "nudge" and calls[3][2] == "P:free", "multi: A's nudge acts on A")
+    c.ui.btnCenter._opts.onClick()
+    check(calls[4][1] == "center" and calls[4][2] == "P:host", "multi: the follower acts on the selection")
+    b.ui.btnDetach._opts.onClick()
+    check(calls[5][1] == "detach" and calls[5][2] == "P:child", "multi: B's Detach acts on B")
+
+    -- The tether beam's far end is each panel's OWN mover, not what it docked to.
+    eq(a.tetherSource(a), proxies["P:free"], "multi: A tethers back to A's proxy")
+    eq(b.tetherSource(b), proxies["P:child"], "multi: B tethers back to B's proxy")
+
+    childPos.anchor = nil
+end
+
+-- Crossing a PINNED panel closes that one only; the selection is untouched.
+do
+    local pinnedA, pinnedB
+    for _, po in ipairs(Pn.live) do
+        if po.elId == "P:free" then pinnedA = po elseif po.elId == "P:child" then pinnedB = po end
+    end
+    local before = Sess.selected
+    pinnedA.closeBtn._opts.onClick()
+    check(pinnedA.closed, "cross/pinned: the pinned panel closed")
+    eq(Sess.selected, before, "cross/pinned: the selection is intact")
+    check(not pinnedB.closed and not Pn.following.closed, "cross/pinned: the others are untouched")
+    eq(#Pn.live, 2, "cross/pinned: only that one left the live set")
+end
+
+-- Crossing the FOLLOWING panel is "I am done": it deselects and closes.
+do
+    local following = Pn.following
+    check(following ~= nil, "cross/following: there is one to cross")
+    following.closeBtn._opts.onClick()
+    check(following.closed, "cross/following: the panel closed")
+    eq(Sess.selected, nil, "cross/following: ...and the element was deselected")
+    check(Pn.following == nil, "cross/following: nothing follows any more")
+    check(not following.frame:IsShown(), "cross/following: the frame is down")
+end
+
+-- ============================================================
+-- 9. SESSION END closes the pinned panels too -- the next session starts clean.
+-- ============================================================
+do
+    check(#Pn.live > 0, "end: a pinned panel is still up going in")
+    Sess.active = false
+    Pn:Refresh()
+    eq(#Pn.live, 0, "end: an inactive session leaves no panel behind")
+    check(Pn.following == nil, "end: and nothing following")
+    Sess.active = true
+end
+
+reset()
+
+-- ============================================================
+-- 10. A PINNED PANEL DIES WITH ITS ELEMENT
+-- It may outlive the selection -- that is what pinning is for -- but not the
+-- thing it is about.
+-- ============================================================
+do
+    R:Register("P", "temp", elDef({ point = "CENTER", x = 40, y = 40 }))
+    proxyFor("P:temp", 40, 40)
+    local po = refresh("P:temp")
+    po:Pin()
+    refresh("P:free")
+    check(not po.closed, "unregister: the pinned panel survives a selection change")
+
+    R:Unregister("P", "temp")
+    proxies["P:temp"] = nil
+    Pn:Refresh()
+    check(po.closed, "unregister: ...but not its element leaving the session")
+    check(not po.frame:IsShown(), "unregister: the frame came down with it")
+end
+
+reset()
+
+-- ============================================================
+-- 11. AUTO-PIN
+-- The gate is DandersMoverDB.autoPinPanels, asked per call by the shell. OFF,
+-- the triggers must do nothing at all -- the pin button is still the way.
+-- ============================================================
+do
+    NS.db.autoPinPanels = false
+    local po = refresh("P:free")
+    po.ui.nudgeButtons[1]._opts.onClick()
+    check(not po:IsPinned(), "autopin off: a nudge does not pin")
+    po.ui.xBox:GetScript("OnEditFocusGained")(po.ui.xBox)
+    check(not po:IsPinned(), "autopin off: taking focus in a coordinate box does not pin")
+    po.ui.targetRow.picker:Open()
+    check(not po:IsPinned(), "autopin off: opening the target picker does not pin")
+    po.ui.edgeDrop:Open()
+    check(not po:IsPinned(), "autopin off: opening the seat pair does not pin")
+    po.ui.targetRow.handle:GetScript("OnMouseDown")(po.ui.targetRow.handle, "LeftButton")
+    check(not po:IsPinned(), "autopin off: taking the link handle does not pin")
+    Sess.linking = nil
+    po.ui.points[1]._opts.onClick()
+    check(not po:IsPinned(), "autopin off: the 9-point picker does not pin")
+    -- The pin BUTTON is the user asking, and is never gated.
+    po.pinBtn._opts.onClick()
+    check(po:IsPinned(), "autopin off: the pin button still pins")
+end
+
+reset()
+
+do
+    NS.db.autoPinPanels = true
+    local po = refresh("P:free")
+    check(not po:IsPinned(), "autopin on: still not pinned merely by opening")
+    po.ui.nudgeButtons[1]._opts.onClick()
+    check(po:IsPinned(), "autopin on: a nudge press pins the panel")
+    eq(calls[#calls][1], "nudge", "autopin on: ...and the nudge still went through")
+
+    -- Each trigger on its own, from a fresh panel each time.
+    local function triggered(name, fire)
+        reset()
+        local p = refresh("P:free")
+        fire(p)
+        check(p:IsPinned(), "autopin on: " .. name .. " pins")
+        Sess.linking = nil
+    end
+    triggered("an edit box taking focus", function(p) p.ui.xBox:GetScript("OnEditFocusGained")(p.ui.xBox) end)
+    triggered("opening the target picker", function(p) p.ui.targetRow.picker:Open() end)
+    triggered("opening the seat pair", function(p) p.ui.edgeDrop:Open() end)
+    triggered("taking the link handle", function(p)
+        p.ui.targetRow.handle:GetScript("OnMouseDown")(p.ui.targetRow.handle, "LeftButton")
+    end)
+    triggered("the 9-point picker", function(p) p.ui.points[1]._opts.onClick() end)
+    NS.db.autoPinPanels = false
+end
+
+reset()
+
+-- ============================================================
+-- 12. THE POOL
+-- One unpinned panel per key: re-selecting must not build a second frame, and
+-- pinning is what makes the next selection build one.
+-- ============================================================
+do
+    local a = refresh("P:free")
+    local before = groupBoxes
+    local b = refresh("P:child")
+    check(a == b, "pool: retargeting the follower reuses the same instance")
+    eq(groupBoxes, before, "pool: ...without a second build")
+    a:Pin()
+    local c = refresh("P:host")
+    check(c ~= a, "pool: once pinned, the next selection gets a new instance")
+    eq(groupBoxes, before + 1, "pool: ...and that one built")
+    eq(#Pn.live, 2, "pool: both are live")
+    -- The element already wearing a pinned panel does not get a second one --
+    -- two panels for one mover is a duplicate, not multi-pin.
+    refresh("P:child")
+    eq(#Pn.live, 1, "pool: an element with a pinned panel gets no duplicate follower")
+    check(Pn.following == nil, "pool: ...the follower stood down instead")
+    check(a:IsPinned() and not a.closed, "pool: the pinned one is what is left")
+end
+
+reset()
+
+-- ============================================================
+-- 13. SUSPEND / RESUME
+-- Combat hides everything and keeps it: the panels come back, they are not
+-- rebuilt.
+-- ============================================================
+do
+    local po = refresh("P:free")
+    po:Pin()
+    refresh("P:child")
+    local built = groupBoxes
+    Sess.suspended = true
+    Pn:Refresh()
+    check(not po.frame:IsShown(), "suspend: the pinned panel is hidden")
+    check(not Pn.following.frame:IsShown(), "suspend: the follower is hidden too")
+    eq(#Pn.live, 2, "suspend: nothing was closed")
+    Sess.suspended = false
+    Pn:Refresh()
+    check(po.frame:IsShown(), "resume: the pinned panel is back")
+    check(Pn.following.frame:IsShown(), "resume: and so is the follower")
+    eq(groupBoxes, built, "resume: nothing was rebuilt")
+end
+
+reset()
+
+-- ============================================================
+-- 14. DOCK SIDE
+-- The mover computes the side itself (it knows what else is on screen) and
+-- forces it on the shell; the panelSide setting overrides that outright.
+-- ============================================================
+do
+    NS.db.panelSide = "left"
+    local po = refresh("P:free")
+    eq(po.side, "left", "panelSide: a forced side wins")
+    eq(po.forcedSide, "left", "panelSide: ...as a forced side on the shell, not a hint")
+    NS.db.panelSide = "right"
+    Pn:Refresh()
+    eq(po.side, "right", "panelSide: and it is recomputed on every refresh")
+    NS.db.panelSide = "auto"
+    Pn:Refresh()
+    check(po.side == "left" or po.side == "right" or po.side == "above" or po.side == "below",
+        "panelSide: auto still lands on a real side")
+    check(po.forcedSide ~= nil, "panelSide: auto is forced too -- the shell must not re-pick")
+end
+
+reset()
+
+-- ============================================================
+-- 15. CONFIGURE
+-- Only for elements whose def offers openSettings, and it opens THAT element's
+-- settings -- not the selected one's.
+-- ============================================================
+do
+    local opened
+    R:Register("P", "cfg", elDef({ point = "CENTER", x = 0, y = 0 },
+        { openSettings = function() opened = "P:cfg" end }))
+    proxyFor("P:cfg", 120, 120)
+    local po = refresh("P:cfg")
+    check(po.ui.btnConfigure:IsShown(), "configure: shown for an element that offers it")
+    po:Pin()
+    refresh("P:free")
+    check(not Pn.following.ui.btnConfigure:IsShown(), "configure: hidden on the panel next door")
+    po.ui.btnConfigure._opts.onClick()
+    eq(opened, "P:cfg", "configure: the pinned panel opened ITS element's settings")
+    R:Unregister("P", "cfg")
+    proxies["P:cfg"] = nil
+end
+
+reset()
 R:UnregisterAddon("P")
 R.ready = wasReady
 NS.db = nil

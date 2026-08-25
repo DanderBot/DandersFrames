@@ -4,24 +4,35 @@ local addonName, NS = ...
 if not NS.Lib then return end
 
 -- ============================================================
--- MINI-PANEL
--- Docks beside the selected proxy on whichever side covers the least (auto),
--- or on the side the user pinned. Parented to the unlock frame so combat
--- suspension hides it for free.
+-- ELEMENT PANEL
+-- One DandersUI popout per element being edited. The shell (host:CreatePopout)
+-- owns the frame, the title bar, the docking, the pin and the tether beam; this
+-- file owns what goes INSIDE it and what closing it means.
 --
--- Deliberately NOT a settings window: it holds only what acts on the SELECTED
--- element plus the session verbs. Editor preferences (snapping, grid size)
--- live behind the cog, because a preference you set once does not belong in a
--- panel you read on every drag.
+-- MULTI-PIN. Selecting a mover opens the POOLED popout, which follows the
+-- selected proxy. Pin it (by hand, or by touching a control while
+-- DandersMoverDB.autoPinPanels is on) and it leaves the pool: it stays on
+-- screen, keeps a beam back to its own mover, and the next selection gets a
+-- fresh following popout. There is no limit on how many are pinned at once.
+--
+-- ⚠ Nothing here may read Session.selected inside a control. `build` runs ONCE
+-- per instance and every closure it creates belongs to THAT instance, so a
+-- control acts on `popout.el` -- the element its own panel is bound to -- which
+-- for a pinned panel is not the selected one and never becomes it again.
+--
+-- Deliberately NOT a settings window, and no longer the session's action bar
+-- either: the verbs that act on the SESSION (save, discard, undo, redo,
+-- settings) live on the legend strip, because they are not about the element
+-- whose panel you happen to have open. What is left is element content only.
 -- ============================================================
-local Pn = {}
+local Pn = { live = {} }
 NS.Panel = Pn
 
 local Registry, Sess, Proxy, Solver, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown = CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown
 local xpcall, geterrorhandler = xpcall, geterrorhandler
-local GetTime, C_Timer = GetTime, C_Timer
 local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber, ipairs, pairs, math.floor, math.max, math.min
+local tremove, wipe = table.remove, wipe
 
 -- The mover's own art, not the kit's (UI.MEDIA): the link glyph ships with this
 -- addon because it is this addon's verb. 64px supersampled TGA so it stays
@@ -33,26 +44,31 @@ local LINK_ICON = MEDIA .. "link"
 -- at 9px. Its ink is only the middle ~half of that canvas, so the drawn square
 -- is wider than the dots look -- the margins are what keep the dots round.
 local GRIP_ICON = MEDIA .. "grip"
+local DEFAULT_ICON = UI.MEDIA .. "DF_Icon"
+
+-- The pool key. One string for every element panel: per host+key the shell
+-- keeps ONE unpinned instance, which is exactly the "one panel follows the
+-- selection" behaviour, and pinning promotes an instance out of it.
+local POPOUT_KEY = "mover.panel"
 
 -- Spacing comes from the theme so this panel keeps the rhythm of every other
 -- DandersUI surface: PAD is the outer padding, GAP the gap between rows of
 -- different kinds, TIGHT the gap inside a run of like things (buttons in a
 -- row, the two X/Y pairs).
--- 260, not the old 236: the anchor block now carries a label column and a drag
+-- 260, not the old 236: the anchor block carries a label column and a drag
 -- handle on the same row as its picker, and at 236 the picker was down to about
--- half the row.
+-- half the row. The shell insets the content by its own PAD, so what is handed
+-- to CreatePopout is the CONTENT width and 260 is what the frame measures.
 local W = 260
 local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
 local CW = W - PAD * 2            -- content width
 local DOCK_GAP = 12               -- panel <-> proxy distance
-local ICON = 24                   -- header icon, drawn from the full 64px source
-local TITLE_W = CW - (ICON + TIGHT - 2)   -- the title column, right of the icon
-local HEADER_LINE = 14            -- fallback line height before the font resolves
-local HEADER_BTN_H = 18           -- the Configure / Settings row under the header
+local ADDON_H = 12                -- the dim addon-name line under the title bar
+local HEADER_BTN_H = 18           -- the Configure row under it
 local BOX_W = 62                  -- X / Y edit boxes
 local NUDGE_CELL, NUDGE_ICON = 22, 14
 local DOT, DOT_GAP = 16, 4        -- 9-point picker cells
-local BTN_H, CTA_H = 20, 22
+local BTN_H = 20
 -- ---- the anchor block --------------------------------------------
 -- Its own group box, so "Anchor" reads as one subject rather than as three
 -- dropdowns that happen to be stacked. UI.Space.section is a PAGE inset and a
@@ -86,10 +102,11 @@ local ACW = CW - ANCHOR_PAD * 2   -- the group box's inner content width
 -- so a disabled label and the disabled dropdown beside it fade to the same depth.
 local DISABLED_ALPHA = 0.4
 local POINTS = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
-
-local function selectedElement()
-    return Sess.selected and Registry:Get(Sess.selected) or nil
-end
+-- Which of the anchor block's two fields a dropdown edits, per mode. The pair
+-- is positional -- left dropdown, right dropdown -- and the mode decides what
+-- each one means.
+local SPEC_KEYS = { outside = { "edge", "align" }, point = { "point", "relPoint" } }
+local SPEC_FALLBACK = { edge = "right", align = "center", point = "CENTER", relPoint = "CENTER" }
 
 local function step() return Solver.NudgeStep(IsShiftKeyDown(), IsControlKeyDown()) end
 
@@ -104,6 +121,15 @@ local function unanchoredCaption()
     return format(L["None — drag %s to link"], "|T" .. LINK_ICON .. ".tga:12:12|t")
 end
 
+-- The anchor mode of whatever element a panel is bound to. Every control that
+-- edits the seat pair asks this rather than a cached flag, because two panels
+-- open at once can be in different modes.
+local function specModeOf(el)
+    if not el then return "outside" end
+    local a = Registry:GetPos(el).anchor
+    return (a and a.mode == "point") and "point" or "outside"
+end
+
 -- ============================================================
 -- GRAB CURSOR
 -- The move cursor while the pointer is over a drag handle: the one affordance
@@ -113,7 +139,7 @@ end
 -- SQUARE where the pointer should be rather than erroring -- so a pcall is not
 -- a guard against a wrong path, only against a missing API. The path is
 -- therefore PROBED first through a throwaway texture: SetTexture answers false
--- for a file that is not in the client, the same idiom Refresh uses to fall
+-- for a file that is not in the client, the same idiom the header uses to fall
 -- back on the addon icon. A probe that fails, or is inconclusive on a stub,
 -- drops the whole affordance rather than risking the square.
 --
@@ -148,7 +174,7 @@ local function buttonRow(parent, y, height, defs)
             text = d.text, width = bw, height = height, onClick = d.onClick,
             style = d.style, tone = d.tone, fitText = false,
         })
-        b:SetPoint("TOPLEFT", PAD + (i - 1) * (bw + TIGHT), y)
+        b:SetPoint("TOPLEFT", (i - 1) * (bw + TIGHT), y)
         out[i] = b
     end
     return out
@@ -156,15 +182,14 @@ end
 
 -- ============================================================
 -- ANCHOR BLOCK LAYOUT
--- Every row is always there now -- an unanchored element greys the ones it has
--- no answer for rather than dropping them, so the block never changes height
--- and the panel never jumps as you anchor and detach. What IS measured here is
--- the label columns: a FontString reads 0 wide until its font resolves, and the
+-- Every row is always there -- an unanchored element greys the ones it has no
+-- answer for rather than dropping them, so the block never changes height and
+-- the panel never jumps as you anchor and detach. What IS measured here is the
+-- label columns: a FontString reads 0 wide until its font resolves, and the
 -- labels also swap with the anchor mode, so the columns are re-measured on every
 -- layout rather than fixed at build.
 --
--- Returns the height the block consumes, gap to the rows below included -- the
--- same trick layoutHeader plays on f.body.
+-- Returns the height the block consumes, gap to the rows below included.
 -- ============================================================
 -- Grey a whole picker row: the kit dims the dropdown itself, the label and the
 -- handle are ours to match. A disabled Button already refuses OnMouseDown, and
@@ -186,20 +211,42 @@ local function labelColumn(a, b, floorW, ceilW)
     return w
 end
 
-local function layoutAnchorBlock(f)
-    labelColumn(f.targetRow.label, f.backupRow.label, LABEL_MIN, LABEL_MAX)
+local function layoutAnchorBlock(ui)
+    labelColumn(ui.targetRow.label, ui.backupRow.label, LABEL_MIN, LABEL_MAX)
     -- The seat pair sits in half a row each, and its labels swap with the mode
     -- ("Rel point" is twice "Align"), so the column is capped at whatever leaves
     -- the dropdown its own minimum rather than at a fixed number.
     local halfW = floor((ACW - GAP) / 2)
-    labelColumn(f.edgeLabel, f.alignLabel, 24, halfW - SPEC_DROP_MIN)
+    labelColumn(ui.edgeLabel, ui.alignLabel, 24, halfW - SPEC_DROP_MIN)
 
     local contentH = ROW_H + TIGHT + SPEC_H + TIGHT + ROW_H
-    f.anchorBox:SetContentHeight(contentH)
-    local h = (f.anchorBox:GetHeight() or contentH) + GAP
-    f.rest:ClearAllPoints()
-    f.rest:SetPoint("TOPLEFT", 0, -h)
+    ui.anchorBox:SetContentHeight(contentH)
+    local h = (ui.anchorBox:GetHeight() or contentH) + GAP
+    ui.rest:ClearAllPoints()
+    ui.rest:SetPoint("TOPLEFT", 0, -h)
     return h
+end
+
+-- Size the X/Y group to its current labels so it stays centred. Both labels
+-- take the wider of the two, so the pairs mirror each other; the boxes give up
+-- width when the labels are long ("Offset X") so the group never overflows.
+local function layoutXY(ui)
+    local lw = max(ui.xLabel:GetStringWidth() or 0, ui.yLabel:GetStringWidth() or 0)
+    ui.xLabel:SetWidth(lw); ui.yLabel:SetWidth(lw)
+    local pair = lw + TIGHT - 2
+    local bw = max(40, floor(min(BOX_W, (CW - GAP) / 2 - pair)))
+    ui.xBox:SetWidth(bw); ui.yBox:SetWidth(bw)
+    ui.xyRow:SetWidth((pair + bw) * 2 + GAP)
+end
+
+-- The addon line is always there; Configure only exists for elements whose def
+-- offers openSettings. Returns the height consumed above the body.
+local function layoutContent(ui, canConfigure)
+    ui.btnConfigure:SetShown(canConfigure)
+    local top = ADDON_H + (canConfigure and (TIGHT + HEADER_BTN_H) or 0) + GAP
+    ui.body:ClearAllPoints()
+    ui.body:SetPoint("TOPLEFT", 0, -top)
+    return top
 end
 
 -- ============================================================
@@ -265,68 +312,55 @@ local function styleHandle(btn)
     end)
 end
 
-local function build()
-    local f = CreateFrame("Frame", "DandersMoverPanel", Proxy:GetUnlockFrame(), "BackdropTemplate")
-    f:SetFrameStrata("DIALOG")
-    f:SetClampedToScreen(true)
-    f:SetWidth(W)
-    UI:CreatePanelBackdrop(f)
-    f:EnableMouse(true)
+-- ============================================================
+-- BUILD
+-- Runs ONCE per popout instance (the shell re-runs it only for a genuinely new
+-- frame), so everything it makes is stored on `po.ui` and every closure it
+-- creates closes over `po` -- never over the selection.
+-- ============================================================
+local function buildPanel(po, content)
+    local ui = {}
+    po.ui = ui
 
-    -- ---- header row 1: icon | full title over the addon name --------
-    -- The title owns the whole content width and may run to two lines, so the
-    -- header's height is not known until Refresh has put a title in it.
-    -- Everything below lives on f.body, which layoutHeader slides down to
-    -- whatever the header measured -- that single anchor is the only thing
-    -- that moves, so the body keeps its build-time offsets.
-    f.icon = f:CreateTexture(nil, "OVERLAY")
-    f.icon:SetSize(ICON, ICON)
-    f.icon:SetPoint("TOPLEFT", PAD, -PAD)
-    f.title = UI:CreateLabel(f, { size = 12, color = UI.Colors.text, width = TITLE_W })
-    -- Two lines is the budget: a title long enough to need a third does not
-    -- belong in a 236px panel.
-    if f.title.SetMaxLines then f.title:SetMaxLines(2) end
-    f.title:SetPoint("TOPLEFT", PAD + ICON + TIGHT - 2, -PAD)
-    f.addon = UI:CreateLabel(f, { size = 10, color = UI.Colors.textDim })
-    f.addon:SetWidth(TITLE_W)
-    f.addon:SetWordWrap(false)
-    f.addon:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -1)
+    -- ---- the addon this element belongs to --------------------------
+    -- The shell's title bar carries the icon and the element's own title; the
+    -- addon name is context under it, muted, one line.
+    ui.addon = UI:CreateLabel(content, { size = 10, color = UI.Colors.textDim })
+    ui.addon:SetWidth(CW)
+    ui.addon:SetWordWrap(false)
+    ui.addon:SetPoint("TOPLEFT", 0, 0)
 
-    -- ---- header row 2: Configure | Settings -------------------------
-    -- Their own row across the content width, so the title above never has to
-    -- give up room to them. Configure is the CONSUMER entry point (the
-    -- selected element's own options page) and exists only for defs that offer
-    -- openSettings; Settings opens the LIB's window, is always there, and
-    -- takes the whole row when Configure is hidden (layoutHeader).
-    f.btnConfigure = UI:CreateButton(f, {
-        text = L["Configure"], height = HEADER_BTN_H, style = "ghost", fitText = false,
+    -- ---- Configure --------------------------------------------------
+    -- The CONSUMER entry point (this element's own options page). Full width,
+    -- and only for defs that offer openSettings -- the session's own Settings
+    -- window lives on the legend strip now, not here.
+    ui.btnConfigure = UI:CreateButton(content, {
+        text = L["Configure"], width = CW, height = HEADER_BTN_H, style = "ghost", fitText = false,
         tooltip = { title = L["Configure"], lines = { L["Open this element's own settings."] } },
         onClick = function()
-            local el = selectedElement()
+            local el = po.el
             if el and el.openSettings then xpcall(el.openSettings, geterrorhandler()) end
         end,
     })
-    f.btnConfigure:Hide()
-    f.btnSettings = UI:CreateButton(f, {
-        text = L["Settings"], height = HEADER_BTN_H, style = "ghost", fitText = false,
-        tooltip = { title = L["Settings"], lines = { L["Snapping, grid and per-addon mover toggles."] } },
-        onClick = function() if NS.Settings then NS.Settings:Toggle() end end,
-    })
+    ui.btnConfigure:SetPoint("TOPLEFT", 0, -(ADDON_H + TIGHT))
+    ui.btnConfigure:Hide()
 
     -- ---- body -------------------------------------------------------
-    local body = CreateFrame("Frame", nil, f)
-    body:SetWidth(W)
-    body:SetPoint("TOPLEFT", 0, 0)          -- layoutHeader re-anchors it
-    f.body = body
+    -- Its own frame so the two header lines above can come and go: these rows
+    -- keep their build-time offsets and only the body's single anchor moves.
+    local body = CreateFrame("Frame", nil, content)
+    body:SetWidth(CW)
+    body:SetPoint("TOPLEFT", 0, 0)          -- layoutContent re-anchors it
+    ui.body = body
 
     -- ---- anchor block ------------------------------------------------
     -- One titled sub-section, three labelled rows: what this element is
     -- anchored TO, how it sits on it, and where it goes when that target is off
     -- screen. Every row is labelled, because three unlabelled dropdowns in a
     -- column tell you nothing about which is which.
-    f.anchorBox = UI:CreateGroupBox(body, { title = L["Anchor"], width = CW, padding = ANCHOR_PAD })
-    f.anchorBox:SetPoint("TOPLEFT", PAD, 0)
-    local ac = f.anchorBox.content
+    ui.anchorBox = UI:CreateGroupBox(body, { title = L["Anchor"], width = CW, padding = ANCHOR_PAD })
+    ui.anchorBox:SetPoint("TOPLEFT", 0, 0)
+    local ac = ui.anchorBox.content
 
     -- ---- Target / Backup rows ----------------------------------------
     -- Both are built by the same helper so they line up without either one
@@ -356,9 +390,12 @@ local function build()
         styleHandle(row.handle)
         row.handle:RegisterForClicks("AnyUp", "AnyDown")
         row.handle:SetScript("OnMouseDown", function(_, button)
-            local el = selectedElement()
+            local el = po.el
             if not el then return end
-            if button == "LeftButton" then Sess:BeginLink(el, o.mode)
+            if button == "LeftButton" then
+                -- Taking hold of the chain is editing: the panel earns its keep.
+                po:AutoPin()
+                Sess:BeginLink(el, o.mode)
             elseif button == "RightButton" and Sess.linking then Sess:CancelLink() end
         end)
         row.handle:SetScript("OnMouseUp", function(_, button)
@@ -378,11 +415,6 @@ local function build()
         -- 20px row. Short captions never showed it; the Target row's empty state
         -- ("None -- drag [chain] to link") is close to the width in English and a
         -- translation will pass it.
-        --
-        -- Caller-side rather than a change to CreateDropdown: every opener in the
-        -- kit is height-fixed, so nothing can WANT two lines, but 216 call sites
-        -- across the options addon is not a blast radius to take on for a
-        -- two-row panel.
         row.picker.opener.Text:SetWordWrap(false)
         row.picker:SetHeight(ROW_H)
         -- Two-point anchored rather than sized, so the picker absorbs whatever
@@ -401,8 +433,9 @@ local function build()
     -- Anchoring without dragging: pick a target and the element stays exactly
     -- where it is (Sess:AnchorInPlace derives the spec that reproduces its
     -- current seat). The list is rebuilt on every open (optionsFunc) because
-    -- what is legal changes with the graph and with what is on screen.
-    f.targetRow = pickerRow(ac, {
+    -- what is legal changes with the graph and with what is on screen -- and
+    -- that same open is one of the auto-pin triggers.
+    ui.targetRow = pickerRow(ac, {
         label = L["Target"], mode = "primary",
         tooltip = { title = L["Target"],
                     lines = { L["What this element is anchored to. Picking one does not move it."] } },
@@ -410,29 +443,30 @@ local function build()
         dropdown = {
             inline = true, searchable = true,
             optionsFunc = function()
-                local el = selectedElement()
+                po:AutoPin()
+                local el = po.el
                 return el and NS.Picker:Options(el) or { _order = {} }
             end,
             get = function()
-                local el = selectedElement(); if not el then return nil end
+                local el = po.el; if not el then return nil end
                 local a = Registry:GetPos(el).anchor
                 return a and a.target or nil
             end,
             set = function(targetId)
-                local el = selectedElement()
+                local el = po.el
                 if el then Sess:AnchorInPlace(el, targetId) end
             end,
         },
     })
-    f.targetRow:SetPoint("TOPLEFT", 0, 0)
-    -- Refresh owns this caption from here on; set once so the opener never
-    -- renders the raw value between build and the Refresh that follows it.
-    f.targetRow.picker:SetDisplayOverride(unanchoredCaption())
+    ui.targetRow:SetPoint("TOPLEFT", 0, 0)
+    -- refreshInstance owns this caption from here on; set once so the opener
+    -- never renders the raw value between build and the refresh that follows it.
+    ui.targetRow.picker:SetDisplayOverride(unanchoredCaption())
 
     -- Where the element goes when the primary target is not on screen. Only
     -- meaningful once there IS a primary, so both the picker and its handle go
     -- grey while the element is free.
-    f.backupRow = pickerRow(ac, {
+    ui.backupRow = pickerRow(ac, {
         label = L["Backup"], mode = "fallback",
         tooltip = { title = L["Backup"],
                     lines = { L["Where this element goes while the target above is off screen."] } },
@@ -440,42 +474,38 @@ local function build()
         dropdown = {
             inline = true, searchable = true,
             optionsFunc = function()
-                local el = selectedElement()
+                po:AutoPin()
+                local el = po.el
                 return el and NS.Picker:Options(el, "fallback") or { _order = {} }
             end,
             get = function()
-                local el = selectedElement(); if not el then return NS.Picker.NONE end
+                local el = po.el; if not el then return NS.Picker.NONE end
                 local a = Registry:GetPos(el).anchor
                 return a and a.fallback and a.fallback.target or NS.Picker.NONE
             end,
             set = function(targetId)
-                local el = selectedElement(); if not el then return end
+                local el = po.el; if not el then return end
                 if targetId == NS.Picker.NONE then Sess:ClearFallback(el) else Sess:SetFallback(el, targetId) end
             end,
         },
     })
-    f.backupRow:SetPoint("TOPLEFT", 0, -(ROW_H + TIGHT + SPEC_H + TIGHT))
-    f.backupRow.picker:SetDisplayOverride(L["None"])
+    ui.backupRow:SetPoint("TOPLEFT", 0, -(ROW_H + TIGHT + SPEC_H + TIGHT))
+    ui.backupRow.picker:SetDisplayOverride(L["None"])
 
     -- ---- the seat: edge/align, or point/relPoint ---------------------
     -- One pair of dropdowns whose SUBJECT follows the anchor's mode, because the
     -- two modes describe a seat with different fields and only one of them is
-    -- ever live. Refresh swaps both the labels and the option sets (specMode).
-    f.specRow = CreateFrame("Frame", nil, ac)
-    f.specRow:SetSize(ACW, SPEC_H)
-    f.specRow:SetPoint("TOPLEFT", 0, -(ROW_H + TIGHT))
+    -- ever live. The refresh swaps both the labels and the option sets.
+    ui.specRow = CreateFrame("Frame", nil, ac)
+    ui.specRow:SetSize(ACW, SPEC_H)
+    ui.specRow:SetPoint("TOPLEFT", 0, -(ROW_H + TIGHT))
     local halfW = floor((ACW - GAP) / 2)
-    -- Which of the anchor block's two fields a dropdown edits, per mode. The
-    -- pair is positional -- left dropdown, right dropdown -- and the mode
-    -- decides what each one means.
-    local SPEC_KEYS = { outside = { "edge", "align" }, point = { "point", "relPoint" } }
-    local SPEC_FALLBACK = { edge = "right", align = "center", point = "CENTER", relPoint = "CENTER" }
     -- The 9 anchor points are API identifiers, not prose -- they read the same
     -- in every locale and the panel already spells them out raw elsewhere, so
     -- the same table serves both point-mode slots.
     local POINT_OPTS = { _order = POINTS }
     for _, p in ipairs(POINTS) do POINT_OPTS[p] = p end
-    f.specOptions = {
+    ui.specOptions = {
         outside = {
             { _order = { "right", "left", "top", "bottom" },
               right = L["Right"], left = L["Left"], top = L["Top"], bottom = L["Bottom"] },
@@ -484,93 +514,101 @@ local function build()
         },
         point = { POINT_OPTS, POINT_OPTS },
     }
-    local function specMode()
-        local el = selectedElement(); if not el then return "outside" end
-        local a = Registry:GetPos(el).anchor
-        return (a and a.mode == "point") and "point" or "outside"
-    end
     local function specDrop(slot)
-        local drop = UI:CreateDropdown(f.specRow, {
-            inline = true, options = f.specOptions.outside[slot],
+        local drop = UI:CreateDropdown(ui.specRow, {
+            inline = true, options = ui.specOptions.outside[slot],
+            -- Opening the menu is editing, and the set it opens on follows the
+            -- element THIS panel is bound to -- two panels can be in two modes.
+            optionsFunc = function()
+                po:AutoPin()
+                return ui.specOptions[specModeOf(po.el)][slot]
+            end,
             get = function()
-                local key = SPEC_KEYS[specMode()][slot]
-                local el = selectedElement(); if not el then return SPEC_FALLBACK[key] end
+                local el = po.el
+                local key = SPEC_KEYS[specModeOf(el)][slot]
+                if not el then return SPEC_FALLBACK[key] end
                 local a = Registry:GetPos(el).anchor
                 return (a and a[key]) or SPEC_FALLBACK[key]
             end,
             set = function(v)
-                local el = selectedElement(); if not el then return end
-                Sess:SetAnchorSpec(el, { [SPEC_KEYS[specMode()][slot]] = v })
+                local el = po.el; if not el then return end
+                Sess:SetAnchorSpec(el, { [SPEC_KEYS[specModeOf(el)][slot]] = v })
             end,
         })
         drop:SetHeight(SPEC_H)
         return drop
     end
-    f.edgeLabel = UI:CreateLabel(f.specRow, { text = L["Edge"], size = 10, color = UI.Colors.textDim })
-    f.edgeLabel:SetWordWrap(false)
-    f.edgeLabel:SetPoint("LEFT", 0, 0)
-    f.edgeDrop = specDrop(1)
-    f.edgeDrop:SetPoint("LEFT", f.edgeLabel, "RIGHT", TIGHT, 0)
-    f.edgeDrop:SetPoint("RIGHT", f.specRow, "LEFT", halfW, 0)
-    f.alignLabel = UI:CreateLabel(f.specRow, { text = L["Align"], size = 10, color = UI.Colors.textDim })
-    f.alignLabel:SetWordWrap(false)
-    f.alignLabel:SetPoint("LEFT", f.specRow, "LEFT", halfW + GAP, 0)
-    f.alignDrop = specDrop(2)
-    f.alignDrop:SetPoint("LEFT", f.alignLabel, "RIGHT", TIGHT, 0)
-    f.alignDrop:SetPoint("RIGHT", f.specRow, "RIGHT", 0, 0)
-    f.specMode = "outside"
+    ui.edgeLabel = UI:CreateLabel(ui.specRow, { text = L["Edge"], size = 10, color = UI.Colors.textDim })
+    ui.edgeLabel:SetWordWrap(false)
+    ui.edgeLabel:SetPoint("LEFT", 0, 0)
+    ui.edgeDrop = specDrop(1)
+    ui.edgeDrop:SetPoint("LEFT", ui.edgeLabel, "RIGHT", TIGHT, 0)
+    ui.edgeDrop:SetPoint("RIGHT", ui.specRow, "LEFT", halfW, 0)
+    ui.alignLabel = UI:CreateLabel(ui.specRow, { text = L["Align"], size = 10, color = UI.Colors.textDim })
+    ui.alignLabel:SetWordWrap(false)
+    ui.alignLabel:SetPoint("LEFT", ui.specRow, "LEFT", halfW + GAP, 0)
+    ui.alignDrop = specDrop(2)
+    ui.alignDrop:SetPoint("LEFT", ui.alignLabel, "RIGHT", TIGHT, 0)
+    ui.alignDrop:SetPoint("RIGHT", ui.specRow, "RIGHT", 0, 0)
+    ui.specMode = "outside"
 
     -- ---- everything below the anchor block ---------------------------
     -- Its own frame so the block above can sit at whatever height the group box
-    -- measures: these rows keep their build-time offsets and only f.rest's
+    -- measures: these rows keep their build-time offsets and only ui.rest's
     -- single anchor moves.
     local rest = CreateFrame("Frame", nil, body)
-    rest:SetWidth(W)
+    rest:SetWidth(CW)
     rest:SetPoint("TOPLEFT", 0, 0)          -- layoutAnchorBlock re-anchors it
-    f.rest = rest
+    ui.rest = rest
 
     local y = 0
     -- Reserve a row of height h and return its top; gap is the space to leave below it.
     local function row(h, gap) local cur = y; y = y - h - (gap or GAP); return cur end
 
     -- ---- X / Y: two label+box pairs centred as one group ------------
-    -- The pairs live in a container whose width is recomputed on Refresh
+    -- The pairs live in a container whose width is recomputed on every refresh
     -- (the labels change between "X" and "Offset X"), and the container is
     -- centred in the panel, so the group stays centred whatever the labels say.
     local ry = row(20)
-    f.xyRow = CreateFrame("Frame", nil, rest)
-    f.xyRow:SetSize(CW, 20)
-    f.xyRow:SetPoint("TOP", rest, "TOP", 0, ry)
-    f.xLabel = UI:CreateLabel(f.xyRow, { text = L["X"], size = 11, justify = "RIGHT" })
-    f.xLabel:SetPoint("LEFT", 0, 0)
-    f.xBox = UI:CreateEditBox(f.xyRow, {
+    ui.xyRow = CreateFrame("Frame", nil, rest)
+    ui.xyRow:SetSize(CW, 20)
+    ui.xyRow:SetPoint("TOP", rest, "TOP", 0, ry)
+    ui.xLabel = UI:CreateLabel(ui.xyRow, { text = L["X"], size = 11, justify = "RIGHT" })
+    ui.xLabel:SetPoint("LEFT", 0, 0)
+    ui.xBox = UI:CreateEditBox(ui.xyRow, {
         width = BOX_W, numeric = true,
         get = function()
-            local el = selectedElement(); if not el then return 0 end
+            local el = po.el; if not el then return 0 end
             local pos = Registry:GetPos(el)
             return pos.anchor and (pos.anchor.offsetX or 0) or floor((pos.x or 0) + 0.5)
         end,
         onCommit = function(v)
-            local el = selectedElement()
-            if el then Sess:SetXY(el, v, tonumber(f.yBox:GetText()) or 0) end
+            local el = po.el
+            if el then Sess:SetXY(el, v, tonumber(ui.yBox:GetText()) or 0) end
         end,
     })
-    f.xBox:SetPoint("LEFT", f.xLabel, "RIGHT", TIGHT - 2, 0)
-    f.yLabel = UI:CreateLabel(f.xyRow, { text = L["Y"], size = 11, justify = "RIGHT" })
-    f.yLabel:SetPoint("LEFT", f.xBox, "RIGHT", GAP, 0)
-    f.yBox = UI:CreateEditBox(f.xyRow, {
+    ui.xBox:SetPoint("LEFT", ui.xLabel, "RIGHT", TIGHT - 2, 0)
+    ui.yLabel = UI:CreateLabel(ui.xyRow, { text = L["Y"], size = 11, justify = "RIGHT" })
+    ui.yLabel:SetPoint("LEFT", ui.xBox, "RIGHT", GAP, 0)
+    ui.yBox = UI:CreateEditBox(ui.xyRow, {
         width = BOX_W, numeric = true,
         get = function()
-            local el = selectedElement(); if not el then return 0 end
+            local el = po.el; if not el then return 0 end
             local pos = Registry:GetPos(el)
             return pos.anchor and (pos.anchor.offsetY or 0) or floor((pos.y or 0) + 0.5)
         end,
         onCommit = function(v)
-            local el = selectedElement()
-            if el then Sess:SetXY(el, tonumber(f.xBox:GetText()) or 0, v) end
+            local el = po.el
+            if el then Sess:SetXY(el, tonumber(ui.xBox:GetText()) or 0, v) end
         end,
     })
-    f.yBox:SetPoint("LEFT", f.yLabel, "RIGHT", TIGHT - 2, 0)
+    ui.yBox:SetPoint("LEFT", ui.yLabel, "RIGHT", TIGHT - 2, 0)
+    -- Taking focus in a coordinate box is the clearest "I am editing THIS one"
+    -- there is, and it is also the moment a panel that keeps re-docking under
+    -- the cursor is most in the way.
+    for _, box in ipairs({ ui.xBox, ui.yBox }) do
+        box:HookScript("OnEditFocusGained", function() po:AutoPin() end)
+    end
 
     -- ---- nudge cluster | 9-point picker: two equal halves ------------
     -- Each cluster sits in its own container, centred in its half of the
@@ -579,335 +617,134 @@ local function build()
     local ny = row(clusterH)
     local half = CW / 2
 
-    f.nudge = CreateFrame("Frame", nil, rest)
-    f.nudge:SetSize(NUDGE_CELL * 3, NUDGE_CELL * 3)
-    f.nudge:SetPoint("CENTER", rest, "TOPLEFT", PAD + half / 2, ny - clusterH / 2)
+    ui.nudge = CreateFrame("Frame", nil, rest)
+    ui.nudge:SetSize(NUDGE_CELL * 3, NUDGE_CELL * 3)
+    ui.nudge:SetPoint("CENTER", rest, "TOPLEFT", half / 2, ny - clusterH / 2)
     local ARROWS = {   -- icon, dx, dy, column, row (0-based in the 3x3 cluster)
         { "expand_less",   0,  1, 1, 0 },
         { "chevron_left", -1,  0, 0, 1 },
         { "chevron_right", 1,  0, 2, 1 },
         { "expand_more",   0, -1, 1, 2 },
     }
-    for _, a in ipairs(ARROWS) do
+    ui.nudgeButtons = {}
+    for i, a in ipairs(ARROWS) do
         local icon, dx, dy, col, rowi = a[1], a[2], a[3], a[4], a[5]
-        local b = UI:CreateGlyphButton(f.nudge, {
+        local b = UI:CreateGlyphButton(ui.nudge, {
             texture = UI.MEDIA .. "Icons\\" .. icon, size = NUDGE_CELL, iconSize = NUDGE_ICON,
             onClick = function()
-                local el = selectedElement()
-                if el then Sess:Nudge(el, dx * step(), dy * step()) end
+                local el = po.el
+                if not el then return end
+                -- Pin BEFORE the nudge: a following panel would otherwise
+                -- re-dock under the cursor on the very keypress that asked for
+                -- a run of them.
+                po:AutoPin()
+                Sess:Nudge(el, dx * step(), dy * step())
             end,
             tooltip = { title = L["Nudge"], lines = { L["Hold Shift for 10 units, Ctrl for 100."] } },
         })
         b:SetPoint("TOPLEFT", col * NUDGE_CELL, -rowi * NUDGE_CELL)
+        ui.nudgeButtons[i] = b
     end
 
-    f.picker = CreateFrame("Frame", nil, rest)
-    f.picker:SetSize(DOT * 3 + DOT_GAP * 2, DOT * 3 + DOT_GAP * 2)
-    f.picker:SetPoint("CENTER", rest, "TOPLEFT", PAD + half + half / 2, ny - clusterH / 2)
-    f.points = {}
+    ui.picker = CreateFrame("Frame", nil, rest)
+    ui.picker:SetSize(DOT * 3 + DOT_GAP * 2, DOT * 3 + DOT_GAP * 2)
+    ui.picker:SetPoint("CENTER", rest, "TOPLEFT", half + half / 2, ny - clusterH / 2)
+    ui.points = {}
     for i, point in ipairs(POINTS) do
         local col, rowi = (i - 1) % 3, floor((i - 1) / 3)
-        local b = UI:CreateButton(f.picker, {
+        local b = UI:CreateButton(ui.picker, {
             width = DOT, height = DOT,
             onClick = function()
-                local el = selectedElement()
-                if el then Sess:SetAnchorPoint(el, point) end
+                local el = po.el
+                if not el then return end
+                po:AutoPin()
+                Sess:SetAnchorPoint(el, point)
             end,
             tooltip = point,
         })
         b:SetPoint("TOPLEFT", col * (DOT + DOT_GAP), -rowi * (DOT + DOT_GAP))
         b.point = point
-        f.points[i] = b
+        ui.points[i] = b
     end
 
     -- ---- actions -------------------------------------------------
-    local acts = buttonRow(rest, row(BTN_H, TIGHT), BTN_H, {
-        { text = L["Center"], onClick = function() local el = selectedElement(); if el then Sess:Center(el) end end },
-        { text = L["Reset"],  onClick = function() local el = selectedElement(); if el then Sess:Reset(el) end end },
-        { text = L["Detach"], onClick = function() local el = selectedElement(); if el then Sess:Detach(el) end end },
+    local acts = buttonRow(rest, row(BTN_H), BTN_H, {
+        { text = L["Center"], onClick = function() local el = po.el; if el then Sess:Center(el) end end },
+        { text = L["Reset"],  onClick = function() local el = po.el; if el then Sess:Reset(el) end end },
+        { text = L["Detach"], onClick = function() local el = po.el; if el then Sess:Detach(el) end end },
     })
-    f.btnCenter, f.btnReset, f.btnDetach = acts[1], acts[2], acts[3]
-
-    local hist = buttonRow(rest, row(BTN_H), BTN_H, {
-        { text = L["Undo"], onClick = function() Sess:Undo() end },
-        { text = L["Redo"], onClick = function() Sess:Redo() end },
-    })
-    f.btnUndo, f.btnRedo = hist[1], hist[2]
-
-    local fin = buttonRow(rest, row(CTA_H), CTA_H, {
-        { text = L["Save & Exit"], style = "primary", onClick = function() Sess:Finish("save") end },
-        { text = L["Discard"], tone = "danger", onClick = function() Sess:Finish("discard") end },
-    })
-    f.btnSave, f.btnDiscard = fin[1], fin[2]
+    ui.btnCenter, ui.btnReset, ui.btnDetach = acts[1], acts[2], acts[3]
 
     -- Copy-to-twin: full-width bottom row, only for elements whose def names a
-    -- twin (Refresh shows it and grows the panel by the row).
-    -- ☠ `text = ""`, not omitted. The label is only knowable in Refresh (it
+    -- twin (the refresh shows it and grows the panel by the row).
+    -- ☠ `text = ""`, not omitted. The label is only knowable at refresh time (it
     -- names the twin), but UI:StyleButton creates the button's FontString --
     -- and registers it via SetFontString, which is what makes the NATIVE
     -- Button:SetText work -- ONLY when `text` is passed. Omit it and the
-    -- button has no font string at all, so Refresh's SetText below silently
-    -- no-ops and the row renders blank. An empty string is enough to get the
-    -- font string built; `fitText = false` keeps it from resizing off it.
-    f.btnCopy = UI:CreateButton(rest, {
+    -- button has no font string at all, so the SetText below silently no-ops
+    -- and the row renders blank. An empty string is enough to get the font
+    -- string built; `fitText = false` keeps it from resizing off it.
+    ui.btnCopy = UI:CreateButton(rest, {
         text = "", width = CW, height = BTN_H, fitText = false,
-        onClick = function() local el = selectedElement(); if el then Sess:CopyToTwin(el) end end,
+        onClick = function() local el = po.el; if el then Sess:CopyToTwin(el) end end,
     })
-    f.btnCopy:SetPoint("TOPLEFT", PAD, row(BTN_H, 0))
-    f.btnCopy:Hide()
+    ui.btnCopy:SetPoint("TOPLEFT", 0, row(BTN_H, 0))
+    ui.btnCopy:Hide()
 
     -- Heights of the rows BELOW the anchor block, with and without the copy row.
-    -- The block adds its own on top (layoutAnchorBlock) and the header its own
-    -- above that (layoutHeader), so the panel's total is settled in Refresh.
-    f.restFullH = -y
-    f.restBaseH = f.restFullH - BTN_H - GAP
-    rest:SetHeight(f.restBaseH)
-    local blockH = layoutAnchorBlock(f)
-    body:SetHeight(blockH + f.restBaseH)
-    f:SetHeight(PAD + ICON + TIGHT + HEADER_BTN_H + GAP + blockH + f.restBaseH + PAD)
-    f:Hide()
-    return f
+    -- The block adds its own on top (layoutAnchorBlock) and the two header lines
+    -- their own above that (layoutContent), so the total is settled per refresh.
+    ui.restFullH = -y
+    ui.restBaseH = ui.restFullH - BTN_H - GAP
+    rest:SetHeight(ui.restBaseH)
 end
 
 -- ============================================================
--- HEADER LAYOUT
--- The title wraps, so the header's height -- and therefore the body's top and
--- the panel's own height -- is only knowable once the title is in. Returns the
--- height consumed above the body, and whether the font had resolved (a
--- FontString measures 0 until it has, and Refresh retries once if so).
+-- PER-INSTANCE REFRESH
+-- Everything a panel shows comes from ITS OWN element, never from the
+-- selection: a pinned panel keeps reporting the mover it was pinned for while
+-- the selection has moved on.
 -- ============================================================
-local function layoutHeader(f, canConfigure)
-    local th, ah = f.title:GetStringHeight() or 0, f.addon:GetStringHeight() or 0
-    local resolved = th > 0
-    if th <= 0 then th = HEADER_LINE end
-    if ah <= 0 then ah = HEADER_LINE - 2 end
-    local textH = th + 1 + ah
-    local hh = max(ICON, textH)
-    -- Whichever of the icon and the text block is shorter centres against the
-    -- other, so a one-line title still sits level with the icon and a two-line
-    -- one does not push the icon off the top.
-    f.icon:ClearAllPoints()
-    f.icon:SetPoint("TOPLEFT", PAD, -PAD - (hh - ICON) / 2)
-    f.title:ClearAllPoints()
-    f.title:SetPoint("TOPLEFT", PAD + ICON + TIGHT - 2, -PAD - (hh - textH) / 2)
-
-    local by = -PAD - hh - TIGHT
-    f.btnConfigure:ClearAllPoints()
-    f.btnSettings:ClearAllPoints()
-    if canConfigure then
-        local bw = floor((CW - TIGHT) / 2)
-        f.btnConfigure:SetWidth(bw)
-        f.btnSettings:SetWidth(bw)
-        f.btnConfigure:SetPoint("TOPLEFT", PAD, by)
-        f.btnSettings:SetPoint("TOPLEFT", PAD + bw + TIGHT, by)
-    else
-        f.btnSettings:SetWidth(CW)
-        f.btnSettings:SetPoint("TOPLEFT", PAD, by)
-    end
-    f.body:ClearAllPoints()
-    f.body:SetPoint("TOPLEFT", 0, by - HEADER_BTN_H - GAP)
-    return PAD + hh + TIGHT + HEADER_BTN_H + GAP, resolved
-end
-
--- Size the X/Y group to its current labels so it stays centred. Both labels
--- take the wider of the two, so the pairs mirror each other; the boxes give up
--- width when the labels are long ("Offset X") so the group never overflows.
-local function layoutXY(f)
-    local lw = max(f.xLabel:GetStringWidth() or 0, f.yLabel:GetStringWidth() or 0)
-    f.xLabel:SetWidth(lw); f.yLabel:SetWidth(lw)
-    local pair = lw + TIGHT - 2
-    local bw = max(40, floor(min(BOX_W, (CW - GAP) / 2 - pair)))
-    f.xBox:SetWidth(bw); f.yBox:SetWidth(bw)
-    f.xyRow:SetWidth((pair + bw) * 2 + GAP)
-end
-
-function Pn:Ensure()
-    if not self.frame then self.frame = build() end
-    return self.frame
-end
-
--- Instant hide: combat suspend, session teardown, selection loss mid-refresh.
--- Cancels any running fade so a stale "hide when done" cannot land later.
-function Pn:Hide()
-    self.holdUntil = nil          -- a hidden panel has nothing to hold in place
-    self.dockedTo = nil
-    self.dockSide = nil
-    if self.frame then
-        NS.Fx.Cancel(self.frame)
-        self.frame:Hide()
-    end
-end
-
--- The entrance drift and scale origin for a dock side: the panel pops out of
--- (and back into) the proxy edge it is docked against. Shared by Dock and
--- FadeOut so the exit is the entrance run backwards.
-local function dockFx(side)
-    if side == "right" then return -8, 0, "LEFT"
-    elseif side == "left" then return 8, 0, "RIGHT"
-    elseif side == "below" then return 0, 8, "TOP"
-    elseif side == "above" then return 0, -8, "BOTTOM" end
-    return 0, 0, "CENTER"
-end
-
--- Deselection: the entrance in reverse -- shrink back toward the docked proxy
--- edge while fading (PopOut, 0.18s), then hide. Suspend never comes through
--- here; it takes the instant Hide above.
-function Pn:FadeOut()
-    self.holdUntil = nil
-    self.dockedTo = nil
-    local side = self.dockSide
-    self.dockSide = nil
-    local f = self.frame
-    if not f or not f:IsShown() then return end
-    local ox, oy, origin = dockFx(side)
-    NS.Fx.PopOut(f, 0.18, ox, oy, 0.92, origin, function() f:Hide() end)
-end
-
--- ============================================================
--- NUDGE HOLD
--- Re-docking on every keypress makes the panel chase the frame around, so a
--- nudge parks it: each nudge pushes the deadline out, and one C_Timer chain
--- re-docks once after the LAST nudge's hold expires. Session:Select clears the
--- hold, so an explicit selection always docks immediately.
--- ============================================================
-local HOLD = 2
-
-function Pn:HoldDock()
-    self.holdUntil = GetTime() + HOLD
-    if self.holdTimerArmed then return end
-    self.holdTimerArmed = true
-    local function tick()
-        if not self.holdUntil then self.holdTimerArmed = false return end
-        local left = self.holdUntil - GetTime()
-        if left > 0 then
-            C_Timer.After(left, tick)
-        else
-            self.holdTimerArmed = false
-            self.holdUntil = nil
-            if Sess:IsActive() and not Sess:IsSuspended() then self:Dock() end
-        end
-    end
-    C_Timer.After(HOLD, tick)
-end
-
-function Pn:ClearHold() self.holdUntil = nil end
-
--- Rect of a frame in UIParent-centre units; nil while it has no geometry yet.
-local function rectOf(fr)
-    local cx, cy = fr:GetCenter()
-    if not cx then return nil end
-    local ux, uy = UIParent:GetCenter()
-    return { x = cx - ux, y = cy - uy, w = fr:GetWidth() or 0, h = fr:GetHeight() or 0 }
-end
-
--- "auto": the candidate beside the proxy that covers the least, scored against
--- every OTHER visible proxy and the legend (Solver.BestDockSide). nil when no
--- candidate fits fully on screen.
-local function autoSide(f, proxy)
-    local pr = rectOf(proxy)
-    if not pr then return nil end
-    local obstacles = {}
-    for _, b in pairs(Proxy.proxies) do
-        if b ~= proxy and b:IsShown() then
-            local r = rectOf(b)
-            if r then obstacles[#obstacles + 1] = r end
-        end
-    end
-    if Proxy.legend and Proxy.legend:IsShown() then
-        local r = rectOf(Proxy.legend)
-        if r then obstacles[#obstacles + 1] = r end
-    end
-    return Solver.BestDockSide(pr, W, f:GetHeight() or 0, DOCK_GAP, obstacles,
-        UIParent:GetWidth(), UIParent:GetHeight())
-end
-
-function Pn:Dock()
-    local f = self.frame
-    local proxy = Sess.selected and Proxy.proxies[Sess.selected]
-    if not f or not proxy or not proxy:IsShown() then self:Hide() return end
-    -- Parked by a nudge: keep the panel where it is until the hold expires.
-    if self.holdUntil then
-        if GetTime() < self.holdUntil then return end
-        self.holdUntil = nil
-    end
-    local side = NS.db.panelSide
-    if side == "auto" then
-        -- Least-covering side; when nothing fits on screen, the old edge flip.
-        side = autoSide(f, proxy)
-        if not side then
-            side = ((proxy:GetRight() or 0) + DOCK_GAP + W > (UIParent:GetRight() or 0)) and "left" or "right"
-        end
-    end
-    f:ClearAllPoints()
-    if side == "left" then f:SetPoint("TOPRIGHT", proxy, "TOPLEFT", -DOCK_GAP, 0)
-    elseif side == "below" then f:SetPoint("TOP", proxy, "BOTTOM", 0, -DOCK_GAP)
-    elseif side == "above" then f:SetPoint("BOTTOM", proxy, "TOP", 0, DOCK_GAP)
-    else f:SetPoint("TOPLEFT", proxy, "TOPRIGHT", DOCK_GAP, 0) end
-
-    -- Entrance: pop from behind the proxy -- scale up from 0.92 with the scale
-    -- originating at the docked edge, sliding from the proxy's side onto the
-    -- anchor, ease-out (Fx.PopIn). Target changed while the panel was already
-    -- up: a quick fade-swap, no pop. Same target: nothing -- Dock runs on
-    -- every Refresh and must not flicker the panel.
-    local wasShown = f:IsShown()
-    if not wasShown then
-        local ox, oy, origin = dockFx(side)
-        NS.Fx.PopIn(f, 0.22, ox, oy, 0.92, origin)
-    elseif self.dockedTo ~= Sess.selected then
-        NS.Fx.FadeIn(f, 0.08)
-    end
-    self.dockedTo = Sess.selected
-    self.dockSide = side          -- FadeOut retraces this edge on deselect
-    f:Show()
-end
-
-function Pn:Refresh()
-    if not Sess:IsActive() or Sess:IsSuspended() then self:Hide() return end
-    local el = selectedElement()
-    if not el then self:FadeOut() return end
-    local f = self:Ensure()
+local function refreshInstance(po)
+    if po.closed or not po.ui then return end
+    local el = po.elId and Registry:Get(po.elId) or nil
+    if not el then return end
+    po.el = el
+    local ui = po.ui
     local pos = Registry:GetPos(el)
 
-    f.title:SetText(el.title)
     local addon = Registry:GetAddon(el.addon)
-    local icon = addon and addon.icon or (UI.MEDIA .. "DF_Icon")
-    if f.icon:SetTexture(icon) == false then f.icon:SetTexture(UI.MEDIA .. "DF_Icon") end
-    f.addon:SetText(addon and addon.title or el.addon)
-    -- Configure only exists for elements whose def offers openSettings; without
-    -- it Settings takes the whole button row.
-    local canConfigure = el.openSettings ~= nil
-    f.btnConfigure:SetShown(canConfigure)
-    local headerH, resolved = layoutHeader(f, canConfigure)
-    -- A FontString measures 0 until its font object resolves, which on the very
-    -- first Refresh would size a wrapped two-line title as one. One deferred
-    -- retry, flagged so repeated Refreshes cannot stack timers.
-    if not resolved and not f.headerRetry and C_Timer then
-        f.headerRetry = true
-        C_Timer.After(0, function() f.headerRetry = nil; Pn:Refresh() end)
-    end
+    local icon = addon and addon.icon or DEFAULT_ICON
+    po:SetHeader(el.title, icon)
+    -- SetTexture answers false for a file the client does not have; the shell
+    -- takes whatever it is handed, so the fallback is ours to apply.
+    if po.iconTex and po.iconTex:SetTexture(icon) == false then po.iconTex:SetTexture(DEFAULT_ICON) end
+    ui.addon:SetText(addon and addon.title or el.addon)
+
+    local top = layoutContent(ui, el.openSettings ~= nil)
 
     local a = pos.anchor
     if a then
         -- Name whichever block is actually driving the element: the backup
         -- taking over is the one thing the panel must not stay quiet about, and
         -- naming the primary's target while the backup holds it would be a lie.
-        -- Just the NAME now -- the seat has its own labelled row underneath, so
-        -- the old "(right/center)" tail is said twice over.
+        -- Just the NAME -- the seat has its own labelled row underneath, so the
+        -- old "(right/center)" tail is said twice over.
         local active = Registry:ActiveAnchor(el)
         local blk = active or a
         local target = Registry:GetTarget(blk.target)
         local text = target and target.title or L["(unavailable)"]
         if active ~= nil and active == a.fallback then text = L["(backup)"] .. " " .. text end
-        f.targetRow.picker:SetDisplayOverride(text)
-        f.xLabel:SetText(L["Offset X"]); f.yLabel:SetText(L["Offset Y"])
-        f.btnDetach:SetEnabled(true)
-        for _, b in ipairs(f.points) do b:Hide() end
+        ui.targetRow.picker:SetDisplayOverride(text)
+        ui.xLabel:SetText(L["Offset X"]); ui.yLabel:SetText(L["Offset Y"])
+        ui.btnDetach:SetEnabled(true)
+        for _, b in ipairs(ui.points) do b:Hide() end
     else
-        f.targetRow.picker:SetDisplayOverride(unanchoredCaption())
-        f.xLabel:SetText(L["X"]); f.yLabel:SetText(L["Y"])
-        f.btnDetach:SetEnabled(false)
+        ui.targetRow.picker:SetDisplayOverride(unanchoredCaption())
+        ui.xLabel:SetText(L["X"]); ui.yLabel:SetText(L["Y"])
+        ui.btnDetach:SetEnabled(false)
         local cur = pos.point or "CENTER"
-        for _, b in ipairs(f.points) do
+        for _, b in ipairs(ui.points) do
             -- pointLocked: the consumer derives `point` (e.g. a growth corner); a
             -- picker would be silently overwritten, so it is not offered.
             b:SetShown(not el.pointLocked)
@@ -925,52 +762,222 @@ function Pn:Refresh()
         ftext = ft and ft.title or L["(unavailable)"]
         if ft and not Registry:IsTargetAvailable(ft) then ftext = ftext .. " " .. L["(hidden)"] end
     end
-    f.backupRow.picker:SetDisplayOverride(ftext)
+    ui.backupRow.picker:SetDisplayOverride(ftext)
 
     -- The seat pair follows the mode. Swapping the option set rebuilds the menu
-    -- rows, so it is done only when the mode actually CHANGED -- Refresh runs on
-    -- every nudge and a rebuild per keypress would be pure churn.
-    local mode = (a and a.mode == "point") and "point" or "outside"
-    if f.specMode ~= mode then
-        f.specMode = mode
-        f.edgeLabel:SetText(mode == "point" and L["Point"] or L["Edge"])
-        f.alignLabel:SetText(mode == "point" and L["Rel point"] or L["Align"])
-        f.edgeDrop:RebuildOptions(f.specOptions[mode][1])
-        f.alignDrop:RebuildOptions(f.specOptions[mode][2])
+    -- rows, so it is done only when the mode actually CHANGED -- a refresh runs
+    -- on every nudge and a rebuild per keypress would be pure churn.
+    local mode = specModeOf(el)
+    if ui.specMode ~= mode then
+        ui.specMode = mode
+        ui.edgeLabel:SetText(mode == "point" and L["Point"] or L["Edge"])
+        ui.alignLabel:SetText(mode == "point" and L["Rel point"] or L["Align"])
+        ui.edgeDrop:RebuildOptions(ui.specOptions[mode][1])
+        ui.alignDrop:RebuildOptions(ui.specOptions[mode][2])
     else
-        f.edgeDrop:UpdateText(); f.alignDrop:UpdateText()
+        ui.edgeDrop:UpdateText(); ui.alignDrop:UpdateText()
     end
 
     -- Grey-when-disabled: a free element has no seat and no backup to set, but
     -- the PRIMARY handle stays live -- dragging it is the way in.
     local anchored = a ~= nil
-    setRowEnabled(f.backupRow, anchored)
-    f.edgeDrop:SetEnabled(anchored); f.alignDrop:SetEnabled(anchored)
-    f.edgeLabel:SetAlpha(anchored and 1 or DISABLED_ALPHA)
-    f.alignLabel:SetAlpha(anchored and 1 or DISABLED_ALPHA)
+    setRowEnabled(ui.backupRow, anchored)
+    ui.edgeDrop:SetEnabled(anchored); ui.alignDrop:SetEnabled(anchored)
+    ui.edgeLabel:SetAlpha(anchored and 1 or DISABLED_ALPHA)
+    ui.alignLabel:SetAlpha(anchored and 1 or DISABLED_ALPHA)
 
-    local blockH = layoutAnchorBlock(f)
+    local blockH = layoutAnchorBlock(ui)
 
-    layoutXY(f)
-    f.xBox:Refresh(); f.yBox:Refresh()
-
-    f.btnUndo:SetEnabled(Sess.undo and Sess.undo:CanUndo() or false)
-    f.btnRedo:SetEnabled(Sess.undo and Sess.undo:CanRedo() or false)
+    layoutXY(ui)
+    ui.xBox:Refresh(); ui.yBox:Refresh()
 
     -- Copy-to-twin row: shown only while the twin is actually registered (a
     -- pinned set's opposite-mode twin can be missing).
     local twin = el.twin and Registry:Get(el.twin) or nil
     local restH
     if twin then
-        f.btnCopy:SetText(format(L["Copy to %s"], twin.title))
-        f.btnCopy:Show()
-        restH = f.restFullH
+        ui.btnCopy:SetText(format(L["Copy to %s"], twin.title))
+        ui.btnCopy:Show()
+        restH = ui.restFullH
     else
-        f.btnCopy:Hide()
-        restH = f.restBaseH
+        ui.btnCopy:Hide()
+        restH = ui.restBaseH
     end
-    f.rest:SetHeight(restH)
-    f.body:SetHeight(blockH + restH)
-    f:SetHeight(headerH + blockH + restH + PAD)
-    self:Dock()
+    ui.rest:SetHeight(restH)
+    ui.body:SetHeight(blockH + restH)
+    po.content:SetHeight(top + blockH + restH)
+    po:Resize()
+end
+
+-- ============================================================
+-- DOCK SIDE
+-- The shell picks a side from what FITS; it has no idea what else is on screen.
+-- The mover does, so it computes the side itself and forces it -- least-covering
+-- against the other proxies and the legend strip.
+-- ============================================================
+local function rectOf(fr)
+    local cx, cy = fr:GetCenter()
+    if not cx then return nil end
+    local ux, uy = UIParent:GetCenter()
+    return { x = cx - ux, y = cy - uy, w = fr:GetWidth() or 0, h = fr:GetHeight() or 0 }
+end
+
+local function autoSide(po, proxy)
+    local pr = rectOf(proxy)
+    if not pr then return nil end
+    local obstacles = {}
+    for _, b in pairs(Proxy.proxies) do
+        if b ~= proxy and b:IsShown() then
+            local r = rectOf(b)
+            if r then obstacles[#obstacles + 1] = r end
+        end
+    end
+    if Proxy.legend and Proxy.legend:IsShown() then
+        local r = rectOf(Proxy.legend)
+        if r then obstacles[#obstacles + 1] = r end
+    end
+    return Solver.BestDockSide(pr, W, po.frame:GetHeight() or 0, DOCK_GAP, obstacles,
+        UIParent:GetWidth(), UIParent:GetHeight())
+end
+
+local function dockSide(po, proxy)
+    local side = NS.db.panelSide
+    if side == "left" or side == "right" then return side end
+    side = autoSide(po, proxy)
+    if not side then
+        -- Nothing fits: the old edge flip, and the shell clamps the overhang.
+        side = ((proxy:GetRight() or 0) + DOCK_GAP + W > (UIParent:GetRight() or 0)) and "left" or "right"
+    end
+    return side
+end
+
+-- ============================================================
+-- INSTANCES
+-- ============================================================
+
+-- The cross, the pool sweep and a family eviction all land here; the shell
+-- reports WHY and this decides what it meant.
+function Pn:OnClose(po, reason)
+    for i = #self.live, 1, -1 do
+        if self.live[i] == po then tremove(self.live, i) end
+    end
+    local wasFollowing = (self.following == po)
+    if wasFollowing then self.following = nil end
+    -- Crossing the FOLLOWING panel is "I am done with this one": the selection
+    -- goes with it. Crossing a pinned panel closes only that panel -- it was
+    -- never the selection to begin with.
+    if reason == "cross" and wasFollowing and Sess.selected then
+        Sess:Select(nil)
+    end
+end
+
+function Pn:Create()
+    local po = UI:CreatePopout({
+        key = POPOUT_KEY,
+        pinnable = true,
+        parent = Proxy:GetUnlockFrame(),   -- combat suspend hides the lot for free
+        width = CW,
+        build = buildPanel,
+        canAutoPin = function() return NS.db.autoPinPanels end,
+        -- The beam's far end is this panel's OWN mover, which after a pin is not
+        -- what it is docked to (it is docked to nothing) and not the selection.
+        tetherSource = function(p) return p.elId and Proxy.proxies[p.elId] or nil end,
+        onClose = function(p, reason) Pn:OnClose(p, reason) end,
+    })
+    local found = false
+    for _, other in ipairs(self.live) do if other == po then found = true end end
+    if not found then self.live[#self.live + 1] = po end
+    return po
+end
+
+-- Instant hide of every live panel, animations cancelled: combat suspend,
+-- session teardown, and the moment a drag starts (the slab a docked panel hangs
+-- off is about to move). The instances survive -- the next Refresh shows them
+-- again -- because none of those three is the user closing anything.
+function Pn:Hide()
+    for _, po in ipairs(self.live) do
+        NS.Fx.Cancel(po.frame)
+        po.frame:Hide()
+        if po.beam then NS.Fx.Cancel(po.beam); po.beam:Hide() end
+    end
+end
+
+-- Session over: the panels go with it, pinned ones included. The unpinned one
+-- returns to the pool, so the next session revives it rather than rebuilding.
+function Pn:CloseAll()
+    local list = {}
+    for i, po in ipairs(self.live) do list[i] = po end
+    self.following = nil
+    for _, po in ipairs(list) do
+        po:Close("api")
+        NS.Fx.Cancel(po.frame)
+        po.frame:Hide()
+        if po.beam then NS.Fx.Cancel(po.beam); po.beam:Hide() end
+    end
+    wipe(self.live)
+end
+
+-- Retarget and re-render EVERY live panel, then re-dock the one that follows.
+-- Called on every mutation, on every rebuild and on every selection change.
+function Pn:Refresh()
+    if not Sess:IsActive() then self:CloseAll() return end
+    if Sess:IsSuspended() then self:Hide() return end
+
+    -- A pinned panel outlives the selection, not the session: once its element
+    -- is gone from the registry or has no proxy left, it is a panel about
+    -- nothing.
+    for i = #self.live, 1, -1 do
+        local po = self.live[i]
+        if po.closed then
+            tremove(self.live, i)
+        elseif po:IsPinned() and not (po.elId and Registry:Get(po.elId) and Proxy.proxies[po.elId]) then
+            po:Close("api")
+        end
+    end
+
+    local el = Sess.selected and Registry:Get(Sess.selected) or nil
+    local proxy = el and Proxy.proxies[el.id] or nil
+
+    local fo = self.following
+    -- Auto-pinning promotes the follower out of the pool; from that moment it is
+    -- just another pinned panel and the next selection gets a fresh one.
+    if fo and (fo.closed or fo:IsPinned()) then fo = nil; self.following = nil end
+
+    local want = (el and proxy and proxy:IsShown()) and true or false
+    -- ...unless a pinned panel is already showing this very element. Two panels
+    -- for one mover is not multi-pin, it is a duplicate.
+    if want then
+        for _, po in ipairs(self.live) do
+            if po ~= fo and po.elId == el.id then want = false break end
+        end
+    end
+
+    if not want then
+        if fo then self.following = nil; fo:Close("api") end
+        fo = nil
+    else
+        if not fo then fo = self:Create(); self.following = fo end
+        fo.elId, fo.el = el.id, el
+    end
+
+    for _, po in ipairs(self.live) do refreshInstance(po) end
+
+    -- The dock side is recomputed here rather than once at open: the least-
+    -- covering answer changes as the proxies move.
+    if fo and not fo.closed and self.following == fo then
+        fo:Follow(proxy, { side = dockSide(fo, proxy) })
+    end
+    -- A pinned panel that a drag (or a suspend) hid comes back; Follow has
+    -- nothing to say for a pinned instance, so the show is ours.
+    for _, po in ipairs(self.live) do
+        if po ~= self.following and not po.closed and not po.frame:IsShown() then po.frame:Show() end
+    end
+end
+
+-- Belt and braces on the teardown: Finish hides the panels, then clears the
+-- undo stack (which refreshes and finds the session inactive). This is the
+-- direct path for it, so a session that ends without an undo stack still starts
+-- the next one clean.
+if NS.Lib.RegisterCallback then
+    NS.Lib.RegisterCallback(Pn, "Locked", function() Pn:CloseAll() end)
 end

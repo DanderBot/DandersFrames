@@ -838,6 +838,16 @@ local function buildLegend()
     -- action bar (EUI has a separate one; ours merges into the legend so there
     -- is a single top element). Declared widths are floors -- fitText grows
     -- them for longer localisations, and Layout re-measures.
+    --
+    -- Undo and Redo live HERE, not on the element panel: what they act on is the
+    -- session's history, not the mover whose panel happens to be open -- and
+    -- with several panels pinned at once, an Undo button on each one would be
+    -- the same button drawn many times. RefreshLegendVerbs keeps their enabled
+    -- state honest (the undo stack fires "Changed").
+    f.btnUndo = UI:CreateButton(f, { text = L["Undo"], width = 44, height = LEGEND_ROW, style = "ghost",
+        onClick = function() NS.Session:Undo() end })
+    f.btnRedo = UI:CreateButton(f, { text = L["Redo"], width = 44, height = LEGEND_ROW, style = "ghost",
+        onClick = function() NS.Session:Redo() end })
     f.btnSave = UI:CreateButton(f, { text = L["Save & Exit"], width = 76, height = LEGEND_ROW, style = "primary",
         onClick = function() NS.Session:Finish("save") end })
     f.btnDiscard = UI:CreateButton(f, { text = L["Discard"], width = 56, height = LEGEND_ROW, tone = "danger",
@@ -865,6 +875,8 @@ local function buildLegend()
     f.btnSettings:SetPoint("RIGHT", f.btnGrid, "LEFT", -TIGHT, 0)
     f.btnDiscard:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
     f.btnSave:SetPoint("RIGHT", f.btnDiscard, "LEFT", -TIGHT, 0)
+    f.btnRedo:SetPoint("RIGHT", f.btnSave, "LEFT", -TIGHT, 0)
+    f.btnUndo:SetPoint("RIGHT", f.btnRedo, "LEFT", -TIGHT, 0)
 
     f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Esc: lock"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - LEGEND_ROW - TIGHT)
@@ -890,7 +902,8 @@ local function buildLegend()
         -- Dots left, buttons right, a double gap between the halves so the
         -- strip reads as key | verbs and not one run.
         row = row + GAP * 2
-        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid, self.btnCollapse }) do
+        for _, b in ipairs({ self.btnUndo, self.btnRedo, self.btnSave, self.btnDiscard,
+                             self.btnSettings, self.btnGrid, self.btnCollapse }) do
             row = row + (b:GetWidth() or 0) + TIGHT
         end
         row = row - TIGHT + PAD
@@ -934,6 +947,17 @@ local function buildStripTab()
     return t
 end
 
+-- The strip's Undo/Redo are the only controls on it whose enabled state is not
+-- a setting: it follows the undo stack, which fires "Changed" (Session wires
+-- that to this).
+function P:RefreshLegendVerbs()
+    local f = self.legend
+    if not f or not f.btnUndo then return end
+    local undo = NS.Session and NS.Session.undo
+    f.btnUndo:SetEnabled(undo and undo:CanUndo() or false)
+    f.btnRedo:SetEnabled(undo and undo:CanRedo() or false)
+end
+
 function P:SetStripCollapsed(collapsed)
     NS.db.stripCollapsed = collapsed and true or false
     self:ShowLegend()
@@ -952,6 +976,7 @@ function P:ShowLegend()
     f:Layout()
     if C_Timer then C_Timer.After(0, function() if f:IsShown() then f:Layout() end end) end
     self:ResetLegendDodge()
+    self:RefreshLegendVerbs()
     f:Show()
 end
 

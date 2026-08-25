@@ -91,7 +91,12 @@ function Sess:Unlock(filter)
         end
     end
     self.undo = Undo:New({ limit = 100 })
-    self.undo.RegisterCallback(self, "Changed", function() panel("Refresh") end)
+    -- The panels re-read the element they are bound to; the legend's Undo/Redo
+    -- buttons re-read whether there is anything left to undo.
+    self.undo.RegisterCallback(self, "Changed", function()
+        panel("Refresh")
+        Proxy:RefreshLegendVerbs()
+    end)
     self.dirty = false
     self.selected = nil
     self.active = true
@@ -218,8 +223,6 @@ end
 
 function Sess:Select(id)
     self.selected = id
-    -- An explicit selection always docks immediately, nudge hold or not.
-    if NS.Panel then NS.Panel:ClearHold() end
     Proxy:Highlight(id)
     panel("Refresh")
 end
@@ -259,8 +262,8 @@ local function clampFree(el, pos)
 end
 
 function Sess:Nudge(el, dx, dy)
-    -- Park the panel: a run of nudges must not re-dock it under the cursor.
-    if NS.Panel then NS.Panel:HoldDock() end
+    -- The panel is not parked here any more: the nudge BUTTONS auto-pin, which
+    -- is a better answer to "the panel chases my nudges" than a timed hold.
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     if pos.anchor then

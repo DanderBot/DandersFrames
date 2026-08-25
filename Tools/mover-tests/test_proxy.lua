@@ -101,9 +101,16 @@ NS.UI = {
         return f
     end,
     CreateCheckbox = function() return stubFrame() end,
+    -- opts and the enabled state are recorded: the strip's Undo/Redo are the
+    -- only buttons on it whose enabled state is not a setting, and the only way
+    -- to see that is to read it back.
     CreateButton = function(_, _, opts)
         local b = stubFrame()
+        b._opts = opts
         if opts and opts.width then b._w = opts.width end
+        b._enabled = true
+        function b:SetEnabled(v) self._enabled = v and true or false end
+        function b:IsEnabled() return self._enabled end
         return b
     end,
     CreateGlyphButton = function(_, _, opts)
@@ -404,6 +411,59 @@ do
     eq(P.proxies["V:off"].coords:GetText(), NS.L["hidden"], "no getRect + hidden frame still reads 'hidden'")
     P:DestroyAll()
     R:UnregisterAddon("V")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE STRIP'S SESSION VERBS
+-- Undo and Redo live here, not on the element panel: what they act on is the
+-- session's history, not the mover whose panel happens to be open -- and with
+-- several panels pinned at once, one per panel would be the same button drawn
+-- many times.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, showGrid = false, addons = {} }
+    local undone, redone = 0, 0
+    local stack = { entries = 0, redos = 0 }
+    function stack:CanUndo() return self.entries > 0 end
+    function stack:CanRedo() return self.redos > 0 end
+    NS.Session = {
+        selected = nil, undo = stack,
+        Undo = function() undone = undone + 1 end,
+        Redo = function() redone = redone + 1 end,
+    }
+    R:RegisterAddon("S", { title = "S" })
+    R:Register("S", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local f = P.legend
+    check(f.btnUndo and f.btnRedo, "strip: Undo and Redo are on the legend")
+    eq(f.btnUndo._opts.text, NS.L["Undo"], "strip: Undo is labelled from the locale")
+    eq(f.btnRedo._opts.text, NS.L["Redo"], "strip: Redo is labelled from the locale")
+    -- An empty history greys both.
+    check(not f.btnUndo:IsEnabled() and not f.btnRedo:IsEnabled(), "strip: an empty history greys both")
+    stack.entries = 1
+    P:RefreshLegendVerbs()
+    check(f.btnUndo:IsEnabled(), "strip: something to undo enables Undo")
+    check(not f.btnRedo:IsEnabled(), "strip: ...and Redo stays grey until there is a redo")
+    stack.redos = 1
+    P:RefreshLegendVerbs()
+    check(f.btnRedo:IsEnabled(), "strip: a redo branch enables Redo")
+
+    f.btnUndo._opts.onClick()
+    f.btnRedo._opts.onClick()
+    eq(undone, 1, "strip: Undo runs the session's undo")
+    eq(redone, 1, "strip: Redo runs the session's redo")
+
+    -- The verbs take part in the strip's width, so they cannot overlap the dots.
+    local wide = f:GetWidth()
+    check(wide and wide > 0, "strip: the layout measured a width")
+
+    P:DestroyAll()
+    R:UnregisterAddon("S")
     R.ready = wasReady
     NS.Session = nil
     NS.db = nil

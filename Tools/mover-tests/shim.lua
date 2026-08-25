@@ -16,6 +16,12 @@ function FakeFrame(cx, cy, w, h, scale)
     function f:GetScale() return self._scale end
     function f:IsShown() return self._shown end
     function f:IsProtected() return false end
+    -- Edge readers: the panel's "nothing fits on screen" fallback measures
+    -- UIParent's right edge, and UIParent is one of these.
+    function f:GetLeft() return self._cx - self._w / 2 end
+    function f:GetRight() return self._cx + self._w / 2 end
+    function f:GetBottom() return self._cy - self._h / 2 end
+    function f:GetTop() return self._cy + self._h / 2 end
     return f
 end
 UIParent = FakeFrame(960, 540, 1920, 1080, 1)
