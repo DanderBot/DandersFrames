@@ -195,7 +195,14 @@ end
 -- the primary handle stays live -- it is the way IN to anchoring.
 do
     local f = refresh("P:free")
-    eq(f.targetRow.picker._override, L["None"], "free: target reads None")
+    -- The Target row's empty state TEACHES: the word plus the chain glyph
+    -- inline, so the sentence points at the handle beside it. The Backup row
+    -- stays a bare "None" -- it is greyed here and has no gesture to offer.
+    local cap = f.targetRow.picker._override
+    check(cap:find("None", 1, true) == 1, "free: the target caption still opens with None")
+    check(cap:find("|TInterface\\AddOns\\DandersMover\\Media\\link.tga:12:12|t", 1, true) ~= nil,
+        "free: the target caption carries the chain glyph inline")
+    check(cap:find("link", 1, true) ~= nil, "free: the target caption names the gesture")
     eq(f.backupRow.picker._override, L["None"], "free: backup reads None")
     check(f.targetRow.handle:IsEnabled(), "free: primary handle stays enabled")
     check(not f.backupRow.handle:IsEnabled(), "free: backup handle disabled")
@@ -231,7 +238,11 @@ do
     childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
     local f = refresh("P:child")
     eq(f:GetHeight(), freeH, "anchoring does not resize the panel")
+    -- Anchored, the caption is the bare target name: the teaching line is the
+    -- EMPTY state's job and would be noise once the row has an answer.
     eq(f.targetRow.picker._override, R:Get("P:host").title, "anchored: target names the target")
+    check(f.targetRow.picker._override:find("|T", 1, true) == nil,
+        "anchored: no inline glyph in the caption")
     check(f.backupRow.picker._enabled, "anchored: backup picker enabled")
     check(f.backupRow.handle:IsEnabled(), "anchored: backup handle enabled")
     check(f.edgeDrop._enabled and f.alignDrop._enabled, "anchored: seat pair enabled")

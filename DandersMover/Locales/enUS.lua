@@ -61,6 +61,11 @@ L["Movers cannot be unlocked in combat."] = true
 L["Movers suspended for combat."] = true
 L["No addons have registered movers yet."] = true
 L["None"] = true
+-- The Target row's EMPTY state. "None" on its own names the state and stops;
+-- this says what to do about it. %s is the chain glyph, dropped in as an inline
+-- texture by the caller -- the escape can never live in the string itself, so
+-- what a translator sees is the sentence with a gap where the icon goes.
+L["None — drag %s to link"] = true
 L["Nudge"] = true
 L["Nudge %s"] = true
 L["Offset X"] = true

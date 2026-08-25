@@ -93,6 +93,17 @@ end
 
 local function step() return Solver.NudgeStep(IsShiftKeyDown(), IsControlKeyDown()) end
 
+-- The Target row's caption while the element is free. "None" on its own names
+-- the state and stops there, which on the ONE row that has a gesture behind it
+-- is a wasted line: the empty state teaches the gesture instead, with the chain
+-- glyph inline so the sentence points at the handle sitting beside it.
+--
+-- The texture escape is assembled here and never inside the locale key -- a
+-- translator gets the sentence with a gap, not a file path to preserve.
+local function unanchoredCaption()
+    return format(L["None — drag %s to link"], "|T" .. LINK_ICON .. ".tga:12:12|t")
+end
+
 -- ============================================================
 -- GRAB CURSOR
 -- The move cursor while the pointer is over a drag handle: the one affordance
@@ -404,7 +415,7 @@ local function build()
     f.targetRow:SetPoint("TOPLEFT", 0, 0)
     -- Refresh owns this caption from here on; set once so the opener never
     -- renders the raw value between build and the Refresh that follows it.
-    f.targetRow.picker:SetDisplayOverride(L["None"])
+    f.targetRow.picker:SetDisplayOverride(unanchoredCaption())
 
     -- Where the element goes when the primary target is not on screen. Only
     -- meaningful once there IS a primary, so both the picker and its handle go
@@ -880,7 +891,7 @@ function Pn:Refresh()
         f.btnDetach:SetEnabled(true)
         for _, b in ipairs(f.points) do b:Hide() end
     else
-        f.targetRow.picker:SetDisplayOverride(L["None"])
+        f.targetRow.picker:SetDisplayOverride(unanchoredCaption())
         f.xLabel:SetText(L["X"]); f.yLabel:SetText(L["Y"])
         f.btnDetach:SetEnabled(false)
         local cur = pos.point or "CENTER"
