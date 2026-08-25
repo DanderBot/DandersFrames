@@ -23,5 +23,6 @@ Fx.lua
 Proxy.lua
 Session.lua
 Panel.lua
+Picker.lua
 Settings.lua
 Demo.lua

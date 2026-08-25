@@ -39,6 +39,10 @@ local BOX_W = 62                  -- X / Y edit boxes
 local NUDGE_CELL, NUDGE_ICON = 22, 14
 local DOT, DOT_GAP = 16, 4        -- 9-point picker cells
 local BTN_H, CTA_H = 20, 22
+-- The anchor block's three rows. Only the first is always there, so these are
+-- named heights rather than numbers baked into one total (layoutAnchorBlock).
+local ANCHOR_H = 20               -- the anchor-target opener
+local BACKUP_H, SPEC_H = 18, 18   -- backup-anchor row, edge/align pair
 local POINTS = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
 
 local function selectedElement()
@@ -61,6 +65,38 @@ local function buttonRow(parent, y, height, defs)
         out[i] = b
     end
     return out
+end
+
+-- ============================================================
+-- ANCHOR BLOCK LAYOUT
+-- The target picker is always there; the backup row and the edge/align pair
+-- come and go with the element's anchor state. A hidden row gives its height
+-- back rather than leaving a hole, so everything below the block (f.rest) and
+-- the panel's own height both follow. Returns the height the block consumes,
+-- gap to the rows below included -- the same trick layoutHeader plays on f.body.
+-- ============================================================
+local function layoutAnchorBlock(f, showBackup, showSpec)
+    local h = ANCHOR_H
+    f.anchorPicker:ClearAllPoints()
+    f.anchorPicker:SetPoint("TOPLEFT", PAD, 0)
+    f.backupRow:ClearAllPoints()
+    if showBackup then
+        h = h + TIGHT
+        f.backupRow:SetPoint("TOPLEFT", PAD, -h)
+        h = h + BACKUP_H
+    end
+    f.specRow:ClearAllPoints()
+    if showSpec then
+        h = h + TIGHT
+        f.specRow:SetPoint("TOPLEFT", PAD, -h)
+        h = h + SPEC_H
+    end
+    f.backupRow:SetShown(showBackup)
+    f.specRow:SetShown(showSpec)
+    h = h + GAP
+    f.rest:ClearAllPoints()
+    f.rest:SetPoint("TOPLEFT", 0, -h)
+    return h
 end
 
 local function build()
@@ -117,22 +153,121 @@ local function build()
     body:SetPoint("TOPLEFT", 0, 0)          -- layoutHeader re-anchors it
     f.body = body
 
+    -- ---- anchor block ------------------------------------------------
+    -- Anchoring without dragging: pick a target and the element stays exactly
+    -- where it is (Sess:AnchorInPlace derives the spec that reproduces its
+    -- current seat). The list is rebuilt on every open (optionsFunc) because
+    -- what is legal changes with the graph and with what is on screen.
+    f.anchorPicker = UI:CreateDropdown(body, {
+        inline = true, searchable = true,
+        optionsFunc = function()
+            local el = selectedElement()
+            return el and NS.Picker:Options(el) or { _order = {} }
+        end,
+        get = function()
+            local el = selectedElement(); if not el then return nil end
+            local a = Registry:GetPos(el).anchor
+            return a and a.target or nil
+        end,
+        set = function(targetId)
+            local el = selectedElement()
+            if el then Sess:AnchorInPlace(el, targetId) end
+        end,
+    })
+    f.anchorPicker:SetSize(CW, ANCHOR_H)
+    -- Refresh owns this caption from here on; set once so the opener never
+    -- renders the raw value between build and the Refresh that follows it.
+    f.anchorPicker:SetDisplayOverride(L["Anchor to…"])
+
+    -- ---- backup anchor -----------------------------------------------
+    -- Where the element goes when the primary target is not on screen. Only
+    -- meaningful once there IS a primary, so the whole row hides while free.
+    f.backupRow = CreateFrame("Frame", nil, body)
+    f.backupRow:SetSize(CW, BACKUP_H)
+    local backupLabel = UI:CreateLabel(f.backupRow, { text = L["Backup anchor"], size = 10, color = UI.Colors.textDim })
+    backupLabel:SetPoint("LEFT", 0, 0)
+    f.backupPicker = UI:CreateDropdown(f.backupRow, {
+        inline = true, searchable = true,
+        optionsFunc = function()
+            local el = selectedElement()
+            return el and NS.Picker:Options(el, "fallback") or { _order = {} }
+        end,
+        get = function()
+            local el = selectedElement(); if not el then return NS.Picker.NONE end
+            local a = Registry:GetPos(el).anchor
+            return a and a.fallback and a.fallback.target or NS.Picker.NONE
+        end,
+        set = function(targetId)
+            local el = selectedElement(); if not el then return end
+            if targetId == NS.Picker.NONE then Sess:ClearFallback(el) else Sess:SetFallback(el, targetId) end
+        end,
+    })
+    f.backupPicker:SetHeight(BACKUP_H)
+    f.backupPicker:SetPoint("LEFT", backupLabel, "RIGHT", TIGHT, 0)
+    f.backupPicker:SetPoint("RIGHT", 0, 0)
+    f.backupPicker:SetDisplayOverride(L["None"])
+    f.backupRow:Hide()
+
+    -- ---- edge / align ------------------------------------------------
+    -- Outside mode only: point mode has no edge or align to set, and a free
+    -- element has no anchor at all.
+    local EDGES = { _order = { "right", "left", "top", "bottom" },
+                    right = L["Right"], left = L["Left"], top = L["Top"], bottom = L["Bottom"] }
+    local ALIGNS = { _order = { "start", "center", "end" },
+                     start = L["Start"], center = L["Center"], ["end"] = L["End"] }
+    f.specRow = CreateFrame("Frame", nil, body)
+    f.specRow:SetSize(CW, SPEC_H)
+    local specW = floor((CW - TIGHT) / 2)
+    f.edgeDrop = UI:CreateDropdown(f.specRow, {
+        inline = true, options = EDGES,
+        get = function()
+            local el = selectedElement(); if not el then return "right" end
+            local a = Registry:GetPos(el).anchor
+            return a and a.edge or "right"
+        end,
+        set = function(v)
+            local el = selectedElement()
+            if el then Sess:SetAnchorSpec(el, { edge = v }) end
+        end,
+    })
+    f.edgeDrop:SetSize(specW, SPEC_H)
+    f.edgeDrop:SetPoint("TOPLEFT", 0, 0)
+    f.alignDrop = UI:CreateDropdown(f.specRow, {
+        inline = true, options = ALIGNS,
+        get = function()
+            local el = selectedElement(); if not el then return "center" end
+            local a = Registry:GetPos(el).anchor
+            return a and a.align or "center"
+        end,
+        set = function(v)
+            local el = selectedElement()
+            if el then Sess:SetAnchorSpec(el, { align = v }) end
+        end,
+    })
+    f.alignDrop:SetSize(specW, SPEC_H)
+    f.alignDrop:SetPoint("TOPLEFT", specW + TIGHT, 0)
+    f.specRow:Hide()
+
+    -- ---- everything below the anchor block ---------------------------
+    -- Its own frame so the block above can grow and shrink under it: these rows
+    -- keep their build-time offsets and only f.rest's single anchor moves.
+    local rest = CreateFrame("Frame", nil, body)
+    rest:SetWidth(W)
+    rest:SetPoint("TOPLEFT", 0, 0)          -- layoutAnchorBlock re-anchors it
+    f.rest = rest
+
     local y = 0
     -- Reserve a row of height h and return its top; gap is the space to leave below it.
     local function row(h, gap) local cur = y; y = y - h - (gap or GAP); return cur end
-
-    -- ---- anchored-to line ----------------------------------------
-    f.anchorLine = UI:CreateLabel(body, { size = 10, color = UI.Colors.accent, width = CW })
-    f.anchorLine:SetPoint("TOPLEFT", PAD, row(14))
 
     -- ---- X / Y: two label+box pairs centred as one group ------------
     -- The pairs live in a container whose width is recomputed on Refresh
     -- (the labels change between "X" and "Offset X"), and the container is
     -- centred in the panel, so the group stays centred whatever the labels say.
     local ry = row(20)
-    f.xyRow = CreateFrame("Frame", nil, body)
+    f.xyRow = CreateFrame("Frame", nil, rest)
     f.xyRow:SetSize(CW, 20)
-    f.xyRow:SetPoint("TOP", body, "TOP", 0, ry)
+    f.xyRow:SetPoint("TOP", rest, "TOP", 0, ry)
     f.xLabel = UI:CreateLabel(f.xyRow, { text = L["X"], size = 11, justify = "RIGHT" })
     f.xLabel:SetPoint("LEFT", 0, 0)
     f.xBox = UI:CreateEditBox(f.xyRow, {
@@ -171,9 +306,9 @@ local function build()
     local ny = row(clusterH)
     local half = CW / 2
 
-    f.nudge = CreateFrame("Frame", nil, body)
+    f.nudge = CreateFrame("Frame", nil, rest)
     f.nudge:SetSize(NUDGE_CELL * 3, NUDGE_CELL * 3)
-    f.nudge:SetPoint("CENTER", body, "TOPLEFT", PAD + half / 2, ny - clusterH / 2)
+    f.nudge:SetPoint("CENTER", rest, "TOPLEFT", PAD + half / 2, ny - clusterH / 2)
     local ARROWS = {   -- icon, dx, dy, column, row (0-based in the 3x3 cluster)
         { "expand_less",   0,  1, 1, 0 },
         { "chevron_left", -1,  0, 0, 1 },
@@ -193,9 +328,9 @@ local function build()
         b:SetPoint("TOPLEFT", col * NUDGE_CELL, -rowi * NUDGE_CELL)
     end
 
-    f.picker = CreateFrame("Frame", nil, body)
+    f.picker = CreateFrame("Frame", nil, rest)
     f.picker:SetSize(DOT * 3 + DOT_GAP * 2, DOT * 3 + DOT_GAP * 2)
-    f.picker:SetPoint("CENTER", body, "TOPLEFT", PAD + half + half / 2, ny - clusterH / 2)
+    f.picker:SetPoint("CENTER", rest, "TOPLEFT", PAD + half + half / 2, ny - clusterH / 2)
     f.points = {}
     for i, point in ipairs(POINTS) do
         local col, rowi = (i - 1) % 3, floor((i - 1) / 3)
@@ -213,20 +348,20 @@ local function build()
     end
 
     -- ---- actions -------------------------------------------------
-    local acts = buttonRow(body, row(BTN_H, TIGHT), BTN_H, {
+    local acts = buttonRow(rest, row(BTN_H, TIGHT), BTN_H, {
         { text = L["Center"], onClick = function() local el = selectedElement(); if el then Sess:Center(el) end end },
         { text = L["Reset"],  onClick = function() local el = selectedElement(); if el then Sess:Reset(el) end end },
         { text = L["Detach"], onClick = function() local el = selectedElement(); if el then Sess:Detach(el) end end },
     })
     f.btnCenter, f.btnReset, f.btnDetach = acts[1], acts[2], acts[3]
 
-    local hist = buttonRow(body, row(BTN_H), BTN_H, {
+    local hist = buttonRow(rest, row(BTN_H), BTN_H, {
         { text = L["Undo"], onClick = function() Sess:Undo() end },
         { text = L["Redo"], onClick = function() Sess:Redo() end },
     })
     f.btnUndo, f.btnRedo = hist[1], hist[2]
 
-    local fin = buttonRow(body, row(CTA_H), CTA_H, {
+    local fin = buttonRow(rest, row(CTA_H), CTA_H, {
         { text = L["Save & Exit"], style = "primary", onClick = function() Sess:Finish("save") end },
         { text = L["Discard"], tone = "danger", onClick = function() Sess:Finish("discard") end },
     })
@@ -241,19 +376,22 @@ local function build()
     -- button has no font string at all, so Refresh's SetText below silently
     -- no-ops and the row renders blank. An empty string is enough to get the
     -- font string built; `fitText = false` keeps it from resizing off it.
-    f.btnCopy = UI:CreateButton(body, {
+    f.btnCopy = UI:CreateButton(rest, {
         text = "", width = CW, height = BTN_H, fitText = false,
         onClick = function() local el = selectedElement(); if el then Sess:CopyToTwin(el) end end,
     })
     f.btnCopy:SetPoint("TOPLEFT", PAD, row(BTN_H, 0))
     f.btnCopy:Hide()
 
-    -- Body heights with and without the copy row; the header adds its own on
-    -- top (layoutHeader), so the panel's total height is settled in Refresh.
-    f.bodyFullH = -y
-    f.bodyBaseH = f.bodyFullH - BTN_H - GAP
-    body:SetHeight(f.bodyFullH)
-    f:SetHeight(PAD + ICON + TIGHT + HEADER_BTN_H + GAP + f.bodyBaseH + PAD)
+    -- Heights of the rows BELOW the anchor block, with and without the copy row.
+    -- The block adds its own on top (layoutAnchorBlock) and the header its own
+    -- above that (layoutHeader), so the panel's total is settled in Refresh.
+    f.restFullH = -y
+    f.restBaseH = f.restFullH - BTN_H - GAP
+    rest:SetHeight(f.restBaseH)
+    local blockH = layoutAnchorBlock(f, false, false)
+    body:SetHeight(blockH + f.restBaseH)
+    f:SetHeight(PAD + ICON + TIGHT + HEADER_BTN_H + GAP + blockH + f.restBaseH + PAD)
     f:Hide()
     return f
 end
@@ -475,19 +613,27 @@ function Pn:Refresh()
         C_Timer.After(0, function() f.headerRetry = nil; Pn:Refresh() end)
     end
 
-    if pos.anchor then
-        local a = pos.anchor
-        local target = Registry:GetTarget(a.target)
+    local a = pos.anchor
+    if a then
+        -- Describe whichever block is actually driving the element: the backup
+        -- taking over is the one thing the panel must not stay quiet about, and
+        -- naming the primary's seat while the backup holds it would be a lie.
+        local active = Registry:ActiveAnchor(el)
+        local isBackup = active ~= nil and active == a.fallback
+        local blk = active or a
+        local target = Registry:GetTarget(blk.target)
         local name = target and target.title or L["(unavailable)"]
         local detail
-        if a.mode == "point" then detail = format("%s (%s → %s)", name, a.point, a.relPoint)
-        else detail = format("%s (%s/%s)", name, a.edge, a.align) end
-        f.anchorLine:SetText(format(L["Anchored to %s"], detail))
+        if blk.mode == "point" then detail = format("%s (%s → %s)", name, blk.point, blk.relPoint)
+        else detail = format("%s (%s/%s)", name, blk.edge, blk.align) end
+        local text = format(L["Anchored to %s"], detail)
+        if isBackup then text = L["(backup)"] .. " " .. text end
+        f.anchorPicker:SetDisplayOverride(text)
         f.xLabel:SetText(L["Offset X"]); f.yLabel:SetText(L["Offset Y"])
         f.btnDetach:SetEnabled(true)
         for _, b in ipairs(f.points) do b:Hide() end
     else
-        f.anchorLine:SetText("")
+        f.anchorPicker:SetDisplayOverride(L["Anchor to…"])
         f.xLabel:SetText(L["X"]); f.yLabel:SetText(L["Y"])
         f.btnDetach:SetEnabled(false)
         local cur = pos.point or "CENTER"
@@ -498,6 +644,24 @@ function Pn:Refresh()
             b:SetActive(b.point == cur)
         end
     end
+
+    -- Backup row: only meaningful once there IS a primary to fall back FROM.
+    -- Edge/align: outside mode only -- point mode has neither.
+    local showBackup = a ~= nil
+    local showSpec = a ~= nil and a.mode ~= "point"
+    if showBackup then
+        local fb = a.fallback
+        local ftext = L["None"]
+        if fb then
+            local ft = Registry:GetTarget(fb.target)
+            ftext = ft and ft.title or L["(unavailable)"]
+            if ft and not Registry:IsTargetAvailable(ft) then ftext = ftext .. " " .. L["(hidden)"] end
+        end
+        f.backupPicker:SetDisplayOverride(ftext)
+    end
+    if showSpec then f.edgeDrop:UpdateText(); f.alignDrop:UpdateText() end
+    local blockH = layoutAnchorBlock(f, showBackup, showSpec)
+
     layoutXY(f)
     f.xBox:Refresh(); f.yBox:Refresh()
 
@@ -507,13 +671,17 @@ function Pn:Refresh()
     -- Copy-to-twin row: shown only while the twin is actually registered (a
     -- pinned set's opposite-mode twin can be missing).
     local twin = el.twin and Registry:Get(el.twin) or nil
+    local restH
     if twin then
         f.btnCopy:SetText(format(L["Copy to %s"], twin.title))
         f.btnCopy:Show()
-        f:SetHeight(headerH + f.bodyFullH + PAD)
+        restH = f.restFullH
     else
         f.btnCopy:Hide()
-        f:SetHeight(headerH + f.bodyBaseH + PAD)
+        restH = f.restBaseH
     end
+    f.rest:SetHeight(restH)
+    f.body:SetHeight(blockH + restH)
+    f:SetHeight(headerH + blockH + restH + PAD)
     self:Dock()
 end

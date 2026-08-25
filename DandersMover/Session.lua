@@ -321,6 +321,57 @@ function Sess:Anchor(el, targetId, edge, align)
     return true
 end
 
+-- Anchor to a target WITHOUT moving: the picker's verb. Solver.AnchorInPlace
+-- derives the spec that reproduces where the element already sits, so choosing
+-- a parent from the panel is a change of relationship, not of position.
+function Sess:AnchorInPlace(el, targetId)
+    if Registry:WouldCreateCycle(el.id, targetId) then
+        NS:Print(L["Anchoring would create a loop."])
+        return
+    end
+    local pos = Registry:GetPos(el)
+    local before = NS.CopyPos(pos)
+    local childRect = Registry:GetRect(el)
+    if not childRect then
+        local cx, cy = visualCenter(el, pos)
+        local w, h = sizeOf(el)
+        childRect = { x = cx, y = cy, w = w, h = h }
+    end
+    local target = Registry:GetTarget(targetId)
+    local targetRect = target and Registry:GetRect(target) or nil
+    if not targetRect then
+        -- Anchoring in place is impossible with no rect: there is no geometry to
+        -- measure a seat against, so nothing can be reproduced. The element HOLDS
+        -- where it is (ResolveElement finds no available anchor) and takes the
+        -- centre-on-centre spec -- the one case where picking a target moves the
+        -- element later, once that target finally appears.
+        pos.anchor = { target = targetId, mode = "point", point = "CENTER", relPoint = "CENTER",
+                       offsetX = 0, offsetY = 0 }
+    else
+        local spec = Solver.AnchorInPlace(childRect, targetRect, Solver.SPACING)
+        pos.anchor = { target = targetId, mode = spec.mode, edge = spec.edge, align = spec.align,
+                       point = spec.point, relPoint = spec.relPoint,
+                       offsetX = spec.offsetX, offsetY = spec.offsetY }
+    end
+    carryFallback(pos, before, targetId)
+    pos.point = "CENTER"
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+end
+
+-- Edit the live spec of an existing outside-mode anchor (the panel's edge and
+-- align dropdowns). Point mode has no edge/align to set, so it is left alone.
+function Sess:SetAnchorSpec(el, changes)
+    local pos = Registry:GetPos(el)
+    if not pos.anchor or pos.anchor.mode == "point" then return end
+    local before = NS.CopyPos(pos)
+    for k, v in pairs(changes) do pos.anchor[k] = v end
+    NS:ResolveElement(el)
+    apply(el, "anchor")
+    commit(el, before, L["Anchor %s"])
+end
+
 function Sess:Detach(el)
     local pos = Registry:GetPos(el)
     if not pos.anchor then return end
