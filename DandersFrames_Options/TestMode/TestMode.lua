@@ -4791,7 +4791,9 @@ function DF:CreateTestPanel()
     -- to that slider rather than to the pair of boxes beside it.
     -- The click-through to the Defensive Icon page comes back with it; the slider row is
     -- a plain frame and never had one, which the removal note listed as a loss.
-    local lastDefCount
+    -- Per mode: the box writes whichever mode's db the panel is showing, so one
+    -- shared remembered count would carry a Party value into a Raid restore.
+    local lastDefCount = {}
     panel.showDefensivesCheck = secIndicators:AddCheckbox(L["Defensives"], "testDefensiveCount",
         function(checked)
             -- Keep the slider showing the value the box just wrote. Set directly rather
@@ -4808,15 +4810,16 @@ function DF:CreateTestPanel()
         end,
         "auras_defensiveicon",
         function(db, checked)
+            local modeKey = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
             if checked then
-                local restore = lastDefCount
+                local restore = lastDefCount[modeKey]
                 if not restore or restore <= 0 then restore = 1 end
                 db.testDefensiveCount = restore
             else
                 -- Remember what to come back to, but never remember 0 -- that would
                 -- make the next tick a no-op and the box look broken.
                 local cur = db.testDefensiveCount or 0
-                if cur > 0 then lastDefCount = cur end
+                if cur > 0 then lastDefCount[modeKey] = cur end
                 db.testDefensiveCount = 0
             end
         end)

@@ -1537,10 +1537,6 @@ function UI:CreateSlider(parent, opts)
     lbl:SetPoint("TOPLEFT", 0, 0)
     lbl:SetText(label)
     lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    -- Exposed for the same reason CreateCheckbox exposes its label: a control whose
-    -- meaning depends on another setting renames itself in a refreshContent hook
-    -- (the Resource Bar size sliders follow the bar's orientation).
-    container.label = lbl
 
     -- Add override indicators if dbKey is provided (for auto profiles)
     -- Use vertical offset of 6 to align with label row (sliders have input box below)

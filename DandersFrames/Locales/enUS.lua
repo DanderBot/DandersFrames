@@ -165,10 +165,10 @@ L["(%d found)"] = true
 -- Breadcrumb button on a search result. Two-part, like every other DF tooltip: the
 -- button's own label already names the destination, so the title is the ACTION.
 -- ("Go to %s" retired with it -- it had exactly one consumer, this tooltip.)
-L["Show In Combat"] = true
-L["Show Out of Combat"] = true
 L["Show me"] = true
 L["Open this setting's own page and highlight it."] = true
+L["Show In Combat"] = true
+L["Show Out of Combat"] = true
 -- Misc GUI fallback strings (banner / confirm)
 L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."] = true
 L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."] = true
@@ -525,6 +525,7 @@ L["Always First"] = true
 L["Always Green"] = true
 L["Always Last"] = true
 L["Addon Language"] = true
+L["Adjust For Frame Border"] = true
 L["Anchor"] = true
 L["Anchor To"] = true
 L["Animated Border"] = true
@@ -1242,9 +1243,8 @@ L["Manage"] = true
 L["Manage Filters"] = true
 L["Manage Profiles"] = true
 L["Mark of the Wild (Druid)"] = true
-L["Match Health Bar Width"] = true
 L["Match Health Bar Height"] = true
-L["Adjust For Frame Border"] = true
+L["Match Health Bar Width"] = true
 L["Keeps the resource bar exactly as long as the health bar, following the frame when it resizes. The matched size slider greys out while this is on; Thickness stays yours. Because the bar is pinned by its ends, the Anchor only takes effect along the other axis."] = true
 L["Shortens the bar so it sits inside the frame border instead of spanning its full length. Leave off to keep the bar exactly as long as the health bar, with the frame border overlapping its ends."] = true
 L["Match Icon Size"] = true
