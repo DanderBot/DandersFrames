@@ -194,7 +194,16 @@ do
     eq(f.alignLabel:GetText(), L["Align"], "free: align label")
     eq(f.targetRow.label:GetText(), L["Target"], "free: target row is labelled")
     eq(f.backupRow.label:GetText(), L["Backup"], "free: backup row is labelled")
-    eq(f.anchorBox.title:GetText(), L["Anchor"], "the block is a titled sub-section")end
+    eq(f.anchorBox.title:GetText(), L["Anchor"], "the block is a titled sub-section")
+    -- An inline dropdown's factory label is hidden, so the kit's usual
+    -- label-hover tooltip has nothing to sit on: the OPENER carries one.
+    eq(f.targetRow.picker.openerTooltip.title, L["Target"], "the target opener names itself")
+    eq(f.backupRow.picker.openerTooltip.title, L["Backup"], "the backup opener names itself")
+    eq(f.targetRow.handle._opts.tooltip.lines[1], L["Drag onto another mover to attach"],
+        "the primary handle says what dragging it does")
+    eq(f.backupRow.handle._opts.tooltip.lines[1], L["Drag onto another mover to set the backup anchor"],
+        "the backup handle says what dragging it does")
+end
 
 -- Both label columns are measured to the wider of their pair, so the two
 -- pickers start on the same column.

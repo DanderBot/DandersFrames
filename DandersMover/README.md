@@ -116,21 +116,28 @@ Two ways to tie an element to a target without moving it: the lib derives the
 anchor spec that reproduces where the element already sits, so the relationship
 changes and the position does not.
 
+The panel's **Anchor** section holds all of it: a **Target** row, an **Edge** /
+**Align** pair (**Point** / **Rel point** when the anchor is in point mode), and
+a **Backup** row. A free element still shows all three — the rows it has no
+answer for grey out rather than vanishing.
+
 - **The panel's target picker.** The selected element gets a searchable dropdown
   of every target it may legally anchor to, bucketed under the addon (and the
   `group`) that owns it; illegal picks — itself, its own descendants, anything
   that would close a loop, and elements the user has toggled off — are not
   listed at all. Targets with nothing on screen *are* listed, dimmed and marked
   `(hidden)`: that is how you anchor to something that only appears in raid.
-  A second row underneath picks the **backup anchor** from the same list, with a
-  **None** row that clears it, and it is shown only once there is a primary to
-  fall back from. Below both, edge and align dropdowns edit an outside-mode
-  anchor's seat in place (point mode has neither, so the row hides).
-- **Link-drag.** Hold the link glyph beside the anchor picker and drag: a line
-  follows the cursor from the element's slab, whatever legal target is under the
-  cursor lights up with the same dashed plate a snap zone wears, and the release
-  anchors in place. The *smallest* target under the cursor wins, so a sub-target
-  nested inside a container is still reachable. Esc, right-click, a release over
+  The **Backup** row picks the backup anchor from the same list, with a **None**
+  row that clears it, minus whatever the primary already is. The seat pair edits
+  the live anchor's seat in place.
+- **Link-drag.** Each of the two picker rows ends in a chain handle: hold it and
+  drag. A line follows the cursor from the element's slab, whatever legal target
+  is under the cursor lights up with the same dashed plate a snap zone wears,
+  and the release ties the two together without moving anything. The **Target**
+  row's handle sets the primary (anchor in place); the **Backup** row's handle
+  sets the backup anchor, and is live only once there is a primary to fall back
+  from. The *smallest* target under the cursor wins, so a sub-target nested
+  inside a container is still reachable. Esc, right-click, a release over
   nothing and combat starting all cancel the gesture with nothing committed.
 
 Either one commits exactly one undo entry, the same as dropping into a snap zone.

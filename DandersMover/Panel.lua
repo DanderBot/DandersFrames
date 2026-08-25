@@ -243,6 +243,11 @@ local function build()
             end
         end)
         row.picker = UI:CreateDropdown(row, o.dropdown)
+        -- An inline dropdown's factory label is hidden, so the kit's usual
+        -- label-hover tooltip has nothing to sit on; openerTooltip puts it on
+        -- the opener itself. Worth having: "Target" alone does not say that
+        -- picking one MOVES NOTHING, which is the whole point of the row.
+        row.picker.openerTooltip = o.tooltip
         row.picker:SetHeight(ROW_H)
         -- Two-point anchored rather than sized, so the picker absorbs whatever
         -- the measured label column leaves it.
@@ -257,6 +262,8 @@ local function build()
     -- what is legal changes with the graph and with what is on screen.
     f.targetRow = pickerRow(ac, {
         label = L["Target"], mode = "primary",
+        tooltip = { title = L["Target"],
+                    lines = { L["What this element is anchored to. Picking one does not move it."] } },
         handleTooltip = { title = L["Anchor"], lines = { L["Drag onto another mover to attach"] } },
         dropdown = {
             inline = true, searchable = true,
@@ -285,6 +292,8 @@ local function build()
     -- grey while the element is free.
     f.backupRow = pickerRow(ac, {
         label = L["Backup"], mode = "fallback",
+        tooltip = { title = L["Backup"],
+                    lines = { L["Where this element goes while the target above is off screen."] } },
         handleTooltip = { title = L["Backup"], lines = { L["Drag onto another mover to set the backup anchor"] } },
         dropdown = {
             inline = true, searchable = true,
