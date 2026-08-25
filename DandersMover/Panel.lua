@@ -29,6 +29,10 @@ local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber
 -- in-game -- see the note on Proxy.lua's copy of these constants).
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local LINK_ICON = MEDIA .. "link"
+-- The grip dots beside the chain: a 2x3 dot grid on its own 32px canvas, drawn
+-- at 9px. Its ink is only the middle ~half of that canvas, so the drawn square
+-- is wider than the dots look -- the margins are what keep the dots round.
+local GRIP_ICON = MEDIA .. "grip"
 
 -- Spacing comes from the theme so this panel keeps the rhythm of every other
 -- DandersUI surface: PAD is the outer padding, GAP the gap between rows of
@@ -56,7 +60,17 @@ local BTN_H, CTA_H = 20, 22
 local ANCHOR_PAD = 6
 local ROW_H = 20                  -- the Target and Backup rows
 local SPEC_H = 18                 -- the edge/align (or point/relPoint) pair
-local HANDLE = 16                 -- link-drag handle at a picker row's right end
+-- The link-drag handle at a picker row's right end. Wider than it is tall
+-- because it is a GRIP, not an icon: grip dots on the left, the chain glyph on
+-- the right, both inside a backdrop so the thing reads as a control you take
+-- hold of rather than a decoration printed on the row. 24 is what those two
+-- glyphs plus their insets measure -- the width buys an affordance, not a label,
+-- and the picker beside it gives up 8px for it.
+local HANDLE_W, HANDLE_H = 24, 16
+local GRIP, HANDLE_GLYPH = 9, 12  -- the two glyph sizes inside that box
+-- Hover: a small lift, quick enough to read as a response rather than an
+-- animation. 1.15 on a 24x16 button is ~3px of growth.
+local HOVER_SCALE, HOVER_DUR = 1.15, 0.08
 -- The label column of the Target/Backup rows, measured from the labels
 -- themselves (layoutAnchorBlock) and held between these: below the minimum the
 -- rows stop lining up, above the maximum a long translation would eat the
@@ -78,6 +92,40 @@ local function selectedElement()
 end
 
 local function step() return Solver.NudgeStep(IsShiftKeyDown(), IsControlKeyDown()) end
+
+-- ============================================================
+-- GRAB CURSOR
+-- The move cursor while the pointer is over a drag handle: the one affordance
+-- that says "this is draggable" before you press anything.
+--
+-- ☠ SetCursor is SILENT about a path it cannot resolve -- it draws a BLACK
+-- SQUARE where the pointer should be rather than erroring -- so a pcall is not
+-- a guard against a wrong path, only against a missing API. The path is
+-- therefore PROBED first through a throwaway texture: SetTexture answers false
+-- for a file that is not in the client, the same idiom Refresh uses to fall
+-- back on the addon icon. A probe that fails, or is inconclusive on a stub,
+-- drops the whole affordance rather than risking the square.
+--
+-- Looked up through _G at call time, not cached at file scope: the headless
+-- tests inject their own to see that both guards hold.
+-- ============================================================
+local GRAB_CURSOR = "Interface\\CURSOR\\UI-Cursor-Move"
+local cursorProbe                 -- nil = not probed yet, then true/false
+
+local function setGrabCursor(on)
+    local set, reset = _G.SetCursor, _G.ResetCursor
+    if type(set) ~= "function" or type(reset) ~= "function" then return end
+    if cursorProbe == nil then
+        cursorProbe = false
+        local ok, probe = pcall(function() return UIParent:CreateTexture(nil, "BACKGROUND") end)
+        if ok and probe then
+            cursorProbe = probe:SetTexture(GRAB_CURSOR) ~= false
+            probe:Hide()
+        end
+    end
+    if not cursorProbe then return end
+    if on then pcall(set, GRAB_CURSOR) else pcall(reset) end
+end
 
 -- A row of equal-width buttons spanning the content width.
 local function buttonRow(parent, y, height, defs)
@@ -141,6 +189,69 @@ local function layoutAnchorBlock(f)
     f.rest:ClearAllPoints()
     f.rest:SetPoint("TOPLEFT", 0, -h)
     return h
+end
+
+-- ============================================================
+-- DRAG HANDLE LOOK
+-- The glyph button gives us the chain, the tooltip and the click plumbing; this
+-- is the GRIP half -- the part that says the control is draggable before you
+-- have touched it. A backdrop box so it reads as a thing rather than as art
+-- printed on the row, grip dots beside the chain, and a hover state that lifts,
+-- brightens and takes the move cursor.
+--
+-- Both handles come through here: primary and backup are the same gesture, so
+-- they must not look like different kinds of control.
+-- ============================================================
+local function styleHandle(btn)
+    UI:CreateElementBackdrop(btn)
+    -- The kit centres its glyph; here it shares the box with the dots, so each
+    -- is pinned to its own end.
+    btn.Icon:ClearAllPoints()
+    btn.Icon:SetPoint("RIGHT", -1, 0)
+    btn.Grip = btn:CreateTexture(nil, "OVERLAY")
+    btn.Grip:SetTexture(GRIP_ICON)
+    btn.Grip:SetSize(GRIP, GRIP)
+    btn.Grip:SetPoint("LEFT", 1, 0)
+    local dim, border = UI.Colors.textDim, UI.Colors.border
+    btn.Grip:SetVertexColor(dim.r, dim.g, dim.b)
+
+    -- Chained, not replaced: the kit's own OnEnter owns the chain tint and the
+    -- tooltip, and both handles keep theirs.
+    local prevEnter, prevLeave = btn:GetScript("OnEnter"), btn:GetScript("OnLeave")
+    -- Whether the cursor currently on screen is OURS. An upvalue rather than a
+    -- field on the button: the pair of scripts is per handle anyway, and a flag
+    -- that lives in the closure cannot be read back wrong.
+    local grabbed = false
+    btn:SetScript("OnEnter", function(self, ...)
+        if prevEnter then prevEnter(self, ...) end
+        -- A greyed backup handle refuses the gesture, so it must not advertise
+        -- it either -- no lift, no cursor.
+        if not self:IsEnabled() then return end
+        local accent = UI:GetAccent()
+        NS.Fx.ScaleTo(self, HOVER_SCALE, HOVER_DUR)
+        self.Grip:SetVertexColor(1, 1, 1)
+        self:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
+        -- Mid-gesture the cursor belongs to the GESTURE, which may have set its
+        -- own. The button keeps mouse capture between press and release, so the
+        -- pointer comes back over it while a link is live and grabbing here
+        -- would fight the drag.
+        if not Sess.linking then
+            grabbed = true
+            setGrabCursor(true)
+        end
+    end)
+    btn:SetScript("OnLeave", function(self, ...)
+        if prevLeave then prevLeave(self, ...) end
+        NS.Fx.ScaleTo(self, 1, HOVER_DUR)
+        self.Grip:SetVertexColor(dim.r, dim.g, dim.b)
+        self:SetBackdropBorderColor(border.r, border.g, border.b, 0.5)
+        -- Only ours to put back: an enter that skipped the cursor (disabled, or
+        -- mid-gesture) must not reset one the gesture set.
+        if grabbed then
+            grabbed = false
+            setGrabCursor(false)
+        end
+    end)
 end
 
 local function build()
@@ -227,9 +338,11 @@ local function build()
         row.label:SetWordWrap(false)
         row.label:SetPoint("LEFT", 0, 0)
         row.handle = UI:CreateGlyphButton(row, {
-            texture = LINK_ICON, size = HANDLE, iconSize = HANDLE - 2, tooltip = o.handleTooltip,
+            texture = LINK_ICON, width = HANDLE_W, height = HANDLE_H,
+            iconSize = HANDLE_GLYPH, tooltip = o.handleTooltip,
         })
         row.handle:SetPoint("RIGHT", 0, 0)
+        styleHandle(row.handle)
         row.handle:RegisterForClicks("AnyUp", "AnyDown")
         row.handle:SetScript("OnMouseDown", function(_, button)
             local el = selectedElement()
@@ -251,8 +364,14 @@ local function build()
         row.picker:SetHeight(ROW_H)
         -- Two-point anchored rather than sized, so the picker absorbs whatever
         -- the measured label column leaves it.
+        --
+        -- ☠ The right edge is measured off the ROW, not off the handle sitting
+        -- there. Anchor offsets resolve in screen space, so a picker pinned to
+        -- the handle's LEFT would slide every time the handle's hover lift
+        -- scaled it -- the whole dropdown jittering because you passed the
+        -- cursor over the grip.
         row.picker:SetPoint("LEFT", row.label, "RIGHT", TIGHT, 0)
-        row.picker:SetPoint("RIGHT", row.handle, "LEFT", -TIGHT, 0)
+        row.picker:SetPoint("RIGHT", row, "RIGHT", -(HANDLE_W + TIGHT), 0)
         return row
     end
 
