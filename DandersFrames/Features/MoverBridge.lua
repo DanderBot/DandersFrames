@@ -17,12 +17,16 @@ if not Mover then return end
 
 local L = DF.L
 local UIParent, hooksecurefunc = UIParent, hooksecurefunc
-local pcall, geterrorhandler, ipairs = pcall, geterrorhandler, ipairs
+local pcall, geterrorhandler, ipairs, wipe = pcall, geterrorhandler, ipairs, wipe
 local max, min, format = math.max, math.min, string.format
 local IsInRaid, CreateFrame, C_Timer = IsInRaid, CreateFrame, C_Timer
 local InCombatLockdown = InCombatLockdown
 
 local ADDON_KEY = "DandersFrames"
+
+-- Forward declaration: the pinned element key for a mode's set at index i. Defined in
+-- PINNED SETS below, next to PINNED_KEY, but SessionFilter (above it) needs it too.
+local keyForSet
 
 -- PERF instrumentation (debug-gated: /df debug on, category "PERF"). Deltas of
 -- debugprofilestop() around the synchronous blocks of the unlock/lock paths, so
@@ -86,7 +90,11 @@ function Bridge:SessionFilter(scope)
     if pf and pf.GetSetForMode then
         for i = 1, (pf.MAX_SETS or 0) do
             local set = pf:GetSetForMode(i, scope == "raid")
-            if set and set.enabled then candidates[#candidates + 1] = scope .. ".pinned" .. i end
+            if set and set.enabled then
+                -- Keyed by uid (keyForSet), not by index -- see PINNED SETS below.
+                local key = keyForSet(scope, i)
+                if key then candidates[#candidates + 1] = key end
+            end
         end
     end
     if scope == "party" then
@@ -383,20 +391,33 @@ end
 -- ============================================================
 -- PINNED SETS
 -- ============================================================
--- One element per EXISTING set per mode: party.pinnedN / raid.pinnedN. MAX_SETS is 4
--- but only 2 are defaulted and RemoveSet COMPACTS indices, so a fixed 1..4 list would
--- show phantom sets and a stale one would point at the wrong set -- the list is
--- rebuilt on add/remove and on a profile refresh (RefreshPinnedElements).
--- ⚠ Known limitation (Phase C): compaction silently re-points a saved
--- anchor.target = "DandersFrames:raid.pinned3" at a different set; a child whose key
--- disappears simply holds.
+-- One element per EXISTING set per mode: party.pinned.<uid> / raid.pinned.<uid>.
+-- MAX_SETS is 4 but only 2 are defaulted and RemoveSet COMPACTS indices, so a fixed
+-- 1..4 list would show phantom sets -- the list is rebuilt on add/remove and on a
+-- profile refresh (RefreshPinnedElements).
+--
+-- ☠ THE KEY IS THE UID, NOT THE INDEX (Phase D). Compaction used to silently re-point a
+-- saved anchor.target = "DandersFrames:raid.pinned3" at whatever set slid into slot 3,
+-- and moved the user's /mover config toggle with it. The uid does not move, so a child
+-- anchored to a DELETED set now simply holds (an unresolvable target), which is the
+-- correct answer. Everything else here stays INDEX-based -- PinnedFrames owns nothing
+-- keyed by uid, so every accessor below is still called with (mode, i).
 --
 -- Containers are plain frames hosting a SecureGroupHeaderTemplate (or secure boss
 -- buttons) -> secure = true. `point` is the growth corner, derived -> pointLocked.
 -- PinnedFrames.lua owns every accessor (the record, the on-screen container for a
 -- mode, its rect, the commit funnel) so nothing here reaches into its internals.
 
-local PINNED_KEY = { party = "party.pinned", raid = "raid.pinned" }
+local PINNED_KEY = { party = "party.pinned.", raid = "raid.pinned." }
+
+-- The element key for a mode's set at INDEX i, or nil when there is no such set.
+-- EnsureSetUid is stamp-on-read, so a set seeded by Config's defaults or written by the
+-- options page after the login migration ran still gets its uid here.
+function keyForSet(mode, i)
+    local pf = DF.PinnedFrames
+    local uid = pf and pf.EnsureSetUid and pf:EnsureSetUid(i, mode)
+    return uid and (PINNED_KEY[mode] .. uid) or nil
+end
 
 local function pinnedDefault(mode, i)
     local defaults = (mode == "raid") and DF.RaidDefaults or DF.PartyDefaults
@@ -430,6 +451,13 @@ end
 
 local function pinnedDef(mode, i)
     local isRaid = (mode == "raid")
+    -- The SAME INDEX in the other mode, keyed by THAT set's uid. nil when the opposite
+    -- mode has no set at this index (the modes are independent) -- the panel only offers
+    -- the copy while the twin is registered, so a missing one is fine.
+    local otherMode = isRaid and "party" or "raid"
+    local pf = DF.PinnedFrames
+    local twinKey = (pf and pf.GetSetForMode and pf:GetSetForMode(i, not isRaid))
+        and keyForSet(otherMode, i) or nil
     return {
         title     = pinnedTitle(mode, i),
         group     = isRaid and L["Raid"] or L["Party"],
@@ -462,23 +490,33 @@ local function pinnedDef(mode, i)
             return (set and set.enabled) and true or false
         end,
         openSettings = function() openOptionsPage(mode, "general_pinnedframes") end,
-        -- The same index in the other mode. The panel only offers the copy
-        -- while that twin is registered, so a missing opposite set is fine.
-        twin      = ADDON_KEY .. ":" .. PINNED_KEY[isRaid and "party" or "raid"] .. i,
+        twin      = twinKey and (ADDON_KEY .. ":" .. twinKey) or nil,
     }
 end
 
--- Unregister every possible key for the mode, then register 1..#sets. Safe mid-session:
--- Lib:Unregister drops the proxy; a new set gets its proxy on the next rebuild.
+-- The keys this bridge currently has registered, per mode. ☠ TRACKED, NOT DERIVED: the
+-- keys are uids now, so "every possible key for the mode" is no longer a 1..MAX_SETS
+-- list -- after a remove there is nothing left in the DB that names the uid that just
+-- went away, and an untracked unregister would leave its proxy on screen forever.
+Bridge.pinnedKeys = { party = {}, raid = {} }
+
+-- Unregister what we registered last time, then register one element per EXISTING set.
+-- Safe mid-session: Lib:Unregister drops the proxy; a new set gets its proxy on the
+-- next rebuild.
 function Bridge:RefreshPinnedElements(mode)
     mode = (mode == "raid") and "raid" or "party"
+    local tracked = self.pinnedKeys[mode]
+    for _, key in ipairs(tracked) do Mover:Unregister(ADDON_KEY, key) end
+    wipe(tracked)
     local pf = DF.PinnedFrames
-    local maxSets = (pf and pf.MAX_SETS) or 4
-    for i = 1, maxSets do Mover:Unregister(ADDON_KEY, PINNED_KEY[mode] .. i) end
     if not (pf and pf.GetSetForMode) then return end
-    for i = 1, maxSets do
+    for i = 1, (pf.MAX_SETS or 4) do
         if pf:GetSetForMode(i, mode == "raid") then
-            Mover:Register(ADDON_KEY, PINNED_KEY[mode] .. i, pinnedDef(mode, i))
+            local key = keyForSet(mode, i)
+            if key then
+                Mover:Register(ADDON_KEY, key, pinnedDef(mode, i))
+                tracked[#tracked + 1] = key
+            end
         end
     end
 end
@@ -492,9 +530,13 @@ end
 -- was solved against last session's target; at login the party frames may not even be
 -- on screen (solo), so Init's Apply HELD. Without this, a Detach before the first
 -- resolve would drop the set at the stale x/y instead of in place.
+-- Iterates the TRACKED keys rather than re-deriving them: these are exactly the
+-- elements registered for the scope, so nothing here can hand Apply a key for a set
+-- that was removed, and nothing stamps a uid as a side effect of an apply.
 local function applyPinned(scope)
-    local pf = DF.PinnedFrames
-    for i = 1, (pf and pf.MAX_SETS) or 4 do Mover:Apply(ADDON_KEY, PINNED_KEY[scope] .. i) end
+    for _, key in ipairs(Bridge.pinnedKeys[(scope == "raid") and "raid" or "party"]) do
+        Mover:Apply(ADDON_KEY, key)
+    end
 end
 
 -- ============================================================
