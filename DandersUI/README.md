@@ -122,10 +122,23 @@ Scroll frames must use `ScrollFrameTemplate` (not `UIPanelScrollFrameTemplate`) 
 ## Popouts
 
 `UI:CreatePopout(opts)` is a small panel that **docks beside a region**: it picks
-the side that fits, follows the region while it moves, and can be pinned loose —
-at which point an accent tether beam keeps saying which region it belongs to. The
-shell owns the frame, the title bar, the docking, the pin and the beam; you mount
-the content in `build` and decide in `onClose` what closing means.
+the side that fits, follows the region while it moves, and can be pinned loose.
+The shell owns the frame, the title bar, the docking, the pin and the chrome; you
+mount the content in `build` and decide in `onClose` what closing means.
+
+**Connected, then detached.** While the popout *follows*, it and its region are
+drawn as one object: a 1px accent border on the popout, the same border laid over
+the source, a ~10px accent diamond — the **connection point** — on the edge the
+popout docked against, and a short **beam** across the dock gap joining the two.
+The colour is the host accent unless `opts.accent` overrides it. **Pin** it and
+every one of those goes: pinning says "this is its own window now", and it looks
+like it.
+
+**Retargeting glides.** Handing `Follow` a different region while the popout is
+already up and following slides it across (~0.18s, ease-out) rather than
+teleporting, so it reads as the same panel now about something else. The re-dock
+is suspended for the ride and the landing is exact. `PlaceFree` and a pinned
+popout are unaffected.
 
 Per host and `key` there is **one unpinned popout**, pooled: asking for a key that
 already has one hands the same object back, re-targeted, without re-running
@@ -143,26 +156,29 @@ something to dock to.
 | `family` | exclusivity group — opening one closes every other popout in its family, pinned ones included. A nil family coexists with everything |
 | `pinnable` | default true. `false`: no pin button, `AutoPin` no-ops, and the popout dies with its source |
 | `title` / `icon` | title bar; changeable later with `:SetHeader` |
-| `parent` | frame to parent to (default `UIParent`). The beam is parented alongside it, so a consumer that hides its own overlay hides the beam too |
+| `parent` | frame to parent to (default `UIParent`). The beam and the source outline are parented alongside it, so a consumer that hides its own overlay hides them too |
 | `width` | CONTENT width; the height follows what `build` mounted |
 | `build(popout, content)` | called ONCE per instance to mount the content |
 | `onClose(popout, reason)` | `reason`: `"cross"`, `"family"`, `"source"`, `"api"` |
 | `onPin(popout)` | fired by a hand pin and an auto-pin alike |
 | `canAutoPin` | boolean or `function(popout)`, evaluated per call; false makes `AutoPin` a no-op |
-| `tetherSource` | region or `function(popout) -> region` — the beam's far end, for when the thing the popout is *about* is not the thing it docked to |
+| `tetherSource` | region or `function(popout) -> region` — the far end of the beam and the source outline, for when the thing the popout is *about* is not the thing it docked to |
+| `accent` | `{r,g,b[,a]}` overriding the host accent for this popout's border, connection point, beam and source outline. Re-read on every open, so a pooled popout tracks a theme change |
 
 `onUnpin`, `actions` and `badge` are accepted and reserved: v1 never unpins and
 draws neither.
 
 | Call | Purpose |
 |---|---|
-| `po:Follow(region, opts)` | Dock beside `region` and track it. `opts.side` forces `"left"` / `"right"` / `"above"` / `"below"`; without it the side is whichever fits on screen. On a pinned popout it only re-points the beam |
-| `po:PlaceFree(x, y)` | Absolute placement, for consumers that own their own layout: no source, so nothing to follow and nothing to tether to |
-| `po:Pin([silent])`, `po:AutoPin()`, `po:IsPinned()` | Take it off its leash: it stops following, becomes draggable by its title bar, and from there the only way out is the cross. `AutoPin` is the same thing gated on `canAutoPin` and without the confirm pop |
+| `po:Follow(region, opts)` | Dock beside `region` and track it. `opts.side` forces `"left"` / `"right"` / `"above"` / `"below"`; without it the side is whichever fits on screen. Handed a NEW region while already up and following, it glides across. On a pinned popout it only re-points the tether |
+| `po:PlaceFree(x, y)` | Absolute placement, for consumers that own their own layout: no source, so nothing to follow and nothing to tether to. Stops a glide |
+| `po:Pin([silent])`, `po:AutoPin()`, `po:IsPinned()` | Take it off its leash: it stops following, drops the connection point, beam and source outline, becomes draggable by its title bar, and from there the only way out is the cross. `AutoPin` is the same thing gated on `canAutoPin` and without the confirm pop |
 | `po:SetHeader(title, icon)`, `po:GetTitle()` | Title bar contents |
 | `po:Resize()` | Re-fit the height after changing the content's height |
+| `po:GetAccent()` | The colour this popout's chrome is drawn in: `opts.accent`, else the host accent |
+| `po:HideChrome()` | Take the beam and the source outline down at once, animations cancelled — for a consumer hiding the popout by hand (a combat suspend, a drag). Neither is a child of `po.frame`, so nothing else would |
 | `po:Close([reason])`, `po:IsShown()` | Close hands `reason` to `onClose`. A pinned instance is discarded; an unpinned one goes back to the pool |
-| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units |
+| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
 
 `po.frame` is the shell, `po.content` the frame `build` was handed.
 

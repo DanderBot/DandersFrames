@@ -25,7 +25,16 @@ UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5
 
 local ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
 function UI:GetAccent() return ACCENT end
-function UI:CreatePanelBackdrop() end
+-- Both backdrop factories RECORD what they were asked to paint: the accent
+-- chrome is only observable as the colour these were handed.
+function UI:CreatePanelBackdrop(frame, opts)
+    frame._panelOpts = opts
+    return frame
+end
+function UI:ApplyPixelBorder(frame, color, weight)
+    frame._pxColor, frame._pxWeight = color, weight
+    return frame
+end
 function UI:CreateLabel(parent, opts)
     local fs = FakeUIFrame()
     if opts and opts.text then fs:SetText(opts.text) end
@@ -295,12 +304,13 @@ end
 
 -- ============================================================
 -- 8. THE TETHER BEAM
--- Hidden while the popout is still beside its source; drawn once it has been
--- pinned AND moved away. Endpoints are the nearest edge midpoints, so the line
--- leaves the faces that are looking at each other.
+-- Up for the whole time the popout FOLLOWS, and only then: a short line from
+-- the connection point's tip across the dock gap to the nearest point on the
+-- source's outline. Pinning takes it away -- pinned is visually detached.
 -- ============================================================
 
--- The predicate first, on plain rects.
+-- The adjacency predicate is published geometry the shell no longer consults;
+-- it is still exercised here because consumers can call it.
 do
     local a = { x = 0, y = 0, w = 100, h = 50 }
     check(UI.PopoutIsAdjacent(a, { x = 62, y = 0, w = 20, h = 50 }, 16),
@@ -314,24 +324,21 @@ do
     check(not UI.PopoutIsAdjacent(a, nil, 16), "adjacent: a missing rect is not beside anything")
 end
 
+-- Where the dock PUTS the frame, stated rather than measured: the stub resolves
+-- no anchors, so a test that wants the beam's real endpoints has to say where
+-- the popout ended up. Right of the source, DOCK_GAP away, hanging from the
+-- source's TOP edge.
+local function dockedRightOfCentre()
+    return CX + 40 + DOCK_GAP + FRAME_W / 2, CY + 20 - FRAME_H / 2
+end
+
 do
     local src = source(80, 40, CX, CY)
     local p = popout({ key = "beam" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    local before = #delays
     p:Follow(src)
-    -- The stub resolves no anchors, so where the dock PUT the frame is stated
-    -- rather than measured: right of the source, DOCK_GAP away.
-    local dockedX = CX + 40 + DOCK_GAP + FRAME_W / 2
-    p.frame:SetFakeCenter(dockedX, CY)
-    p:Pin()
-    check(p.beam == nil or not p.beam:IsShown(), "beam: a popout still beside its source draws none")
-
-    -- Drag it away: the beam appears, with both layers coloured from the host
-    -- accent and the core the thinner, brighter of the two.
-    p.titleBar:GetScript("OnDragStart")()
-    check(p.frame._flags.moving, "beam: the drag actually moved the frame")
-    p.frame:SetFakeCenter(400, 200)
-    p.frame:GetScript("OnUpdate")(p.frame)
-    check(p.beam:IsShown(), "beam: pinned and away from the source, the beam shows")
+    check(p.beam:IsShown(), "beam: FOLLOWING, the beam is up -- docked is exactly when it means something")
     local glow, core = p.beam.glow, p.beam.core
     check(glow:IsShown() and core:IsShown(), "beam: both layers are up")
     eq(core._thickness, 3, "beam: the core is the thin bright line")
@@ -339,25 +346,314 @@ do
     eq(core._color.r, ACCENT.r, "beam: the core takes the host accent")
     eq(core._color.a, 0.55, "beam: ...at the core alpha")
     eq(glow._color.a, 0.15, "beam: ...and the glow at the under-glow alpha")
-    check(core._start ~= nil and core._end ~= nil, "beam: the core has both endpoints")
     eq(core._start.rel, UIParent, "beam: endpoints are stated in UIParent-centre units")
-    -- Popout centre (400,200) is left of and below the source (960,540): the
-    -- nearest faces are the popout's RIGHT edge and the source's LEFT edge.
-    eq(core._start.x, 400 - CX + FRAME_W / 2, "beam: it leaves the popout's near edge midpoint")
-    eq(core._end.x, -40, "beam: ...and lands on the source's near edge midpoint")
+    -- The popout's rect is { x = 112, y = -26, 120 x 92 }; right-docked, the
+    -- connection point's tip is half a notch left of its left edge.
+    eq(core._start.x, 112 - FRAME_W / 2 - 5, "beam: it leaves the connection point's TIP")
+    eq(core._start.y, -26, "beam: at the source-facing edge's midpoint")
+    -- ...and lands on the nearest point of the source's outline: its right face
+    -- (x = 40), clamped down to the bottom of that face (y = -20) because the
+    -- popout hangs below it.
+    eq(core._end.x, 40, "beam: and lands on the source outline's near face")
+    eq(core._end.y, -20, "beam: clamped onto the outline, not aimed at its centre")
 
     -- The reveal waited out the entrance rather than racing it.
     local waited = false
-    for _, d in ipairs(delays) do if d == 0.22 then waited = true end end
+    for i = before + 1, #delays do if delays[i] == 0.22 then waited = true end end
     check(waited, "beam: the reveal was deferred by the pop-in duration")
 
-    -- Back beside it and the beam has nothing left to say.
-    p.frame:SetFakeCenter(dockedX, CY)
+    -- PINNED is detached: the beam goes, and dragging the popout miles away does
+    -- not bring it back.
+    p:Pin()
+    check(not p.beam:IsShown(), "beam: pinning takes the beam away")
+    p.titleBar:GetScript("OnDragStart")()
+    check(p.frame._flags.moving, "beam: the drag actually moved the frame")
+    p.frame:SetFakeCenter(400, 200)
     p.frame:GetScript("OnUpdate")(p.frame)
-    check(not p.beam:IsShown(), "beam: moved back beside the source, the beam goes away")
+    check(not p.beam:IsShown(), "beam: a pinned popout stays beamless however far it is dragged")
     p.titleBar:GetScript("OnDragStop")()
     check(not p.frame._flags.moving, "beam: the drag released the frame")
+    check(not p.beam:IsShown(), "beam: ...and letting go does not bring it back either")
     p:Close()
+end
+
+-- The beam re-sides with the dock: flipped left, it leaves the popout's RIGHT
+-- face and lands on the source's left one.
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "beamflip" })
+    -- Left-docked at the same offsets, mirrored.
+    p.frame:SetFakeCenter(CX - 40 - DOCK_GAP - FRAME_W / 2, CY + 20 - FRAME_H / 2)
+    p:Follow(src, { side = "left" })
+    eq(p.beam.core._start.x, -112 + FRAME_W / 2 + 5, "beam: left-docked, it leaves the RIGHT face's tip")
+    eq(p.beam.core._end.x, -40, "beam: and lands on the source's left face")
+    p:Close()
+end
+
+-- ============================================================
+-- 8a. THE RETARGET GLIDE
+-- Pointing an OPEN following popout at a different thing slides it across
+-- instead of teleporting. The re-dock is suspended for the duration -- a
+-- following popout is anchored to its source and cannot be driven while that
+-- anchor holds -- and the landing is exact.
+-- ============================================================
+do
+    local a = source(80, 40, CX, CY)
+    local b = source(80, 40, CX - 500, CY)
+    local p = popout({ key = "glide" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(a)
+    check(not p.gliding, "glide: the first placement is not a glide -- there is nowhere to come from")
+    eq(p.frame._points[1][2], a, "glide: ...it is anchored straight to its source")
+
+    -- Record every re-anchor, so "it took an explicit screen anchor while
+    -- gliding and a source anchor when it landed" is observable rather than
+    -- inferred from a position the stub does not resolve.
+    local moves = {}
+    local realSetPoint = p.frame.SetPoint
+    p.frame.SetPoint = function(s, ...) moves[#moves + 1] = { ... } return realSetPoint(s, ...) end
+
+    p:Follow(b)
+    check(p.gliding, "glide: retargeting a shown following popout glides")
+    local first = moves[#moves]
+    eq(first[1], "CENTER", "glide: it takes an explicit screen anchor for the ride")
+    eq(first[2], UIParent, "glide: ...off UIParent, not the source")
+    eq(first[4], 112, "glide: starting exactly where it already was")
+    eq(first[5], -26, "glide: ...on both axes")
+    -- The connected chrome commits to the NEW source at once.
+    eq(p.srcOutline._points[1][2], b, "glide: the source outline snaps to the new source at once")
+
+    -- Part-way: still gliding, still on its own anchor, and the beam's near end
+    -- has travelled with the frame.
+    local midStart = p.beam.core._start.x
+    p.frame:GetScript("OnUpdate")(p.frame, 0.06)
+    check(p.gliding, "glide: part-way through, it is still gliding")
+    check(p._gX < 112 and p._gX > -388, "glide: ...and somewhere between the two docks")
+    eq(moves[#moves][1], "CENTER", "glide: still driving its own anchor")
+    check(p.beam.core._start.x < midStart, "glide: the beam's near end tracks the gliding frame")
+
+    -- ☠ The re-dock is SUSPENDED. A source move mid-glide must not yank the
+    -- frame onto the destination on the very next frame.
+    b:SetFakeCenter(CX - 500, CY + 100)
+    p.frame:GetScript("OnUpdate")(p.frame, 0.02)
+    check(p.gliding, "glide: a source move mid-glide does not end the glide")
+    eq(moves[#moves][1], "CENTER", "glide: ...and does not re-dock underneath it")
+    b:SetFakeCenter(CX - 500, CY)
+
+    -- Run it out. It lands on the computed dock point and hands the anchor back
+    -- to the source, so the ordinary follow works again from there.
+    p.frame:GetScript("OnUpdate")(p.frame, 1)
+    check(not p.gliding, "glide: it finishes")
+    local landed, docked
+    for i = #moves, 1, -1 do
+        if not docked then docked = moves[i] end
+        if moves[i][1] == "CENTER" and moves[i][2] == UIParent then landed = moves[i] break end
+    end
+    local tx, ty = UI.PopoutDockPos({ x = -500, y = 0, w = 80, h = 40 },
+                                    "right", FRAME_W, FRAME_H, DOCK_GAP)
+    eq(landed[4], tx, "glide: the last driven position IS the dock point")
+    eq(landed[5], ty, "glide: ...on both axes")
+    eq(docked[1], "TOPLEFT", "glide: and it ends re-anchored to the source")
+    eq(docked[2], b, "glide: ...to the NEW source")
+    p.frame.SetPoint = realSetPoint
+    p:Close()
+end
+
+-- The dock position as a pure function -- the same point the SetPoint in _Dock
+-- resolves to, which is what makes the glide's landing exact.
+do
+    local src = { x = 0, y = 0, w = 80, h = 40 }
+    local x, y = UI.PopoutDockPos(src, "right", 120, 92, 12)
+    eq(x, 112, "dockpos: right of the source, a gap away")
+    eq(y, -26, "dockpos: hanging from the source's top edge")
+    x, y = UI.PopoutDockPos(src, "left", 120, 92, 12)
+    eq(x, -112, "dockpos: mirrored on the left")
+    x, y = UI.PopoutDockPos(src, "above", 120, 92, 12)
+    eq(x, 0, "dockpos: above centres on the source")
+    eq(y, 20 + 12 + 46, "dockpos: ...clear of its top edge")
+    x, y = UI.PopoutDockPos(src, "below", 120, 92, 12)
+    eq(y, -20 - 12 - 46, "dockpos: and below clears its bottom")
+    eq(UI.PopoutDockPos(src, "sideways", 120, 92, 12), nil, "dockpos: an unknown side has no position")
+    eq(UI.PopoutDockPos(nil, "right", 120, 92, 12), nil, "dockpos: no source, no position")
+end
+
+-- What does NOT glide.
+do
+    local a = source(80, 40, CX, CY)
+    local p = popout({ key = "noglide" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(a)
+    p:Follow(a)
+    check(not p.gliding, "glide: re-Following the SAME source re-docks, it does not glide")
+    p:Follow(a, { side = "below" })
+    check(not p.gliding, "glide: nor does changing the forced side on one source")
+    eq(p.side, "below", "glide: ...which still re-docks")
+    p:Close()
+
+    -- A pinned popout is off its leash; Follow only re-points its beam.
+    local q = popout({ key = "glidepin" })
+    q.frame:SetFakeCenter(dockedRightOfCentre())
+    q:Follow(a)
+    q:Pin()
+    q:Follow(source(80, 40, CX - 500, CY))
+    check(not q.gliding, "glide: a pinned popout does not glide anywhere")
+    q:Close()
+
+    -- PlaceFree owns its own position, so it cancels a glide outright.
+    local r = popout({ key = "glidefree" })
+    r.frame:SetFakeCenter(dockedRightOfCentre())
+    r:Follow(a)
+    r:Follow(source(80, 40, CX - 500, CY))
+    check(r.gliding, "glide: gliding going in")
+    r:PlaceFree(0, 0)
+    check(not r.gliding, "glide: PlaceFree stops it dead")
+    eq(r.frame._points[1][4], 0, "glide: ...at the position it was given")
+    r:Close()
+end
+
+-- ============================================================
+-- 8b. ACCENT CHROME
+-- The popout, the connection point and the source outline are all drawn in ONE
+-- colour, so the two ends read as two halves of one object. The host accent by
+-- default; opts.accent overrides it per popout.
+-- ============================================================
+do
+    local p = popout({ key = "accent" })
+    local bc = p.frame._panelOpts and p.frame._panelOpts.borderColor
+    check(bc ~= nil, "accent: the popout's backdrop was given a border colour")
+    eq(bc.r, ACCENT.r, "accent: the border takes the host accent")
+    eq(bc.b, ACCENT.b, "accent: ...on every channel")
+    p:Close()
+
+    local mine = { 1, 0.5, 0 }
+    local q = popout({ key = "accentopt", accent = mine })
+    eq(q.frame._panelOpts.borderColor.r, 1, "accent: opts.accent overrides the host")
+    eq(q.frame._panelOpts.borderColor.g, 0.5, "accent: ...as an array triple")
+    eq(q:GetAccent().b, 0, "accent: GetAccent answers the override")
+    q:Close()
+
+    -- The override is per ADOPT, so a pooled popout re-opened without one falls
+    -- back to the host again rather than keeping the last consumer's colour.
+    local back = popout({ key = "accentopt" })
+    check(back == q, "accent: the pooled instance came back")
+    eq(back:GetAccent().r, ACCENT.r, "accent: ...and dropped the override with the opts")
+    back:Close()
+end
+
+-- ============================================================
+-- 8c. THE CONNECTION POINT
+-- A small accent diamond centred on the edge the popout docked against. It
+-- re-sides with the dock and it is gone the moment the popout is pinned, which
+-- is when the relationship it describes stops holding.
+-- ============================================================
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "notch" })
+    check(not p.notch:IsShown(), "notch: a built popout has no connection point yet")
+    p:Follow(src)
+    check(p.notch:IsShown(), "notch: following, the point is up")
+    eq(p.notch:GetTexture(), "Icons\\notch", "notch: it wears the diamond")
+    eq(p.notch._vertex.r, ACCENT.r, "notch: tinted with the accent")
+    eq(p.notch:GetWidth(), 10, "notch: ~10px")
+    local pt = p.notch._points[#p.notch._points]
+    eq(pt[1], "CENTER", "notch: its CENTRE sits on the edge")
+    eq(pt[3], "LEFT", "notch: right-docked, that is the popout's LEFT edge")
+
+    -- Flip the dock and the point crosses with it.
+    src:SetFakeCenter(1850, CY)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(p.side, "left", "notch: the dock flipped")
+    eq(p.notch._points[#p.notch._points][3], "RIGHT",
+        "notch: left-docked, the point moves to the popout's RIGHT edge")
+
+    p:Follow(src, { side = "above" })
+    eq(p.notch._points[#p.notch._points][3], "BOTTOM", "notch: above-docked points DOWN")
+    p:Follow(src, { side = "below" })
+    eq(p.notch._points[#p.notch._points][3], "TOP", "notch: below-docked points UP")
+
+    p:Pin()
+    check(not p.notch:IsShown(), "notch: pinning takes the connection point away")
+    p:Close()
+
+    -- PlaceFree has no dock side, so there is nothing to point at.
+    local free = popout({ key = "notchfree" })
+    free:PlaceFree(0, 0)
+    check(not free.notch:IsShown(), "notch: a free-placed popout draws none")
+    free:Close()
+end
+
+-- The tip geometry, head-on: the outer vertex of a diamond straddling the
+-- source-facing edge, half its size proud of it.
+do
+    local pr = { x = 100, y = 20, w = 120, h = 92 }
+    local x, y = UI.PopoutNotchTip(pr, "right", 10)
+    eq(x, 100 - 60 - 5, "tip: right-docked, the tip is left of the popout's left edge")
+    eq(y, 20, "tip: on that edge's midpoint")
+    x, y = UI.PopoutNotchTip(pr, "left", 10)
+    eq(x, 100 + 60 + 5, "tip: left-docked, the tip is right of the right edge")
+    x, y = UI.PopoutNotchTip(pr, "above", 10)
+    eq(y, 20 - 46 - 5, "tip: above-docked, the tip is below the bottom edge")
+    x, y = UI.PopoutNotchTip(pr, "below", 10)
+    eq(y, 20 + 46 + 5, "tip: below-docked, the tip is above the top edge")
+    eq(UI.PopoutNotchTip(pr, nil, 10), nil, "tip: no dock side, no tip")
+    eq(UI.PopoutNotchTip(nil, "right", 10), nil, "tip: no rect, no tip")
+end
+
+-- Nearest point on a rect's outline. The tip is always OUTSIDE the source, so
+-- clamping onto the rect lands on its perimeter.
+do
+    local r = { x = 0, y = 0, w = 100, h = 50 }
+    local x, y = UI.PopoutNearestOnRect(r, 200, 0)
+    eq(x, 50, "nearest: clamped onto the right face")
+    eq(y, 0, "nearest: ...at the height it came from")
+    x, y = UI.PopoutNearestOnRect(r, -200, 100)
+    eq(x, -50, "nearest: the left face")
+    eq(y, 25, "nearest: ...and the top, for a point off the corner")
+    eq(UI.PopoutNearestOnRect(nil, 0, 0), nil, "nearest: no rect, no point")
+end
+
+-- ============================================================
+-- 8d. THE SOURCE OUTLINE
+-- While following, the shell draws the SAME 1px accent border over the tether
+-- source that the popout wears, so the two visibly share an edge.
+-- ============================================================
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "outline" })
+    check(p.srcOutline == nil, "outline: nothing is built until the popout is placed")
+    p:Follow(src)
+    check(p.srcOutline ~= nil and p.srcOutline:IsShown(), "outline: following, it is up")
+    eq(p.srcOutline._pxColor[1], ACCENT.r, "outline: the same accent as the popout's border")
+    eq(p.srcOutline._points[1][1], "TOPLEFT", "outline: it covers the source rect")
+    eq(p.srcOutline._points[1][2], src, "outline: ...anchored to the source itself")
+    eq(p.srcOutline._points[2][1], "BOTTOMRIGHT", "outline: on both corners")
+
+    -- Anchored to the region, so it tracks a moving source for free -- and must
+    -- not pay for a re-anchor and a border relayout on every re-dock.
+    local repaints = 0
+    local realApply = UI.ApplyPixelBorder
+    UI.ApplyPixelBorder = function(s, frame, ...) repaints = repaints + 1 return realApply(s, frame, ...) end
+    src:SetFakeCenter(CX + 30, CY)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    src:SetFakeCenter(CX + 60, CY)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(repaints, 0, "outline: a source move re-docks without touching the outline")
+    UI.ApplyPixelBorder = realApply
+
+    p:Pin()
+    check(not p.srcOutline:IsShown(), "outline: pinning is visually detached, so it goes")
+    p:Close()
+end
+
+-- It follows the TETHER source, not the dock source, and it leaves on close.
+do
+    local src = source(80, 40, CX, CY)
+    local far = source(60, 40, CX - 400, CY)
+    local p = popout({ key = "outlinetether", tetherSource = far })
+    p:Follow(src)
+    eq(p.srcOutline._points[1][2], far, "outline: it outlines the TETHER target")
+    p:Close()
+    check(not p.srcOutline:IsShown(), "outline: closing takes it down")
 end
 
 -- ============================================================
@@ -532,29 +828,29 @@ end
 -- to -- a popout about a row inside a list may dock to the list.
 do
     local src = source(80, 40, CX, CY)
-    -- Well away to the left, level with the screen centre, so the nearest faces
-    -- are unambiguous: the popout's right edge to the target's left edge.
+    -- Well away to the left of the dock target, so "which of the two did the
+    -- beam actually land on" is unambiguous.
     local far = source(60, 40, CX - 400, CY)
     local p = popout({ key = "tether", tetherSource = far })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
     p:Follow(src)
-    p.frame:SetFakeCenter(100, CY)          -- rect x = -860, y = 0
-    p:Pin()
-    check(p.beam:IsShown(), "tether: pinned and away, the beam shows")
-    eq(p.beam.core._start.x, -860 + FRAME_W / 2, "tether: it leaves the popout's right face")
-    eq(p.beam.core._start.y, 0, "tether: at that face's midpoint")
-    eq(p.beam.core._end.x, -430, "tether: and lands on the TETHER target's left face")
-    eq(p.beam.core._end.y, 0, "tether: at that face's midpoint, not on the dock target")
+    check(p.beam:IsShown(), "tether: following, the beam shows")
+    eq(p.beam.core._start.x, 112 - FRAME_W / 2 - 5, "tether: it leaves the connection point's tip")
+    eq(p.beam.core._end.x, -370, "tether: and lands on the TETHER target's near face")
+    eq(p.beam.core._end.y, -20, "tether: clamped onto its outline, not on the dock target")
+    -- The outline follows the same target, so both ends of the "connected" look
+    -- agree about what the popout is about.
+    eq(p.srcOutline._points[1][2], far, "tether: the source outline is on the tether target too")
     p:Close()
 
     -- The function form is resolved when the beam is drawn, so the target can
     -- change between two opens of the same popout.
     local calls = 0
     local q = popout({ key = "tetherfn", tetherSource = function() calls = calls + 1; return far end })
-    q:Follow(source(80, 40))
-    q.frame:SetFakeCenter(100, CY)
-    q:Pin()
+    q.frame:SetFakeCenter(dockedRightOfCentre())
+    q:Follow(source(80, 40, CX, CY))
     check(calls > 0, "tether: a function tetherSource is called")
-    eq(q.beam.core._end.x, -430, "tether: and the region it returns is used")
+    eq(q.beam.core._end.x, -370, "tether: and the region it returns is used")
     q:Close()
 end
 
@@ -562,9 +858,8 @@ end
 -- that fade out, so the two read as one gesture instead of two events.
 do
     local p = popout({ key = "closeorder" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
     p:Follow(source(80, 40, CX, CY))
-    p.frame:SetFakeCenter(400, 200)
-    p:Pin()
     check(p.beam:IsShown(), "exit: the beam is up going in")
     local before = #delays
     p:Close()

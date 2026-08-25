@@ -437,9 +437,8 @@ end
 -- ============================================================
 -- THE STRIP'S SESSION VERBS
 -- Undo and Redo live here, not on the element panel: what they act on is the
--- session's history, not the mover whose panel happens to be open -- and with
--- several panels pinned at once, one per panel would be the same button drawn
--- many times.
+-- session's history, not the mover whose panel happens to be open, so putting
+-- them on the panel would be a session verb wearing an element's clothes.
 -- ============================================================
 do
     local wasReady = R.ready
@@ -538,11 +537,15 @@ end
 
 -- ============================================================
 -- THE PIN MARKER
--- A mover with a panel pinned open on it wears a dim white outline at rest, so a
--- screen full of pinned panels can be traced back to the movers they belong to.
+-- The mover keeps ONE panel, so a pinned one is a panel that has stopped
+-- following: the selection may be somewhere else entirely, or nowhere. The dim
+-- white outline at rest is what says which mover that panel belongs to.
 -- It must stay UNDER hover and selection: it is a resting state, not a
 -- highlight, and a marker that outshone the slab under the cursor would make
 -- hover unreadable.
+--
+-- The colour rules are exercised against a stubbed IsElementPinned, so several
+-- ids read as pinned here at once; only the SLAB's rules are under test.
 -- ============================================================
 do
     local wasReady = R.ready
