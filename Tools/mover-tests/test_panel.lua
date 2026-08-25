@@ -53,6 +53,9 @@ local function stubFontString()
     function f:GetText() return self._text end
     function f:GetStringWidth() return 7 * #self._text end
     function f:GetStringHeight() return 12 end
+    -- Recorded: whether a caption clips or wraps is the difference between a
+    -- long string staying in its row and falling through the one below.
+    function f:SetWordWrap(v) self._wordWrap = v and true or false end
     return f
 end
 
@@ -63,6 +66,11 @@ local function stubDropdown(opts)
     d._opts = opts or {}
     d._options = d._opts.options
     d._enabled = true
+    -- The kit always hands the opener button back on the container
+    -- (container.opener); the panel reaches through it for the caption's
+    -- FontString.
+    d.opener = stubFrame()
+    d.opener.Text = stubFontString()
     function d:SetDisplayOverride(text) self._override = text end
     function d:UpdateText() end
     function d:RebuildOptions(newOptions) if newOptions then self._options = newOptions end end
@@ -204,6 +212,11 @@ do
         "free: the target caption carries the chain glyph inline")
     check(cap:find("link", 1, true) ~= nil, "free: the target caption names the gesture")
     eq(f.backupRow.picker._override, L["None"], "free: backup reads None")
+    -- ...and that caption has to CLIP. Word wrap on a both-edges-anchored
+    -- FontString would put the overflow on a second line, straight through the
+    -- row below it.
+    eq(f.targetRow.picker.opener.Text._wordWrap, false, "free: the target caption clips, not wraps")
+    eq(f.backupRow.picker.opener.Text._wordWrap, false, "free: the backup caption clips, not wraps")
     check(f.targetRow.handle:IsEnabled(), "free: primary handle stays enabled")
     check(not f.backupRow.handle:IsEnabled(), "free: backup handle disabled")
     check(f.backupRow.picker._enabled == false, "free: backup picker disabled")

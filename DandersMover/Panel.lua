@@ -372,6 +372,18 @@ local function build()
         -- the opener itself. Worth having: "Target" alone does not say that
         -- picking one MOVES NOTHING, which is the whole point of the row.
         row.picker.openerTooltip = o.tooltip
+        -- The opener's caption CLIPS, it does not wrap. Its FontString is
+        -- anchored to both edges with word wrap left on by the kit, so a caption
+        -- wider than the opener takes a second line and spills straight out of a
+        -- 20px row. Short captions never showed it; the Target row's empty state
+        -- ("None -- drag [chain] to link") is close to the width in English and a
+        -- translation will pass it.
+        --
+        -- Caller-side rather than a change to CreateDropdown: every opener in the
+        -- kit is height-fixed, so nothing can WANT two lines, but 216 call sites
+        -- across the options addon is not a blast radius to take on for a
+        -- two-row panel.
+        row.picker.opener.Text:SetWordWrap(false)
         row.picker:SetHeight(ROW_H)
         -- Two-point anchored rather than sized, so the picker absorbs whatever
         -- the measured label column leaves it.
