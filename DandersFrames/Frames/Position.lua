@@ -1734,14 +1734,26 @@ function DF:CreatePositionPanel()
     posOverrideRow:Hide()
     panel.posOverrideRow = posOverrideRow
     
-    local posOverrideStar = posOverrideRow:CreateTexture(nil, "OVERLAY")
-    posOverrideStar:SetSize(12, 12)
-    posOverrideStar:SetPoint("LEFT", 0, 0)
-    posOverrideStar:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
-    posOverrideStar:SetVertexColor(1, 0.8, 0.2)
-    
+    -- ☠ THE OVERRIDE MARKER IS THE DOT, NOT THE STAR. Every override control in the
+    -- addon speaks one visual language -- see GUI:CreateOverrideMarker and
+    -- GUI.OVERRIDE_MARKER_COLOR (GUI/Widgets.lua), which the settings pages and the
+    -- nav tabs all render through. This row hand-rolls its marker because it carries
+    -- its own label and Reset button rather than being a bare marker, and it was the
+    -- one site left still drawing the retired star: the drag overlay said "Position
+    -- Overridden" with a different glyph from every other overridden setting on
+    -- screen. Colour comes from the shared constant so there is one source of truth
+    -- even though the texture is drawn here.
+    -- ⚠ The star icon is NOT retired generally -- it is still the feature-callout
+    -- glyph (DandersFrames_Options/GUI/Panel.lua). Do not swap that one.
+    local overrideColor = (DF.GUI and DF.GUI.OVERRIDE_MARKER_COLOR) or { 1, 0.8, 0.2 }
+    local posOverrideDot = posOverrideRow:CreateTexture(nil, "OVERLAY")
+    posOverrideDot:SetSize(12, 12)
+    posOverrideDot:SetPoint("LEFT", 0, 0)
+    posOverrideDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
+    posOverrideDot:SetVertexColor(overrideColor[1], overrideColor[2], overrideColor[3])
+
     local posOverrideText = posOverrideRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    posOverrideText:SetPoint("LEFT", posOverrideStar, "RIGHT", 4, 0)
+    posOverrideText:SetPoint("LEFT", posOverrideDot, "RIGHT", 4, 0)
     posOverrideText:SetText(L["Position Overridden"])
     posOverrideText:SetTextColor(1, 0.8, 0.2)
     
@@ -1802,7 +1814,7 @@ function DF:CreatePositionPanel()
     panel.UpdatePositionOverride = function()
         -- Debug mode shows indicator
         if DF.GUI and DF.GUI.IsOverrideDebugMode and DF.GUI.IsOverrideDebugMode() then
-            posOverrideStar:Show()
+            posOverrideDot:Show()
             posOverrideText:SetText("Position (debug)")
             posResetBtn:Show()
             posOverrideRow:Show()
