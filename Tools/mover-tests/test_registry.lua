@@ -345,3 +345,87 @@ do
     R:UnregisterAddon("CY")
     R.ready = wasReady
 end
+
+-- RenameKey: the user toggle moves even when nothing is registered under the old key
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { addons = { RN = { elements = { rn_old = false } } } }
+    check(R:RenameKey("RN", "rn_old", "rn_new"), "rename with only a toggle succeeds")
+    check(NS.db.addons.RN.elements.rn_old == nil, "old toggle cleared")
+    check(NS.db.addons.RN.elements.rn_new == false, "explicit false moved to the new key")
+    NS.db = nil
+    R.pendingRenames = nil
+    R.ready = wasReady
+end
+
+-- RenameKey: registry entry, paired target, foreign records, twins; refusals
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("RN", { title = "RN" })
+    R:RegisterAddon("RNF", { title = "RNF" })
+    local el = R:Register("RN", "rn_old", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    local target = R:GetTarget("RN:rn_old")
+
+    -- a foreign addon anchored at the old id, once as primary and once as a backup
+    local posP = { point = "CENTER", x = 0, y = 0, anchor = { target = "RN:rn_old", edge = "top", align = "start" } }
+    R:Register("RNF", "rn_child", elDef(FakeFrame(0, 0, 10, 10), posP))
+    local posF = { point = "CENTER", x = 0, y = 0, anchor = { target = "RNF:rn_child", edge = "top", align = "start",
+        fallback = { target = "RN:rn_old", edge = "top", align = "start" } } }
+    R:Register("RNF", "rn_backup", elDef(FakeFrame(0, 0, 10, 10), posF))
+    local twinned = R:Register("RNF", "rn_twin", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { twin = "RN:rn_old" }))
+
+    check(R:RenameKey("RN", "rn_old", "rn_new"), "rename succeeds")
+    check(R:Get("RN:rn_new") == el, "same element table under the new id")
+    eq(el.id, "RN:rn_new", "element id updated"); eq(el.key, "rn_new", "element key updated")
+    check(R:Get("RN:rn_old") == nil, "old element id gone")
+    check(R:GetTarget("RN:rn_new") == target, "paired target moved with it")
+    eq(target.id, "RN:rn_new", "target id updated"); eq(target.key, "rn_new", "target key updated")
+    check(R:GetTarget("RN:rn_old") == nil, "old target id gone")
+    eq(posP.anchor.target, "RN:rn_new", "foreign record's anchor target rewritten in place")
+    eq(posF.anchor.fallback.target, "RN:rn_new", "backup target rewritten too")
+    eq(posF.anchor.target, "RNF:rn_child", "an unrelated target is left alone")
+    eq(twinned.twin, "RN:rn_new", "twin string rewritten")
+
+    check(R:RenameKey("RN", "rn_new", "rn_new") == false, "old == new refused")
+    R:Register("RN", "rn_taken", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+    check(R:RenameKey("RN", "rn_new", "rn_taken") == false, "rename onto an existing key refused")
+    check(R:Get("RN:rn_new") == el, "refused rename left the element where it was")
+    eq(el.key, "rn_new", "refused rename left the key alone")
+
+    R:UnregisterAddon("RN"); R:UnregisterAddon("RNF")
+    R.pendingRenames = nil
+    R.ready = wasReady
+end
+
+-- RenameKey: queued registrations, both sides of the rename
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("RN", { title = "RN" })
+    R:Register("RN", "rn_old", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 }))
+
+    -- queued BEFORE the rename: rewritten on the def as the rename runs
+    R.ready = false
+    local posQ = { point = "CENTER", x = 0, y = 0, anchor = { target = "RN:rn_old", edge = "top", align = "start" } }
+    R:Register("RN", "rn_queued", elDef(FakeFrame(0, 0, 10, 10), posQ, { twin = "RN:rn_old" }))
+    check(R:RenameKey("RN", "rn_old", "rn_new"), "rename while a registration is queued")
+    eq(posQ.anchor.target, "RN:rn_new", "queued record rewritten at rename time")
+
+    -- queued AFTER the rename: only the Flush replay can catch it
+    local posL = { point = "CENTER", x = 0, y = 0, anchor = { target = "RN:rn_old", edge = "left", align = "end" } }
+    R:Register("RN", "rn_late", elDef(FakeFrame(0, 0, 10, 10), posL, { twin = "RN:rn_old" }))
+    eq(posL.anchor.target, "RN:rn_old", "late registration still names the old id before Flush")
+    R:Flush()
+    eq(posL.anchor.target, "RN:rn_new", "late record rewritten by the Flush replay")
+    eq(R:Get("RN:rn_late").twin, "RN:rn_new", "late twin rewritten by the Flush replay")
+    eq(R:Get("RN:rn_queued").twin, "RN:rn_new", "queued twin rewritten")
+    check(R.pendingRenames == nil, "pendingRenames cleared by Flush")
+
+    R:UnregisterAddon("RN")
+    R.ready = wasReady
+end

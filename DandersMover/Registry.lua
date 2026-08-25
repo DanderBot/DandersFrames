@@ -103,6 +103,27 @@ function R:RegisterAnchorTarget(addon, key, def)
     return insertTarget(self, addon, key, def, nil)
 end
 
+-- Points a record's anchor blocks (primary and backup) away from oldId. The record
+-- is the consumer's live table, so this edits it in place; the position itself does
+-- not move, which is why no rename path Notifies.
+local function rewriteRecord(pos, oldId, newId)
+    if type(pos) ~= "table" then return end
+    local a = pos.anchor
+    if not a then return end
+    if a.target == oldId then a.target = newId end
+    if a.fallback and a.fallback.target == oldId then a.fallback.target = newId end
+end
+
+-- Every registered element's record and twin string, moved off oldId. Shared by
+-- R:RenameKey and the Flush replay below (see R:RenameKey for why both need it).
+local function rewriteRegistered(self, oldId, newId)
+    for _, el in pairs(self.elements) do
+        local ok, pos = pcall(el.getPos)
+        if ok then rewriteRecord(pos, oldId, newId) end
+        if el.twin == oldId then el.twin = newId end
+    end
+end
+
 function R:Flush()
     self.ready = true
     local q = self.queue
@@ -113,6 +134,12 @@ function R:Flush()
             if not self.addons[item.addon] then self:RegisterAddon(item.addon) end
             insertTarget(self, item.addon, item.key, item.def, nil)
         end
+    end
+    -- A consumer can register between a rename and this Flush, carrying a record that
+    -- still names the old id. Replay the renames over what just landed.
+    if self.pendingRenames then
+        for oldId, newId in pairs(self.pendingRenames) do rewriteRegistered(self, oldId, newId) end
+        self.pendingRenames = nil
     end
 end
 
@@ -126,6 +153,56 @@ function R:UnregisterAddon(addon)
     for id, el in pairs(self.elements) do if el.addon == addon then self.elements[id] = nil end end
     for id, t in pairs(self.targets) do if t.addon == addon then self.targets[id] = nil end end
     self.addons[addon] = nil
+end
+
+-- ============================================================
+-- RENAME
+-- ============================================================
+-- Moves an element's key: the user toggle, the registry entry (with its paired
+-- anchor target) and every record or twin string that names the old id follow it.
+-- The element keeps its table and its position -- nothing is re-registered and
+-- nothing is Notified, so live closures and the saved position both survive.
+-- Refuses (false, no throw) a no-op rename or one onto a key already in use.
+function R:RenameKey(addon, old, new)
+    if old == new then return false end
+    local oldId, newId = R.Id(addon, old), R.Id(addon, new)
+    if self.elements[newId] or self.targets[newId] then return false end
+
+    -- The toggle outlives the registration: move it even with nothing registered.
+    local db = NS.db
+    local a = db and db.addons and db.addons[addon]
+    if a and a.elements and a.elements[old] ~= nil then
+        a.elements[new] = a.elements[old]
+        a.elements[old] = nil
+    end
+
+    local el = self.elements[oldId]
+    if el then
+        self.elements[oldId] = nil
+        el.key, el.id = new, newId
+        self.elements[newId] = el
+    end
+    -- An anchorable element's target IS this entry, so re-keying it here covers both.
+    local target = self.targets[oldId]
+    if target then
+        self.targets[oldId] = nil
+        target.key, target.id = new, newId
+        self.targets[newId] = target
+    end
+
+    rewriteRegistered(self, oldId, newId)
+    for _, item in ipairs(self.queue) do
+        if item.kind == "element" then
+            local ok, pos = pcall(item.def.getPos)
+            if ok then rewriteRecord(pos, oldId, newId) end
+            if item.def.twin == oldId then item.def.twin = newId end
+        end
+    end
+
+    -- Anything that registers after this but before Flush is caught by the replay there.
+    self.pendingRenames = self.pendingRenames or {}
+    self.pendingRenames[oldId] = newId
+    return true
 end
 
 -- ============================================================

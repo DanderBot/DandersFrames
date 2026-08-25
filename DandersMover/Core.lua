@@ -192,6 +192,19 @@ function Lib:UnregisterAddon(addon)
     registryChanged(addon)
 end
 
+-- Renames an element's key in place: the user toggle, the registry entry and every
+-- registered or queued record's anchor target move with it; the position does not.
+-- Ignored while unlocked -- a live session is keyed by the ids it opened with.
+function Lib:RenameKey(addon, old, new)
+    if Lib:IsUnlocked() then
+        NS:Debug("RenameKey ignored while unlocked: " .. tostring(old))
+        return false
+    end
+    local ok = Registry:RenameKey(addon, old, new)
+    if ok then registryChanged(addon) end
+    return ok
+end
+
 function Lib:RefreshAnchorTarget(addon, key)
     NS:ReapplyDescendants(Registry.Id(addon, key), "parent")
 end
