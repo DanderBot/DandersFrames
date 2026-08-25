@@ -304,12 +304,13 @@ end
 
 -- ============================================================
 -- 8. THE TETHER BEAM
--- Hidden while the popout is still beside its source; drawn once it has been
--- pinned AND moved away. Endpoints are the nearest edge midpoints, so the line
--- leaves the faces that are looking at each other.
+-- Up for the whole time the popout FOLLOWS, and only then: a short line from
+-- the connection point's tip across the dock gap to the nearest point on the
+-- source's outline. Pinning takes it away -- pinned is visually detached.
 -- ============================================================
 
--- The predicate first, on plain rects.
+-- The adjacency predicate is published geometry the shell no longer consults;
+-- it is still exercised here because consumers can call it.
 do
     local a = { x = 0, y = 0, w = 100, h = 50 }
     check(UI.PopoutIsAdjacent(a, { x = 62, y = 0, w = 20, h = 50 }, 16),
@@ -323,24 +324,21 @@ do
     check(not UI.PopoutIsAdjacent(a, nil, 16), "adjacent: a missing rect is not beside anything")
 end
 
+-- Where the dock PUTS the frame, stated rather than measured: the stub resolves
+-- no anchors, so a test that wants the beam's real endpoints has to say where
+-- the popout ended up. Right of the source, DOCK_GAP away, hanging from the
+-- source's TOP edge.
+local function dockedRightOfCentre()
+    return CX + 40 + DOCK_GAP + FRAME_W / 2, CY + 20 - FRAME_H / 2
+end
+
 do
     local src = source(80, 40, CX, CY)
     local p = popout({ key = "beam" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    local before = #delays
     p:Follow(src)
-    -- The stub resolves no anchors, so where the dock PUT the frame is stated
-    -- rather than measured: right of the source, DOCK_GAP away.
-    local dockedX = CX + 40 + DOCK_GAP + FRAME_W / 2
-    p.frame:SetFakeCenter(dockedX, CY)
-    p:Pin()
-    check(p.beam == nil or not p.beam:IsShown(), "beam: a popout still beside its source draws none")
-
-    -- Drag it away: the beam appears, with both layers coloured from the host
-    -- accent and the core the thinner, brighter of the two.
-    p.titleBar:GetScript("OnDragStart")()
-    check(p.frame._flags.moving, "beam: the drag actually moved the frame")
-    p.frame:SetFakeCenter(400, 200)
-    p.frame:GetScript("OnUpdate")(p.frame)
-    check(p.beam:IsShown(), "beam: pinned and away from the source, the beam shows")
+    check(p.beam:IsShown(), "beam: FOLLOWING, the beam is up -- docked is exactly when it means something")
     local glow, core = p.beam.glow, p.beam.core
     check(glow:IsShown() and core:IsShown(), "beam: both layers are up")
     eq(core._thickness, 3, "beam: the core is the thin bright line")
@@ -348,24 +346,47 @@ do
     eq(core._color.r, ACCENT.r, "beam: the core takes the host accent")
     eq(core._color.a, 0.55, "beam: ...at the core alpha")
     eq(glow._color.a, 0.15, "beam: ...and the glow at the under-glow alpha")
-    check(core._start ~= nil and core._end ~= nil, "beam: the core has both endpoints")
     eq(core._start.rel, UIParent, "beam: endpoints are stated in UIParent-centre units")
-    -- Popout centre (400,200) is left of and below the source (960,540): the
-    -- nearest faces are the popout's RIGHT edge and the source's LEFT edge.
-    eq(core._start.x, 400 - CX + FRAME_W / 2, "beam: it leaves the popout's near edge midpoint")
-    eq(core._end.x, -40, "beam: ...and lands on the source's near edge midpoint")
+    -- The popout's rect is { x = 112, y = -26, 120 x 92 }; right-docked, the
+    -- connection point's tip is half a notch left of its left edge.
+    eq(core._start.x, 112 - FRAME_W / 2 - 5, "beam: it leaves the connection point's TIP")
+    eq(core._start.y, -26, "beam: at the source-facing edge's midpoint")
+    -- ...and lands on the nearest point of the source's outline: its right face
+    -- (x = 40), clamped down to the bottom of that face (y = -20) because the
+    -- popout hangs below it.
+    eq(core._end.x, 40, "beam: and lands on the source outline's near face")
+    eq(core._end.y, -20, "beam: clamped onto the outline, not aimed at its centre")
 
     -- The reveal waited out the entrance rather than racing it.
     local waited = false
-    for _, d in ipairs(delays) do if d == 0.22 then waited = true end end
+    for i = before + 1, #delays do if delays[i] == 0.22 then waited = true end end
     check(waited, "beam: the reveal was deferred by the pop-in duration")
 
-    -- Back beside it and the beam has nothing left to say.
-    p.frame:SetFakeCenter(dockedX, CY)
+    -- PINNED is detached: the beam goes, and dragging the popout miles away does
+    -- not bring it back.
+    p:Pin()
+    check(not p.beam:IsShown(), "beam: pinning takes the beam away")
+    p.titleBar:GetScript("OnDragStart")()
+    check(p.frame._flags.moving, "beam: the drag actually moved the frame")
+    p.frame:SetFakeCenter(400, 200)
     p.frame:GetScript("OnUpdate")(p.frame)
-    check(not p.beam:IsShown(), "beam: moved back beside the source, the beam goes away")
+    check(not p.beam:IsShown(), "beam: a pinned popout stays beamless however far it is dragged")
     p.titleBar:GetScript("OnDragStop")()
     check(not p.frame._flags.moving, "beam: the drag released the frame")
+    check(not p.beam:IsShown(), "beam: ...and letting go does not bring it back either")
+    p:Close()
+end
+
+-- The beam re-sides with the dock: flipped left, it leaves the popout's RIGHT
+-- face and lands on the source's left one.
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "beamflip" })
+    -- Left-docked at the same offsets, mirrored.
+    p.frame:SetFakeCenter(CX - 40 - DOCK_GAP - FRAME_W / 2, CY + 20 - FRAME_H / 2)
+    p:Follow(src, { side = "left" })
+    eq(p.beam.core._start.x, -112 + FRAME_W / 2 + 5, "beam: left-docked, it leaves the RIGHT face's tip")
+    eq(p.beam.core._end.x, -40, "beam: and lands on the source's left face")
     p:Close()
 end
 
@@ -674,29 +695,29 @@ end
 -- to -- a popout about a row inside a list may dock to the list.
 do
     local src = source(80, 40, CX, CY)
-    -- Well away to the left, level with the screen centre, so the nearest faces
-    -- are unambiguous: the popout's right edge to the target's left edge.
+    -- Well away to the left of the dock target, so "which of the two did the
+    -- beam actually land on" is unambiguous.
     local far = source(60, 40, CX - 400, CY)
     local p = popout({ key = "tether", tetherSource = far })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
     p:Follow(src)
-    p.frame:SetFakeCenter(100, CY)          -- rect x = -860, y = 0
-    p:Pin()
-    check(p.beam:IsShown(), "tether: pinned and away, the beam shows")
-    eq(p.beam.core._start.x, -860 + FRAME_W / 2, "tether: it leaves the popout's right face")
-    eq(p.beam.core._start.y, 0, "tether: at that face's midpoint")
-    eq(p.beam.core._end.x, -430, "tether: and lands on the TETHER target's left face")
-    eq(p.beam.core._end.y, 0, "tether: at that face's midpoint, not on the dock target")
+    check(p.beam:IsShown(), "tether: following, the beam shows")
+    eq(p.beam.core._start.x, 112 - FRAME_W / 2 - 5, "tether: it leaves the connection point's tip")
+    eq(p.beam.core._end.x, -370, "tether: and lands on the TETHER target's near face")
+    eq(p.beam.core._end.y, -20, "tether: clamped onto its outline, not on the dock target")
+    -- The outline follows the same target, so both ends of the "connected" look
+    -- agree about what the popout is about.
+    eq(p.srcOutline._points[1][2], far, "tether: the source outline is on the tether target too")
     p:Close()
 
     -- The function form is resolved when the beam is drawn, so the target can
     -- change between two opens of the same popout.
     local calls = 0
     local q = popout({ key = "tetherfn", tetherSource = function() calls = calls + 1; return far end })
-    q:Follow(source(80, 40))
-    q.frame:SetFakeCenter(100, CY)
-    q:Pin()
+    q.frame:SetFakeCenter(dockedRightOfCentre())
+    q:Follow(source(80, 40, CX, CY))
     check(calls > 0, "tether: a function tetherSource is called")
-    eq(q.beam.core._end.x, -430, "tether: and the region it returns is used")
+    eq(q.beam.core._end.x, -370, "tether: and the region it returns is used")
     q:Close()
 end
 
@@ -704,9 +725,8 @@ end
 -- that fade out, so the two read as one gesture instead of two events.
 do
     local p = popout({ key = "closeorder" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
     p:Follow(source(80, 40, CX, CY))
-    p.frame:SetFakeCenter(400, 200)
-    p:Pin()
     check(p.beam:IsShown(), "exit: the beam is up going in")
     local before = #delays
     p:Close()

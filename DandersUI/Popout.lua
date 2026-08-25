@@ -5,8 +5,14 @@ if not UI then return end
 -- ============================================================
 -- POPOUT
 -- A small panel that DOCKS BESIDE A THING: it picks the side that fits, follows
--- the thing while it moves, and can be pinned loose -- at which point a tether
--- beam keeps saying which thing it belongs to.
+-- the thing while it moves, and can be pinned loose.
+--
+-- CONNECTED, then DETACHED. While it FOLLOWS, the popout, the thing and the gap
+-- between them are drawn as one object: a 1px accent border on the popout, the
+-- same border laid over the source, a small accent diamond -- the connection
+-- point -- on the edge the popout docked against, and a short beam across the
+-- gap joining the two. PIN it and every one of those goes: pinning is the
+-- gesture that says "this is its own window now", and it should look like it.
 --
 -- Host-bound, like every factory here: `host:CreatePopout(opts)`. The shell
 -- knows nothing about what it contains or what closing it MEANS -- the consumer
@@ -97,36 +103,19 @@ end
 
 -- "Still beside it": the two rects are within `gap` of touching on BOTH axes.
 -- A docked popout sits DOCK_GAP from its source and overlaps it on the other
--- axis, so it passes; drag it away and it stops passing, which is exactly when
--- the beam has something to say.
+-- axis, so it passes; drag it away and it stops passing.
+--
+-- ⚠ NOTHING IN THE SHELL ASKS THIS ANY MORE. It was the beam's gate while the
+-- beam meant "strayed"; now the beam means "joined" and is a function of
+-- `following` alone (see _UpdateBeam). Kept because it is published geometry a
+-- consumer can reasonably want -- but it is not load-bearing here, so do not
+-- reason about the beam from it.
 function UI.PopoutIsAdjacent(a, b, gap)
     if not a or not b then return false end
     gap = gap or ADJ_GAP
     local dx = max(abs(a.x - b.x) - (a.w + b.w) / 2, 0)
     local dy = max(abs(a.y - b.y) - (a.h + b.h) / 2, 0)
     return dx <= gap and dy <= gap
-end
-
--- The midpoints of a rect's four edges, in the order top, bottom, left, right.
-local function edgeMids(r)
-    return {
-        { r.x, r.y + r.h / 2 }, { r.x, r.y - r.h / 2 },
-        { r.x - r.w / 2, r.y }, { r.x + r.w / 2, r.y },
-    }
-end
-
--- The closest pair of edge midpoints between two rects. The beam wants to leave
--- and arrive at the faces that are actually looking at each other; centre-to-
--- centre would draw a line straight through both boxes.
-local function nearestEdgePair(a, b)
-    local bestD, ax, ay, bx, by
-    for _, p in ipairs(edgeMids(a)) do
-        for _, q in ipairs(edgeMids(b)) do
-            local d = (p[1] - q[1]) ^ 2 + (p[2] - q[2]) ^ 2
-            if not bestD or d < bestD then bestD, ax, ay, bx, by = d, p[1], p[2], q[1], q[2] end
-        end
-    end
-    return ax, ay, bx, by
 end
 
 -- Rect of a region in UIParent-centre units; nil while it has no geometry yet.
@@ -423,11 +412,10 @@ function Popout:HideChrome()
     end
 end
 
--- ---- the follow / beam ticker ------------------------------------
+-- ---- the follow ticker -------------------------------------------
 
 -- ONE OnUpdate drives everything that has to react to movement: the re-dock
--- when the source moves, the source-death close, and the live beam (which also
--- has to keep up during a title-bar drag, when nothing else fires).
+-- when the source moves and the source-death close.
 --
 -- It early-outs the moment nothing has moved, which is the overwhelmingly
 -- common case, and it is a plain script so a headless test can drive one tick
@@ -463,10 +451,10 @@ function Popout:_Tick()
                           or sr.w ~= self._srcW or sr.h ~= self._srcH)
     if moved then self._srcX, self._srcY, self._srcW, self._srcH = sr.x, sr.y, sr.w, sr.h end
 
+    -- A re-dock redraws the chrome on the way through (_Dock -> _Present), so
+    -- there is nothing else to do for a source move. A PINNED popout wears no
+    -- connected chrome at all, so a move it is not following costs one compare.
     if moved and self.following then self:_Dock() end
-    -- The beam is redrawn on a source move OR while the popout itself is being
-    -- dragged; both ends can move independently.
-    if moved or self.dragging then self:_UpdateBeam() end
 end
 
 function Popout:_SourceAlive()
@@ -485,6 +473,13 @@ function Popout:_TetherRegion()
     local t = self.tetherSource
     if type(t) == "function" then t = t(self) end
     return t or self.source
+end
+
+-- The popout's own rect, in the same UIParent-centre units as everything else
+-- here. Its own method rather than a bare rectOf(self.frame) call because the
+-- glide overrides it: see _FrameRect's glide arm in the retarget section.
+function Popout:_FrameRect()
+    return rectOf(self.frame)
 end
 
 function Popout:_EnsureBeam()
@@ -510,22 +505,39 @@ function Popout:_EnsureBeam()
     return b
 end
 
--- Draw / show / hide the beam for the current state. It exists only while the
--- popout is PINNED and has been moved off its source: docked, the two boxes are
--- touching and a line between them would be noise.
+-- Draw / show / hide the beam for the current state.
+--
+-- ⚠ THE BEAM MEANS "JOINED", NOT "STRAYED". It was the other way round to begin
+-- with -- drawn only once a PINNED popout had been dragged away from its source
+-- -- and that is what made the docked state read as a floating box: at the one
+-- moment the two things genuinely belong together, nothing said so. Now:
+--
+--   FOLLOWING   the beam is always up, and SHORT: from the connection point's
+--               tip to the nearest point on the source's outline, i.e. straight
+--               across the dock gap. Popout border, beam and source outline are
+--               one continuous accent line.
+--   PINNED      no beam, no connection point, no source outline. Pinning is
+--               visually detached, full stop.
 function Popout:_UpdateBeam()
-    local want = self.pinned and not self.closed
+    local want = self.following and not self.pinned and not self.closed
+                 and self.frame:IsShown()
     local target = want and self:_TetherRegion() or nil
     local tr = target and rectOf(target) or nil
-    local pr = tr and rectOf(self.frame) or nil
-    if tr and pr and UI.PopoutIsAdjacent(pr, tr, ADJ_GAP) then want = false end
-    if not (want and tr and pr) then
+    local pr = tr and self:_FrameRect() or nil
+    -- The beam LEAVES THE TIP, not the frame edge: the connection point is the
+    -- thing pointing at the source, so a beam starting behind it would read as
+    -- a line passing through a decoration.
+    -- ⚠ Not `local ax, ay = pr and PopoutNotchTip(...)` -- `and` truncates to ONE
+    -- value, so ay would silently be nil and the clamp below would error.
+    local ax, ay
+    if pr then ax, ay = UI.PopoutNotchTip(pr, self.side, NOTCH_SIZE) end
+    if not (tr and pr and ax) then
         self:_HideBeam()
         return
     end
+    local bx, by = UI.PopoutNearestOnRect(tr, ax, ay)
 
     local b = self:_EnsureBeam()
-    local ax, ay, bx, by = nearestEdgePair(pr, tr)
     local c = self:GetAccent()
     for _, line in ipairs({ b.glow, b.core }) do
         if line then
@@ -550,7 +562,7 @@ function Popout:_UpdateBeam()
     local wait = self._popDur
     self._popDur = nil
     local function reveal()
-        if self.closed or not self.pinned then return end
+        if self.closed or not self.following or self.pinned then return end
         if Fx then Fx.FadeIn(b, BEAM_DUR) else b:Show() end
     end
     if wait then after(wait, reveal) else reveal() end
@@ -595,15 +607,10 @@ function Popout:Pin(silent)
     local bar = self.titleBar
     bar:EnableMouse(true)
     bar:RegisterForDrag("LeftButton")
-    bar:SetScript("OnDragStart", function()
-        f:StartMoving()
-        self.dragging = true
-    end)
-    bar:SetScript("OnDragStop", function()
-        f:StopMovingOrSizing()
-        self.dragging = false
-        self:_UpdateBeam()
-    end)
+    -- Nothing to redraw on either end of the drag: a pinned popout carries no
+    -- connected chrome, which is the whole point of pinning it.
+    bar:SetScript("OnDragStart", function() f:StartMoving() end)
+    bar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
 
     -- v1 does not unpin, so the button would be a lie about what it does.
     if self.pinBtn then self.pinBtn:Hide() end
@@ -660,7 +667,6 @@ function Popout:Close(reason)
     if self.closed then return self end
     self.closed = true
     self.following = false
-    self.dragging = false
     self:_StopTick()
 
     local store = storeFor(self.host)
