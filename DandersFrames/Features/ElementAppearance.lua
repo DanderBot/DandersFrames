@@ -1789,6 +1789,24 @@ function DF:UpdateRangeAppearance(frame)
     -- catches the fast-path cache-hit cases a hook on UpdateRange's tail would
     -- miss. Hint-filtered, so it's a no-op unless a range_text element exists.
     if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "range") end
+
+    -- ☠ THE MISSING-BUFF GATE READS dfInRange, SO IT NEEDS THE SAME CHOKE POINT.
+    -- RefreshMissingBuffVisibility hides the strip when frame.dfInRange is false and
+    -- latches the result in frame.dfMissingStripShown. Its callers were the dead and
+    -- offline edges in Update.lua plus the alive path in UpdateUnitFrame -- none of
+    -- which a RANGE transition produces. So the hide landed (any full update while the
+    -- unit was away) and the re-show had no trigger at all: walking back into range
+    -- wrote dfInRange = true, drove the appearance, and left the strip hidden until a
+    -- roster event, a combat transition or an aura change re-entered the drive. Field
+    -- report: "it never comes back unless you buff + they remove or reload."
+    --
+    -- Same reasoning as the TD call above, and the same reason it belongs HERE rather
+    -- than on UpdateRange's tail: this is the one function every range path funnels
+    -- through, including the cache-HIT branch that only touches this frame.
+    -- Combat-safe by construction -- non-secret reads plus one SetShown on a DF-owned
+    -- strip -- and a no-op both when the state is unchanged and when the frame never
+    -- built the feature (it returns on a nil missingBuffStrip).
+    if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
 end
 
 -- ============================================================
