@@ -697,13 +697,16 @@ function Popout:_UpdateBeam()
     local target = want and self:_TetherRegion() or nil
     local tr = target and rectOf(target) or nil
     local pr = tr and self:_FrameRect() or nil
-    -- The beam LEAVES THE TIP, not the frame edge: the connection point is the
-    -- thing pointing at the source, so a beam starting behind it would read as
-    -- a line passing through a decoration.
+    -- The beam starts UNDER the diamond -- at its centre, on the frame edge --
+    -- and emerges through the tip. Starting AT the tip left a visible seam
+    -- between the diamond's antialiased point and the line's first pixel; the
+    -- beam layers below the notch, so the overlap costs nothing.
+    -- (size 0 = the point ON the edge; the slide clamp only reads pr, so the
+    -- slid position is identical to the notch's own.)
     -- ⚠ Not `local ax, ay = pr and PopoutNotchTip(...)` -- `and` truncates to ONE
     -- value, so ay would silently be nil and the clamp below would error.
     local ax, ay
-    if pr then ax, ay = UI.PopoutNotchTip(pr, self.side, NOTCH_SIZE, tr) end
+    if pr then ax, ay = UI.PopoutNotchTip(pr, self.side, 0, tr) end
     if not (tr and pr and ax) then
         self:_HideBeam()
         return

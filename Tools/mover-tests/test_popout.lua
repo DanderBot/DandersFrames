@@ -349,7 +349,7 @@ do
     eq(core._start.rel, UIParent, "beam: endpoints are stated in UIParent-centre units")
     -- The popout's rect is { x = 112, y = -26, 120 x 92 }; right-docked, the
     -- connection point's tip is half a notch left of its left edge.
-    eq(core._start.x, 112 - FRAME_W / 2 - 5, "beam: it leaves the connection point's TIP")
+    eq(core._start.x, 112 - FRAME_W / 2, "beam: it starts under the connection point, on the frame edge")
     -- The tip SLIDES along the edge to meet the source: the source's centre
     -- (y = 0) is inside the edge's clamp range, so the tip sits level with it
     -- rather than at the edge's midpoint (-26).
@@ -387,7 +387,7 @@ do
     -- Left-docked at the same offsets, mirrored.
     p.frame:SetFakeCenter(CX - 40 - DOCK_GAP - FRAME_W / 2, CY + 20 - FRAME_H / 2)
     p:Follow(src, { side = "left" })
-    eq(p.beam.core._start.x, -112 + FRAME_W / 2 + 5, "beam: left-docked, it leaves the RIGHT face's tip")
+    eq(p.beam.core._start.x, -112 + FRAME_W / 2, "beam: left-docked, it starts under the point on the RIGHT face")
     eq(p.beam.core._end.x, -40, "beam: and lands on the source's left face")
     p:Close()
 end
@@ -852,7 +852,7 @@ do
     p.frame:SetFakeCenter(dockedRightOfCentre())
     p:Follow(src)
     check(p.beam:IsShown(), "tether: following, the beam shows")
-    eq(p.beam.core._start.x, 112 - FRAME_W / 2 - 5, "tether: it leaves the connection point's tip")
+    eq(p.beam.core._start.x, 112 - FRAME_W / 2, "tether: it starts under the connection point, on the frame edge")
     eq(p.beam.core._end.x, -370, "tether: and lands on the TETHER target's near face")
     eq(p.beam.core._end.y, 0, "tether: level with the tether target, not the dock target")
     -- The outline follows the same target, so both ends of the "connected" look
