@@ -2801,7 +2801,8 @@ DF.PartyDefaults = {
     -- visibility.combatOverride, same five values). Ellesmere reaches the same
     -- place from the other side with one always/outOfCombat/never mode.
     --
-    -- SHOW in both is today's default and must stay a perfect no-op.
+    -- Defaults mirror the retired booleans' behaviour: binding SHOW/SHOW, frame
+    -- SHOW out of combat but HIDE in combat (its DisableInCombat defaulted true).
     --
     -- ⚠ ONLY THE TWO DF-DRAWN TYPES GET THIS, and that is a capability limit
     -- rather than a decision. The buff / debuff / defensive rows are drawn by
@@ -2812,7 +2813,11 @@ DF.PartyDefaults = {
     -- plain Disable In Combat, which is exactly the one thing the engine does
     -- expose for them via SetHideTooltipInCombat.
     tooltipFrameOutOfCombat = "SHOW",     -- SHOW | SHIFT | CTRL | ALT | HIDE
-    tooltipFrameCombat = "SHOW",
+    -- ⚠ HIDE, matching the retired tooltipFrameDisableInCombat default (true): a
+    -- profile born on 5.4 gets the same no-frame-tooltip-in-combat behaviour every
+    -- older profile migrates to. Safe to seed BECAUSE the migration gates on the
+    -- OLD keys existing, not on this one being absent (DF:MigrateTooltipVisibility).
+    tooltipFrameCombat = "HIDE",
     tooltipBindingOutOfCombat = "SHOW",
     tooltipBindingCombat = "SHOW",
     tooltipBuffAnchor = "FRAME",
