@@ -501,16 +501,27 @@ function Popout:_UpdateSourceOutline()
         return
     end
     local o = self:_EnsureSourceOutline()
-    o:ClearAllPoints()
-    o:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 0)
-    o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
-    local c = self:GetAccent()
-    self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
+    -- Only when the TARGET changes. This runs off _Present, which runs off every
+    -- re-dock, and re-anchoring plus a full ApplyPixelBorder relayout per source
+    -- move would be real work for an outline that is already exactly right --
+    -- it is anchored to the region, so it tracks a moving source for free. An
+    -- accent change repaints through _ApplyAccent instead.
+    if self._outlineOn ~= region then
+        self._outlineOn = region
+        o:ClearAllPoints()
+        o:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 0)
+        o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
+        local c = self:GetAccent()
+        self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
+    end
     if o:IsShown() then return end
     if Fx then Fx.FadeIn(o, BEAM_DUR) else o:Show() end
 end
 
 function Popout:_HideSourceOutline()
+    -- Forgotten, so the next show re-anchors: the target it comes back on may
+    -- not be the one it went down against.
+    self._outlineOn = nil
     local o = self.srcOutline
     if not o or not o:IsShown() then return end
     if Fx then Fx.FadeOut(o, BEAM_DUR, function() o:Hide() end) else o:Hide() end
@@ -528,6 +539,7 @@ function Popout:HideChrome()
     if self.srcOutline then
         if Fx then Fx.Cancel(self.srcOutline) end
         self.srcOutline:Hide()
+        self._outlineOn = nil
     end
 end
 

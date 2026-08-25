@@ -628,6 +628,18 @@ do
     eq(p.srcOutline._points[1][2], src, "outline: ...anchored to the source itself")
     eq(p.srcOutline._points[2][1], "BOTTOMRIGHT", "outline: on both corners")
 
+    -- Anchored to the region, so it tracks a moving source for free -- and must
+    -- not pay for a re-anchor and a border relayout on every re-dock.
+    local repaints = 0
+    local realApply = UI.ApplyPixelBorder
+    UI.ApplyPixelBorder = function(s, frame, ...) repaints = repaints + 1 return realApply(s, frame, ...) end
+    src:SetFakeCenter(CX + 30, CY)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    src:SetFakeCenter(CX + 60, CY)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(repaints, 0, "outline: a source move re-docks without touching the outline")
+    UI.ApplyPixelBorder = realApply
+
     p:Pin()
     check(not p.srcOutline:IsShown(), "outline: pinning is visually detached, so it goes")
     p:Close()
