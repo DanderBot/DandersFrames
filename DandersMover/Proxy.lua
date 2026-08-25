@@ -53,6 +53,12 @@ local ICON_SZ, LINK_SZ = 16, 12
 local INSET, ITEM = 4, 4                -- slab padding, gap between inline items
 local BODY_ALPHA, HOVER_ALPHA = 0.95, 1
 local WEIGHT, SEL_WEIGHT = 1, 1         -- outline thickness; selection is colour, not weight
+-- The "a panel is pinned open on this one" marker: the SAME white outline the
+-- selection and hover wear, at a third alpha. 0.4 because it has to sit clearly
+-- under hover (0.6) and selection (1) -- a resting marker that outshone the
+-- thing under the cursor would make hover unreadable -- while staying clearly
+-- above the neutral hairline (a 0.25 grey), or it would say nothing at all.
+local PIN_ALPHA = 0.4
 -- Below these the slab cannot hold everything, so parts drop out in this order:
 -- the coords first, then the role DOT -- the addon icon wins the space (the
 -- left edge already carries the role colour) -- then everything but the
@@ -82,19 +88,13 @@ function P:GetUnlockFrame()
     local f = CreateFrame("Frame", "DandersMoverUnlockFrame", UIParent)
     f:SetAllPoints(UIParent)
     f:SetFrameStrata("HIGH")
-    -- The overlay owns clicks on empty space: left deselects. Proxies, panel
-    -- and legend are children at higher frame levels, so they keep taking
-    -- their own clicks first. While a session is open the overlay therefore
-    -- captures the mouse and the world behind it is unreachable -- documented
-    -- in the README; locking (Esc, the strip, /mover) gives the screen back.
-    f:EnableMouse(true)
-    f:SetScript("OnMouseDown", function(_, button)
-        -- A link gesture in flight owns the mouse: the press that started it
-        -- must not also deselect, or the element being linked FROM is gone by
-        -- the time the release lands.
-        if NS.Session and NS.Session.linking then return end
-        if button == "LeftButton" then P:ClickSelect() end
-    end)
+    -- ☠ The overlay must NEVER take the mouse. It covers the whole screen, so
+    -- EnableMouse(true) on it captures every click a session is open for -- the
+    -- camera cannot be dragged, nothing behind the movers can be clicked. It
+    -- used to do exactly that so a click on empty space could deselect; the
+    -- deselect moved to Esc (Session's OnKeyDown) and the screen went back to
+    -- the game. Only the CHILDREN (slabs, strip, panels) take clicks now.
+    --
     -- Alt-peek. The event is only registered while a session is up (Build /
     -- DestroyAll), so this cannot fire outside one.
     f:SetScript("OnEvent", function(_, _, key)
@@ -145,7 +145,12 @@ local function onDragStart(self)
     GameTooltip:Hide()
     NS.Session.selected = el.id            -- select without docking the panel; EndDrag re-docks it
     P:Highlight(el.id)
-    if NS.Panel then NS.Panel:Hide() end
+    -- Only the FOLLOWING panel: it hangs off the slab that is about to move, so
+    -- it would be dragged around with it. Pinned panels are anchored to the
+    -- screen and stay put -- hiding them would make every drag flash the whole
+    -- pinned set off and on. Their content catches up on the drop (apply ->
+    -- Refresh), which is soon enough for a panel that is not moving.
+    if NS.Panel then NS.Panel:HideFollowing() end
     NS.Session:BeginDrag(el)
     P:ShowZones(el)
     self:SetScript("OnUpdate", function(s)
@@ -182,9 +187,13 @@ local function onDragStop(self)
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
 
--- Both the proxies' own clicks and the overlay's empty-space clicks route
--- through ClickSelect, so a click on a stack of overlapping proxies can cycle
--- through them even though the top proxy is the one that took the click.
+-- A proxy's click routes through ClickSelect rather than selecting itself, so a
+-- click on a stack of overlapping proxies can cycle through them even though the
+-- top proxy is the one that took the click.
+--
+-- No link-gesture guard is needed here: the gesture starts on the panel's link
+-- HANDLE, which keeps mouse capture between press and release, so the release
+-- lands back on the handle and a proxy under the cursor never sees a click.
 local function onClick(self)
     P:ClickSelect()
 end
@@ -194,7 +203,9 @@ end
 -- The first click on a point selects the topmost proxy under it; clicking
 -- again at (about) the same point cycles to the next one down, wrapping
 -- around. The cycle resets when the click lands more than CYCLE_MOVE from the
--- last one or after CYCLE_TIMEOUT seconds. A click over nothing deselects.
+-- last one or after CYCLE_TIMEOUT seconds. A click over nothing does nothing --
+-- deselecting is Esc's job, and the overlay does not take clicks any more, so
+-- the only way in here is a proxy's own click (which always has a hit).
 -- ============================================================
 local CYCLE_MOVE, CYCLE_TIMEOUT = 10, 2
 local cycle = { x = nil, y = nil, at = 0, index = 0 }
@@ -227,7 +238,7 @@ end
 function P:ClickSelect()
     local x, y = self:CursorPos()
     local hits = hitsAt(x, y)
-    if #hits == 0 then NS.Session:Select(nil) return end
+    if #hits == 0 then return end
     local now = GetTime and GetTime() or 0
     local same = cycle.x ~= nil
         and abs(x - cycle.x) <= CYCLE_MOVE and abs(y - cycle.y) <= CYCLE_MOVE
@@ -381,10 +392,15 @@ local function applyLook(b, selected, hovered)
     -- Selection is the OUTLINE, never the fill or the role colour: white and
     -- twice as thick. Hover is a softer white at the same weight, and it stands
     -- down for the selected proxy so hovering cannot make it look less selected.
+    -- Below both, the pin marker: a mover with a panel pinned open on it keeps a
+    -- dim white outline at rest, so several pinned panels can be told apart from
+    -- the movers they belong to at a glance. NS.Panel is guarded because Proxy
+    -- loads before it.
     local weight = selected and SEL_WEIGHT or WEIGHT
     local r, g, bl, a = C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1
     if selected then r, g, bl, a = 1, 1, 1, 1
-    elseif hovered then r, g, bl, a = 1, 1, 1, 0.6 end
+    elseif hovered then r, g, bl, a = 1, 1, 1, 0.6
+    elseif NS.Panel and NS.Panel:IsElementPinned(b.element.id) then r, g, bl, a = 1, 1, 1, PIN_ALPHA end
     -- Weight is baked into the border textures, so it only re-lays out when the
     -- thickness actually changes; a recolour goes through the cheap shim.
     if b.outlineWeight ~= weight then
@@ -485,7 +501,6 @@ function P:Build(filter, animate)
     -- invalidate its deferred teardown and restore the frame it was fading.
     self.dismissToken = (self.dismissToken or 0) + 1
     NS.Fx.Cancel(f)
-    f:EnableMouse(true)
     self.peeking = false          -- Cancel above restored alpha 1
     if f.RegisterEvent then f:RegisterEvent("MODIFIER_STATE_CHANGED") end
     local n = 0
@@ -585,13 +600,12 @@ end
 -- destroy. The token guards the deferred teardown -- a new session can open
 -- before the fade lands, and its freshly built proxies must not be destroyed
 -- by the previous session's callback (Build bumps the token and cancels the
--- fade). Mouse goes off immediately so the screen is usable during the fade.
+-- fade). The overlay never held the mouse, so the screen is usable throughout.
 function P:DismissAll()
     local f = self.unlockFrame
     if not f or not f:IsShown() then self:DestroyAll() return end
     local token = (self.dismissToken or 0) + 1
     self.dismissToken = token
-    f:EnableMouse(false)
     self.peeking = false          -- the fade below plays from full alpha
     NS.Fx.FadeOut(f, FADE_OUT, function()
         if self.dismissToken == token and not (NS.Session and NS.Session:IsActive()) then
@@ -838,6 +852,16 @@ local function buildLegend()
     -- action bar (EUI has a separate one; ours merges into the legend so there
     -- is a single top element). Declared widths are floors -- fitText grows
     -- them for longer localisations, and Layout re-measures.
+    --
+    -- Undo and Redo live HERE, not on the element panel: what they act on is the
+    -- session's history, not the mover whose panel happens to be open -- and
+    -- with several panels pinned at once, an Undo button on each one would be
+    -- the same button drawn many times. RefreshLegendVerbs keeps their enabled
+    -- state honest (the undo stack fires "Changed").
+    f.btnUndo = UI:CreateButton(f, { text = L["Undo"], width = 44, height = LEGEND_ROW, style = "ghost",
+        onClick = function() NS.Session:Undo() end })
+    f.btnRedo = UI:CreateButton(f, { text = L["Redo"], width = 44, height = LEGEND_ROW, style = "ghost",
+        onClick = function() NS.Session:Redo() end })
     f.btnSave = UI:CreateButton(f, { text = L["Save & Exit"], width = 76, height = LEGEND_ROW, style = "primary",
         onClick = function() NS.Session:Finish("save") end })
     f.btnDiscard = UI:CreateButton(f, { text = L["Discard"], width = 56, height = LEGEND_ROW, tone = "danger",
@@ -865,8 +889,10 @@ local function buildLegend()
     f.btnSettings:SetPoint("RIGHT", f.btnGrid, "LEFT", -TIGHT, 0)
     f.btnDiscard:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
     f.btnSave:SetPoint("RIGHT", f.btnDiscard, "LEFT", -TIGHT, 0)
+    f.btnRedo:SetPoint("RIGHT", f.btnSave, "LEFT", -TIGHT, 0)
+    f.btnUndo:SetPoint("RIGHT", f.btnRedo, "LEFT", -TIGHT, 0)
 
-    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Esc: lock"], size = 10, color = C_MUTED })
+    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Esc: back out"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - LEGEND_ROW - TIGHT)
 
     -- Third row, consumer-initiated sessions only: other addons' enabled+relevant
@@ -890,7 +916,8 @@ local function buildLegend()
         -- Dots left, buttons right, a double gap between the halves so the
         -- strip reads as key | verbs and not one run.
         row = row + GAP * 2
-        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid, self.btnCollapse }) do
+        for _, b in ipairs({ self.btnUndo, self.btnRedo, self.btnSave, self.btnDiscard,
+                             self.btnSettings, self.btnGrid, self.btnCollapse }) do
             row = row + (b:GetWidth() or 0) + TIGHT
         end
         row = row - TIGHT + PAD
@@ -934,6 +961,17 @@ local function buildStripTab()
     return t
 end
 
+-- The strip's Undo/Redo are the only controls on it whose enabled state is not
+-- a setting: it follows the undo stack, which fires "Changed" (Session wires
+-- that to this).
+function P:RefreshLegendVerbs()
+    local f = self.legend
+    if not f or not f.btnUndo then return end
+    local undo = NS.Session and NS.Session.undo
+    f.btnUndo:SetEnabled(undo and undo:CanUndo() or false)
+    f.btnRedo:SetEnabled(undo and undo:CanRedo() or false)
+end
+
 function P:SetStripCollapsed(collapsed)
     NS.db.stripCollapsed = collapsed and true or false
     self:ShowLegend()
@@ -952,6 +990,7 @@ function P:ShowLegend()
     f:Layout()
     if C_Timer then C_Timer.After(0, function() if f:IsShown() then f:Layout() end end) end
     self:ResetLegendDodge()
+    self:RefreshLegendVerbs()
     f:Show()
 end
 

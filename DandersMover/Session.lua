@@ -91,7 +91,12 @@ function Sess:Unlock(filter)
         end
     end
     self.undo = Undo:New({ limit = 100 })
-    self.undo.RegisterCallback(self, "Changed", function() panel("Refresh") end)
+    -- The panels re-read the element they are bound to; the legend's Undo/Redo
+    -- buttons re-read whether there is anything left to undo.
+    self.undo.RegisterCallback(self, "Changed", function()
+        panel("Refresh")
+        Proxy:RefreshLegendVerbs()
+    end)
     self.dirty = false
     self.selected = nil
     self.active = true
@@ -218,8 +223,6 @@ end
 
 function Sess:Select(id)
     self.selected = id
-    -- An explicit selection always docks immediately, nudge hold or not.
-    if NS.Panel then NS.Panel:ClearHold() end
     Proxy:Highlight(id)
     panel("Refresh")
 end
@@ -259,8 +262,8 @@ local function clampFree(el, pos)
 end
 
 function Sess:Nudge(el, dx, dy)
-    -- Park the panel: a run of nudges must not re-dock it under the cursor.
-    if NS.Panel then NS.Panel:HoldDock() end
+    -- The panel is not parked here any more: the nudge BUTTONS auto-pin, which
+    -- is a better answer to "the panel chases my nudges" than a timed hold.
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     if pos.anchor then
@@ -653,8 +656,14 @@ end
 
 -- ============================================================
 -- KEYBOARD
--- Esc = lock, arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y = undo/redo.
+-- Esc backs out one layer at a time: a live link gesture, then the selection,
+-- then the session. Arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y =
+-- undo/redo.
 -- Only ever enabled while the unlock frame is shown, which never happens in combat.
+--
+-- Esc IS the deselect now: the unlock overlay no longer takes clicks (it covered
+-- the whole screen, so owning the mouse made the world unclickable for the whole
+-- session), and a click on empty space therefore goes to the game.
 -- ============================================================
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
 
@@ -665,10 +674,15 @@ function Sess:EnableKeyboard(on)
     f:SetScript("OnKeyDown", function(frame, key)
         local handled = false
         if key == "ESCAPE" then
-            -- Esc backs out of the link gesture first: it is the innermost
-            -- thing open, and ending the whole session under it would be a
-            -- surprise.
-            if Sess.linking then Sess:CancelLink() else Sess:Lock() end
+            -- Innermost thing first, one layer per press: the link gesture, then
+            -- the selection (the following panel closes on the Refresh that
+            -- follows), then the session itself. Ending the whole session out
+            -- from under an open gesture or a selected mover would be a
+            -- surprise -- and with the overlay no longer taking clicks, this is
+            -- the only way to deselect.
+            if Sess.linking then Sess:CancelLink()
+            elseif Sess.selected then Sess:Select(nil)
+            else Sess:Lock() end
             handled = true
         elseif ARROWS[key] and NS.db.keyboardNudge and Sess.selected then
             local el = Registry:Get(Sess.selected)

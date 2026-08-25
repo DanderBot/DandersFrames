@@ -212,6 +212,8 @@ local function build()
     stack(editor, {
         toggle(editor.content, L["Keyboard nudge"], "keyboardNudge", nil,
             { title = L["Keyboard nudge"], lines = { L["Arrow keys move the selected element. Shift ×10, Ctrl ×100."] } }),
+        toggle(editor.content, L["Auto-pin panels when editing"], "autoPinPanels", nil,
+            { title = L["Auto-pin panels when editing"], lines = { L["Typing in or clicking a mover's panel pins it in place. Off: only the pin button pins."] } }),
         toggle(editor.content, L["Show movers for hidden frames"], "showHiddenMovers", rebuildProxies),
         -- In a session another addon opened (e.g. /df unlock), other addons' movers are
         -- anchor targets but not draggable unless this is on. Mirrored on the legend.

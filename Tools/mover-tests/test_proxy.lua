@@ -23,10 +23,14 @@ local function stubFrame()
     -- dragging is read as a plain boolean by Proxy:Refresh; without a real
     -- value the __index fallback would hand back a (truthy) function and
     -- Refresh would bail before Highlight ran. fxIn/fxOut/tagShown are plain
-    -- values read by Fx and applyLook for the same reason.
+    -- values read by Fx and applyLook for the same reason -- and so is
+    -- `hovered`, which Highlight reads off every slab: left absent, EVERY slab
+    -- would repaint as hovered. `_mouse` and `_border` are recorded state, and
+    -- the same fallback would make a never-set one read as truthy.
     local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false,
-                fxScale = false, tagShown = false }
+                fxScale = false, tagShown = false, hovered = false,
+                _mouse = false, _border = false }
     function f:CreateAnimationGroup() return stubAnimationGroup() end
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
@@ -42,6 +46,13 @@ local function stubFrame()
     function f:GetSize() return self._w, self._h end
     -- Vertex colour is how the role now reads (the dot), so it is recorded.
     function f:SetVertexColor(r, g, b, a) self._vertex = { r, g, b, a } end
+    -- The slab OUTLINE, which is what selection, hover and the pin marker all
+    -- speak through. Weight never changes (SEL_WEIGHT == WEIGHT), so applyLook
+    -- always takes the recolour path rather than re-laying the border out.
+    function f:SetBackdropBorderColor(r, g, b, a) self._border = { r, g, b, a } end
+    -- Mouse capture is recorded rather than swallowed: the unlock overlay
+    -- covers the whole screen and must never take it.
+    function f:EnableMouse(v) self._mouse = v and true or false end
     function f:CreateTexture() return stubFrame() end
     function f:CreateLine() return stubFrame() end
     function f:SetScript(name, fn) self._scripts[name] = fn end
@@ -101,9 +112,16 @@ NS.UI = {
         return f
     end,
     CreateCheckbox = function() return stubFrame() end,
+    -- opts and the enabled state are recorded: the strip's Undo/Redo are the
+    -- only buttons on it whose enabled state is not a setting, and the only way
+    -- to see that is to read it back.
     CreateButton = function(_, _, opts)
         local b = stubFrame()
+        b._opts = opts
         if opts and opts.width then b._w = opts.width end
+        b._enabled = true
+        function b:SetEnabled(v) self._enabled = v and true or false end
+        function b:IsEnabled() return self._enabled end
         return b
     end,
     CreateGlyphButton = function(_, _, opts)
@@ -334,7 +352,14 @@ do
     local pt = lg.title._points[1]
     check(#lg.title._points == 1 and pt and pt[1] == "TOP" and pt[3] == "BOTTOM",
         "very long title floats below the slab, never truncated")
-    check(lg.tagBg and lg.tagBg:IsShown(), "floating title carries its pill background")
+    -- The pill is ON-DEMAND chrome: up only while its slab is the one being
+    -- looked at or moved, so a stack of anchored movers does not pile pills on
+    -- top of each other. (This used to assert it was up at rest -- it only read
+    -- that way because the frame stub answered `hovered` with a truthy
+    -- function; the stub now starts it false, so idle really is idle.)
+    check(lg.tagBg and not lg.tagBg:IsShown(), "floating title: no pill while the slab is idle")
+    P:Highlight("T:long")
+    check(lg.tagBg:IsShown(), "floating title: selecting the slab brings its pill up")
     check(s.tagBg and not s.tagBg:IsShown(), "in-slab title has no pill")
     P:DestroyAll()
     R:UnregisterAddon("T")
@@ -404,6 +429,237 @@ do
     eq(P.proxies["V:off"].coords:GetText(), NS.L["hidden"], "no getRect + hidden frame still reads 'hidden'")
     P:DestroyAll()
     R:UnregisterAddon("V")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE STRIP'S SESSION VERBS
+-- Undo and Redo live here, not on the element panel: what they act on is the
+-- session's history, not the mover whose panel happens to be open -- and with
+-- several panels pinned at once, one per panel would be the same button drawn
+-- many times.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, showGrid = false, addons = {} }
+    local undone, redone = 0, 0
+    local stack = { entries = 0, redos = 0 }
+    function stack:CanUndo() return self.entries > 0 end
+    function stack:CanRedo() return self.redos > 0 end
+    NS.Session = {
+        selected = nil, undo = stack,
+        Undo = function() undone = undone + 1 end,
+        Redo = function() redone = redone + 1 end,
+    }
+    R:RegisterAddon("S", { title = "S" })
+    R:Register("S", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local f = P.legend
+    check(f.btnUndo and f.btnRedo, "strip: Undo and Redo are on the legend")
+    eq(f.btnUndo._opts.text, NS.L["Undo"], "strip: Undo is labelled from the locale")
+    eq(f.btnRedo._opts.text, NS.L["Redo"], "strip: Redo is labelled from the locale")
+    -- An empty history greys both.
+    check(not f.btnUndo:IsEnabled() and not f.btnRedo:IsEnabled(), "strip: an empty history greys both")
+    stack.entries = 1
+    P:RefreshLegendVerbs()
+    check(f.btnUndo:IsEnabled(), "strip: something to undo enables Undo")
+    check(not f.btnRedo:IsEnabled(), "strip: ...and Redo stays grey until there is a redo")
+    stack.redos = 1
+    P:RefreshLegendVerbs()
+    check(f.btnRedo:IsEnabled(), "strip: a redo branch enables Redo")
+
+    f.btnUndo._opts.onClick()
+    f.btnRedo._opts.onClick()
+    eq(undone, 1, "strip: Undo runs the session's undo")
+    eq(redone, 1, "strip: Redo runs the session's redo")
+
+    -- The verbs take part in the strip's width, so they cannot overlap the dots.
+    local wide = f:GetWidth()
+    check(wide and wide > 0, "strip: the layout measured a width")
+
+    P:DestroyAll()
+    R:UnregisterAddon("S")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- SELECTION SEMANTICS
+-- The unlock overlay covers the WHOLE screen, so it must never take the mouse:
+-- a session that captured it left the camera undraggable and everything behind
+-- the movers unclickable for as long as the movers were unlocked. Empty-space
+-- clicks therefore reach the game, and a ClickSelect that finds nothing under
+-- the cursor does NOTHING -- deselecting is Esc's job now.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    local picked = 0
+    NS.Session = { selected = nil,
+                   Select = function(self, id) self.selected = id; picked = picked + 1 end }
+    R:RegisterAddon("C", { title = "C" })
+    R:Register("C", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local uf = P:GetUnlockFrame()
+    -- The stub starts at false and only EnableMouse moves it, so false here is
+    -- "never enabled" -- nothing turns it off again either.
+    eq(uf._mouse, false, "overlay: the unlock frame never enables the mouse")
+    check(uf:GetScript("OnMouseDown") == nil, "overlay: ...and has no click handler at all")
+
+    -- The stub slab's centre is (0, 0) in SCREEN units, i.e. far from the
+    -- UIParent-centred origin the cursor sits on: nothing is under the cursor.
+    cursorX, cursorY = 960, 540        -- an earlier drag block left it elsewhere
+    NS.Session.selected = "C:one"
+    P:ClickSelect()
+    eq(NS.Session.selected, "C:one", "click over nothing leaves the selection alone")
+    eq(picked, 0, "click over nothing does not reach Select at all")
+
+    -- ...and a click that DOES land on a slab still selects it, so the no-op is
+    -- the empty case only.
+    local b = P.proxies["C:one"]
+    b.GetCenter = function() return 960, 540 end
+    P:ClickSelect()
+    eq(NS.Session.selected, "C:one", "a click on a slab selects it")
+    eq(picked, 1, "...through Select")
+
+    P:DismissAll()
+    eq(uf._mouse, false, "overlay: the dismiss fade has no mouse state to put back")
+    P:DestroyAll()
+    R:UnregisterAddon("C")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE PIN MARKER
+-- A mover with a panel pinned open on it wears a dim white outline at rest, so a
+-- screen full of pinned panels can be traced back to the movers they belong to.
+-- It must stay UNDER hover and selection: it is a resting state, not a
+-- highlight, and a marker that outshone the slab under the cursor would make
+-- hover unreadable.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    local pinnedIds = {}
+    NS.Panel = { IsElementPinned = function(_, id) return pinnedIds[id] == true end }
+    R:RegisterAddon("M", { title = "M" })
+    for _, key in ipairs({ "sel", "hov", "pin", "plain" }) do
+        R:Register("M", key, elDef({ point = "CENTER", x = 0, y = 0 }))
+    end
+    P:Build()
+    local sel, hov, pin, plain =
+        P.proxies["M:sel"], P.proxies["M:hov"], P.proxies["M:pin"], P.proxies["M:plain"]
+    local function border(b) return b._border or {} end
+
+    hov.hovered = true
+    pinnedIds["M:pin"] = true
+    P:Highlight("M:sel")
+    local s, h, p, n = border(sel), border(hov), border(pin), border(plain)
+    check(s[1] == 1 and s[2] == 1 and s[3] == 1 and s[4] == 1, "selected: a full white outline")
+    check(h[1] == 1 and h[2] == 1 and h[3] == 1, "hovered: white too")
+    eq(h[4], 0.6, "hovered: ...at the softer alpha")
+    check(p[1] == 1 and p[2] == 1 and p[3] == 1, "pinned: the marker is the same white")
+    eq(p[4], 0.4, "pinned: ...at the marker alpha")
+    check(p[4] < h[4], "pinned: the marker sits under hover")
+    check(p[4] < s[4], "pinned: ...and under selection")
+    eq(n[1], COLORS.border.r, "unpinned and untouched: the neutral hairline")
+    eq(n[4], 1, "unpinned: the hairline is opaque")
+    -- White at 0.4 over the dark slab reads brighter than a 0.25 grey at 1, so
+    -- the marker is visible against the outline it replaces.
+    check(p[4] > COLORS.border.r, "pinned: the marker reads brighter than the hairline it replaces")
+
+    -- Precedence: both louder states win outright.
+    pinnedIds["M:sel"] = true
+    pinnedIds["M:hov"] = true
+    P:Highlight("M:sel")
+    eq(border(sel)[4], 1, "pinned AND selected: selection wins")
+    eq(border(hov)[4], 0.6, "pinned AND hovered: hover wins")
+
+    -- The panel closing takes the marker with it.
+    pinnedIds["M:pin"] = nil
+    P:Highlight("M:sel")
+    eq(border(pin)[1], COLORS.border.r, "the marker goes when the pinned panel does")
+
+    -- Proxy loads BEFORE Panel, so the lookup has to survive there being no
+    -- Panel module at all.
+    NS.Panel = nil
+    check(pcall(P.Highlight, P, "M:sel"), "no Panel module: the marker lookup is guarded")
+
+    P:DestroyAll()
+    R:UnregisterAddon("M")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- ESC: ONE LAYER PER PRESS
+-- The link gesture first, then the selection, then the session. Deselecting is
+-- Esc's job now that the overlay does not take clicks, so it must not be
+-- swallowed by the lock.
+--
+-- Session.lua is loaded HERE (the only suite that does): it needs a live Proxy,
+-- which this file has already stubbed and built.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, keyboardNudge = true, addons = {} }
+    -- Two file-scope side effects a headless run has to stand in for: the
+    -- registry callback the session subscribes to, and the exit popup it
+    -- declares. The callback stub is put straight back so no later suite sees it.
+    local prevRegister = NS.Lib.RegisterCallback
+    NS.Lib.RegisterCallback = prevRegister or function() end
+    StaticPopupDialogs = StaticPopupDialogs or {}
+    load_addon_file("Session.lua")
+    NS.Lib.RegisterCallback = prevRegister
+    local Sess = NS.Session
+
+    R:RegisterAddon("E", { title = "E" })
+    R:Register("E", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+
+    -- Lock is the one verb with a real side effect (a popup, or the whole
+    -- teardown), so it is counted rather than performed; everything else -- the
+    -- cancel and the deselect -- runs for real.
+    local locks = 0
+    Sess.Lock = function() locks = locks + 1 end
+    Sess.active = true
+    Sess:EnableKeyboard(true)
+    local uf = P:GetUnlockFrame()
+    local onKey = uf:GetScript("OnKeyDown")
+    check(onKey ~= nil, "esc: the session installs a key handler on the unlock frame")
+
+    -- (a) mid-gesture: the link is cancelled and nothing else happens.
+    Sess.selected = "E:one"
+    Sess.linking = { id = "E:one", mode = "primary" }
+    onKey(uf, "ESCAPE")
+    check(Sess.linking == nil, "esc: a live link gesture is cancelled first")
+    eq(Sess.selected, "E:one", "esc: ...and the selection survives it")
+    eq(locks, 0, "esc: ...and the session does not end")
+
+    -- (b) something selected: deselect, still no lock.
+    onKey(uf, "ESCAPE")
+    eq(Sess.selected, nil, "esc: the next press deselects")
+    eq(locks, 0, "esc: ...and still does not lock")
+
+    -- (c) nothing left to back out of: NOW it locks.
+    onKey(uf, "ESCAPE")
+    eq(locks, 1, "esc: with nothing selected, Esc locks the session")
+
+    Sess:EnableKeyboard(false)
+    check(uf:GetScript("OnKeyDown") == nil, "esc: disabling the keyboard takes the handler off")
+    P:DestroyAll()
+    R:UnregisterAddon("E")
     R.ready = wasReady
     NS.Session = nil
     NS.db = nil
