@@ -23,6 +23,11 @@ local xpcall, geterrorhandler = xpcall, geterrorhandler
 local GetTime, C_Timer = GetTime, C_Timer
 local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber, ipairs, pairs, math.floor, math.max, math.min
 
+-- The mover's own art, not the kit's (UI.MEDIA): the link glyph ships with this
+-- addon because it is this addon's verb.
+local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
+local LINK_ICON = MEDIA .. "link"
+
 -- Spacing comes from the theme so this panel keeps the rhythm of every other
 -- DandersUI surface: PAD is the outer padding, GAP the gap between rows of
 -- different kinds, TIGHT the gap inside a run of like things (buttons in a
@@ -174,10 +179,40 @@ local function build()
             if el then Sess:AnchorInPlace(el, targetId) end
         end,
     })
-    f.anchorPicker:SetSize(CW, ANCHOR_H)
+    -- The picker gives up the glyph's width on its right so the two share the
+    -- anchor row; the glyph itself hangs off the picker, so layoutAnchorBlock
+    -- still only has to move the picker.
+    f.anchorPicker:SetSize(CW - ANCHOR_H - TIGHT, ANCHOR_H)
     -- Refresh owns this caption from here on; set once so the opener never
     -- renders the raw value between build and the Refresh that follows it.
     f.anchorPicker:SetDisplayOverride(L["Anchor to…"])
+
+    -- ---- link drag ---------------------------------------------------
+    -- The same relationship the picker sets, aimed instead of chosen: hold the
+    -- glyph, drag the line onto a target and let go. Press and release are
+    -- deliberately OnMouseDown/OnMouseUp rather than an onClick -- the gesture
+    -- has to START on the press and FINISH wherever the cursor ended up, which
+    -- a click (down and up on the same button) cannot express. The button keeps
+    -- mouse capture between the two, so the release comes back here even though
+    -- the cursor is over a proxy by then.
+    f.linkBtn = UI:CreateGlyphButton(body, {
+        texture = LINK_ICON, size = ANCHOR_H, iconSize = 14,
+        tooltip = { title = L["Link"],
+                    lines = { L["Drag onto another element to anchor this one where it sits. Esc or right-click cancels."] } },
+    })
+    f.linkBtn:SetPoint("LEFT", f.anchorPicker, "RIGHT", TIGHT, 0)
+    f.linkBtn:RegisterForClicks("AnyUp", "AnyDown")
+    f.linkBtn:SetScript("OnMouseDown", function(_, button)
+        local el = selectedElement()
+        if not el then return end
+        if button == "LeftButton" then Sess:BeginLink(el)
+        elseif button == "RightButton" and Sess.linking then Sess:CancelLink() end
+    end)
+    f.linkBtn:SetScript("OnMouseUp", function(_, button)
+        if button == "LeftButton" and Sess.linking then
+            Sess:EndLink(Proxy.LinkHover and Proxy:LinkHover() or nil)
+        end
+    end)
 
     -- ---- backup anchor -----------------------------------------------
     -- Where the element goes when the primary target is not on screen. Only

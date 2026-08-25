@@ -138,6 +138,12 @@ function Sess:Finish(mode)
             if el then NS:Notify(el, "discard") end
         end
     end
+    -- A link gesture in flight owns an OnUpdate on the unlock frame; the
+    -- session must never end with that still running.
+    if self.linking then
+        self.linking = nil
+        Proxy:EndLinkVisual()
+    end
     self:EnableKeyboard(false)
     Proxy:DismissAll()            -- fade out, then destroy (combat suspend stays instant)
     Grid:Hide()
@@ -190,6 +196,10 @@ end)
 
 function Sess:Suspend()
     if not self.active or self.suspended then return end
+    -- A link gesture cannot survive combat: the unlock frame (and its
+    -- OnUpdate) hides, and a stale `linking` flag would keep the ClickSelect
+    -- guard and the glyph dead after Resume.
+    if self.linking then self:CancelLink() end
     self.suspended = true
     Proxy:GetUnlockFrame():Hide()
     Grid:Hide()
@@ -370,6 +380,37 @@ function Sess:SetAnchorSpec(el, changes)
     NS:ResolveElement(el)
     apply(el, "anchor")
     commit(el, before, L["Anchor %s"])
+end
+
+-- ============================================================
+-- LINK DRAG
+-- Press the panel's link glyph and drag a line onto another element: the
+-- release anchors IN PLACE, so the relationship changes and nothing moves.
+-- The gesture owns no record state of its own -- Sess.linking is just the id
+-- of the element being linked FROM, and the commit is AnchorInPlace's (one
+-- undo entry, same as picking the target from the dropdown). Esc and
+-- right-click cancel; the visual half lives in Proxy.
+-- ============================================================
+function Sess:BeginLink(el)
+    if not self.active or self.suspended or self.linking then return end
+    self.linking = { id = el.id }
+    Proxy:BeginLinkVisual(el)
+end
+
+function Sess:EndLink(targetId)
+    if not self.linking then return end
+    -- Re-read the element: a link can outlive the record it started from
+    -- (RegistryChanged mid-gesture), and the visual must come down either way.
+    local el = Registry:Get(self.linking.id)
+    self.linking = nil
+    Proxy:EndLinkVisual()
+    if el and targetId then self:AnchorInPlace(el, targetId) end
+end
+
+function Sess:CancelLink()
+    if not self.linking then return end
+    self.linking = nil
+    Proxy:EndLinkVisual()
 end
 
 function Sess:Detach(el)
@@ -600,7 +641,11 @@ function Sess:EnableKeyboard(on)
     f:SetScript("OnKeyDown", function(frame, key)
         local handled = false
         if key == "ESCAPE" then
-            Sess:Lock(); handled = true
+            -- Esc backs out of the link gesture first: it is the innermost
+            -- thing open, and ending the whole session under it would be a
+            -- surprise.
+            if Sess.linking then Sess:CancelLink() else Sess:Lock() end
+            handled = true
         elseif ARROWS[key] and NS.db.keyboardNudge and Sess.selected then
             local el = Registry:Get(Sess.selected)
             if el then
