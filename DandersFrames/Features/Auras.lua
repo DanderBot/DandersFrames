@@ -4498,10 +4498,28 @@ local function checkFrameOverflow(frame)
                         -- The per-group breakdown is the whole diagnosis: it separates "one
                         -- group overfilled" from "the same aura landed in two groups", which
                         -- are indistinguishable on screen and have different causes.
+                        -- ★ THE PER-UNIT TERMS, because the report is "only SOME people".
+                        -- Whatever is different about the affected raiders has to be a
+                        -- per-unit value, and these are the ones the aura path actually
+                        -- reads. canAssist above all: it is the sole input to Blizzard's
+                        -- identity gate (isHarmful and UnitCanAssist -> spell-ID candidate
+                        -- filters are NOT applied), it is evaluated PER TARGET, and DF has
+                        -- already field-confirmed it goes false for everyone while you are
+                        -- a ghost (Update.lua's note on the observer-side case).
+                        -- pcall'd and secrecy-checked: dfInRange can hold a secret boolean
+                        -- from the UnitInRange fallback, and tostring on a secret makes the
+                        -- whole line vanish rather than erroring.
+                        local okA, canAssist = pcall(UnitCanAssist, "player", frame.unit)
+                        if not okA or (issecretvalue and issecretvalue(canAssist)) then canAssist = "?" end
+                        local inRange = frame.dfInRange
+                        if issecretvalue and issecretvalue(inRange) then inRange = "secret" end
                         DF:DebugWarn("AURAROW",
-                            "OVERFLOW %s %s row: showing %d vs max %d per group over %d groups [%s] dead=%s combat=%s",
+                            "OVERFLOW %s %s row: showing %d vs max %d per group over %d groups [%s]"
+                            .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
                             tostring(frame.unit), label, total, cap, groups, parts,
-                            tostring(DF.playerIsDead), tostring(DF.playerInCombat))
+                            tostring(DF.playerIsDead), tostring(DF.playerInCombat),
+                            tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
+                            tostring(inRange))
                     end
                 elseif prev then
                     overflowState[stateKey] = nil
