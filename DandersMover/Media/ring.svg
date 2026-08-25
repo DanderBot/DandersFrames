@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- The root marker: a hollow disc sharing dot.svg's outer radius, so a ring
+       drawn one or two pixels larger than the dot shows as a rim of exactly the
+       difference. The band is 10 of 64 units (~1.7px at the 11px the proxy draws
+       it), and the hole is cut by the inner arcs' opposite winding as well as by
+       fill-rule, so either fill rule gives the same shape. -->
+  <path fill="#ffffff" fill-rule="evenodd" d="
+    M 1 32 A 31 31 0 1 0 63 32 A 31 31 0 1 0 1 32 Z
+    M 11 32 A 21 21 0 1 1 53 32 A 21 21 0 1 1 11 32 Z"/>
+</svg>

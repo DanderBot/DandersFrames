@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Two interlocking oval links on a 45 degree axis, each drawn as a filled
+       annulus: a pair of outer half-arcs, then a pair of inner half-arcs wound
+       the other way to cut the hole. No stroke (nothing to scale badly) and no
+       colour but white, so SetVertexColor tints the whole glyph.
+
+       The tilt is baked into each arc's x-axis-rotation AND its endpoints, so
+       the file needs no transform to be read correctly. Each link is centred
+       14.4 units off the middle along the axis, which is 14.4 units less than
+       its own length; that difference is the overlap that makes the two read as
+       a chain rather than as two ovals side by side.
+
+       The two links are SEPARATE paths on purpose. One path with four subpaths
+       under fill-rule="evenodd" would XOR where they cross and punch a hole
+       through the join.
+
+       (No double hyphens anywhere in these comments: XML forbids them.) -->
+  <path fill="#ffffff" fill-rule="evenodd" d="
+    M 6.55 57.45 A 21.6 13 -45 1 0 37.09 26.91 A 21.6 13 -45 1 0 6.55 57.45 Z
+    M 11.21 52.79 A 15 6.5 -45 1 1 32.43 31.57 A 15 6.5 -45 1 1 11.21 52.79 Z"/>
+  <path fill="#ffffff" fill-rule="evenodd" d="
+    M 26.91 37.09 A 21.6 13 -45 1 0 57.45 6.55 A 21.6 13 -45 1 0 26.91 37.09 Z
+    M 31.57 32.43 A 15 6.5 -45 1 1 52.79 11.21 A 15 6.5 -45 1 1 31.57 32.43 Z"/>
+</svg>
