@@ -2934,13 +2934,13 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
     local anchor = db.roleIconAnchor or "TOPLEFT"
     local x = db.roleIconX or 2
     local y = db.roleIconY or -2
-    local alpha = db.roleIconAlpha or 1
     
     frame.roleIcon:SetScale(scale)
     frame.roleIcon:ClearAllPoints()
     frame.roleIcon:SetPoint(anchor, frame, anchor, x, y)
-    frame.roleIcon:SetAlpha(alpha)
-    
+    -- ☠ Alpha delegated to the appearance twin — see UpdateRaidTargetIcon.
+    DF:UpdateRoleIconAppearance(frame)
+
     -- Apply frame level
     frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.roleIconFrameLevel or 30))
 end
@@ -3033,13 +3033,15 @@ function DF:UpdateLeaderIcon(frame)
     local anchor = db.leaderIconAnchor or "TOPLEFT"
     local x = db.leaderIconX or -2
     local y = db.leaderIconY or 2
-    local alpha = db.leaderIconAlpha or 1
     
     frame.leaderIcon:SetScale(scale)
     frame.leaderIcon:ClearAllPoints()
     frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
-    frame.leaderIcon:SetAlpha(alpha)
-    
+    -- ☠ Alpha delegated to the appearance twin — this was THE reported flasher
+    -- (crown popping to full alpha on every roster/leadership event while the
+    -- frame sat dimmed out of range). See UpdateRaidTargetIcon for the class.
+    DF:UpdateLeaderIconAppearance(frame)
+
     -- Apply frame level
     frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
 end
@@ -3098,13 +3100,16 @@ function DF:UpdateRaidTargetIcon(frame)
     local anchor = db.raidTargetIconAnchor or "TOP"
     local x = db.raidTargetIconX or 0
     local y = db.raidTargetIconY or 2
-    local alpha = db.raidTargetIconAlpha or 1
     
     frame.raidTargetIcon:SetScale(scale)
     frame.raidTargetIcon:ClearAllPoints()
     frame.raidTargetIcon:SetPoint(anchor, frame, anchor, x, y)
-    frame.raidTargetIcon:SetAlpha(alpha)
-    
+    -- ☠ ALPHA IS THE APPEARANCE TWIN'S, not this updater's. A plain SetAlpha here
+    -- stomped the range/dead fade on every event this runs for, so an out-of-range
+    -- unit's icon strobed bright/dim between this writer and the appearance sweep
+    -- (field report: leader icons "flashing in/out of range"). One writer per icon.
+    DF:UpdateRaidTargetIconAppearance(frame)
+
     -- Apply frame level
     frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidTargetIconFrameLevel or 30))
 end
@@ -3162,13 +3167,13 @@ function DF:UpdateReadyCheckIcon(frame)
     local anchor = db.readyCheckIconAnchor or "CENTER"
     local x = db.readyCheckIconX or 0
     local y = db.readyCheckIconY or 0
-    local alpha = db.readyCheckIconAlpha or 1
     
     frame.readyCheckIcon:SetScale(scale)
     frame.readyCheckIcon:ClearAllPoints()
     frame.readyCheckIcon:SetPoint(anchor, frame, anchor, x, y)
-    frame.readyCheckIcon:SetAlpha(alpha)
-    
+    -- ☠ Alpha delegated to the appearance twin — see UpdateRaidTargetIcon.
+    DF:UpdateReadyCheckIconAppearance(frame)
+
     -- Apply frame level
     frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
 end
