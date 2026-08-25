@@ -12,14 +12,20 @@ local function stubFrame()
     -- fxIn/fxOut/... are plain values because Fx reads them as booleans; a
     -- __index fallback would hand back a (truthy) function and Fx.Cancel would
     -- try to :Stop() it.
-    local f = { _shown = false, _alpha = 1, _scripts = {}, _points = {}, _w = 0, _h = 0,
-                fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false }
+    local f = { _shown = false, _alpha = 1, _scale = 1, _scripts = {}, _points = {}, _w = 0, _h = 0,
+                fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false,
+                fxScale = false }
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
     function f:IsShown() return self._shown end
     function f:SetShown(v) self._shown = v and true or false end
     function f:SetAlpha(v) self._alpha = v end
     function f:GetAlpha() return self._alpha end
+    -- Real values, because Fx.ScaleTo rests wherever it is put: the hover lift
+    -- is only observable as the scale it leaves behind.
+    function f:SetScale(v) self._scale = v end
+    function f:GetScale() return self._scale end
+    function f:SetVertexColor(r, g, b, a) self._vertex = { r, g, b, a } end
     function f:SetSize(w, h) self._w, self._h = w, h end
     function f:SetWidth(w) self._w = w end
     function f:SetHeight(h) self._h = h end
@@ -47,6 +53,9 @@ local function stubFontString()
     function f:GetText() return self._text end
     function f:GetStringWidth() return 7 * #self._text end
     function f:GetStringHeight() return 12 end
+    -- Recorded: whether a caption clips or wraps is the difference between a
+    -- long string staying in its row and falling through the one below.
+    function f:SetWordWrap(v) self._wordWrap = v and true or false end
     return f
 end
 
@@ -57,6 +66,11 @@ local function stubDropdown(opts)
     d._opts = opts or {}
     d._options = d._opts.options
     d._enabled = true
+    -- The kit always hands the opener button back on the container
+    -- (container.opener); the panel reaches through it for the caption's
+    -- FontString.
+    d.opener = stubFrame()
+    d.opener.Text = stubFontString()
     function d:SetDisplayOverride(text) self._override = text end
     function d:UpdateText() end
     function d:RebuildOptions(newOptions) if newOptions then self._options = newOptions end end
@@ -99,6 +113,11 @@ NS.UI = {
         local b = stubFrame()
         b._opts = opts
         if opts and opts.size then b._w, b._h = opts.size, opts.size end
+        if opts and opts.width then b._w = opts.width end
+        if opts and opts.height then b._h = opts.height end
+        -- The kit's glyph texture, which the panel re-anchors to make room for
+        -- the grip dots beside it.
+        b.Icon = stubFrame()
         return b
     end,
     CreateEditBox = function(_, _, opts)
@@ -184,8 +203,20 @@ end
 -- the primary handle stays live -- it is the way IN to anchoring.
 do
     local f = refresh("P:free")
-    eq(f.targetRow.picker._override, L["None"], "free: target reads None")
+    -- The Target row's empty state TEACHES: the word plus the chain glyph
+    -- inline, so the sentence points at the handle beside it. The Backup row
+    -- stays a bare "None" -- it is greyed here and has no gesture to offer.
+    local cap = f.targetRow.picker._override
+    check(cap:find("None", 1, true) == 1, "free: the target caption still opens with None")
+    check(cap:find("|TInterface\\AddOns\\DandersMover\\Media\\link.tga:12:12|t", 1, true) ~= nil,
+        "free: the target caption carries the chain glyph inline")
+    check(cap:find("link", 1, true) ~= nil, "free: the target caption names the gesture")
     eq(f.backupRow.picker._override, L["None"], "free: backup reads None")
+    -- ...and that caption has to CLIP. Word wrap on a both-edges-anchored
+    -- FontString would put the overflow on a second line, straight through the
+    -- row below it.
+    eq(f.targetRow.picker.opener.Text._wordWrap, false, "free: the target caption clips, not wraps")
+    eq(f.backupRow.picker.opener.Text._wordWrap, false, "free: the backup caption clips, not wraps")
     check(f.targetRow.handle:IsEnabled(), "free: primary handle stays enabled")
     check(not f.backupRow.handle:IsEnabled(), "free: backup handle disabled")
     check(f.backupRow.picker._enabled == false, "free: backup picker disabled")
@@ -220,7 +251,11 @@ do
     childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
     local f = refresh("P:child")
     eq(f:GetHeight(), freeH, "anchoring does not resize the panel")
+    -- Anchored, the caption is the bare target name: the teaching line is the
+    -- EMPTY state's job and would be noise once the row has an answer.
     eq(f.targetRow.picker._override, R:Get("P:host").title, "anchored: target names the target")
+    check(f.targetRow.picker._override:find("|T", 1, true) == nil,
+        "anchored: no inline glyph in the caption")
     check(f.backupRow.picker._enabled, "anchored: backup picker enabled")
     check(f.backupRow.handle:IsEnabled(), "anchored: backup handle enabled")
     check(f.edgeDrop._enabled and f.alignDrop._enabled, "anchored: seat pair enabled")
@@ -276,6 +311,77 @@ do
     f.backupRow.handle:GetScript("OnMouseDown")(f.backupRow.handle, "RightButton")
     eq(calls[1][1], "cancel", "right-click cancels")
     hover = nil
+end
+
+-- The handles read as grips: dots beside the chain, and a hover state that
+-- lifts, brightens and takes the move cursor. Both handles get the same
+-- treatment -- they are the same gesture.
+do
+    local f = refresh("P:free")
+    for _, row in ipairs({ f.targetRow, f.backupRow }) do
+        local h = row.handle
+        check(h.Grip ~= nil, "the handle carries grip dots beside the chain")
+        check(h:GetScript("OnEnter") and h:GetScript("OnLeave"), "the handle has hover scripts")
+        check(h:GetWidth() > h:GetHeight(), "the handle is a grip box, not a square icon")
+    end
+    -- The picker must NOT be pinned to the handle: a lift would drag it along.
+    local pinnedToHandle = false
+    for _, p in ipairs(f.targetRow.picker._points) do
+        if p[2] == f.targetRow.handle then pinnedToHandle = true end
+    end
+    check(not pinnedToHandle, "the picker is anchored to the row, not to the lifting handle")
+end
+
+-- Hover: lift on enter, settle on leave, and the move cursor on the way in and
+-- out. SetCursor is probed and pcall'd, so neither a missing path nor a
+-- throwing API may escape into the hover.
+do
+    local f = refresh("P:free")
+    local h = f.targetRow.handle
+    local cur = {}
+    -- Probe surface: a texture whose SetTexture answers "not false", i.e. the
+    -- cursor file resolved.
+    UIParent.CreateTexture = function() return { SetTexture = function() end, Hide = function() end } end
+    SetCursor = function(path) cur[#cur + 1] = path end
+    ResetCursor = function() cur[#cur + 1] = "reset" end
+
+    h:GetScript("OnEnter")(h)
+    check(h:GetScale() > 1, "hovering lifts the handle")
+    eq(cur[1], "Interface\\CURSOR\\UI-Cursor-Move", "hovering takes the move cursor")
+    h:GetScript("OnLeave")(h)
+    eq(h:GetScale(), 1, "leaving settles the handle back to rest scale")
+    eq(cur[2], "reset", "leaving puts the cursor back")
+
+    -- A SetCursor that throws (missing file, older client) must not break the
+    -- hover: the pcall swallows it and the lift still happens.
+    cur = {}
+    SetCursor = function() error("no such cursor") end
+    h:GetScript("OnEnter")(h)
+    check(h:GetScale() > 1, "a throwing SetCursor still leaves the hover working")
+    h:GetScript("OnLeave")(h)
+    eq(h:GetScale(), 1, "...and the leave still settles")
+
+    -- Mid-gesture the cursor is the gesture's. The button keeps mouse capture
+    -- between press and release, so the pointer comes back over it while a link
+    -- is live -- grabbing there would fight the drag.
+    cur = {}
+    SetCursor = function(path) cur[#cur + 1] = path end
+    Sess.linking = { id = "P:free", mode = "primary" }
+    h:GetScript("OnEnter")(h)
+    h:GetScript("OnLeave")(h)
+    eq(#cur, 0, "a live link gesture keeps its own cursor")
+    Sess.linking = nil
+
+    -- A greyed handle refuses the gesture, so it must not advertise it.
+    cur = {}
+    local b = f.backupRow.handle
+    check(not b:IsEnabled(), "free: the backup handle is the disabled case")
+    b:GetScript("OnEnter")(b)
+    eq(b:GetScale(), 1, "a disabled handle does not lift")
+    eq(#cur, 0, "a disabled handle does not take the cursor")
+    b:GetScript("OnLeave")(b)
+
+    SetCursor, ResetCursor = nil, nil
 end
 
 -- The backup row names its own target, and the Target row says so when the

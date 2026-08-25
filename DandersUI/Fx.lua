@@ -14,7 +14,7 @@ if not UI then return end
 -- call plain Hide() and, if a fade might be running, Fx.Cancel.
 --
 -- Library-level, not per host: the helpers keep their state on the TARGET
--- (fxIn/fxOut/fxPop/fxPopOut/fxTo animation groups), so there is nothing
+-- (fxIn/fxOut/fxPop/fxPopOut/fxTo/fxScale animation groups), so there is nothing
 -- host-specific to shadow.
 -- ============================================================
 local Fx = {}
@@ -201,8 +201,47 @@ function Fx.FadeTo(target, alpha, dur)
     g:Play()
 end
 
+-- Scale the target to a RESTING scale and leave it there -- the scale sibling of
+-- FadeTo, and like FadeTo it rests wherever it is put rather than always coming
+-- back to 1. The rest value is taken at once (SetScale), so a stub or a client
+-- without the modern Scale setters still lands on the right size; the animation
+-- only decorates the transition. Hover "lift" affordances pair
+-- ScaleTo(btn, 1.15) on enter with ScaleTo(btn, 1) on leave.
+--
+-- ⚠ FRAMES ONLY. Textures have no SetScale, so a region caller is a no-op here
+-- (deliberately silent -- everything else in this file works on both).
+--
+-- ☠ A scaled frame moves whatever is anchored TO it: anchor offsets resolve in
+-- screen space, so a neighbour pinned to a lifted button's edge jitters with it.
+-- Anchor the neighbours to the ROW, not to the thing that lifts.
+function Fx.ScaleTo(target, scale, dur)
+    if not target or not target.SetScale then return end
+    local from = target:GetScale() or 1
+    target:SetScale(scale)
+    if from == scale then return end
+    local g = target.fxScale
+    if not g then
+        g = target:CreateAnimationGroup()
+        if not g then return end                    -- headless stub: sized, done
+        g.scale = g:CreateAnimation("Scale")
+        target.fxScale = g
+    end
+    if g:IsPlaying() then g:Stop() end
+    -- A Scale animation MULTIPLIES the region's own scale and its state reverts
+    -- on finish, so the ratio below runs the RENDERED scale from `from` back up
+    -- to the rest value SetScale just took, and leaves it there.
+    local ratio = from / scale
+    if g.scale.SetScaleFrom then g.scale:SetScaleFrom(ratio, ratio); g.scale:SetScaleTo(1, 1) end
+    if g.scale.SetOrigin then g.scale:SetOrigin("CENTER", 0, 0) end
+    g.scale:SetDuration(dur or 0.08)
+    g.scale:SetSmoothing("OUT")
+    g:Play()
+end
+
 -- Stop any running fade and restore the resting alpha. For paths that must be
--- instant (combat suspend, teardown).
+-- instant (combat suspend, teardown). The resting SCALE is left alone: unlike
+-- alpha, it is the caller's state (ScaleTo rests where it is put), so a Cancel
+-- that forced it to 1 would silently undo a deliberate size.
 function Fx.Cancel(target)
     if not target then return end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
@@ -210,5 +249,6 @@ function Fx.Cancel(target)
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
     if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     if target.fxTo and target.fxTo:IsPlaying() then target.fxTo:Stop() end
+    if target.fxScale and target.fxScale:IsPlaying() then target.fxScale:Stop() end
     target:SetAlpha(1)
 end

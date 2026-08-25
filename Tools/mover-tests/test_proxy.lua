@@ -26,7 +26,7 @@ local function stubFrame()
     -- values read by Fx and applyLook for the same reason.
     local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false,
-                tagShown = false }
+                fxScale = false, tagShown = false }
     function f:CreateAnimationGroup() return stubAnimationGroup() end
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
