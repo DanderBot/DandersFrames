@@ -1922,6 +1922,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
         groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
 
+        -- ☠ THE OVERRIDE READOUT MUST SPEAK THE GLOBAL'S DIALECT. These two dropdowns
+        -- share ONE key with OPPOSITE label maps, so the word for a given stored value
+        -- depends on raidUseGroups -- and an auto layout can override raidUseGroups. An
+        -- auto layout with groups OFF, against a global with groups ON, therefore printed
+        -- the global's growth direction through the FLAT map: "(Global: Columns)" beside a
+        -- global page reading "Rows". Same value, wrong dialect, and it reads as the addon
+        -- being wrong about a setting the user can see for themselves.
+        -- The resolver picks the map from the GLOBAL raidUseGroups, read through the same
+        -- accessor the pass is using (runtime and editing resolve globals differently).
+        -- ⚠ Nothing here changes what is STORED or drawn -- only the sentence describing
+        -- the global. The label flip when you toggle the checkbox is not this bug and is
+        -- deliberate: the same value genuinely renders as rows in one mode and columns in
+        -- the other, so the word has to change with it (see the convention note above).
+        -- ⚠ NO OVERRIDE HOOKS HERE, DELIBERATELY. growDirection is mode-relative and a
+        -- layout can override the key that sets its mode, so a flat layout matching a
+        -- grouped global stores the OPPOSITE raw value -- which made the override row
+        -- report a difference the user does not have. Three widget-level attempts to
+        -- describe or suppress that did not hold; the answer lives in the profile layer
+        -- instead (AutoProfilesUI:GetGlobalValue / IsSettingOverridden translate
+        -- growDirection into the editing profile's mode), so the dot, the reset, the
+        -- readout and the tab stars all get one consistent answer with no widget
+        -- plumbing. Do not re-add a per-dropdown hook: it would translate twice.
+
         -- ☠ EVERY Start/End PAIR ON THIS PAGE SITS ON ONE OF TWO PERPENDICULAR AXES,
         -- AND WHICH ONE IS NOT GUESSABLE FROM THE CONTROL'S NAME. Get this wrong and the
         -- dropdown confidently offers "Right" for something that only ever moves up and
@@ -1959,6 +1982,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
         
         raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
+            -- ☠☠ KEEP THE LAYOUT THE USER CAN SEE, NOT THE VALUE UNDER IT. growDirection
+            -- is ONE key meaning OPPOSITE things in the two modes -- flat HORIZONTAL lays
+            -- frames left-to-right (rows), grouped HORIZONTAL stacks each group five deep
+            -- and runs the groups across (columns) -- which is why the two dropdowns carry
+            -- inverted labels. Correct as descriptions, but it meant TOGGLING THIS BOX
+            -- SILENTLY RE-ORIENTED THE RAID: sitting on "Rows" in grouped mode and turning
+            -- groups off left the stored VERTICAL intact, which flat renders as columns,
+            -- and the dropdown honestly relabelled itself "Columns". The user then had to
+            -- set it back to "Rows" to get what they already had (Krathe, 2026-08-25).
+            --
+            -- The maps are exact inverses, so preserving the LABEL is inverting the VALUE.
+            -- Rows stay rows, columns stay columns, and the box goes back to meaning only
+            -- what it says: whether players are organised into groups.
+            -- ⚠ Writes through `db`, so an auto layout in edit mode records it as an
+            -- override alongside raidUseGroups -- which is right: expressing "flat, in
+            -- rows" needs both keys, and storing only the toggle would re-orient the raid
+            -- whenever the layout activated.
+            -- ⚠ BEFORE UpdateFrames, or the pass below lays out on the pre-flip value.
+            -- (The real cure is splitting the key per mode so nothing has to be flipped;
+            -- that is a migration plus ~99 read sites and is deliberately not this fix.)
+            db.growDirection = (db.growDirection == "HORIZONTAL") and "VERTICAL" or "HORIZONTAL"
             UpdateFrames()
             -- Branch on the SETTING only. Folding `not InCombatLockdown()` into this
             -- test meant that switching TO flat mode while in combat fell into the

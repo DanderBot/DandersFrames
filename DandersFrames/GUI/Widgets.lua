@@ -1035,6 +1035,49 @@ function GUI:CreateOverrideResetButton(parent, opts)
     return btn
 end
 
+-- ☠☠ THE GLOBAL VALUE MUST BE LABELLED IN THE GLOBAL'S OWN VOCABULARY, and for one
+-- control it was not. A dropdown's option map is normally a constant, so rendering the
+-- global value through the widget's own map is right -- EXCEPT where the map itself
+-- depends on ANOTHER key that the profile may be overriding. Growth Direction is exactly
+-- that: grouped raid and flat raid label the same stored HORIZONTAL/VERTICAL with
+-- OPPOSITE words (the repeating unit is a group in one and a frame in the other -- see
+-- the convention note in Pages/Options.lua). So an auto layout that turns groups OFF
+-- while the global has them ON rendered the global value through the FLAT map and
+-- announced "Global: Columns" for a global page that plainly reads "Rows" -- a true
+-- value described in the wrong dialect, which reads as the addon simply being wrong
+-- about the user's own setting (Krathe, 2026-08-25).
+--
+-- ⚠ WIDGETS DO NOT TRANSLATE VALUES, and an attempt to let them do so was removed.
+-- Where a key's MEANING depends on another key the profile can override -- growDirection,
+-- whose grouped and flat readings are inverses -- the translation belongs in the profile
+-- layer, so that the marker, the reset, this readout and the tab stars cannot disagree.
+-- See AutoProfilesUI:GetGlobalValue: it hands back the global already expressed in the
+-- editing profile's mode, and this function just names it with the widget's own map.
+-- ⚠ ONE resolver for both call sites below on purpose: they format identically, and
+-- fixing the class in one and not its sibling is a standing failure mode in this file.
+local function ResolveGlobalDisplay(self, globalValue, getGlobal)
+    if type(globalValue) == "boolean" then
+        return globalValue and L["Yes"] or L["No"]
+    elseif type(globalValue) == "number" then
+        if globalValue == math.floor(globalValue) then
+            return tostring(globalValue)
+        end
+        return string.format("%.2f", globalValue)
+    elseif type(globalValue) == "table" then
+        return globalValue.r and L["Color"] or "..."
+    elseif type(globalValue) == "string" then
+        local map = self.overrideOptionsMap
+        local mapped = map and map[globalValue]
+        if mapped ~= nil then
+            if type(mapped) == "table" then
+                return mapped.text or mapped.label or globalValue
+            end
+            return tostring(mapped)
+        end
+    end
+    return tostring(globalValue or L["None"])
+end
+
 local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOffset, optionsMap, dbTable)
     -- Skip for proxy tables (e.g. Aura Designer) that don't support per-key override tracking
     if dbTable and rawget(dbTable, "_skipOverrideIndicators") then return end
@@ -1117,34 +1160,9 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             self.overrideResetBtn:Hide()  -- Can't reset runtime overrides from controls
             self.overrideCheckIcon:Hide()
 
-            local globalValue = AutoProfilesUI:GetRuntimeGlobalValue(dbKey)
-
-            -- Format global value for display
-            local globalDisplay
-            if type(globalValue) == "boolean" then
-                globalDisplay = globalValue and L["Yes"] or L["No"]
-            elseif type(globalValue) == "number" then
-                if globalValue == math.floor(globalValue) then
-                    globalDisplay = tostring(globalValue)
-                else
-                    globalDisplay = string.format("%.2f", globalValue)
-                end
-            elseif type(globalValue) == "table" then
-                if globalValue.r then
-                    globalDisplay = L["Color"]
-                else
-                    globalDisplay = "..."
-                end
-            elseif type(globalValue) == "string" and self.overrideOptionsMap and self.overrideOptionsMap[globalValue] then
-                local mapped = self.overrideOptionsMap[globalValue]
-                if type(mapped) == "table" then
-                    globalDisplay = mapped.text or mapped.label or globalValue
-                else
-                    globalDisplay = tostring(mapped)
-                end
-            else
-                globalDisplay = tostring(globalValue or L["None"])
-            end
+            local getGlobal = function(k) return AutoProfilesUI:GetRuntimeGlobalValue(k) end
+            local globalValue = getGlobal(dbKey)
+            local globalDisplay = ResolveGlobalDisplay(self, globalValue, getGlobal)
 
             self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
             self.overrideGlobalText:ClearAllPoints()
@@ -1157,8 +1175,8 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
         -- Editing mode: existing behavior
         -- Check if setting is overridden
         local isOverridden = AutoProfilesUI:IsSettingOverridden(dbKey)
-        local globalValue = AutoProfilesUI:GetGlobalValue(dbKey)
-
+        local getGlobal = function(k) return AutoProfilesUI:GetGlobalValue(k) end
+        local globalValue = getGlobal(dbKey)
         -- Show/hide star and reset button
         if isOverridden then
             self.overrideStar.tooltipText = L["Override active"]
@@ -1170,33 +1188,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             self.overrideResetBtn:Hide()
         end
 
-        -- Format global value for display
-        local globalDisplay
-        if type(globalValue) == "boolean" then
-            globalDisplay = globalValue and L["Yes"] or L["No"]
-        elseif type(globalValue) == "number" then
-            if globalValue == math.floor(globalValue) then
-                globalDisplay = tostring(globalValue)
-            else
-                globalDisplay = string.format("%.2f", globalValue)
-            end
-        elseif type(globalValue) == "table" then
-            -- Color table
-            if globalValue.r then
-                globalDisplay = L["Color"]
-            else
-                globalDisplay = "..."
-            end
-        elseif type(globalValue) == "string" and self.overrideOptionsMap and self.overrideOptionsMap[globalValue] then
-            local mapped = self.overrideOptionsMap[globalValue]
-            if type(mapped) == "table" then
-                globalDisplay = mapped.text or mapped.label or globalValue
-            else
-                globalDisplay = tostring(mapped)
-            end
-        else
-            globalDisplay = tostring(globalValue or L["None"])
-        end
+        local globalDisplay = ResolveGlobalDisplay(self, globalValue, getGlobal)
 
         -- Show global value inline with label
         self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
