@@ -493,12 +493,45 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         bgColor     = { 0.08, 0.08, 0.08, 1 },
     })
     
-    -- Profile name
+    -- Profile name — CLICKABLE, opening the same dialog the range badge does (which now
+    -- carries the name field as well). The affordance mirrors the range badge beside it
+    -- rather than adding a fifth button to an already crowded row.
+    -- ⚠ Fixed layouts (mythic) have no dialog: the badge below only wires its click for
+    -- non-fixed types, so the name follows the same rule or it would open nothing.
     local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     nameText:SetPoint("LEFT", 10, 0)
     nameText:SetText(profile.name or L["Unnamed"])
     nameText:SetWidth(100)
     nameText:SetJustifyH("LEFT")
+
+    -- ⚠ ONE tooltip for the name AND the range badge, because they open the SAME
+    -- dialog. They used to describe themselves separately ("Click to edit range"),
+    -- which promised less than the click delivers now that the dialog carries both
+    -- fields -- and two descriptions of one destination drift apart. House shape:
+    -- title plus a describing line, not a bare title.
+    local function ShowRowEditTip(owner)
+        GUI:ShowTooltip(owner, {
+            title = L["Click to edit"],
+            lines = { L["Change this layout's name, or the player range that activates it."] },
+        })
+    end
+
+    if not contentType.isFixed then
+        local nameBtn = CreateFrame("Button", nil, row)
+        nameBtn:SetPoint("LEFT", nameText, "LEFT", -2, 0)
+        nameBtn:SetSize(104, 22)
+        nameBtn:SetScript("OnEnter", function(self)
+            nameText:SetTextColor(1, 0.8, 0.2)
+            ShowRowEditTip(self)
+        end)
+        nameBtn:SetScript("OnLeave", function()
+            nameText:SetTextColor(1, 1, 1)
+            GUI:HideTooltip()
+        end)
+        nameBtn:SetScript("OnClick", function()
+            AutoProfilesUI:ShowProfileDialog(contentType, profile, index, pageFrame)
+        end)
+    end
     
     -- Range badge
     local rangeBadge = CreateFrame("Button", nil, row, "BackdropTemplate")
@@ -523,7 +556,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         rangeBadge:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(1, 0.5, 0.2, 1)
             rangeText:SetTextColor(1, 1, 1)
-            GUI:ShowTooltip(self, { title = L["Click to edit range"] })
+            ShowRowEditTip(self)
         end)
         rangeBadge:SetScript("OnLeave", function(self)
             self:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
@@ -1022,18 +1055,25 @@ function AutoProfilesUI:ShowProfileDialog(contentType, profile, profileIndex, pa
     
     -- Set title
     if dialog.isEditMode then
-        dialog.title:SetText(L["Edit Layout Range"])
+        -- ★ EDIT MODE SHOWS THE NAME TOO, so this is where a layout gets renamed.
+        -- The field was hidden here and the dialog was titled "Edit Layout Range",
+        -- which left no way to rename a layout at all once it existed -- the name was
+        -- fixed at creation for the life of the layout. Same geometry as create mode
+        -- now, so the two states differ only in their title and button text.
+        -- ⚠ The duplicate-name check downstream already excluded the edited layout's
+        -- own index (written for this and previously unreachable), so re-saving with
+        -- the name untouched is not a conflict.
+        dialog.title:SetText(L["Edit Layout"])
         dialog.createBtnText:SetText(L["Save Changes"])
-        dialog.nameLabel:Hide()
-        dialog.nameInput:Hide()
-        -- Shift elements up (52px offset from hidden name section)
+        dialog.nameLabel:Show()
+        dialog.nameInput:Show()
         dialog.rangeLabel:ClearAllPoints()
-        dialog.rangeLabel:SetPoint("TOPLEFT", 12, -40)
+        dialog.rangeLabel:SetPoint("TOPLEFT", 12, -92)
         dialog.sliderTrack:ClearAllPoints()
-        dialog.sliderTrack:SetPoint("TOPLEFT", 12, -60)
+        dialog.sliderTrack:SetPoint("TOPLEFT", 12, -112)
         dialog.validationIcon:ClearAllPoints()
-        dialog.validationIcon:SetPoint("TOPLEFT", 12, -100)
-        dialog:SetHeight(175)
+        dialog.validationIcon:SetPoint("TOPLEFT", 12, -152)
+        dialog:SetHeight(220)
     else
         dialog.title:SetText(L["Add Layout"])
         dialog.createBtnText:SetText(L["Create Layout"])
@@ -1065,9 +1105,10 @@ function AutoProfilesUI:ShowProfileDialog(contentType, profile, profileIndex, pa
     self:ValidateDialog()
     dialog:Show()
     
-    if not dialog.isEditMode then
-        dialog.nameInput:SetFocus()
-    end
+    -- Focus the name in BOTH modes: renaming is now the usual reason to open this in
+    -- edit mode (the row's name is the click target), and the range is driven by the
+    -- slider rather than the keyboard, so nothing competes for focus.
+    dialog.nameInput:SetFocus()
 end
 
 function AutoProfilesUI:SuggestRange(contentType, existingProfiles)
@@ -1110,19 +1151,23 @@ function AutoProfilesUI:ValidateDialog()
     local minVal = dialog.currentMin or 1
     local maxVal = dialog.currentMax or 40
     
-    -- Validate name (only for new profiles)
-    if not dialog.isEditMode then
-        if name == "" then
-            isValid = false
-            errorMsg = L["Enter a profile name"]
-        else
-            local profiles = self:GetProfiles(contentType.key)
-            for _, p in ipairs(profiles) do
-                if p.name:lower() == name:lower() then
-                    isValid = false
-                    errorMsg = L["A profile with this name already exists"]
-                    break
-                end
+    -- Validate the name. ⚠ Runs in EDIT mode too now that the field is shown there --
+    -- it was create-only while renaming was impossible, and leaving it that way would
+    -- have let a rename clear the name or collide with another layout, with the failure
+    -- surfacing only after Save.
+    -- ☠ The duplicate scan must SKIP THE LAYOUT BEING EDITED, or a layout would always
+    -- conflict with itself and Save would be dead the moment the dialog opened.
+    if name == "" then
+        isValid = false
+        errorMsg = L["Enter a profile name"]
+    else
+        local profiles = self:GetProfiles(contentType.key)
+        for i, p in ipairs(profiles) do
+            if not (dialog.isEditMode and i == dialog.profileIndex)
+                and p.name and p.name:lower() == name:lower() then
+                isValid = false
+                errorMsg = L["A profile with this name already exists"]
+                break
             end
         end
     end
@@ -1171,7 +1216,15 @@ function AutoProfilesUI:SubmitDialog()
     
     local success, err
     if dialog.isEditMode then
-        success, err = self:UpdateProfileRange(contentType.key, dialog.profileIndex, minVal, maxVal)
+        -- ⚠ RENAME FIRST, RANGE SECOND, AND BAIL IF THE RENAME FAILS. UpdateProfileRange
+        -- re-sorts the list by range, which invalidates profileIndex -- renaming after it
+        -- could land on a different layout. Failing closed also keeps the dialog honest:
+        -- a rejected name (duplicate/empty) leaves BOTH values untouched rather than
+        -- silently applying half the edit.
+        success, err = self:RenameProfile(contentType.key, dialog.profileIndex, name)
+        if success then
+            success, err = self:UpdateProfileRange(contentType.key, dialog.profileIndex, minVal, maxVal)
+        end
     else
         success, err = self:CreateProfile(contentType.key, name, minVal, maxVal)
     end
