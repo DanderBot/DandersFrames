@@ -1868,7 +1868,12 @@ function DF:CreateRaidSeparatedHeaders()
         header:SetAttribute("showParty", false)
         header:SetAttribute("showRaid", true)
         header:SetAttribute("showSolo", false)
-        header:SetAttribute("groupFilter", tostring(group))  -- Only this group!
+        -- Routed through SetHeaderAttribute so the cache KNOWS this header starts
+        -- with a groupFilter. ApplyRaidGroupSorting's nameList branch clears it with
+        -- nil, and a nil write against an empty cache entry compares equal and is
+        -- skipped -- the group would keep filtering by index and nameList sorting
+        -- would never take effect on a fresh login.
+        SetHeaderAttribute(header, "groupFilter", tostring(group))  -- Only this group!
         
         -- Template
         header:SetAttribute("template", "DandersUnitButtonTemplate")
@@ -3891,16 +3896,24 @@ function DF:ApplyRaidGroupSorting()
                 -- DEFENSE IN DEPTH: Don't just hide — strip all attributes so the
                 -- header can never claim or display units even if something shows it.
                 -- An empty nameList with NAMELIST sort means zero children matched.
-                header:SetAttribute("showRaid", false)
-                header:SetAttribute("showParty", false)
-                header:SetAttribute("showPlayer", false)
-                header:SetAttribute("nameList", "")
-                header:SetAttribute("sortMethod", "NAMELIST")
-                header:SetAttribute("groupFilter", nil)
-                header:SetAttribute("groupBy", nil)
-                header:SetAttribute("groupingOrder", nil)
-                header:SetAttribute("roleFilter", nil)
-                header:SetAttribute("strictFiltering", nil)
+                --
+                -- Routed through SetHeaderAttribute: every raw SetAttribute on a
+                -- visible header fires a full SecureGroupHeader_Update
+                -- (re-sort/re-assign/re-anchor of all children) even when the value
+                -- is unchanged, and this loop runs on every roster tick. Mode
+                -- switches stay safe because every raw writer to these headers
+                -- clears the cache (see ClearHeaderAttributeCache) so the restoring
+                -- write is never skipped.
+                SetHeaderAttribute(header, "showRaid", false)
+                SetHeaderAttribute(header, "showParty", false)
+                SetHeaderAttribute(header, "showPlayer", false)
+                SetHeaderAttribute(header, "nameList", "")
+                SetHeaderAttribute(header, "sortMethod", "NAMELIST")
+                SetHeaderAttribute(header, "groupFilter", nil)
+                SetHeaderAttribute(header, "groupBy", nil)
+                SetHeaderAttribute(header, "groupingOrder", nil)
+                SetHeaderAttribute(header, "roleFilter", nil)
+                SetHeaderAttribute(header, "strictFiltering", nil)
 
                 if header:IsShown() then header:Hide() end
                 if DF.raidPositionHandler then
@@ -3914,9 +3927,9 @@ function DF:ApplyRaidGroupSorting()
                 DF:Debug("ROSTER", "  Group %d: hidden (user setting, attrs cleared)", i)
             else
                 -- Visible group: set up sorting attributes normally
-                header:SetAttribute("showPlayer", true)
-                header:SetAttribute("showRaid", true)
-                header:SetAttribute("showParty", false)
+                SetHeaderAttribute(header, "showPlayer", true)
+                SetHeaderAttribute(header, "showRaid", true)
+                SetHeaderAttribute(header, "showParty", false)
 
                 -- NOTE: Positioning attributes (point, yOffset, sortDir, ClearAllPoints/SetPoint)
                 -- are now handled by the secure position handler via UpdateRaidPositionAttributes
@@ -3933,13 +3946,13 @@ function DF:ApplyRaidGroupSorting()
 
                     -- Sorting disabled - clear ALL sorting attributes with nil
                     -- CRITICAL: Must use nil, not empty string, for SecureGroupHeaderTemplate
-                    header:SetAttribute("nameList", nil)
-                    header:SetAttribute("groupBy", nil)
-                    header:SetAttribute("groupingOrder", nil)
-                    header:SetAttribute("roleFilter", nil)
-                    header:SetAttribute("strictFiltering", nil)
-                    header:SetAttribute("groupFilter", tostring(i))  -- Keep groupFilter to show correct group
-                    header:SetAttribute("sortMethod", "INDEX")
+                    SetHeaderAttribute(header, "nameList", nil)
+                    SetHeaderAttribute(header, "groupBy", nil)
+                    SetHeaderAttribute(header, "groupingOrder", nil)
+                    SetHeaderAttribute(header, "roleFilter", nil)
+                    SetHeaderAttribute(header, "strictFiltering", nil)
+                    SetHeaderAttribute(header, "groupFilter", tostring(i))  -- Keep groupFilter to show correct group
+                    SetHeaderAttribute(header, "sortMethod", "INDEX")
 
                     headerDebug("  Group", i, ": sorting DISABLED, using INDEX")
                 else
@@ -3958,17 +3971,15 @@ function DF:ApplyRaidGroupSorting()
                         local nameList = DF:BuildRaidGroupNameList(i, groupSelfPosition)
                         sortKey = "NL:" .. (nameList or "")
 
-                        -- Clear native sorting attributes - use direct SetAttribute to bypass cache
-                        -- This ensures attributes are always set fresh when switching modes
-                        header:SetAttribute("groupBy", nil)
-                        header:SetAttribute("groupingOrder", nil)
-                        header:SetAttribute("groupFilter", nil)  -- nameList acts as the filter
-                        header:SetAttribute("roleFilter", nil)
-                        header:SetAttribute("strictFiltering", nil)
+                        -- Clear native sorting attributes
+                        SetHeaderAttribute(header, "groupBy", nil)
+                        SetHeaderAttribute(header, "groupingOrder", nil)
+                        SetHeaderAttribute(header, "groupFilter", nil)  -- nameList acts as the filter
+                        SetHeaderAttribute(header, "roleFilter", nil)
+                        SetHeaderAttribute(header, "strictFiltering", nil)
 
-                        -- Set nameList and sortMethod directly (bypass cache)
-                        header:SetAttribute("nameList", nameList)
-                        header:SetAttribute("sortMethod", "NAMELIST")
+                        SetHeaderAttribute(header, "nameList", nameList)
+                        SetHeaderAttribute(header, "sortMethod", "NAMELIST")
 
                         if DF:DebugActive("HEADERS") then
                             local tag = isPlayerGroup and "(player)" or ""
@@ -3978,12 +3989,11 @@ function DF:ApplyRaidGroupSorting()
                         sortKey = "ROLE:" .. i .. ":" .. roleOrderString
 
                         -- Use native sorting with groupFilter (simple role sorting only)
-                        -- Use direct SetAttribute to bypass cache
-                        header:SetAttribute("nameList", nil)
-                        header:SetAttribute("groupFilter", tostring(i))
-                        header:SetAttribute("groupingOrder", roleOrderString)
-                        header:SetAttribute("groupBy", "ASSIGNEDROLE")
-                        header:SetAttribute("sortMethod", "NAME")
+                        SetHeaderAttribute(header, "nameList", nil)
+                        SetHeaderAttribute(header, "groupFilter", tostring(i))
+                        SetHeaderAttribute(header, "groupingOrder", roleOrderString)
+                        SetHeaderAttribute(header, "groupBy", "ASSIGNEDROLE")
+                        SetHeaderAttribute(header, "sortMethod", "NAME")
 
                         headerDebug("  Group", i, ": native role sorting, groupFilter=", i)
                     end
@@ -5222,6 +5232,10 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
                         header:SetAttribute("nameList", "")
                         header:SetAttribute("sortMethod", "NAMELIST")
                         header:SetAttribute("groupFilter", nil)
+                        -- Written raw, so drop SetHeaderAttribute's cache: it still
+                        -- describes what ApplyRaidGroupSorting last set, and would
+                        -- skip the writes that bring the group back.
+                        ClearHeaderAttributeCache(header)
 
                         header:Hide()
                         DF:SetHeaderChildrenEventsEnabled(header, false)
@@ -5250,6 +5264,10 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
                     header:SetAttribute("nameList", "")
                     header:SetAttribute("sortMethod", "NAMELIST")
                     header:SetAttribute("groupFilter", nil)
+                    -- Written raw, so drop SetHeaderAttribute's cache: it still
+                    -- describes what ApplyRaidGroupSorting last set, and would skip
+                    -- the writes that restore the grouped layout on the way back.
+                    ClearHeaderAttributeCache(header)
                     header:Hide()
                     DF:SetHeaderChildrenEventsEnabled(header, false)
                 end
@@ -6096,7 +6114,10 @@ function DF:SetRaidSorting(sortMethod, groupBy, groupingOrder)
                 if sortMethod then
                     header:SetAttribute("sortMethod", sortMethod)
                 end
-                
+                -- Written raw (this function predates SetHeaderAttribute), so drop
+                -- the cache -- same reason as DF:SetPartySorting above.
+                ClearHeaderAttributeCache(header)
+
                 -- Force relayout
                 for j = 1, 5 do
                     local child = header:GetAttribute("child" .. j)
