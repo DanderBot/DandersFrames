@@ -2720,6 +2720,15 @@ function DF:DriveDispelOverlayFactory(frame, db)
         h:ApplyTuning({ filter = dispelFilterRecords(slots, db, frame) })
         -- Fall through: the unit upkeep and style pass below still apply.
     elseif not h or frame.dispelFactorySig ~= sig then
+        -- ☠ THE OTHER HALF OF THE TUNE LINE ABOVE, AND THE ONE A TALENT CHANGE TAKES.
+        -- Adding or removing the poison gap slot changes the slot KEY SET, so it is
+        -- structural and lands here rather than in the tune branch — which is why the
+        -- first cut of this logging showed nothing at all while the totem was being
+        -- talented on and off. A dump that is silent on the transition you are testing is
+        -- worse than no dump: it reads as "nothing happened".
+        DF:Debug("DISPEL", "overlay: %s unit=%s self=%s  %s -> %s",
+            h and "REBUILD" or "BUILD", tostring(frame.unit), tostring(isSelf),
+            tostring(frame.dispelFactorySig), tostring(sig))
         if h then h:Destroy() end
         local filterRecords = dispelFilterRecords(slots, db, frame)
         h = DF.AuraContainer:Create(frame, {
