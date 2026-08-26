@@ -2687,6 +2687,11 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- (or stopped being) the player would keep the wrong slot set until some unrelated
     -- rebuild happened by. Costs nothing for anyone who is not a dwarf: RacialGapPossible
     -- short-circuits before the UnitIsUnit call, and this is the per-UNIT_AURA path.
+    -- ⚠ NOT "is this the player's frame". It is "does the RACIAL gap apply here" — that AND
+    -- being a dwarf — which is why it logs as racialSelf. The first cut printed it as
+    -- `self`, and a line reading `unit=player self=false` looks like the unit test is
+    -- broken rather than a non-dwarf short-circuiting before it ever runs (field log,
+    -- 2026-08-26 16:56). A diagnostic that reads as a fault is worse than no diagnostic.
     local isSelf = RacialGapPossible() and UnitIsUnit(frame.unit, "player") and true or false
     if h and frame.dfDispelFactoryVersion == ver and frame.dfDispelStyledGen == (h._gen or 0)
         and frame.dfDispelSelf == isSelf then
@@ -2713,7 +2718,7 @@ function DF:DriveDispelOverlayFactory(frame, db)
         -- while key set and filter strings do not, so before that fix NEITHER sig moved and
         -- this branch was never reached. Seeing a TUNE here on that transition IS the fix
         -- working; seeing none means the plan and the signature have drifted apart again.
-        DF:Debug("DISPEL", "overlay: TUNE unit=%s self=%s  %s -> %s",
+        DF:Debug("DISPEL", "overlay: TUNE unit=%s racialSelf=%s  %s -> %s",
             tostring(frame.unit), tostring(isSelf),
             tostring(frame.dispelFactoryTuneSig), tostring(tuneSig))
         frame.dispelFactoryTuneSig = tuneSig
@@ -2726,7 +2731,7 @@ function DF:DriveDispelOverlayFactory(frame, db)
         -- first cut of this logging showed nothing at all while the totem was being
         -- talented on and off. A dump that is silent on the transition you are testing is
         -- worse than no dump: it reads as "nothing happened".
-        DF:Debug("DISPEL", "overlay: %s unit=%s self=%s  %s -> %s",
+        DF:Debug("DISPEL", "overlay: %s unit=%s racialSelf=%s  %s -> %s",
             h and "REBUILD" or "BUILD", tostring(frame.unit), tostring(isSelf),
             tostring(frame.dispelFactorySig), tostring(sig))
         if h then h:Destroy() end
