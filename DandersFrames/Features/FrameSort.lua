@@ -191,6 +191,12 @@ local function SortGroupedRaidFrames(units)
                 header:SetAttribute("groupBy", nil)
                 header:SetAttribute("groupingOrder", nil)
                 header:SetAttribute("groupFilter", nil)
+                -- Nil the two remaining attributes DF's own raid sorting
+                -- nil-clears. The cache drop below means a later nil clear
+                -- compares equal to an empty cache entry and is skipped, so
+                -- anything left live here would survive the hand-back.
+                header:SetAttribute("roleFilter", nil)
+                header:SetAttribute("strictFiltering", nil)
                 -- Written raw, so drop SetHeaderAttribute's cache: it still
                 -- describes whatever DF's own sorting last set, and would
                 -- skip the write that restores it. (Same pattern as the
