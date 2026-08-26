@@ -653,8 +653,21 @@ end
 
 -- Debug flag for slider updates (enable the GUI category in the debug console)
 
--- Track active slider dragging state
-DF.sliderDragging = false
+-- Track active slider dragging state.
+--
+-- ⚠ REFCOUNTED, not a boolean. More than one surface can hold a drag open at
+-- once -- the colour picker's bars announce themselves through the same two
+-- hooks now, and a picker opened from a settings page can be dragged while some
+-- other widget is mid-gesture. With a plain boolean, whichever one released
+-- FIRST cleared the flag for both, and every "am I dragging?" reader below went
+-- false while a bar was still being held.
+--
+-- `DF.sliderDragging` stays a DERIVED BOOLEAN and is what everything reads
+-- (Core.lua's health-colour gate, GUI.lua's isDragging hook, TestMode's throttle
+-- and its frame-count slider). Nothing outside this section should read the
+-- count.
+DF.sliderDragCount = 0          -- how many surfaces are holding a drag open
+DF.sliderDragging = false       -- derived: sliderDragCount > 0
 DF.sliderLightweightFunc = nil  -- The lightweight update function to call during drag
 DF.sliderLightweightName = nil  -- Name of the lightweight function for debug
 DF.sliderUpdateCallCount = 0    -- Call counter for debugging
@@ -668,12 +681,20 @@ local lastSizeUpdate = 0
 -- funcName: optional name for debug output
 -- usePreviewMode: if true, hide frame elements for better performance
 function DF:OnSliderDragStart(lightweightFunc, funcName, usePreviewMode)
+    DF.sliderDragCount = (DF.sliderDragCount or 0) + 1
     DF.sliderDragging = true
+
+    -- ONE lightweight slot, last writer wins. Two overlapping drags cannot both
+    -- be previewed through a single slot, and the second one is the one the
+    -- user is actually moving. A drag that supplies no lightweight (the colour
+    -- picker's bars) therefore CLEARS the slot -- which is correct: the outgoing
+    -- function was for a bar nobody is holding any more.
     DF.sliderLightweightFunc = lightweightFunc
     DF.sliderLightweightName = funcName or "unknown"
     DF.sliderUpdateCallCount = 0  -- Reset counter
-    
-    DF:Debug("GUI", "Slider drag START - %s%s",
+
+    DF:Debug("GUI", "Slider drag START (%d held) - %s%s",
+        DF.sliderDragCount,
         lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
             or "no lightweight function (will skip until release)",
         usePreviewMode and " (PREVIEW MODE)" or "")
@@ -681,16 +702,37 @@ end
 
 -- Called when a slider stops being dragged (mouse up)
 function DF:OnSliderDragStop()
-    DF:Debug("GUI", "Slider drag STOP - %s lightweight calls, now FULL UpdateAll()",
-        tostring(DF.sliderUpdateCallCount))
-    
-    DF.sliderDragging = false
+    local count = (DF.sliderDragCount or 0) - 1
+    if count < 0 then
+        -- A stop with no matching start. Floored rather than allowed to go
+        -- negative, or the next real drag would have to climb back to 1 before
+        -- sliderDragging read true again.
+        DF:DebugWarn("GUI", "Slider drag STOP with no drag held - refcount underflow")
+        count = 0
+    end
+    DF.sliderDragCount = count
+    DF.sliderDragging = count > 0
+
+    DF:Debug("GUI", "Slider drag STOP (%d still held) - %s lightweight calls",
+        count, tostring(DF.sliderUpdateCallCount))
+
+    -- Still someone holding a bar: keep the lightweight slot and do NOT run the
+    -- test-mode catch-up below, which is the "the gesture is over" pass.
+    if count > 0 then return end
+
     DF.sliderLightweightFunc = nil
     DF.sliderLightweightName = nil
-    
-    -- Perform full update now that dragging has stopped
+
+    -- ⚠ RAID TEST MODE ONLY. The generic full sweep is no longer requested from
+    -- here: the widget kit's release path calls the `refreshNow` hook, which
+    -- asks for exactly the same "all" and coalesces with whatever the setting's
+    -- own callback scheduled. The old `else DF:UpdateAll()` arm was therefore a
+    -- duplicate request and is gone.
+    --
+    -- This branch is NOT a duplicate and must stay: "all" does not cover
+    -- UpdateAllRaidPetFrames, so removing it would leave the raid test preview's
+    -- pet frames stale for the rest of the drag.
     local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-    
     if isRaidMode and DF.raidTestMode then
         if DF.UpdateRaidTestFrames then
             DF:UpdateRaidTestFrames()
@@ -698,34 +740,24 @@ function DF:OnSliderDragStop()
         if DF.UpdateAllRaidPetFrames then
             DF:UpdateAllRaidPetFrames()
         end
-    else
-        DF:UpdateAll()
-        -- UpdateAll already calls UpdateAllPetFrames
     end
 end
 
--- Called during slider value changes
--- If dragging with a lightweight function, call it directly (throttled)
--- If dragging without lightweight function, skip entirely until release
--- If not dragging, call UpdateAll directly (no throttle)
+-- ⚠ DEPRECATED -- A PLAIN ALIAS FOR DF:UpdateAll(), and deleted next minor.
 --
--- ⚠ DEPRECATED. The throttle it is named for is now the apply scheduler's job:
--- DF:UpdateAll() below is an arm-stub, so repeat calls in one rendered frame
--- coalesce on their own (Core\ApplyScheduler.lua). The drag branch survives only
--- because the current widget kit still routes per-tick refresh through here and
--- relies on the lightweight-function swap. T2/P2 reduces this to a plain alias
--- for DF:UpdateAll, and it is deleted next minor.
+-- The throttle it is named for is the apply scheduler's job now: DF:UpdateAll()
+-- is an arm-stub, so repeat calls inside one rendered frame coalesce on their
+-- own (Core\ApplyScheduler.lua). The drag branch that used to live here -- swap
+-- in the slider's lightweight function, or skip entirely -- is gone: the widget
+-- kit no longer routes per-tick refresh through the host during a drag. It
+-- pumps its own preview once per rendered frame and commits once on release,
+-- so there is nothing left for this to decide.
+--
+-- Callers reaching this through the GUI `refresh` hook during someone ELSE's
+-- drag now request a full "all" per call instead of a lightweight one. That is
+-- bounded, not unbounded: the sink collapses every request in a frame into one
+-- pass. Point new code at DF:UpdateAll() directly.
 function DF:ThrottledUpdateAll()
-    if DF.sliderDragging then
-        if DF.sliderLightweightFunc then
-            -- During drag with lightweight function, call it (has its own throttle)
-            DF.sliderLightweightFunc()
-        end
-        -- If no lightweight func, just skip until release
-        return
-    end
-    
-    -- Not dragging - just call UpdateAll directly
     DF:UpdateAll()
 end
 

@@ -156,7 +156,17 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
         if AP and AP.RefreshTabOverrideStars then AP:RefreshTabOverrideStars() end
     end,
 
-    -- ---- live refresh + slider drag -----------------------------
+    -- ---- live refresh + drag bookkeeping ------------------------
+    -- BOTH refresh hooks land on the same coalescing sink now, one frame apart
+    -- from nothing: ThrottledUpdateAll is a deprecated alias for UpdateAll, and
+    -- UpdateAll is an arm-stub (Core\ApplyScheduler.lua), so however many times
+    -- a page fires either of these inside one rendered frame, one pass runs.
+    --
+    -- The drag pair is REFCOUNTED host-side (Core.lua): the widget kit is not the
+    -- only surface that holds a drag open -- the colour picker's bars do too --
+    -- and every start must be matched by exactly one stop. onDragStop no longer
+    -- performs the general full update; the kit's release path asks for that
+    -- through refreshNow.
     refresh    = function() DF:ThrottledUpdateAll() end,
     refreshNow = function() DF:UpdateAll() end,
     onDragStart = function(lightFn, name, previewMode) DF:OnSliderDragStart(lightFn, name, previewMode) end,
