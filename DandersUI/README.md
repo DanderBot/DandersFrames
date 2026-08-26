@@ -105,6 +105,7 @@ The library has no SavedVariables and depends on nothing but LibStub.
 | `onIndicatorsRefreshed` | `()` | no-op |
 | `onPopupOpen` | `()` | no-op |
 | `pickerStore` | `() -> store` with `saved` / `recent` / `square` | colour picker remembers nothing past a reload |
+| `pickerTitle` | string, or `() -> string` | the colour picker carries no title text |
 | `debug` | `(cat) -> printer or nil` | silent |
 | `onSectionToggled` | `(key, expanded)` | no-op |
 | `scrollToSection` | `(page, section) -> widget` | link-to-setting controls don't render |
@@ -149,6 +150,7 @@ tooltip to their label, and read the spec off the returned widget. Set
 | `UI:StyleButton(btn, opts)`, `UI:StyleCheckButton(cb, opts)`, `UI:StyleEditBox(eb, opts)` | Apply the house look to a frame you built yourself |
 | `UI:ShowTooltip(owner, { title, lines, tone, anchor })`, `UI:HideTooltip()`, `UI:AttachTooltip(widget, label, labelRegion)` | The house tooltip. Never use raw `GameTooltip` for your own tooltips |
 | `UI:ShowPopupAlert(config)`, `UI:ShowPopupInput(config)`, `UI:IsPopupShown()` | One shared modal dialog. A second call while one is open takes the frame over |
+| `UI:OpenColorPicker(initialColor, hasAlpha, onAccept, onCancel, onChange, defaultColor)`, `UI:GetColorPickerFrame()` | The shared colour picker (options manifest). One frame for the whole pack, like the popup: a second open takes it over. Colours are `{r,g,b,a}` in 0-1. Palettes and the square/wheel preference persist through `pickerStore`, the title comes from `pickerTitle`, and `GetColorPickerFrame` is a handle for a consumer that has to react to the picker opening or closing |
 | `UI:SetAccent(r, g, b)`, `UI:GetAccent()`, `UI:RegisterAccentListener(fn)` | Per-host accent. The default is the party purple-blue |
 | `UI:ApplySettingsFont()`, `UI:SetSettingsFont(fs, size, outline)`, `UI:RefreshSettingsFont()` | Drive the `DFFont*` objects from your font hooks |
 | `UI:RefreshAllOverrideIndicators()` | A method, not a bare function. The widget registry it sweeps is pack-wide, not per host; `onIndicatorsRefreshed` fires on whichever host you call it on |

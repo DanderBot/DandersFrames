@@ -196,6 +196,14 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- picker has always written.
     pickerStore = function() return pickerStore end,
 
+    -- The colour picker's window title. The pack may not name whoever embeds it
+    -- and has no locale key of its own, so it titles the frame from here or
+    -- leaves the title blank. Resolved on the FIRST open (the frame is built
+    -- once), which is why it is a function: L is swapped wholesale by the
+    -- language override, and a plain string captured at host creation would
+    -- freeze the title in whatever locale was live at login.
+    pickerTitle = function() return L["DandersFrames Color Picker"] end,
+
     -- Category debug printer, so pack code logs through /df debug like ours does.
     debug = function(cat) return DF:MakeDebugPrinter(cat) end,
 

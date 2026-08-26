@@ -86,6 +86,10 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   onPopupOpen()                            before a popup takes the singleton frame
 --   pickerStore() -> store                   persistent colour-picker memory: a table with
 --        fields saved (array), recent (array), square (boolean|nil); absent = session-only
+--   pickerTitle                              the colour picker's window title: a STRING, or a
+--        function returning one (read once, when the picker frame is first built).
+--        Absent = the picker carries no title text -- the library may not name a consumer
+--        and has no locale key of its own to fall back on
 --   debug(cat) -> printer|nil                category debug printer factory; absent = silent
 --   getSettingsDB() -> db                    the settings table a page's hideOn / disableOn /
 --        refreshContent predicates are evaluated against (the consumer decides what "current"
