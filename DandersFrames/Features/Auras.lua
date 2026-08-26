@@ -269,7 +269,12 @@ local DISPEL_SPELLS = {
     },
     PALADIN = {
         { id = 4987,   types = { Magic = true, Poison = true, Disease = true } },-- Cleanse (Holy)
-        { id = 1152,   types = { Poison = true, Disease = true } },              -- Purify
+        -- ☠ 1152 "Purify" WAS HERE AND IS NOT A RETAIL SPELL. LibDispel probes it without a
+        -- retail guard, so it came across when I said the classic branches were dropped —
+        -- they were, except the ones the peer does not label. It showed as
+        -- "(name unavailable)" in the very first paladin dump, which is precisely the check
+        -- the name column exists for. ⚠ Cross-checking a peer is not the same as inheriting
+        -- its era assumptions: verify each ID RESOLVES, not just that someone else uses it.
         { id = 213644, types = { Poison = true, Disease = true } },              -- Cleanse Toxins
     },
     PRIEST = {
