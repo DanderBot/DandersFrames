@@ -260,11 +260,21 @@ do
     check(ui.targetRow.handle:IsEnabled(), "free: primary handle stays enabled")
     check(not ui.backupRow.handle:IsEnabled(), "free: backup handle disabled")
     check(ui.backupRow.picker._enabled == false, "free: backup picker disabled")
-    check(ui.edgeDrop._enabled == false and ui.alignDrop._enabled == false, "free: seat pair disabled")
-    eq(ui.edgeLabel:GetText(), L["Edge"], "free: seat labels default to Edge/Align")
-    eq(ui.alignLabel:GetText(), L["Align"], "free: align label")
+    check(ui.edgeRow.picker._enabled == false and ui.alignRow.picker._enabled == false,
+        "free: seat pair disabled")
+    eq(ui.edgeRow.label:GetText(), L["Edge"], "free: seat labels default to Edge/Align")
+    eq(ui.alignRow.label:GetText(), L["Align"], "free: align label")
     eq(ui.targetRow.label:GetText(), L["Target"], "free: target row is labelled")
     eq(ui.backupRow.label:GetText(), L["Backup"], "free: backup row is labelled")
+    -- The seat rows are picker rows like the other two, minus the handle: their
+    -- captions have to clip for the same reason, and link-drag has no target to
+    -- reach for from a row that only says how the element sits on one.
+    eq(ui.edgeRow.picker.opener.Text._wordWrap, false, "free: the edge caption clips, not wraps")
+    eq(ui.alignRow.picker.opener.Text._wordWrap, false, "free: the align caption clips, not wraps")
+    check(ui.edgeRow.hasHandle == false and ui.alignRow.hasHandle == false,
+        "free: the seat rows carry no link handle")
+    check(ui.targetRow.hasHandle and ui.backupRow.hasHandle,
+        "free: ...and the rows that name a target still do")
     eq(ui.anchorBox.title:GetText(), L["Anchor"], "the block is a titled sub-section")
     -- An inline dropdown's factory label is hidden, so the kit's usual
     -- label-hover tooltip has nothing to sit on: the OPENER carries one.
@@ -275,10 +285,26 @@ do
     eq(ui.backupRow.handle._opts.tooltip.lines[1], L["Drag onto another mover to set the backup anchor"],
         "the backup handle says what dragging it does")
 
-    -- Both label columns are measured to the wider of their pair, so the two
-    -- pickers start on the same column.
-    eq(ui.targetRow.label:GetWidth(), ui.backupRow.label:GetWidth(), "Target/Backup share a label column")
-    eq(ui.edgeLabel:GetWidth(), ui.alignLabel:GetWidth(), "Edge/Align share a label column")
+    -- ONE label column across the whole block, measured to the widest of the
+    -- four labels, so all four pickers start on the same column -- and the
+    -- pickers end on it too, because the seat rows give up the handle gutter
+    -- they have no handle for.
+    local col = ui.targetRow.label:GetWidth()
+    for _, row in ipairs({ ui.backupRow, ui.edgeRow, ui.alignRow }) do
+        eq(row.label:GetWidth(), col, "all four rows share one label column")
+    end
+    local function rightEdge(row)
+        for _, p in ipairs(row.picker._points) do
+            if p[1] == "RIGHT" then return p[4] end
+        end
+    end
+    eq(rightEdge(ui.edgeRow), rightEdge(ui.targetRow), "the seat rows keep the handle gutter")
+    eq(rightEdge(ui.alignRow), rightEdge(ui.backupRow), "...both of them")
+
+    -- 290 wide. Two fixed columns (the labels, the handle gutter) come off
+    -- every row before the dropdown gets any, so the panel width is what
+    -- decides whether a value like BOTTOMLEFT renders or clips.
+    eq(po.frame:GetWidth(), 290, "the panel is 290 wide")
 end
 
 -- ============================================================
@@ -323,38 +349,45 @@ do
         "anchored: no inline glyph in the caption")
     check(ui.backupRow.picker._enabled, "anchored: backup picker enabled")
     check(ui.backupRow.handle:IsEnabled(), "anchored: backup handle enabled")
-    check(ui.edgeDrop._enabled and ui.alignDrop._enabled, "anchored: seat pair enabled")
-    eq(ui.edgeDrop._opts.get(), "bottom", "edge reads the record")
-    eq(ui.alignDrop._opts.get(), "start", "align reads the record")
-    ui.edgeDrop._opts.set("top")
+    check(ui.edgeRow.picker._enabled and ui.alignRow.picker._enabled, "anchored: seat pair enabled")
+    eq(ui.edgeRow.picker._opts.get(), "bottom", "edge reads the record")
+    eq(ui.alignRow.picker._opts.get(), "start", "align reads the record")
+    ui.edgeRow.picker._opts.set("top")
     local last = calls[#calls]
     check(last[1] == "spec" and last[2] == "P:child" and last[3].edge == "top",
         "outside mode writes `edge`, for the panel's own element")
 end
 
 -- ============================================================
--- 4. POINT MODE: the same pair of dropdowns, relabelled, with the 9 points.
+-- 4. POINT MODE: the same two rows, relabelled, with the 9 points.
 -- ============================================================
 do
     childPos.anchor = { target = "P:host", mode = "point", point = "TOPLEFT",
                         relPoint = "BOTTOMLEFT", offsetX = 0, offsetY = 0 }
     local po = refresh("P:child")
     local ui = po.ui
-    eq(ui.edgeLabel:GetText(), L["Point"], "point mode: left label is Point")
-    eq(ui.alignLabel:GetText(), L["Rel point"], "point mode: right label is Rel point")
-    eq(ui.edgeDrop._options.TOPLEFT, "TOPLEFT", "point mode: the 9 points are the option set")
-    eq(ui.edgeDrop._opts.get(), "TOPLEFT", "point reads the record")
-    eq(ui.alignDrop._opts.get(), "BOTTOMLEFT", "relPoint reads the record")
-    ui.alignDrop._opts.set("TOP")
+    eq(ui.edgeRow.label:GetText(), L["Point"], "point mode: the first seat row is Point")
+    eq(ui.alignRow.label:GetText(), L["Rel point"], "point mode: the second is Rel point")
+    eq(ui.edgeRow.picker._options.TOPLEFT, "TOPLEFT", "point mode: the 9 points are the option set")
+    eq(ui.edgeRow.picker._opts.get(), "TOPLEFT", "point reads the record")
+    eq(ui.alignRow.picker._opts.get(), "BOTTOMLEFT", "relPoint reads the record")
+    ui.alignRow.picker._opts.set("TOP")
     local last = calls[#calls]
     check(last[1] == "spec" and last[3].relPoint == "TOP" and last[3].align == nil,
         "point mode writes `relPoint`, not `align`")
     eq(po.content:GetHeight(), freeH, "point mode does not resize the panel either")
+    -- "Rel point" is the widest label the block ever carries, and the column is
+    -- shared, so the mode swap moves where every picker starts -- in step, and
+    -- without the block or the panel growing for it.
+    eq(ui.edgeRow.label:GetWidth(), ui.targetRow.label:GetWidth(),
+        "point mode: the wider seat label widened the shared column")
+    eq(ui.backupRow.label:GetWidth(), ui.alignRow.label:GetWidth(),
+        "point mode: ...for all four rows")
     -- ...and back, so the swap is not one-way.
     childPos.anchor = { target = "P:host", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
     po = refresh("P:child")
-    eq(po.ui.edgeLabel:GetText(), L["Edge"], "back to outside mode: labels swap back")
-    eq(po.ui.edgeDrop._options.right, L["Right"], "back to outside mode: edges are the option set")
+    eq(po.ui.edgeRow.label:GetText(), L["Edge"], "back to outside mode: labels swap back")
+    eq(po.ui.edgeRow.picker._options.right, L["Right"], "back to outside mode: edges are the option set")
 end
 
 -- ============================================================
@@ -649,7 +682,7 @@ do
     check(not po:IsPinned(), "autopin off: taking focus in a coordinate box does not pin")
     po.ui.targetRow.picker:Open()
     check(not po:IsPinned(), "autopin off: opening the target picker does not pin")
-    po.ui.edgeDrop:Open()
+    po.ui.edgeRow.picker:Open()
     check(not po:IsPinned(), "autopin off: opening the seat pair does not pin")
     po.ui.targetRow.handle:GetScript("OnMouseDown")(po.ui.targetRow.handle, "LeftButton")
     check(not po:IsPinned(), "autopin off: taking the link handle does not pin")
@@ -681,7 +714,7 @@ do
     end
     triggered("an edit box taking focus", function(p) p.ui.xBox:GetScript("OnEditFocusGained")(p.ui.xBox) end)
     triggered("opening the target picker", function(p) p.ui.targetRow.picker:Open() end)
-    triggered("opening the seat pair", function(p) p.ui.edgeDrop:Open() end)
+    triggered("opening the seat pair", function(p) p.ui.edgeRow.picker:Open() end)
     triggered("taking the link handle", function(p)
         p.ui.targetRow.handle:GetScript("OnMouseDown")(p.ui.targetRow.handle, "LeftButton")
     end)
@@ -786,6 +819,20 @@ do
     check(po.side == "left" or po.side == "right" or po.side == "above" or po.side == "below",
         "panelSide: auto still lands on a real side")
     check(po.forcedSide ~= nil, "panelSide: auto is forced too -- the shell must not re-pick")
+
+    -- ☠ The width handed to the solver and the width the frame MEASURES are two
+    -- separately-kept numbers -- one a constant in Panel.lua, the other whatever
+    -- the shell made of the content width it was passed. Let them drift and the
+    -- least-covering side is computed for a panel that is not the one on screen,
+    -- so it docks over the very slab it was dodging.
+    local realBest, solverW = NS.Solver.BestDockSide, nil
+    NS.Solver.BestDockSide = function(pr, panelW, ...)
+        solverW = panelW
+        return realBest(pr, panelW, ...)
+    end
+    Pn:Refresh()
+    NS.Solver.BestDockSide = realBest
+    eq(solverW, po.frame:GetWidth(), "panelSide: the solver is told the width the panel actually is")
 end
 
 reset()
