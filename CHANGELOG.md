@@ -20,6 +20,7 @@
 * (Targeted Spells) The Targeted List drops a caster's bar the moment it dies — bars no longer linger for a second or two on dead mobs, and a cast with no cast time no longer shows a huge garbage countdown. (by Krathe)
 * (Targeted Spells) Personal targeted icons no longer shuffle sideways as casts start and expire: new casts join at the end, showing icons hold their place, and the row re-centres as icons come and go. Also fixes the Max Icons cap being able to hide the one cast that was actually aimed at you. (by Krathe)
 * (Tooltips) Fix a suppressed frame tooltip re-appearing a moment later, fix pet frame tooltips ignoring the tooltip settings entirely, and fix the tooltip flashing up when a modifier key is pressed while the mouse is already on a frame. (by Krathe)
+* (Missing Buffs) Fix missing buff icons going stale and never coming back — most often after a raider walked out of range, and after a wipe. The icons stayed hidden until you re-buffed that player, a fight started, or you reloaded. (by Krathe)
 
 ### Changes
 - The settings-panel toolkit is now a shared library built into each Danders addon, so they all share one look and get fixes at the same time.

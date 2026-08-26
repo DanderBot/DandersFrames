@@ -1929,14 +1929,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the global's growth direction through the FLAT map: "(Global: Columns)" beside a
         -- global page reading "Rows". Same value, wrong dialect, and it reads as the addon
         -- being wrong about a setting the user can see for themselves.
-        -- ⚠ THE FIX IS NOT HERE, and this comment used to claim otherwise ("the resolver
-        -- picks the map from the GLOBAL raidUseGroups") -- describing a widget-side
-        -- resolver that no longer exists. The widget still names the value with its own
-        -- map; what changed is that it is HANDED a value already expressed in this
-        -- profile's mode. Both accessors translate growDirection now:
-        -- AutoProfilesUI:GetGlobalValue for the editing pass and GetRuntimeGlobalValue
-        -- for an active layout.
-        -- ⚠ Nothing here changes what is STORED or drawn -- only the sentence describing
+        -- ⚠ 2026-08-26: this used to describe a RESOLVER that "picks the map from the
+        -- GLOBAL raidUseGroups". No such thing ships. That was one of three widget-level
+        -- attempts, all reverted -- two of which silently never fired -- and the sentence
+        -- outlived the code it described. What actually happens: the PROFILE LAYER hands
+        -- back a growDirection already expressed in this profile's mode
+        -- (AutoProfilesUI:GetGlobalValue / GetRuntimeGlobalValue), so by the time a label
+        -- map is applied here there is only one dialect left and no map-picking to do.
+        -- ☠ Do not re-add a widget-side translation: with the source translating, a second
+        -- pass here inverts it straight back.
+        -- ⚠ Nothing in the profile layer changes what is STORED or drawn -- only the
         -- the global. The label flip when you toggle the checkbox is not this bug and is
         -- deliberate: the same value genuinely renders as rows in one mode and columns in
         -- the other, so the word has to change with it (see the convention note above).
