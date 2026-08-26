@@ -288,6 +288,23 @@ panels coexist. The popout's content width is `UI.PopoutContentWidth` (260 — t
 settings-group inner width every factory is already built for, so widgets mount
 unchanged).
 
+**Toggled off gates the pane.** When the row's toggle is off, every widget the
+build mounted into that row's pane greys and stops taking input — `SetEnabled(false)`
+where the widget has one, a dim to the same 0.4 where it does not — so a switched-off
+feature never shows a panel of live controls that do nothing. The popout's own header
+toggle, pin and cross stay enabled: that tick is the way back on. The gate BORROWS the
+enabled state rather than owning it — it records what each widget's own logic last
+asked for and replays exactly that on the way back out, so a control a page's
+`disableOn` had already disabled is not resurrected by switching the feature on. Gating
+that changes *while* the gate is shut has no `SetEnabled` call to record, so opening the
+gate hands the pane back to whoever wired it (a settings group's `RefreshChildStates`,
+else each widget's `refreshContent`) to re-assert itself; that is a no-op on a pane with
+no wiring of its own. This is not `opts.enabled` — the dependent grey is a separate
+mechanism about a feature you cannot act on yet, and a dependent-greyed row whose own
+toggle is on keeps its popout's controls live. A consumer wrapping several widgets in one
+frame should give that wrapper a `SetEnabled` (as the kit's own containers do); the gate
+walks the pane's direct children and cannot reach past a wrapper that answers nothing.
+
 | Opt | Purpose |
 |---|---|
 | `label` | **required** row name (the consumer localises) |
