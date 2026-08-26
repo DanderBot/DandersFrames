@@ -1655,6 +1655,119 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
 end
 
 -- ============================================================
+-- AD ALPHA HOST PROBE  (/df debug adalpha [unit])
+-- ============================================================
+-- ☠ ANSWERS ONE QUESTION: has the aura button's access restriction started DESCENDING
+-- TO ITS CHILDREN?
+--
+-- The whole AD fade design rests on it not doing so. The note above
+-- ForEachAuraDesignerAlphaHost says it outright: the host is a CHILD of the aura button,
+-- the button carries DenyTaintedAccessWhenAurasAreSecret, and DF assumes restrictions do
+-- not descend — "a Blizzard-side implementation detail, not a contract". It even names
+-- the symptom to expect if that assumption breaks: *AD indicators that no longer fade out
+-- of range — not an error storm, and not a dead range pass.* Which is the field report
+-- this probe exists to settle (Krathe, 2026-08-26, with `AD alpha host refused a tainted
+-- write ... plainSetAlphaOK=false` in the log).
+--
+-- ☠☠ IT NEVER CALLS A METHOD ON A HOST TO IDENTIFY IT. The refused object rejects READS
+-- too — `readableName=false` in that log line is GetDebugName being refused — so probing
+-- it for identity is how you replace the fault with a fresh error and learn nothing (the
+-- exact mistake recorded at the warning site). Identity comes from `rawequal` against
+-- frames we already hold, which cannot dispatch into the object, and everything that does
+-- touch a host is pcall'd and writes only the base alpha the walk writes anyway.
+--
+-- Read the output as a PATTERN, not per row: a child refused while its DF-owned ancestor
+-- accepts is the descent, and the cure is to fade the ancestor and let it cascade — which
+-- is what the slot-owner block already does, and what EllesmereUI does throughout.
+function DF:DebugADAlphaHosts(unit)
+    unit = (unit and unit ~= "" and unit) or "player"
+    local o = DF:Out("AD Alpha Hosts", "unit " .. unit)
+
+    local frame
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(f) if not frame and f.unit == unit then frame = f end end)
+    end
+    if not frame then
+        o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
+        return
+    end
+
+    -- Baseline: frames we KNOW are ours. If either of these is refused the client has
+    -- moved the ground under the whole addon and nothing below means what it looks like.
+    local function probe(f)
+        if not f then return "absent" end
+        local okW = pcall(f.SetAlpha, f, f.dfProbeBase or 1.0)
+        local okR = pcall(f.GetDebugName, f)
+        return (okW and "write OK" or "WRITE REFUSED") .. " / " .. (okR and "name OK" or "name refused")
+    end
+
+    o:Section("Baseline (DF-owned)")
+    o:Field("unit frame", probe(frame), "NEUTRAL")
+    o:Field("contentOverlay", probe(frame.contentOverlay), "NEUTRAL")
+    local slotHost = DF.AuraContainer and DF.AuraContainer.GetSlotOwnerAlphaHost
+        and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
+    o:Field("slot-owner anchor", probe(slotHost), "NEUTRAL")
+
+    local store = frame.dfADFactory
+    if not store then
+        o:Line("This frame has no Aura Designer factory store — nothing to probe.", "WARN")
+        return
+    end
+
+    local ver = DF.auraLayoutVersion or 0
+    local total, refused, slotBacked = 0, 0, 0
+    for _, storeKey in ipairs(AD_STORE_KEYS) do
+        local t = store[storeKey]
+        if t then
+            local shown = false
+            for entryKey, entry in pairs(t) do
+                local h = entry and entry.handle
+                local f = (h and h.GetAlphaHost) and h:GetAlphaHost() or nil
+                if f then
+                    if not shown then o:Section(storeKey); shown = true end
+                    total = total + 1
+                    -- Slot-backed hosts sit UNDER a Blizzard aura button; standalone ones
+                    -- are DF frames of our own. That split is the whole diagnosis, and it
+                    -- is read off our handle, never off the host.
+                    local kind = h.button and "slot-backed (child of an aura button)"
+                                           or "standalone (DF-created)"
+                    if h.button then slotBacked = slotBacked + 1 end
+                    local okW = pcall(f.SetAlpha, f, h._dfADBaseAlpha or 1.0)
+                    if not okW then refused = refused + 1 end
+                    local okR = pcall(f.GetDebugName, f)
+                    local latched = (h._dfAlphaHostDeniedVer == ver) and " LATCHED-DENIED" or ""
+                    o:Line(string.format("%s: %s | write %s, name %s | isHandleFrame=%s%s",
+                        tostring(entryKey), kind,
+                        okW and "OK" or "REFUSED", okR and "OK" or "refused",
+                        tostring(rawequal(f, h.frame)), latched),
+                        okW and nil or "BAD")
+                end
+            end
+        end
+    end
+
+    o:Section("Verdict")
+    o:Line(string.format("%d host%s probed, %d slot-backed, %d refused",
+        total, total == 1 and "" or "s", slotBacked, refused))
+    if refused == 0 then
+        o:Line("Every host accepts a plain write — the restriction is NOT descending right "
+            .. "now. A fade stuck on screen is then a TRIGGER problem, not a writability "
+            .. "one: check the range edge, not this.", "GOOD")
+    elseif slotBacked > 0 and refused >= slotBacked then
+        o:Line("Slot-backed hosts are refusing while DF-owned frames above them accept. "
+            .. "That is the access restriction DESCENDING TO CHILDREN — the case the walk's "
+            .. "header warns about, and the fade has to move to the DF-owned ancestor.", "BAD")
+    else
+        o:Line("Mixed result: some hosts refuse and the split does not follow slot-backing. "
+            .. "Capture this alongside combat state — the restriction is aura-secrecy "
+            .. "scoped, so in and out of combat can differ.", "WARN")
+    end
+    o:Line("⚠ Run this BOTH in and out of combat on the same unit: the restriction is tied "
+        .. "to aura secrecy, so an out-of-combat run alone can read clean while the fade is "
+        .. "broken in a fight.", "NEUTRAL")
+end
+
+-- ============================================================
 -- RESTRICTION-LIFT RETRY
 -- Combat end is a writability edge for slot-backed alpha hosts
 -- ============================================================

@@ -7063,6 +7063,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
                     DF.AuraContainer.DebugDumpIdentityGate()
                 end
+            elseif msg == "adalpha" or msg:match("^adalpha%s") then
+                -- ☠ WRITABILITY, not visibility — the question adgate cannot answer.
+                -- An AD indicator that will not fade out of range is usually not a
+                -- gate or a trigger problem: it is the aura button's access
+                -- restriction reaching its CHILDREN, where our alpha hosts live.
+                -- See DF:DebugADAlphaHosts for why it identifies hosts by rawequal
+                -- rather than by asking them anything.
+                local unit = msg:match("^adalpha%s+(%S+)$")
+                if DF.DebugADAlphaHosts then DF:DebugADAlphaHosts(unit) end
             elseif msg == "adgate" then
                 -- The AD half of the same question: idgate sees a placement's handle but
                 -- not its chain, its parent-driven links or its badge — so an indicator
