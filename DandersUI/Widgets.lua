@@ -2720,6 +2720,8 @@ function UI:CreateCheckbox(parent, opts)
     return container
 end
 
+UI.CreateCheckboxNative = UI.CreateCheckbox
+
 -- opts: width, height, get() -> value, set(text), onCommit(text), numeric,
 --       tooltip, maxLetters, placeholder
 -- Returns the styled EditBox itself, with :Refresh().
@@ -2779,6 +2781,8 @@ function UI:CreateEditBox(parent, opts)
     return eb
 end
 
+UI.CreateEditBoxNative = UI.CreateEditBox
+
 -- opts: text, width, height, onClick(btn), style = "primary"|"ghost"|"tab"|"tinted",
 --       tone = "danger"|"success", icon, accent, align, fitText, themeRoot, tooltip
 function UI:CreateButton(parent, opts)
@@ -2813,6 +2817,8 @@ function UI:CreateButton(parent, opts)
     return btn
 end
 
+UI.CreateButtonNative = UI.CreateButton
+
 -- opts: text, size (settings font at that size), color {r,g,b}, font (a font
 --       OBJECT name, which wins over size), width (enables word wrap), justify
 function UI:CreateLabel(parent, opts)
@@ -2826,6 +2832,8 @@ function UI:CreateLabel(parent, opts)
     fs:SetJustifyH(opts.justify or "LEFT")
     return fs
 end
+
+UI.CreateLabelNative = UI.CreateLabel
 
 -- ============================================================
 -- TOOLTIPS AND BANNER TONES  (moved back from the companion)

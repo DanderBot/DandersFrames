@@ -21,7 +21,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$REPO_ROOT/DandersUI"
-HOSTS="DandersFrames DandersMover"
+HOSTS="DandersFrames DandersFrames_Options DandersMover"
 
 if [ ! -d "$SRC" ]; then
     echo "sync-libs: canonical source not found at $SRC" >&2

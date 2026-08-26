@@ -27,6 +27,43 @@ Media paths resolve inside the **embedding** addon
 (`Interface\AddOns\<YourAddon>\Libs\DandersUI\Media\`), so the `Media` folder has
 to travel with the copy.
 
+## Split loading
+
+The pack ships **two** manifests. `DandersUI.xml` is the base half — everything a
+running addon needs. `DandersUI_Options.xml` is the settings-panel half: surfaces
+only a settings window ever builds, so an addon that opens its panel on demand
+should not pay for them at login.
+
+```
+Libs\LibStub\LibStub.lua
+Libs\DandersUI\DandersUI.xml            <- the resident addon
+...
+Libs\DandersUI\DandersUI_Options.xml    <- the load-on-demand companion addon
+```
+
+The two are normally listed by **different addons**: the base half by the resident
+one, the options half by its `LoadOnDemand` companion. Each of them needs its own
+`Libs\DandersUI` copy (junction locally, real copy in CI via `Tools/sync-libs.sh`),
+because a TOC can only reference files inside its own addon folder. Listing both
+manifests in one addon also works and is the simpler case.
+
+`OptionsCore.lua` heads the options manifest and installs the `NS.__DandersUI`
+handshake for the files after it. Because it may load in an addon that never
+loaded `Core.lua`, it resolves the library through **LibStub** rather than the
+handshake, and falls back to `NS.__DandersUI` only for the same-addon case. If the
+base half is missing, or is a different revision, it prints one plain error and
+returns **without** setting the handshake — so every later file's
+`local UI = NS.__DandersUI; if not UI then return end` guard makes it inert
+instead of throwing per file. `UI.MEDIA` is left alone: it points inside whichever
+addon carries the base copy.
+
+☠ **`EXPECTED_MINOR` in `OptionsCore.lua` must track `MINOR` in `Core.lua`.** Any
+commit that bumps `MINOR` bumps `EXPECTED_MINOR` in the same commit. They are
+compared for **equality**, not "at least" — an options half paired with any other
+revision refuses to load, which is the point: LibStub hands the whole session to
+the highest-MINOR base copy, and a mismatched options half would build on
+surfaces that copy may not have.
+
 ## Getting a host
 
 Every consumer takes its own HOST rather than using the library directly, because
@@ -67,6 +104,12 @@ The library has no SavedVariables and depends on nothing but LibStub.
 | `registerSearch` | `(kind, label, key, widget, meta)` | no search index |
 | `onIndicatorsRefreshed` | `()` | no-op |
 | `onPopupOpen` | `()` | no-op |
+| `pickerStore` | `() -> store` with `saved` / `recent` / `square` | colour picker remembers nothing past a reload |
+| `pickerTitle` | string, or `() -> string` | the colour picker carries no title text |
+| `debug` | `(cat) -> printer or nil` | silent |
+| `onSectionToggled` | `(key, expanded)` | no-op |
+| `scrollToSection` | `(page, section) -> widget` | link-to-setting controls don't render |
+| `getSettingsDB` | `() -> table or nil` | settings-group `hideOn` / `disableOn` / `refreshContent` predicates never fire |
 
 `state` is `"none"`, `"runtime"` (overridden by something the user cannot reset here),
 `"overridden"` (differs from the global, resettable) or `"editing"` (matches the global).
@@ -108,6 +151,8 @@ tooltip to their label, and read the spec off the returned widget. Set
 | `UI:StyleButton(btn, opts)`, `UI:StyleCheckButton(cb, opts)`, `UI:StyleEditBox(eb, opts)` | Apply the house look to a frame you built yourself |
 | `UI:ShowTooltip(owner, { title, lines, tone, anchor })`, `UI:HideTooltip()`, `UI:AttachTooltip(widget, label, labelRegion)` | The house tooltip. Never use raw `GameTooltip` for your own tooltips |
 | `UI:ShowPopupAlert(config)`, `UI:ShowPopupInput(config)`, `UI:IsPopupShown()` | One shared modal dialog. A second call while one is open takes the frame over |
+| `UI:CreateSettingsGroup(parent, width, opts)`, `UI:CreateInfoBanner(parent, opts)`, `UI:CreateLink(parent, opts)`, `UI:FlashWidget(widget)`, `UI:LinkToSetting(widget, target)`, `UI:ShowGameTooltip(owner, opts)`, `UI:GroupInnerWidth(group)`, `UI:GetToneColor(tone)`, `UI:ToneHex(tone)`, `UI:CreateDisabledOverlay(frame)` | The page-composition layer (options manifest): collapsible settings groups (`group:AddWidget(widget, height)`), the toned info banner, inline links, link-to-setting jumps and the game-data tooltip. Collapse state persists through the host's `GetCollapsedGroups` method when it has one; section toggles fire `onSectionToggled`; link-to-setting notes render only when `scrollToSection` exists |
+| `UI:OpenColorPicker(initialColor, hasAlpha, onAccept, onCancel, onChange, defaultColor)`, `UI:GetColorPickerFrame()` | The shared colour picker (options manifest). One frame for the whole pack, like the popup: a second open takes it over. Colours are `{r,g,b,a}` in 0-1. Palettes and the square/wheel preference persist through `pickerStore`, the title comes from `pickerTitle`, and `GetColorPickerFrame` is a handle for a consumer that has to react to the picker opening or closing |
 | `UI:SetAccent(r, g, b)`, `UI:GetAccent()`, `UI:RegisterAccentListener(fn)` | Per-host accent. The default is the party purple-blue |
 | `UI:ApplySettingsFont()`, `UI:SetSettingsFont(fs, size, outline)`, `UI:RefreshSettingsFont()` | Drive the `DFFont*` objects from your font hooks |
 | `UI:RefreshAllOverrideIndicators()` | A method, not a bare function. The widget registry it sweeps is pack-wide, not per host; `onIndicatorsRefreshed` fires on whichever host you call it on |

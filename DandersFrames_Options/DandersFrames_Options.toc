@@ -53,6 +53,11 @@ Changelog.lua
 # /dficons dev icon browser. Its slash registers on load; the /df debug
 # dispatcher loads the companion on an unknown word, so first use still works.
 GUI\IconLib.lua
+# The load-on-demand half of the embedded DandersUI lib. This addon needs its
+# OWN Libs\DandersUI copy -- a TOC cannot reference another addon's folder --
+# and this manifest must load before the GUI files below, which call the
+# surfaces it brings in.
+Libs\DandersUI\DandersUI_Options.xml
 # Widget factories the live addon never calls, lifted out of the resident
 # GUI.lua / Widgets.lua. Loads first: the parts below build pages with them.
 GUI\SettingsWidgets.lua

@@ -16,7 +16,10 @@ local addonName, NS = ...
 -- Canonical source lives at <repo>/DandersUI; never edit the copies under
 -- */Libs/.
 -- ============================================================
-local MAJOR, MINOR = "DandersUI-1.0", 6
+-- ☠ Bumping MINOR means bumping EXPECTED_MINOR in OptionsCore.lua in the SAME
+-- commit -- the options manifest compares the two for equality and goes inert on
+-- a mismatch. See the README's split-loading section.
+local MAJOR, MINOR = "DandersUI-1.0", 7
 local UI = LibStub:NewLibrary(MAJOR, MINOR)
 if not UI then return end
 -- The handshake the other four files read. `NS` is the HOST addon's private
@@ -81,6 +84,19 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   registerSearch(kind, label, key, widget, meta)
 --   onIndicatorsRefreshed()                  after a RefreshAllOverrideIndicators sweep
 --   onPopupOpen()                            before a popup takes the singleton frame
+--   pickerStore() -> store                   persistent colour-picker memory: a table with
+--        fields saved (array), recent (array), square (boolean|nil); absent = session-only
+--   pickerTitle                              the colour picker's window title: a STRING, or a
+--        function returning one (read once, when the picker frame is first built).
+--        Absent = the picker carries no title text -- the library may not name a consumer
+--        and has no locale key of its own to fall back on
+--   debug(cat) -> printer|nil                category debug printer factory; absent = silent
+--   getSettingsDB() -> db                    the settings table a page's hideOn / disableOn /
+--        refreshContent predicates are evaluated against (the consumer decides what "current"
+--        means -- e.g. which mode is selected); absent = those predicates never fire
+--   onSectionToggled(key, expanded)          after a collapsible section toggles
+--   scrollToSection(page, section) -> widget jump the settings scroll to a section; absent =
+--        link-to-setting controls don't render
 function UI:NewHost(name, hooks)
     if type(name) ~= "string" or name == "" then
         error("DandersUI: NewHost needs a consumer name", 2)
