@@ -50,6 +50,11 @@ lua.globals().load_ui_file_into = lambda name, tns: run(HERE.parents[1] / "Dande
 # a DF module's namespace IS the addon table, so a test stubs the DF surface it
 # needs (Debug, the _Now bodies) onto a fresh table and hands that in.
 lua.globals().load_df_file_into = lambda name, tns: run(HERE.parents[1] / "DandersFrames" / name, "DandersFrames", tns)
+# ...and the same door for an options-companion file. ⚠ Those files take their
+# host off the GLOBAL (`local DF = DandersFrames`), not off the varargs, so the
+# namespace handed in here is inert -- a test of one stubs `DandersFrames`
+# itself before loading. The arg is kept so every door reads the same.
+lua.globals().load_options_file_into = lambda name, tns: run(HERE.parents[1] / "DandersFrames_Options" / name, "DandersFrames_Options", tns)
 # Source text only, for a compile-only (loadstring) syntax check that must not
 # run the file. Read here rather than in Lua so the path resolves the same way
 # every other load does, whatever the cwd is.
