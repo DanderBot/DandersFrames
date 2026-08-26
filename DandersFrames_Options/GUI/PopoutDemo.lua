@@ -424,7 +424,10 @@ local function buildWindow()
         })
         row:SetWidth(childW)
         row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
-        y = y + (row.preferredHeight or UI.RowHeight.checkbox)
+        -- The row stamps its own slot (preferredHeight + fixedRowHeight); the
+        -- fallback is the same number from the same place, so a retune of the
+        -- row's box model moves this list with it.
+        y = y + (row.preferredHeight or UI.PopoutRow.slot)
         rows[def.name] = row
     end
 

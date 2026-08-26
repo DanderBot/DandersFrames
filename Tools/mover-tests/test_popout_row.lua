@@ -27,6 +27,13 @@ local UI = NS.__DandersUI
 UI.MEDIA = UI.MEDIA or ""
 UI.Colors = UI.Colors or { text = { r = 0.9, g = 0.9, b = 0.9 },
                            textDim = { r = 0.5, g = 0.5, b = 0.5 } }
+-- The plate's neutrals, mirrored from Theme.lua. test_popout.lua's half of the
+-- palette stops at the two text colours, so these are added rather than assumed:
+-- PopoutRow reads all four at FILE SCOPE and a nil would blow up on load.
+UI.Colors.element    = UI.Colors.element    or { r = 0.18, g = 0.18, b = 0.18, a = 1 }
+UI.Colors.border     = UI.Colors.border     or { r = 0.25, g = 0.25, b = 0.25, a = 1 }
+UI.Colors.hover      = UI.Colors.hover      or { r = 0.22, g = 0.22, b = 0.22, a = 1 }
+UI.Colors.background = UI.Colors.background or { r = 0.08, g = 0.08, b = 0.08, a = 0.95 }
 if not UI.GetAccent then
     local A = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
     function UI:GetAccent() return A end
@@ -39,6 +46,35 @@ end
 if not UI.ApplyPixelBorder then
     function UI:ApplyPixelBorder(frame, color, weight)
         frame._pxColor, frame._pxWeight = color, weight
+        return frame
+    end
+end
+-- The element backdrop, which the row's plate and its count pill are both built
+-- from. Records what it was asked to paint AND installs the two recolour methods
+-- the real one leaves behind (SetBackdropColor from BackdropTemplateMixin,
+-- SetBackdropBorderColor from the pixel-border shim) -- the row drives both on
+-- every state change, and the stub's catch-all __index would swallow them.
+--
+-- ⚠ THE ONE STUB HERE THAT REPLACES RATHER THAN ADDS, against this file's own
+-- rule at the head. test_panel.lua installs `function KIT:CreateElementBackdrop()
+-- end` on the SAME shared table and runs first, so the guarded version of this
+-- never took -- and a no-op cannot answer what the plate was painted, which is
+-- the whole of the row's rest/hover/active look. Replacing a no-op with a
+-- recorder is a superset: nothing else in the suite reads what it records, and
+-- every test that ran against the no-op has already finished.
+do
+    function UI:CreateElementBackdrop(frame, opts)
+        opts = opts or {}
+        frame._elementOpts = opts
+        frame.SetBackdropColor = function(self, r, g, b, a)
+            self._fill = { r = r, g = g, b = b, a = a }
+        end
+        frame.SetBackdropBorderColor = function(self, r, g, b, a)
+            self._edge = { r = r, g = g, b = b, a = a }
+        end
+        local bg, bc = opts.bgColor, opts.borderColor
+        if bg then frame:SetBackdropColor(bg.r or bg[1], bg.g or bg[2], bg.b or bg[3], bg.a or bg[4] or 1) end
+        if bc then frame:SetBackdropBorderColor(bc.r or bc[1], bc.g or bc[2], bc.b or bc[3], bc.a or bc[4] or 1) end
         return frame
     end
 end
@@ -70,9 +106,23 @@ UI.PopoutContentWidth = UI.PopoutContentWidth or 260
 UI.PopoutTitleHeight = UI.PopoutTitleHeight or 28
 UI.PopoutPad = UI.PopoutPad or 10
 UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true end
+-- The row's own box model (Theme.lua's UI.PopoutRow). Mirrored whole, and the
+-- slot derived the same way the real one is, so the two cannot drift into
+-- numbers that disagree.
+UI.PopoutRow = UI.PopoutRow or {
+    plate = 44, gap = 6, padX = 10, labelGap = 10, colGap = 6,
+    check = 16, checkTick = 9, gear = 14, chevron = 10,
+    badgeW = 22, badgeH = 16,
+    labelSize = 12, summarySize = 11, badgeSize = 10,
+    restFill = 0.55, hoverFill = 0.75, restBorder = 0.5,
+    activeFill = 0.14, activeHover = 0.20, activeBorder = 1,
+    badgeFill = 0.55, badgeBorder = 0.45,
+}
+UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
 
-local ROW_H   = UI.RowHeight.checkbox
-local PLATE_H = ROW_H - UI.RowGap
+local M       = UI.PopoutRow
+local ROW_H   = M.slot
+local PLATE_H = M.plate
 local PW      = UI.PopoutContentWidth
 local TITLE_H, PAD = UI.PopoutTitleHeight, UI.PopoutPad
 
@@ -260,19 +310,48 @@ do
     eq(row.summary:GetText(), "size 12", "row: the summary is rendered from the db")
     eq(row.badge:GetText(), "4", "row: the count badge carries the declared count")
     check(row.gear ~= nil and row.chevron ~= nil, "row: gear and chevron are both drawn")
-    eq(row:GetHeight(), ROW_H, "row: it takes a checkbox's slot")
+    eq(row:GetHeight(), ROW_H, "row: it takes the popout row's own slot")
     eq(row.preferredHeight, ROW_H, "row: ...and stamps it, so a call-site number cannot override it")
     check(row.fixedRowHeight, "row: the slot is owned by the factory, not the call site")
     -- rawget: rowKind is not underscore-prefixed, so the stub's method fallback
     -- would answer for it; the claim is that the FACTORY never wrote one.
     eq(rawget(row, "rowKind"), nil, "row: no rowKind -- an unknown kind would break a run of checkboxes")
-    eq(row.plate._fill.a, 0.03, "row: the hover plate rests at the collapse bar's own alpha")
     eq(row.plate:GetHeight(), PLATE_H, "row: the plate is the slot less its gap")
+    eq(ROW_H - PLATE_H, M.gap, "row: ...and the gap is what is left, which is what the next row stands on")
+
+    -- THE PLATE IS A BORDERED SURFACE, not the bare 3%-white texture it was. At
+    -- rest it is the kit's element fill inside the kit's element border -- the
+    -- same pair every dropdown and edit box wears -- so a column of rows reads as
+    -- a stack of controls rather than as faint bands on the page.
+    eq(row.plate._fill.r, UI.Colors.element.r, "row: the plate rests on the element fill")
+    eq(row.plate._fill.a, M.restFill, "row: ...at the rest alpha")
+    eq(row.plate._edge.r, UI.Colors.border.r, "row: inside the element border")
+    eq(row.plate._edge.a, M.restBorder, "row: ...at the border's own half strength")
 
     row:GetScript("OnEnter")()
-    eq(row.plate._fill.a, 0.06, "row: hovering lights it")
+    eq(row.plate._fill.r, UI.Colors.hover.r, "row: hovering lifts it to the hover colour")
+    eq(row.plate._fill.a, M.hoverFill, "row: ...and brightens it")
     row:GetScript("OnLeave")()
-    eq(row.plate._fill.a, 0.03, "row: and leaving puts it back")
+    eq(row.plate._fill.r, UI.Colors.element.r, "row: and leaving puts it back")
+    eq(row.plate._fill.a, M.restFill, "row: ...to the rest alpha")
+
+    -- The count is a PILL: a fixed, bordered chip with its own darker fill,
+    -- carrying the number centred inside it.
+    check(row.badgePill ~= nil, "row: the count is drawn in a pill")
+    eq(row.badgePill:GetWidth(), M.badgeW, "row: sized, not measured -- the width is the column's")
+    eq(row.badgePill:GetHeight(), M.badgeH, "row: ...and its height is fixed too")
+    eq(row.badgePill._fill.r, UI.Colors.background.r, "row: the pill is darker than the plate it sits on")
+    eq(row.badgePill._edge.r, UI.Colors.border.r, "row: and carries a border of its own")
+    check(row.badgePill:IsShown(), "row: a declared count draws the pill")
+end
+
+-- No count, no pill: an empty bordered chip beside the chevron says nothing.
+do
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Countless", db = {}, build = counting("nopill", 40), window = window(),
+    })
+    eq(row.badge:GetText(), "", "pill: no count, no number")
+    check(not row.badgePill:IsShown(), "pill: ...and no pill either")
 end
 
 -- ============================================================
@@ -795,7 +874,7 @@ do
     -- outline was drawn a clear RowGap taller than the plate it was lighting.
     local ins = row.popoutInset
     eq(type(ins), "table", "ink: the row declares which part of its slot is drawn")
-    eq(ins[4], UI.RowGap, "ink: the bottom trim is exactly the slot's gap to the next row")
+    eq(ins[4], M.gap, "ink: the bottom trim is exactly the slot's gap to the next row")
     eq((ins[1] or 0) + (ins[2] or 0) + (ins[3] or 0), 0,
         "ink: and nothing else is trimmed -- the plate is flush with the slot otherwise")
     eq(row:GetHeight() - ins[4], PLATE_H, "ink: so what is left is the plate")
@@ -808,7 +887,7 @@ do
     -- The stub resolves no anchors, so the outline's offsets are the claim.
     local tl, br = po.srcOutline._points[1], po.srcOutline._points[2]
     eq(tl[5], 0, "ink: the outline's top is the row's own top")
-    eq(br[5], UI.RowGap, "ink: and its bottom lifts clear of the slot's gap")
+    eq(br[5], M.gap, "ink: and its bottom lifts clear of the slot's gap")
     row:ClosePopout()
 
     -- No clipTo declared: the shell falls back to the window rather than losing
@@ -841,8 +920,13 @@ end
 -- the gear and the summary to the badge COLUMN's width rather than to whatever
 -- its text measured, which is the thing that was broken. Verified by reverting
 -- the fix: the three literals fail, the comparisons do not.
+--
+-- The column now starts a PAD in from the plate's edge rather than flush with
+-- it, so every offset below carries M.padX -- the chevron no longer hugs an edge
+-- the plate has grown a border on.
 -- ============================================================
-local CHEV_SIZE, GEAR_SIZE, GAP, BADGE_W = 10, 14, 6, 18
+local CHEV_SIZE, GEAR_SIZE, GAP, BADGE_W = M.chevron, M.gear, M.colGap, M.badgeW
+local PAD_X = M.padX
 
 local function rightEdgeFrom(region, plate)
     if region == plate then return 0 end
@@ -871,11 +955,12 @@ do
     eq(many.badge:GetText(), "14", "cols: ...one of them twice as wide as the other in text")
 
     -- The badge is a fixed COLUMN, not a box that grows with its number. This is
-    -- the one that caused the rest.
-    eq(few.badge:GetWidth(), BADGE_W, "cols: the badge is a fixed-width column")
-    eq(many.badge:GetWidth(), few.badge:GetWidth(), "cols: the same width whatever it says")
+    -- the one that caused the rest -- and it is the PILL that is sized now, with
+    -- the number laid out inside it, so the box cannot move with what it says.
+    eq(few.badgePill:GetWidth(), BADGE_W, "cols: the badge pill is a fixed-width column")
+    eq(many.badgePill:GetWidth(), few.badgePill:GetWidth(), "cols: the same width whatever it says")
 
-    for _, part in ipairs({ "chevron", "badge", "gear", "summary" }) do
+    for _, part in ipairs({ "chevron", "badgePill", "badge", "gear", "summary" }) do
         local a = rightEdgeFrom(few[part], few.plate)
         local b = rightEdgeFrom(many[part], many.plate)
         check(a ~= nil, "cols: " .. part .. " resolves to the plate's right edge")
@@ -885,12 +970,40 @@ do
     -- ...and where those columns actually are, so a change to one of the four
     -- constants is a deliberate one rather than a silent drift.
     local p = few.plate
-    eq(rightEdgeFrom(few.chevron, p), 0, "cols: the chevron is flush with the plate's right edge")
-    eq(rightEdgeFrom(few.badge, p), -(CHEV_SIZE + GAP), "cols: the badge column ends a gap inboard of it")
-    eq(rightEdgeFrom(few.gear, p), -(CHEV_SIZE + GAP + BADGE_W + GAP),
+    eq(rightEdgeFrom(few.chevron, p), -PAD_X, "cols: the chevron sits a pad in from the plate's right edge")
+    eq(rightEdgeFrom(few.badgePill, p), -(PAD_X + CHEV_SIZE + GAP), "cols: the badge column ends a gap inboard of it")
+    eq(rightEdgeFrom(few.badge, p), rightEdgeFrom(few.badgePill, p),
+        "cols: the number rides the pill's own right edge rather than its own text")
+    eq(rightEdgeFrom(few.gear, p), -(PAD_X + CHEV_SIZE + GAP + BADGE_W + GAP),
         "cols: the gear a gap inboard of the badge COLUMN, not of its text")
-    eq(rightEdgeFrom(few.summary, p), -(CHEV_SIZE + GAP + BADGE_W + GAP + GEAR_SIZE + GAP),
+    eq(rightEdgeFrom(few.summary, p), -(PAD_X + CHEV_SIZE + GAP + BADGE_W + GAP + GEAR_SIZE + GAP),
         "cols: and the summary right-aligns a gap inboard of the gear")
+
+    -- The other end of the row: the tick is a pad in, and the label is a
+    -- generous gap off the tick rather than the column gap -- that pair is the
+    -- row's subject, the four columns above are its detail.
+    local cbPt = few.checkButton._points[1]
+    eq(cbPt[1], "LEFT", "cols: the toggle anchors LEFT, so it centres on the plate's midline")
+    eq(cbPt[4], PAD_X, "cols: ...a pad in from the plate's left edge")
+    local lblPt = few.label._points[1]
+    eq(lblPt[2], few.checkButton, "cols: the label hangs off the toggle")
+    eq(lblPt[4], M.labelGap, "cols: at the label gap, which is wider than the column gap")
+    check(M.labelGap > M.colGap, "cols: ...and that really is the wider of the two")
+end
+
+-- A row with NO toggle puts its label on the same left edge the tick would have
+-- occupied, so a mixed column does not have two label positions.
+do
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Untoggled", db = {}, build = counting("notoggle", 40), window = window(),
+    }))
+    -- rawget: `checkButton` is not underscore-prefixed, so the stub's method
+    -- fallback answers a function for it; the claim is that the factory never
+    -- wrote one.
+    eq(rawget(row, "checkButton"), nil, "cols: this row really has no toggle")
+    local pt = row.label._points[1]
+    eq(pt[2], row.plate, "cols: so the label anchors to the plate itself")
+    eq(pt[4], PAD_X, "cols: at the same pad the toggle would have started at")
 end
 
 -- ============================================================
@@ -1190,6 +1303,124 @@ do
     check(bagA[1]:IsEnabled() == false, "gate/swap: swapping back to a row toggled off greys its cached pane")
     check(bagB[1]:IsEnabled(), "gate/swap: and B's pane was left alone")
     host:CloseAllPopoutRows()
+end
+
+-- ============================================================
+-- 17. THE ACTIVE ROW
+-- ONE panel serves a whole column, so the column has to say which row the panel
+-- is currently about. Without it a user who has scrolled the list -- or glided
+-- the panel three rows down -- is reading a set of controls with nothing on the
+-- page tying them to the row they came from.
+--
+-- The statement is the accent, three ways: the plate's border, a wash inside it,
+-- and the label that names it. ACTIVE is ANSWERED by walking the row's bound
+-- instances rather than kept as a flag, so a pinned panel and the shared one can
+-- both be claiming their own row at once.
+-- ============================================================
+do
+    local win = window()
+    local function mk(name, dy)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = { on = true }, toggle = { key = "on" },
+            summary = function() return name end,
+            count = 1, build = counting("act" .. name, 50, 1), window = win,
+        }), dy)
+    end
+    local a, b = mk("AA", 100), mk("AB", -100)
+
+    eq(a.plate._fill.r, UI.Colors.element.r, "active: a closed row is on the neutral fill")
+    eq(a.label._textColor.r, C_TEXT.r, "active: with a plain label")
+
+    a:OpenPopout()
+    eq(a.plate._edge.r, ACCENT.r, "active: opening puts the accent on the plate's border")
+    eq(a.plate._edge.a, M.activeBorder, "active: at full strength")
+    eq(a.plate._fill.r, ACCENT.r, "active: and washes the inside with it")
+    eq(a.plate._fill.a, M.activeFill, "active: ...as a WASH, not a fill")
+    eq(a.label._textColor.r, ACCENT.r, "active: the label takes the tint too")
+
+    -- Hovering must BRIGHTEN the wash, not swap it for the neutral hover: the
+    -- cursor is over the row exactly when the user is reading which one is open.
+    a:GetScript("OnEnter")()
+    eq(a.plate._fill.r, ACCENT.r, "active: hovering an open row keeps the accent")
+    eq(a.plate._fill.a, M.activeHover, "active: ...and brightens it")
+    a:GetScript("OnLeave")()
+    eq(a.plate._fill.a, M.activeFill, "active: leaving settles it back to the wash")
+
+    -- ONE PANEL: a retarget has to repaint BOTH rows, or the column ends up with
+    -- two rows claiming the same panel.
+    b:OpenPopout()
+    eq(b.plate._edge.r, ACCENT.r, "active: the row the panel glided to is active now")
+    eq(a.plate._edge.r, UI.Colors.border.r, "active: and the one it left is back to the neutral border")
+    eq(a.plate._fill.r, UI.Colors.element.r, "active: with its wash gone")
+    eq(a.label._textColor.r, C_TEXT.r, "active: and its label back to plain")
+
+    b:ClosePopout()
+    eq(b.plate._edge.r, UI.Colors.border.r, "active: closing the panel clears the last row too")
+    eq(b.label._textColor.r, C_TEXT.r, "active: label included")
+end
+
+-- OFF OUTRANKS ACTIVE on the label. A row whose feature is switched off has
+-- nothing to be the subject of, open panel or not -- an accent label over a
+-- dimmed summary would read as the opposite of what it is.
+do
+    local win, db = window(), { on = false }
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Dark", db = db, toggle = { key = "on" },
+        summary = function() return "live" end,
+        build = counting("actoff", 50), window = win,
+    }))
+    row:OpenPopout()
+    eq(row.plate._edge.r, ACCENT.r, "active/off: the PLATE still says which row is open")
+    eq(row.label._textColor.r, C_TEXT_DIM.r, "active/off: but the label stays dim, because the feature is")
+    db.on = true
+    row.Refresh()
+    eq(row.label._textColor.r, ACCENT.r, "active/off: switching it on hands the label the accent")
+    row:ClosePopout()
+end
+
+-- A PINNED panel keeps its own row active after the shared one has moved on.
+-- This is why ACTIVE is answered from the bound set rather than kept as a flag:
+-- two panels are up, and each is about a different row.
+do
+    local win = window()
+    local function mk(name, dy)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = { on = true }, toggle = { key = "on" },
+            summary = function() return name end,
+            build = counting("actpin" .. name, 50), window = win,
+        }), dy)
+    end
+    local a, b = mk("PinA", 100), mk("PinB", -100)
+
+    a:OpenPopout()
+    a.popout:Pin()
+    b:OpenPopout()
+    check(b.popout ~= a.popout, "active/pin: B really did get its own instance")
+    eq(a.plate._edge.r, ACCENT.r, "active/pin: A stays active -- the pinned panel is still about it")
+    eq(b.plate._edge.r, ACCENT.r, "active/pin: and B is active on the shared one")
+
+    host:CloseAllPopoutRows("window")
+    eq(a.plate._edge.r, UI.Colors.border.r, "active/pin: closing everything clears A")
+    eq(b.plate._edge.r, UI.Colors.border.r, "active/pin: ...and B")
+end
+
+-- The accent is the ROW's, not the host's: re-tinting an open row has to repaint
+-- the wash and the label as well as the popout's chrome.
+do
+    local win = window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Retint", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "live" end,
+        build = counting("actaccent", 50), window = win,
+    }))
+    row:OpenPopout()
+    eq(row.plate._edge.r, ACCENT.r, "active/accent: it opened in the host accent")
+    row:SetAccent({ 1, 0.5, 0 })
+    eq(row.plate._edge.r, 1, "active/accent: SetAccent repaints the active border")
+    eq(row.plate._fill.r, 1, "active/accent: the wash too")
+    eq(row.label._textColor.g, 0.5, "active/accent: and the label, on every channel")
+    row:ClosePopout()
+    eq(row.plate._edge.r, UI.Colors.border.r, "active/accent: closing hands the plate back to the neutral border")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

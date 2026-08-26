@@ -29,8 +29,11 @@ if not UI then return end
 -- POSITIONAL CreateSlider / CreateDropdown / CreateAnchorGrid / CreateCheckbox /
 -- CreateEditBox / CreateButton / CreateLabel on its own host, which shadows the
 -- pack's native factories for that consumer only. Those seven go through the
--- *Native alias; everything else here (StyleCheckButton, CreatePopout) has no
--- shadowable twin and is called by its plain name.
+-- *Native alias; everything else here (StyleCheckButton, CreatePopout,
+-- CreateElementBackdrop) has no shadowable twin and is called by its plain name.
+-- CreateElementBackdrop is reached as a HOST method rather than through
+-- UI._priv the way Sections.lua takes it, matching Popout.lua's own
+-- host:CreatePanelBackdrop -- one convention across the popout family.
 --
 -- Canonical source lives at <repo>/DandersUI; never edit the copies under
 -- */Libs/.
@@ -43,37 +46,28 @@ local tremove = table.remove
 local max = math.max
 
 local C_TEXT, C_TEXT_DIM = UI.Colors.text, UI.Colors.textDim
+local C_ELEMENT, C_BORDER = UI.Colors.element, UI.Colors.border
+local C_HOVER, C_BACKGROUND = UI.Colors.hover, UI.Colors.background
 local ICON_PATH = UI.MEDIA .. "Icons\\"
 
--- THE SLOT is a checkbox's, and deliberately so. This row is a compact,
--- label-inline control -- a tick, a name and a value on one line -- which is
--- exactly the shape UI.RowHeight.checkbox was derived for (2.9 top inset + 18.2
--- of content + RowGap). Giving it a slot of its own would put a second number in
--- the vertical rhythm that nothing else agrees with; see the Theme.lua note on
--- the `toggle` entry that was removed for that reason.
-local ROW_H = UI.RowHeight.checkbox
--- ...and RowGap of that slot is the gap BELOW the row, so the visible plate is
--- what is left. Everything in the row is anchored inside the plate, so the row's
--- ink is top-aligned in its slot the way a checkbox's is.
-local PLATE_H = ROW_H - UI.RowGap
+-- EVERY metric this file draws with lives in Theme.lua (UI.PopoutRow), for the
+-- reason the row heights do: a widget whose numbers are file-locals can only be
+-- retuned by editing the widget, and a look retuned that way drifts from the one
+-- everything else was tuned against. See that table for what each value is and
+-- why -- including why the row no longer takes a checkbox's slot.
+local M = UI.PopoutRow
 
-local CHECK_SIZE = 16       -- a touch under the standard 18: this row is dense
-local CHECK_TICK = 9
-local GEAR_SIZE  = 14
-local CHEV_SIZE  = 10
-local GAP        = 6
--- The count badge is given a FIXED width wherever it is drawn, and its text is
--- laid out inside that box rather than sizing it. A FontString that sizes itself
--- moves everything anchored off it, which is how a column of rows ends up with
--- its gears and chevrons at three different x positions -- see the column block
--- in the row build. 18 holds three digits of the 10px face; a group with more
--- than 999 controls has a bigger problem than a clipped badge.
-local BADGE_W    = 18
+-- The slot, and the visible PLATE inside it. M.gap of the slot is the gap BELOW
+-- the row and nothing is painted there, so everything the row draws is anchored
+-- inside the plate.
+local ROW_H   = M.slot
+local PLATE_H = M.plate
 
 -- ⚠ NO rowKind. rowKind drives UI.RowCompact's run-tightening, and a value that
 -- is not IN RowCompact silently BREAKS a run of checkboxes it sits between --
--- the same trap the removed `toggle` entry was. A row with no kind at all takes
--- the full RowGap on both sides, which is what a group of controls wants anyway.
+-- the same trap the removed `toggle` entry was. A row with no kind at all is
+-- laid out at whatever its own slot says, and this row's slot already carries
+-- the gap it wants below it (M.gap), so there is nothing for RowCompact to do.
 
 -- Greyed like every other widget's SetEnabled: 0.4 on the whole thing.
 local DIM_ALPHA = 0.4
@@ -81,11 +75,6 @@ local DIM_ALPHA = 0.4
 -- click, it just has nothing to report -- so the glyphs half-fade and the text
 -- goes dim rather than the whole row dropping to 0.4.
 local OFF_ALPHA = 0.5
-
--- The hover plate, at the collapse bar's own two values (Sections.lua). A row
--- that lights the same way the collapse bar does reads as the same KIND of
--- affordance: a whole-row click target rather than a control with a hit box.
-local PLATE_REST, PLATE_HOVER = 0.03, 0.06
 
 -- The height ceiling, as a fraction of the screen. A group with thirty controls
 -- would otherwise open a popout taller than the monitor, and a panel whose top
@@ -398,6 +387,11 @@ end
 
 -- Bind an instance to a row: the row owns its header, its title and its accent
 -- from here until something else is bound.
+--
+-- ...and the row it takes the panel FROM has to be repainted as well as the one
+-- it hands it to. ACTIVE is "the open panel is about ME", so a retarget always
+-- changes the answer for exactly two rows, and painting only the winner would
+-- leave a column with two rows both claiming the panel.
 local function bindRow(po, row)
     local prev = po._boundRow
     if prev and prev ~= row and prev._bound then prev._bound[po] = nil end
@@ -406,6 +400,8 @@ local function bindRow(po, row)
     po:SetHeader(row._title)
     po:SetAccent(row._accent)      -- nil resets to the host accent
     syncHeader(row, po)
+    if prev and prev ~= row then safeCall(prev._SyncActive) end
+    safeCall(row._SyncActive)
 end
 
 -- Show `row`'s pane on this instance and take the old one down.
@@ -446,8 +442,8 @@ local function buildHeaderControls(host, po, bar)
     -- Fixed width here too: ONE panel serves every row, so a swap from a 3-control
     -- group to a 14-control one would otherwise widen this badge and shove the
     -- title's right edge across mid-glide.
-    local badge = host:CreateLabelNative(bar, { size = 10, color = C_TEXT_DIM })
-    badge:SetWidth(BADGE_W)
+    local badge = host:CreateLabelNative(bar, { size = M.badgeSize, color = C_TEXT_DIM })
+    badge:SetWidth(M.badgeW)
     if badge.SetJustifyH then badge:SetJustifyH("RIGHT") end
     po._hdrBadge = badge
     return cb, badge
@@ -465,6 +461,9 @@ local function forgetInstance(host, po)
         if row.popout == po then row.popout = nil end
     end
     po._boundRow = nil
+    -- After the unbind, not before: _SyncActive answers by walking row._bound,
+    -- and a row still holding a closed instance would paint itself active.
+    if row then safeCall(row._SyncActive) end
 end
 
 -- ============================================================
@@ -519,12 +518,12 @@ function UI:CreatePopoutRow(parent, opts)
     row.preferredHeight = ROW_H
     row.fixedRowHeight = true
     -- WHICH PART OF THIS FRAME IS INK. The row's frame is its whole layout SLOT,
-    -- and the bottom RowGap of that slot is the gap to the next row -- nothing is
+    -- and the bottom M.gap of that slot is the gap to the next row -- nothing is
     -- painted there. The popout shell reads this off any region it tethers to
     -- (Popout.lua's insetOf), so the source outline is drawn round the PLATE
     -- rather than round the slot, and the beam aims at the plate's centre. Left
     -- flush with the frame, because the plate is.
-    row.popoutInset = { 0, 0, 0, UI.RowGap }
+    row.popoutInset = { 0, 0, 0, M.gap }
 
     row._label   = opts.label or ""
     row._title   = opts.title or row._label
@@ -539,20 +538,39 @@ function UI:CreatePopoutRow(parent, opts)
     local offText = opts.offText or (L and L["Off"]) or "Off"
 
     -- ---- chrome ---------------------------------------------------
-    local plate = row:CreateTexture(nil, "BACKGROUND")
+    -- A FRAME, not the texture this used to be, and everything the row draws is
+    -- parented to IT rather than to the row. Two reasons, and the second is the
+    -- one that forces it:
+    --
+    --   * the plate carries a real element backdrop now -- fill AND a 1px border
+    --     -- and the border is the kit's own pixel border, which is four textures
+    --     on a frame. A texture cannot own one.
+    --   * a child frame draws ABOVE its parent's own layers. With the glyphs left
+    --     on the row, the plate's fill would cover them.
+    --
+    -- Its rect is the row's SLOT less the gap below (see row.popoutInset): the
+    -- ink is top-aligned in the slot, and the gap under it belongs to the next
+    -- row.
+    local plate = CreateFrame("Frame", nil, row, "BackdropTemplate")
     plate:SetPoint("TOPLEFT", 0, 0)
     plate:SetPoint("TOPRIGHT", 0, 0)
     plate:SetHeight(PLATE_H)
-    plate:SetColorTexture(1, 1, 1, PLATE_REST)
+    host:CreateElementBackdrop(plate, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, M.restFill },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder },
+    })
     row.plate = plate
 
     -- The toggle. A bare CheckButton put through the shared styler, so this tick
     -- and the tick on a CreateCheckbox are one control at two sizes.
+    --
+    -- LEFT, so it centres on the plate's midline -- which is what every anchor
+    -- in this build does, and the whole of "vertically centred" for this row.
     local cb
     if row._hasToggle then
-        cb = CreateFrame("CheckButton", nil, row, "BackdropTemplate")
-        cb:SetPoint("LEFT", plate, "LEFT", 0, 0)
-        host:StyleCheckButton(cb, { size = CHECK_SIZE, checkSize = CHECK_TICK,
+        cb = CreateFrame("CheckButton", nil, plate, "BackdropTemplate")
+        cb:SetPoint("LEFT", plate, "LEFT", M.padX, 0)
+        host:StyleCheckButton(cb, { size = M.check, checkSize = M.checkTick,
                                     accent = row._accent, themeRoot = parent })
         row.checkButton = cb
     end
@@ -565,35 +583,54 @@ function UI:CreatePopoutRow(parent, opts)
     -- column of these read as a ragged list instead of a table. Every offset
     -- below is a constant, so the four columns land at the same x on every row of
     -- a parent whatever any of them happens to say.
-    local chevron = row:CreateTexture(nil, "OVERLAY")
-    chevron:SetSize(CHEV_SIZE, CHEV_SIZE)
-    chevron:SetPoint("RIGHT", plate, "RIGHT", 0, 0)
+    local chevron = plate:CreateTexture(nil, "OVERLAY")
+    chevron:SetSize(M.chevron, M.chevron)
+    chevron:SetPoint("RIGHT", plate, "RIGHT", -M.padX, 0)
     chevron:SetTexture(ICON_PATH .. "chevron_right")
     chevron:SetVertexColor(1, 1, 1, 0.5)
     row.chevron = chevron
 
     -- The count badge sits between the gear and the chevron and is drawn in the
     -- accent, so "how much is in here" reads as part of the way IN rather than
-    -- as another value in the summary. LEFT-justified inside its fixed box: the
-    -- number belongs to the gear beside it, so the slack goes on the other side
-    -- where the chevron's own fixed column swallows it.
-    local badge = host:CreateLabelNative(row, { size = 10, color = C_TEXT_DIM })
-    badge:SetWidth(BADGE_W)
-    if badge.SetJustifyH then badge:SetJustifyH("LEFT") end
-    badge:SetPoint("RIGHT", chevron, "LEFT", -GAP, 0)
+    -- as another value in the summary.
+    --
+    -- A PILL, not a bare number: its own darker fill and 1px border, so the count
+    -- reads as a chip stamped into the plate rather than as a third piece of text
+    -- competing with the label and the summary. The pill is the fixed column --
+    -- it is sized, never measured -- and the number is laid out INSIDE it,
+    -- centred, so the box cannot move with what it says.
+    local badgePill = CreateFrame("Frame", nil, plate, "BackdropTemplate")
+    badgePill:SetSize(M.badgeW, M.badgeH)
+    badgePill:SetPoint("RIGHT", chevron, "LEFT", -M.colGap, 0)
+    host:CreateElementBackdrop(badgePill, {
+        bgColor     = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, M.badgeFill },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, M.badgeBorder },
+    })
+    row.badgePill = badgePill
+
+    local badge = host:CreateLabelNative(badgePill, { size = M.badgeSize, color = C_TEXT_DIM })
+    badge:SetPoint("LEFT", badgePill, "LEFT", 0, 0)
+    badge:SetPoint("RIGHT", badgePill, "RIGHT", 0, 0)
+    if badge.SetJustifyH then badge:SetJustifyH("CENTER") end
     badge:SetText(row._count and tostring(row._count) or "")
     row.badge = badge
 
-    local gear = row:CreateTexture(nil, "OVERLAY")
-    gear:SetSize(GEAR_SIZE, GEAR_SIZE)
-    gear:SetPoint("RIGHT", badge, "LEFT", -GAP, 0)
+    -- No count declared, no pill: an empty bordered box beside the chevron is a
+    -- chip that says nothing. The COLUMN stays either way -- the gear is anchored
+    -- to the pill's rect, not to whether it is drawn -- so a row with a count and
+    -- a row without still line their gears up.
+    badgePill:SetShown(row._count ~= nil)
+
+    local gear = plate:CreateTexture(nil, "OVERLAY")
+    gear:SetSize(M.gear, M.gear)
+    gear:SetPoint("RIGHT", badgePill, "LEFT", -M.colGap, 0)
     gear:SetTexture(ICON_PATH .. "settings")
     gear:SetVertexColor(1, 1, 1, 0.6)
     row.gear = gear
 
-    local label = host:CreateLabelNative(row, { size = 11, color = C_TEXT })
+    local label = host:CreateLabelNative(plate, { size = M.labelSize, color = C_TEXT })
     label:SetText(row._label)
-    label:SetPoint("LEFT", cb or plate, cb and "RIGHT" or "LEFT", cb and GAP or 0, 0)
+    label:SetPoint("LEFT", cb or plate, cb and "RIGHT" or "LEFT", cb and M.labelGap or M.padX, 0)
     label:SetJustifyH("LEFT")
     if label.SetWordWrap then label:SetWordWrap(false) end
     row.label = label
@@ -604,12 +641,65 @@ function UI:CreatePopoutRow(parent, opts)
     -- value flush against the way in is where the eye already is. Its RIGHT edge
     -- is a constant off the plate now that the gear's is, so a stack of rows
     -- right-aligns its values against one another as well as against the gear.
-    local summary = host:CreateLabelNative(row, { size = 10, color = C_TEXT_DIM })
-    summary:SetPoint("LEFT", label, "RIGHT", GAP, 0)
-    summary:SetPoint("RIGHT", gear, "LEFT", -GAP, 0)
+    local summary = host:CreateLabelNative(plate, { size = M.summarySize, color = C_TEXT_DIM })
+    summary:SetPoint("LEFT", label, "RIGHT", M.colGap, 0)
+    summary:SetPoint("RIGHT", gear, "LEFT", -M.colGap, 0)
     summary:SetJustifyH("RIGHT")
     if summary.SetWordWrap then summary:SetWordWrap(false) end
     row.summary = summary
+
+    -- ---- the plate's paint ----------------------------------------
+    -- Everything whose colour depends on the row's STATE rather than on its
+    -- values: the plate, and the label that names it.
+    --
+    -- Split out of Refresh because ACTIVE changes without the db changing -- one
+    -- retarget repaints two rows, and re-running a consumer's summary function
+    -- for each would be work for nothing.
+    --
+    -- The three states are NOT independent, which is why this is one function
+    -- rather than a hover handler and an active handler that both write the
+    -- plate. Hovering an ACTIVE row has to brighten the accent wash rather than
+    -- replace it with the neutral hover: the cursor is over the row exactly when
+    -- the user is reading which one is open, and that is the worst moment to
+    -- stop saying so.
+    local function paintState()
+        local on = row._Read()
+        local active = row._active
+        local accent = row._accent or host:GetAccent()
+        if active then
+            plate:SetBackdropColor(accent.r, accent.g, accent.b,
+                                   row._hovered and M.activeHover or M.activeFill)
+            plate:SetBackdropBorderColor(accent.r, accent.g, accent.b, M.activeBorder)
+        else
+            local f = row._hovered and C_HOVER or C_ELEMENT
+            plate:SetBackdropColor(f.r, f.g, f.b,
+                                   row._hovered and M.hoverFill or M.restFill)
+            plate:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder)
+        end
+        -- OFF outranks ACTIVE on the label. A row with its feature switched off
+        -- has nothing to be the subject of, open panel or not -- and an accent
+        -- label over a dimmed summary would read as the opposite.
+        local c = (not on) and C_TEXT_DIM or (active and accent or C_TEXT)
+        label:SetTextColor(c.r, c.g, c.b, 1)
+    end
+
+    -- ACTIVE is "the panel that is open is about ME", and it is ANSWERED by
+    -- walking the bound set rather than kept as a flag someone has to remember to
+    -- clear: a row may be bound to a PINNED instance as well as to the shared
+    -- one, and it is still the subject of the pinned panel after the shared one
+    -- has moved on to another row.
+    function row._SyncActive()
+        local active = false
+        for po in pairs(row._bound) do
+            if po and not po.closed and po._boundRow == row then
+                active = true
+                break
+            end
+        end
+        if row._active == active then return end
+        row._active = active
+        paintState()
+    end
 
     -- ---- state ----------------------------------------------------
 
@@ -673,8 +763,8 @@ function UI:CreatePopoutRow(parent, opts)
         -- only what the toggle governs -- so the tick you need to click to turn
         -- it back on never fades with everything it controls.
         row:SetAlpha(enabled and 1 or DIM_ALPHA)
-        local c = on and C_TEXT or C_TEXT_DIM
-        label:SetTextColor(c.r, c.g, c.b, 1)
+        -- The plate and the label, in one place shared with the active repaint.
+        paintState()
         summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, on and 1 or 0.7)
         gear:SetVertexColor(1, 1, 1, on and 0.6 or OFF_ALPHA * 0.6)
         chevron:SetVertexColor(1, 1, 1, on and 0.5 or OFF_ALPHA * 0.5)
@@ -756,6 +846,10 @@ function UI:CreatePopoutRow(parent, opts)
         local col = row._accent or host:GetAccent()
         if cb and cb.ApplyThemeColor then cb.ApplyThemeColor(col) end
         badge:SetTextColor(col.r, col.g, col.b, 1)
+        -- The ACTIVE plate and label are drawn in the accent, so a row that is
+        -- open when its colour changes has to repaint here as well -- otherwise
+        -- the wash keeps the old hue until the next Refresh.
+        paintState()
         for po in pairs(row._bound) do
             if po and not po.closed and po.SetAccent then po:SetAccent(row._accent) end
         end
@@ -763,8 +857,8 @@ function UI:CreatePopoutRow(parent, opts)
     end
 
     -- ---- interaction ----------------------------------------------
-    row:SetScript("OnEnter", function() plate:SetColorTexture(1, 1, 1, PLATE_HOVER) end)
-    row:SetScript("OnLeave", function() plate:SetColorTexture(1, 1, 1, PLATE_REST) end)
+    row:SetScript("OnEnter", function() row._hovered = true;  paintState() end)
+    row:SetScript("OnLeave", function() row._hovered = false; paintState() end)
     -- NOT gated on `enabled`. A greyed row is one whose settings do nothing YET;
     -- being able to look at them (and at the control inside that would turn the
     -- feature on) is exactly what a user in that state needs.

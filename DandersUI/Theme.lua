@@ -249,6 +249,80 @@ UI.PopoutTitleHeight = 28
 -- the bar while carrying 2 x this much slack below it.
 UI.PopoutPad = 10
 
+-- ============================================================
+-- THE POPOUT ROW'S BOX MODEL
+--
+-- Every number PopoutRow.lua draws with, in one table, for the reason the row
+-- heights above are here: a widget whose metrics live as file-locals can only be
+-- retuned by editing the widget, and a look that is retuned by editing the
+-- widget drifts from the look everything else was tuned against.
+--
+-- WHY IT IS NOT UI.RowHeight.checkbox ANY MORE. The row used to take a
+-- checkbox's slot (35, so a 21px plate) on the reasoning that it is a compact
+-- label-inline control and shares that shape. It reads as one: a tick, a name, a
+-- value, a count and a way in, all crammed into 21px with the tick and the
+-- chevron flush against the plate's own edges. The row is not a checkbox with
+-- extras -- it is a PLATE, a whole-row click target that stands for a group of
+-- fifteen controls, and it has to carry the weight of one.
+--
+-- So it gets its own slot, and the slot is NOT in UI.RowHeight: nothing writes
+-- rowKind = "popoutRow" (see the ⚠ on RowCompact -- a kind nothing agrees with
+-- silently breaks the run it sits in), and a height there would invite one.
+--
+--   plate      44, the mockup's figure. 16 of tick + 14 above and below it.
+--   gap        the gap to the NEXT row, and deliberately not RowGap. A column of
+--              these is ONE list -- the same argument RowGapTight makes for a run
+--              of checkboxes -- and 14 between plates reads as unrelated rows.
+--   padX       inner left/right padding, so neither the tick nor the chevron
+--              hugs an edge the plate now actually HAS (it is bordered).
+--   labelGap   tick -> label. Wider than colGap on purpose: that pair is the
+--              row's subject, and the four columns on the right are its detail.
+--   colGap     between every column on the right-hand side.
+UI.PopoutRow = {
+    plate     = 44,
+    gap       = 6,
+    padX      = 10,
+    labelGap  = 10,
+    colGap    = 6,
+
+    -- Glyph and control sizes.
+    check     = 16,   -- a touch under the standard 18: this row is dense
+    checkTick = 9,
+    gear      = 14,
+    chevron   = 10,
+    -- The count badge is a PILL, and a fixed one wherever it is drawn: a box that
+    -- sized itself to its number moves everything anchored off it, which is how a
+    -- column of rows ends up with its gears and chevrons at three different x
+    -- positions. 22 x 16 holds three digits of the 10px face inside its own
+    -- border; a group with more than 999 controls has a bigger problem than a
+    -- clipped badge.
+    badgeW    = 22,
+    badgeH    = 16,
+
+    -- Type hierarchy. The label is the row's subject and the summary is its
+    -- detail, so they are a size apart rather than both at the body size -- which
+    -- is what made a stack of rows read as a wall of same-weight text.
+    labelSize   = 12,
+    summarySize = 11,
+    badgeSize   = 10,
+
+    -- The plate's own paint, at rest / hovered / ACTIVE (this row's popout is the
+    -- one that is open). Alphas rather than colours: the hue is C_ELEMENT and
+    -- C_BORDER at rest and the row's accent when active, so a retheme moves all
+    -- three states together.
+    restFill     = 0.55,   -- of C_ELEMENT
+    hoverFill    = 0.75,   -- of C_HOVER
+    restBorder   = 0.5,    -- of C_BORDER -- the element default
+    activeFill   = 0.14,   -- of the accent: a WASH, not a fill
+    activeHover  = 0.20,
+    activeBorder = 1,
+    badgeFill    = 0.55,   -- of C_BACKGROUND: the pill reads as a hole in the plate
+    badgeBorder  = 0.45,   -- of C_BORDER
+}
+-- The layout SLOT: the plate plus the gap to the next row. Derived rather than
+-- declared, so the two can never be set to numbers that disagree.
+UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
+
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
 -- own their height (drift-proof); everything else uses the height it was handed, then the widget's
 -- own preferred height, then a sane default.
