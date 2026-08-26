@@ -1806,24 +1806,59 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- classColor + roleColor are now first-class helper include flags (no
         -- bespoke "Use Class Color" extra needed). (Pixel-Perfect Scaling moved
         -- to General > Settings > Rendering — it's a global, mode-agnostic flag.)
-        GUI:CreateBorderControls(appearanceGroup, db, "frame", {
-            parent       = self.child,
-            include      = {
-                -- Frame Border is the outer chrome of the unit. It's a
-                -- structural element, not an alert surface, so animations
-                -- don't fit the design — removed in Stage 4.0 after Stage
-                -- 3 used it as a dev playground.
-                inset = true, offset = true, blendMode = true,
-                gradient = true, shadow = true,
-                classColor = true, roleColor = true,
-                alpha = true,
-            },
-            fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
-            lightUpdate  = function() DF:LightweightUpdateBorder() end,
-            lightColors  = function() DF:LightweightUpdateBorderColor() end,
+        --
+        -- Border and Border Shadow are TWO builders, each taking the group and
+        -- parent it should build into, because popout gate two mounts them as two
+        -- separate popout rows. Here they are mounted back-to-back into the one
+        -- Appearance group, which is the same panel, in the same order, as the
+        -- single CreateBorderControls call they replaced.
+        --
+        -- ⚠ shadowDisableWhen is not decoration. In the single call the shadow
+        -- rows greyed with Show Border because CreateBorderControls' own
+        -- composition loop reached them; split out, the shadow builder is never
+        -- inside that loop, so the same predicate has to be handed to it.
+        local function BuildBorderGroup(tools)
+            GUI:CreateBorderControls(tools.group, db, "frame", {
+                parent       = tools.parent,
+                include      = {
+                    -- Frame Border is the outer chrome of the unit. It's a
+                    -- structural element, not an alert surface, so animations
+                    -- don't fit the design — removed in Stage 4.0 after Stage
+                    -- 3 used it as a dev playground.
+                    inset = true, offset = true, blendMode = true,
+                    gradient = true,
+                    classColor = true, roleColor = true,
+                    alpha = true,
+                },
+                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
+                lightUpdate  = function() DF:LightweightUpdateBorder() end,
+                lightColors  = function() DF:LightweightUpdateBorderColor() end,
+                refreshStates = tools.refreshStates,
+                sizeMin = 1, sizeMax = 16, sizeStep = 1,
+                noShowToggle = tools.hoistToggles or nil,
+            })
+        end
+        local function BuildBorderShadowGroup(tools)
+            GUI:CreateBorderShadowControls(tools.group, db, "frame", {
+                parent       = tools.parent,
+                -- No lightColors: the shadow colour picker commits through
+                -- fullUpdate, exactly as it did inside the single call.
+                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
+                lightUpdate  = function() DF:LightweightUpdateBorder() end,
+                refreshStates = tools.refreshStates,
+                hideWhen     = tools.shadowHideWhen,
+                disableWhen  = tools.shadowDisableWhen,
+                noEnableToggle = tools.hoistToggles or nil,
+            })
+        end
+        local borderTools = {
+            group  = appearanceGroup,
+            parent = self.child,
             refreshStates = function() if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end end,
-            sizeMin = 1, sizeMax = 16, sizeStep = 1,
-        })
+            shadowDisableWhen = function() return db.frameShowBorder == false end,
+        }
+        BuildBorderGroup(borderTools)
+        BuildBorderShadowGroup(borderTools)
         Add(appearanceGroup, nil, 2)
 
         -- ===== FRAME FADE GROUP (Column 2) =====

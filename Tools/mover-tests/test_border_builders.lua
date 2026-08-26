@@ -211,6 +211,14 @@ local function checkInventory(got, want, tag)
     end
 end
 
+-- Every scalar a recorder captured, so the split can be compared field for
+-- field rather than on the four columns the golden table spells out. (Options
+-- tables are skipped: they are built fresh per call, so identity says nothing,
+-- and the split takes the SAME code path for every dropdown.)
+local COMPARED = { "kind", "label", "key", "height", "slot", "parent", "dbTable",
+                   "cb", "light", "preview", "get", "set", "hasAlpha", "useLight",
+                   "min", "max", "step" }
+
 -- ---- the grey matrix ------------------------------------------------
 -- Read at three states of the two booleans. Restores the db it was handed, so a
 -- caller can go on using the same fixture.
@@ -372,6 +380,138 @@ do
         fullUpdate = tools.full,
     })
     eq(db.frameBorderColorSource, "CLASS", "seed: a legacy class-colour profile migrates to CLASS")
+end
+
+-- ============================================================
+-- 2. THE SPLIT BUILD -- Border, then Border Shadow, as two mounts
+-- The gate-two shape. Same group, same db, same order: the merged result has to
+-- be indistinguishable from the single call above, field for field.
+--
+-- ⚠ THE GREY IS THE SUBTLE PART. In the single call the shadow rows grey with
+-- Show Border because the end-of-function loop composes borderOff onto
+-- everything. Split apart, the shadow builder is never inside that loop, so the
+-- page has to hand it the same predicate as disableWhen -- which is what the
+-- matrix below is checking.
+-- ============================================================
+if GUI.CreateBorderShadowControls then
+    rec = {}
+    local tools, db = newTools(), newDB(true)
+    local before = keySet(db)
+    local group = newGroup()
+    local borderOff = function() return db.frameShowBorder == false end
+
+    local w = GUI:CreateBorderControls(group, db, "frame", {
+        parent  = tools.parent,
+        include = {
+            inset = true, offset = true, blendMode = true,
+            gradient = true,
+            classColor = true, roleColor = true,
+            alpha = true,
+        },
+        fullUpdate    = tools.full,
+        lightUpdate   = tools.light,
+        lightColors   = tools.colors,
+        refreshStates = tools.refresh,
+        sizeMin = 1, sizeMax = 16, sizeStep = 1,
+    })
+    local sw = GUI:CreateBorderShadowControls(group, db, "frame", {
+        parent        = tools.parent,
+        fullUpdate    = tools.full,
+        lightUpdate   = tools.light,
+        refreshStates = tools.refresh,
+        hideWhen      = nil,
+        disableWhen   = borderOff,
+    })
+    for k, v in pairs(sw) do w[k] = v end
+
+    -- (a) the same 19 rows, in the same order, with the same everything
+    checkInventory(rec, GOLDEN, "split")
+    for i = 1, math.min(#rec, #goldenRec) do
+        for _, field in ipairs(COMPARED) do
+            local a, b = rec[i][field], goldenRec[i][field]
+            -- dbTable identity is per-fixture, so compare "is it THE db" instead.
+            if field == "dbTable" then a, b = a ~= false, b ~= false end
+            eq(tostring(a), tostring(b),
+               string.format("split: row %d field %s matches the golden build", i, field))
+        end
+    end
+    eq(tools.fired.full + tools.fired.light + tools.fired.colors + tools.fired.refresh, 0,
+       "split: building fired no callbacks either")
+
+    -- (b) the same two build-time writes, and only those
+    local added = newKeys(before, db)
+    eq(#added, 1, "split: the same single write")
+    eq(added[1], "frameBorderColorSource", "split: ...the same key")
+    eq(db.frameBorderColorSource, "STATIC", "split: ...with the same value")
+    eq(db.frameBorderColor.a, 0.8, "split: the existing alpha is still left alone")
+
+    -- (c) the same grey matrix, cell for cell
+    local grey = greyMatrix(w, db)
+    for _, state in ipairs({ "bothOn", "borderOff", "shadowOff" }) do
+        for _, k in ipairs({ "show", "size", "shadowEnabled", "shadowColor" }) do
+            eq(tostring(grey[state][k]), tostring(goldenGrey[state][k]),
+               string.format("split: grey[%s].%s matches the golden build", state, k))
+        end
+    end
+
+    -- ...and the same never-hidden shadow block
+    for _, k in ipairs({ "shadowEnabled", "shadowColor", "shadowSize", "shadowOffsetX", "shadowOffsetY" }) do
+        check(sw[k] ~= nil, "split: " .. k .. " was built by the shadow builder")
+        eq(sw[k].hideOn(nil), false, "split: " .. k .. " is never hidden with no hideWhen")
+    end
+
+    -- ---- the standalone builder's own options ----
+    -- hideWhen reaches EVERY row (a consumer whose whole feature is off).
+    do
+        rec = {}
+        local t2, db2 = newTools(), newDB(true)
+        local hidden = false
+        local s = GUI:CreateBorderShadowControls(newGroup(), db2, "frame", {
+            parent = t2.parent, fullUpdate = t2.full, lightUpdate = t2.light,
+            hideWhen = function() return hidden end,
+        })
+        eq(#rec, 5, "standalone: five rows")
+        eq(s.shadowEnabled.hideOn(nil), false, "standalone: visible while the gate is open")
+        hidden = true
+        eq(s.shadowEnabled.hideOn(nil), true, "standalone: hideWhen hides the toggle...")
+        eq(s.shadowColor.hideOn(nil), true, "standalone: ...and the sub-controls")
+    end
+
+    -- noEnableToggle drops the checkbox and nothing else; the sub-controls keep
+    -- greying on the key, which the external toggle is expected to write.
+    do
+        rec = {}
+        local t3, db3 = newTools(), newDB(true)
+        local s = GUI:CreateBorderShadowControls(newGroup(), db3, "frame", {
+            parent = t3.parent, fullUpdate = t3.full, lightUpdate = t3.light,
+            noEnableToggle = true,
+        })
+        eq(#rec, 4, "noEnableToggle: the checkbox is gone, the four sub-controls remain")
+        eq(s.shadowEnabled, nil, "noEnableToggle: ...and no handle is published for it")
+        eq(rec[1].label, "Shadow Color", "noEnableToggle: the block now opens on the colour")
+        eq(s.shadowColor.disableOn(nil), false, "noEnableToggle: live while the key is on")
+        db3.frameBorderShadowEnabled = false
+        eq(s.shadowColor.disableOn(nil), true, "noEnableToggle: the key still greys the sub-controls")
+    end
+
+    -- disableWhen greys the toggle TOO -- that is the difference between it and
+    -- the border's own borderOff, and it is what the Frame page relies on.
+    do
+        rec = {}
+        local t4, db4 = newTools(), newDB(true)
+        local off = false
+        local s = GUI:CreateBorderShadowControls(newGroup(), db4, "frame", {
+            parent = t4.parent, fullUpdate = t4.full, disableWhen = function() return off end,
+        })
+        eq(s.shadowEnabled.disableOn(nil), false, "disableWhen: open -- the toggle is live")
+        off = true
+        eq(s.shadowEnabled.disableOn(nil), true, "disableWhen: closed -- the toggle greys too")
+        eq(s.shadowColor.disableOn(nil), true, "disableWhen: ...and so does everything under it")
+    end
+else
+    -- The golden half stands on its own; the split half needs the builder to
+    -- exist. Said out loud rather than silently skipped.
+    check(false, "split: GUI:CreateBorderShadowControls is not defined yet")
 end
 
 -- ---- restore the global --------------------------------------------
