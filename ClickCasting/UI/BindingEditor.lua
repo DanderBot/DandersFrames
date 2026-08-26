@@ -45,6 +45,216 @@ local addBindingDialog = nil
 
 -- ============================================================
 
+-- ============================================================
+-- BINDING ROW DRAG-TO-REORDER
+-- Handle + floating ghost + insert indicator for drag reordering
+-- ============================================================
+
+local reorderState = nil        -- active drag state
+local reorderGhost = nil        -- floating cursor-follower frame
+local reorderIndicator = nil    -- insert-position line
+local reorderUpdater = nil      -- OnUpdate driver
+
+-- Build the ordered list of currently-visible (enabled) bindings.
+local function BuildVisibleSequence()
+    local seq = {}
+    local bindings = CC.db and CC.db.bindings or {}
+    for _, b in ipairs(bindings) do
+        if b.enabled ~= false then
+            table.insert(seq, b)
+        end
+    end
+    return seq
+end
+
+-- Compute drop zone index (0 .. N) from cursor Y against bindingsContent.
+-- Zone 0 = insert before first row, Zone N = insert after last row.
+local function ComputeDropZone(visibleCount)
+    local content = CC.bindingsContent
+    if not content or visibleCount <= 0 then return 0 end
+    local scale = content:GetEffectiveScale()
+    local _, cy = GetCursorPosition()
+    cy = cy / scale
+    local top = content:GetTop()
+    if not top then return 0 end
+    local relY = top - cy  -- distance from content top, in pixels
+    local rowH = BINDING_ROW_HEIGHT
+    local zone = math.floor(relY / rowH + 0.5)
+    if zone < 0 then zone = 0 end
+    if zone > visibleCount then zone = visibleCount end
+    return zone
+end
+
+local function EnsureGhost()
+    if reorderGhost then return reorderGhost end
+    local C = CC.UI_COLORS
+    local theme = C and C.theme or { r = 1, g = 1, b = 1 }
+    local g = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    g:SetFrameStrata("TOOLTIP")
+    g:SetSize(220, 34)
+    g:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    g:SetBackdropColor(0, 0, 0, 0.88)
+    g:SetBackdropBorderColor(theme.r, theme.g, theme.b, 1)
+    local gi = g:CreateTexture(nil, "ARTWORK")
+    gi:SetSize(24, 24)
+    gi:SetPoint("LEFT", 4, 0)
+    gi:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    g.icon = gi
+    local gt = g:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    gt:SetPoint("LEFT", gi, "RIGHT", 6, 0)
+    gt:SetPoint("RIGHT", -6, 0)
+    gt:SetJustifyH("LEFT")
+    gt:SetWordWrap(false)
+    g.text = gt
+    g:Hide()
+    reorderGhost = g
+    return g
+end
+
+local function EnsureIndicator()
+    if reorderIndicator then return reorderIndicator end
+    local content = CC.bindingsContent
+    if not content then return nil end
+    local C = CC.UI_COLORS
+    local theme = C and C.theme or { r = 1, g = 1, b = 1 }
+    local ind = content:CreateTexture(nil, "OVERLAY")
+    ind:SetHeight(2)
+    ind:SetColorTexture(theme.r, theme.g, theme.b, 1)
+    ind:Hide()
+    reorderIndicator = ind
+    return ind
+end
+
+local function UpdateReorderVisuals()
+    if not reorderState then return end
+    local ghost = reorderGhost
+    if ghost then
+        local scale = UIParent:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        ghost:ClearAllPoints()
+        ghost:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cx / scale + 14, cy / scale - 4)
+    end
+    local content = CC.bindingsContent
+    local ind = reorderIndicator
+    if content and ind then
+        local zone = ComputeDropZone(reorderState.visibleCount)
+        reorderState.dropZone = zone
+        ind:ClearAllPoints()
+        ind:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -zone * BINDING_ROW_HEIGHT + 1)
+        ind:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -zone * BINDING_ROW_HEIGHT + 1)
+        ind:Show()
+    end
+end
+
+local function BeginBindingReorder(row, binding)
+    if InCombatLockdown() then return end  -- be defensive, though this is non-secure UI
+    if not CC.db or not CC.db.bindings then return end
+    local seq = BuildVisibleSequence()
+    local sourceVisibleIdx
+    for i, b in ipairs(seq) do
+        if b == binding then sourceVisibleIdx = i; break end
+    end
+    if not sourceVisibleIdx then return end
+
+    reorderState = {
+        sourceBinding = binding,
+        sourceRow = row,
+        sourceVisibleIdx = sourceVisibleIdx,
+        visibleCount = #seq,
+        dropZone = sourceVisibleIdx - 1,
+    }
+
+    row:SetAlpha(0.4)
+
+    local ghost = EnsureGhost()
+    if ghost then
+        if row.icon and row.icon.GetTexture then
+            ghost.icon:SetTexture(row.icon:GetTexture())
+            ghost.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        end
+        if row.name and row.name.GetText then
+            ghost.text:SetText(row.name:GetText() or "")
+        end
+        ghost:Show()
+    end
+
+    EnsureIndicator()
+
+    if not reorderUpdater then
+        reorderUpdater = CreateFrame("Frame")
+        reorderUpdater:SetScript("OnUpdate", UpdateReorderVisuals)
+    end
+    reorderUpdater:Show()
+    UpdateReorderVisuals()
+end
+
+local function CancelBindingReorder()
+    if reorderState and reorderState.sourceRow then
+        reorderState.sourceRow:SetAlpha(1)
+    end
+    reorderState = nil
+    if reorderGhost then reorderGhost:Hide() end
+    if reorderIndicator then reorderIndicator:Hide() end
+    if reorderUpdater then reorderUpdater:Hide() end
+end
+
+local function EndBindingReorder()
+    if not reorderState then return end
+    local state = reorderState
+    local sourceBinding = state.sourceBinding
+    local sourceVisibleIdx = state.sourceVisibleIdx
+    local targetZone = state.dropZone or (sourceVisibleIdx - 1)
+
+    -- Clean up visuals first (avoid flash during Refresh)
+    if reorderGhost then reorderGhost:Hide() end
+    if reorderIndicator then reorderIndicator:Hide() end
+    if reorderUpdater then reorderUpdater:Hide() end
+    if state.sourceRow then state.sourceRow:SetAlpha(1) end
+    reorderState = nil
+
+    -- No-op if dropped in its current slot (zones sourceIdx-1 or sourceIdx both mean "stay put")
+    if targetZone == sourceVisibleIdx - 1 or targetZone == sourceVisibleIdx then
+        return
+    end
+
+    local seq = BuildVisibleSequence()
+    -- Re-resolve source index in case array changed underneath
+    local curSource
+    for i, b in ipairs(seq) do
+        if b == sourceBinding then curSource = i; break end
+    end
+    if not curSource then return end
+
+    table.remove(seq, curSource)
+    local insertAt = targetZone
+    if curSource < targetZone then insertAt = insertAt - 1 end
+    insertAt = math.max(0, math.min(#seq, insertAt))
+    table.insert(seq, insertAt + 1, sourceBinding)
+
+    -- Rebuild CC.db.bindings, preserving disabled entries in their original slots
+    local oldDb = CC.db.bindings
+    local newDb = {}
+    local seqIdx = 1
+    for _, b in ipairs(oldDb) do
+        if b.enabled ~= false then
+            newDb[#newDb + 1] = seq[seqIdx]
+            seqIdx = seqIdx + 1
+        else
+            newDb[#newDb + 1] = b
+        end
+    end
+    CC.db.bindings = newDb
+
+    if CC.ApplyBindings then CC:ApplyBindings() end
+    if CC.RefreshActiveBindings then CC:RefreshActiveBindings() end
+    if CC.RefreshSpellGrid then CC:RefreshSpellGrid(true) end
+end
+
+-- =========================================================================
 -- ACTIVE BINDINGS ROW CREATION
 -- =========================================================================
 function CC:CreateBindingRow(parent, binding, index)
@@ -64,13 +274,47 @@ function CC:CreateBindingRow(parent, binding, index)
     -- Icon (larger to fill height better)
     local icon = row:CreateTexture(nil, "ARTWORK")
     icon:SetSize(32, 32)
-    icon:SetPoint("LEFT", 4, 0)
+    icon:SetPoint("LEFT", 14, 0)  -- Shifted right to make room for drag handle
     
     -- Icon for the binding's action (shared resolver in Bindings.lua)
     icon:SetTexture(CC:GetBindingDisplayIcon(binding))
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     row.icon = icon
-    
+
+    -- Drag handle (far left, thin strip for reordering)
+    local dragHandle = CreateFrame("Button", nil, row)
+    dragHandle:SetPoint("TOPLEFT", 0, 0)
+    dragHandle:SetPoint("BOTTOMLEFT", 0, 0)
+    dragHandle:SetWidth(10)
+    dragHandle:RegisterForDrag("LeftButton")
+    dragHandle:EnableMouse(true)
+
+    local handleIcon = dragHandle:CreateTexture(nil, "OVERLAY")
+    handleIcon:SetSize(8, 14)
+    handleIcon:SetPoint("CENTER")
+    handleIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder")
+    handleIcon:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
+
+    dragHandle:SetScript("OnEnter", function(self)
+        handleIcon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
+        SetCursor("Interface\\CURSOR\\UI-Cursor-Move")
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(L["Drag to reorder"], 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    dragHandle:SetScript("OnLeave", function()
+        handleIcon:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
+        SetCursor(nil)
+        GameTooltip:Hide()
+    end)
+    dragHandle:SetScript("OnDragStart", function()
+        BeginBindingReorder(row, binding)
+    end)
+    dragHandle:SetScript("OnDragStop", function()
+        EndBindingReorder()
+    end)
+    row.dragHandle = dragHandle
+
     -- Delete button (far right)
     local deleteBtn = CreateFrame("Button", nil, row)
     deleteBtn:SetSize(20, 20)

@@ -201,6 +201,7 @@ L["Disable Only While Flying"] = true
 L["Disable While Mounted"] = true
 L["Disable while mounted/flying"] = true
 L["Disabled"] = true
+L["Drag to reorder"] = true
 L["Edit Binding"] = true
 L["Edit Copy"] = true
 L["Edit Macro"] = true
