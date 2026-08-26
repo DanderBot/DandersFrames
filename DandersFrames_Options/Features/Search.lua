@@ -266,10 +266,26 @@ function Search:BuildFullRegistry()
         
         if not wasShown then
             page:Hide()
+            -- ☠ AND PUT IT BACK IN THE PAGE DOCK. Indexing means BUILDING all 34
+            -- pages, and leaving 700+ freshly-built widgets parented under the
+            -- settings window -- hidden or not -- is what made every later open
+            -- of it freeze the game for the best part of ten seconds. Hiding a
+            -- page does not take it out of the subtree the engine walks;
+            -- reparenting it does. See THE PAGE DOCK in GUI/Panel.lua.
+            --
+            -- ⚠ Parked pages keep their anchors to the content frame, so
+            -- page:Refresh() above builds correctly on a page already in the
+            -- dock (which, after the first tab switch, every page but one is).
+            if DF.GUI.ParkPage then DF.GUI:ParkPage(page) end
         end
     end
-    
+
     if originalTab and DF.GUI.Pages[originalTab] then
+        -- The page the user is actually looking at comes back out of the dock.
+        -- It was never parked by the loop above (wasShown was true for it), so
+        -- this is normally a no-op -- but it is the one page that MUST be
+        -- adopted when this returns, so it is asserted rather than assumed.
+        if DF.GUI.AdoptPage then DF.GUI:AdoptPage(DF.GUI.Pages[originalTab]) end
         DF.GUI.Pages[originalTab]:Show()
         if DF.GUI.Pages[originalTab].RefreshStates then
             DF.GUI.Pages[originalTab]:RefreshStates()

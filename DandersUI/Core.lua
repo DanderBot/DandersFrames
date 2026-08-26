@@ -28,7 +28,8 @@ if not UI then return end
 NS.__DandersUI = UI
 
 local setmetatable, rawget, type, error, ipairs, print = setmetatable, rawget, type, error, ipairs, print
-local tinsert, xpcall, geterrorhandler, tostring = table.insert, xpcall, geterrorhandler, tostring
+local tinsert, tremove, xpcall, geterrorhandler, tostring =
+      table.insert, table.remove, xpcall, geterrorhandler, tostring
 local pairs, format, sort, concat = pairs, string.format, table.sort, table.concat
 -- The hook counters below are the only caller, and they are the only thing in
 -- this file that needs a client global. Stubbed rather than assumed so the file
@@ -133,7 +134,28 @@ function UI:GetHost(name) return UI.hosts[name] end
 -- a caller that cached it (`local c = host:GetAccent()`) keeps seeing the live
 -- value -- and so the listener list is only needed for surfaces that have to
 -- REPAINT, not for ones that merely read.
+--
+-- ☠ THE LISTENER LIST ONLY EVER GREW. It held bare functions, and nothing could
+-- take one off again -- so CreateGroupBox, which registers one closure per box
+-- to re-tint its title, left another dead listener behind on every rebuild of
+-- every panel that uses one, and every later SetAccent walked and called the
+-- lot. It holds ENTRIES now -- { fn = <listener>, hasOwner = <bool> } -- with
+-- the OWNER (the widget the listener is FOR) held in a weak-valued side table,
+-- so an owner that goes away takes its entry with it on the next SetAccent.
+--
+-- ⚠ WoW NEVER COLLECTS A FRAME, so the weak half does not fire for a frame
+-- owner and this is not on its own a cure for the growth. Naming an owner is
+-- what makes the entry ADDRESSABLE: a consumer with a real teardown path calls
+-- UnregisterAccentListener(owner) and the entry goes immediately, which is the
+-- half that actually bounds the list. The weak table saves a plain-table owner
+-- and stops the registry itself pinning anything alive.
 -- ============================================================
+-- entry -> owner. Weak in the VALUE, so a collected owner leaves a hole the
+-- compaction below can see. Library-wide rather than per host: entries are
+-- unique tables, so one map serves every host without them being able to
+-- collide.
+local listenerOwners = setmetatable({}, { __mode = "v" })
+
 function UI:SetAccent(r, g, b)
     local a = rawget(self, "accent")
     if not a then error("DandersUI: SetAccent must be called on a host, not on the library", 2) end
@@ -141,8 +163,23 @@ function UI:SetAccent(r, g, b)
     if not (r and g and b) then return end
     if a.r == r and a.g == g and a.b == b then return end
     a.r, a.g, a.b = r, g, b
-    for _, fn in ipairs(self.accentListeners) do
-        xpcall(fn, geterrorhandler(), a)
+
+    local list = rawget(self, "accentListeners")
+    if not list then return end
+    -- Compact FIRST, in place, then fire. Two passes rather than one because a
+    -- listener is free to register or unregister another from inside itself,
+    -- and rewriting the array underneath that would drop entries silently.
+    local count, n = #list, 0
+    for i = 1, count do
+        local e = list[i]
+        if (not e.hasOwner) or listenerOwners[e] ~= nil then
+            n = n + 1
+            list[n] = e
+        end
+    end
+    for i = count, n + 1, -1 do list[i] = nil end
+    for i = 1, n do
+        xpcall(list[i].fn, geterrorhandler(), a)
     end
 end
 
@@ -150,11 +187,39 @@ function UI:GetAccent()
     return rawget(self, "accent") or DEFAULT_ACCENT
 end
 
-function UI:RegisterAccentListener(fn)
+-- `owner` is optional and backwards compatible: RegisterAccentListener(fn)
+-- still registers a permanent listener exactly as it always did. Pass the
+-- widget the listener repaints and the entry becomes droppable -- by that
+-- owner, or automatically once nothing else references it.
+-- Returns the entry, which is also a valid handle for UnregisterAccentListener.
+function UI:RegisterAccentListener(fn, owner)
     if type(fn) ~= "function" then return end
     local list = rawget(self, "accentListeners")
     if not list then error("DandersUI: RegisterAccentListener must be called on a host", 2) end
-    tinsert(list, fn)
+    local entry = { fn = fn }
+    if owner ~= nil then
+        entry.hasOwner = true
+        listenerOwners[entry] = owner
+    end
+    tinsert(list, entry)
+    return entry
+end
+
+-- Drop a listener early. Takes the OWNER it was registered against, the
+-- listener function itself, or the entry Register handed back. Removes every
+-- match, so unregistering an owner clears all of its listeners at once.
+function UI:UnregisterAccentListener(what)
+    if what == nil then return self end
+    local list = rawget(self, "accentListeners")
+    if not list then return self end
+    for i = #list, 1, -1 do
+        local e = list[i]
+        if e == what or e.fn == what or listenerOwners[e] == what then
+            listenerOwners[e] = nil
+            tremove(list, i)
+        end
+    end
+    return self
 end
 
 -- ============================================================

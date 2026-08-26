@@ -381,7 +381,21 @@ function DF:CreateGUI()
     -- lives on the close button below and on the DF:ToggleGUI wrapper at the
     -- foot of this file; Esc (UISpecialFrames) hides directly and stays
     -- instant, as does the mover bridge's close-on-unlock.
-    frame:HookScript("OnShow", function(f) GUI.Fx.FadeIn(f, 0.3) end)
+    --
+    -- ★ AND IT IS WHERE THE CURRENT PAGE COMES BACK OUT OF THE PAGE DOCK. The
+    -- OnHide below parks it; this adopts it. Hooked on the FRAME rather than
+    -- bolted onto DF:ToggleGUI because several paths show this window directly
+    -- without going through a SelectTab afterwards (Core.lua's debug open, the
+    -- mover bridge, the test-mode reopen), and a window that came back blank on
+    -- any one of them would be a far worse bug than the one being fixed.
+    -- AdoptPage no-ops when the page is not parked, so this is free on the paths
+    -- that never parked it.
+    frame:HookScript("OnShow", function(f)
+        if GUI.AdoptPage and GUI.Pages and GUI.CurrentPageName then
+            GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
+        end
+        GUI.Fx.FadeIn(f, 0.3)
+    end)
     
     -- Allow closing with Escape key
     tinsert(UISpecialFrames, "DandersFramesGUI")
@@ -400,6 +414,15 @@ function DF:CreateGUI()
         -- Escape, /df, and the combat auto-close -- so this is the one place it
         -- needs saying. Guarded for an older embedded copy of the pack.
         if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("windowClosed") end
+
+        -- Park the page that was on screen (see THE PAGE DOCK). With the window
+        -- closed nothing needs it in the tree, and leaving it there is one more
+        -- subtree the next Show has to walk. It is NOT hidden -- its own shown
+        -- flag stays set, so the OnShow hook above brings it straight back
+        -- visible with a single SetParent and needs no state of its own.
+        if GUI.ParkPage and GUI.Pages and GUI.CurrentPageName then
+            GUI:ParkPage(GUI.Pages[GUI.CurrentPageName])
+        end
     end)
     
     -- Title bar (handles dragging like old addon)
@@ -1654,7 +1677,63 @@ function DF:CreateGUI()
     content:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     GUI.contentFrame = content
     GUI.tabFrame = tabFrame
-    
+
+    -- =========================================================================
+    -- THE PAGE DOCK
+    -- -------------------------------------------------------------------------
+    -- ☠ EVERY BUILT PAGE USED TO STAY PARENTED TO `content`, SHOWN OR NOT, and
+    -- that is what made opening the settings window take EIGHT SECONDS. Settings
+    -- search indexes by BUILDING every page (Search:BuildFullRegistry), so one
+    -- search leaves all 34 of them fully populated -- 700+ widgets, plus the
+    -- Aura/Text Designer machinery -- hanging hidden off this one frame. From
+    -- then on GUIFrame:Show() measured 7774ms and Hide() about 2000ms, with only
+    -- ~52 of our own OnShow handlers firing in the whole 7.7s: the cost is the
+    -- ENGINE walking that hidden subtree for visibility, not Lua we run.
+    -- Reparenting the non-current pages away dropped the same Show to 90ms.
+    --
+    -- So a page that is not the one on screen lives HERE instead: a detached,
+    -- permanently hidden frame with no parent at all, outside the window's tree
+    -- entirely. Deliberately NOT GUI._trashFrame -- trash means dead and never
+    -- coming back (that is where a rebuild retires a page's old children); the
+    -- dock means alive and parked, and every page in it is expected back.
+    --
+    -- ⚠ A parked page KEEPS ITS ANCHORS to `content` -- which is why the
+    -- SetPoint in CreateSubTab names `content` explicitly instead of leaning on
+    -- the omitted-relativeTo default. A parked page therefore still measures at
+    -- its real size and can be BUILT in place, which is exactly what search's
+    -- index pass does to all 34 of them.
+    GUI._pageDock = CreateFrame("Frame")
+    GUI._pageDock:Hide()
+
+    -- Move a page out of the window's frame tree. Idempotent and cheap; the page
+    -- is expected to be hidden already (every caller hides first).
+    function GUI:ParkPage(page)
+        if not page or page._parked then return end
+        page:SetParent(GUI._pageDock)
+        page._parked = true
+    end
+
+    -- ...and bring it back, re-asserting the anchors rather than trusting them to
+    -- have survived the round trip.
+    --
+    -- ⚠ Scale comes back WITH the parent. The dock sits at 1.0 while the window
+    -- is scaled, and a page must never register as a scaled surface (it is INSIDE
+    -- the window, so it would be scaled twice -- see RegisterScaledSurface), so
+    -- re-parenting is the whole of it: the page re-inherits the window's scale
+    -- chain and nothing caches an effective scale while it is parked.
+    --
+    -- Early-out when the page is not parked, so callers on hot paths
+    -- (RefreshCurrentPage, the window's OnShow) can call it unconditionally.
+    function GUI:AdoptPage(page)
+        if not page or not page._parked then return end
+        page:SetParent(content)
+        page._parked = nil
+        local inset = page._contentInset or 8
+        page:ClearAllPoints()
+        page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -inset, inset)
+    end
+
     -- =========================================================================
     -- CLICK CASTING PANEL (full width, replaces normal content when active)
     -- =========================================================================
@@ -1921,7 +2000,14 @@ function DF:CreateGUI()
         -- verbs. Guarded for an older embedded copy of the pack.
         if GUI.CloseUnpinnedPopoutRows then GUI:CloseUnpinnedPopoutRows("pageSwitch") end
 
-        for k, page in pairs(GUI.Pages) do page:Hide() end
+        -- Hide every page, and PARK the ones we are not about to show. Hiding
+        -- alone is what the eight-second window open was made of: a hidden page
+        -- still parented under the window is a subtree the engine walks on every
+        -- Show and Hide of it. See THE PAGE DOCK.
+        for k, page in pairs(GUI.Pages) do
+            page:Hide()
+            if k ~= name then GUI:ParkPage(page) end
+        end
         for k, btn in pairs(GUI.Tabs) do
             if btn.accent then btn.accent:Hide() end
             -- Check if tab is disabled (e.g., during Auto Profile editing)
@@ -1979,6 +2065,10 @@ function DF:CreateGUI()
                 DF.Search.CurrentSection = nil
             end
             
+            -- Out of the dock and back under the content frame BEFORE the Show,
+            -- so it is never shown while detached (and so RefreshCached below
+            -- builds against the real geometry).
+            GUI:AdoptPage(GUI.Pages[name])
             GUI.Pages[name]:Show()
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
             GUI.Pages[name]:RefreshCached()
@@ -2037,6 +2127,12 @@ function DF:CreateGUI()
             return
         end
         if GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName] then
+            -- Belt and braces for the reopen path: DF:ToggleGUI shows the window
+            -- and then calls this, and the window's OnShow has already adopted
+            -- the page by the time we get here -- but refreshing a page that is
+            -- still in the dock would lay out against nothing, so make sure.
+            -- No-ops when it is not parked.
+            GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
             GUI.Pages[GUI.CurrentPageName]:Refresh()
             if GUI.Pages[GUI.CurrentPageName].RefreshStates then
                 GUI.Pages[GUI.CurrentPageName]:RefreshStates()
@@ -2213,9 +2309,17 @@ function DF:CreateGUI()
         -- surface every page is measured against was the one it could not touch.
         -- Snapping the OFFSETS is the fix that works for a two-corner frame:
         -- correct the numbers going in, since the box itself can't be nudged.
+        --
+        -- ⚠ `content` IS NAMED EXPLICITLY, and the inset is kept on the page.
+        -- A page is reparented to the page dock whenever it is not the one on
+        -- screen (see THE PAGE DOCK), and these two points have to keep pointing
+        -- at the content frame across that trip -- a parked page that measured
+        -- zero could not be built, and search builds all of them. GUI:AdoptPage
+        -- re-asserts exactly these two lines from page._contentInset.
         local inset = SnapLen(content, 8) or 8
-        page:SetPoint("TOPLEFT", inset, -inset)
-        page:SetPoint("BOTTOMRIGHT", -inset, inset)
+        page._contentInset = inset
+        page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -inset, inset)
 
         StyleScrollBar(page)
 
