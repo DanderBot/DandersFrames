@@ -59,6 +59,12 @@ lua.globals().load_options_file_into = lambda name, tns: run(HERE.parents[1] / "
 # run the file. Read here rather than in Lua so the path resolves the same way
 # every other load does, whatever the cwd is.
 lua.globals().ui_file_source = lambda name: (HERE.parents[1] / "DandersUI" / name).read_text(encoding="utf-8")
+# ...and the same door for the options companion. A page file is far too tangled
+# in the panel to LOAD headlessly, but a constant it declares (the popout rows'
+# control counts) can still be read out of its source and asserted against what a
+# builder actually mounts -- which beats copying the number into the test and
+# letting the two drift.
+lua.globals().options_file_source = lambda name: (HERE.parents[1] / "DandersFrames_Options" / name).read_text(encoding="utf-8")
 
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
 for test in sorted(HERE.glob("test_*.lua")):

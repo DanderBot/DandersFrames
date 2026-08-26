@@ -514,5 +514,170 @@ else
     check(false, "split: GUI:CreateBorderShadowControls is not defined yet")
 end
 
+-- ============================================================
+-- 3. THE POPOUT SHAPE -- the same two builders with their toggles HOISTED
+-- Gate two puts Border and Border Shadow behind two popout ROWS, and a row
+-- carries the feature's on/off tick itself. So each builder is called with its
+-- own checkbox suppressed (noShowToggle / noEnableToggle) and mounts into a
+-- group of its own rather than into the page's Appearance box.
+--
+-- The claim is the same one section 2 makes, one step further: dropping the two
+-- toggles must remove EXACTLY those two rows and change nothing else --
+-- including the db seed, which is the headless half of the profile-export
+-- byte-identity gate. A build that seeds different keys (or seeds them at a
+-- different moment) can dirty a profile just by opening a panel.
+-- ============================================================
+if GUI.CreateBorderShadowControls then
+    -- The two halves of GOLDEN the popouts actually mount: rows 2-14 (border,
+    -- less "Show Border") and 16-19 (shadow, less "Border Shadow"). Written as
+    -- slices of the golden table rather than retyped, so a change to the
+    -- inventory reaches this test whether anyone remembered it or not.
+    local function slice(t, from, to)
+        local out = {}
+        for i = from, to do out[#out + 1] = t[i] end
+        return out
+    end
+    local BORDER_PANE, SHADOW_PANE = slice(GOLDEN, 2, 14), slice(GOLDEN, 16, 19)
+
+    -- Field for field against the golden rows, minus `slot`: a popout group
+    -- starts its own numbering at 1, and checkInventory has already asserted
+    -- each row reached ITS group in order.
+    local PANE_COMPARED = {}
+    for _, f in ipairs(COMPARED) do
+        if f ~= "slot" then PANE_COMPARED[#PANE_COMPARED + 1] = f end
+    end
+    local function compareToGolden(got, offset, tag)
+        for i = 1, #got do
+            for _, field in ipairs(PANE_COMPARED) do
+                local a, b = got[i][field], goldenRec[i + offset][field]
+                if field == "dbTable" then a, b = a ~= false, b ~= false end
+                eq(tostring(a), tostring(b),
+                   string.format("%s: row %d field %s matches the golden build", tag, i, field))
+            end
+        end
+    end
+
+    -- ---- the Border pane ----
+    local borderRec, shadowRec
+    local db = newDB(true)
+    local before = keySet(db)
+    local bw, sw
+    do
+        rec = {}
+        local tools = newTools()
+        bw = GUI:CreateBorderControls(newGroup(), db, "frame", {
+            parent  = tools.parent,
+            include = {
+                inset = true, offset = true, blendMode = true,
+                gradient = true,
+                classColor = true, roleColor = true,
+                alpha = true,
+            },
+            fullUpdate    = tools.full,
+            lightUpdate   = tools.light,
+            lightColors   = tools.colors,
+            refreshStates = tools.refresh,
+            sizeMin = 1, sizeMax = 16, sizeStep = 1,
+            noShowToggle  = true,
+        })
+        borderRec = rec
+        checkInventory(borderRec, BORDER_PANE, "border pane")
+        compareToGolden(borderRec, 1, "border pane")
+        eq(bw.show, nil, "border pane: the hoisted Show Border checkbox is gone")
+        eq(tools.fired.full + tools.fired.light + tools.fired.colors + tools.fired.refresh, 0,
+           "border pane: building fired no callbacks")
+    end
+
+    -- ---- the Border Shadow pane ----
+    do
+        rec = {}
+        local tools = newTools()
+        sw = GUI:CreateBorderShadowControls(newGroup(), db, "frame", {
+            parent        = tools.parent,
+            fullUpdate    = tools.full,
+            lightUpdate   = tools.light,
+            refreshStates = tools.refresh,
+            -- The Frame page hands this over inside the popout too: with Show
+            -- Border off the four sub-controls grey exactly as they do inline.
+            disableWhen   = function() return db.frameShowBorder == false end,
+            noEnableToggle = true,
+        })
+        shadowRec = rec
+        checkInventory(shadowRec, SHADOW_PANE, "shadow pane")
+        compareToGolden(shadowRec, 15, "shadow pane")
+        eq(sw.shadowEnabled, nil, "shadow pane: the hoisted Border Shadow checkbox is gone")
+        eq(tools.fired.full + tools.fired.light + tools.fired.colors + tools.fired.refresh, 0,
+           "shadow pane: building fired no callbacks")
+    end
+
+    -- ---- the db seed, which is the point ----
+    -- Two builders, two groups, one db: the writes have to be the golden path's
+    -- and only those. This is the headless half of the export byte-identity gate.
+    do
+        local added = newKeys(before, db)
+        eq(#added, 1, "popout seed: the same single write as the golden build")
+        eq(added[1], "frameBorderColorSource", "popout seed: ...the same key")
+        eq(db.frameBorderColorSource, "STATIC", "popout seed: ...with the same value")
+        eq(db.frameBorderColor.a, 0.8, "popout seed: an existing alpha is still left alone")
+    end
+
+    -- ...and the colourless profile, the two-write branch.
+    do
+        rec = {}
+        local t, db2 = newTools(), newDB(false)
+        local was = keySet(db2)
+        GUI:CreateBorderControls(newGroup(), db2, "frame", {
+            parent  = t.parent,
+            include = { inset = true, offset = true, blendMode = true, gradient = true,
+                        classColor = true, roleColor = true, alpha = true },
+            fullUpdate = t.full, lightUpdate = t.light, lightColors = t.colors,
+            refreshStates = t.refresh,
+            sizeMin = 1, sizeMax = 16, sizeStep = 1,
+            noShowToggle = true,
+        })
+        GUI:CreateBorderShadowControls(newGroup(), db2, "frame", {
+            parent = t.parent, fullUpdate = t.full, lightUpdate = t.light,
+            noEnableToggle = true,
+        })
+        local added = newKeys(was, db2)
+        eq(#added, 2, "popout seed: a db with no border colour still gets exactly two writes")
+        eq(added[1], "frameBorderColor", "popout seed: ...the colour table")
+        eq(added[2], "frameBorderColorSource", "popout seed: ...and the source")
+        eq(db2.frameBorderColor.a, 1, "popout seed: seeded fully opaque, as before")
+    end
+
+    -- ---- the grey the split still owes ----
+    -- Show Border no longer has a checkbox in either pane, but it still governs
+    -- both: the border controls through CreateBorderControls' own loop, the
+    -- shadow sub-controls through the disableWhen the page hands over.
+    do
+        db.frameShowBorder, db.frameBorderShadowEnabled = true, true
+        eq(bw.size.disableOn(nil), false, "popout grey: border on -- thickness is live")
+        eq(sw.shadowColor.disableOn(nil), false, "popout grey: ...and the shadow colour")
+        db.frameShowBorder = false
+        eq(bw.size.disableOn(nil), true, "popout grey: border off -- thickness greys")
+        eq(sw.shadowColor.disableOn(nil), true, "popout grey: ...and so does the shadow colour")
+        db.frameShowBorder = true
+        db.frameBorderShadowEnabled = false
+        eq(bw.size.disableOn(nil), false, "popout grey: shadow off -- the border controls are untouched")
+        eq(sw.shadowColor.disableOn(nil), true, "popout grey: ...and the shadow sub-controls grey on their own key")
+        db.frameBorderShadowEnabled = true
+    end
+
+    -- ---- and the numbers the ROWS declare ----
+    -- Read out of the page's source rather than retyped here: the count badge is
+    -- a CLAIM about how much is inside, the kit checks it against what a build
+    -- actually mounted, and this checks it against what the builders produce
+    -- before anyone gets in-game to see the mismatch reported.
+    local pageSrc = options_file_source("GUI/Pages/Options.lua")
+    local declaredBorder, declaredShadow =
+        pageSrc:match("BORDER_COUNT,%s*SHADOW_COUNT%s*=%s*(%d+)%s*,%s*(%d+)")
+    check(declaredBorder ~= nil, "counts: the Frame page declares both row counts in one place")
+    eq(tonumber(declaredBorder), #borderRec, "counts: the Border row's count is what its pane mounts")
+    eq(tonumber(declaredShadow), #shadowRec, "counts: the Border Shadow row's count is what its pane mounts")
+    eq(#borderRec, 13, "counts: which is 13 -- the golden 14 less the hoisted Show Border")
+    eq(#shadowRec, 4, "counts: and 4 -- the golden 5 less the hoisted Border Shadow")
+end
+
 -- ---- restore the global --------------------------------------------
 DandersFrames = savedDF
