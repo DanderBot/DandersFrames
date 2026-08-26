@@ -6698,6 +6698,32 @@ local function ensureOwner(frame, unit)
     owner = { frame = frame, anchor = anchor, container = c, unit = unit, slots = {}, seq = 0 }
     frame.dfSlotOwner = owner
     AuraContainer.stats.slotOwners = (AuraContainer.stats.slotOwners or 0) + 1
+
+    -- ☠ THE ANCHOR IS BORN AT FULL ALPHA AND NOTHING COMES BACK FOR IT.
+    -- In element-fade mode this anchor is the ONLY thing that fades Aura Designer
+    -- indicators out of range, and the pass that writes it runs on a range EDGE. The owner
+    -- is stood up LAZILY, on first slot acquisition — so an anchor created while the unit is
+    -- ALREADY out of range has missed the only trigger it will get, and
+    -- UpdateAuraDesignerAppearance skips its whole slot-host block when
+    -- GetSlotOwnerAlphaHost returns nil: no write, nothing queued, nothing to retry. The
+    -- indicator then sits at full brightness on a faded frame until the unit comes back
+    -- into range and leaves again.
+    --
+    -- ⚠ NOT A REGRESSION, AND THE HISTORY IS WHY IT LOOKS LIKE ONE. This area has been
+    -- fixed three times — 22086f49 gave the fade a legal target, 2a8507ef stopped the
+    -- squared fade and retried denied hosts on combat drop, 71163802 hardened the pass
+    -- against throws and added the restriction-lift retry. Every one of those is about a
+    -- write being ATTEMPTED AND REFUSED. This is the path where the write is never
+    -- attempted at all, so none of them could see it.
+    --
+    -- ✅ Field-diagnosed, not reasoned: the probe showed the pass HAD run and seen
+    -- inRange=false, nothing refused, anchor still 1.00 — and a forced ApplyOORAlpha took it
+    -- to 0.20 instantly. Writability was never the problem; being born after the trigger was.
+    -- Idempotent (it recomputes from db + the frame's own range state) and a no-op in
+    -- whole-frame mode, where the cascade already covers this anchor.
+    if DF.UpdateAuraDesignerAppearance then
+        pcall(DF.UpdateAuraDesignerAppearance, DF, frame)
+    end
     return owner
 end
 
