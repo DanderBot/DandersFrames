@@ -205,6 +205,10 @@ DF.EVERYDAY_COMMANDS = {
     help = true, console = true, users = true, reset = true, resetgui = true,
     test = true, hide = true, lock = true, unlock = true, raidlock = true,
     raidunlock = true, clearoverride = true,
+    -- Dev-facing but documented as a bare command (the popout demo's own
+    -- header says "/df popoutdemo"); without this entry the gate below reads
+    -- it as an unknown word and opens the settings window instead.
+    popoutdemo = true,
 }
 
 --- The typeable path for a command word, e.g. "dispel" -> "/df debug dispel".
