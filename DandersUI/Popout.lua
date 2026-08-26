@@ -212,13 +212,47 @@ function UI.PopoutIsAdjacent(a, b, gap)
     return dx <= gap and dy <= gap
 end
 
--- Rect of a region in UIParent-centre units; nil while it has no geometry yet.
+-- ---- the ink rect ------------------------------------------------
+
+-- WHICH PART OF A REGION IS ACTUALLY DRAWN. A region's frame and its INK are not
+-- always the same rect: a settings row occupies a layout slot that includes the
+-- gap to the next row, so its frame is RowGap taller than anything it paints. An
+-- outline laid over the frame is therefore visibly too tall, and a beam aimed at
+-- the frame's centre lands below the thing it is pointing at.
+--
+-- So a region may declare its own inset -- `region.popoutInset = { l, r, t, b }`,
+-- pixels trimmed off each edge -- and EVERY rect this file takes of a region
+-- honours it. One protocol, read in one place, so the dock, the tether, the clip
+-- gate, the beam and the outline cannot end up disagreeing about where a row is.
+-- The shell still knows nothing about rows: the region says which part of itself
+-- is ink, and the shell believes it.
+--
+-- ⚠ type(), not a truthiness test. A headless frame stub answers every unknown
+-- key with a no-op FUNCTION, so `region.popoutInset` is truthy on frames that
+-- have never declared one.
+local function insetOf(region)
+    local ins = region and region.popoutInset
+    if type(ins) ~= "table" then return 0, 0, 0, 0 end
+    return ins[1] or 0, ins[2] or 0, ins[3] or 0, ins[4] or 0
+end
+
+-- Rect of a region in UIParent-centre units, inset to its ink; nil while it has
+-- no geometry yet.
 local function rectOf(region)
     if not region or not region.GetCenter then return nil end
     local cx, cy = region:GetCenter()
     if not cx then return nil end
     local ux, uy = UIParent:GetCenter()
-    return { x = cx - ux, y = cy - uy, w = region:GetWidth() or 0, h = region:GetHeight() or 0 }
+    local x, y = cx - ux, cy - uy
+    local w, h = region:GetWidth() or 0, region:GetHeight() or 0
+    local l, r, t, b = insetOf(region)
+    if l ~= 0 or r ~= 0 or t ~= 0 or b ~= 0 then
+        -- Trimming the left edge moves the centre right by half of it, and so on
+        -- round the four; the size loses both edges of each axis.
+        x, y = x + (l - r) / 2, y + (b - t) / 2
+        w, h = max(w - l - r, 0), max(h - t - b, 0)
+    end
+    return { x = x, y = y, w = w, h = h }
 end
 
 -- Per dock side: the popout's OWN edge that faces the source, and the outward
@@ -340,6 +374,11 @@ local popoutMeta = { __index = Popout }
 -- UI.PopoutOutsidePos). Only "left"/"right" are meaningful for opts.side there.
 -- The mode lives on the instance, so a plain Follow afterwards clears it.
 --
+-- opts.clipTo = <region> names what actually CLIPS the source -- the scroll
+-- frame, not the window around it. The connected chrome hides while the source
+-- leaves that rect. Defaults to outsideOf, which is nearly always too generous
+-- by the window's own title bar and padding: see _TetherClipped.
+--
 -- RETARGETING a popout that is already up (a different region while it is
 -- following) GLIDES it across instead of teleporting: see _StartGlide.
 function Popout:Follow(region, opts)
@@ -348,6 +387,9 @@ function Popout:Follow(region, opts)
     self.source = region
     self.forcedSide = opts and opts.side or nil
     self.outsideOf = opts and opts.outsideOf or nil
+    -- The region that actually CLIPS the source (a scroll frame), which is not
+    -- the window -- see _TetherClipped.
+    self.clipTo = opts and opts.clipTo or nil
     self.free = false
     -- A pinned popout has been taken off its leash by hand; re-pointing its
     -- SOURCE (so the beam knows where to land) must not drag it back to it.
@@ -374,6 +416,7 @@ function Popout:PlaceFree(x, y)
     self.following = false
     self.gliding = false
     self.outsideOf = nil        -- absolute placement is not docked to anything
+    self.clipTo = nil           -- ...and nothing is clipping what it is not about
     local f = self.frame
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", x or 0, y or 0)
@@ -614,9 +657,21 @@ end
 --
 -- ⚠ IsShown() CANNOT ANSWER THIS. A row scrolled out of a scroll child is still
 -- shown -- it is CLIPPED by the scroll frame, and clipping leaves no flag on the
--- row. So in the settings placement the honest test is geometric: does the row's
--- rect still overlap the window it lives in. Outside that mode there is no
--- clipper to ask about, and the answer is always yes.
+-- row. So the honest test is geometric: does the row's rect still overlap the
+-- thing that clips it. With nothing declared to clip against, the answer is
+-- always yes.
+--
+-- ☠ THE CLIPPER IS NOT THE WINDOW. This used to test against `outsideOf`, and
+-- that is the wrong rect by exactly the window's own chrome: a settings window
+-- has a title bar, a blurb and its padding ABOVE the viewport, so a row scrolled
+-- off the top of the list stops being drawn while its rect still overlaps the
+-- window by 50-60px. For that whole stretch the beam, the point and the outline
+-- were drawn over the window's own title bar, pointing at a row nobody could
+-- see -- chrome hanging in mid-air, which is exactly what it looked like.
+--
+-- `Follow`'s opts.clipTo names the region that really clips (the scroll frame),
+-- and `outsideOf` remains the fallback so an existing caller keeps the old
+-- behaviour rather than silently losing the gate.
 --
 -- Only the CHROME is gated. The popout stays up and stays docked (its y clamps
 -- into the window's span, see PopoutOutsidePos) -- scrolling a list must not
@@ -624,11 +679,11 @@ end
 -- point and the source outline go, because all three are claims about a row that
 -- is no longer on screen.
 function Popout:_TetherClipped()
-    local win = self.outsideOf
-    if not win then return false end
-    local wr = rectOf(win)
-    if not wr then return false end
-    return not rectsOverlap(wr, rectOf(self:_TetherRegion()))
+    local clip = self.clipTo or self.outsideOf
+    if not clip then return false end
+    local cr = rectOf(clip)
+    if not cr then return false end
+    return not rectsOverlap(cr, rectOf(self:_TetherRegion()))
 end
 
 -- ---- the connection point ----------------------------------------
@@ -701,8 +756,14 @@ function Popout:_UpdateSourceOutline()
     if self._outlineOn ~= region then
         self._outlineOn = region
         o:ClearAllPoints()
-        o:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 0)
-        o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
+        -- INSET TO THE REGION'S INK, not laid over its frame. A settings row's
+        -- frame is its whole layout slot -- RowGap and all -- so the flush
+        -- version drew a box a clear 14px taller than the plate it was supposed
+        -- to be lighting, with the overhang sitting in the gap above the next
+        -- row. Same rect rectOf() reports, so outline, beam and clip gate agree.
+        local l, r, t, b = insetOf(region)
+        o:SetPoint("TOPLEFT", region, "TOPLEFT", l, -t)
+        o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", -r, b)
         local c = self:GetAccent()
         self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
     end

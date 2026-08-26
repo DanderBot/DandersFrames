@@ -756,5 +756,50 @@ do
     p:Close()
 end
 
+-- ============================================================
+-- 13. WHAT THE ROW TELLS THE SHELL ABOUT ITSELF
+-- The shell knows nothing about rows, so everything it needs to draw the
+-- connected chrome correctly has to be declared BY the row: which part of its
+-- slot is actually painted, and what really clips it.
+-- ============================================================
+do
+    local win, view = window(), window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Inked", db = {}, build = counting("ink", 50),
+        window = win, clipTo = view,
+    }))
+
+    -- The row's frame is its whole layout SLOT; the bottom RowGap of it is the
+    -- gap to the next row and nothing paints there. Without this the source
+    -- outline was drawn a clear RowGap taller than the plate it was lighting.
+    local ins = row.popoutInset
+    eq(type(ins), "table", "ink: the row declares which part of its slot is drawn")
+    eq(ins[4], UI.RowGap, "ink: the bottom trim is exactly the slot's gap to the next row")
+    eq((ins[1] or 0) + (ins[2] or 0) + (ins[3] or 0), 0,
+        "ink: and nothing else is trimmed -- the plate is flush with the slot otherwise")
+    eq(row:GetHeight() - ins[4], PLATE_H, "ink: so what is left is the plate")
+
+    row:OpenPopout()
+    local po = row.popout
+    eq(po.outsideOf, win, "ink: the row hands the shell the window it stands outside of")
+    eq(po.clipTo, view, "ink: ...and, separately, the thing that really clips it")
+
+    -- The stub resolves no anchors, so the outline's offsets are the claim.
+    local tl, br = po.srcOutline._points[1], po.srcOutline._points[2]
+    eq(tl[5], 0, "ink: the outline's top is the row's own top")
+    eq(br[5], UI.RowGap, "ink: and its bottom lifts clear of the slot's gap")
+    row:ClosePopout()
+
+    -- No clipTo declared: the shell falls back to the window rather than losing
+    -- the gate outright.
+    local bare = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Bare", db = {}, build = counting("inkbare", 50), window = win,
+    }), -80)
+    bare:OpenPopout()
+    eq(bare.popout.clipTo, nil, "ink: a row with no clipper declares none")
+    check(not bare.popout:_TetherClipped(), "ink: ...and the window still gates it")
+    bare:ClosePopout()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit

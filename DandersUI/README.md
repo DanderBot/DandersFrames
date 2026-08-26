@@ -217,7 +217,7 @@ draws neither.
 | Call | Purpose |
 |---|---|
 | `po:Follow(region, opts)` | Dock beside `region` and track it. `opts.side` forces `"left"` / `"right"` / `"above"` / `"below"`; without it the side is whichever fits on screen. Handed a NEW region while already up and following, it glides across. On a pinned popout it only re-points the tether |
-| `po:Follow(row, { outsideOf = window })` | The **settings placement**: `row` lives inside `window` (typically in a scroll child), and the popout docks outside the WINDOW's vertical edge at the ROW's height rather than beside the row — so it never covers the list the row was picked from. Only `"left"` / `"right"` are meaningful for `opts.side`; it flips to the window's left edge when the right lacks screen room. The tether chrome stays on the ROW, and hides (popout still up and docked) while the row is scrolled out of the window's rect. A plain `Follow` clears the mode |
+| `po:Follow(row, { outsideOf = window, clipTo = viewport })` | The **settings placement**: `row` lives inside `window` (typically in a scroll child), and the popout docks outside the WINDOW's vertical edge at the ROW's height rather than beside the row — so it never covers the list the row was picked from. Only `"left"` / `"right"` are meaningful for `opts.side`; it flips to the window's left edge when the right lacks screen room. The tether chrome stays on the ROW and hides (popout still up and docked) while the row is scrolled out of view. **`clipTo` is what decides that**, and it should be the scroll frame, not the window: a window's own title bar and padding sit inside the window and outside the viewport, so gating on the window leaves the beam and outline drawn over that chrome for the 50-odd pixels between the row leaving the list and its rect leaving the window. Omitted, it falls back to `outsideOf`. A plain `Follow` clears both |
 | `po:PlaceFree(x, y)` | Absolute placement, for consumers that own their own layout: no source, so nothing to follow and nothing to tether to. Stops a glide |
 | `po:Pin([silent])`, `po:AutoPin()`, `po:IsPinned()` | Take it off its leash: it stops following, drops the connection point, beam and source outline, becomes draggable by its title bar, and from there the only way out is the cross. `AutoPin` is the same thing gated on `canAutoPin` and without the confirm pop |
 | `po:SetHeader(title, icon)`, `po:GetTitle()` | Title bar contents |
@@ -238,6 +238,14 @@ without reading `Popout.lua`. The title bar is `UI.PopoutTitleHeight` tall and
 holds the icon, the caption, whatever `headerControls` returned, the pin and the
 cross; the content hangs one `PAD` below it, with the same `PAD` under and either
 side of it.
+
+**The ink rect.** A region's frame and the part of it that is actually painted
+are not always the same rect — a settings row's frame is its whole layout slot,
+gap to the next row included. Any region the shell tethers to may declare
+`region.popoutInset = { left, right, top, bottom }` (pixels trimmed off each
+edge), and every rect the shell takes of it honours that: the source outline is
+drawn round the ink, the beam aims at the ink, the clip gate tests the ink, and
+the settings placement measures the ink. Undeclared means "the whole frame".
 
 ### Popout rows (options manifest)
 
@@ -269,6 +277,7 @@ unchanged).
 | `accent` | per-row accent override; `enabled` — bool or `fn(db)`, false greys the whole row (popout still opens) |
 | `onToggle(v)` | after a toggle write from the row OR the popout header (one write path, both stay in sync) |
 | `window` | **required** to open: the frame the popout docks outside of |
+| `clipTo` | the region that actually clips this row — the scroll frame the list lives in. The popout's connected chrome hides while the row is scrolled out of it. Omitted, the shell falls back to `window`, which is too generous by that window's own title bar and padding |
 | `title` | popout header title (default: `label`) |
 
 Returns the row frame with `.Refresh()` / `.refreshContent(db)` (the settings-group

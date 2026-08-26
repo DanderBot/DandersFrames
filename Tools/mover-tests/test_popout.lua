@@ -1214,6 +1214,80 @@ do
     p:Close()
 end
 
+-- ---- the clipper is not the window --------------------------------
+-- ☠ A settings window is not its list. Its title bar, its blurb and its padding
+-- all sit INSIDE the window and OUTSIDE the viewport, so a row scrolled off the
+-- top of the list stops being drawn a good 50px before its rect stops
+-- overlapping the window. Gated on the window, the beam and the outline spent
+-- that whole stretch drawn over the window's own title bar, pointing at a row
+-- nobody could see. opts.clipTo names the rect that really clips.
+do
+    local win = outsideWindow()
+    -- The viewport: the window less 72px of chrome above the list and padding
+    -- below it, so it spans y = -200 .. 164 where the window spans -200 .. 200.
+    local view = source(WIN_W - 24, WIN_H - 72, CX, CY - 36)
+    local row = outsideRow()
+    local p = popout({ key = "outsideclipto" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win, clipTo = view })
+    check(p.beam:IsShown() and p.srcOutline:IsShown(), "clipto: in the viewport, the chrome is up")
+
+    -- Scrolled up behind the window's own title bar: the row spans 170..210 --
+    -- clean out of the VIEWPORT, still comfortably inside the WINDOW.
+    row:SetFakeCenter(CX + ROW.x, CY + 190)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    check(p:_TetherClipped(), "clipto: gated on the viewport, that row counts as clipped")
+    check(not p.beam:IsShown(), "clipto: so the beam goes")
+    check(not p.srcOutline:IsShown(), "clipto: and the outline with it")
+    check(p:IsShown() and not p.closed, "clipto: while the popout itself stays up, as ever")
+
+    -- The very same rects with no clipTo. This is the old answer, and it is the
+    -- bug: the window alone still calls that row visible.
+    p.clipTo = nil
+    check(not p:_TetherClipped(), "clipto: the window alone reads the same row as still on screen")
+    p:Close()
+end
+
+-- ---- the ink rect: a region says which part of it is drawn ---------
+-- A settings row's frame is its whole layout SLOT, gap to the next row included,
+-- and nothing is painted in that gap. `region.popoutInset` trims it, and every
+-- rect the shell takes honours it -- so the outline is drawn round the plate
+-- rather than round the slot, and the beam aims at the plate.
+-- A DELIBERATELY EXAGGERATED trim -- 30 of the 40-tall slot, leaving a 10-tall
+-- strip of ink along its top. A real row trims RowGap, but at that size the
+-- beam's landing point falls inside the ink either way and the claim below could
+-- not tell a working inset from a broken one.
+local INK_TRIM = 30
+do
+    local win = outsideWindow()
+    local row = outsideRow()
+    row.popoutInset = { 0, 0, 0, INK_TRIM }
+    local p = popout({ key = "outsideink" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+
+    -- The ink's TOP is the frame's top, and the top is what the placement reads.
+    -- Trimming the slot's gap must therefore not move the popout at all.
+    eq(p.frame._points[1][5], OUT_Y, "ink: trimming the slot's gap does not move the popout")
+
+    -- The stub resolves no anchors, so the outline's OFFSETS are the claim: it is
+    -- inset by the trim rather than laid flush over the frame.
+    local tl, br = p.srcOutline._points[1], p.srcOutline._points[2]
+    eq(tl[1], "TOPLEFT", "ink: the outline still starts at the region's top-left")
+    eq(tl[4], 0, "ink: ...flush on x")
+    eq(tl[5], 0, "ink: ...and on y, because nothing is trimmed off the top")
+    eq(br[1], "BOTTOMRIGHT", "ink: and it ends at the region's bottom-right")
+    eq(br[5], INK_TRIM, "ink: lifted clear of the trimmed gap")
+
+    -- The beam stops at the INK's bottom edge rather than reaching down into the
+    -- part of the slot that paints nothing: the ink is the top (ROW_H - INK_TRIM)
+    -- of the slot, so its bottom edge is that far below the row's top.
+    local inkBottom = ROW.y + ROW_H / 2 - (ROW_H - INK_TRIM)
+    check(p.beam.core._end.y >= inkBottom,
+        "ink: and the beam lands on the plate, not down in the slot's empty gap")
+    p:Close()
+end
+
 -- Outside the mode there is no clipper to ask about, so an ordinary popout is
 -- never gated by any of this.
 do

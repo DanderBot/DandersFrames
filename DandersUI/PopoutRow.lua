@@ -323,6 +323,13 @@ end
 --              still opens -- the controls inside gate themselves
 --   onToggle   fn(newValue) after a toggle write from either place
 --   window     REQUIRED for opening: the window frame the popout docks outside
+--   clipTo     the region that actually CLIPS this row -- the scroll frame the
+--              list lives in. The popout's connected chrome hides while the row
+--              is scrolled out of it. Without one the shell falls back to the
+--              WINDOW, which is too generous by the window's own title bar and
+--              padding: the beam and outline then hang over that chrome for the
+--              50-odd pixels between the row leaving the viewport and its rect
+--              leaving the window
 --   popoutKey  override the shared pool key (default: one per host)
 --   title      popout header title (default: label)
 --
@@ -341,12 +348,20 @@ function UI:CreatePopoutRow(parent, opts)
     row:SetSize(260, ROW_H)
     row.preferredHeight = ROW_H
     row.fixedRowHeight = true
+    -- WHICH PART OF THIS FRAME IS INK. The row's frame is its whole layout SLOT,
+    -- and the bottom RowGap of that slot is the gap to the next row -- nothing is
+    -- painted there. The popout shell reads this off any region it tethers to
+    -- (Popout.lua's insetOf), so the source outline is drawn round the PLATE
+    -- rather than round the slot, and the beam aims at the plate's centre. Left
+    -- flush with the frame, because the plate is.
+    row.popoutInset = { 0, 0, 0, UI.RowGap }
 
     row._label   = opts.label or ""
     row._title   = opts.title or row._label
     row._count   = opts.count
     row._build   = opts.build
     row._window  = opts.window
+    row._clipTo  = opts.clipTo
     row._key     = opts.popoutKey or DEFAULT_KEY
     row._accent  = normColor(opts.accent)
     row._hasToggle = opts.toggle ~= nil
@@ -521,7 +536,7 @@ function UI:CreatePopoutRow(parent, opts)
         -- from the frame's height, and a popout placed at the previous row's
         -- height would land in the wrong place and then jump.
         swapTo(po, row)
-        po:Follow(row, { outsideOf = row._window })
+        po:Follow(row, { outsideOf = row._window, clipTo = row._clipTo })
         row.popout = po
         if not po.pinned then storeFor(host).shared[row._key] = po end
         return row
