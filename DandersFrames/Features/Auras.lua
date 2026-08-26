@@ -247,11 +247,11 @@ local DISPEL_SPELLS = {
         { id = 213644, types = { Poison = true, Disease = true } },             -- Cleanse Toxins         UNVERIFIED
     },
     PRIEST = {
-        { id = 527,    types = { Magic = true } },                              -- Purify (Disc/Holy)     UNVERIFIED
-        { id = 213634, types = { Disease = true } },                            -- Purify Disease (Shadow) UNVERIFIED
+        { id = 527,    types = { Magic = true } },                              -- Purify (Disc/Holy)     ✅ 2026-08-26
+        { id = 213634, types = { Disease = true } },                            -- Purify Disease (Shadow) ✅ 2026-08-26
         -- ★ THE REPORTED CASE. Disc/Holy cure disease only with this talent, and the engine
         -- flag claims they always can.
-        { id = 390632, types = { Disease = true }, talent = true },              -- Improved Purify        UNVERIFIED
+        { id = 390632, types = { Disease = true }, talent = true },              -- Improved Purify        ✅ 2026-08-26
     },
     SHAMAN = {
         { id = 77130,  types = { Magic = true, Curse = true } },                -- Purify Spirit (Resto)  UNVERIFIED
