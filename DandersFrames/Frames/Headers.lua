@@ -5232,6 +5232,16 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
                         header:SetAttribute("nameList", "")
                         header:SetAttribute("sortMethod", "NAMELIST")
                         header:SetAttribute("groupFilter", nil)
+                        -- Nil EVERY attribute ApplyRaidGroupSorting ever nil-clears,
+                        -- not just the ones this block cares about. The clear below
+                        -- empties the cache, and a nil write against an empty cache
+                        -- entry compares equal and is skipped -- so anything left live
+                        -- here (groupBy/groupingOrder from the native role branch)
+                        -- would survive into a later NAMELIST pass and re-sort the group.
+                        header:SetAttribute("groupBy", nil)
+                        header:SetAttribute("groupingOrder", nil)
+                        header:SetAttribute("roleFilter", nil)
+                        header:SetAttribute("strictFiltering", nil)
                         -- Written raw, so drop SetHeaderAttribute's cache: it still
                         -- describes what ApplyRaidGroupSorting last set, and would
                         -- skip the writes that bring the group back.
@@ -5264,6 +5274,14 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
                     header:SetAttribute("nameList", "")
                     header:SetAttribute("sortMethod", "NAMELIST")
                     header:SetAttribute("groupFilter", nil)
+                    -- Nil EVERY attribute ApplyRaidGroupSorting ever nil-clears (see
+                    -- the twin block above): the clear below empties the cache, and a
+                    -- nil write against an empty cache entry is skipped, so anything
+                    -- left live here would survive the switch back to grouped mode.
+                    header:SetAttribute("groupBy", nil)
+                    header:SetAttribute("groupingOrder", nil)
+                    header:SetAttribute("roleFilter", nil)
+                    header:SetAttribute("strictFiltering", nil)
                     -- Written raw, so drop SetHeaderAttribute's cache: it still
                     -- describes what ApplyRaidGroupSorting last set, and would skip
                     -- the writes that restore the grouped layout on the way back.
@@ -6108,9 +6126,14 @@ function DF:SetRaidSorting(sortMethod, groupBy, groupingOrder)
         for i = 1, 8 do
             local header = DF.raidSeparatedHeaders[i]
             if header then
-                -- Use empty string "" to actually clear attributes
-                header:SetAttribute("groupingOrder", groupingOrder or "")
-                header:SetAttribute("groupBy", groupBy or "")
+                -- nil, NOT "" -- opposite of the flat header above, deliberately.
+                -- An empty string is a live value to SecureGroupHeaderTemplate, and
+                -- once the cache is dropped below, ApplyRaidGroupSorting's nil clear
+                -- compares equal to the empty cache entry and is skipped, leaving
+                -- groupBy="" applied. That used to be harmless because the raid loop
+                -- wrote its nils raw and unconditionally every tick; it no longer does.
+                header:SetAttribute("groupingOrder", groupingOrder)
+                header:SetAttribute("groupBy", groupBy)
                 if sortMethod then
                     header:SetAttribute("sortMethod", sortMethod)
                 end
