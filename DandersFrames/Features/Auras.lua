@@ -259,7 +259,11 @@ local DISPEL_SPELLS = {
     MAGE = {
         { id = 475,    types = { Curse = true } },                               -- Remove Curse
         -- ⚠ Grants Magic AS WELL as Curse — the half a from-memory entry drops.
-        { id = 412113, types = { Curse = true, Magic = true } },                 -- Greater Invisibility line
+        -- ☠ 412113 WAS HERE AND DOES NOT RESOLVE ON RETAIL — "(name unavailable)" in the
+        -- first mage dump, the same failure as the paladin's 1152. Taken from LibDispel,
+        -- where it is probed with no era guard and would have contributed a Magic claim
+        -- mages do not have. Second import from the same source to fail the name check,
+        -- which is the argument for the name column existing at all.
     },
     MONK = {
         { id = 115450, types = { Magic = true, Poison = true, Disease = true } },-- Detox (Mistweaver)
