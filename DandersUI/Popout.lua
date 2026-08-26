@@ -403,6 +403,15 @@ function Popout:Follow(region, opts)
     -- The region that actually CLIPS the source (a scroll frame), which is not
     -- the window -- see _TetherClipped.
     self.clipTo = opts and opts.clipTo or nil
+    -- Docking against a window: the popout (and the beam synced just under it)
+    -- must render ABOVE that window and its children -- a scrollbar sitting on
+    -- top of the beam reads as the link being cut.
+    if self.outsideOf and self.outsideOf.GetFrameLevel and self.frame.SetFrameLevel then
+        local wl = self.outsideOf:GetFrameLevel() or 1
+        if (self.frame:GetFrameLevel() or 0) <= wl + 10 then
+            self.frame:SetFrameLevel(wl + 10)
+        end
+    end
     self.free = false
     -- A pinned popout has been taken off its leash by hand; re-pointing its
     -- SOURCE (so the beam knows where to land) must not drag it back to it.
@@ -983,7 +992,13 @@ function Popout:_EnsureBeam()
     -- rect, so the lines still span the gap.
     local b = CreateFrame("Frame", nil, self.frame:GetParent() or UIParent)
     b:SetAllPoints(UIParent)
-    b:SetFrameStrata("BACKGROUND")
+    -- DIALOG, same strata as the source outline and the popout itself: on
+    -- BACKGROUND the beam ran UNDER whatever window it crossed, so a settings
+    -- window's scrollbar cut the link in half. The LEVEL is synced to sit just
+    -- under the popout on every beam update (see _UpdateBeam) -- the "beam
+    -- emerges from under the notch" trick needs it beneath the popout, and the
+    -- popout is raised above the window it docks against.
+    b:SetFrameStrata("DIALOG")
     b:Hide()
     -- Guarded, and cached as FALSE rather than nil so the guard is asked once:
     -- a headless stub (or any surface without Line objects) simply never gets a
@@ -1033,6 +1048,14 @@ function Popout:_UpdateBeam()
     self:_UpdateNotch()
 
     local b = self:_EnsureBeam()
+    -- Just under the popout, every update: the popout's own level moves (it is
+    -- raised over whatever window it docks against), and the beam must stay in
+    -- the sliver between that window's children and the popout so the notch
+    -- still covers its root.
+    if b.SetFrameLevel and self.frame.GetFrameLevel then
+        local pl = self.frame:GetFrameLevel() or 2
+        b:SetFrameLevel(pl > 1 and pl - 1 or 1)
+    end
     local c = self:GetAccent()
     for _, line in ipairs({ b.glow, b.core }) do
         if line then
