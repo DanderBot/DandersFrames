@@ -546,6 +546,9 @@ end
 --              FUNCTION -> table, re-resolved on every refresh
 --   toggle     { db = t|fn, key = "k" }  (db defaults to opts.db)
 --              OR { get = fn, set = fn(v) }
+--              A {db, key} write goes through the host's interceptWrite /
+--              onSettingWritten hooks, like every other db-bound widget in the
+--              kit; a {get, set} one does not -- see row._Write
 --              OFF also GATES the popout: every widget in this row's pane greys
 --              and stops taking input. The popout's own header toggle, pin and
 --              cross stay live -- see THE OFF GATE above
@@ -791,6 +794,20 @@ function UI:CreatePopoutRow(parent, opts)
     -- THE ONE WRITE PATH. The row's tick and the popout header's tick both come
     -- through here, so neither can write somewhere the other does not read, and
     -- the refresh that follows repaints BOTH.
+    --
+    -- ☠ A {db, key} TOGGLE IS A SETTING, AND SETTINGS GO THROUGH THE HOST'S
+    -- SETTING HOOKS. Every other db-bound widget in the kit brackets its write
+    -- with interceptWrite / onSettingWritten (Widgets.lua: the slider's
+    -- OnValueChanged, the dropdown menu button's OnClick, the align grid's
+    -- WriteKey), because a consumer may be running a RUNTIME OVERLAY -- where the
+    -- write belongs to a baseline table rather than the live one -- or EDITING a
+    -- layout, where the write also has to be recorded as an override. This row's
+    -- tick used to write the key bare, so a tick and an ordinary checkbox bound to
+    -- the SAME key disagreed: half the consumer's own panel honoured its overlay
+    -- and half of it wrote straight through. One key, one write path.
+    --
+    -- A {get, set} toggle is NOT the kit's db to gate -- set() IS the consumer's
+    -- write path, and it is left entirely alone.
     function row._Write(v)
         v = v and true or false
         local t = opts.toggle
@@ -798,7 +815,21 @@ function UI:CreatePopoutRow(parent, opts)
             if t.set then safeCall(t.set, v)
             else
                 local tdb = resolveDB(t.db or opts.db)
-                if tdb and t.key then tdb[t.key] = v end
+                if tdb and t.key then
+                    if host:Call("interceptWrite", tdb, t.key, v) then
+                        -- REDIRECTED: the live value did not change, so neither
+                        -- the write nor onToggle happens -- exactly what the
+                        -- slider and the dropdown do (they return before their
+                        -- callback) and what the align grid spells out as
+                        -- `if liveWrite and callback`. The Refresh still runs:
+                        -- the tick has already moved ITSELF by the time it gets
+                        -- here, and only a re-read puts it back on the live value.
+                        row.Refresh()
+                        return
+                    end
+                    tdb[t.key] = v
+                    host:Call("onSettingWritten", tdb, t.key, v)
+                end
             end
         end
         safeCall(opts.onToggle, v)

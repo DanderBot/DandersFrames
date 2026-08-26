@@ -569,6 +569,138 @@ do
     eq(row.summary:GetText(), "custom", "get/set: and the row re-read through the getter")
 end
 
+-- ---- the tick writes through the host's SETTING HOOKS -----------------
+-- A {db, key} toggle is a setting like any other, so it takes the route every
+-- db-bound widget in Widgets.lua takes: interceptWrite first (the consumer may
+-- redirect the write to a baseline it keeps under a runtime overlay), then the
+-- plain write, then onSettingWritten (the consumer may record it as an override
+-- while a layout is being edited). The row's tick and an ordinary checkbox bound
+-- to the SAME key have to be ONE write path, or half a consumer's panel honours
+-- its overlay and half of it writes straight through.
+--
+-- A host with both hooks and a log of what they were handed, in order. `intercept`
+-- is what interceptWrite answers -- true stands for "this write was redirected".
+local function hookedHost(intercept)
+    local log = {}
+    local h = setmetatable({ hooks = {
+        L = L,
+        interceptWrite = function(db, key, value)
+            log[#log + 1] = { "interceptWrite", db, key, value }
+            return intercept and true or false
+        end,
+        onSettingWritten = function(db, key, value)
+            log[#log + 1] = { "onSettingWritten", db, key, value }
+        end,
+    } }, { __index = UI })
+    return h, log
+end
+
+-- A PLAIN write: both hooks fire, in order, and everything else happens as before.
+do
+    local h, log = hookedHost(false)
+    local db, seen = { on = false }, {}
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Hooked", db = db, toggle = { key = "on" },
+        onToggle = function(v) seen[#seen + 1] = v end,
+        summary = function() return "on" end,
+        build = counting("hookplain", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(db.on, true, "hooks: a write nobody redirected still lands in the db")
+    eq(#log, 2, "hooks: both hooks were consulted, once each")
+    eq(log[1][1], "interceptWrite", "hooks: the intercept is asked FIRST -- before the value is written")
+    eq(log[2][1], "onSettingWritten", "hooks: ...and the record is made after it landed")
+    check(log[1][2] == db, "hooks: the hook is handed the RESOLVED db table")
+    eq(log[1][3], "on", "hooks: ...the key")
+    eq(log[1][4], true, "hooks: ...and the value being written")
+    check(log[2][2] == db, "hooks: onSettingWritten sees the same table")
+    eq(log[2][4], true, "hooks: ...and the value that landed")
+    eq(seen[1], true, "hooks: onToggle fired with the new value")
+    eq(row.summary:GetText(), "on", "hooks: and the row refreshed off the db")
+end
+
+-- An INTERCEPTED write: the live table is untouched, nothing is recorded, and the
+-- tick goes back to the live value. onToggle does NOT fire -- the same decision
+-- the slider and the dropdown make (both return before their callback), because
+-- there is no new live value for a consumer to act on.
+do
+    local h, log = hookedHost(true)
+    local db, seen = { on = false }, {}
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Redirected", db = db, toggle = { key = "on" },
+        onToggle = function(v) seen[#seen + 1] = v end,
+        summary = function() return "on" end,
+        build = counting("hookintercept", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(db.on, false, "intercept: the redirected write never touched the live table")
+    eq(#log, 1, "intercept: and no override was recorded for a write that did not land")
+    eq(log[1][1], "interceptWrite", "intercept: the intercept is the only hook that ran")
+    eq(#seen, 0, "intercept: onToggle did NOT fire -- the live value did not change")
+    check(row.checkButton:GetChecked() == false, "intercept: the tick re-read the live value and went back")
+    eq(row.summary:GetText(), "Off", "intercept: ...and the row still reads off")
+end
+
+-- A HOOKLESS host -- the demo, DandersMover, anything that never declared these
+-- -- writes exactly as it did before. host:Call answers nil for a missing hook,
+-- so the intercept branch can never be taken.
+do
+    local db, seen = { on = false }, {}
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Hookless", db = db, toggle = { key = "on" },
+        onToggle = function(v) seen[#seen + 1] = v end,
+        summary = function() return "on" end,
+        build = counting("hookless", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(db.on, true, "hookless: a host with no setting hooks writes the db as before")
+    eq(seen[1], true, "hookless: ...and onToggle fires as before")
+    eq(row.summary:GetText(), "on", "hookless: ...and the row refreshed as before")
+end
+
+-- A {get, set} toggle is the CONSUMER'S write path, so the hooks are not its
+-- business -- an intercept that would have swallowed a db write does not touch it.
+do
+    local h, log = hookedHost(true)
+    local stored = false
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Custom hooked", db = {},
+        toggle = { get = function() return stored end, set = function(v) stored = v end },
+        summary = function() return "custom" end,
+        build = counting("hookgetset", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(stored, true, "get/set hooks: the consumer's own setter took the write")
+    eq(#log, 0, "get/set hooks: ...and the setting hooks were never consulted")
+end
+
+-- The POPOUT HEADER'S tick goes through the same hooked path, because it goes
+-- through the same _Write. Section 5 proves the two ticks agree about the db;
+-- this proves they agree about who gets TOLD.
+do
+    local h, log = hookedHost(false)
+    local db, win = { on = false }, window()
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Header hooked", db = db, toggle = { key = "on" },
+        summary = function() return "on" end,
+        count = 1, build = counting("hookheader", 40, 1), window = win,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    po._hdrToggle:SetChecked(true)
+    po._hdrToggle:GetScript("OnClick")(po._hdrToggle)
+    eq(db.on, true, "header hooks: the header's tick wrote the db")
+    eq(#log, 2, "header hooks: through the SAME bracketed write path as the row's")
+    eq(log[1][1], "interceptWrite", "header hooks: intercept first")
+    eq(log[2][1], "onSettingWritten", "header hooks: ...record after")
+    eq(log[1][3], "on", "header hooks: on the row's own key")
+    row:ClosePopout()
+end
+
 -- ============================================================
 -- 6. ONE PANEL ACROSS ROWS
 -- The point of the whole widget: clicking another row does not open another
