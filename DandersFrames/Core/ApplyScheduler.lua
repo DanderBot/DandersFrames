@@ -97,6 +97,7 @@ local COMBAT_UNSAFE = {
 
 local pending = {}      -- kind -> true while a request is outstanding
 local batch = {}        -- reused snapshot buffer, so a drain allocates nothing
+local postDrain = {}    -- listeners run after a drain that actually ran work
 
 local DF_Apply = {}
 DF.Apply = DF_Apply
@@ -183,6 +184,16 @@ local function DrainNow()
             DebugError("no %s on DF for kind '%s'", TARGET[kind], kind)
         end
     end
+
+    -- The new geometry is on screen at this point, which is the whole reason
+    -- this seam exists: a listener that has to MEASURE what a sweep produced
+    -- (rather than know what it was asked to do) has nowhere earlier to stand.
+    -- Each one is fenced off in its own pcall so a listener that throws cannot
+    -- take the drain -- or the listener after it -- down with it.
+    for i = 1, #postDrain do
+        local ok, err = pcall(postDrain[i])
+        if not ok then DebugError("post-drain listener %d failed: %s", i, tostring(err)) end
+    end
 end
 
 if CreateFrame then
@@ -238,6 +249,27 @@ end
 --- rendered frame) can step it without a real OnUpdate. Prefer Flush().
 function DF_Apply:Drain()
     DrainNow()
+end
+
+--- Run `fn` at the END of every drain that ran at least one kind -- i.e. once
+--- per rendered frame in which the addon re-applied any layout, after the new
+--- sizes and positions have landed. Nothing runs it on an empty drain, and
+--- nothing runs it for a kind that combat held back (that work replays at
+--- PLAYER_REGEN_ENABLED, and so does this).
+---
+--- ⚠ A LISTENER MAY REQUEST KINDS, BUT IT MUST CONVERGE. A request made from
+--- here re-arms the drain for the next frame like any other; a listener that
+--- re-requests unconditionally is an unbounded loop. Ask only when the thing
+--- you measured actually changed.
+---
+--- Registration is permanent (there is no remove): the listeners are module-level
+--- wiring set up once at load, not per-page subscriptions.
+function DF_Apply:AddPostDrain(fn)
+    if type(fn) ~= "function" then
+        DebugError("AddPostDrain: expected a function, got %s", type(fn))
+        return
+    end
+    postDrain[#postDrain + 1] = fn
 end
 
 -- ============================================================

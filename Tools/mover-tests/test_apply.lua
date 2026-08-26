@@ -295,5 +295,105 @@ do
     eq(errs, 1, "missing _Now body is reported once")
 end
 
+-- ---- post-drain listeners -------------------------------------------
+-- The seam for anything that has to MEASURE what a sweep produced rather than
+-- know what it was asked for -- DandersFrames/Features/MoverBridge.lua re-solves
+-- anchors from here, because a frame RESIZE moves an anchor target without any
+-- of the position functions it hooks ever running.
+do
+    local df = loadScheduler()
+    check(type(df.Apply.AddPostDrain) == "function", "AddPostDrain exists")
+
+    df.Apply:AddPostDrain(function() df.order[#df.order + 1] = "post" end)
+
+    -- Nothing pending: no drain, and so no listener.
+    df.Apply:Flush()
+    eq(joined(df.order), "", "an empty drain runs no listener")
+
+    df:ApplyHeaderSettings()
+    df:UpdateAllFrames()
+    df.Apply:Flush()
+    eq(joined(df.order), "headers,frames,post", "the listener runs after the kinds, once")
+
+    df:UpdateAllFrames()
+    df.Apply:Flush()
+    eq(joined(df.order), "headers,frames,post,frames,post", "and once per drain that ran work")
+end
+
+do
+    -- Several listeners, in registration order.
+    local df = loadScheduler()
+    df.Apply:AddPostDrain(function() df.order[#df.order + 1] = "a" end)
+    df.Apply:AddPostDrain(function() df.order[#df.order + 1] = "b" end)
+    df:UpdateAll()
+    df.Apply:Flush()
+    eq(joined(df.order), "all,a,b", "listeners run in registration order")
+end
+
+do
+    -- ☠ ONE BAD LISTENER MUST NOT TAKE THE DRAIN DOWN. The anchor re-solve pass
+    -- reaches into another addon through a library; if it throws, the settings
+    -- sweep it is attached to still has to have happened.
+    local df = loadScheduler()
+    local errs = 0
+    df.DebugError = function() errs = errs + 1 end
+    df.Apply:AddPostDrain(function() error("boom") end)
+    df.Apply:AddPostDrain(function() df.order[#df.order + 1] = "after" end)
+    df:UpdateAll()
+    local ok = pcall(function() df.Apply:Flush() end)
+    check(ok, "a throwing listener does not error out of the drain")
+    eq(joined(df.order), "all,after", "the kinds ran, and so did the next listener")
+    eq(errs, 1, "the failure is reported once")
+end
+
+do
+    -- Combat holds every kind, so there is no drain to report -- and the replay
+    -- at PLAYER_REGEN_ENABLED is a real drain, which does.
+    local df, frame = loadScheduler()
+    df.Apply:AddPostDrain(function() df.order[#df.order + 1] = "post" end)
+    InCombatLockdown = function() return true end
+    df:UpdateAllFrames()
+    df.Apply:Flush()
+    eq(joined(df.order), "", "in combat: nothing ran, so no listener ran")
+
+    InCombatLockdown = function() return false end
+    frame:GetScript("OnEvent")(frame, "PLAYER_REGEN_ENABLED")
+    eq(joined(df.order), "frames,post", "the regen replay runs the listener with the work")
+end
+
+do
+    -- A listener may ask for more work; it lands in the NEXT drain, exactly like
+    -- a _Now body asking. (Whether it CONVERGES is the listener's problem -- the
+    -- mover bridge's does, because it only asks when a rect actually moved.)
+    local df, frame = loadScheduler()
+    local runs = 0
+    df.Apply:AddPostDrain(function()
+        runs = runs + 1
+        if runs == 1 then df:UpdateAllFrames() end
+    end)
+    df:UpdateAll()
+    df.Apply:Flush()
+    eq(runs, 1, "the listener ran once")
+    eq(joined(df.order), "all", "its request did not join the drain it was called from")
+    check(df.Apply:IsPending("frames"), "the request is pending for the next drain")
+    check(frame:IsShown(), "and re-armed the drain frame")
+    df.Apply:Flush()
+    eq(joined(df.order), "all,frames", "which then runs it")
+    eq(runs, 2, "and the listener ran again for that drain")
+end
+
+do
+    -- Junk is refused the way an unknown kind is: reported, never thrown.
+    local df = loadScheduler()
+    local errs = 0
+    df.DebugError = function() errs = errs + 1 end
+    local ok = pcall(function() df.Apply:AddPostDrain("not a function") end)
+    check(ok, "a non-function listener does not error")
+    eq(errs, 1, "and is reported")
+    df:UpdateAll()
+    local ok2 = pcall(function() df.Apply:Flush() end)
+    check(ok2, "and nothing was registered to break the drain")
+end
+
 CreateFrame = savedCreateFrame
 InCombatLockdown = savedInCombatLockdown

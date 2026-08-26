@@ -1,7 +1,29 @@
 -- Headless shim: just enough WoW globals for Undo/Solver/Registry.
 geterrorhandler = geterrorhandler or function() return function(err) print("ERROR: " .. tostring(err)) end end
 securecallfunction = securecallfunction or function(f, ...) return f(...) end
-InCombatLockdown = InCombatLockdown or function() return false end
+-- ☠ WoW's xpcall FORWARDS extra arguments to the called function; stock Lua 5.1's
+-- signature is xpcall(f, handler) and silently drops them. DandersMover's
+-- NS:Notify is xpcall(el.onChanged, geterrorhandler(), pos, reason), so under the
+-- unpatched builtin every consumer callback would be handed nil for both -- which
+-- looks exactly like a lib bug and is purely an artefact of the harness.
+do
+    local builtin = xpcall
+    xpcall = function(f, handler, ...)
+        local n = select("#", ...)
+        if n == 0 then return builtin(f, handler) end
+        local args = { ... }
+        return builtin(function() return f(unpack(args, 1, n)) end, handler)
+    end
+end
+-- Combat as a MUTABLE FLAG rather than a fixed answer. DandersMover/Core.lua caches
+-- InCombatLockdown in a file-scope local at load time, so a test that swaps the
+-- GLOBAL afterwards never reaches the lib -- this flag is the only door into its
+-- combat deferral (NS:Notify holding a secure element, NS:FlushPending replaying
+-- it). Defaults to false, so every existing caller sees exactly what it did before.
+-- (Modules that resolve InCombatLockdown at CALL time -- ApplyScheduler -- are
+-- tested by replacing the global instead; test_apply.lua does that and restores it.)
+IN_COMBAT = false
+InCombatLockdown = InCombatLockdown or function() return IN_COMBAT and true or false end
 wipe = wipe or function(t) for k in pairs(t) do t[k] = nil end return t end
 strsplit = strsplit or function(sep, s) local out = {} for piece in string.gmatch(s, "([^" .. sep .. "]+)") do out[#out + 1] = piece end return unpack(out) end
 
