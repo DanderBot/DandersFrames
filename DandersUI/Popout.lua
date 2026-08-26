@@ -185,8 +185,11 @@ function UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)
         -- SetClampedToScreen deal with the overhang, exactly as _PickSide does.
     end
     local x = (side == "left") and leftX or rightX
-    -- Level with the row, measured from the middle of both.
-    local y = row.y
+    -- The row sits a THIRD down the popout, not at its middle. Dead-centre made
+    -- tall popouts feel like they hung off the row (half the panel below your
+    -- eye line); a third matches where a reader expects the "current" item.
+    -- centre = row - (h/2 - h/3) = row - h/6, then clamped like any y.
+    local y = row.y - h / 6
     -- Into the window's vertical span. `slack` is how far the popout's centre may
     -- stray from the window's before an edge of it leaves the window; negative
     -- means the popout is taller than the window and no such position exists, so

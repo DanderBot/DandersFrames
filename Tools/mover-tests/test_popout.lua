@@ -992,11 +992,12 @@ local ROW_W, ROW_H = 200, 40
 local WIN = { x = 0, y = 0, w = WIN_W, h = WIN_H }
 local ROW = { x = -100, y = 50, w = ROW_W, h = ROW_H }
 -- Right-docked: the popout's LEFT edge a gap clear of the window's RIGHT edge,
--- and the popout CENTRED on the row. The window clamp is a no-op here -- a
--- 98-tall popout may stray 151 from the window's middle before an edge of it
--- leaves, and the row sits 50 off it.
+-- and the row A THIRD down the popout (centre = row - h/6; dead-centre made
+-- tall popouts feel like they hung below the row -- Danders 2026-08-26). The
+-- window clamp is a no-op here -- a 98-tall popout may stray 151 from the
+-- window's middle before an edge of it leaves.
 local OUT_X = WIN_W / 2 + DOCK_GAP + FRAME_W / 2            -- 372
-local OUT_Y = ROW.y                                          -- 50
+local OUT_Y = ROW.y - FRAME_H / 6                            -- 50 - 16.33
 
 -- Build the pair the live tests drive: a window at screen centre and a row
 -- inside it, `dy` above/below the window's middle.
@@ -1008,20 +1009,20 @@ do
     local side, x, y = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
     eq(side, "right", "outside: open screen docks outside the window's RIGHT edge")
     eq(x, OUT_X, "outside: its left edge a gap clear of that edge")
-    eq(y, OUT_Y, "outside: centred on the ROW, not on the window")
+    eq(y, OUT_Y, "outside: the row a third down the popout, not window-centred")
 
     -- The row is what moves the popout vertically -- that is the whole reason
     -- this is not just "dock beside the window".
     local _, _, y2 = UI.PopoutOutsidePos(WIN, { x = -100, y = -50, w = ROW_W, h = ROW_H },
                                          FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
-    eq(y2, -50, "outside: a lower row lowers the popout by the same amount")
+    eq(y2, -50 - FRAME_H / 6, "outside: a lower row lowers the popout by the same amount")
 
-    -- ☠ The reason this is the CENTRE and not the row's top. Hung from the top, a
-    -- popout's whole body drops below the row it belongs to -- for a 400-tall
-    -- group that is 200px of panel level with a part of the list it has nothing
-    -- to do with. Centred, the row stays level with the middle of its own panel.
+    -- ☠ The third rule, not the row's top and not dead-centre. Hung from the
+    -- top, a 400-tall popout is 200px of panel below its row; dead-centred it
+    -- still read as hanging (in-game feedback). A third down keeps the row at
+    -- a reader's natural focus line whatever the height.
     local _, _, tallY = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, 300, DOCK_GAP, 1920, 1080)
-    eq(tallY, ROW.y, "outside: a TALL popout is centred on the row too, not dropped below it")
+    eq(tallY, ROW.y - 300 / 6, "outside: a TALL popout keeps its row a third down, not dropped below")
 end
 
 -- No room to the right of the window: the popout crosses to the OTHER side of
@@ -1088,7 +1089,7 @@ do
     -- down rather than jamming the panel against an arbitrary edge, and the
     -- popout stays centred on the row it is about.
     _, _, y = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, 600, DOCK_GAP, 1920, 1080)
-    eq(y, ROW.y, "outside: a popout taller than the window stays centred on its row")
+    eq(y, ROW.y - 600 / 6, "outside: a popout taller than the window keeps the third rule on its row")
 end
 
 -- Missing rects have no answer, the same way PopoutDockPos has none.
@@ -1297,8 +1298,8 @@ do
     local row = outsideRow()
     row.popoutInset = { 0, 0, 0, INK_TRIM }
     -- Trimming the bottom of the slot lifts its centre by half the trim, and the
-    -- placement centres on the row -- so this IS where the popout lands.
-    local INK_Y = ROW.y + INK_TRIM / 2
+    -- placement puts the PLATE a third down the popout -- so this IS where it lands.
+    local INK_Y = ROW.y + INK_TRIM / 2 - FRAME_H / 6
     local p = popout({ key = "outsideink" })
     p.frame:SetFakeCenter(CX + OUT_X, CY + INK_Y)
     p:Follow(row, { outsideOf = win })
@@ -1384,8 +1385,11 @@ do
     p.frame:SetFakeCenter(CX + GX, CY + GY)
     rowB:SetFakeCenter(CX + ROW.x, CY - 150)
     p.frame:GetScript("OnUpdate")(p.frame)
-    eq(p.frame._points[1][5], -150,
-        "outglide: and the ordinary follow works from the landing")
+    -- Third rule wants -150 - h/6 = -166.33, but the row now sits close enough
+    -- to the window's bottom that the span clamp engages: the popout holds at
+    -- the clamp instead.
+    eq(p.frame._points[1][5], -SLACK,
+        "outglide: and the ordinary follow works from the landing (clamped)")
     p.frame.SetPoint = realSetPoint
     p:Close()
 end
@@ -1403,7 +1407,7 @@ do
     local p = popout({ key = "outsidethin" })
     p.frame:SetFakeCenter(CX + OUT_X, CY + ROW.y)
     p:Follow(row, { outsideOf = win })
-    eq(p.frame._points[1][5], ROW.y, "thin: a 20-tall row centres the popout exactly as any other does")
+    eq(p.frame._points[1][5], ROW.y - FRAME_H / 6, "thin: a 20-tall row places the popout exactly as any other does")
     eq(p.beam.core._start.y, ROW.y, "thin: so the point reaches the row's centre instead of stopping short")
     eq(p.beam.core._end.y, ROW.y, "thin: ...and the beam runs dead level rather than at a diagonal")
     p:Close()
