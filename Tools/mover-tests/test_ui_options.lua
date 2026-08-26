@@ -150,20 +150,20 @@ do
     eq(#lines, 0, "sameaddon: and nothing is printed")
 end
 
--- ☠ IMPLEMENTED BEHAVIOUR, NOT AN ENDORSEMENT. The minor check runs on the
--- pre-set table too, so a mismatched in-addon copy still prints and still
--- returns early -- but the early return cannot UNSET a key it did not set, so
--- NS.__DandersUI keeps pointing at the mismatched copy and the later files in
--- the manifest would carry on against it. Unreachable in practice (a pre-set key
--- means Core.lua ran in this same addon, so the minors are the same file's), and
--- recorded here so a future change to either half is measured against what the
--- code actually does today.
+-- The minor check runs on the pre-set table too, and a mismatch CLEARS the
+-- handshake rather than leaving it: a pre-set key with the wrong minor means a
+-- mixed-version install, and leaving it set would let the rest of this manifest
+-- run against the mismatched base. (Unreachable in a healthy install -- a
+-- pre-set key means Core.lua ran in this same addon, so the minors come from
+-- the same folder -- which is exactly why it must fail safe when it does
+-- happen.) The resident half is unaffected: its files read the key at their own
+-- load time, which has already passed.
 do
     local stale = { MINOR = 6, name = "stale-in-addon" }
     local ns = { __DandersUI = stale }
     local lines = withLibStub(nil, function() return loadOptionsCore(ns) end)
     eq(#lines, 1, "stale: a mismatched in-addon copy is still reported")
-    check(ns.__DandersUI == stale, "stale: ...but the pre-set key is not cleared (see comment)")
+    check(ns.__DandersUI == nil, "stale: and the pre-set handshake is cleared, inerting the manifest")
 end
 
 -- ============================================================

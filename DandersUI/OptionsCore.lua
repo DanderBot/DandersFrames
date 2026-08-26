@@ -43,10 +43,16 @@ end
 
 -- A copy of the base half from an older (or newer) addon won the LibStub race.
 -- The surfaces this manifest builds on may not exist, or may have changed shape,
--- so refuse rather than error halfway through a page build.
+-- so refuse rather than error halfway through a page build. The handshake is
+-- CLEARED, not just left alone: a pre-set key (both manifests in one addon, but
+-- with mixed-version files -- a broken install) would otherwise keep the later
+-- files in THIS manifest running against the mismatched base. The resident
+-- manifest's files read the key at their own load time, which has already
+-- passed, so clearing it here only inerts the options half.
 if UI.MINOR ~= EXPECTED_MINOR then
     print(("|cffff4040DandersUI_Options:|r version mismatch -- base DandersUI is minor %s but this options module expects minor %s. Update all addons that embed DandersUI.")
         :format(tostring(UI.MINOR), tostring(EXPECTED_MINOR)))
+    NS.__DandersUI = nil
     return
 end
 
