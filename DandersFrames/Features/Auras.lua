@@ -274,6 +274,42 @@ function DF:GetEngineDispelFlagGaps(selfOnly)
     return nil
 end
 
+-- ☠☠ A TALENT EDIT DOES NOT FIRE A SPEC EVENT, AND THE SPELLBOOK GRANT LANDS LATE.
+-- PLAYER_TALENT_UPDATE is not the signal: talent edits do not necessarily raise it, and
+-- even when something does fire, the spell is not KNOWN yet when we probe — the grant
+-- arrives with SPELLS_CHANGED afterwards. Net effect, field-reported: untalenting the
+-- totem removed the poison gap (the spell goes away promptly) while re-talenting it never
+-- brought it back, because the only re-plan happened before the spellbook caught up and
+-- nothing re-asked afterwards. One-way, which is the same shape as every other missing
+-- trigger this week: the state has an edge, and only one side of it had a listener.
+--
+-- ⚠ Both events, for the two different lags — the trait config landing, and the spellbook
+-- grant that follows it. EllesmereUI reached the same pair from the same bug and says so
+-- in its own note; the reasoning is theirs and it holds here.
+--
+-- ★ FLIP-GATED. SPELLS_CHANGED fires constantly (every login, every book open, every
+-- temporary grant), so the version is bumped only when the CAPABILITY actually changes.
+-- The cache here exists solely to detect that flip — the probe itself stays uncached, so
+-- every real read is still live. Shamans only: nobody else can hold this talent, so no
+-- other class pays an event registration for it.
+do
+    local _, playerClass = UnitClass("player")
+    if playerClass == "SHAMAN" then
+        local lastKnown
+        local totemWatcher = CreateFrame("Frame")
+        totemWatcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+        totemWatcher:RegisterEvent("SPELLS_CHANGED")
+        totemWatcher:SetScript("OnEvent", function()
+            local now = KnowsPoisonCleansingTotem()
+            if now == lastKnown then return end
+            lastKnown = now
+            DF:Debug("DISPEL", "Poison Cleansing Totem -> %s (re-planning dispel displays)",
+                tostring(now))
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        end)
+    end
+end
+
 -- Build the debuff filter records (native 12.1 category filters).
 -- Returns nil (show all) or an array of records { filter, key, candidateFilters }
 -- — the record form normalizeFilters accepts; each record becomes one container
