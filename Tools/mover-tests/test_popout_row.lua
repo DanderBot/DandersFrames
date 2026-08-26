@@ -67,12 +67,14 @@ end
 UI.RowGap = UI.RowGap or 14
 UI.RowHeight = UI.RowHeight or { checkbox = 35 }
 UI.PopoutContentWidth = UI.PopoutContentWidth or 260
+UI.PopoutTitleHeight = UI.PopoutTitleHeight or 28
+UI.PopoutPad = UI.PopoutPad or 10
 UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true end
 
 local ROW_H   = UI.RowHeight.checkbox
 local PLATE_H = ROW_H - UI.RowGap
 local PW      = UI.PopoutContentWidth
-local TITLE_H, PAD = 22, 10
+local TITLE_H, PAD = UI.PopoutTitleHeight, UI.PopoutPad
 
 -- ---- widget stubs PopoutRow touches -------------------------------
 -- StyleCheckButton's whole observable contract from here: it sizes the box, it
@@ -84,6 +86,24 @@ function UI:StyleCheckButton(cb, opts)
     cb._styleOpts = opts
     cb.ApplyThemeColor = function(c) cb._tint = c end
     cb.ApplyThemeColor(opts.accent or self:GetAccent())
+    -- ...and the other half of the real contract: an UNACCENTED box registers
+    -- itself on its themeRoot's ThemeListeners, which is the list the popout's
+    -- accent cascade walks. Without this the header toggle would look unreachable
+    -- from a test and the cascade's frame-rooted claim could not be made.
+    --
+    -- ⚠ rawget. The stub answers every unknown key with a no-op FUNCTION, so a
+    -- plain `root.ThemeListeners or {}` keeps that function and table.insert
+    -- errors on it. Real frames answer nil, which is why Widgets.lua can write it
+    -- the short way.
+    if not opts.accent then
+        cb.UpdateTheme = function() cb.ApplyThemeColor(self:GetAccent()) end
+        local root = opts.themeRoot or cb:GetParent()
+        if type(root) == "table" then
+            local list = rawget(root, "ThemeListeners")
+            if not list then list = {}; root.ThemeListeners = list end
+            list[#list + 1] = cb
+        end
+    end
     return cb.Check
 end
 
@@ -151,6 +171,9 @@ CreateFrame = function(kind, _, parent)
     f.GetParent = function(self) return self._parent end
     f.SetParent = function(self, p) self._parent = p end
     f.GetNumChildren = function(self) return #self._children end
+    -- The popout's accent cascade walks the frame tree looking for
+    -- ThemeListeners lists, so the stub has to have a tree to walk.
+    f.GetChildren = function(self) return unpack(self._children) end
     if kind == "CheckButton" then
         f.SetChecked = function(self, v) self._checked = v and true or false end
         f.GetChecked = function(self) return self._checked end
@@ -751,6 +774,202 @@ do
     p:SetAccent(nil)
     eq(p:GetAccent().r, ACCENT.r, "setaccent: nil hands it back to the host")
     eq(p.frame._panelOpts.borderColor.r, ACCENT.r, "setaccent: ...and repaints on the way")
+    p:Close()
+end
+
+-- ============================================================
+-- 13. WHAT THE ROW TELLS THE SHELL ABOUT ITSELF
+-- The shell knows nothing about rows, so everything it needs to draw the
+-- connected chrome correctly has to be declared BY the row: which part of its
+-- slot is actually painted, and what really clips it.
+-- ============================================================
+do
+    local win, view = window(), window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Inked", db = {}, build = counting("ink", 50),
+        window = win, clipTo = view,
+    }))
+
+    -- The row's frame is its whole layout SLOT; the bottom RowGap of it is the
+    -- gap to the next row and nothing paints there. Without this the source
+    -- outline was drawn a clear RowGap taller than the plate it was lighting.
+    local ins = row.popoutInset
+    eq(type(ins), "table", "ink: the row declares which part of its slot is drawn")
+    eq(ins[4], UI.RowGap, "ink: the bottom trim is exactly the slot's gap to the next row")
+    eq((ins[1] or 0) + (ins[2] or 0) + (ins[3] or 0), 0,
+        "ink: and nothing else is trimmed -- the plate is flush with the slot otherwise")
+    eq(row:GetHeight() - ins[4], PLATE_H, "ink: so what is left is the plate")
+
+    row:OpenPopout()
+    local po = row.popout
+    eq(po.outsideOf, win, "ink: the row hands the shell the window it stands outside of")
+    eq(po.clipTo, view, "ink: ...and, separately, the thing that really clips it")
+
+    -- The stub resolves no anchors, so the outline's offsets are the claim.
+    local tl, br = po.srcOutline._points[1], po.srcOutline._points[2]
+    eq(tl[5], 0, "ink: the outline's top is the row's own top")
+    eq(br[5], UI.RowGap, "ink: and its bottom lifts clear of the slot's gap")
+    row:ClosePopout()
+
+    -- No clipTo declared: the shell falls back to the window rather than losing
+    -- the gate outright.
+    local bare = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Bare", db = {}, build = counting("inkbare", 50), window = win,
+    }), -80)
+    bare:OpenPopout()
+    eq(bare.popout.clipTo, nil, "ink: a row with no clipper declares none")
+    check(not bare.popout:_TetherClipped(), "ink: ...and the window still gates it")
+    bare:ClosePopout()
+end
+
+-- ============================================================
+-- 14. THE COLUMNS LINE UP
+-- A stack of these rows has to read as a TABLE: the chevron, the count and the
+-- gear in the same place on every row, and the summaries right-aligned with one
+-- another. They did not -- the badge sized itself to its text and the gear and
+-- summary were anchored off its left edge, so a "3" row and a "14" row put both
+-- 6px apart.
+--
+-- The stub resolves no anchors, so "the same place" is asked of the recorded
+-- anchor chain instead: resolve each column's RIGHT edge as an offset from the
+-- plate's, and two rows carrying different counts must answer identically.
+--
+-- ⚠ WHICH HALF OF THIS ACTUALLY BITES. The stub's FontStrings never auto-size,
+-- so under the OLD layout both rows resolved to the same (wrong) x and the
+-- two-row comparison passed regardless -- it is documentation of the rule, not a
+-- guard on it. The guard is the block of literal positions after it: those pin
+-- the gear and the summary to the badge COLUMN's width rather than to whatever
+-- its text measured, which is the thing that was broken. Verified by reverting
+-- the fix: the three literals fail, the comparisons do not.
+-- ============================================================
+local CHEV_SIZE, GEAR_SIZE, GAP, BADGE_W = 10, 14, 6, 18
+
+local function rightEdgeFrom(region, plate)
+    if region == plate then return 0 end
+    for _, pt in ipairs(region._points) do
+        local point, rel, relPoint, x = pt[1], pt[2], pt[3], pt[4] or 0
+        if point == "RIGHT" then
+            local base = rightEdgeFrom(rel, plate)
+            -- Anchored to the neighbour's LEFT edge: step back across its width.
+            if relPoint == "LEFT" then base = base - (rel:GetWidth() or 0) end
+            return base + x
+        end
+    end
+end
+
+do
+    local win = window()
+    local function counted(n)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = "Row " .. n, db = { on = true }, toggle = { key = "on" },
+            summary = function() return "a summary of some length" end,
+            count = n, build = counting("cols" .. n, 50), window = win,
+        }))
+    end
+    local few, many = counted(3), counted(14)
+    eq(few.badge:GetText(), "3", "cols: the two rows really are carrying different counts")
+    eq(many.badge:GetText(), "14", "cols: ...one of them twice as wide as the other in text")
+
+    -- The badge is a fixed COLUMN, not a box that grows with its number. This is
+    -- the one that caused the rest.
+    eq(few.badge:GetWidth(), BADGE_W, "cols: the badge is a fixed-width column")
+    eq(many.badge:GetWidth(), few.badge:GetWidth(), "cols: the same width whatever it says")
+
+    for _, part in ipairs({ "chevron", "badge", "gear", "summary" }) do
+        local a = rightEdgeFrom(few[part], few.plate)
+        local b = rightEdgeFrom(many[part], many.plate)
+        check(a ~= nil, "cols: " .. part .. " resolves to the plate's right edge")
+        eq(b, a, "cols: " .. part .. " sits at the same x on both rows")
+    end
+
+    -- ...and where those columns actually are, so a change to one of the four
+    -- constants is a deliberate one rather than a silent drift.
+    local p = few.plate
+    eq(rightEdgeFrom(few.chevron, p), 0, "cols: the chevron is flush with the plate's right edge")
+    eq(rightEdgeFrom(few.badge, p), -(CHEV_SIZE + GAP), "cols: the badge column ends a gap inboard of it")
+    eq(rightEdgeFrom(few.gear, p), -(CHEV_SIZE + GAP + BADGE_W + GAP),
+        "cols: the gear a gap inboard of the badge COLUMN, not of its text")
+    eq(rightEdgeFrom(few.summary, p), -(CHEV_SIZE + GAP + BADGE_W + GAP + GEAR_SIZE + GAP),
+        "cols: and the summary right-aligns a gap inboard of the gear")
+end
+
+-- ============================================================
+-- 15. THE ACCENT CASCADES INTO THE PANEL'S CONTENTS
+-- SetAccent repainted the CHROME -- border, point, beam, outline -- and stopped
+-- there, so switching a row's colour under an open panel left a purple-bordered
+-- box full of orange sliders. The widgets never read the popout's colour: they
+-- were built against the host accent and registered on their parent's
+-- ThemeListeners, so the popout has to walk its own tree and repaint them.
+-- ============================================================
+-- Read one channel off a colour that may not have arrived at all. A bare
+-- `seen.r` on a regression ERRORS, which aborts the shared runner and takes
+-- every later test with it; this reports a plain failure instead.
+local function chan(c, k) return (type(c) == "table") and c[k] or nil end
+
+do
+    local win = window()
+    local seen, calls = nil, 0
+    -- Stands in for a kit widget mounted in the pane. ApplyThemeColor is the
+    -- kit's published "tint to THIS colour" entry point -- the one the cascade
+    -- drives, and the only one that can safely take a colour (UpdateTheme has
+    -- colon call sites in the wild). This one just records what it was handed.
+    local widget = { ApplyThemeColor = function(c) seen = c; calls = calls + 1 end }
+
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Cascade", db = {}, window = win,
+        build = function(_, pane)
+            pane.ThemeListeners = { widget }
+            pane:SetHeight(50)
+        end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    check(calls > 0, "cascade: opening the panel repaints the widgets inside it")
+    eq(chan(seen, "r"), ACCENT.r, "cascade: in the host accent, since this row has none of its own")
+
+    -- The live path: the row's colour changes under an OPEN panel.
+    row:SetAccent({ 1, 0.5, 0 })
+    eq(po.frame._panelOpts.borderColor.r, 1, "cascade: the chrome took the new colour, as before")
+    eq(chan(seen, "r"), 1, "cascade: ...and so did the widget mounted in the content")
+    eq(chan(seen, "g"), 0.5, "cascade: on every channel")
+
+    -- The TITLE BAR is not a child of the content, so a cascade rooted there
+    -- would leave the panel's own toggle in the colour everything else had left.
+    eq(chan(po._hdrToggle._tint, "r"), 1, "cascade: the header toggle re-tints too -- the walk starts at the frame")
+
+    row:SetAccent(nil)
+    eq(chan(seen, "r"), ACCENT.r, "cascade: clearing the override hands the content back to the host accent")
+    eq(chan(po._hdrToggle._tint, "r"), ACCENT.r, "cascade: header included")
+    row:ClosePopout()
+end
+
+-- Popout:SetAccent, head-on: the same cascade without a row driving it, and the
+-- claim that a widget's colour follows the POPOUT rather than the host.
+do
+    local src = FakeUIFrame(80, 40, CX, CY)
+    src:Show()
+    local seen
+    -- ☠ A listener that publishes only UpdateTheme must be LEFT ALONE. UpdateTheme
+    -- means "repaint to the host accent" and cannot be made to take a colour --
+    -- call sites in the wild reach it through COLON syntax
+    -- (`slider:UpdateTheme()`), which would fill that parameter with the widget
+    -- table and paint every channel nil. This is the guard on that rule.
+    local updateOnly = 0
+    local p = host:CreatePopout({ key = "cascadebare", width = 100,
+        build = function(_, c)
+            c.ThemeListeners = {
+                { ApplyThemeColor = function(col) seen = col end },
+                { UpdateTheme = function() updateOnly = updateOnly + 1 end },
+            }
+            c:SetHeight(20)
+        end })
+    p:Follow(src)
+    eq(chan(seen, "r"), ACCENT.r, "cascade: a plain popout builds its content in the host accent")
+    p:SetAccent({ r = 0.2, g = 0.8, b = 0.4 })
+    eq(chan(seen, "g"), 0.8, "cascade: SetAccent on the popout alone reaches the content")
+    eq(chan(seen, "r"), 0.2, "cascade: ...without anyone touching the host accent")
+    eq(host:GetAccent().r, ACCENT.r, "cascade: which is untouched, as it must be")
+    eq(updateOnly, 0, "cascade: and it never drives UpdateTheme, which cannot take a colour")
     p:Close()
 end
 

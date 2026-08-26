@@ -388,6 +388,13 @@ local function buildWindow()
             enabled  = def.enabled,
             onToggle = def.onToggle,
             window   = f,
+            -- The window decides WHERE the popout stands; the scroll frame
+            -- decides whether the row is still on screen. They are not the same
+            -- rect -- the title bar and the intro line above sit inside the
+            -- window and outside the viewport -- and gating on the window left
+            -- the beam and outline drawn over that chrome for two rows' worth of
+            -- scrolling after the row itself had gone.
+            clipTo   = sf,
             -- Passed at BUILD, not left to SetAccent alone: an unaccented row
             -- registers a theme listener on its tick, and a later host theme
             -- change would then pull that tick back to the host colour even

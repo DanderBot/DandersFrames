@@ -231,6 +231,24 @@ UI.RowHeight = {
 -- GroupInnerWidth falls back to for exactly this reason.
 UI.PopoutContentWidth = 260
 
+-- The popout shell's own box model. Here rather than as file-locals in
+-- Popout.lua because BOTH numbers are load-bearing OUTSIDE the shell: a consumer
+-- that lays out a fixed-height panel has to know what the chrome costs it before
+-- it can size its content, and the shell's height is exactly
+-- titleHeight + pad + content + pad.
+--
+-- 28, not the original 22. The tallest thing in the title bar is the 18px close
+-- button, so 22 left it 2px of air top and bottom and the row read as packed --
+-- title, badge, pin and cross all jammed against each other and against the
+-- panel's own accent border. 28 is that 18 plus 5 above and 5 below, which is
+-- the smallest number at which the bar reads as a BAR rather than as a strip the
+-- buttons happen to overflow.
+UI.PopoutTitleHeight = 28
+-- The outer inset around the content, and now the gap UNDER the title bar too --
+-- see Popout.lua's _Resize, where the content used to be anchored flush against
+-- the bar while carrying 2 x this much slack below it.
+UI.PopoutPad = 10
+
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
 -- own their height (drift-proof); everything else uses the height it was handed, then the widget's
 -- own preferred height, then a sane default.

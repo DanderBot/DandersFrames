@@ -39,8 +39,19 @@ local min, max, abs = math.min, math.max, math.abs
 
 local Fx = UI.Fx
 
-local PAD        = 10        -- outer inset around the content
-local TITLE_H    = 22        -- the title bar strip
+-- The box model comes from the theme (see Theme.lua's note on both): the frame's
+-- height is TITLE_H + PAD + content + PAD, and a consumer sizing a fixed panel
+-- has to be able to work that out without reading this file.
+local PAD        = UI.PopoutPad          -- outer inset around the content
+local TITLE_H    = UI.PopoutTitleHeight  -- the title bar strip
+-- The title bar's INTERNAL composition, which nothing outside can use and so
+-- stays here. HDR_EDGE is the cross's inset from the bar's right edge, HDR_GAP
+-- the gap between two adjacent glyph buttons, and TITLE_GAP the wider air either
+-- side of the title text -- wider because a caption butted up against a glyph
+-- reads as a label FOR that glyph.
+local HDR_EDGE   = 6
+local HDR_GAP    = 6
+local TITLE_GAP  = 8
 local DOCK_GAP   = 12        -- popout <-> source distance when docked
 local ADJ_GAP    = 16        -- "still beside it" slack, for UI.PopoutIsAdjacent
 local POP_DUR    = 0.22      -- entrance
@@ -126,7 +137,7 @@ end
 -- list the row was picked from, and every scroll drags it across that list. So it
 -- docks outside the WINDOW's vertical edge instead, at the ROW's height -- the
 -- window stays wholly readable, and the popout still visibly belongs to one row
--- because it hangs from that row's top and the beam crosses to it.
+-- because it is centred on that row and the beam crosses to it.
 --
 -- Two rects, therefore, not one: the WINDOW decides x (which edge, and how far
 -- out), the ROW decides y. Which is also why this cannot be expressed as a frame
@@ -136,15 +147,23 @@ end
 -- PopoutDockPos, so the dock, the glide's destination and the tests all read one
 -- answer. nil for a missing rect.
 --
+-- ⚠ CENTRED ON THE ROW, not hung from its top. Hanging from the top is the story
+-- right/left docking tells, and for a SHORT popout the two readings agree -- but
+-- a tall one hung by its top puts its whole body below the row, so a group with
+-- a dozen controls opened from the third row of a list ends up level with the
+-- twelfth. "At the row's height" is what this placement promises, and the centre
+-- is what actually delivers it.
+--
 -- The clamps, in order (later wins, because being off-screen is worse than being
 -- level with the wrong part of the window):
---   1. THE POPOUT'S TOP is clamped into the window's vertical span. Applied
---      ALWAYS, not only when the row is clipped: for a row in view its top is
---      already inside that span, so the clamp is a no-op and "top level with the
---      row's top" holds exactly. For a row scrolled out of the window it is what
---      keeps the popout beside the LIST rather than trailing off after a row that
---      is no longer drawn. Only the TOP is clamped, so a popout taller than the
---      window still hangs below it rather than being squeezed.
+--   1. THE WHOLE POPOUT is clamped into the window's vertical span -- WHEN IT
+--      FITS THERE. For a row in view with a popout shorter than the window this
+--      is usually a no-op and "centred on the row" holds exactly; for a row
+--      scrolled out of the window it is what keeps the popout beside the LIST
+--      rather than trailing off after a row that is no longer drawn. A popout
+--      TALLER than the window has no position that satisfies the clamp, so it
+--      stands down rather than pinning the panel to an arbitrary edge -- the
+--      screen clamp below takes it from there.
 --   2. The whole popout is clamped fully on screen.
 function UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)
     if not (win and row) then return nil end
@@ -166,11 +185,16 @@ function UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)
         -- SetClampedToScreen deal with the overhang, exactly as _PickSide does.
     end
     local x = (side == "left") and leftX or rightX
-    -- Hang from the row's TOP, the same story right/left docking tells: the
-    -- popout reads as a continuation of the thing's header.
-    local top = row.y + row.h / 2
-    top = min(max(top, win.y - win.h / 2), win.y + win.h / 2)
-    local y = top - h / 2
+    -- Level with the row, measured from the middle of both.
+    local y = row.y
+    -- Into the window's vertical span. `slack` is how far the popout's centre may
+    -- stray from the window's before an edge of it leaves the window; negative
+    -- means the popout is taller than the window and no such position exists, so
+    -- the clamp stands down rather than jamming the panel against an edge.
+    local slack = win.h / 2 - h / 2
+    if slack >= 0 then
+        y = min(max(y, win.y - slack), win.y + slack)
+    end
     local halfH = (screenH or 0) / 2
     y = min(max(y, -halfH + h / 2), halfH - h / 2)
     return side, x, y
@@ -201,13 +225,47 @@ function UI.PopoutIsAdjacent(a, b, gap)
     return dx <= gap and dy <= gap
 end
 
--- Rect of a region in UIParent-centre units; nil while it has no geometry yet.
+-- ---- the ink rect ------------------------------------------------
+
+-- WHICH PART OF A REGION IS ACTUALLY DRAWN. A region's frame and its INK are not
+-- always the same rect: a settings row occupies a layout slot that includes the
+-- gap to the next row, so its frame is RowGap taller than anything it paints. An
+-- outline laid over the frame is therefore visibly too tall, and a beam aimed at
+-- the frame's centre lands below the thing it is pointing at.
+--
+-- So a region may declare its own inset -- `region.popoutInset = { l, r, t, b }`,
+-- pixels trimmed off each edge -- and EVERY rect this file takes of a region
+-- honours it. One protocol, read in one place, so the dock, the tether, the clip
+-- gate, the beam and the outline cannot end up disagreeing about where a row is.
+-- The shell still knows nothing about rows: the region says which part of itself
+-- is ink, and the shell believes it.
+--
+-- ⚠ type(), not a truthiness test. A headless frame stub answers every unknown
+-- key with a no-op FUNCTION, so `region.popoutInset` is truthy on frames that
+-- have never declared one.
+local function insetOf(region)
+    local ins = region and region.popoutInset
+    if type(ins) ~= "table" then return 0, 0, 0, 0 end
+    return ins[1] or 0, ins[2] or 0, ins[3] or 0, ins[4] or 0
+end
+
+-- Rect of a region in UIParent-centre units, inset to its ink; nil while it has
+-- no geometry yet.
 local function rectOf(region)
     if not region or not region.GetCenter then return nil end
     local cx, cy = region:GetCenter()
     if not cx then return nil end
     local ux, uy = UIParent:GetCenter()
-    return { x = cx - ux, y = cy - uy, w = region:GetWidth() or 0, h = region:GetHeight() or 0 }
+    local x, y = cx - ux, cy - uy
+    local w, h = region:GetWidth() or 0, region:GetHeight() or 0
+    local l, r, t, b = insetOf(region)
+    if l ~= 0 or r ~= 0 or t ~= 0 or b ~= 0 then
+        -- Trimming the left edge moves the centre right by half of it, and so on
+        -- round the four; the size loses both edges of each axis.
+        x, y = x + (l - r) / 2, y + (b - t) / 2
+        w, h = max(w - l - r, 0), max(h - t - b, 0)
+    end
+    return { x = x, y = y, w = w, h = h }
 end
 
 -- Per dock side: the popout's OWN edge that faces the source, and the outward
@@ -329,6 +387,11 @@ local popoutMeta = { __index = Popout }
 -- UI.PopoutOutsidePos). Only "left"/"right" are meaningful for opts.side there.
 -- The mode lives on the instance, so a plain Follow afterwards clears it.
 --
+-- opts.clipTo = <region> names what actually CLIPS the source -- the scroll
+-- frame, not the window around it. The connected chrome hides while the source
+-- leaves that rect. Defaults to outsideOf, which is nearly always too generous
+-- by the window's own title bar and padding: see _TetherClipped.
+--
 -- RETARGETING a popout that is already up (a different region while it is
 -- following) GLIDES it across instead of teleporting: see _StartGlide.
 function Popout:Follow(region, opts)
@@ -337,6 +400,9 @@ function Popout:Follow(region, opts)
     self.source = region
     self.forcedSide = opts and opts.side or nil
     self.outsideOf = opts and opts.outsideOf or nil
+    -- The region that actually CLIPS the source (a scroll frame), which is not
+    -- the window -- see _TetherClipped.
+    self.clipTo = opts and opts.clipTo or nil
     self.free = false
     -- A pinned popout has been taken off its leash by hand; re-pointing its
     -- SOURCE (so the beam knows where to land) must not drag it back to it.
@@ -363,6 +429,7 @@ function Popout:PlaceFree(x, y)
     self.following = false
     self.gliding = false
     self.outsideOf = nil        -- absolute placement is not docked to anything
+    self.clipTo = nil           -- ...and nothing is clipping what it is not about
     local f = self.frame
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", x or 0, y or 0)
@@ -572,6 +639,10 @@ end
 -- _ApplyAccent, which re-runs ApplyPixelBorder on it unconditionally --
 -- _UpdateSourceOutline itself only repaints on a TARGET change, so it would not
 -- have noticed a colour change on a shown outline.
+--
+-- _ApplyAccent also CASCADES into the content, so the widgets the consumer
+-- mounted follow the chrome instead of staying in whatever colour they were
+-- built against -- see _CascadeAccent for what that reaches and what it does not.
 function Popout:SetAccent(c)
     self.accent = normColor(c)
     self:_ApplyAccent()
@@ -579,6 +650,64 @@ function Popout:SetAccent(c)
     self:_UpdateBeam()
     self:_UpdateSourceOutline()
     return self
+end
+
+-- ---- the accent cascade ------------------------------------------
+
+-- How deep under the frame the walk below looks. A popout's tree is shallow by
+-- construction (frame -> content -> the consumer's mount -> its pane -> a
+-- widget's own parts), and a bound rather than an unbounded walk keeps a
+-- consumer that parents something enormous into a popout from paying for it.
+local CASCADE_DEPTH = 8
+
+-- Repaint the accent-bearing widgets a consumer mounted INSIDE this popout.
+--
+-- ⚠ The chrome is not the whole panel. SetAccent used to repaint the border, the
+-- point, the beam and the source outline and stop there -- so a popout whose
+-- accent changed under an open panel ended up a purple-bordered box full of
+-- orange sliders. The widgets do not read the popout's colour: they were built
+-- against the HOST accent and registered themselves on their parent's
+-- `ThemeListeners`, the kit's existing repaint list.
+--
+-- So the popout walks its own tree, finds those lists and repaints them with ITS
+-- colour through `ApplyThemeColor(c)` -- the kit's published "tint to THIS
+-- colour" entry point, which sliders, buttons, check boxes and collapse arrows
+-- all carry.
+--
+-- ☠ ApplyThemeColor, NEVER UpdateTheme. UpdateTheme means "repaint to the HOST
+-- accent" and takes no arguments -- and it cannot be made to take one, because
+-- several call sites in the wild reach it through COLON syntax
+-- (`slider:UpdateTheme()`), which would fill that parameter with the widget
+-- table itself and paint every channel nil.
+--
+-- KNOWN LIMIT (gate one): a widget re-tints only if it registered on a
+-- ThemeListeners list under this popout AND publishes ApplyThemeColor. A widget
+-- built with an explicit opts.accent registers no listener at all, deliberately
+-- -- that colour is the call site's choice, not an inherited one. And any
+-- repaint that reads host:GetAccent() at CLICK time rather than at theme time (a
+-- dropdown menu building its rows, an anchor grid cell re-activating) still
+-- comes up in the host colour until it is next rebuilt.
+local function cascadeInto(frame, c, depth)
+    if type(frame) ~= "table" or depth > CASCADE_DEPTH then return end
+    local list = rawget(frame, "ThemeListeners")
+    if type(list) == "table" then
+        for _, w in ipairs(list) do
+            if type(w) == "table" and type(w.ApplyThemeColor) == "function" then
+                w.ApplyThemeColor(c)
+            end
+        end
+    end
+    if type(frame.GetChildren) ~= "function" then return end
+    local kids = { frame:GetChildren() }
+    for i = 1, #kids do cascadeInto(kids[i], c, depth + 1) end
+end
+
+-- Rooted at the FRAME, not at the content: the title bar is not a child of the
+-- content, and a consumer's header controls (a popout row's own toggle) live
+-- there. A cascade that missed them would leave the one control at the top of
+-- the panel in the colour everything else had just left.
+function Popout:_CascadeAccent()
+    cascadeInto(self.frame, self:GetAccent(), 0)
 end
 
 -- Repaint everything the accent colours. Called on every adopt, so a pooled
@@ -595,6 +724,9 @@ function Popout:_ApplyAccent()
     if self.srcOutline then
         self.host:ApplyPixelBorder(self.srcOutline, { c.r, c.g, c.b, c.a or 1 })
     end
+    -- ...and the widgets INSIDE it, which are not chrome and do not read this
+    -- popout's colour on their own.
+    self:_CascadeAccent()
 end
 
 -- ---- the connected chrome's one gate -----------------------------
@@ -603,9 +735,21 @@ end
 --
 -- ⚠ IsShown() CANNOT ANSWER THIS. A row scrolled out of a scroll child is still
 -- shown -- it is CLIPPED by the scroll frame, and clipping leaves no flag on the
--- row. So in the settings placement the honest test is geometric: does the row's
--- rect still overlap the window it lives in. Outside that mode there is no
--- clipper to ask about, and the answer is always yes.
+-- row. So the honest test is geometric: does the row's rect still overlap the
+-- thing that clips it. With nothing declared to clip against, the answer is
+-- always yes.
+--
+-- ☠ THE CLIPPER IS NOT THE WINDOW. This used to test against `outsideOf`, and
+-- that is the wrong rect by exactly the window's own chrome: a settings window
+-- has a title bar, a blurb and its padding ABOVE the viewport, so a row scrolled
+-- off the top of the list stops being drawn while its rect still overlaps the
+-- window by 50-60px. For that whole stretch the beam, the point and the outline
+-- were drawn over the window's own title bar, pointing at a row nobody could
+-- see -- chrome hanging in mid-air, which is exactly what it looked like.
+--
+-- `Follow`'s opts.clipTo names the region that really clips (the scroll frame),
+-- and `outsideOf` remains the fallback so an existing caller keeps the old
+-- behaviour rather than silently losing the gate.
 --
 -- Only the CHROME is gated. The popout stays up and stays docked (its y clamps
 -- into the window's span, see PopoutOutsidePos) -- scrolling a list must not
@@ -613,11 +757,11 @@ end
 -- point and the source outline go, because all three are claims about a row that
 -- is no longer on screen.
 function Popout:_TetherClipped()
-    local win = self.outsideOf
-    if not win then return false end
-    local wr = rectOf(win)
-    if not wr then return false end
-    return not rectsOverlap(wr, rectOf(self:_TetherRegion()))
+    local clip = self.clipTo or self.outsideOf
+    if not clip then return false end
+    local cr = rectOf(clip)
+    if not cr then return false end
+    return not rectsOverlap(cr, rectOf(self:_TetherRegion()))
 end
 
 -- ---- the connection point ----------------------------------------
@@ -690,8 +834,14 @@ function Popout:_UpdateSourceOutline()
     if self._outlineOn ~= region then
         self._outlineOn = region
         o:ClearAllPoints()
-        o:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 0)
-        o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
+        -- INSET TO THE REGION'S INK, not laid over its frame. A settings row's
+        -- frame is its whole layout slot -- RowGap and all -- so the flush
+        -- version drew a box a clear 14px taller than the plate it was supposed
+        -- to be lighting, with the overhang sitting in the gap above the next
+        -- row. Same rect rectOf() reports, so outline, beam and clip gate agree.
+        local l, r, t, b = insetOf(region)
+        o:SetPoint("TOPLEFT", region, "TOPLEFT", l, -t)
+        o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", -r, b)
         local c = self:GetAccent()
         self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
     end
@@ -1178,7 +1328,7 @@ function UI:CreatePopout(opts)
         size = CLOSE_SIZE,
         onClick = function() po:Close("cross") end,
     })
-    po.closeBtn:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
+    po.closeBtn:SetPoint("RIGHT", bar, "RIGHT", -HDR_EDGE, 0)
 
     if po.pinnable then
         po.pinBtn = host:CreateGlyphButton(f, {
@@ -1187,7 +1337,7 @@ function UI:CreatePopout(opts)
             tooltip = { title = L and L["Pin"] or "Pin" },
             onClick = function() po:Pin() end,
         })
-        po.pinBtn:SetPoint("RIGHT", po.closeBtn, "LEFT", -2, 0)
+        po.pinBtn:SetPoint("RIGHT", po.closeBtn, "LEFT", -HDR_GAP, 0)
     end
 
     -- The title takes whatever the buttons left. Anchored to the pin (or the
@@ -1198,8 +1348,8 @@ function UI:CreatePopout(opts)
     -- SetText gets a table). The mover host has no shims, which is why this
     -- only ever erupts under DF. Same rule as Sections/ColorPicker.
     po.titleFS = host:CreateLabelNative(f, { size = 11, color = UI.Colors and UI.Colors.text })
-    po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
-    po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+    po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", TITLE_GAP, 0)
+    po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -TITLE_GAP, 0)
     if po.titleFS.SetWordWrap then po.titleFS:SetWordWrap(false) end
 
     -- ---- header controls ------------------------------------------
@@ -1225,24 +1375,28 @@ function UI:CreatePopout(opts)
             po.titleFS:ClearAllPoints()
             if left then
                 left:ClearAllPoints()
-                left:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
-                po.titleFS:SetPoint("LEFT", left, "RIGHT", 4, 0)
+                left:SetPoint("LEFT", iconTex, "RIGHT", HDR_GAP, 0)
+                po.titleFS:SetPoint("LEFT", left, "RIGHT", TITLE_GAP, 0)
             else
-                po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
+                po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", TITLE_GAP, 0)
             end
             if right then
                 right:ClearAllPoints()
-                right:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
-                po.titleFS:SetPoint("RIGHT", right, "LEFT", -4, 0)
+                right:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -HDR_GAP, 0)
+                po.titleFS:SetPoint("RIGHT", right, "LEFT", -TITLE_GAP, 0)
             else
-                po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+                po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -TITLE_GAP, 0)
             end
         end
     end
 
     -- ---- content --------------------------------------------------
+    -- ⚠ -(TITLE_H + PAD), not -TITLE_H. The height has always been
+    -- TITLE_H + PAD + h + PAD, so anchoring the content flush against the bar put
+    -- BOTH pads at the bottom: the first control sat hard against the title while
+    -- 20px of nothing hung under the last one. Same height, symmetric now.
     local content = CreateFrame("Frame", nil, f)
-    content:SetPoint("TOPLEFT", PAD, -TITLE_H)
+    content:SetPoint("TOPLEFT", PAD, -(TITLE_H + PAD))
     content:SetWidth(po.width)
     content:SetHeight(1)
     po.content = content
@@ -1252,6 +1406,12 @@ function UI:CreatePopout(opts)
     tinsert(store.live, po)
 
     safeCall(opts.build, po, content)
+    -- ...and NOW the content exists. adopt() painted the accent a moment ago, but
+    -- it ran before build, so the cascade it did had nothing to walk -- a popout
+    -- with an opts.accent override would otherwise come up with chrome in its own
+    -- colour and a body still in the host's. Chrome only needs painting once, so
+    -- this is the cascade alone rather than a second _ApplyAccent.
+    po:_CascadeAccent()
     po:_Resize()
     sweepFamily(host, po)
     return po

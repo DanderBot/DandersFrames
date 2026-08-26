@@ -62,6 +62,13 @@ local CHECK_TICK = 9
 local GEAR_SIZE  = 14
 local CHEV_SIZE  = 10
 local GAP        = 6
+-- The count badge is given a FIXED width wherever it is drawn, and its text is
+-- laid out inside that box rather than sizing it. A FontString that sizes itself
+-- moves everything anchored off it, which is how a column of rows ends up with
+-- its gears and chevrons at three different x positions -- see the column block
+-- in the row build. 18 holds three digits of the 10px face; a group with more
+-- than 999 controls has a bigger problem than a clipped badge.
+local BADGE_W    = 18
 
 -- ⚠ NO rowKind. rowKind drives UI.RowCompact's run-tightening, and a value that
 -- is not IN RowCompact silently BREAKS a run of checkboxes it sits between --
@@ -271,7 +278,12 @@ local function buildHeaderControls(host, po, bar)
     end)
     po._hdrToggle = cb
 
+    -- Fixed width here too: ONE panel serves every row, so a swap from a 3-control
+    -- group to a 14-control one would otherwise widen this badge and shove the
+    -- title's right edge across mid-glide.
     local badge = host:CreateLabelNative(bar, { size = 10, color = C_TEXT_DIM })
+    badge:SetWidth(BADGE_W)
+    if badge.SetJustifyH then badge:SetJustifyH("RIGHT") end
     po._hdrBadge = badge
     return cb, badge
 end
@@ -311,6 +323,13 @@ end
 --              still opens -- the controls inside gate themselves
 --   onToggle   fn(newValue) after a toggle write from either place
 --   window     REQUIRED for opening: the window frame the popout docks outside
+--   clipTo     the region that actually CLIPS this row -- the scroll frame the
+--              list lives in. The popout's connected chrome hides while the row
+--              is scrolled out of it. Without one the shell falls back to the
+--              WINDOW, which is too generous by the window's own title bar and
+--              padding: the beam and outline then hang over that chrome for the
+--              50-odd pixels between the row leaving the viewport and its rect
+--              leaving the window
 --   popoutKey  override the shared pool key (default: one per host)
 --   title      popout header title (default: label)
 --
@@ -329,12 +348,20 @@ function UI:CreatePopoutRow(parent, opts)
     row:SetSize(260, ROW_H)
     row.preferredHeight = ROW_H
     row.fixedRowHeight = true
+    -- WHICH PART OF THIS FRAME IS INK. The row's frame is its whole layout SLOT,
+    -- and the bottom RowGap of that slot is the gap to the next row -- nothing is
+    -- painted there. The popout shell reads this off any region it tethers to
+    -- (Popout.lua's insetOf), so the source outline is drawn round the PLATE
+    -- rather than round the slot, and the beam aims at the plate's centre. Left
+    -- flush with the frame, because the plate is.
+    row.popoutInset = { 0, 0, 0, UI.RowGap }
 
     row._label   = opts.label or ""
     row._title   = opts.title or row._label
     row._count   = opts.count
     row._build   = opts.build
     row._window  = opts.window
+    row._clipTo  = opts.clipTo
     row._key     = opts.popoutKey or DEFAULT_KEY
     row._accent  = normColor(opts.accent)
     row._hasToggle = opts.toggle ~= nil
@@ -360,6 +387,14 @@ function UI:CreatePopoutRow(parent, opts)
         row.checkButton = cb
     end
 
+    -- ---- the right-hand columns -----------------------------------
+    -- ☠ FIXED COLUMNS, every one of them, and NOT ONE anchored off a self-sizing
+    -- thing. The badge used to take whatever width its text wanted, and the gear
+    -- and the summary hung off its left edge -- so a row reading "3" and a row
+    -- reading "14" put their gears 6px apart and their summaries with them, and a
+    -- column of these read as a ragged list instead of a table. Every offset
+    -- below is a constant, so the four columns land at the same x on every row of
+    -- a parent whatever any of them happens to say.
     local chevron = row:CreateTexture(nil, "OVERLAY")
     chevron:SetSize(CHEV_SIZE, CHEV_SIZE)
     chevron:SetPoint("RIGHT", plate, "RIGHT", 0, 0)
@@ -369,15 +404,19 @@ function UI:CreatePopoutRow(parent, opts)
 
     -- The count badge sits between the gear and the chevron and is drawn in the
     -- accent, so "how much is in here" reads as part of the way IN rather than
-    -- as another value in the summary.
+    -- as another value in the summary. LEFT-justified inside its fixed box: the
+    -- number belongs to the gear beside it, so the slack goes on the other side
+    -- where the chevron's own fixed column swallows it.
     local badge = host:CreateLabelNative(row, { size = 10, color = C_TEXT_DIM })
+    badge:SetWidth(BADGE_W)
+    if badge.SetJustifyH then badge:SetJustifyH("LEFT") end
     badge:SetPoint("RIGHT", chevron, "LEFT", -GAP, 0)
     badge:SetText(row._count and tostring(row._count) or "")
     row.badge = badge
 
     local gear = row:CreateTexture(nil, "OVERLAY")
     gear:SetSize(GEAR_SIZE, GEAR_SIZE)
-    gear:SetPoint("RIGHT", badge, "LEFT", -4, 0)
+    gear:SetPoint("RIGHT", badge, "LEFT", -GAP, 0)
     gear:SetTexture(ICON_PATH .. "settings")
     gear:SetVertexColor(1, 1, 1, 0.6)
     row.gear = gear
@@ -392,7 +431,9 @@ function UI:CreatePopoutRow(parent, opts)
     -- The summary is ANCHORED between the label and the gear cluster rather than
     -- sized from its own text, and right-justified. Both matter: a box that
     -- resized itself would shuffle the row every time the value changed, and a
-    -- value flush against the way in is where the eye already is.
+    -- value flush against the way in is where the eye already is. Its RIGHT edge
+    -- is a constant off the plate now that the gear's is, so a stack of rows
+    -- right-aligns its values against one another as well as against the gear.
     local summary = host:CreateLabelNative(row, { size = 10, color = C_TEXT_DIM })
     summary:SetPoint("LEFT", label, "RIGHT", GAP, 0)
     summary:SetPoint("RIGHT", gear, "LEFT", -GAP, 0)
@@ -509,7 +550,7 @@ function UI:CreatePopoutRow(parent, opts)
         -- from the frame's height, and a popout placed at the previous row's
         -- height would land in the wrong place and then jump.
         swapTo(po, row)
-        po:Follow(row, { outsideOf = row._window })
+        po:Follow(row, { outsideOf = row._window, clipTo = row._clipTo })
         row.popout = po
         if not po.pinned then storeFor(host).shared[row._key] = po end
         return row

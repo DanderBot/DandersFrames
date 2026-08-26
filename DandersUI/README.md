@@ -217,18 +217,58 @@ draws neither.
 | Call | Purpose |
 |---|---|
 | `po:Follow(region, opts)` | Dock beside `region` and track it. `opts.side` forces `"left"` / `"right"` / `"above"` / `"below"`; without it the side is whichever fits on screen. Handed a NEW region while already up and following, it glides across. On a pinned popout it only re-points the tether |
-| `po:Follow(row, { outsideOf = window })` | The **settings placement**: `row` lives inside `window` (typically in a scroll child), and the popout docks outside the WINDOW's vertical edge at the ROW's height rather than beside the row — so it never covers the list the row was picked from. Only `"left"` / `"right"` are meaningful for `opts.side`; it flips to the window's left edge when the right lacks screen room. The tether chrome stays on the ROW, and hides (popout still up and docked) while the row is scrolled out of the window's rect. A plain `Follow` clears the mode |
+| `po:Follow(row, { outsideOf = window, clipTo = viewport })` | The **settings placement**: `row` lives inside `window` (typically in a scroll child), and the popout docks outside the WINDOW's vertical edge at the ROW's height rather than beside the row — so it never covers the list the row was picked from. Only `"left"` / `"right"` are meaningful for `opts.side`; it flips to the window's left edge when the right lacks screen room. The tether chrome stays on the ROW and hides (popout still up and docked) while the row is scrolled out of view. **`clipTo` is what decides that**, and it should be the scroll frame, not the window: a window's own title bar and padding sit inside the window and outside the viewport, so gating on the window leaves the beam and outline drawn over that chrome for the 50-odd pixels between the row leaving the list and its rect leaving the window. Omitted, it falls back to `outsideOf`. A plain `Follow` clears both |
 | `po:PlaceFree(x, y)` | Absolute placement, for consumers that own their own layout: no source, so nothing to follow and nothing to tether to. Stops a glide |
 | `po:Pin([silent])`, `po:AutoPin()`, `po:IsPinned()` | Take it off its leash: it stops following, drops the connection point, beam and source outline, becomes draggable by its title bar, and from there the only way out is the cross. `AutoPin` is the same thing gated on `canAutoPin` and without the confirm pop |
 | `po:SetHeader(title, icon)`, `po:GetTitle()` | Title bar contents |
 | `po:Resize()` | Re-fit the height after changing the content's height |
 | `po:GetAccent()` | The colour this popout's chrome is drawn in: `opts.accent`, else the host accent |
-| `po:SetAccent(c)` | Live re-tint of a popout that is already up: border, connection point, beam and source outline all repaint. `nil` hands it back to the host accent. `adopt` paints at open time; this is the only way to repaint one mid-flight (a party/raid mode switch under an open panel) |
+| `po:SetAccent(c)` | Live re-tint of a popout that is already up: border, connection point, beam and source outline all repaint, **and the colour cascades into the widgets the consumer mounted** (see below). `nil` hands it back to the host accent. `adopt` paints at open time; this is the only way to repaint one mid-flight (a party/raid mode switch under an open panel) |
 | `po:HideChrome()` | Take the beam and the source outline down at once, animations cancelled — for a consumer hiding the popout by hand (a combat suspend, a drag). Neither is a child of `po.frame`, so nothing else would |
 | `po:Close([reason])`, `po:IsShown()` | Close hands `reason` to `onClose`. A pinned instance is discarded; an unpinned one goes back to the pool |
-| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutOutsidePos` is the settings placement's whole geometry — it answers `side, x, y` for a popout standing outside `win` at `row`'s height, clamping the popout's top into the window's vertical span and then the whole popout onto the screen; the dock, the retarget glide and the tests all read that one answer. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
+| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutOutsidePos` is the settings placement's whole geometry — it answers `side, x, y` for a popout standing outside `win`, **centred on** `row`, then clamped into the window's vertical span (skipped when the popout is taller than the window, since no position there satisfies it) and finally onto the screen; the dock, the retarget glide and the tests all read that one answer. Centred, not hung from the row's top: a tall popout hung by its top drops its whole body below the row it belongs to and ends up level with a part of the list it has nothing to do with. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
 
 `po.frame` is the shell, `po.content` the frame `build` was handed.
+
+**The box model.** `po.frame`'s height is
+`UI.PopoutTitleHeight + UI.PopoutPad + <content height> + UI.PopoutPad`, and its
+width is `opts.width + 2 × UI.PopoutPad` — both numbers live in `Theme.lua` so a
+consumer laying out a fixed-height panel can work out what the chrome costs it
+without reading `Popout.lua`. The title bar is `UI.PopoutTitleHeight` tall and
+holds the icon, the caption, whatever `headerControls` returned, the pin and the
+cross; the content hangs one `PAD` below it, with the same `PAD` under and either
+side of it.
+
+**The ink rect.** A region's frame and the part of it that is actually painted
+are not always the same rect — a settings row's frame is its whole layout slot,
+gap to the next row included. Any region the shell tethers to may declare
+`region.popoutInset = { left, right, top, bottom }` (pixels trimmed off each
+edge), and every rect the shell takes of it honours that: the source outline is
+drawn round the ink, the beam aims at the ink, the clip gate tests the ink, and
+the settings placement measures the ink. Undeclared means "the whole frame".
+
+**The accent cascade.** A popout's accent is not just its chrome. Whenever the
+accent is applied — at open, and on every `SetAccent` — the popout walks its own
+frame tree (from `po.frame`, so the title bar and any `headerControls` are
+included), collects the `ThemeListeners` lists it finds and calls
+`ApplyThemeColor(c)` on each entry with the popout's colour. Without it a popout
+whose accent changed under an open panel ended up a purple-bordered box full of
+orange sliders.
+
+`ApplyThemeColor(c)` is the kit's "tint to THIS colour" entry point and is the
+only one the cascade drives. **`UpdateTheme()` takes no arguments and must not
+start** — several call sites reach it through colon syntax (`slider:UpdateTheme()`),
+which would fill a colour parameter with the widget table itself. It means
+"repaint to the host accent"; a widget that wants to be scope-tintable publishes
+`ApplyThemeColor` as well (sliders, buttons, check boxes and collapse arrows all
+do).
+
+Two things it does not reach, by design or by limit: a widget built with an
+explicit `opts.accent` registers no listener at all (that colour is the call
+site's choice, not an inherited one), and any repaint that reads
+`host:GetAccent()` at *click* time rather than at theme time — a dropdown menu
+building its rows, an anchor grid cell re-activating — comes up in the host
+colour until it is next rebuilt.
 
 ### Popout rows (options manifest)
 
@@ -260,6 +300,7 @@ unchanged).
 | `accent` | per-row accent override; `enabled` — bool or `fn(db)`, false greys the whole row (popout still opens) |
 | `onToggle(v)` | after a toggle write from the row OR the popout header (one write path, both stay in sync) |
 | `window` | **required** to open: the frame the popout docks outside of |
+| `clipTo` | the region that actually clips this row — the scroll frame the list lives in. The popout's connected chrome hides while the row is scrolled out of it. Omitted, the shell falls back to `window`, which is too generous by that window's own title bar and padding |
 | `title` | popout header title (default: `label`) |
 
 Returns the row frame with `.Refresh()` / `.refreshContent(db)` (the settings-group
