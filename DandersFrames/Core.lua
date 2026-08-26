@@ -430,6 +430,7 @@ DF.COMMAND_SIBLINGS = {
     guiwidth  = {},
     adpin     = {},
     gapcheck  = { "all", "clear" },
+    guiperf   = { "start", "stop", "report" },
     -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
     -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
     -- asked.
@@ -546,6 +547,7 @@ DF.DEBUG_GROUP_OF = {
     casthistory = "click", clearhistory = "click", resetconflict = "click",
 
     pixelcheck = "gui", gapcheck = "gui", navprobe = "gui", guiwidth = "gui",
+    guiperf = "gui",
     tdmirror = "gui", colorhook = "gui", overridedebug = "gui", atlas = "gui",
     icons = "gui",
 
@@ -6430,6 +6432,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("gapcheck",     "GUI spacing probe (add 'all' or 'clear')", true, "[all|clear]")
         sub("navprobe",     "nav menu row probe", true, "[n]")
         sub("guiwidth",     "GUI width dump", true)
+        sub("guiperf",      "count the hook calls a settings change drives", true, "<start|stop|report>")
         sub("tdmirror",     "Text Designer mirror state", true)
         -- Performance
         sub("profiler",     "open the profiler UI")
@@ -7146,6 +7149,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- artefact. All four look the same on screen.
                 if DF.GUI and DF.GUI.NavProbe then
                     DF.GUI.NavProbe(tonumber(msg:match("(%d+)$")))
+                else
+                    DF:Say("GUI module not loaded.")
+                end
+            elseif msg == "guiperf" or msg:match("^guiperf%s+%a+$") then
+                -- Counts the hook calls one settings change drives, at DandersUI's
+                -- UI:Call chokepoint. Start, drag a slider, stop -- the report says
+                -- how many full applies that single drag cost.
+                if DF.GUIPerf then
+                    DF:GUIPerf(msg:match("^guiperf%s+(%a+)$"))
                 else
                     DF:Say("GUI module not loaded.")
                 end

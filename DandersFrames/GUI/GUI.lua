@@ -1213,6 +1213,44 @@ end
 -- dispatcher started forwarding the mode argument. Zero callers.
 
 -- ============================================================
+-- /df debug guiperf -- count the hook calls a settings change actually drives
+--
+-- Every hook a widget factory fires (refresh, refreshNow, onSettingWritten,
+-- onDragStart/Stop, interceptWrite, …) goes through DandersUI's UI:Call, so the
+-- pack can count them without knowing anything about us. This is the DF-side
+-- door onto that: start, drag a slider, stop, report.
+--
+-- The question it answers is the one no screenshot can: how many full applies
+-- one drag of one slider costs. "It feels laggy" and "it fires forty times a
+-- second" look identical from the outside.
+--
+-- Debug output — developer-facing, so deliberately unlocalised like the rest of
+-- the /df debug dumps.
+-- ============================================================
+function DF:GUIPerf(action)
+    action = action and action:lower() or "report"
+    -- ⚠ The pack reports through the `debug` hook's printer, which is silent
+    -- unless PERF is a logged category. Without this line a report with debug
+    -- off prints NOTHING and reads as "the counters recorded nothing".
+    if not (DF.DebugActive and DF:DebugActive("PERF")) then
+        DF:Say("GUI hook perf", "PERF logging is off — enable it in the debug console or output goes nowhere", "WARN")
+    end
+    if action == "start" then
+        GUI:PerfStart()
+        DF:Say("GUI hook perf", "RECORDING", "GOOD")
+        DF:Say("Drag a slider, then: " .. DF:CmdPath("guiperf") .. " stop")
+    elseif action == "stop" then
+        GUI:PerfStop()
+        DF:Say("GUI hook perf", "STOPPED", "NEUTRAL")
+        GUI:PerfReport()
+    elseif action == "report" then
+        GUI:PerfReport()
+    else
+        DF:Err("guiperf: expected start, stop or report.")
+    end
+end
+
+-- ============================================================
 -- DESIGNER PRESET PROMPTS (DandersFrames-only)
 -- Used by the Aura / Text Designer template bars in the options companion,
 -- which alias them off GUI._priv. They stay here because deleting a preset is
