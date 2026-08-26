@@ -64,7 +64,7 @@ end
 -- and the base half has to be found through the one registry both halves share.
 -- ============================================================
 do
-    local base = { MINOR = 7, name = "base-7" }
+    local base = { MINOR = 8, name = "base-8" }
     local ns = {}
     local lines = withLibStub(base, function(asked)
         local out = loadOptionsCore(ns)
@@ -117,18 +117,18 @@ do
     check(ns.__DandersUI == nil, "mismatch: an older base half does NOT get the handshake")
     eq(#lines, 1, "mismatch: one line")
     check(lines[1]:find("6", 1, true) ~= nil, "mismatch: the line names the minor it found")
-    check(lines[1]:find("7", 1, true) ~= nil, "mismatch: ...and the minor it wanted")
+    check(lines[1]:find("8", 1, true) ~= nil, "mismatch: ...and the minor it wanted")
 end
 
 -- A NEWER base half is refused on exactly the same terms: the check is
 -- `~=`, not `<`, because a shape change cuts both ways.
 do
-    local newer = { MINOR = 8 }
+    local newer = { MINOR = 9 }
     local ns = {}
     local lines = withLibStub(newer, function() return loadOptionsCore(ns) end)
     check(ns.__DandersUI == nil, "mismatch: a NEWER base half is refused too")
     eq(#lines, 1, "mismatch: ...with one line")
-    check(lines[1]:find("8", 1, true) ~= nil, "mismatch: naming the newer minor it found")
+    check(lines[1]:find("9", 1, true) ~= nil, "mismatch: naming the newer minor it found")
 end
 
 -- ============================================================
@@ -138,8 +138,8 @@ end
 -- other addon's copy that won the race.
 -- ============================================================
 do
-    local mine = { MINOR = 7, name = "same-addon" }
-    local theirs = { MINOR = 7, name = "someone-else" }
+    local mine = { MINOR = 8, name = "same-addon" }
+    local theirs = { MINOR = 8, name = "someone-else" }
     local ns = { __DandersUI = mine }
     local lines = withLibStub(theirs, function(asked)
         local out = loadOptionsCore(ns)

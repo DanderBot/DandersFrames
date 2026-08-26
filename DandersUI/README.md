@@ -216,6 +216,7 @@ draws neither.
 | Call | Purpose |
 |---|---|
 | `po:Follow(region, opts)` | Dock beside `region` and track it. `opts.side` forces `"left"` / `"right"` / `"above"` / `"below"`; without it the side is whichever fits on screen. Handed a NEW region while already up and following, it glides across. On a pinned popout it only re-points the tether |
+| `po:Follow(row, { outsideOf = window })` | The **settings placement**: `row` lives inside `window` (typically in a scroll child), and the popout docks outside the WINDOW's vertical edge at the ROW's height rather than beside the row — so it never covers the list the row was picked from. Only `"left"` / `"right"` are meaningful for `opts.side`; it flips to the window's left edge when the right lacks screen room. The tether chrome stays on the ROW, and hides (popout still up and docked) while the row is scrolled out of the window's rect. A plain `Follow` clears the mode |
 | `po:PlaceFree(x, y)` | Absolute placement, for consumers that own their own layout: no source, so nothing to follow and nothing to tether to. Stops a glide |
 | `po:Pin([silent])`, `po:AutoPin()`, `po:IsPinned()` | Take it off its leash: it stops following, drops the connection point, beam and source outline, becomes draggable by its title bar, and from there the only way out is the cross. `AutoPin` is the same thing gated on `canAutoPin` and without the confirm pop |
 | `po:SetHeader(title, icon)`, `po:GetTitle()` | Title bar contents |
@@ -223,7 +224,7 @@ draws neither.
 | `po:GetAccent()` | The colour this popout's chrome is drawn in: `opts.accent`, else the host accent |
 | `po:HideChrome()` | Take the beam and the source outline down at once, animations cancelled — for a consumer hiding the popout by hand (a combat suspend, a drag). Neither is a child of `po.frame`, so nothing else would |
 | `po:Close([reason])`, `po:IsShown()` | Close hands `reason` to `onClose`. A pinned instance is discarded; an unpinned one goes back to the pool |
-| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
+| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutOutsidePos` is the settings placement's whole geometry — it answers `side, x, y` for a popout standing outside `win` at `row`'s height, clamping the popout's top into the window's vertical span and then the whole popout onto the screen; the dock, the retarget glide and the tests all read that one answer. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
 
 `po.frame` is the shell, `po.content` the frame `build` was handed.
 

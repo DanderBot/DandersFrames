@@ -905,4 +905,355 @@ do
         "adjacent: one step past it does not")
 end
 
+-- ============================================================
+-- 12. THE SETTINGS PLACEMENT -- Follow(row, { outsideOf = window })
+-- ------------------------------------------------------------
+-- A popout about a ROW inside a scrolling WINDOW docks outside the WINDOW's
+-- vertical edge at the ROW's height, not beside the row -- beside the row it
+-- would sit on top of the list the row was picked from. Two rects decide the
+-- position: the window gives x, the row gives y.
+--
+-- Every rect below is in UIParent-centre units:
+--   window { 0, 0, 600 x 400 }    -> edges at x = ±300, y = ±200
+--   row    { -100, 50, 200 x 40 } -> its TOP at y = 70
+-- ============================================================
+local WIN_W, WIN_H = 600, 400
+local ROW_W, ROW_H = 200, 40
+local WIN = { x = 0, y = 0, w = WIN_W, h = WIN_H }
+local ROW = { x = -100, y = 50, w = ROW_W, h = ROW_H }
+-- Right-docked: the popout's LEFT edge a gap clear of the window's RIGHT edge,
+-- and its TOP level with the row's top.
+local OUT_X = WIN_W / 2 + DOCK_GAP + FRAME_W / 2            -- 372
+local OUT_Y = ROW.y + ROW.h / 2 - FRAME_H / 2               -- 24
+
+-- Build the pair the live tests drive: a window at screen centre and a row
+-- inside it, `dy` above/below the window's middle.
+local function outsideWindow() return source(WIN_W, WIN_H, CX, CY) end
+local function outsideRow(dy, h) return source(ROW_W, h or ROW_H, CX + ROW.x, CY + (dy or ROW.y)) end
+
+-- ---- the pure geometry, head-on ----------------------------------
+do
+    local side, x, y = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    eq(side, "right", "outside: open screen docks outside the window's RIGHT edge")
+    eq(x, OUT_X, "outside: its left edge a gap clear of that edge")
+    eq(y, OUT_Y, "outside: hanging from the ROW's top, not the window's")
+
+    -- The row is what moves the popout vertically -- that is the whole reason
+    -- this is not just "dock beside the window".
+    local _, _, y2 = UI.PopoutOutsidePos(WIN, { x = -100, y = -50, w = ROW_W, h = ROW_H },
+                                         FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    eq(y2, -50 + ROW_H / 2 - FRAME_H / 2, "outside: a lower row lowers the popout by the same amount")
+end
+
+-- No room to the right of the window: the popout crosses to the OTHER side of
+-- the window rather than overhanging the screen.
+do
+    -- Window pushed right until its right edge is at x = 900: 900 + 12 + 120
+    -- overruns the 960 half-screen.
+    local win = { x = 600, y = 0, w = WIN_W, h = WIN_H }
+    local side, x = UI.PopoutOutsidePos(win, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    eq(side, "left", "outside: no screen room on the right flips to the window's LEFT edge")
+    eq(x, 600 - WIN_W / 2 - DOCK_GAP - FRAME_W / 2, "outside: right edge a gap clear of the window's left")
+
+    -- Exactly at the boundary: the popout's right edge lands ON the screen edge,
+    -- which counts as fitting. One pixel further and it does not.
+    local fits = { x = 960 - FRAME_W - DOCK_GAP - WIN_W / 2, y = 0, w = WIN_W, h = WIN_H }
+    eq(UI.PopoutOutsidePos(fits, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080), "right",
+        "outside: flush against the screen edge still fits")
+    local over = { x = fits.x + 1, y = 0, w = WIN_W, h = WIN_H }
+    eq(UI.PopoutOutsidePos(over, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080), "left",
+        "outside: one step past it does not")
+end
+
+-- A forced side beats the fit test, in both directions. Only left/right mean
+-- anything out here, so anything else hands the choice back to the fit test.
+do
+    local side, x = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080, "left")
+    eq(side, "left", "outside: opts.side forces the left edge even with room on the right")
+    eq(x, -OUT_X, "outside: mirrored about the window's centre")
+    local cramped = { x = 600, y = 0, w = WIN_W, h = WIN_H }
+    side, x = UI.PopoutOutsidePos(cramped, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080, "right")
+    eq(side, "right", "outside: ...and forcing right keeps it right where it would have flipped")
+    eq(x, 600 + WIN_W / 2 + DOCK_GAP + FRAME_W / 2, "outside: overhang and all -- SetClampedToScreen deals with it")
+    eq(UI.PopoutOutsidePos(WIN, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080, "above"), "right",
+        "outside: above/below are meaningless here, so the fit test decides")
+end
+
+-- The vertical screen clamp. A tall window can put a row past the top or bottom
+-- of the screen; the popout may not go with it.
+do
+    local tall = { x = 0, y = 0, w = WIN_W, h = 1400 }
+    local high = { x = -100, y = 590, w = ROW_W, h = 20 }        -- top at 600
+    local _, _, y = UI.PopoutOutsidePos(tall, high, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    eq(y, 540 - FRAME_H / 2, "outside: clamped to the top of the screen")
+    local low = { x = -100, y = -590, w = ROW_W, h = 20 }
+    _, _, y = UI.PopoutOutsidePos(tall, low, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    eq(y, -540 + FRAME_H / 2, "outside: and to the bottom")
+end
+
+-- The window clamp: the popout's TOP is held inside the window's vertical span.
+-- For a row IN VIEW that is a no-op (its top is inside the span by definition),
+-- which is what keeps "level with the row's top" exact.
+do
+    local below = { x = -100, y = -400, w = ROW_W, h = ROW_H }   -- scrolled off the bottom
+    local _, _, y = UI.PopoutOutsidePos(WIN, below, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    eq(y, -WIN_H / 2 - FRAME_H / 2, "outside: a row below the window pins the popout's top to its bottom edge")
+    local above = { x = -100, y = 400, w = ROW_W, h = ROW_H }
+    _, _, y = UI.PopoutOutsidePos(WIN, above, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    eq(y, WIN_H / 2 - FRAME_H / 2, "outside: and a row above it pins the top to the window's top edge")
+
+    -- A popout TALLER than the window is not squeezed -- only its top is clamped,
+    -- so it hangs below the window rather than being centred in it.
+    _, _, y = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, 600, DOCK_GAP, 1920, 1080)
+    eq(y, ROW.y + ROW.h / 2 - 300, "outside: a popout taller than the window still hangs from the row")
+end
+
+-- Missing rects have no answer, the same way PopoutDockPos has none.
+do
+    eq(UI.PopoutOutsidePos(nil, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080), nil,
+        "outside: no window, no position")
+    eq(UI.PopoutOutsidePos(WIN, nil, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080), nil,
+        "outside: no row, no position")
+end
+
+-- ---- the live dock ------------------------------------------------
+-- An EXPLICIT SCREEN ANCHOR, not a frame anchor: the y is a function of the row
+-- AND of two clamps, and no SetPoint against either frame can say that.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "outside" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+    eq(p.side, "right", "outside: it docked outside the window's right edge")
+    eq(p.outsideOf, win, "outside: the mode is stored on the instance")
+    local pt = p.frame._points[1]
+    eq(pt[1], "CENTER", "outside: anchored by its centre")
+    eq(pt[2], UIParent, "outside: ...to the SCREEN, not to the window or the row")
+    eq(pt[4], OUT_X, "outside: at the x PopoutOutsidePos computed")
+    eq(pt[5], OUT_Y, "outside: and the y")
+
+    -- Both baselines are taken at dock time, so the very next tick reads
+    -- "nothing moved" rather than re-docking for free.
+    eq(p._srcX, ROW.x, "outside: the row baseline is set")
+    eq(p._winW, WIN_W, "outside: and the window has one of its own")
+
+    -- The tether is the ROW throughout: the window is only where the popout
+    -- stands, never what it is about.
+    check(p.beam:IsShown(), "outside: the beam is up")
+    check(p.notch:IsShown(), "outside: so is the connection point")
+    eq(p.notch._points[#p.notch._points][3], "LEFT", "outside: right-docked, on the popout's LEFT edge")
+    eq(p.srcOutline._points[1][2], row, "outside: the source outline is on the ROW, not the window")
+    eq(p.beam.core._start.x, OUT_X - FRAME_W / 2, "outside: the beam leaves the popout's left face")
+    eq(p.beam.core._start.y, ROW.y, "outside: slid level with the row's centre")
+    eq(p.beam.core._end.x, ROW.x + ROW_W / 2, "outside: and lands on the row's near face")
+    eq(p.beam.core._end.y, ROW.y, "outside: straight across -- over the window, to the row")
+    p:Close()
+end
+
+-- A forced side, live.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "outsideforced" })
+    p:Follow(row, { outsideOf = win, side = "left" })
+    eq(p.side, "left", "outside: opts.side forces the window edge")
+    eq(p.frame._points[1][4], -OUT_X, "outside: ...and the popout is on the other side of it")
+    p:Close()
+end
+
+-- A plain Follow afterwards CLEARS the mode: the popout goes back to docking
+-- beside its source like any other.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "outsideclear" })
+    p:Follow(row, { outsideOf = win })
+    check(p.outsideOf ~= nil, "outside: the mode is on")
+    p:Follow(row)
+    eq(p.outsideOf, nil, "outside: a plain Follow clears it")
+    eq(p.frame._points[1][2], row, "outside: ...and it anchors to the row again")
+    p:Close()
+
+    local q = popout({ key = "outsidefree" })
+    q:Follow(outsideRow(), { outsideOf = outsideWindow() })
+    q:PlaceFree(0, 0)
+    eq(q.outsideOf, nil, "outside: PlaceFree clears it too -- absolute placement docks to nothing")
+    q:Close()
+end
+
+-- ---- the two-rect ticker ------------------------------------------
+-- The row moves when the list scrolls AND when the window is dragged; the window
+-- moves on its own when it is RESIZED. Both have to re-dock, and neither may
+-- cost anything while nothing has moved.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "outsidetick" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+
+    local docks = 0
+    local realSetPoint = p.frame.SetPoint
+    p.frame.SetPoint = function(s, ...) docks = docks + 1 return realSetPoint(s, ...) end
+
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(docks, 0, "outside: a tick with neither rect moved re-docks nothing")
+
+    -- Scrolled: the row drops 100, so the popout drops 100 with it.
+    row:SetFakeCenter(CX + ROW.x, CY + ROW.y - 100)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    check(docks > 0, "outside: a moved ROW re-docks")
+    eq(p.frame._points[1][5], OUT_Y - 100, "outside: the y follows the row")
+    eq(p.frame._points[1][4], OUT_X, "outside: the x does not -- the window did not move")
+
+    -- Resized wider on the right: the row is unmoved, but the edge the popout
+    -- stands outside of is not where it was. This is the case the source
+    -- baseline alone cannot see.
+    docks = 0
+    win:SetSize(WIN_W + 200, WIN_H)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    check(docks > 0, "outside: a WINDOW resize re-docks even though the row never moved")
+    eq(p.frame._points[1][4], (WIN_W + 200) / 2 + DOCK_GAP + FRAME_W / 2,
+        "outside: the popout tracked the window's new right edge")
+    eq(p.frame._points[1][5], OUT_Y - 100, "outside: ...without disturbing the row-tracked y")
+
+    -- And a plain window move.
+    docks = 0
+    win:SetSize(WIN_W, WIN_H)
+    win:SetFakeCenter(CX + 40, CY)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    check(docks > 0, "outside: a moved WINDOW re-docks")
+    eq(p.frame._points[1][4], OUT_X + 40, "outside: the x travelled with it")
+
+    docks = 0
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(docks, 0, "outside: and it settles again -- both baselines were re-taken")
+
+    p.frame.SetPoint = realSetPoint
+    p:Close()
+end
+
+-- ---- the row scrolled out of view ---------------------------------
+-- ⚠ A clipped row is still IsShown(). The chrome is gated on the row's rect
+-- still overlapping the window's, and ONLY the chrome: the popout stays up and
+-- stays docked, because scrolling a list must not close the panel you scrolled
+-- the list to configure.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "outsideclip" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+    check(p.beam:IsShown() and p.notch:IsShown() and p.srcOutline:IsShown(),
+        "clip: all three pieces of chrome are up while the row is in view")
+
+    -- Scrolled clean out of the bottom of the window.
+    row:SetFakeCenter(CX + ROW.x, CY - 400)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    check(p:IsShown(), "clip: the popout stays up")
+    check(not p.closed, "clip: and stays open -- a clipped row is not a dead one")
+    check(not p.beam:IsShown(), "clip: the beam goes -- it pointed at a row nobody can see")
+    check(not p.notch:IsShown(), "clip: so does the connection point")
+    check(not p.srcOutline:IsShown(), "clip: and the source outline")
+    eq(p.frame._points[1][5], -WIN_H / 2 - FRAME_H / 2,
+        "clip: its top clamps to the window's bottom edge rather than trailing the row")
+
+    -- Scrolled back.
+    row:SetFakeCenter(CX + ROW.x, CY + ROW.y)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    check(p.beam:IsShown(), "clip: scrolled back into view, the beam returns")
+    check(p.notch:IsShown(), "clip: ...and the point")
+    check(p.srcOutline:IsShown(), "clip: ...and the outline")
+    eq(p.srcOutline._points[1][2], row, "clip: re-anchored to the row it came back on")
+    eq(p.frame._points[1][5], OUT_Y, "clip: and the popout is level with the row again")
+    p:Close()
+end
+
+-- Outside the mode there is no clipper to ask about, so an ordinary popout is
+-- never gated by any of this.
+do
+    local src = source(80, 40, CX, CY)
+    local p = popout({ key = "outsidenoclip" })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(src)
+    check(not p:_TetherClipped(), "clip: a plain Follow is never clipped")
+    check(p.beam:IsShown(), "clip: ...so its chrome is untouched")
+    p:Close()
+end
+
+-- ---- the retarget glide, in the settings placement -----------------
+do
+    local win = outsideWindow()
+    local rowA, rowB = outsideRow(), outsideRow(-100)     -- rowB's rect sits at y = -100
+    -- The destination, stated up front: it is PopoutOutsidePos of rowB, and every
+    -- claim below about where the glide goes is measured against it.
+    local _, GX, GY = UI.PopoutOutsidePos(WIN, { x = ROW.x, y = -100, w = ROW_W, h = ROW_H },
+                                          FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
+    local p = popout({ key = "outsideglide" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(rowA, { outsideOf = win })
+    check(not p.gliding, "outglide: the first placement is not a glide")
+
+    local moves = {}
+    local realSetPoint = p.frame.SetPoint
+    p.frame.SetPoint = function(s, ...) moves[#moves + 1] = { ... } return realSetPoint(s, ...) end
+
+    p:Follow(rowB, { outsideOf = win })
+    check(p.gliding, "outglide: retargeting to another row glides")
+    local first = moves[#moves]
+    eq(first[1], "CENTER", "outglide: it drives its own screen anchor for the ride")
+    eq(first[2], UIParent, "outglide: ...off UIParent")
+    eq(first[4], OUT_X, "outglide: starting exactly where it already was")
+    eq(first[5], OUT_Y, "outglide: ...on both axes")
+    eq(p.srcOutline._points[1][2], rowB, "outglide: the outline commits to the new row at once")
+
+    p.frame:GetScript("OnUpdate")(p.frame, 0.06)
+    check(p.gliding, "outglide: part-way through, still gliding")
+    eq(p._gX, OUT_X, "outglide: the x never changes -- only the row's height did")
+    check(p._gY < OUT_Y and p._gY > GY, "outglide: ...and the y is between the two rows")
+
+    -- Run it out. The landing keeps the EXPLICIT anchor -- _Dock's outsideOf arm
+    -- re-takes it rather than handing the frame back to a source anchor it cannot
+    -- express.
+    p.frame:GetScript("OnUpdate")(p.frame, 1)
+    check(not p.gliding, "outglide: it finishes")
+    local landed = moves[#moves]
+    eq(landed[1], "CENTER", "outglide: it lands on an explicit screen anchor")
+    eq(landed[2], UIParent, "outglide: ...still off UIParent, not the row")
+    eq(landed[4], GX, "outglide: exactly on PopoutOutsidePos of the new row")
+    eq(landed[5], GY, "outglide: ...on both axes")
+    eq(p.source, rowB, "outglide: and it is following the new row")
+    check(p.beam:IsShown(), "outglide: with its chrome back on the row it arrived at")
+
+    -- The follow works again from there: the ticker's baselines were re-taken on
+    -- the way through, so a fresh scroll still moves it.
+    p.frame:SetFakeCenter(CX + GX, CY + GY)
+    rowB:SetFakeCenter(CX + ROW.x, CY - 150)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(p.frame._points[1][5], -150 + ROW_H / 2 - FRAME_H / 2,
+        "outglide: and the ordinary follow works from the landing")
+    p.frame.SetPoint = realSetPoint
+    p:Close()
+end
+
+-- ---- the connection point on a THIN row ---------------------------
+-- ☠ The slide clamp keeps the diamond NOTCH_EDGE_INSET (14) clear of the
+-- popout's corners, and the popout's top is level with the row's top -- so for
+-- any row shorter than 2*14 = 28 the row's centre is INSIDE that inset and the
+-- point cannot quite reach it. It stops 14 below the popout's top instead. The
+-- beam still lands on the row (a 20-tall row spans ±10 of its centre, and the
+-- miss is 4), so this is a cosmetic ceiling on the alignment, not a break -- but
+-- it is a real one, and it is asserted here so a change to either number is
+-- caught rather than discovered on screen.
+do
+    local win, row = outsideWindow(), outsideRow(ROW.y, 20)
+    local p = popout({ key = "outsidethin" })
+    local thinY = ROW.y + 10 - FRAME_H / 2                      -- top of a 20-tall row
+    p.frame:SetFakeCenter(CX + OUT_X, CY + thinY)
+    p:Follow(row, { outsideOf = win })
+    eq(p.frame._points[1][5], thinY, "thin: the popout still hangs from the row's top")
+    eq(p.beam.core._start.y, thinY + FRAME_H / 2 - 14,
+        "thin: the point stops at the corner inset rather than reaching the row's centre")
+    check(p.beam.core._start.y < ROW.y, "thin: ...which is a little below it")
+    check(p.beam.core._end.y >= ROW.y - 10 and p.beam.core._end.y <= ROW.y + 10,
+        "thin: and the beam still lands ON the row")
+    p:Close()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
