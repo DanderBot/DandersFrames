@@ -311,6 +311,47 @@ function DF:GetPlayerDispelCapability()
     return types, via, racial
 end
 
+-- Types this character demonstrably CANNOT cleanse, for subtracting from the engine's
+-- answer. Returns nil when we should not act at all.
+--
+-- ★ CORRECT THE ENGINE, DO NOT REPLACE IT — Krathe's call, and the failure modes are the
+-- argument. Driving the overlay purely from our own table would fail CLOSED: one wrong
+-- spell ID, or a class nobody has curated, and that type silently stops showing at all.
+-- Subtracting from the engine's answer fails OPEN — the worst a mistake does is show a
+-- type you cannot actually cleanse, which is exactly what the overlay does today and is
+-- plainly better than a healer not seeing a debuff they CAN cure.
+--
+-- ☠☠ THE FAIL-OPEN IS NOT AUTOMATIC, IT IS THIS PRECONDITION. If NOTHING in the class list
+-- probed true, the table is not working for this character — bad IDs, an uncurated class,
+-- a spellbook that has not populated yet — and its negatives are worth nothing, so we
+-- subtract nothing and leave the engine's answer alone. Only once at least one spell has
+-- proven the list functional HERE do we trust it to say what is missing.
+-- ⚠ Types the class list does not cover at all are never excluded either: silence is not
+-- evidence. A priest list carrying no Curse entry says nothing about curses.
+function DF:GetDispelTypesToExclude()
+    local _, class = UnitClass("player")
+    local entries = DISPEL_SPELLS[class]
+    if not entries then return nil end          -- uncurated class: not our place to say
+
+    local types = DF:GetPlayerDispelCapability()
+    if next(types) == nil then return nil end   -- the list proved nothing here; do not act
+
+    -- Every type this class can theoretically cleanse, according to our own list.
+    local covered = {}
+    for _, e in ipairs(entries) do
+        for t in pairs(e.types) do covered[t] = true end
+    end
+
+    local exclude
+    for t in pairs(covered) do
+        if not types[t] then
+            exclude = exclude or {}
+            exclude[t] = true
+        end
+    end
+    return exclude
+end
+
 -- ☠ THE VALIDATION TOOL FOR THE TABLE ABOVE, and the reason it is safe to ship a table of
 -- unverified spell IDs at all. Every ID is a claim about a class the author may not have
 -- played; this prints the claim and the evidence side by side so a wrong one is visible on
@@ -469,19 +510,33 @@ end
 -- The cache here exists solely to detect that flip — the probe itself stays uncached, so
 -- every real read is still live. Shamans only: nobody else can hold this talent, so no
 -- other class pays an event registration for it.
+-- ⚠ ANY DISPEL-CAPABLE CLASS, not just shamans. The first cut watched SHAMAN alone because
+-- the totem was the only known case; a priest's disease cure is talent-gated the same way
+-- and would have sat stale until a reload. The predicate is "does this class have a
+-- curated dispel list", which is the same set the capability table can answer for.
 do
     local _, playerClass = UnitClass("player")
-    if playerClass == "SHAMAN" then
+    if DISPEL_SPELLS[playerClass] then
+        -- The whole capability set, serialised, so ANY talent that changes what this
+        -- character can cleanse trips it — not just the one spell we happened to name.
         local lastKnown
-        local totemWatcher = CreateFrame("Frame")
-        totemWatcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
-        totemWatcher:RegisterEvent("SPELLS_CHANGED")
-        totemWatcher:SetScript("OnEvent", function()
-            local now = KnowsPoisonCleansingTotem()
+        local function capabilitySig()
+            local types = DF:GetPlayerDispelCapability()
+            local list = {}
+            for t in pairs(types) do list[#list + 1] = t end
+            table.sort(list)
+            return table.concat(list, ",")
+        end
+        local capWatcher = CreateFrame("Frame")
+        capWatcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+        capWatcher:RegisterEvent("SPELLS_CHANGED")
+        capWatcher:SetScript("OnEvent", function()
+            local now = capabilitySig()
             if now == lastKnown then return end
+            local before = lastKnown
             lastKnown = now
-            DF:Debug("DISPEL", "Poison Cleansing Totem -> %s (re-planning dispel displays)",
-                tostring(now))
+            DF:Debug("DISPEL", "dispel capability changed: [%s] -> [%s] (re-planning)",
+                tostring(before), now)
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
         end)
     end
