@@ -257,6 +257,13 @@ local DISPEL_SPELLS = {
         { id = 459517, types = { Poison = true, Disease = true }, talent = true },
     },
     MAGE = {
+        -- ✅ 2026-08-26: verified BOTH ways on one character — unspecced it reads unknown,
+        -- with default talents it reads known. ★ So a talent-gated spell does NOT always
+        -- need `talent = true`: that flag exists only for grants the spellbook probe
+        -- OVER-reports, which is the override-linked kind (Poison Cleansing Totem). An
+        -- ordinary talent that simply is or is not in the book tracks correctly as a base
+        -- entry. Do not flag every talent-gated spell on principle — flag the ones that
+        -- lie.
         { id = 475,    types = { Curse = true } },                               -- Remove Curse
         -- ⚠ Grants Magic AS WELL as Curse — the half a from-memory entry drops.
         -- ☠ 412113 WAS HERE AND DOES NOT RESOLVE ON RETAIL — "(name unavailable)" in the
