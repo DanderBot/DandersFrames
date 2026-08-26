@@ -4977,15 +4977,29 @@ SlashCmdList["DFAURAS"] = function(msg)
         tostring(select(4, GetBuildInfo()))))
 
     -- Find the frame driving this unit.
-    -- ★ TWO PASSES, AND THE SECOND IS WHY THIS IS USABLE MID-RAID. An exact token match
-    -- only helps when you already know the raid index of the frame that is misbehaving,
-    -- which you never do while looking at one. The UnitIsUnit pass makes `mouseover`,
-    -- `target` and a player's NAME resolve to whichever frame is driving them, so the
-    -- workflow is "point at the broken frame, run the command".
+    -- ★ THREE WAYS IN, AND `last` IS THE ONE THAT ACTUALLY WORKS MID-RAID.
+    -- ☠ `mouseover` CANNOT be used from a slash command: moving the cursor to the chat box
+    -- to type IS the mouse leaving the frame, so the token is empty by the time you press
+    -- enter. I suggested it before realising that. `last` is the sticky record of the
+    -- previous DF frame hovered (ClickCasting/Frames.lua) — point at the broken frame, then
+    -- type. `target` works too, at the cost of changing your target.
+    -- The UnitIsUnit pass below then resolves `target`, a player NAME, or any token that
+    -- aliases a frame's unit, so you never need the raid index of a frame you are looking at.
     -- ⚠ pcall'd: UnitIsUnit throws on a token for a unit that does not exist, and a dump
-    -- that errors while you are trying to catch something transient is worse than useless.
+    -- that errors while you are chasing something transient is worse than useless.
     local target
-    if DF.IterateAllFrames then
+    if unit == "last" then
+        target = DF._lastHoverFrame
+        if not target then
+            o:Line("No DF frame has been hovered yet — put the mouse over the frame you "
+                .. "want, then run this again.", "WARN")
+            o:Siblings("auras")
+            return
+        end
+        unit = target.unit or "?"
+        o:Line("Using the last hovered frame — unit " .. tostring(unit), "NEUTRAL")
+    end
+    if not target and DF.IterateAllFrames then
         DF:IterateAllFrames(function(f)
             if not target and f.unit == unit then target = f end
         end)
@@ -5003,7 +5017,7 @@ SlashCmdList["DFAURAS"] = function(msg)
         -- separator rule and the title twice on the not-found path.
         -- IterateAllFrames covers party/raid/arena, not pets or pinned sets.
         o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
-        o:Line("Try player, mouseover, target, a raid1..40 token, or a player name — and make sure the frames are shown.", "NEUTRAL")
+        o:Line("Try `last` (the frame you most recently hovered), target, player, a raid1..40 token, or a player name.", "NEUTRAL")
         o:Siblings("auras")
         return
     end
