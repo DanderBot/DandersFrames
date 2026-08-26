@@ -1431,8 +1431,24 @@ end
 -- regions hangs off — its own anchor frame for a container, dfLevelHost for a
 -- collapsed slot — so fading it fades the indicator whole. Nil only if host creation
 -- failed, hence the guard. See SlotHandle:GetAlphaHost.
+-- ☠☠ "fgroups"/"dgroups" WERE MISSING FROM THIS LIST, AND THAT WAS THE WHOLE
+-- "AD groups don't fade out of range" bug (element mode, 2026-08-26). The Factory's own
+-- retarget list names all eight stores; this one named six. Group containers therefore
+-- had NO alpha writer at all in element mode — the frame is pinned at base there, so the
+-- cascade that covers them in whole-frame mode never runs, and nothing else touches them.
+-- Placed indicators kept fading (slot-owner anchor), which made it look like the old
+-- anchor fix had regressed. It had not: groups are a different pathway that never had the
+-- fade wired.
+-- ⚠ Krathe's differential located it — "my AD single PI is working, it's a group that
+-- doesn't fade" — after four wrong theories from me about the anchor path.
+-- ★ Group handles are ROW handles: entry.handle.button is nil, so the walk's existing
+-- callback routes them onto the fade branch (base-only in whole-frame mode, where the
+-- cascade already fades them — no squared fade, see [ad_oor_fade_two_layers]).
+-- ☠ If the Factory ever grows a ninth store, IT GOES IN BOTH LISTS — this one and the
+-- retarget walk at Factory.lua ~5464 — or its containers will silently skip either fades
+-- or unit reassignment.
 local AD_STORE_KEYS = { "healthbar", "background", "border", "placed",
-                        "nametext", "healthtext" }
+                        "nametext", "healthtext", "fgroups", "dgroups" }
 
 -- ☠ THE WRITE IS PROTECTED, AND A DENIED HOST IS REMEMBERED.
 -- GetAlphaHost is supposed to answer with a DF-owned frame, so in principle a tainted
