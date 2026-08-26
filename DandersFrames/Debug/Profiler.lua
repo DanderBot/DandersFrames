@@ -545,10 +545,34 @@ local PROFILED_FUNCTIONS = {
     -- takes the wrapper as a plain write, and Panel.lua's pages dispatch
     -- through the NAME so the wrap is seen by pages built before the run.
     -- ----------------------------------------------------------
+    -- ⚠ TWO KINDS OF ROW LIVE HERE, and mixing them up misreads the profile.
+    --
+    -- REQUEST RATE. These five are now arm-stubs (Core\ApplyScheduler.lua): they
+    -- mark a kind dirty and return, so their ms columns are ~0 by design. What
+    -- they still measure -- and the reason they are kept -- is the CALL COUNT:
+    -- how many times a click or a slider drag asked for a sweep. That number is
+    -- the thing the scheduler exists to decouple from real work, so watching it
+    -- stay high while the _Now counts stay at one per rendered frame is the
+    -- coalescing working.
+    -- ⚠ The other two request-rate rows, "UpdateAllFrames" and
+    -- "RefreshAllVisibleFrames", are already listed under Bulk sweeps above --
+    -- listing a name twice would wrap it twice and leave Stop() restoring a
+    -- wrapper, so they are not repeated here.
     "UpdateAll",
-    "ThrottledUpdateAll",
     "ApplyHeaderSettings",
     "UpdateRaidLayout",
+    "ThrottledUpdateAll",
+    --
+    -- REAL COST. The `_Now` bodies are where the sweep actually happens -- one
+    -- run per dirty kind per drain, plus the sync seams that call them directly
+    -- (FullProfileRefresh, login/init, the external import API, test mode).
+    -- These are the rows to read for ms-per-call and total time.
+    "UpdateAll_Now",
+    "UpdateAllFrames_Now",
+    "RefreshAllVisibleFrames_Now",
+    "ApplyHeaderSettings_Now",
+    "UpdateRaidLayout_Now",
+
     "FullProfileRefresh",
     "GUI.PageRefreshStates",
 

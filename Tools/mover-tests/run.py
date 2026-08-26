@@ -46,6 +46,10 @@ lua.globals().load_ui_file = lambda name: run(HERE.parents[1] / "DandersUI" / na
 # head builds the `NS.__DandersUI` handshake itself, so a test of that handshake
 # has to hand it a FRESH namespace rather than the shared one above.
 lua.globals().load_ui_file_into = lambda name, tns: run(HERE.parents[1] / "DandersUI" / name, "DandersUI", tns)
+# ...and the same door for a DandersFrames file. Same reason it takes its own ns:
+# a DF module's namespace IS the addon table, so a test stubs the DF surface it
+# needs (Debug, the _Now bodies) onto a fresh table and hands that in.
+lua.globals().load_df_file_into = lambda name, tns: run(HERE.parents[1] / "DandersFrames" / name, "DandersFrames", tns)
 # Source text only, for a compile-only (loadstring) syntax check that must not
 # run the file. Read here rather than in Lua so the path resolves the same way
 # every other load does, whatever the cwd is.

@@ -64,6 +64,10 @@ local CATEGORY_GROUPS = {
             -- and boss frames — a moving raid produces a steady stream.
             { key = "RANGE",      desc = "Range fading checks and cache decisions", noisy = true },
             { key = "PINNED",     desc = "Pinned frames init, layout changes, boss handler, test mode" },
+            -- The settings apply sink: which sweeps a change asked for, and what
+            -- the once-per-frame drain actually ran. Edge-triggered (one line per
+            -- request, one per drain), so it is quiet outside settings activity.
+            { key = "APPLY",      desc = "Apply scheduler: sweep requests, drain order, combat re-queue" },
         },
     },
     {

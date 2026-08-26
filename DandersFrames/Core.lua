@@ -708,6 +708,13 @@ end
 -- If dragging with a lightweight function, call it directly (throttled)
 -- If dragging without lightweight function, skip entirely until release
 -- If not dragging, call UpdateAll directly (no throttle)
+--
+-- ⚠ DEPRECATED. The throttle it is named for is now the apply scheduler's job:
+-- DF:UpdateAll() below is an arm-stub, so repeat calls in one rendered frame
+-- coalesce on their own (Core\ApplyScheduler.lua). The drag branch survives only
+-- because the current widget kit still routes per-tick refresh through here and
+-- relies on the lightweight-function swap. T2/P2 reduces this to a plain alias
+-- for DF:UpdateAll, and it is deleted next minor.
 function DF:ThrottledUpdateAll()
     if DF.sliderDragging then
         if DF.sliderLightweightFunc then
@@ -8048,12 +8055,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         DF:UpdateLiveRaidFrames()
                     end
                 else
-                    if DF.UpdateAllFrames then
-                        DF:UpdateAllFrames()
+                    -- _Now: login/init seam. The click-cast registration, the
+                    -- rested indicator and the flat-layout pass below all run
+                    -- in this same tick and expect the frames to exist and be
+                    -- laid out already.
+                    if DF.UpdateAllFrames_Now then
+                        DF:UpdateAllFrames_Now()
                     end
                 end
             end
-            
+
             -- Register click casting now that frames are ready
             if DF.RegisterClickCastFrames then
                 DF:RegisterClickCastFrames()
@@ -8084,14 +8095,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Flat layout refresh to ensure correct positioning on load
             local raidDb = DF:GetRaidDB()
             if IsInRaid() and not raidDb.raidUseGroups and not InCombatLockdown() then
+                -- _Now: login/init seam. UpdateRaidGroupLabels immediately below
+                -- reads the header positions these two produce ("needs headers
+                -- to be positioned first").
                 if DF.headersInitialized then
-                    DF:ApplyHeaderSettings()
+                    DF:ApplyHeaderSettings_Now()
                 end
-                if DF.UpdateRaidLayout then
-                    DF:UpdateRaidLayout()
+                if DF.UpdateRaidLayout_Now then
+                    DF:UpdateRaidLayout_Now()
                 end
             end
-            
+
             -- Update raid group labels (needs headers to be positioned first)
             if DF.UpdateRaidGroupLabels then
                 DF:UpdateRaidGroupLabels()
@@ -8350,6 +8364,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
         -- Apply queued updates after combat
+        -- Left on the arm-stub deliberately: DF:UpdateAll() now just marks the
+        -- "all" kind dirty, so this replay folds into the apply scheduler's own
+        -- drain (Core\ApplyScheduler.lua) instead of running a second full sweep
+        -- beside it. The scheduler has its own PLAYER_REGEN_ENABLED re-queue for
+        -- work it held back during combat; this is the older needsUpdate path
+        -- that the _Now bodies still set, and the two now converge on one pass.
         if DF.needsUpdate then
             DF.needsUpdate = false
             DF:UpdateAll()
@@ -8521,12 +8541,14 @@ end)
 -- UPDATE ALL
 -- ============================================================
 
-function DF:UpdateAll()
+-- The real body. DF:UpdateAll() is now an arm-stub that coalesces requests
+-- through DF.Apply -- see Core\ApplyScheduler.lua.
+function DF:UpdateAll_Now()
     if InCombatLockdown() then
         DF.needsUpdate = true
         return
     end
-    
+
     DF:SyncLinkedSections()
 
     -- Invalidate aura layout so all frames re-apply layout on next aura update
@@ -8554,8 +8576,11 @@ function DF:UpdateAll()
         end
     elseif DF.testMode then
         -- In party test mode, update party frames
-        if DF.UpdateAllFrames then
-            DF:UpdateAllFrames()
+        -- ⚠ _Now, not the stub: this body already runs FROM the scheduler's
+        -- drain, so re-arming here would push the work one more frame out on
+        -- every single pass -- forever.
+        if DF.UpdateAllFrames_Now then
+            DF:UpdateAllFrames_Now()
         end
         if DF.RefreshTestFrames then
             DF:RefreshTestFrames()
@@ -8566,23 +8591,24 @@ function DF:UpdateAll()
         end
     elseif editingRaid then
         -- Editing raid settings (not in test mode), update raid layout
-        if DF.UpdateRaidLayout then
-            DF:UpdateRaidLayout()
+        -- _Now for the same reason as the branch above.
+        if DF.UpdateRaidLayout_Now then
+            DF:UpdateRaidLayout_Now()
         end
     elseif IsInRaid() and not (DF.IsInArena and DF:IsInArena()) then
         -- In a live raid: update raid layout AND header visibility
         -- (UpdateHeaderVisibility may also fire from Headers.lua's REGEN handler
         -- via pendingVisibilityUpdate — that's harmless, the call is idempotent)
-        if DF.UpdateRaidLayout then
-            DF:UpdateRaidLayout()
+        if DF.UpdateRaidLayout_Now then
+            DF:UpdateRaidLayout_Now()
         end
         if DF.UpdateHeaderVisibility then
             DF:UpdateHeaderVisibility()
         end
     else
         -- Default: update party frames
-        if DF.UpdateAllFrames then
-            DF:UpdateAllFrames()
+        if DF.UpdateAllFrames_Now then
+            DF:UpdateAllFrames_Now()
         end
         -- Update rested indicator
         if DF.UpdateRestedIndicator then
@@ -8730,19 +8756,26 @@ function DF:FullProfileRefresh()
     -- === RECONFIGURE HEADER ORIENTATION ===
     -- Must be called before layout updates so headers use the new profile's
     -- growDirection, growthAnchor, and selfPosition settings
-    if DF.ApplyHeaderSettings then
-        DF:ApplyHeaderSettings()
+    -- ⚠ SYNC SEAM. A profile switch/import/reset must have LANDED by the time
+    -- this function returns -- the rest of the body (FlatRaidFrames layout, the
+    -- Aura Designer re-drive, the container reposition, the GUI rebuild) reads
+    -- the state these three produce, and the external API returns to its caller
+    -- straight after. So these are the `_Now` bodies, not the arm-stubs.
+    -- Their source order (headers, frames, raidLayout) is also NOT the drain
+    -- order, which is the second reason it cannot go through the sink.
+    if DF.ApplyHeaderSettings_Now then
+        DF:ApplyHeaderSettings_Now()
     end
 
     -- === UPDATE LAYOUTS ===
     -- Update party layout (this handles positioning, visibility, etc.)
-    if DF.UpdateAllFrames then
-        DF:UpdateAllFrames()
+    if DF.UpdateAllFrames_Now then
+        DF:UpdateAllFrames_Now()
     end
-    
+
     -- Update raid layout
-    if DF.UpdateRaidLayout then
-        DF:UpdateRaidLayout()
+    if DF.UpdateRaidLayout_Now then
+        DF:UpdateRaidLayout_Now()
     end
 
     -- Re-apply Aura Designer indicators from the new profile: re-syncs the
@@ -8864,8 +8897,9 @@ function DF:FullProfileRefresh()
     -- === REFRESH NAME TRUNCATION ===
     -- UpdateAllFrames only pushes attribute changes; name truncation requires
     -- a full visible-frame pass to recalculate text widths.
-    if DF.RefreshAllVisibleFrames then
-        DF:RefreshAllVisibleFrames()
+    -- _Now: same sync seam as the three above.
+    if DF.RefreshAllVisibleFrames_Now then
+        DF:RefreshAllVisibleFrames_Now()
     end
 
     -- === UPDATE MINIMAP BUTTON ===
