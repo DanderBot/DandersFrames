@@ -4543,6 +4543,13 @@ end
 -- that could change the answer (and cannot go stale the way that would).
 C_Timer.NewTicker(WATCH_INTERVAL, function()
     if not DF.DebugActive or not DF:DebugActive("AURAROW") then return end
+    -- ☠ NOT IN TEST MODE. The preview deliberately fills every group from the curated
+    -- sample pool — Handle:_slotCount returns testSlotCount there, NOT config.max — so a
+    -- six-record debuff row reports 60 against a max of 3 and every frame in the raid
+    -- fires at once. That is the preview working, not a fault, and one toggle buried the
+    -- real findings under 50 false lines (field log, 2026-08-26 11:49:35).
+    if DF.AuraContainer and DF.AuraContainer._testMode then return end
+    if DF.testMode or DF.raidTestMode then return end
     DF:ScanAuraRowOverflow()
 end)
 
