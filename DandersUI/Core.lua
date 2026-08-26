@@ -87,6 +87,9 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   pickerStore() -> store                   persistent colour-picker memory: a table with
 --        fields saved (array), recent (array), square (boolean|nil); absent = session-only
 --   debug(cat) -> printer|nil                category debug printer factory; absent = silent
+--   getSettingsDB() -> db                    the settings table a page's hideOn / disableOn /
+--        refreshContent predicates are evaluated against (the consumer decides what "current"
+--        means -- e.g. which mode is selected); absent = those predicates never fire
 --   onSectionToggled(key, expanded)          after a collapsible section toggles
 --   scrollToSection(page, section) -> widget jump the settings scroll to a section; absent =
 --        link-to-setting controls don't render

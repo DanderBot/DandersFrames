@@ -199,6 +199,12 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- Category debug printer, so pack code logs through /df debug like ours does.
     debug = function(cat) return DF:MakeDebugPrinter(cat) end,
 
+    -- The settings table a settings group evaluates its children's hideOn /
+    -- disableOn / refreshContent predicates against: whichever mode the window
+    -- is currently editing. Every predicate in the pages takes exactly this
+    -- table, so it has to follow SelectedMode rather than being pinned.
+    getSettingsDB = function() return DF.db and DF.db[GUI.SelectedMode] end,
+
     -- A collapsible settings group opened or closed. The Aura Designer page owns
     -- its own layout and has to re-run it either way; BuildPage pages re-flow
     -- themselves and need nothing here.
