@@ -814,7 +814,9 @@ end
 -- Docked top-centre for the session: one compact strip with the dot key on
 -- the left and the session verbs (Save & Exit, Discard, Settings, Grid) on
 -- the right, plus the modifier hints below -- so the session can be saved or
--- discarded with nothing selected. Same dot art and same slab as the proxies
+-- discarded with nothing selected. (The element panel offers the same verbs as
+-- an icon row; this is the copy that does not need a selection to exist, and
+-- the one that says the names out loud.) Same dot art and same slab as the proxies
 -- themselves, so the key and the thing it is a key to cannot drift apart.
 -- Parented to the unlock frame, so suspend and lock hide it with everything
 -- else.
@@ -853,11 +855,12 @@ local function buildLegend()
     -- is a single top element). Declared widths are floors -- fitText grows
     -- them for longer localisations, and Layout re-measures.
     --
-    -- Undo and Redo live HERE, not on the element panel: what they act on is the
-    -- session's history, not the mover whose panel happens to be open -- and
-    -- with several panels pinned at once, an Undo button on each one would be
-    -- the same button drawn many times. RefreshLegendVerbs keeps their enabled
-    -- state honest (the undo stack fires "Changed").
+    -- These are the verbs SPELLED OUT. The element panel carries the same five
+    -- as a compact icon row, which is the copy you reach for while working on a
+    -- mover; this is the copy that is always there, names itself in words, and
+    -- works with nothing selected at all. Both drive the same entry points, and
+    -- RefreshLegendVerbs greys Undo/Redo in both places off the one stack (the
+    -- undo stack fires "Changed").
     f.btnUndo = UI:CreateButton(f, { text = L["Undo"], width = 44, height = LEGEND_ROW, style = "ghost",
         onClick = function() NS.Session:Undo() end })
     f.btnRedo = UI:CreateButton(f, { text = L["Redo"], width = 44, height = LEGEND_ROW, style = "ghost",
@@ -964,7 +967,14 @@ end
 -- The strip's Undo/Redo are the only controls on it whose enabled state is not
 -- a setting: it follows the undo stack, which fires "Changed" (Session wires
 -- that to this).
+--
+-- The element panel carries a second copy of the session verbs, and its
+-- Undo/Redo grey off the same stack -- so this is the one call that refreshes
+-- BOTH, rather than two schedules that can drift apart. Panel.lua loads after
+-- this file, and the strip exists in sessions where no panel is open, so the
+-- panels go first and the legend's own early-out below cannot skip them.
 function P:RefreshLegendVerbs()
+    if NS.Panel then NS.Panel:RefreshVerbs() end
     local f = self.legend
     if not f or not f.btnUndo then return end
     local undo = NS.Session and NS.Session.undo

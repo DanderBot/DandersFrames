@@ -164,6 +164,13 @@ editing** (focus an X/Y box, press a nudge arrow, open a dropdown or the 9-point
 picker, grab a chain handle). That second route is what **Settings › Editor ›
 Auto-pin panels when editing** gates; turn it off and only the button pins.
 
+Along the panel's bottom edge is an icon row repeating the session verbs —
+**Undo**, **Redo**, **Save & Exit**, **Discard**, **Settings** — so they are to
+hand without crossing the screen. They are the same verbs as the top strip's,
+not a second set: either place does the same thing and Undo/Redo grey together
+in both. Being session verbs, these are the one part of the panel that never
+auto-pins it.
+
 Selecting a **different** mover while a panel is pinned closes the pinned one and
 opens a fresh following panel at the new slab. Coming back to the pinned panel's
 own mover leaves it alone. The cross closes a pinned panel outright; on a
@@ -186,4 +193,4 @@ selection (the following panel goes with it), then the session.
 - Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. On slabs too narrow for both, the addon icon wins and the dot drops (the left edge still carries the role, and a root's green ring moves onto the icon). Selection is a white outline; a faded slab means the real frame is hidden.
 - Hold Shift while dragging to move horizontally only, Ctrl to move vertically only (both held = free drag). A nudge (arrow keys or the panel arrows) steps by 1; Shift makes it 10, Ctrl 100.
 - Hold Alt (while not dragging) to peek: the slabs, strip and panel fade almost out so you can see the UI underneath; release restores them.
-- The unlock overlay does **not** take the mouse. The world and the camera stay interactable for the whole session, and a click on empty space reaches the game rather than deselecting — Esc is the deselect (see The element panel). The session's own verbs all live on the top strip: **Save & Exit**, **Discard**, **Undo**, **Redo**, **Settings** and **Grid**. `/mover` and Esc (with nothing selected and no gesture running) also lock.
+- The unlock overlay does **not** take the mouse. The world and the camera stay interactable for the whole session, and a click on empty space reaches the game rather than deselecting — Esc is the deselect (see The element panel). The session's own verbs live on the top strip: **Save & Exit**, **Discard**, **Undo**, **Redo**, **Settings** and **Grid** — and all but Grid are repeated as an icon row on the element panel (see The element panel). `/mover` and Esc (with nothing selected and no gesture running) also lock.

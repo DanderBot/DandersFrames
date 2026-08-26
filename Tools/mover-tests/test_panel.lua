@@ -150,10 +150,21 @@ NS.Proxy = {
     -- would not grow the list.
     Highlight = function(_, id) highlights[#highlights + 1] = id or false end,
 }
+-- The session's undo stack, as much of it as the verb row reads: two counters
+-- and the two questions the row asks them.
+local stack = { entries = 0, redos = 0 }
+function stack:CanUndo() return self.entries > 0 end
+function stack:CanRedo() return self.redos > 0 end
+
 NS.Session = {
-    selected = nil, linking = nil, active = true, suspended = false,
+    selected = nil, linking = nil, active = true, suspended = false, undo = stack,
     IsActive = function(self) return self.active end,
     IsSuspended = function(self) return self.suspended end,
+    -- The session verbs. Recorded like every other call, so a test can see
+    -- WHICH entry point the panel's icon reached for.
+    Undo = function() calls[#calls + 1] = { "undo" } end,
+    Redo = function() calls[#calls + 1] = { "redo" } end,
+    Finish = function(_, mode) calls[#calls + 1] = { "finish", mode } end,
     Select = function(self, id)
         self.selected = id
         calls[#calls + 1] = { "select", id }
@@ -177,6 +188,9 @@ NS.Session = {
     Detach = function(_, el) calls[#calls + 1] = { "detach", el.id } end,
     CopyToTwin = function(_, el) calls[#calls + 1] = { "copytwin", el.id } end,
 }
+-- The mover's own settings window, which the verb row's cog opens. Read at
+-- call time by Panel.lua (Settings.lua loads after it), same as the legend.
+NS.Settings = { Toggle = function() calls[#calls + 1] = { "settings" } end }
 NS.Lib = NS.Lib or { callbacks = { Fire = function() end } }
 
 load_ui_file("Popout.lua")
@@ -308,29 +322,188 @@ do
 end
 
 -- ============================================================
--- 2. THE PANEL HOLDS ELEMENT CONTENT ONLY
--- The session verbs moved to the legend strip: they act on the SESSION, not on
--- the element whose panel happens to be open, so a copy of each on the panel
--- would be the same button drawn in the wrong place.
+-- 2. THE SESSION VERBS ARE BACK, AS A FOOTER ICON ROW
+-- A SECOND access point, not a replacement: the legend strip keeps its own
+-- spelled-out buttons. Here they are glyphs, because five captions would
+-- out-shout the element content above them and the strip already says the
+-- words -- so every one of them carries a tooltip that names it.
 -- ============================================================
 do
     local ui = Pn.following.ui
-    check(ui.btnUndo == nil and ui.btnRedo == nil, "verbs: no undo/redo on the panel")
-    check(ui.btnSave == nil and ui.btnDiscard == nil, "verbs: no save/discard on the panel")
-    check(ui.btnSettings == nil, "verbs: no Settings button on the panel")
+    eq(#ui.verbButtons, 5, "verbs: five of them")
+    local order = { ui.btnUndo, ui.btnRedo, ui.btnSave, ui.btnDiscard, ui.btnSettings }
+    for i, b in ipairs(order) do
+        check(b ~= nil, "verbs: button " .. i .. " exists")
+        eq(ui.verbButtons[i], b, "verbs: ...and is the " .. i .. "th in the row")
+    end
+    -- An icon with no caption anywhere near it: the tooltip is the ONLY thing
+    -- naming the verb, so a missing one is a button that cannot be identified.
+    local names = { L["Undo"], L["Redo"], L["Save & Exit"], L["Discard"], L["Settings"] }
+    for i, b in ipairs(order) do
+        eq(b._opts.tooltip and b._opts.tooltip.title, names[i], "verbs: tooltip names " .. names[i])
+        check(b._opts.texture and b._opts.texture:find("DandersMover", 1, true),
+            "verbs: " .. names[i] .. " draws mover-local art")
+    end
+    -- The mover cannot reference DandersFrames' media at runtime -- it has to
+    -- load with that addon disabled -- so the copied glyphs live here.
+    for _, b in ipairs(order) do
+        check(b._opts.texture:find("DandersFrames", 1, true) == nil,
+            "verbs: ...and never reaches into DandersFrames' folder for it")
+    end
+    -- Undo/Redo step through history; Save/Discard/Settings leave or configure
+    -- the session. The gap between the two groups is what says so.
+    local function leftOf(b) return b._points[1][2] end
+    check(leftOf(ui.btnSave) - leftOf(ui.btnRedo) > leftOf(ui.btnRedo) - leftOf(ui.btnUndo),
+        "verbs: a wider gap splits the history pair from the rest")
+    eq(leftOf(ui.btnDiscard) - leftOf(ui.btnSave), leftOf(ui.btnSettings) - leftOf(ui.btnDiscard),
+        "verbs: ...and the trio is evenly spaced within itself")
+
+    -- WHERE the row sits: under the element's own action buttons, above the
+    -- copy-to-twin row. Copy stays last because it is the one row that comes
+    -- and goes -- put the verbs under it and hiding it leaves a hole.
+    local vy = ui.verbs._points[1][5]
+    local ay = ui.btnCenter._points[1][3]
+    local cy = ui.btnCopy._points[1][3]
+    check(vy < ay, "verbs: the row sits below Center/Reset/Detach")
+    check(cy < vy, "verbs: ...and above the copy row, which is element content")
+    -- ...and the panel actually GREW for it: the container that holds these
+    -- rows measures down to the bottom of the verb row. (P:free has no twin,
+    -- so the copy row is not counted.)
+    local rowH = ui.btnCenter:GetHeight()
+    eq(ui.rest:GetHeight(), -vy + rowH, "verbs: the measured height contains the new row")
+
+    -- The element content is all still here.
+    check(ui.btnCenter and ui.btnReset and ui.btnDetach, "content: Center/Reset/Detach are still here")
+    check(ui.btnCopy ~= nil, "content: the copy-to-twin row is still here")
+    check(ui.btnConfigure ~= nil, "content: Configure is still here")
+    check(not ui.btnConfigure:IsShown(), "content: ...and hidden for an element with no openSettings")
+    -- Still glyphs, not labelled buttons: no session verb was built through
+    -- CreateButton anywhere in the panel.
     local banned = { [L["Undo"]] = true, [L["Redo"]] = true, [L["Save & Exit"]] = true,
                      [L["Discard"]] = true, [L["Settings"]] = true }
     local found
     for _, opts in ipairs(builtButtons) do
         if opts and opts.text and banned[opts.text] then found = opts.text end
     end
-    eq(found, nil, "verbs: no session verb was built anywhere in the panel")
-    -- What IS there is element content.
-    check(ui.btnCenter and ui.btnReset and ui.btnDetach, "content: Center/Reset/Detach are still here")
-    check(ui.btnCopy ~= nil, "content: the copy-to-twin row is still here")
-    check(ui.btnConfigure ~= nil, "content: Configure is still here")
-    check(not ui.btnConfigure:IsShown(), "content: ...and hidden for an element with no openSettings")
+    eq(found, nil, "verbs: none of them is a labelled button")
 end
+
+-- Each icon reaches for the SAME entry point the legend strip's own button
+-- uses. Two access points to one verb must not become two implementations of
+-- it, so what is asserted is which session call came out the other end.
+do
+    local ui = Pn.following.ui
+    wipe(calls)
+    ui.btnUndo._opts.onClick()
+    ui.btnRedo._opts.onClick()
+    ui.btnSave._opts.onClick()
+    ui.btnDiscard._opts.onClick()
+    ui.btnSettings._opts.onClick()
+    eq(calls[1][1], "undo", "verbs: Undo runs the session's undo")
+    eq(calls[2][1], "redo", "verbs: Redo runs the session's redo")
+    check(calls[3][1] == "finish" and calls[3][2] == "save", "verbs: Save & Exit finishes with save")
+    check(calls[4][1] == "finish" and calls[4][2] == "discard", "verbs: Discard finishes with discard")
+    eq(calls[5][1], "settings", "verbs: the cog opens the mover's settings")
+    wipe(calls)
+end
+
+-- Undo and Redo grey with the stack, exactly as the strip's do -- and the call
+-- that refreshes the strip is the one that refreshes these, so the two access
+-- points cannot end up disagreeing.
+do
+    local po = Pn.following
+    local ui = po.ui
+    stack.entries, stack.redos = 0, 0
+    Pn:RefreshVerbs()
+    check(not ui.btnUndo:IsEnabled(), "grey: an empty history greys Undo")
+    check(not ui.btnRedo:IsEnabled(), "grey: ...and Redo")
+    -- Greyed, not just dead: a bare glyph has no chrome to look disabled with,
+    -- so the dim is the only thing saying the button will not answer.
+    check(ui.btnUndo:GetAlpha() < 1, "grey: a dead verb dims")
+    stack.entries = 1
+    Pn:RefreshVerbs()
+    check(ui.btnUndo:IsEnabled(), "grey: something to undo enables Undo")
+    eq(ui.btnUndo:GetAlpha(), 1, "grey: ...and brings it back to full")
+    check(not ui.btnRedo:IsEnabled(), "grey: Redo stays grey until there is a redo")
+    stack.redos = 1
+    Pn:RefreshVerbs()
+    check(ui.btnRedo:IsEnabled(), "grey: a redo branch enables Redo")
+
+    -- PER INSTANCE, walking Pn.live rather than poking `following`. The mover
+    -- allows exactly one panel at a time (the family evicts the rest), but the
+    -- one that is up need not be the follower: a PINNED panel outlives the
+    -- selection, and its row must not go stale while it sits there.
+    po:Pin()
+    Sess.selected = nil
+    Pn:Refresh()
+    check(Pn.following == nil and #Pn.live == 1, "grey: a pinned panel with nothing selected")
+    stack.entries, stack.redos = 0, 0
+    Pn:RefreshVerbs()
+    check(not po.ui.btnUndo:IsEnabled(), "grey: ...and its row still followed the stack")
+    reset()
+
+    -- ☠ THE POOLED PATH. The unpinned panel is not rebuilt between selections,
+    -- it is REVIVED -- so a row left greyed by the last session is still greyed
+    -- when the frame comes back out of the pool. Only the per-instance refresh
+    -- clears that, which is why it runs on every refreshInstance and not just
+    -- when the stack changes.
+    local pooled = refresh("P:free")
+    stack.entries, stack.redos = 0, 0
+    Pn:RefreshVerbs()
+    check(not pooled.ui.btnUndo:IsEnabled(), "grey: the follower goes into the pool greyed")
+    reset()
+    stack.entries = 1
+    local revived = refresh("P:free")
+    eq(revived, pooled, "grey: ...and comes back out of the pool as the same frame")
+    check(revived.ui.btnUndo:IsEnabled(), "grey: ...reading the stack as it is NOW, not as it was")
+    stack.entries, stack.redos = 0, 0
+end
+
+reset()
+
+-- ☠ SESSION verbs, so they do NOT auto-pin. Everything else on the panel does,
+-- because everything else is editing the element the panel is bound to --
+-- pressing Undo is not, and a panel that pinned itself on it would stop
+-- following the selection over a keystroke that had nothing to do with it.
+do
+    NS.db.autoPinPanels = true
+    for _, key in ipairs({ "btnUndo", "btnRedo", "btnSave", "btnDiscard", "btnSettings" }) do
+        reset()
+        local po = refresh("P:free")
+        po.ui[key]._opts.onClick()
+        check(not po:IsPinned(), "autopin: " .. key .. " does not pin the panel")
+    end
+    NS.db.autoPinPanels = false
+end
+
+reset()
+
+-- Save and Discard END THE SESSION, and the session's teardown takes every
+-- panel down with it -- including the one whose button is still mid-click. The
+-- shell only hides a closed popout (the frame is pooled, never destroyed), so
+-- this holds; the test is here because it is exactly the kind of thing that
+-- stops holding quietly.
+do
+    local po = refresh("P:free")
+    local realFinish = Sess.Finish
+    Sess.Finish = function(self, mode)
+        realFinish(self, mode)
+        -- What Session:Finish actually does to the panels, in order.
+        Pn:Hide()
+        Pn:CloseAll()
+    end
+    check(pcall(po.ui.btnSave._opts.onClick), "finish: saving from inside a panel does not error")
+    check(po.closed, "finish: ...and the panel it was pressed on is closed")
+    eq(#Pn.live, 0, "finish: no panel is left behind")
+
+    local other = refresh("P:child")
+    check(pcall(other.ui.btnDiscard._opts.onClick), "finish: and discarding from inside one does not either")
+    check(other.closed, "finish: ...same teardown")
+    Sess.Finish = realFinish
+end
+
+reset()
+refresh("P:free")
 
 -- ============================================================
 -- 3. ANCHORED: the height does not change, and the caption names the target.

@@ -27,10 +27,21 @@ if not NS.Lib then return end
 -- control acts on `popout.el` -- the element its own panel is bound to -- which
 -- for a pinned panel is not the selected one and never becomes it again.
 --
--- Deliberately NOT a settings window, and no longer the session's action bar
--- either: the verbs that act on the SESSION (save, discard, undo, redo,
--- settings) live on the legend strip, because they are not about the element
--- whose panel you happen to have open. What is left is element content only.
+-- Deliberately NOT a settings window. The bulk of the panel is element content
+-- -- what this mover is anchored to, where it sits, where it goes.
+--
+-- Under it sits a SECOND access point for the session verbs (undo, redo, save,
+-- discard, settings). The legend strip still carries them, spelled out in
+-- words, and is still where they live when nothing is selected; this row is the
+-- one you reach for without crossing the screen while you are working on an
+-- element. It is a compact ICON row precisely because it is the second copy:
+-- five captions would out-shout the content above them, and the strip already
+-- says the words.
+--
+-- ⚠ They are SESSION verbs, so unlike everything else on the panel they do not
+-- auto-pin -- pressing Undo is not editing THIS element, and a panel that
+-- pinned itself on it would stop following the selection for a keystroke that
+-- had nothing to do with the mover it is docked to.
 -- ============================================================
 local Pn = { live = {} }
 NS.Panel = Pn
@@ -51,6 +62,23 @@ local LINK_ICON = MEDIA .. "link"
 -- at 9px. Its ink is only the middle ~half of that canvas, so the drawn square
 -- is wider than the dots look -- the margins are what keep the dots round.
 local GRIP_ICON = MEDIA .. "grip"
+-- The session verbs' glyphs. save / discard / settings are the DandersFrames
+-- Material set's own save, delete and settings, COPIED here byte for byte --
+-- the mover may not REFERENCE that folder (it has to load with DandersFrames
+-- disabled) but duplicating the asset is free, and a hand-drawn floppy beside
+-- the addon's established icons would be the one thing the eye picks out.
+-- undo and redo have no equivalent in that set (refresh and sync are a reload
+-- loop and a two-arrow cycle, neither of which reads as history), so those two
+-- are drawn to the same metrics: 32px master, 2px stroke, ink in a 26px box.
+--
+-- Mover-local rather than in DandersUI: the kit itself never draws an undo, a
+-- floppy or a bin, and art the toolkit does not reference has no business
+-- living in the toolkit.
+local UNDO_ICON     = MEDIA .. "undo"
+local REDO_ICON     = MEDIA .. "redo"
+local SAVE_ICON     = MEDIA .. "save"
+local DISCARD_ICON  = MEDIA .. "discard"
+local SETTINGS_ICON = MEDIA .. "settings"
 local DEFAULT_ICON = UI.MEDIA .. "DF_Icon"
 
 -- The pool key, and the family name -- deliberately the same string, because
@@ -81,6 +109,22 @@ local BOX_W = 62                  -- X / Y edit boxes
 local NUDGE_CELL, NUDGE_ICON = 22, 14
 local DOT, DOT_GAP = 16, 4        -- 9-point picker cells
 local BTN_H = 20
+-- The session-verb footer. A glyph CELL, not a labelled button: five captions
+-- ("Save & Exit" among them) do not fit across 270px of content, and this row
+-- is the second way to reach verbs the legend strip already spells out in
+-- words -- so the names live in the tooltips. Cell height is BTN_H so the row
+-- sits square under the Center/Reset/Detach row above it.
+--
+-- ☠ 16, not 14. The glyphs are 32px masters, so 16 is an exact 2:1 downsample
+-- and every 2px stroke in them lands on one whole pixel. At 14 the same
+-- strokes fall between pixels and the set goes soft -- the gear worst of all,
+-- which at 14 is a smudge with a hole in it. Three pixels wider costs the row
+-- nothing; illegible icons cost it everything.
+local VERB_CELL, VERB_ICON = 22, 16
+-- The gap that splits the pair from the trio. Undo and Redo step through the
+-- history; Save, Discard and Settings leave the session or configure it. Run
+-- all five together and they read as one undifferentiated strip of icons.
+local VERB_SEP = GAP
 -- ---- the anchor block --------------------------------------------
 -- Its own group box, so "Anchor" reads as one subject rather than as four
 -- dropdowns that happen to be stacked. UI.Space.section is a PAGE inset and a
@@ -172,6 +216,57 @@ local function setGrabCursor(on)
     end
     if not cursorProbe then return end
     if on then pcall(set, GRAB_CURSOR) else pcall(reset) end
+end
+
+-- ============================================================
+-- SESSION VERBS
+-- The footer row's contents, in order, with the gap that splits the pair from
+-- the trio marked on the first member of the second group.
+--
+-- Every onClick goes straight to the SAME entry point the legend strip's own
+-- button uses -- Sess:Undo/Redo, Sess:Finish, Settings:Toggle. Nothing here
+-- decides anything; two access points to one verb must not be two
+-- implementations of it.
+--
+-- NS.Settings is read at call time, not captured: Settings.lua loads after this
+-- file, exactly as the legend does it.
+-- ============================================================
+local VERBS = {
+    { key = "btnUndo",     icon = UNDO_ICON,     tip = "Undo",
+      onClick = function() Sess:Undo() end },
+    { key = "btnRedo",     icon = REDO_ICON,     tip = "Redo",
+      onClick = function() Sess:Redo() end },
+    { key = "btnSave",     icon = SAVE_ICON,     tip = "Save & Exit", split = true,
+      onClick = function() Sess:Finish("save") end },
+    { key = "btnDiscard",  icon = DISCARD_ICON,  tip = "Discard",
+      onClick = function() Sess:Finish("discard") end },
+    { key = "btnSettings", icon = SETTINGS_ICON, tip = "Settings",
+      desc = "Snapping, grid and per-addon mover toggles.",
+      onClick = function() if NS.Settings then NS.Settings:Toggle() end end },
+}
+
+-- Grey a verb the session has nothing for. The kit's glyph button carries no
+-- disabled look of its own (it is a bare icon, not a chromed control), so the
+-- dim is ours -- matched to the same DISABLED_ALPHA the anchor block's rows
+-- use, and the hover brighten is suppressed with it so a dead button does not
+-- light up under the mouse. The tooltip is deliberately left alive: "Redo" with
+-- nothing to redo is still the answer to "what is this icon".
+local function setVerbEnabled(btn, enabled)
+    btn:SetEnabled(enabled)
+    btn:SetAlpha(enabled and 1 or DISABLED_ALPHA)
+    btn:SetGlyphHover(enabled)
+end
+
+-- Undo and Redo are the only two on the row whose state is not a constant: it
+-- follows the session's undo stack. Driven from Proxy:RefreshLegendVerbs, so
+-- the strip and every open panel can never disagree about whether there is
+-- anything left to undo.
+local function refreshVerbs(po)
+    local ui = po.ui
+    if not ui or not ui.btnUndo then return end
+    local undo = Sess.undo
+    setVerbEnabled(ui.btnUndo, (undo and undo:CanUndo()) or false)
+    setVerbEnabled(ui.btnRedo, (undo and undo:CanRedo()) or false)
 end
 
 -- A row of equal-width buttons spanning the content width.
@@ -353,8 +448,12 @@ local function buildPanel(po, content)
 
     -- ---- Configure --------------------------------------------------
     -- The CONSUMER entry point (this element's own options page). Full width,
-    -- and only for defs that offer openSettings -- the session's own Settings
-    -- window lives on the legend strip now, not here.
+    -- and only for defs that offer openSettings.
+    --
+    -- ⚠ Not to be confused with the cog in the verb footer: that one opens the
+    -- MOVER's settings (snapping, grid, which addons get proxies), this one
+    -- opens the settings of the thing being moved. Which is why one is a
+    -- labelled button at the top and the other an icon at the bottom.
     ui.btnConfigure = UI:CreateButton(content, {
         text = L["Configure"], width = CW, height = HEADER_BTN_H, style = "ghost", fitText = false,
         tooltip = { title = L["Configure"], lines = { L["Open this element's own settings."] } },
@@ -706,6 +805,38 @@ local function buildPanel(po, content)
     })
     ui.btnCenter, ui.btnReset, ui.btnDetach = acts[1], acts[2], acts[3]
 
+    -- ---- the session verbs ------------------------------------------
+    -- Centred as a CLUSTER rather than spread across the content width: five
+    -- 22px cells stretched over 270 would read as five unrelated controls, and
+    -- the row is one toolbar. Measured rather than declared, so the split gap
+    -- and the cell size stay the only two numbers to keep honest.
+    local verbW = VERB_CELL * #VERBS
+    for i, v in ipairs(VERBS) do
+        if i > 1 then verbW = verbW + (v.split and VERB_SEP or TIGHT) end
+    end
+    local vy = row(BTN_H)
+    ui.verbs = CreateFrame("Frame", nil, rest)
+    ui.verbs:SetSize(verbW, BTN_H)
+    ui.verbs:SetPoint("TOP", rest, "TOPLEFT", CW / 2, vy)
+    ui.verbButtons = {}
+    local vx = 0
+    for i, v in ipairs(VERBS) do
+        if i > 1 then vx = vx + (v.split and VERB_SEP or TIGHT) end
+        local b = UI:CreateGlyphButton(ui.verbs, {
+            texture = v.icon, width = VERB_CELL, height = BTN_H, iconSize = VERB_ICON,
+            -- An icon with no caption anywhere near it: the tooltip is the only
+            -- thing that names the verb, so every one of them has one.
+            tooltip = { title = L[v.tip], lines = v.desc and { L[v.desc] } or nil },
+            -- ☠ No po:AutoPin(). See the header: these act on the session, not
+            -- on the element this panel is bound to.
+            onClick = v.onClick,
+        })
+        b:SetPoint("TOPLEFT", vx, 0)
+        ui[v.key] = b
+        ui.verbButtons[i] = b
+        vx = vx + VERB_CELL
+    end
+
     -- Copy-to-twin: full-width bottom row, only for elements whose def names a
     -- twin (the refresh shows it and grows the panel by the row).
     -- ☠ `text = ""`, not omitted. The label is only knowable at refresh time (it
@@ -816,6 +947,11 @@ local function refreshInstance(po)
     setRowEnabled(ui.edgeRow, anchored)
     setRowEnabled(ui.alignRow, anchored)
 
+    -- The verb row carries no element state, but a panel that has just been
+    -- built (or revived out of the pool) has never been told what the undo
+    -- stack looks like.
+    refreshVerbs(po)
+
     local blockH = layoutAnchorBlock(ui)
 
     layoutXY(ui)
@@ -908,6 +1044,19 @@ end
 -- per repaint (Proxy's applyLook). Family exclusivity means the list is at most
 -- one long, and it is still a walk rather than a cached field because there is
 -- then no index to keep honest.
+-- Every open panel's Undo/Redo, re-read off the session's stack.
+--
+-- Called from Proxy:RefreshLegendVerbs -- ONE entry point for both access
+-- points, so the strip and the panels cannot disagree about whether there is
+-- anything left to undo. A full Pn:Refresh would do it too (refreshInstance
+-- ends in refreshVerbs), but the stack changing is not an element changing and
+-- a relayout of every panel is not what it should cost.
+function Pn:RefreshVerbs()
+    for _, po in ipairs(self.live) do
+        if not po.closed then refreshVerbs(po) end
+    end
+end
+
 function Pn:IsElementPinned(id)
     if not id then return false end
     for _, po in ipairs(self.live) do

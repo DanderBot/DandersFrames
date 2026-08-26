@@ -436,9 +436,9 @@ end
 
 -- ============================================================
 -- THE STRIP'S SESSION VERBS
--- Undo and Redo live here, not on the element panel: what they act on is the
--- session's history, not the mover whose panel happens to be open, so putting
--- them on the panel would be a session verb wearing an element's clothes.
+-- Spelled out in words here, and offered again as an icon row on the element
+-- panel. Undo and Redo are the two whose enabled state is not a setting, and
+-- ONE call refreshes both surfaces -- see the RefreshVerbs assertions below.
 -- ============================================================
 do
     local wasReady = R.ready
@@ -452,6 +452,13 @@ do
         selected = nil, undo = stack,
         Undo = function() undone = undone + 1 end,
         Redo = function() redone = redone + 1 end,
+    }
+    -- The panel module stands in for the second access point: all this block
+    -- cares about is that the strip's refresh drives it too.
+    local panelRefreshes = 0
+    NS.Panel = {
+        RefreshVerbs = function() panelRefreshes = panelRefreshes + 1 end,
+        IsElementPinned = function() return false end,   -- every slab repaint asks
     }
     R:RegisterAddon("S", { title = "S" })
     R:Register("S", "one", elDef({ point = "CENTER", x = 0, y = 0 }))
@@ -478,6 +485,23 @@ do
     -- The verbs take part in the strip's width, so they cannot overlap the dots.
     local wide = f:GetWidth()
     check(wide and wide > 0, "strip: the layout measured a width")
+
+    -- ☠ THE SHARED PATH. The panel's copy of Undo/Redo greys off the same
+    -- stack, and it must not be on a schedule of its own -- one refresh, both
+    -- surfaces, or they drift the moment something calls only one of them.
+    check(panelRefreshes > 0, "verbs: refreshing the strip refreshes the panels too")
+    local before = panelRefreshes
+    P:RefreshLegendVerbs()
+    eq(panelRefreshes, before + 1, "verbs: ...on every refresh, not just the first")
+
+    -- ...and the panels go FIRST, so the legend's own early-out cannot skip
+    -- them. Proxy loads before Panel, so a missing module is guarded too.
+    P.legend, before = nil, panelRefreshes
+    P:RefreshLegendVerbs()
+    eq(panelRefreshes, before + 1, "verbs: a session with no strip built still refreshes the panels")
+    NS.Panel = nil
+    check(pcall(P.RefreshLegendVerbs, P), "verbs: no Panel module: the refresh is guarded")
+    P.legend = f
 
     P:DestroyAll()
     R:UnregisterAddon("S")
@@ -553,7 +577,10 @@ do
     NS.db = { showHiddenMovers = true, addons = {} }
     NS.Session = { selected = nil }
     local pinnedIds = {}
-    NS.Panel = { IsElementPinned = function(_, id) return pinnedIds[id] == true end }
+    -- RefreshVerbs is on the stub because building the strip calls it (the
+    -- panel's verb row greys off the same undo stack); nothing here reads it.
+    NS.Panel = { IsElementPinned = function(_, id) return pinnedIds[id] == true end,
+                 RefreshVerbs = function() end }
     R:RegisterAddon("M", { title = "M" })
     for _, key in ipairs({ "sel", "hov", "pin", "plain" }) do
         R:Register("M", key, elDef({ point = "CENTER", x = 0, y = 0 }))
