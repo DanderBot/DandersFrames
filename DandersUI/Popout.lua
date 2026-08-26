@@ -561,6 +561,26 @@ function Popout:GetAccent()
     return self.accent or self.host:GetAccent()
 end
 
+-- Set (or clear) this instance's accent override and repaint every piece of
+-- chrome that carries it, WHILE IT IS UP. adopt() already applies opts.accent at
+-- open time; this is the live path -- a consumer that re-themes (a party/raid
+-- mode switch, a per-row colour changing under an open panel) has nothing else
+-- to call, and a popout left in the old colour while its source has changed is
+-- the one thing the shared-border story cannot survive.
+--
+-- nil resets to the host accent. The source outline repaints through
+-- _ApplyAccent, which re-runs ApplyPixelBorder on it unconditionally --
+-- _UpdateSourceOutline itself only repaints on a TARGET change, so it would not
+-- have noticed a colour change on a shown outline.
+function Popout:SetAccent(c)
+    self.accent = normColor(c)
+    self:_ApplyAccent()
+    self:_UpdateNotch()
+    self:_UpdateBeam()
+    self:_UpdateSourceOutline()
+    return self
+end
+
 -- Repaint everything the accent colours. Called on every adopt, so a pooled
 -- popout re-opened after a theme change comes up in the current colour rather
 -- than in whatever it was built in.
@@ -1078,6 +1098,9 @@ end
 --   parent        frame to parent to (default UIParent)
 --   width         CONTENT width; the height follows what build mounted
 --   build(popout, content)   called ONCE per instance
+--   headerControls(popout, bar) -> leftFrame, rightFrame   also ONCE per
+--                 instance; either may be nil. The shell anchors them in the
+--                 title bar and re-anchors the title around them
 --   onClose(popout, reason)  reason: "cross"|"family"|"source"|"api"
 --   onPin(popout) / onUnpin(popout)
 --   canAutoPin    boolean or function(popout); false makes AutoPin a no-op
@@ -1174,6 +1197,44 @@ function UI:CreatePopout(opts)
     po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
     po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
     if po.titleFS.SetWordWrap then po.titleFS:SetWordWrap(false) end
+
+    -- ---- header controls ------------------------------------------
+    -- A consumer may put its own controls IN the title bar -- the shell stays
+    -- ignorant of what they are and only says where they go: `left` where the
+    -- icon and title start, `right` inboard of the pin/close cluster, with the
+    -- title squeezed between whatever came back.
+    --
+    -- ONCE per instance, like build and for the same reason: these are frames,
+    -- and a pooled popout re-targeted at something else re-BINDS them rather
+    -- than rebuilding them. A consumer that needs them re-pointed does it from
+    -- its own retarget path -- the shell has nothing to re-point them AT.
+    --
+    -- Nothing is touched when the consumer passes none, so the layout of every
+    -- popout that has no header controls is exactly what it was.
+    if type(opts.headerControls) == "function" then
+        local left, right = opts.headerControls(po, bar)
+        po.headerLeft, po.headerRight = left, right
+        if left or right then
+            -- Both points re-set together: the title's span is defined by the
+            -- pair, and re-stating only the one that changed would leave it
+            -- anchored to a frame the other control now sits in front of.
+            po.titleFS:ClearAllPoints()
+            if left then
+                left:ClearAllPoints()
+                left:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
+                po.titleFS:SetPoint("LEFT", left, "RIGHT", 4, 0)
+            else
+                po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
+            end
+            if right then
+                right:ClearAllPoints()
+                right:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+                po.titleFS:SetPoint("RIGHT", right, "LEFT", -4, 0)
+            else
+                po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+            end
+        end
+    end
 
     -- ---- content --------------------------------------------------
     local content = CreateFrame("Frame", nil, f)

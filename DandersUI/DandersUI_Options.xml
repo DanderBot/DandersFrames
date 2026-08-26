@@ -2,5 +2,6 @@
 ..\FrameXML\UI.xsd">
 	<Script file="OptionsCore.lua"/>
 	<Script file="Sections.lua"/>
+	<Script file="PopoutRow.lua"/>
 	<Script file="ColorPicker.lua"/>
 </Ui>
