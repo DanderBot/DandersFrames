@@ -430,6 +430,13 @@ end
 -- anything writes the header's attributes WITHOUT going through
 -- SetHeaderAttribute -- otherwise the cache still describes the old values and
 -- the next matching write is skipped as redundant).
+-- ⚠ Clearing is NOT sufficient on its own. SetHeaderAttribute skips a
+-- nil-write when the cache entry is empty (nil == nil), so after a raw
+-- write + clear, any attribute left non-nil on the frame survives every
+-- later cached nil-clear. A raw writer that ends in a clear must leave
+-- the frame's REAL attribute state nil for every attribute the cached
+-- writers ever nil-clear (see the raw-nil blocks in
+-- UpdateRaidHeaderVisibility and FrameSort's SortGroupedRaidFrames).
 local function ClearHeaderAttributeCache(header)
     if header then
         local headerName = header:GetName() or tostring(header)
