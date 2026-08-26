@@ -230,38 +230,66 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- makes exactly this split — IsSpellKnown for Improved Purify, the spellbook probe for the
 -- shaman totem — which is why their shaman case has the bug we just fixed and their priest
 -- case does not.
+-- ☠☠ `verified` IS A SAFETY FLAG, NOT BOOKKEEPING — READ THIS BEFORE ADDING AN ENTRY.
+-- Granting and subtracting are NOT symmetric in risk:
+--   * An entry that GRANTS a type it should not is harmless-ish — the overlay shows a type
+--     you cannot cleanse, which is exactly what the engine already does today.
+--   * An entry makes its types "covered", and a covered type with no known spell gets
+--     SUBTRACTED. So a wrong ID, or wrong talent gating, can DELETE a dispel type a player
+--     genuinely has. That is a real regression, and worse than the bug being fixed.
+-- ⇒ Only `verified = true` entries contribute to the covered set. An unverified entry can
+-- still GRANT (safe, and it makes the debug dump useful) but can never cause a
+-- subtraction. Flip the flag once the row has been read on a live character of that class
+-- and its spell name resolved correctly.
+--
+-- ⚠ THE TALENT GATING BELOW IS THE UNCERTAIN PART, not the base spells. Which dispels are
+-- talent-locked moves between patches, and I cannot confirm any of it offline — that is
+-- precisely why unverified entries are inert for subtraction. `/df debug dispelcap` prints
+-- each row with its verified state and what it WOULD subtract.
 local DISPEL_SPELLS = {
     DRUID = {
-        { id = 88423,  types = { Magic = true, Curse = true, Poison = true } },  -- Nature's Cure (Resto)  UNVERIFIED
-        { id = 2782,   types = { Curse = true, Poison = true } },                -- Remove Corruption      UNVERIFIED
+        { id = 88423,  types = { Magic = true, Curse = true, Poison = true } },   -- Nature's Cure (Resto)
+        { id = 2782,   types = { Curse = true, Poison = true } },                 -- Remove Corruption
     },
     MAGE = {
-        { id = 475,    types = { Curse = true } },                              -- Remove Curse           UNVERIFIED
+        { id = 475,    types = { Curse = true } },                               -- Remove Curse
     },
     MONK = {
-        { id = 115450, types = { Magic = true, Poison = true, Disease = true } },-- Detox (Mistweaver)     UNVERIFIED
-        { id = 218164, types = { Poison = true, Disease = true } },             -- Detox (non-MW)         UNVERIFIED
+        { id = 115450, types = { Poison = true, Disease = true } },              -- Detox (Mistweaver)
+        { id = 218164, types = { Poison = true, Disease = true } },              -- Detox (non-MW)
+        -- ⚠ Believed to be the talent that adds Magic for Mistweaver. Gating unconfirmed.
+        { id = 388874, types = { Magic = true }, talent = true },                 -- Improved Detox
     },
     PALADIN = {
-        { id = 4987,   types = { Magic = true, Poison = true, Disease = true } },-- Cleanse (Holy)         UNVERIFIED
-        { id = 213644, types = { Poison = true, Disease = true } },             -- Cleanse Toxins         UNVERIFIED
+        { id = 4987,   types = { Magic = true, Poison = true, Disease = true } }, -- Cleanse (Holy)
+        { id = 213644, types = { Poison = true, Disease = true } },              -- Cleanse Toxins
     },
     PRIEST = {
-        { id = 527,    types = { Magic = true } },                              -- Purify (Disc/Holy)     ✅ 2026-08-26
-        { id = 213634, types = { Disease = true } },                            -- Purify Disease (Shadow) ✅ 2026-08-26
+        { id = 527,    types = { Magic = true }, verified = true },              -- Purify (Disc/Holy)
+        { id = 213634, types = { Disease = true }, verified = true },            -- Purify Disease (Shadow)
         -- ★ THE REPORTED CASE. Disc/Holy cure disease only with this talent, and the engine
-        -- flag claims they always can.
-        { id = 390632, types = { Disease = true }, talent = true },              -- Improved Purify        ✅ 2026-08-26
+        -- flag claims they always can. ✅ Confirmed both directions in game, 2026-08-26.
+        { id = 390632, types = { Disease = true }, talent = true, verified = true }, -- Improved Purify
     },
     SHAMAN = {
-        { id = 77130,  types = { Magic = true, Curse = true } },                -- Purify Spirit (Resto)  UNVERIFIED
-        { id = 51886,  types = { Curse = true } },                              -- Cleanse Spirit         UNVERIFIED
-        -- ✅ VERIFIED in game 2026-08-26 (Krathe): both directions, no reload.
-        { id = 383013, types = { Poison = true }, talent = true },               -- Poison Cleansing Totem
+        { id = 77130,  types = { Magic = true, Curse = true } },                 -- Purify Spirit (Resto)
+        { id = 51886,  types = { Curse = true } },                               -- Cleanse Spirit
+        -- ✅ Confirmed both directions in game, 2026-08-26 (Krathe).
+        { id = 383013, types = { Poison = true }, talent = true, verified = true }, -- Poison Cleansing Totem
     },
     EVOKER = {
-        { id = 360823, types = { Magic = true, Poison = true } },               -- Naturalize (Preservation) UNVERIFIED
-        { id = 365585, types = { Poison = true } },                             -- Expunge                UNVERIFIED
+        { id = 360823, types = { Magic = true, Poison = true } },                -- Naturalize (Preservation)
+        { id = 365585, types = { Poison = true } },                              -- Expunge
+        -- ⚠ Believed to clear several types on a talent. Types and gating both unconfirmed.
+        { id = 374251, types = { Curse = true, Poison = true, Disease = true, Bleed = true },
+          talent = true },                                                        -- Cauterizing Flame
+    },
+    WARLOCK = {
+        -- ⚠ PET-DEPENDENT, which nothing else here is: Singe Magic belongs to the Imp, so
+        -- knowing it is not the same as being able to use it right now. Listed so the class
+        -- is not silently treated as dispelling nothing; deliberately left unverified so it
+        -- can never subtract until someone works out the pet condition.
+        { id = 89808,  types = { Magic = true } },                               -- Singe Magic (Imp)
     },
 }
 
@@ -336,11 +364,17 @@ function DF:GetDispelTypesToExclude()
     local types = DF:GetPlayerDispelCapability()
     if next(types) == nil then return nil end   -- the list proved nothing here; do not act
 
-    -- Every type this class can theoretically cleanse, according to our own list.
+    -- ☠ VERIFIED ENTRIES ONLY. This is the covered set, and covered-but-unknown is what
+    -- gets SUBTRACTED — so an unverified row must never reach it, or a wrong ID deletes a
+    -- dispel type the player actually has. Unverified rows still GRANT (see
+    -- GetPlayerDispelCapability); they just cannot take anything away.
     local covered = {}
     for _, e in ipairs(entries) do
-        for t in pairs(e.types) do covered[t] = true end
+        if e.verified then
+            for t in pairs(e.types) do covered[t] = true end
+        end
     end
+    if next(covered) == nil then return nil end
 
     local exclude
     for t in pairs(covered) do
@@ -380,10 +414,12 @@ function DF:DebugDispelCapability()
             for t in pairs(e.types) do list[#list + 1] = t end
             table.sort(list)
             local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
-            o:Line(string.format("%-7d %-26s %-9s %s%s",
+            o:Line(string.format("%-7d %-24s %-8s %-22s%s%s",
                 e.id, tostring(name or "(name unavailable)"),
                 known == true and "known" or (known == false and "unknown" or "?"),
-                table.concat(list, "/"), e.talent and "   [talent]" or ""),
+                table.concat(list, "/"),
+                e.talent and " [talent]" or "",
+                e.verified and " ✅" or " ⚠ unverified"),
                 known == true and "GOOD" or nil)
         end
     end
@@ -407,13 +443,34 @@ function DF:DebugDispelCapability()
         o:Line("Nothing — 'Only Dispellable by You' should show an empty overlay.", "WARN")
     end
 
+    -- ★ THE CONSEQUENCE, not just the conclusion. Capability alone does not tell you what
+    -- the overlay will DO — only the subtraction does, and the subtraction is the half that
+    -- can regress someone. Printing it is what makes this dump a safety check rather than
+    -- a curiosity.
+    o:Section("Effect on 'Only Dispellable by You'")
+    local exclude = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+    if not exclude then
+        o:Line("Nothing subtracted — the engine's answer stands unchanged.")
+        o:Line("Either this class has no VERIFIED entries yet (unverified rows can grant, "
+            .. "never subtract), or nothing it can theoretically cleanse is missing.",
+            "NEUTRAL")
+    else
+        local list = {}
+        for t in pairs(exclude) do list[#list + 1] = t end
+        table.sort(list)
+        o:Line("Subtracting: " .. table.concat(list, ", "), "GOOD")
+        o:Line("These are types this class CAN cleanse in principle, that you cannot right "
+            .. "now. If any of them is wrong, a dispel you have is being hidden — that is "
+            .. "the one failure worth reporting immediately.", "WARN")
+    end
+
     o:Section("Cross-check")
     o:Line("Compare the yes/no column against the character in front of you. A row that "
-        .. "disagrees means that entry's spell ID is wrong, not that the feature is broken "
-        .. "— the IDs are curated offline and most are still unverified.", "NEUTRAL")
-    o:Line("⚠ The overlay does NOT drive off this table yet. It still uses the engine's "
-        .. "RAID_PLAYER_DISPELLABLE flag plus the gap repair, so a disagreement here is a "
-        .. "finding to fix, not a live fault.", "NEUTRAL")
+        .. "disagrees means that entry's spell ID or its talent gating is wrong, not that "
+        .. "the feature is broken.", "NEUTRAL")
+    o:Line("⚠ Rows marked unverified are inert for subtraction by design. Confirm the name "
+        .. "resolves and the known/unknown column matches the character, then the entry can "
+        .. "be marked verified and start correcting the engine.", "NEUTRAL")
 end
 
 local ENGINE_GAP_POISON = { Poison = true }
