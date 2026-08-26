@@ -1527,14 +1527,21 @@ function AutoProfilesUI:ResetProfileSetting(key)
         self.editingProfile.overrides[key] = nil
     end
     
-    -- Restore the actual db value to the true global (from snapshot)
-    local globalValue, found = GetSnapshotValue(self.globalSnapshot, key)
-    if not found then
-        globalValue = GetRaidValue(key)
-    end
-    
-    -- Deep copy to avoid mutating the snapshot
-    SetRaidValue(key, DeepCopyValue(globalValue))
+    -- ☠ THROUGH GetGlobalValue, NOT THE SNAPSHOT DIRECTLY. It performs the same snapshot
+    -- read with the same live fallback and the same deep copy, AND it translates
+    -- growDirection into this profile's mode.
+    -- Reading the snapshot here instead meant Reset wrote the RAW global on a flat layout
+    -- under a grouped global (or the reverse) — a value that means the opposite
+    -- orientation in that mode — and then cleared the override, so the row showed no dot
+    -- while the raid drew the inverse of the global's look.
+    -- ⚠ This is the function the round-5 note below claimed was "fixed as a bonus" by the
+    -- profile-layer translation. It was NOT: it never called GetGlobalValue. A comment
+    -- asserting a mechanism that does not exist is worse than the bug it describes, so the
+    -- claim and the code now agree. Identical behaviour for every key but growDirection.
+    -- ⚠ Order is deliberate: the override is cleared first, but GetGlobalValue's mode test
+    -- reads raidUseGroups (a different key) from the live db, so clearing this one cannot
+    -- change the answer.
+    SetRaidValue(key, self:GetGlobalValue(key))
 
     -- Refresh tab stars so they update live as overrides are removed
     self:RefreshTabOverrideStars()
@@ -1558,9 +1565,11 @@ end
 -- explain or suppress it did not hold, and the reason is that this is not a display
 -- question: "what is the global, for this profile" is a profile-layer question, and
 -- every consumer (the dot, the reset, the readout, the tab stars) wants the same answer.
--- Translating once at the source fixes all of them, and fixes Reset as a bonus -- it
--- writes the value that reproduces the global's LOOK rather than a raw value that means
--- the opposite thing in this mode.
+-- Translating once at the source fixes all of them -- PROVIDED each one actually routes
+-- through it. ⚠ ResetProfileSetting did not, and the first cut of this note claimed it was
+-- "fixed as a bonus" anyway; it read the snapshot directly and kept writing the raw value.
+-- Corrected 2026-08-26 (Danders review of #251). If a new consumer needs the global, it
+-- calls GetGlobalValue -- reading globalSnapshot directly is how this recurs.
 -- ⚠ The maps are exact inverses, which is what makes a plain flip correct; if a third
 -- orientation is ever added this needs a real mapping instead.
 -- ⚠ The real cure is splitting the key per mode, which retires this, the toggle rewrite
@@ -2046,7 +2055,21 @@ function AutoProfilesUI:GetRuntimeGlobalValue(key)
         return nil
     end
 
-    return DF._realRaidDB[key]
+    -- ☠ SAME DIALECT PROBLEM AS GetGlobalValue, ONE PATH OVER. This is the ACTIVE-layout
+    -- readout rather than the editing one, so the two ends are the LIVE raid db (the
+    -- layout's applied values) and _realRaidDB (the untouched global) — not the snapshot.
+    -- Without this an active layout overriding raidUseGroups printed the global's growth
+    -- direction through the wrong map: "(Global: Columns)" beside a global page plainly
+    -- reading "Rows". Lower stakes than the editing path (a runtime row carries no dot and
+    -- no reset button) but the same class of wrongness, and leaving one half translated
+    -- was how it looked fixed while still lying.
+    local value = DF._realRaidDB[key]
+    if key == "growDirection" and GROW_INVERSE[value] then
+        local liveGroups = GetRaidValue("raidUseGroups") and true or false
+        local realGroups = DF._realRaidDB.raidUseGroups and true or false
+        if liveGroups ~= realGroups then return GROW_INVERSE[value] end
+    end
+    return value
 end
 
 -- One-shot migration: strip stale "pinnedFrames" direct keys from all profile overrides.
