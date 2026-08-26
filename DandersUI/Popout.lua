@@ -639,6 +639,10 @@ end
 -- _ApplyAccent, which re-runs ApplyPixelBorder on it unconditionally --
 -- _UpdateSourceOutline itself only repaints on a TARGET change, so it would not
 -- have noticed a colour change on a shown outline.
+--
+-- _ApplyAccent also CASCADES into the content, so the widgets the consumer
+-- mounted follow the chrome instead of staying in whatever colour they were
+-- built against -- see _CascadeAccent for what that reaches and what it does not.
 function Popout:SetAccent(c)
     self.accent = normColor(c)
     self:_ApplyAccent()
@@ -646,6 +650,64 @@ function Popout:SetAccent(c)
     self:_UpdateBeam()
     self:_UpdateSourceOutline()
     return self
+end
+
+-- ---- the accent cascade ------------------------------------------
+
+-- How deep under the frame the walk below looks. A popout's tree is shallow by
+-- construction (frame -> content -> the consumer's mount -> its pane -> a
+-- widget's own parts), and a bound rather than an unbounded walk keeps a
+-- consumer that parents something enormous into a popout from paying for it.
+local CASCADE_DEPTH = 8
+
+-- Repaint the accent-bearing widgets a consumer mounted INSIDE this popout.
+--
+-- ⚠ The chrome is not the whole panel. SetAccent used to repaint the border, the
+-- point, the beam and the source outline and stop there -- so a popout whose
+-- accent changed under an open panel ended up a purple-bordered box full of
+-- orange sliders. The widgets do not read the popout's colour: they were built
+-- against the HOST accent and registered themselves on their parent's
+-- `ThemeListeners`, the kit's existing repaint list.
+--
+-- So the popout walks its own tree, finds those lists and repaints them with ITS
+-- colour through `ApplyThemeColor(c)` -- the kit's published "tint to THIS
+-- colour" entry point, which sliders, buttons, check boxes and collapse arrows
+-- all carry.
+--
+-- ☠ ApplyThemeColor, NEVER UpdateTheme. UpdateTheme means "repaint to the HOST
+-- accent" and takes no arguments -- and it cannot be made to take one, because
+-- several call sites in the wild reach it through COLON syntax
+-- (`slider:UpdateTheme()`), which would fill that parameter with the widget
+-- table itself and paint every channel nil.
+--
+-- KNOWN LIMIT (gate one): a widget re-tints only if it registered on a
+-- ThemeListeners list under this popout AND publishes ApplyThemeColor. A widget
+-- built with an explicit opts.accent registers no listener at all, deliberately
+-- -- that colour is the call site's choice, not an inherited one. And any
+-- repaint that reads host:GetAccent() at CLICK time rather than at theme time (a
+-- dropdown menu building its rows, an anchor grid cell re-activating) still
+-- comes up in the host colour until it is next rebuilt.
+local function cascadeInto(frame, c, depth)
+    if type(frame) ~= "table" or depth > CASCADE_DEPTH then return end
+    local list = rawget(frame, "ThemeListeners")
+    if type(list) == "table" then
+        for _, w in ipairs(list) do
+            if type(w) == "table" and type(w.ApplyThemeColor) == "function" then
+                w.ApplyThemeColor(c)
+            end
+        end
+    end
+    if type(frame.GetChildren) ~= "function" then return end
+    local kids = { frame:GetChildren() }
+    for i = 1, #kids do cascadeInto(kids[i], c, depth + 1) end
+end
+
+-- Rooted at the FRAME, not at the content: the title bar is not a child of the
+-- content, and a consumer's header controls (a popout row's own toggle) live
+-- there. A cascade that missed them would leave the one control at the top of
+-- the panel in the colour everything else had just left.
+function Popout:_CascadeAccent()
+    cascadeInto(self.frame, self:GetAccent(), 0)
 end
 
 -- Repaint everything the accent colours. Called on every adopt, so a pooled
@@ -662,6 +724,9 @@ function Popout:_ApplyAccent()
     if self.srcOutline then
         self.host:ApplyPixelBorder(self.srcOutline, { c.r, c.g, c.b, c.a or 1 })
     end
+    -- ...and the widgets INSIDE it, which are not chrome and do not read this
+    -- popout's colour on their own.
+    self:_CascadeAccent()
 end
 
 -- ---- the connected chrome's one gate -----------------------------
@@ -1341,6 +1406,12 @@ function UI:CreatePopout(opts)
     tinsert(store.live, po)
 
     safeCall(opts.build, po, content)
+    -- ...and NOW the content exists. adopt() painted the accent a moment ago, but
+    -- it ran before build, so the cascade it did had nothing to walk -- a popout
+    -- with an opts.accent override would otherwise come up with chrome in its own
+    -- colour and a body still in the host's. Chrome only needs painting once, so
+    -- this is the cascade alone rather than a second _ApplyAccent.
+    po:_CascadeAccent()
     po:_Resize()
     sweepFamily(host, po)
     return po

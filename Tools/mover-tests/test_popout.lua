@@ -68,7 +68,28 @@ local host = setmetatable({ hooks = { L = L } }, { __index = UI })
 
 -- ---- WoW globals the popout touches -------------------------------
 local prevCreateFrame, prevTimer = CreateFrame, C_Timer
-CreateFrame = function() return FakeUIFrame() end
+-- ☠ THIS is the stub every popout frame in BOTH popout suites is built from.
+-- Popout.lua captures CreateFrame as a file-scope local when it LOADS, and in a
+-- full run it loads here -- so a capability the shell needs has to be in THIS
+-- stub, not only in test_popout_row's richer one, or it works when that file is
+-- run alone and silently does nothing in the full suite.
+--
+-- The frame TREE is such a capability: the accent cascade walks down from the
+-- popout's frame looking for ThemeListeners lists, and a stub whose frames have
+-- no children gives it nothing to find.
+CreateFrame = function(_, _, parent)
+    local f = FakeUIFrame()
+    f._children = {}
+    f.GetChildren = function(self) return unpack(self._children) end
+    -- rawget: FakeUIFrame answers every unknown key with a no-op FUNCTION, so a
+    -- plain read would hand back that function and #kids would blow up on it.
+    if type(parent) == "table" then
+        local kids = rawget(parent, "_children")
+        if not kids then kids = {}; parent._children = kids end
+        kids[#kids + 1] = f
+    end
+    return f
+end
 -- Fires immediately, and RECORDS the delay: the Fx sequencing claims (the beam
 -- waits out the pop-in, the beam leaves before the popout does) are about ORDER
 -- and about which duration was waited on, neither of which needs real time.

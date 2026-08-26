@@ -198,9 +198,16 @@ function UI:CreateSettingsGroup(parent, width, opts)
             self.collapseArrow = arrow
 
             -- Theme listener for arrow color
+            -- Tint to an EXPLICIT colour: the kit-wide published name, so a
+            -- surface owning a colour of its own (a popout cascading its accent
+            -- into what a consumer mounted in it) has one entry point.
+            arrow.ApplyThemeColor = function(c)
+                if c then arrow:SetVertexColor(c.r, c.g, c.b) end
+            end
+            -- ⚠ No arguments -- see the slider's note in Widgets.lua: colon call
+            -- sites would fill a parameter here with the widget itself.
             arrow.UpdateTheme = function()
-                local nc = host:GetAccent()
-                arrow:SetVertexColor(nc.r, nc.g, nc.b)
+                arrow.ApplyThemeColor(host:GetAccent())
             end
             if not parent.ThemeListeners then parent.ThemeListeners = {} end
             table.insert(parent.ThemeListeners, arrow)

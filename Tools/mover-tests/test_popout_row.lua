@@ -86,6 +86,24 @@ function UI:StyleCheckButton(cb, opts)
     cb._styleOpts = opts
     cb.ApplyThemeColor = function(c) cb._tint = c end
     cb.ApplyThemeColor(opts.accent or self:GetAccent())
+    -- ...and the other half of the real contract: an UNACCENTED box registers
+    -- itself on its themeRoot's ThemeListeners, which is the list the popout's
+    -- accent cascade walks. Without this the header toggle would look unreachable
+    -- from a test and the cascade's frame-rooted claim could not be made.
+    --
+    -- ⚠ rawget. The stub answers every unknown key with a no-op FUNCTION, so a
+    -- plain `root.ThemeListeners or {}` keeps that function and table.insert
+    -- errors on it. Real frames answer nil, which is why Widgets.lua can write it
+    -- the short way.
+    if not opts.accent then
+        cb.UpdateTheme = function() cb.ApplyThemeColor(self:GetAccent()) end
+        local root = opts.themeRoot or cb:GetParent()
+        if type(root) == "table" then
+            local list = rawget(root, "ThemeListeners")
+            if not list then list = {}; root.ThemeListeners = list end
+            list[#list + 1] = cb
+        end
+    end
     return cb.Check
 end
 
@@ -153,6 +171,9 @@ CreateFrame = function(kind, _, parent)
     f.GetParent = function(self) return self._parent end
     f.SetParent = function(self, p) self._parent = p end
     f.GetNumChildren = function(self) return #self._children end
+    -- The popout's accent cascade walks the frame tree looking for
+    -- ThemeListeners lists, so the stub has to have a tree to walk.
+    f.GetChildren = function(self) return unpack(self._children) end
     if kind == "CheckButton" then
         f.SetChecked = function(self, v) self._checked = v and true or false end
         f.GetChecked = function(self) return self._checked end
@@ -870,6 +891,86 @@ do
         "cols: the gear a gap inboard of the badge COLUMN, not of its text")
     eq(rightEdgeFrom(few.summary, p), -(CHEV_SIZE + GAP + BADGE_W + GAP + GEAR_SIZE + GAP),
         "cols: and the summary right-aligns a gap inboard of the gear")
+end
+
+-- ============================================================
+-- 15. THE ACCENT CASCADES INTO THE PANEL'S CONTENTS
+-- SetAccent repainted the CHROME -- border, point, beam, outline -- and stopped
+-- there, so switching a row's colour under an open panel left a purple-bordered
+-- box full of orange sliders. The widgets never read the popout's colour: they
+-- were built against the host accent and registered on their parent's
+-- ThemeListeners, so the popout has to walk its own tree and repaint them.
+-- ============================================================
+-- Read one channel off a colour that may not have arrived at all. A bare
+-- `seen.r` on a regression ERRORS, which aborts the shared runner and takes
+-- every later test with it; this reports a plain failure instead.
+local function chan(c, k) return (type(c) == "table") and c[k] or nil end
+
+do
+    local win = window()
+    local seen, calls = nil, 0
+    -- Stands in for a kit widget mounted in the pane. ApplyThemeColor is the
+    -- kit's published "tint to THIS colour" entry point -- the one the cascade
+    -- drives, and the only one that can safely take a colour (UpdateTheme has
+    -- colon call sites in the wild). This one just records what it was handed.
+    local widget = { ApplyThemeColor = function(c) seen = c; calls = calls + 1 end }
+
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Cascade", db = {}, window = win,
+        build = function(_, pane)
+            pane.ThemeListeners = { widget }
+            pane:SetHeight(50)
+        end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    check(calls > 0, "cascade: opening the panel repaints the widgets inside it")
+    eq(chan(seen, "r"), ACCENT.r, "cascade: in the host accent, since this row has none of its own")
+
+    -- The live path: the row's colour changes under an OPEN panel.
+    row:SetAccent({ 1, 0.5, 0 })
+    eq(po.frame._panelOpts.borderColor.r, 1, "cascade: the chrome took the new colour, as before")
+    eq(chan(seen, "r"), 1, "cascade: ...and so did the widget mounted in the content")
+    eq(chan(seen, "g"), 0.5, "cascade: on every channel")
+
+    -- The TITLE BAR is not a child of the content, so a cascade rooted there
+    -- would leave the panel's own toggle in the colour everything else had left.
+    eq(chan(po._hdrToggle._tint, "r"), 1, "cascade: the header toggle re-tints too -- the walk starts at the frame")
+
+    row:SetAccent(nil)
+    eq(chan(seen, "r"), ACCENT.r, "cascade: clearing the override hands the content back to the host accent")
+    eq(chan(po._hdrToggle._tint, "r"), ACCENT.r, "cascade: header included")
+    row:ClosePopout()
+end
+
+-- Popout:SetAccent, head-on: the same cascade without a row driving it, and the
+-- claim that a widget's colour follows the POPOUT rather than the host.
+do
+    local src = FakeUIFrame(80, 40, CX, CY)
+    src:Show()
+    local seen
+    -- ☠ A listener that publishes only UpdateTheme must be LEFT ALONE. UpdateTheme
+    -- means "repaint to the host accent" and cannot be made to take a colour --
+    -- call sites in the wild reach it through COLON syntax
+    -- (`slider:UpdateTheme()`), which would fill that parameter with the widget
+    -- table and paint every channel nil. This is the guard on that rule.
+    local updateOnly = 0
+    local p = host:CreatePopout({ key = "cascadebare", width = 100,
+        build = function(_, c)
+            c.ThemeListeners = {
+                { ApplyThemeColor = function(col) seen = col end },
+                { UpdateTheme = function() updateOnly = updateOnly + 1 end },
+            }
+            c:SetHeight(20)
+        end })
+    p:Follow(src)
+    eq(chan(seen, "r"), ACCENT.r, "cascade: a plain popout builds its content in the host accent")
+    p:SetAccent({ r = 0.2, g = 0.8, b = 0.4 })
+    eq(chan(seen, "g"), 0.8, "cascade: SetAccent on the popout alone reaches the content")
+    eq(chan(seen, "r"), 0.2, "cascade: ...without anyone touching the host accent")
+    eq(host:GetAccent().r, ACCENT.r, "cascade: which is untouched, as it must be")
+    eq(updateOnly, 0, "cascade: and it never drives UpdateTheme, which cannot take a colour")
+    p:Close()
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

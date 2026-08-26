@@ -1650,12 +1650,24 @@ function UI:CreateSlider(parent, opts)
         end
     end
     
-    container.UpdateTheme = function()
-        local nc = accentColor or host:GetAccent()
-        if slider:IsEnabled() then
+    -- Tint to an EXPLICIT colour. The same published name StyleButton and
+    -- StyleCheckButton use, so anything driving a scoped repaint -- a popout
+    -- cascading its own accent into the widgets mounted in it -- has one entry
+    -- point across the kit. A slider built with its own accentColor still wins:
+    -- that colour is the call site's choice, not something it inherited.
+    container.ApplyThemeColor = function(c)
+        local nc = accentColor or c
+        if nc and slider:IsEnabled() then
             thumb:SetColorTexture(nc.r, nc.g, nc.b, 1)
             fill:SetColorTexture(nc.r, nc.g, nc.b, 0.8)
         end
+    end
+    -- ⚠ TAKES NO ARGUMENTS, and must not start: several call sites reach this
+    -- through COLON syntax (`slider:UpdateTheme()`), which would hand a colour
+    -- parameter the widget table itself. UpdateTheme means "repaint to the host
+    -- accent"; ApplyThemeColor is the one that takes a colour.
+    container.UpdateTheme = function()
+        container.ApplyThemeColor(host:GetAccent())
     end
     if not parent.ThemeListeners then parent.ThemeListeners = {} end
     table.insert(parent.ThemeListeners, container)
