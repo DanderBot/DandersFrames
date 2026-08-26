@@ -15,6 +15,8 @@
 * (Tooltips) Fix a suppressed frame tooltip re-appearing a moment later, fix pet frame tooltips ignoring the tooltip settings entirely, and fix the tooltip flashing up when a modifier key is pressed while the mouse is already on a frame. (by Krathe)
 * (Raid Frames) Fix turning Use Group-Based Layout on or off silently re-orienting the raid, so rows stay rows and columns stay columns. (by Krathe)
 * (Auto Layouts) Fix a layout showing a false override on Growth Direction, with a mismatched global and a reset that applied the wrong orientation. (by Krathe)
+* (Dispel) Fix the dispel overlay staying dark on poisons for a Shaman carrying Poison Cleansing Totem. (by Krathe)
+* (Dispel) Fix "Only Dispellable by You" never lighting for bleeds on a Dwarf, whose Stoneform clears them. (by Krathe)
 * (Missing Buffs) Fix missing buff icons going stale and never coming back — most often after a raider walked out of range, and after a wipe. The icons stayed hidden until you re-buffed that player, a fight started, or you reloaded. (by Krathe)
 * (Test Mode) Fix preview auras being left behind on your real party and raid frames after leaving test mode or locking frames, showing icons nobody actually has until a reload.
 * (Test Mode) Leaving test mode no longer briefly freezes the game while frames return to their real auras.
