@@ -6698,6 +6698,25 @@ local function ensureOwner(frame, unit)
     owner = { frame = frame, anchor = anchor, container = c, unit = unit, slots = {}, seq = 0 }
     frame.dfSlotOwner = owner
     AuraContainer.stats.slotOwners = (AuraContainer.stats.slotOwners or 0) + 1
+
+    -- ★ SEED THE APPEARANCE AT BIRTH — defensive, not a diagnosis.
+    -- In element-fade mode this anchor is the only thing that fades slot-backed Aura
+    -- Designer indicators, the pass that writes it runs on a range EDGE, and the owner is
+    -- stood up LAZILY on first slot acquisition. An anchor born while its unit is already
+    -- out of range would therefore start at full alpha with no further edge to correct it;
+    -- this call closes that ordering hole. Idempotent (the pass recomputes from db + the
+    -- frame's own range state) and effectively a no-op in whole-frame mode, where the
+    -- unit-frame cascade covers the anchor anyway.
+    --
+    -- ⚠ HONEST STATUS: this shipped mid-hunt as THE fix for "AD indicators don't fade out
+    -- of range" (2026-08-26) and it was NOT that bug — the field fault was group
+    -- containers being absent from ElementAppearance's AD_STORE_KEYS walk entirely, fixed
+    -- separately. The birth-order hole above is real but was never proven to be biting.
+    -- Kept because it is one cheap call at a rare event; if it is ever suspected of
+    -- misbehaving, deleting it outright is safe.
+    if DF.UpdateAuraDesignerAppearance then
+        pcall(DF.UpdateAuraDesignerAppearance, DF, frame)
+    end
     return owner
 end
 
