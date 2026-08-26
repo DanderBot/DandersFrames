@@ -1781,6 +1781,32 @@ function DF:DebugADAlphaHosts(unit)
         .. "but an indicator not = the cascade breaks between them. Anchor itself unfaded = "
         .. "the one write that should have faded it never landed.", "NEUTRAL")
 
+    -- ★ AND WHY IT DID NOT LAND. Knowing the anchor is unfaded only halves the answer;
+    -- these four fields say which half. ☠ In ELEMENT mode the unit frame's own alpha is
+    -- PINNED at base by design, so it tells you nothing about range — read dfInRange, not
+    -- the frame, or you will conclude the unit is in range when it is not.
+    o:Section("Why")
+    local ir = frame.dfInRange
+    if issecretvalue and issecretvalue(ir) then
+        o:Field("frame.dfInRange", "SECRET — ApplyOORAlpha is forced onto "
+            .. "SetAlphaFromBoolean, the one setter these hosts refuse", "WARN")
+    else
+        o:Field("frame.dfInRange", tostring(ir),
+            (ir == false) and "GOOD" or "NEUTRAL")
+    end
+    -- Stamped by UpdateAuraDesignerAppearance itself. nil = that pass has NEVER run for
+    -- this frame, which makes it a trigger fault outright and nothing to do with alphas.
+    o:Field("AD pass has run?", frame._dfADLastInRange == nil and "NO — never"
+        or ("yes, last saw inRange=" .. tostring(frame._dfADLastInRange)),
+        frame._dfADLastInRange == nil and "BAD" or "NEUTRAL")
+    o:Field("frame queued for restriction-lift retry?",
+        (DF._adDeniedHostFrames and DF._adDeniedHostFrames[frame]) and "YES — a write was "
+            .. "refused and is waiting on combat end" or "no", "NEUTRAL")
+    o:Line("Read it as: pass never ran => trigger. Pass ran with inRange=true while the "
+        .. "unit is out of range => the range value is wrong, not the alpha. Pass ran with "
+        .. "inRange=false and the anchor still 1.00 => the write itself was rejected.",
+        "NEUTRAL")
+
     local store = frame.dfADFactory
     if not store then
         o:Line("This frame has no Aura Designer factory store — nothing to probe.", "WARN")
