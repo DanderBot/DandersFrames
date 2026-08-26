@@ -691,6 +691,8 @@ function PinnedFrames:ProcessAllSets()
                 if self.labels[i] then self.labels[i]:Hide() end
             end
             self.pvpHidden = true
+            -- Every set just went away: drop Headers' pinned-unit memo.
+            if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
         end
         return false
     end
@@ -748,6 +750,10 @@ function PinnedFrames:UpdateBossFrameMapEntries(setIndex)
     local frames = self.bossFrames[setIndex]
     if not frames then return end
 
+    -- Boss frames come and go on a secure state driver, so nothing else tells
+    -- Headers their visibility changed — this sweep is the notification point.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
+
     for i = 1, 8 do
         local f = frames[i]
         if f then
@@ -768,6 +774,10 @@ end
 -- Called when boss units change (appear, die, change faction)
 function PinnedFrames:OnBossFramesChanged()
     if not self.initialized then return end
+
+    -- A boss appeared/died/changed faction: which units resolve to a pinned
+    -- boss frame just changed.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
 
     for setIndex = 1, PinnedFrames.MAX_SETS do
         local set = GetSetDB(setIndex)
@@ -1556,6 +1566,8 @@ function PinnedFrames:CreateSetFrames(setIndex)
             container:Hide()
             if label then label:Hide() end
         end
+        -- New boss frames exist (and are now shown/hidden): re-scan on next lookup.
+        if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
         return
     end
 
@@ -1633,6 +1645,10 @@ function PinnedFrames:CreateSetFrames(setIndex)
             DF:SetHeaderChildrenEventsEnabled(header, false)
         end
     end
+
+    -- A whole set's worth of children just came into existence and was
+    -- shown or hidden — every cached "not pinned" answer may now be wrong.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
 end
 
 -- ============================================================
@@ -1689,7 +1705,11 @@ function PinnedFrames:UpdateHeaderNameList(setIndex)
         header:Hide()
         header:Show()
     end
-    
+
+    -- Membership changed: which units this set's children answer for changed
+    -- with it, so Headers' memoized lookups must be re-scanned.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
+
     -- Resize container after layout change
     self:ResizeContainer(setIndex)
     
@@ -1984,6 +2004,10 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
         if currentNameList and currentNameList ~= "" then
             header:SetAttribute("nameList", currentNameList)
         end
+
+        -- The clear/restore cycle above unassigns and re-assigns every child,
+        -- so any memoized unit -> pinned frame answer is stale.
+        if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
     end
     
     -- Resize container after layout change
@@ -2269,6 +2293,10 @@ function PinnedFrames:SetEnabled(setIndex, enabled)
             DF:RefreshMainFrameSorting()
         end
     end
+
+    -- Either branch above changed what is on screen for this set, so the
+    -- memoized unit -> pinned frame answers have to be re-scanned.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
 end
 
 -- Re-sync every set's show/hide state against the CURRENT profile + mode
@@ -2564,7 +2592,11 @@ function PinnedFrames:Initialize()
     end
     
     self.initialized = true
-    
+
+    -- Pinned lookups were hard-off until this flip; nothing cached before it
+    -- can be trusted now that sets exist.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
+
     -- Apply layout settings immediately (no delays for combat safety)
     -- Note: ApplyLayoutSettings is also called in CreateSetFrames, but we do it
     -- again here to ensure all settings are applied after headers are fully set up
@@ -2689,6 +2721,10 @@ function PinnedFrames:PruneOrphanedSets()
             if activeC and not visible then hideContainerSafe(self, activeC) end
         end
     end
+
+    -- The prune hides and untracks headers/containers, so anything the memo
+    -- still points at may have just gone away.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
 end
 
 function PinnedFrames:Reinitialize()
@@ -2789,6 +2825,11 @@ function PinnedFrames:Reinitialize()
     end
 
     self.initialized = false
+
+    -- Every header, container and boss frame above was just destroyed; the
+    -- memo must not outlive the frames it points at.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
+
     self:Initialize()  -- ends with PruneOrphanedSets: reaps untracked strays too
 
     -- If Test Mode was active before Reinitialize (e.g. user changed
@@ -2964,6 +3005,8 @@ function PinnedFrames:RemoveSet(setIndex, mode)
         hideContainerSafe(self, self.headers[setIndex])
         if self.labels[setIndex] then self.labels[setIndex]:Hide() end
         self.pendingReinitialize = true
+        -- The set's chrome is on its way out (now, or at regen): re-scan.
+        if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
         return true
     end
 
@@ -3806,6 +3849,9 @@ function PinnedFrames:EnterTestMode()
         if self.labels[setIndex] then self.labels[setIndex]:Hide() end
     end
 
+    -- Every live pinned header just went dark for the preview.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
+
     for setIndex = 1, PinnedFrames.MAX_SETS do
         local set = GetSetDBForMode(setIndex, isRaidMode)
         if set and set.enabled then
@@ -4025,6 +4071,10 @@ function PinnedFrames:ExitTestMode()
         end
     end
 
+    -- The live headers are back: the negatives cached while the preview owned
+    -- the screen would otherwise keep them dark for up to the TTL.
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
+
     -- Legacy: no-op in the new design, but other code paths may still have
     -- cleared flags on real boss frames. Defensively clear to avoid stale
     -- dfIsTestFrame leaking from an older-session toggle.
@@ -4112,6 +4162,7 @@ local function ForceBossFrameVisible(setIndex, bossIndex, show)
     local f = frames[bossIndex]
     if not f then return end
     RegisterStateDriver(f, "visibility", show and "show" or "hide")
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
 end
 
 -- Restore real `[@bossN,help]show;hide` drivers on all boss-mode sets.
@@ -4131,6 +4182,7 @@ local function RestoreBossFrameDrivers()
             end
         end
     end
+    if DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
 end
 
 -- Schedule each step via C_Timer.After, keyed to a captured generation.
@@ -4302,6 +4354,10 @@ function PinnedFrames:SetBossTestMode(visibleCount)
             end
         end
     end
+
+    -- Boss visibility was just forced: re-scan rather than answer from the
+    -- pre-test picture.
+    if anyToggled and DF.InvalidatePinnedUnitCache then DF:InvalidatePinnedUnitCache() end
 
     if not anyToggled then
         DF:Err("No enabled boss-mode sets. Enable a pinned set and set its Frame Type to 'Friendly Boss NPCs' first.")

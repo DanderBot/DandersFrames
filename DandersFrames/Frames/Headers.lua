@@ -762,6 +762,11 @@ function DF:InitializeHeaderChild(frame)
                 -- Pets.lua and this file have no guaranteed load order.
                 if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
 
+                -- Same reasoning for the pinned-unit memo: this button now answers
+                -- for a different unit, so any cached "unit -> pinned frame" result
+                -- involving it is stale.
+                if self.isPinnedFrame then DF:InvalidatePinnedUnitCache() end
+
                 return
             end
 
@@ -798,6 +803,9 @@ function DF:InitializeHeaderChild(frame)
             -- treated a nil unit as "invalidate everything" and the field log caught it
             -- degrading straight back to a full sweep during arena entry.
             if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
+            -- A pinned child just changed unit: drop the pinned-unit memo so the
+            -- next lookup re-scans instead of answering from the old assignment.
+            if self.isPinnedFrame then DF:InvalidatePinnedUnitCache() end
             -- Clear background color tracking (unit changed, need fresh colors)
             -- Clear stale range state so this slot doesn't inherit the previous
             -- occupant's faded appearance. dfInRange is immediately repopulated
@@ -7829,6 +7837,9 @@ end
 
 function DF:ProcessRosterUpdate()
     DF:RosterDebugEvent("Headers.lua:ProcessRosterUpdate")
+    -- The roster is about to be re-slotted: every cached "unit -> pinned frame"
+    -- answer (including the negatives) is suspect from here on.
+    DF:InvalidatePinnedUnitCache()
     local numGroup = GetNumGroupMembers()
     local inRaid = IsInRaid()
     DF:Debug("ROSTER", "ProcessRosterUpdate: %d members, inRaid=%s", numGroup, tostring(inRaid))
@@ -8275,11 +8286,25 @@ DF.IteratePinnedFrames = IteratePinnedFrames
 -- UNIT_CONNECTION / UNIT_AURA handlers below, i.e. per unit event. It early-
 -- outs cheaply when pinned frames are off or hidden, so only pinned users pay
 -- the scan -- but for them it is up to 2x40 secure attribute reads per event.
--- CHILD_ATTR keeps the string cost out of it; replacing the scan itself with a
--- maintained pinned-unit map is the real fix and is on the Perfy list, because
--- the invalidation (frames re-slot on roster change) needs in-game validation.
+-- CHILD_ATTR keeps the string cost out of it; the scan itself is now memoized
+-- per unit (see pinnedUnitCache below) rather than maintained as a live map --
+-- a map's invalidation (frames re-slot on roster change) is the risky half, so
+-- the cache re-validates positives and self-heals on a 1s TTL instead.
 local CHILD_ATTR = DF.CHILD_ATTR
-local function FindPinnedFrameForUnit(unit)
+
+-- Memoized results for FindPinnedFrameForUnit, including negative results
+-- (false = "scanned, not pinned" — most units aren't pinned and the O(80)
+-- scan was paid for every one of them on every unit event). Wiped whole on
+-- anything that can change an answer (unit reassignments, roster ticks,
+-- pinned set show/hide/reconfigure) plus a 1s TTL safety net so a missed
+-- invalidation self-heals instead of freezing a pinned frame's updates.
+local pinnedUnitCache = {}
+local pinnedUnitCacheTime = 0
+function DF:InvalidatePinnedUnitCache()
+    if next(pinnedUnitCache) then wipe(pinnedUnitCache) end
+end
+
+local function ScanPinnedFrameForUnit(unit)
     if not DF.PinnedFrames or not DF.PinnedFrames.initialized then
         return nil
     end
@@ -8312,6 +8337,27 @@ local function FindPinnedFrameForUnit(unit)
         end
     end
     return nil
+end
+
+local function FindPinnedFrameForUnit(unit)
+    if not DF.PinnedFrames or not DF.PinnedFrames.initialized then
+        return nil
+    end
+    local now = GetTime()
+    if now - pinnedUnitCacheTime > 1.0 then
+        if next(pinnedUnitCache) then wipe(pinnedUnitCache) end
+        pinnedUnitCacheTime = now
+    end
+    local cached = pinnedUnitCache[unit]
+    if cached ~= nil then
+        if cached == false then return nil end
+        -- A hidden/reassigned frame must not be handed out stale: cheap
+        -- re-validation, falls through to a rescan when it fails.
+        if cached:IsVisible() and cached.unit == unit then return cached end
+    end
+    local frame = ScanPinnedFrameForUnit(unit)
+    pinnedUnitCache[unit] = frame or false
+    return frame
 end
 
 -- TextDesigner live-text refresh helper. No-op unless the TD module loaded
