@@ -1398,8 +1398,24 @@ local warnedSlotStyle = false
 -- fired first hide the other for the rest of the session.
 local warnedSlotInit = false
 
--- Slot plan from settings.
-local function dispelSlotPlan(db)
+-- Cheap gate for the RACIAL half of the dispel-flag gap (Dwarf Stoneform clears Bleed —
+-- see DF:GetEngineDispelFlagGaps). Only a dwarf can ever have it, so nobody else pays the
+-- per-pass UnitIsUnit in the drive.
+-- ⚠ Not cached until the API answers: UnitRace can return nil early in the login window,
+-- and caching that would pin every dwarf to "no racial gap" for the whole session.
+local playerIsDwarf
+local function RacialGapPossible()
+    if playerIsDwarf == nil then
+        local _, race = UnitRace("player")
+        if race == nil then return false end
+        playerIsDwarf = race == "Dwarf"
+    end
+    return playerIsDwarf
+end
+
+-- Slot plan from settings. selfOnly marks the PLAYER'S OWN frame — the only frame where
+-- the racial half of the gap means anything, since a racial cleanses its own caster.
+local function dispelSlotPlan(db, selfOnly)
     local byMe = (db.dispelOverlayDispelType or 2) == 1
 
     -- ☠ "All Dispellable" must NOT depend on what the player can dispel.
@@ -1500,7 +1516,9 @@ local function dispelSlotPlan(db)
     -- learning/unlearning the totem rebuilds through the coalesced
     -- PLAYER_TALENT_UPDATE -> UpdateAllFrames path.
     if byMe and DF.GetEngineDispelFlagGaps then
-        local gap = DF:GetEngineDispelFlagGaps()
+        -- selfOnly adds the Bleed half on the player's own frame (Dwarf Stoneform); the
+        -- class-wide Poison half applies on every frame, because a totem cleanses the group.
+        local gap = DF:GetEngineDispelFlagGaps(selfOnly)
         if gap then
             slots[#slots + 1] = { key = "gap", filter = "HARMFUL|!RAID_PLAYER_DISPELLABLE",
                                   candidateFilters = { includeDispelTypes = gap }, roles = roles }
@@ -1517,8 +1535,8 @@ end
 -- Structural signature: me/all, border slot, icon slots — anything that changes
 -- the SLOT SET (topology is add-only, so set changes are a rebuild).
 -- Pure styling (alphas, geometry) hot-applies via the style pass instead.
-local function dispelFactoryPlanAndSig(db)
-    local slots = dispelSlotPlan(db)
+local function dispelFactoryPlanAndSig(db, selfOnly)
+    local slots = dispelSlotPlan(db, selfOnly)
     if not slots then return nil end
     -- Mode marker. Derived from the PLAN, not the setting, so the by-me degrade
     -- inside dispelSlotPlan is reflected here too. (Was "policy"/"nopolicy" back
@@ -2634,13 +2652,25 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- Skips the per-call plan/signature allocation entirely; any settings change
     -- goes through InvalidateAuraLayout, which breaks the version latch.
     local ver = DF.auraLayoutVersion or 0
-    if h and frame.dfDispelFactoryVersion == ver and frame.dfDispelStyledGen == (h._gen or 0) then
+    -- ☠ SELF-NESS IS PART OF THE PLAN, AND IT CAN CHANGE WITHOUT THE VERSION MOVING.
+    -- The racial gap adds a Bleed slot on the player's own frame only, so the slot SET
+    -- depends on which unit this frame is driving — and roster churn reassigns a header
+    -- child's unit with no layout bump at all. Left out of the latch, a frame that became
+    -- (or stopped being) the player would keep the wrong slot set until some unrelated
+    -- rebuild happened by. Costs nothing for anyone who is not a dwarf: RacialGapPossible
+    -- short-circuits before the UnitIsUnit call, and this is the per-UNIT_AURA path.
+    local isSelf = RacialGapPossible() and UnitIsUnit(frame.unit, "player") and true or false
+    if h and frame.dfDispelFactoryVersion == ver and frame.dfDispelStyledGen == (h._gen or 0)
+        and frame.dfDispelSelf == isSelf then
         if h:GetUnit() ~= frame.unit then h:SetUnit(frame.unit) end
         return
     end
 
-    local sig, slots, tuneSig = dispelFactoryPlanAndSig(db)
+    local sig, slots, tuneSig = dispelFactoryPlanAndSig(db, isSelf)
     if not sig then return end
+    -- Stamped here rather than beside the sig below: the plan above already reflects it,
+    -- and both the tune branch and the rebuild branch have to leave it current.
+    frame.dfDispelSelf = isSelf
 
     if h and frame.dispelFactorySig == sig and frame.dispelFactoryTuneSig ~= tuneSig then
         -- ☠ TUNE, DO NOT REBUILD. The structural half is identical, so only the filter

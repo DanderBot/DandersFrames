@@ -151,8 +151,25 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- which read aura data in ADDON code and therefore really do go dark in
 -- combat. VuhDo's container path narrows RAID_PLAYER_DISPELLABLE by
 -- includeDispelTypes -- an intersection, which cannot add back a type the
--- token already dropped. So DF's ADDITIVE record is the only shape in the
--- surveyed set that repairs the gap where it matters.
+-- token already dropped.
+--
+-- ⚠ 2026-08-26, AMENDED: this used to end "so DF's ADDITIVE record is the only
+-- shape in the surveyed set that repairs the gap". That was true of the set
+-- surveyed at the time and is now INCOMPLETE. EllesmereUI ships a third shape
+-- that also works -- SUBSTITUTIVE: it keeps a slot PER DISPEL TYPE, so for the
+-- Poison slot it simply drops the token and lets that slot's own
+-- includeDispelTypes do the narrowing (EUI_RaidFrames_AuraContainers.lua,
+-- DispelSlotFilter). Neither shape is better; each is the only one its own
+-- architecture allows. Ours collapsed the overlay to ONE slot, so there is no
+-- per-type slot left to relax and the repair has to add. Do not re-derive the
+-- "only shape" claim -- it is a statement about DF's topology, not about the
+-- API.
+-- ★ Where they ARE ahead: they also repair BLEED via the Dwarf racial (see
+-- ENGINE_GAP_BLEED below), which we copied. Where we are ahead: they probe with
+-- IsPlayerSpell, which on 12.1 lives in Blizzard_DeprecatedSpellBook behind
+-- `if not GetCVarBool("loadDeprecationFallbacks") then return end` -- verified in
+-- the local dump -- so their repair silently no-ops for anyone with that CVar
+-- off. That is the exact trap the note below records us falling into first.
 --
 -- ⚠ Re-checked on every call, never cached: the totem is a TALENT, and talent
 -- swaps re-drive the factories through the coalesced PLAYER_TALENT_UPDATE ->
@@ -174,6 +191,17 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- distinct from a confident false. A capability probe that cannot run must say
 -- so rather than quietly answering "no".
 local ENGINE_GAP_POISON = { Poison = true }
+-- ★ THE RACIAL GAP. RAID_PLAYER_DISPELLABLE knows class and spec dispels, and NOTHING a
+-- class learns removes a Bleed -- only the Dwarf racial, Stoneform. So without this, "Only
+-- Dispellable by You" can never light for a bleed, for anybody, ever.
+-- ☠ SELF ONLY, and BLEED only. A racial cleanses its own caster, so it says nothing about
+-- anyone else's frame -- hence the selfOnly argument rather than a class-wide answer.
+-- Stoneform also clears poison/disease/curse, but any class that dispels those already
+-- passes the token, and treating a two-minute racial as a dispel would overlay most of
+-- what a dwarf ever catches. Both scoping decisions match EllesmereUI's, which reached
+-- them first; the reasoning is theirs and it holds for us.
+local ENGINE_GAP_BLEED  = { Bleed = true }
+local ENGINE_GAP_BOTH   = { Poison = true, Bleed = true }   -- a dwarf shaman is a real thing
 local POISON_CLEANSING_TOTEM = 383013
 local warnedNoSpellProbe = false
 local function KnowsPoisonCleansingTotem()
@@ -198,10 +226,24 @@ local function KnowsPoisonCleansingTotem()
     return nil
 end
 
-function DF:GetEngineDispelFlagGaps()
+-- selfOnly: pass true ONLY for the player's own frame. It adds the racial (Bleed) half,
+-- which is meaningless on anyone else's frame. Omit it and the answer is the class-wide
+-- one, which is what the debuff row wants — the row builds its records per db, not per
+-- frame, so it has no self to distinguish and must not claim one.
+function DF:GetEngineDispelFlagGaps(selfOnly)
     local _, class = UnitClass("player")
-    if class ~= "SHAMAN" then return nil end
-    if KnowsPoisonCleansingTotem() then return ENGINE_GAP_POISON end
+    -- ⚠ Three outcomes upstream: KnowsPoisonCleansingTotem returns nil for "cannot tell".
+    -- Collapsed to false here, as it always was — an unreadable probe must not assert a
+    -- capability, and it has already logged itself once.
+    local poison = class == "SHAMAN" and KnowsPoisonCleansingTotem() == true
+    local bleed = false
+    if selfOnly then
+        local _, race = UnitRace("player")
+        bleed = race == "Dwarf"
+    end
+    if poison and bleed then return ENGINE_GAP_BOTH end
+    if poison then return ENGINE_GAP_POISON end
+    if bleed then return ENGINE_GAP_BLEED end
     return nil
 end
 
