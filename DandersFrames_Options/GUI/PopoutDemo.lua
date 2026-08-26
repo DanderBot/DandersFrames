@@ -11,6 +11,13 @@
 -- one-pixel adjustment. When a behaviour looks right HERE, it goes to the
 -- pages; not the other way round.
 --
+-- THE OFF GATE, where to see it: Border Shadow starts toggled OFF, so opening it
+-- shows a pane that is already dead -- every control greyed and unclickable while
+-- the popout's own header tick, pin and cross stay live. Flip that tick (from the
+-- row OR from the header) to watch the whole group grey and un-grey in place.
+-- Highlights is the counter-case: Border switched off greys the ROW, but its own
+-- toggle is still on, so its popout's controls stay live.
+--
 -- Dev-facing on purpose: every string is a plain literal and NOTHING here is
 -- localised. Same rule as the rest of /df debug -- these words are for whoever
 -- is working on the chrome, not for players.
@@ -153,6 +160,20 @@ local function editbox(pane, label, tbl, key, rowName)
         onCommit = function() refreshRow(rowName) end,
     })
     eb:SetPoint("TOPLEFT", 0, -16)
+
+    -- The wrapper forwards SetEnabled to what it wraps, the way every kit
+    -- container does. The row's off-gate walks the pane's DIRECT children, so a
+    -- wrapper that answered nothing would be dimmed as decoration and leave the
+    -- live box inside it still typeable in a dead group.
+    --
+    -- Label and box separately, NOT SetAlpha on the wrapper: the box dims itself
+    -- to 0.4 inside SetEnabled, so a 0.4 on the parent as well would land it at
+    -- 0.16 and make this one control darker than everything beside it.
+    box.SetEnabled = function(_, enabled)
+        local c = enabled and C.text or C.textDim
+        lbl:SetTextColor(c.r, c.g, c.b)
+        eb:SetEnabled(enabled)
+    end
     return box
 end
 

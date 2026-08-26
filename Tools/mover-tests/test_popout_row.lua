@@ -973,5 +973,224 @@ do
     p:Close()
 end
 
+-- ============================================================
+-- 16. THE OFF GATE
+-- A feature switched off has a popout full of controls that do nothing, and a
+-- live control that does nothing is a lie. So the row's toggle greys its own
+-- pane -- and, crucially, NOT the header tick that is the way back on.
+--
+-- ⚠ EVERY frame this file's CreateFrame makes carries FakeUIFrame's SetEnabled /
+-- IsEnabled, so the "mounted widget" path is the default one here and the
+-- no-SetEnabled fallback has to be built by hand (see the decoration block).
+-- ============================================================
+
+-- A pane build that mounts `n` widgets and hands them back, so a test can drive
+-- and read the same objects the gate is walking.
+local function mounting(bag, n, h)
+    return function(_, pane)
+        for i = 1, (n or 1) do bag[i] = CreateFrame("Frame", nil, pane) end
+        pane:SetHeight(h or 60)
+    end
+end
+
+-- The gate greys a pane built for a row that is ALREADY off, and lifts it live.
+do
+    local win, bag = window(), {}
+    local db = { on = false }
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Gated", db = db, toggle = { key = "on" },
+        summary = function() return "live" end,
+        build = mounting(bag, 3), window = win,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    check(bag[1]:IsEnabled() == false, "gate: a pane built for an off row comes up already dead")
+    check(bag[2]:IsEnabled() == false and bag[3]:IsEnabled() == false, "gate: ...every widget in it")
+    check(po._rowPanes[row].gateShut, "gate: and the record says so")
+
+    -- The header tick is the way back on, so it must never grey with the group.
+    check(po._hdrToggle:IsEnabled(), "gate: the popout's own toggle stays enabled")
+    check(po.closeBtn:IsEnabled(), "gate: the cross too")
+    check(po.pinBtn:IsEnabled(), "gate: and the pin")
+
+    -- Live, from the ROW's tick.
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    check(bag[1]:IsEnabled(), "gate: the row's tick lifted the gate on the open pane")
+    check(not po._rowPanes[row].gateShut, "gate: ...and cleared the record")
+
+    -- Live, from the HEADER's tick -- the same write path, so the same grey.
+    po._hdrToggle:SetChecked(false)
+    po._hdrToggle:GetScript("OnClick")(po._hdrToggle)
+    check(bag[1]:IsEnabled() == false, "gate: the header's tick shuts it too")
+    check(po._hdrToggle:IsEnabled(), "gate: and still does not grey itself")
+    row:ClosePopout()
+end
+
+-- A row that is ON builds a live pane, and nothing is touched.
+do
+    local win, bag = window(), {}
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Open", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "live" end,
+        build = mounting(bag, 2), window = win,
+    }))
+    row:OpenPopout()
+    check(bag[1]:IsEnabled() and bag[2]:IsEnabled(), "gate: an on row's pane is live")
+    check(row.popout._rowPanes[row].gateShut == false, "gate: with the gate recorded open")
+    row:ClosePopout()
+end
+
+-- ☠ THE ONE THAT MATTERS. A widget may carry its OWN gating, and a gate that
+-- enabled everything on the way out would resurrect a control that logic had
+-- disabled. The gate hands back exactly what it took.
+do
+    local win, bag = window(), {}
+    local db = { on = true }
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Own gate", db = db, toggle = { key = "on" },
+        summary = function() return "live" end,
+        build = mounting(bag, 2), window = win,
+    }))
+    row:OpenPopout()
+
+    -- Widget 2 is disabled by its own logic BEFORE the gate ever closes.
+    bag[2]:SetEnabled(false)
+    check(bag[1]:IsEnabled() and bag[2]:IsEnabled() == false, "gate: a widget disabled itself")
+
+    db.on = false
+    row.Refresh()
+    check(bag[1]:IsEnabled() == false, "gate: shutting takes the live one down")
+    check(bag[2]:IsEnabled() == false, "gate: ...and the already-dead one stays down")
+
+    db.on = true
+    row.Refresh()
+    check(bag[1]:IsEnabled(), "gate: opening restores the one the gate took")
+    check(bag[2]:IsEnabled() == false, "gate: and does NOT resurrect the one it never took")
+
+    -- The reverse: a widget's own logic re-enables it WHILE the gate is shut.
+    -- The call is recorded, not applied -- the group is dead until the toggle
+    -- says otherwise -- and replayed when the gate opens.
+    db.on = false
+    row.Refresh()
+    bag[2]:SetEnabled(true)
+    check(bag[2]:IsEnabled() == false, "gate: a SetEnabled under a shut gate does not light the widget")
+    db.on = true
+    row.Refresh()
+    check(bag[2]:IsEnabled(), "gate: ...and lands the moment the gate opens")
+    row:ClosePopout()
+end
+
+-- Opening the gate hands the pane back to whoever wired it, because gating that
+-- changed while the gate was shut never reached a SetEnabled call to record.
+do
+    local win, bag = window(), {}
+    local db, rewires = { on = true }, 0
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Rewired", db = db, toggle = { key = "on" },
+        summary = function() return "live" end,
+        window = win,
+        build = function(po, pane)
+            bag[1] = CreateFrame("Frame", nil, pane)
+            pane.RefreshChildStates = function() rewires = rewires + 1 end
+            pane:SetHeight(50)
+        end,
+    }))
+    row:OpenPopout()
+    eq(rewires, 0, "gate: building a live pane rewires nothing")
+    db.on = false
+    row.Refresh()
+    eq(rewires, 0, "gate: nor does shutting it -- the gate owns the state until it opens")
+    db.on = true
+    row.Refresh()
+    eq(rewires, 1, "gate: opening it re-runs the consumer's own child-state pass")
+    row:ClosePopout()
+end
+
+-- A widget with no SetEnabled at all -- a note, a separator -- is dimmed to the
+-- same depth instead, and handed back the alpha and mouse state it had.
+do
+    local win = window()
+    local db = { on = true }
+    local deco = { _alpha = 1, _mouse = true }
+    function deco:SetAlpha(v) self._alpha = v end
+    function deco:GetAlpha() return self._alpha end
+    function deco:EnableMouse(v) self._mouse = v and true or false end
+    function deco:IsMouseEnabled() return self._mouse end
+
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Deco", db = db, toggle = { key = "on" },
+        summary = function() return "live" end,
+        window = win,
+        build = function(_, pane)
+            -- Mounted by hand: the stub's frames all answer SetEnabled, so the
+            -- fallback path cannot be reached with one.
+            local kids = rawget(pane, "_children")
+            if not kids then kids = {}; pane._children = kids end
+            kids[#kids + 1] = deco
+            pane:SetHeight(40)
+        end,
+    }))
+    row:OpenPopout()
+    eq(deco._alpha, 1, "gate: a live pane leaves decoration alone")
+
+    db.on = false
+    row.Refresh()
+    eq(deco._alpha, 0.4, "gate: no SetEnabled means dimmed to the same 0.4 a disabled widget lands at")
+    eq(deco._mouse, false, "gate: and the mouse comes off it")
+
+    db.on = true
+    row.Refresh()
+    eq(deco._alpha, 1, "gate: opening hands the alpha back")
+    eq(deco._mouse, true, "gate: and the mouse with it")
+    row:ClosePopout()
+end
+
+-- DEPENDENT GREY IS A DIFFERENT MECHANISM. A row greyed by opts.enabled whose
+-- own toggle is ON keeps its popout's controls live -- the control that would
+-- satisfy the dependency is often one of them.
+do
+    local win, bag = window(), {}
+    local db = { master = false, on = true }
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Dependent", db = db, toggle = { key = "on" },
+        enabled = function(d) return d.master end,
+        summary = function() return "ready" end,
+        build = mounting(bag, 2), window = win,
+    }))
+    row:OpenPopout()
+    eq(row:GetAlpha(), 0.4, "gate: the row really is dependent-greyed")
+    check(bag[1]:IsEnabled() and bag[2]:IsEnabled(),
+        "gate: ...but its popout's controls stay live -- dependent grey is not the toggle's gate")
+    row:ClosePopout()
+end
+
+-- ONE PANEL, TWO ROWS: a cached pane whose row was toggled while another row was
+-- showing greys on the way back in. A hidden pane takes no refresh of its own.
+do
+    local win = window()
+    local bagA, bagB = {}, {}
+    local dbA = { on = true }
+    local function mk(name, dy, bag, db)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = db, toggle = { key = "on" },
+            summary = function() return name end,
+            build = mounting(bag, 2), window = win,
+        }), dy)
+    end
+    local a = mk("GA", 100, bagA, dbA)
+    local b = mk("GB", -100, bagB, { on = true })
+
+    a:OpenPopout()
+    check(bagA[1]:IsEnabled(), "gate/swap: A opened live")
+    b:OpenPopout()                       -- A's pane is now cached and hidden
+    dbA.on = false
+    a.Refresh()                          -- A is not bound to the instance any more
+    a:OpenPopout()
+    check(bagA[1]:IsEnabled() == false, "gate/swap: swapping back to a row toggled off greys its cached pane")
+    check(bagB[1]:IsEnabled(), "gate/swap: and B's pane was left alone")
+    host:CloseAllPopoutRows()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit

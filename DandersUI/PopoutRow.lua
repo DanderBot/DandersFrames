@@ -158,6 +158,147 @@ local function capHeight()
     return (UIParent:GetHeight() or 0) * CAP_FRAC
 end
 
+-- ============================================================
+-- THE OFF GATE
+-- A feature switched OFF has a popout full of controls that do nothing, and a
+-- live control that does nothing is a lie. So the row's toggle gates its own
+-- pane: off greys every widget in it and stops it taking input, exactly the
+-- grey-when-disabled treatment every other gated control in the pack gets.
+--
+-- WHAT IT DOES NOT TOUCH. The popout's HEADER toggle, its pin and its cross all
+-- live in the title bar, and the gate only ever walks the PANE -- so the tick
+-- you need to switch the feature back on never greys with the things it
+-- governs. Same statement the ROW makes when it dims its label and glyphs but
+-- leaves its own tick alone.
+--
+-- ⚠ NOT the dependent grey. opts.enabled is a separate mechanism about a
+-- feature you cannot act on YET, and it deliberately leaves the popout's
+-- contents live (the control that would satisfy the dependency is often one of
+-- them). The gate keys off the TOGGLE and nothing else.
+-- ============================================================
+
+-- ☠ THE GATE IS NOT THE ONLY WRITER. A mounted widget may carry its own gating
+-- -- a page's disableOn, a sub-option that only applies in one mode -- and a
+-- gate that simply enabled everything on the way back out would resurrect a
+-- control its own logic had disabled. So the gate does not enable widgets: it
+-- BORROWS the enabled state and hands back exactly what it took.
+--
+-- The borrow is a wrapper on the widget's own SetEnabled, installed once, at
+-- build. It records what the caller WANTED and applies it only while the gate
+-- is open; while the gate is shut it swallows the call and keeps the number.
+-- Opening the gate replays the last wanted value, so a widget disabled before
+-- the gate closed stays disabled, and a widget re-gated while it was shut comes
+-- back in the state its own logic last asked for.
+local function armGate(w)
+    if w._dfGateApply then return end
+    local native = w.SetEnabled
+    if type(native) ~= "function" then return end
+
+    -- The seed is what the widget can be ASKED. `enabled` is what the kit's own
+    -- containers record; IsEnabled is what a native Button/CheckButton/EditBox
+    -- answers. A widget that can say neither is taken as enabled -- which is what
+    -- it is, unless the consumer disabled it DURING build, before this wrapper
+    -- existed to hear it. Consumers gate in a pass after build (that is what
+    -- RefreshChildStates is), so that hole is narrow and documented rather than
+    -- guessed at.
+    local wanted = true
+    if type(w.enabled) == "boolean" then
+        wanted = w.enabled
+    elseif type(w.IsEnabled) == "function" then
+        local ok, v = xpcall(function() return w:IsEnabled() end, geterrorhandler())
+        if ok and type(v) == "boolean" then wanted = v end
+    end
+    w._dfGateWanted = wanted
+    w._dfGateApply = function(enabled) return native(w, enabled) end
+    w.SetEnabled = function(self, enabled)
+        enabled = enabled and true or false
+        self._dfGateWanted = enabled
+        if self._dfGateShut then return self end
+        return native(self, enabled)
+    end
+    return true
+end
+
+-- Mouse state, but only when the frame can actually be ASKED for it. A widget
+-- that answers nothing gets its mouse left alone rather than re-enabled on the
+-- way out -- the gate hands back what it took, and it cannot take what it never
+-- read.
+local function mouseOn(w)
+    if type(w.IsMouseEnabled) ~= "function" then return nil end
+    local ok, v = xpcall(function() return w:IsMouseEnabled() end, geterrorhandler())
+    if ok and type(v) == "boolean" then return v end
+    return nil
+end
+
+-- Per-widget gating that changed WHILE the gate was shut never reached a
+-- SetEnabled call to be recorded -- a page's disableOn only re-runs when the
+-- page refreshes it. So opening the gate hands the pane back to whoever wired
+-- it: a settings group re-runs its own child-state pass, and anything else gets
+-- its widgets' refreshContent. Both are no-ops on a pane that has no wiring of
+-- its own, which is the demo's case.
+local function rewire(po, rec)
+    local pane = rec.pane
+    if type(pane.RefreshChildStates) == "function" then
+        return safeCall(pane.RefreshChildStates, pane)
+    end
+    local db = po.host and po.host:Call("getSettingsDB")
+    for _, w in ipairs(rec.kids) do
+        if type(w.RefreshChildStates) == "function" then
+            safeCall(w.RefreshChildStates, w)
+        elseif type(w.refreshContent) == "function" then
+            safeCall(w.refreshContent, w, db)
+        end
+    end
+end
+
+-- Shut or open the gate on one built pane. Idempotent: the state is kept on the
+-- record, so the refresh that follows every toggle write can call this on every
+-- bound instance without re-walking a pane that is already in the right state.
+local function gatePane(po, rec, shut)
+    shut = shut and true or false
+    if rec.gateShut == shut then return end
+    rec.gateShut = shut
+    for _, w in ipairs(rec.kids) do
+        if w._dfGateApply then
+            w._dfGateShut = shut or nil
+            -- ⚠ Spelled out, NOT `shut and false or wanted`: that idiom cannot
+            -- yield false, so the shut branch handed the widget its own wanted
+            -- value back and nothing ever greyed.
+            if shut then w._dfGateApply(false) else w._dfGateApply(w._dfGateWanted) end
+        else
+            -- No SetEnabled at all -- a note, a separator, a consumer's own
+            -- frame. Dimmed to the SAME depth a disabled widget lands at, so a
+            -- shut pane reads as one dead block rather than a mix.
+            if shut then
+                if w._dfGateAlpha == nil and type(w.GetAlpha) == "function" then
+                    w._dfGateAlpha = w:GetAlpha() or 1
+                end
+                if type(w.SetAlpha) == "function" then w:SetAlpha(DIM_ALPHA) end
+                if mouseOn(w) then
+                    w._dfGateMouse = true
+                    w:EnableMouse(false)
+                end
+            else
+                if type(w.SetAlpha) == "function" then w:SetAlpha(w._dfGateAlpha or 1) end
+                w._dfGateAlpha = nil
+                if w._dfGateMouse then
+                    w._dfGateMouse = nil
+                    w:EnableMouse(true)
+                end
+            end
+        end
+    end
+    if not shut then rewire(po, rec) end
+end
+
+-- The gate for a row's pane ON THIS INSTANCE, if that pane has been built. Safe
+-- to call for a row whose pane this instance has never seen.
+local function syncGate(po, row, rec)
+    rec = rec or (po._rowPanes and po._rowPanes[row])
+    if not rec then return end
+    gatePane(po, rec, not row._Read())
+end
+
 -- Build (or fetch) the pane holding `row`'s controls on this instance.
 -- Returns the record and whether this call BUILT it.
 --
@@ -183,7 +324,24 @@ local function paneFor(po, row)
     safeCall(row._build, po, pane)
     local h = max(pane:GetHeight() or 0, 1)
 
-    rec = { pane = pane, host = pane, h = h }
+    -- THE GATE'S ROSTER, taken once, here. A pane is built ONCE per (instance,
+    -- row) and never grows afterwards, so the list of widgets the toggle governs
+    -- is settled the moment the build returns -- and re-walking GetChildren on
+    -- every toggle would only re-derive the same list.
+    local kids = {}
+    if type(pane.GetChildren) == "function" then
+        for _, w in ipairs({ pane:GetChildren() }) do
+            if type(w) == "table" then
+                kids[#kids + 1] = w
+                armGate(w)
+            end
+        end
+    end
+
+    -- gateShut starts FALSE rather than nil: a pane is built with its widgets in
+    -- whatever state the consumer left them, which is the open state, so the
+    -- first sync on an already-on row is a no-op instead of a pointless rewire.
+    rec = { pane = pane, host = pane, h = h, kids = kids, gateShut = false }
 
     local cap = capHeight()
     if cap > 0 and h > cap then
@@ -203,6 +361,9 @@ local function paneFor(po, row)
 
     rec.host:Hide()
     panes[row] = rec
+    -- PRE-GREYED ON ARRIVAL. Opening the popout of a row that is already off has
+    -- to show a dead group, not a live one that greys a frame later.
+    syncGate(po, row, rec)
 
     -- THE COUNT CHECK, and it runs here or nowhere: this is the one moment the
     -- declared number and the mounted one can be compared without building the
@@ -251,6 +412,10 @@ end
 local function swapTo(po, row)
     local prev = po._rowActive
     local rec = paneFor(po, row)
+    -- Re-synced on every swap, not just on build: a CACHED pane's row may have
+    -- been toggled from somewhere else while this instance was showing a
+    -- different row, and a hidden pane takes no refresh of its own.
+    syncGate(po, row, rec)
     if prev and prev ~= rec then prev.host:Hide() end
     rec.pane:Show()
     rec.host:Show()
@@ -312,6 +477,9 @@ end
 --              FUNCTION -> table, re-resolved on every refresh
 --   toggle     { db = t|fn, key = "k" }  (db defaults to opts.db)
 --              OR { get = fn, set = fn(v) }
+--              OFF also GATES the popout: every widget in this row's pane greys
+--              and stops taking input. The popout's own header toggle, pin and
+--              cross stay live -- see THE OFF GATE above
 --   summary    fn(db) -> string, rendered live in the row
 --   offText    the single word shown instead of the summary while toggled off
 --   count      declared number of controls in the group (the badge, and the
@@ -320,7 +488,9 @@ end
 --              (instance, row), and it must size its pane
 --   accent     {r,g,b[,a]} per-row accent override (else the host accent)
 --   enabled    bool or fn(db) -> bool; false greys the WHOLE row, and the popout
---              still opens -- the controls inside gate themselves
+--              still opens -- the controls inside gate themselves. ⚠ A SEPARATE
+--              mechanism from the toggle's gate: a dependent-grey row whose own
+--              toggle is ON keeps its popout contents live
 --   onToggle   fn(newValue) after a toggle write from either place
 --   window     REQUIRED for opening: the window frame the popout docks outside
 --   clipTo     the region that actually CLIPS this row -- the scroll frame the
@@ -510,7 +680,14 @@ function UI:CreatePopoutRow(parent, opts)
         chevron:SetVertexColor(1, 1, 1, on and 0.5 or OFF_ALPHA * 0.5)
 
         for po in pairs(row._bound) do
-            if po and not po.closed and po._boundRow == row then syncHeader(row, po) end
+            if po and not po.closed and po._boundRow == row then
+                syncHeader(row, po)
+                -- The LIVE half of the gate. Both ticks -- the row's and the
+                -- popout header's -- write through row._Write, which lands here,
+                -- so there is one path to the grey and neither tick can move the
+                -- toggle without the pane following.
+                syncGate(po, row)
+            end
         end
     end
     row.refreshContent = row.Refresh
