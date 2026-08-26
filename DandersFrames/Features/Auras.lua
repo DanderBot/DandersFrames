@@ -171,10 +171,18 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- the local dump -- so their repair silently no-ops for anyone with that CVar
 -- off. That is the exact trap the note below records us falling into first.
 --
--- ⚠ Re-checked on every call, never cached: the totem is a TALENT, and talent
--- swaps re-drive the factories through the coalesced PLAYER_TALENT_UPDATE ->
--- UpdateAllFrames path, which rebuilds the plans that call this. A cached
--- answer would survive exactly the event that changes it.
+-- ⚠ Re-checked on every call, never cached: the totem is a TALENT, so a cached answer
+-- would survive exactly the event that changes it.
+--
+-- ☠ THE RE-DRIVE ROUTE IS NOT WHAT THIS COMMENT USED TO SAY. It claimed talent swaps
+-- reach the plans "through the coalesced PLAYER_TALENT_UPDATE -> UpdateAllFrames path".
+-- UpdateAllFrames does NOT bump auraLayoutVersion, and the drives are version-gated, so
+-- that route on its own leaves the overlay on its fast path and never re-plans. What
+-- actually carried it was the AD engine: the same handler calls
+-- Engine:ForceRefreshAllFrames, which ends in DF:InvalidateAuraLayout. A dispel feature
+-- depending on the Aura Designer's refresh to notice a talent is the kind of link nobody
+-- would look for when it breaks, so the talent handler now bumps the version itself
+-- (Core.lua) and this no longer rides a sibling feature.
 --
 -- ☠☠ NOT IsPlayerSpell. The first cut used it, and on a 12.1 client that
 -- function EXISTS ONLY IF A CVAR IS ON: it lives in Blizzard_DeprecatedSpellBook
@@ -208,6 +216,25 @@ local function KnowsPoisonCleansingTotem()
     local sb = C_SpellBook
     local bank = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
     if sb and bank then
+        -- ☠☠ IsSpellKnown, NOT IsSpellInSpellBook. THE TWO ANSWER DIFFERENT QUESTIONS and
+        -- we shipped the wrong one — Blizzard's own documentation says so outright:
+        --   IsSpellInSpellBook — "Returns true if a spell should be found in the spellbook.
+        --     This function CAN ALSO RETURN TRUE FOR SPELLS THAT AREN'T KNOWN, such as
+        --     override spells granted by an aura linked to CLASS TALENTS."
+        --   IsSpellKnown      — "Returns true if a player KNOWS a spell."
+        -- Poison Cleansing Totem is precisely a talent-linked entry, so the spellbook probe
+        -- answered true for every shaman alive and the poison gap slot was added whether or
+        -- not the totem was talented. Field-reported: "it's still showing when they don't
+        -- have the totem talent. It's a half fix." (Krathe, 2026-08-26.)
+        -- ⚠ A capability probe must ask about the CAPABILITY. "Would this appear in the
+        -- spellbook UI" is a rendering question and was never the right one.
+        if sb.IsSpellKnown then
+            return sb.IsSpellKnown(POISON_CLEANSING_TOTEM, bank) and true or false
+        end
+        -- ⚠ LAST RESORT, AND IT OVER-REPORTS — see above. Kept only so a build without
+        -- IsSpellKnown still repairs the gap for the shamans who DO have the totem, at the
+        -- cost of also repairing it for those who do not. Better than the feature being
+        -- silently dead, worse than being right.
         if sb.IsSpellInSpellBook then
             return sb.IsSpellInSpellBook(POISON_CLEANSING_TOTEM, bank, true) and true or false
         end
