@@ -1929,8 +1929,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the global's growth direction through the FLAT map: "(Global: Columns)" beside a
         -- global page reading "Rows". Same value, wrong dialect, and it reads as the addon
         -- being wrong about a setting the user can see for themselves.
-        -- The resolver picks the map from the GLOBAL raidUseGroups, read through the same
-        -- accessor the pass is using (runtime and editing resolve globals differently).
+        -- ⚠ THE FIX IS NOT HERE, and this comment used to claim otherwise ("the resolver
+        -- picks the map from the GLOBAL raidUseGroups") -- describing a widget-side
+        -- resolver that no longer exists. The widget still names the value with its own
+        -- map; what changed is that it is HANDED a value already expressed in this
+        -- profile's mode. Both accessors translate growDirection now:
+        -- AutoProfilesUI:GetGlobalValue for the editing pass and GetRuntimeGlobalValue
+        -- for an active layout.
         -- ⚠ Nothing here changes what is STORED or drawn -- only the sentence describing
         -- the global. The label flip when you toggle the checkbox is not this bug and is
         -- deliberate: the same value genuinely renders as rows in one mode and columns in

@@ -1502,14 +1502,18 @@ function AutoProfilesUI:ResetProfileSetting(key)
         self.editingProfile.overrides[key] = nil
     end
     
-    -- Restore the actual db value to the true global (from snapshot)
-    local globalValue, found = GetSnapshotValue(self.globalSnapshot, key)
-    if not found then
-        globalValue = GetRaidValue(key)
-    end
-    
-    -- Deep copy to avoid mutating the snapshot
-    SetRaidValue(key, DeepCopyValue(globalValue))
+    -- ☠ THROUGH GetGlobalValue, NOT THE RAW SNAPSHOT. It already does the
+    -- snapshot-then-live lookup and the deep copy -- and, for growDirection, it
+    -- expresses the global in THIS profile's mode. Reading the snapshot directly
+    -- skipped that translation, so resetting a flat layout against a grouped global
+    -- wrote the raw value -- which means the OPPOSITE orientation in flat mode -- and
+    -- then cleared the override: no dot, and the raid drawing the inverse of the
+    -- global's look. That is the phantom-override bug inverted, made by the reset
+    -- path. Identical behaviour for every other key.
+    -- ⚠ DeepCopyValue kept: GetGlobalValue copies on its snapshot path but hands back
+    -- the LIVE value when the key is absent from the snapshot, and this must never
+    -- store a reference into db.raid.
+    SetRaidValue(key, DeepCopyValue(self:GetGlobalValue(key)))
 
     -- Refresh tab stars so they update live as overrides are removed
     self:RefreshTabOverrideStars()
@@ -2029,7 +2033,23 @@ function AutoProfilesUI:GetRuntimeGlobalValue(key)
         return nil
     end
 
-    return DF._realRaidDB[key]
+    local value = DF._realRaidDB[key]
+    -- ☠ SAME TRANSLATION AS THE EDITING PATH. growDirection is mode-relative, and a
+    -- RUNTIME layout can override raidUseGroups just as an edited one can -- so without
+    -- this the "(Global: X)" readout on an active layout renders the true global through
+    -- the wrong mode's map, which is the wrong-dialect bug the editing path already
+    -- fixes. Compares the LIVE mode (what the active layout is rendering) against the
+    -- real global's, mirroring GrowDirectionModesDiffer.
+    -- ⚠ raidUseGroups itself is read raw on both sides here: only growDirection is
+    -- mode-relative, so there is no recursion.
+    if key == "growDirection" and GROW_INVERSE[value] then
+        local liveGroups = GetRaidValue("raidUseGroups") and true or false
+        local realGroups = DF._realRaidDB.raidUseGroups and true or false
+        if liveGroups ~= realGroups then
+            return GROW_INVERSE[value]
+        end
+    end
+    return value
 end
 
 -- One-shot migration: strip stale "pinnedFrames" direct keys from all profile overrides.
