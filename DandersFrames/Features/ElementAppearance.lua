@@ -1683,14 +1683,43 @@ function DF:DebugADAlphaHosts(unit)
     unit = (unit and unit ~= "" and unit) or "player"
     local o = DF:Out("AD Alpha Hosts", "unit " .. unit)
 
+    -- ⚠ DEFAULTING TO "player" IS A TRAP FOR THIS PARTICULAR PROBE. The player is almost
+    -- always in range, so an argument-less run reads a tidy 1.00 everywhere and looks like
+    -- a clean bill of health for a frame that was never the broken one. Field: exactly that
+    -- happened. `last` is the frame you most recently hovered — point at the unfaded
+    -- indicator, then type, the same as /dfauras. `target` and player names resolve too.
     local frame
-    if DF.IterateAllFrames then
+    if unit == "last" then
+        frame = DF._lastHoverFrame
+        if not frame then
+            o:Line("No DF frame has been hovered yet — put the mouse over the frame whose "
+                .. "indicator is not fading, then run this again.", "WARN")
+            return
+        end
+        unit = frame.unit or "?"
+        o:Line("Using the last hovered frame — unit " .. tostring(unit), "NEUTRAL")
+    end
+    if not frame and DF.IterateAllFrames then
         DF:IterateAllFrames(function(f) if not frame and f.unit == unit then frame = f end end)
+        if not frame then
+            DF:IterateAllFrames(function(f)
+                if not frame and f.unit then
+                    local ok, same = pcall(UnitIsUnit, f.unit, unit)
+                    if ok and same then frame = f end
+                end
+            end)
+        end
     end
     if not frame then
         o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
+        o:Line("Try `last` (the frame you most recently hovered), a partyN/raidN token, "
+            .. "target, or a player name.", "NEUTRAL")
         return
     end
+    -- ☠ The header was stamped before the unit could be resolved, so restate it — a dump
+    -- titled "unit player" while reporting party2 is how a reading gets attributed to the
+    -- wrong frame.
+    o:Line("Reporting on unit: " .. tostring(unit), "NEUTRAL")
 
     -- Baseline: frames we KNOW are ours. If either of these is refused the client has
     -- moved the ground under the whole addon and nothing below means what it looks like.
