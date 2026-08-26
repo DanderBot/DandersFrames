@@ -569,6 +569,138 @@ do
     eq(row.summary:GetText(), "custom", "get/set: and the row re-read through the getter")
 end
 
+-- ---- the tick writes through the host's SETTING HOOKS -----------------
+-- A {db, key} toggle is a setting like any other, so it takes the route every
+-- db-bound widget in Widgets.lua takes: interceptWrite first (the consumer may
+-- redirect the write to a baseline it keeps under a runtime overlay), then the
+-- plain write, then onSettingWritten (the consumer may record it as an override
+-- while a layout is being edited). The row's tick and an ordinary checkbox bound
+-- to the SAME key have to be ONE write path, or half a consumer's panel honours
+-- its overlay and half of it writes straight through.
+--
+-- A host with both hooks and a log of what they were handed, in order. `intercept`
+-- is what interceptWrite answers -- true stands for "this write was redirected".
+local function hookedHost(intercept)
+    local log = {}
+    local h = setmetatable({ hooks = {
+        L = L,
+        interceptWrite = function(db, key, value)
+            log[#log + 1] = { "interceptWrite", db, key, value }
+            return intercept and true or false
+        end,
+        onSettingWritten = function(db, key, value)
+            log[#log + 1] = { "onSettingWritten", db, key, value }
+        end,
+    } }, { __index = UI })
+    return h, log
+end
+
+-- A PLAIN write: both hooks fire, in order, and everything else happens as before.
+do
+    local h, log = hookedHost(false)
+    local db, seen = { on = false }, {}
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Hooked", db = db, toggle = { key = "on" },
+        onToggle = function(v) seen[#seen + 1] = v end,
+        summary = function() return "on" end,
+        build = counting("hookplain", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(db.on, true, "hooks: a write nobody redirected still lands in the db")
+    eq(#log, 2, "hooks: both hooks were consulted, once each")
+    eq(log[1][1], "interceptWrite", "hooks: the intercept is asked FIRST -- before the value is written")
+    eq(log[2][1], "onSettingWritten", "hooks: ...and the record is made after it landed")
+    check(log[1][2] == db, "hooks: the hook is handed the RESOLVED db table")
+    eq(log[1][3], "on", "hooks: ...the key")
+    eq(log[1][4], true, "hooks: ...and the value being written")
+    check(log[2][2] == db, "hooks: onSettingWritten sees the same table")
+    eq(log[2][4], true, "hooks: ...and the value that landed")
+    eq(seen[1], true, "hooks: onToggle fired with the new value")
+    eq(row.summary:GetText(), "on", "hooks: and the row refreshed off the db")
+end
+
+-- An INTERCEPTED write: the live table is untouched, nothing is recorded, and the
+-- tick goes back to the live value. onToggle does NOT fire -- the same decision
+-- the slider and the dropdown make (both return before their callback), because
+-- there is no new live value for a consumer to act on.
+do
+    local h, log = hookedHost(true)
+    local db, seen = { on = false }, {}
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Redirected", db = db, toggle = { key = "on" },
+        onToggle = function(v) seen[#seen + 1] = v end,
+        summary = function() return "on" end,
+        build = counting("hookintercept", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(db.on, false, "intercept: the redirected write never touched the live table")
+    eq(#log, 1, "intercept: and no override was recorded for a write that did not land")
+    eq(log[1][1], "interceptWrite", "intercept: the intercept is the only hook that ran")
+    eq(#seen, 0, "intercept: onToggle did NOT fire -- the live value did not change")
+    check(row.checkButton:GetChecked() == false, "intercept: the tick re-read the live value and went back")
+    eq(row.summary:GetText(), "Off", "intercept: ...and the row still reads off")
+end
+
+-- A HOOKLESS host -- the demo, DandersMover, anything that never declared these
+-- -- writes exactly as it did before. host:Call answers nil for a missing hook,
+-- so the intercept branch can never be taken.
+do
+    local db, seen = { on = false }, {}
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Hookless", db = db, toggle = { key = "on" },
+        onToggle = function(v) seen[#seen + 1] = v end,
+        summary = function() return "on" end,
+        build = counting("hookless", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(db.on, true, "hookless: a host with no setting hooks writes the db as before")
+    eq(seen[1], true, "hookless: ...and onToggle fires as before")
+    eq(row.summary:GetText(), "on", "hookless: ...and the row refreshed as before")
+end
+
+-- A {get, set} toggle is the CONSUMER'S write path, so the hooks are not its
+-- business -- an intercept that would have swallowed a db write does not touch it.
+do
+    local h, log = hookedHost(true)
+    local stored = false
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Custom hooked", db = {},
+        toggle = { get = function() return stored end, set = function(v) stored = v end },
+        summary = function() return "custom" end,
+        build = counting("hookgetset", 40), window = window(),
+    }))
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    eq(stored, true, "get/set hooks: the consumer's own setter took the write")
+    eq(#log, 0, "get/set hooks: ...and the setting hooks were never consulted")
+end
+
+-- The POPOUT HEADER'S tick goes through the same hooked path, because it goes
+-- through the same _Write. Section 5 proves the two ticks agree about the db;
+-- this proves they agree about who gets TOLD.
+do
+    local h, log = hookedHost(false)
+    local db, win = { on = false }, window()
+    local row = place(h:CreatePopoutRow(FakeUIFrame(), {
+        label = "Header hooked", db = db, toggle = { key = "on" },
+        summary = function() return "on" end,
+        count = 1, build = counting("hookheader", 40, 1), window = win,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    po._hdrToggle:SetChecked(true)
+    po._hdrToggle:GetScript("OnClick")(po._hdrToggle)
+    eq(db.on, true, "header hooks: the header's tick wrote the db")
+    eq(#log, 2, "header hooks: through the SAME bracketed write path as the row's")
+    eq(log[1][1], "interceptWrite", "header hooks: intercept first")
+    eq(log[2][1], "onSettingWritten", "header hooks: ...record after")
+    eq(log[1][3], "on", "header hooks: on the row's own key")
+    row:ClosePopout()
+end
+
 -- ============================================================
 -- 6. ONE PANEL ACROSS ROWS
 -- The point of the whole widget: clicking another row does not open another
@@ -1422,6 +1554,177 @@ do
     eq(row.label._textColor.g, 0.5, "active/accent: and the label, on every channel")
     row:ClosePopout()
     eq(row.plate._edge.r, UI.Colors.border.r, "active/accent: closing hands the plate back to the neutral border")
+end
+
+-- ============================================================
+-- 18. A SETTINGS GROUP AS THE PANE'S CONTENT
+-- The demo mounts loose widgets straight into the pane, and every rule above was
+-- written against that. A real settings PAGE cannot: its group's AddWidget
+-- RE-PARENTS each control into the group frame, so a pane built by a page hands
+-- the gate ONE direct child -- the group -- and arming that child buys nothing.
+-- A group has no SetEnabled, and EnableMouse(false) on a frame does NOT stop its
+-- children taking input, so a "dead" pane would still be fully clickable and its
+-- declared count would be measured against 1.
+--
+-- So a group is opened up: its groupChildren are the roster, and the group frame
+-- itself is left off it -- which is why rewire has to reach the group's own
+-- state pass separately.
+-- ============================================================
+
+-- A stand-in for CreateSettingsGroup's observable shape: the two markers the
+-- roster keys off, a groupChildren list of { widget = ... } entries, and the
+-- child-state pass the gate hands the pane back to.
+local function fakeGroup(pane, n, bag, seen)
+    local g = CreateFrame("Frame", nil, pane)
+    g.isSettingsGroup = true
+    g.groupChildren = {}
+    for i = 1, n do
+        -- Parented to the GROUP, exactly as AddWidget re-parents them, so the
+        -- pane really does have one direct child.
+        local w = CreateFrame("Frame", nil, g)
+        bag[i] = w
+        g.groupChildren[i] = { widget = w }
+    end
+    g.RefreshChildStates = function() seen.passes = seen.passes + 1 end
+    return g
+end
+
+do
+    local win, bag, seen = window(), {}, { passes = 0 }
+    local db, group = { on = false }, nil
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Grouped", db = db, toggle = { key = "on" },
+        summary = function() return "live" end,
+        count = 3, window = win,
+        build = function(_, pane)
+            group = fakeGroup(pane, 3, bag, seen)
+            pane:SetHeight(70)
+        end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    eq(po._rowPanes[row].pane:GetNumChildren(), 1,
+        "group: the pane really does have ONE direct child")
+    eq(#po._rowPanes[row].kids, 3, "group: ...and the roster is the three widgets inside it")
+
+    -- The gate reaches the INNER widgets, which is the whole point.
+    check(bag[1]:IsEnabled() == false, "group: a pane built for an off row greys the group's children")
+    check(bag[2]:IsEnabled() == false and bag[3]:IsEnabled() == false, "group: ...every one of them")
+
+    -- ...and leaves the group FRAME alone. Dimming it would double up on the
+    -- children's own 0.4, and its mouse state governs nothing.
+    eq(group:GetAlpha(), 1, "group: the group frame itself is not dimmed as decoration")
+    check(rawget(group, "_dfGateApply") == nil, "group: nor armed as though it were a widget")
+
+    -- Opening the gate hands the pane back to the group's own pass -- the only
+    -- thing that re-derives its children's disableOn states.
+    eq(seen.passes, 0, "group: a shut gate runs no state pass")
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    check(bag[1]:IsEnabled(), "group: the toggle lifted the gate off the inner widgets")
+    eq(seen.passes, 1, "group: and re-ran the group's own child-state pass")
+
+    -- The borrow still holds through a group: a widget its own logic disabled is
+    -- not resurrected by the gate opening.
+    bag[2]:SetEnabled(false)
+    row.checkButton:SetChecked(false)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    check(bag[1]:IsEnabled() == false, "group: shutting takes the live one down")
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    check(bag[1]:IsEnabled(), "group: opening restores the one the gate took")
+    check(bag[2]:IsEnabled() == false, "group: and not the one it never took")
+    row:ClosePopout()
+end
+
+-- THE COUNT CHECK IS MEASURED AGAINST THE ROSTER. Against the pane's direct
+-- children a group would answer 1, and every honest declaration on a real page
+-- would report as a mismatch.
+do
+    local win, bag, seen = window(), {}, { passes = 0 }
+    local before = #dbgLog
+    local right = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "GroupRight", db = {}, count = 4, window = win,
+        build = function(_, pane) fakeGroup(pane, 4, bag, seen); pane:SetHeight(70) end,
+    }), 60)
+    right:OpenPopout()
+    eq(#dbgLog, before, "group/count: four widgets in a group answer a declared 4")
+    host:CloseAllPopoutRows()
+
+    local wrong = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "GroupWrong", db = {}, count = 9, window = win,
+        build = function(_, pane) fakeGroup(pane, 4, bag, seen); pane:SetHeight(70) end,
+    }), -60)
+    wrong:OpenPopout()
+    eq(#dbgLog, before + 1, "group/count: a wrong declaration still reports")
+    check(dbgLog[#dbgLog].msg:find("4"),
+        "group/count: ...naming the roster's four, not the pane's one child")
+    host:CloseAllPopoutRows()
+end
+
+-- ============================================================
+-- 19. THE PANE'S HEIGHT IS NOT A CONSTANT
+-- paneFor measures the pane once, at build, and swapTo used to replay that
+-- number forever. A pane holding a settings group re-flows whenever a hideOn
+-- inside it changes (a style dropdown revealing a texture picker), so the panel
+-- was left sized to a column that no longer exists -- a gap under the last
+-- control, or a control cut off below the frame.
+-- ============================================================
+do
+    local win, pane = window(), nil
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Grows", db = {}, window = win,
+        build = function(_, p) pane = p; p:SetHeight(80) end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    eq(po.content:GetHeight(), 80, "resync: the panel opened at the pane's build height")
+    pane:SetHeight(140)
+    eq(po.content:GetHeight(), 80, "resync: a re-flow underneath it is not noticed on its own")
+    po:SyncRowPaneHeight()
+    eq(po.content:GetHeight(), 140, "resync: the public resync re-measures the active pane")
+    eq(po.frame:GetHeight(), TITLE_H + PAD + 140 + PAD, "resync: ...and the frame follows it")
+    row:ClosePopout()
+end
+
+-- A CACHED pane re-flowed while another row had the panel: the swap back has to
+-- re-measure, because nothing else will.
+do
+    local win, panes = window(), {}
+    local function mk(name, dy, h)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = {}, window = win,
+            build = function(_, p) panes[name] = p; p:SetHeight(h) end,
+        }), dy)
+    end
+    local a, b = mk("RA", 100, 60), mk("RB", -100, 90)
+    a:OpenPopout()
+    local po = a.popout
+    eq(po.content:GetHeight(), 60, "resync/swap: A opened at its own height")
+    b:OpenPopout()
+    panes.RA:SetHeight(200)
+    a:OpenPopout()
+    eq(po.content:GetHeight(), 200, "resync/swap: swapping back re-reads the cached pane")
+    host:CloseAllPopoutRows()
+end
+
+-- A SCROLL-WRAPPED pane is left alone by both paths. Its host is the scroll
+-- region and rec.h IS the cap, so re-measuring the pane inside it would open a
+-- panel taller than the screen -- which is the thing the cap exists to stop.
+do
+    local win, pane = window(), nil
+    local cap = UIParent:GetHeight() * 0.6
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "TallResync", db = {}, window = win,
+        build = function(_, p) pane = p; p:SetHeight(2000) end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    eq(po.content:GetHeight(), cap, "resync/cap: a wrapped pane opens at the cap")
+    pane:SetHeight(3000)
+    po:SyncRowPaneHeight()
+    eq(po.content:GetHeight(), cap, "resync/cap: and the resync leaves it there")
+    row:ClosePopout()
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

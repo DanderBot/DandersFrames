@@ -7256,6 +7256,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 o:Field(L["Debug logging"],
                     DF.OUT.CMD .. "/df debug on|r / " .. DF.OUT.CMD .. "/df debug off|r")
                 o:Field(L["console page"], DF.OUT.CMD .. "/df console|r")
+                -- Which way the settings panel is drawing its gated groups. Raw,
+                -- not L[...]: dev diagnostics stay out of the translation portal.
+                o:Field("settings layout",
+                    DF:IsClassicSettingsLayout() and "classic" or "popout", "NEUTRAL")
 
                 -- Flatten both registries into one row shape: {name, desc}.
                 -- ONE form per row now. The old listing carried a second grey

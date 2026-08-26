@@ -3103,3 +3103,28 @@ function DF:GetGlobalDB()
     end
     return DandersFramesDB_v2.global
 end
+
+-- ============================================================
+-- CLASSIC SETTINGS LAYOUT
+-- ------------------------------------------------------------
+-- Transition toggle for the settings-panel redesign: checkbox-gated groups now
+-- render as popout rows, and this falls the panel back to the old inline
+-- rendering. Temporary — it goes once the redesign has settled.
+--
+-- It lives at the ROOT of the SavedVariable, not in .global and not in a
+-- profile: it is how the panel is DRAWN, so it has to be one answer per
+-- account rather than something a profile switch can change underfoot.
+--
+-- ☠ DandersFramesDB_v2 is read AT ACCESS TIME, never captured. This file loads
+-- before the SV table is guaranteed to exist, so a captured nil would strand
+-- every read forever (the same trap as the colour-picker store in GUI.lua).
+function DF:IsClassicSettingsLayout()
+    return DandersFramesDB_v2 ~= nil and DandersFramesDB_v2.classicSettings == true
+end
+
+function DF:SetClassicSettingsLayout(value)
+    -- Create the SV table if the write lands before it exists, mirroring the
+    -- colour-picker store's __newindex guard.
+    if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
+    DandersFramesDB_v2.classicSettings = value and true or false
+end

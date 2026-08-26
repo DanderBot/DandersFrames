@@ -392,6 +392,14 @@ function DF:CreateGUI()
         if AutoProfilesUI and AutoProfilesUI:IsEditing() then
             AutoProfilesUI:ExitEditing(true)  -- Skip UI updates since GUI is closing
         end
+        -- Popout rows stand OUTSIDE this frame, so hiding the window does not
+        -- hide them -- they would be left floating over the game with nothing to
+        -- dock against. CloseAll, not CloseUnpinned: a pinned panel is pinned
+        -- loose from the ROW, not from the window, and the window going away
+        -- takes it too. Every path that hides the panel lands here -- the cross,
+        -- Escape, /df, and the combat auto-close -- so this is the one place it
+        -- needs saying. Guarded for an older embedded copy of the pack.
+        if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("windowClosed") end
     end)
     
     -- Title bar (handles dragging like old addon)
@@ -1904,6 +1912,14 @@ function DF:CreateGUI()
             end
             GUI.pendingSectionBadges[leavingTab] = nil
         end
+
+        -- Popout rows: leaving the page invalidates the rows the open panel is
+        -- ABOUT -- the row it is tethered to is about to be hidden, and the
+        -- controls inside it belong to a page nobody is looking at. UNPINNED
+        -- only: a panel the user deliberately pinned loose is theirs to keep
+        -- across a page change, which is the whole difference between the two
+        -- verbs. Guarded for an older embedded copy of the pack.
+        if GUI.CloseUnpinnedPopoutRows then GUI:CloseUnpinnedPopoutRows("pageSwitch") end
 
         for k, page in pairs(GUI.Pages) do page:Hide() end
         for k, btn in pairs(GUI.Tabs) do
