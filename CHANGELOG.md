@@ -15,6 +15,7 @@
 ### Bug Fixes
 
 - (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
+- (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
 
 ### Changes
 
