@@ -7849,6 +7849,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
                     DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                 end
+                -- ☠ A TALENT CHANGE IS AN AURA-LAYOUT CHANGE, and nothing here said so.
+                -- The dispel overlay's plan asks whether the player has Poison Cleansing
+                -- Totem — a TALENT — and the drives are version-gated, so without a bump
+                -- the overlay stays on its fast path and keeps the old plan until some
+                -- unrelated setting happens to move the version.
+                -- ⚠ It appeared to work only because ForceRefreshAllFrames above ends in
+                -- InvalidateAuraLayout: a dispel feature silently depending on the Aura
+                -- Designer's refresh to notice a talent, which is the kind of link nobody
+                -- would look for when it breaks -- and it breaks the moment that call is
+                -- guarded on AD being enabled. State it here instead of inheriting it.
+                -- Cheap: the drives are sig-gated, so an unchanged plan costs a compare.
+                if DF.InvalidateAuraLayout then
+                    DF:InvalidateAuraLayout()
+                end
             end)
         end
 
