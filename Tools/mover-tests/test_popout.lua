@@ -971,9 +971,11 @@ local ROW_W, ROW_H = 200, 40
 local WIN = { x = 0, y = 0, w = WIN_W, h = WIN_H }
 local ROW = { x = -100, y = 50, w = ROW_W, h = ROW_H }
 -- Right-docked: the popout's LEFT edge a gap clear of the window's RIGHT edge,
--- and its TOP level with the row's top.
+-- and the popout CENTRED on the row. The window clamp is a no-op here -- a
+-- 98-tall popout may stray 151 from the window's middle before an edge of it
+-- leaves, and the row sits 50 off it.
 local OUT_X = WIN_W / 2 + DOCK_GAP + FRAME_W / 2            -- 372
-local OUT_Y = ROW.y + ROW.h / 2 - FRAME_H / 2               -- 24
+local OUT_Y = ROW.y                                          -- 50
 
 -- Build the pair the live tests drive: a window at screen centre and a row
 -- inside it, `dy` above/below the window's middle.
@@ -985,13 +987,20 @@ do
     local side, x, y = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
     eq(side, "right", "outside: open screen docks outside the window's RIGHT edge")
     eq(x, OUT_X, "outside: its left edge a gap clear of that edge")
-    eq(y, OUT_Y, "outside: hanging from the ROW's top, not the window's")
+    eq(y, OUT_Y, "outside: centred on the ROW, not on the window")
 
     -- The row is what moves the popout vertically -- that is the whole reason
     -- this is not just "dock beside the window".
     local _, _, y2 = UI.PopoutOutsidePos(WIN, { x = -100, y = -50, w = ROW_W, h = ROW_H },
                                          FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
-    eq(y2, -50 + ROW_H / 2 - FRAME_H / 2, "outside: a lower row lowers the popout by the same amount")
+    eq(y2, -50, "outside: a lower row lowers the popout by the same amount")
+
+    -- ☠ The reason this is the CENTRE and not the row's top. Hung from the top, a
+    -- popout's whole body drops below the row it belongs to -- for a 400-tall
+    -- group that is 200px of panel level with a part of the list it has nothing
+    -- to do with. Centred, the row stays level with the middle of its own panel.
+    local _, _, tallY = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, 300, DOCK_GAP, 1920, 1080)
+    eq(tallY, ROW.y, "outside: a TALL popout is centred on the row too, not dropped below it")
 end
 
 -- No room to the right of the window: the popout crosses to the OTHER side of
@@ -1040,21 +1049,25 @@ do
     eq(y, -540 + FRAME_H / 2, "outside: and to the bottom")
 end
 
--- The window clamp: the popout's TOP is held inside the window's vertical span.
--- For a row IN VIEW that is a no-op (its top is inside the span by definition),
--- which is what keeps "level with the row's top" exact.
+-- The window clamp: the whole popout is held inside the window's vertical span,
+-- so a row scrolled out of the list leaves the panel beside the LIST rather than
+-- trailing off after a row nobody can see. `slack` is how far its centre may
+-- stray from the window's before an edge of it leaves.
+local SLACK = WIN_H / 2 - FRAME_H / 2
 do
     local below = { x = -100, y = -400, w = ROW_W, h = ROW_H }   -- scrolled off the bottom
     local _, _, y = UI.PopoutOutsidePos(WIN, below, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
-    eq(y, -WIN_H / 2 - FRAME_H / 2, "outside: a row below the window pins the popout's top to its bottom edge")
+    eq(y, -SLACK, "outside: a row below the window holds the popout inside its bottom edge")
     local above = { x = -100, y = 400, w = ROW_W, h = ROW_H }
     _, _, y = UI.PopoutOutsidePos(WIN, above, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080)
-    eq(y, WIN_H / 2 - FRAME_H / 2, "outside: and a row above it pins the top to the window's top edge")
+    eq(y, SLACK, "outside: and a row above it holds the popout inside the top edge")
 
-    -- A popout TALLER than the window is not squeezed -- only its top is clamped,
-    -- so it hangs below the window rather than being centred in it.
+    -- A popout TALLER than the window has no position that satisfies the clamp:
+    -- every one of them leaves the window top and bottom. So the clamp stands
+    -- down rather than jamming the panel against an arbitrary edge, and the
+    -- popout stays centred on the row it is about.
     _, _, y = UI.PopoutOutsidePos(WIN, ROW, FRAME_W, 600, DOCK_GAP, 1920, 1080)
-    eq(y, ROW.y + ROW.h / 2 - 300, "outside: a popout taller than the window still hangs from the row")
+    eq(y, ROW.y, "outside: a popout taller than the window stays centred on its row")
 end
 
 -- Missing rects have no answer, the same way PopoutDockPos has none.
@@ -1200,8 +1213,8 @@ do
     check(not p.beam:IsShown(), "clip: the beam goes -- it pointed at a row nobody can see")
     check(not p.notch:IsShown(), "clip: so does the connection point")
     check(not p.srcOutline:IsShown(), "clip: and the source outline")
-    eq(p.frame._points[1][5], -WIN_H / 2 - FRAME_H / 2,
-        "clip: its top clamps to the window's bottom edge rather than trailing the row")
+    eq(p.frame._points[1][5], -(WIN_H / 2 - FRAME_H / 2),
+        "clip: it holds inside the window's bottom edge rather than trailing the row")
 
     -- Scrolled back.
     row:SetFakeCenter(CX + ROW.x, CY + ROW.y)
@@ -1262,13 +1275,14 @@ do
     local win = outsideWindow()
     local row = outsideRow()
     row.popoutInset = { 0, 0, 0, INK_TRIM }
+    -- Trimming the bottom of the slot lifts its centre by half the trim, and the
+    -- placement centres on the row -- so this IS where the popout lands.
+    local INK_Y = ROW.y + INK_TRIM / 2
     local p = popout({ key = "outsideink" })
-    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p.frame:SetFakeCenter(CX + OUT_X, CY + INK_Y)
     p:Follow(row, { outsideOf = win })
 
-    -- The ink's TOP is the frame's top, and the top is what the placement reads.
-    -- Trimming the slot's gap must therefore not move the popout at all.
-    eq(p.frame._points[1][5], OUT_Y, "ink: trimming the slot's gap does not move the popout")
+    eq(p.frame._points[1][5], INK_Y, "ink: the placement centres on the PLATE, not on the whole slot")
 
     -- The stub resolves no anchors, so the outline's OFFSETS are the claim: it is
     -- inset by the trim rather than laid flush over the frame.
@@ -1349,34 +1363,48 @@ do
     p.frame:SetFakeCenter(CX + GX, CY + GY)
     rowB:SetFakeCenter(CX + ROW.x, CY - 150)
     p.frame:GetScript("OnUpdate")(p.frame)
-    eq(p.frame._points[1][5], -150 + ROW_H / 2 - FRAME_H / 2,
+    eq(p.frame._points[1][5], -150,
         "outglide: and the ordinary follow works from the landing")
     p.frame.SetPoint = realSetPoint
     p:Close()
 end
 
 -- ---- the connection point on a THIN row ---------------------------
--- ☠ The slide clamp keeps the diamond NOTCH_EDGE_INSET (14) clear of the
--- popout's corners, and the popout's top is level with the row's top -- so for
--- any row shorter than 2*14 = 28 the row's centre is INSIDE that inset and the
--- point cannot quite reach it. It stops 14 below the popout's top instead. The
--- beam still lands on the row (a 20-tall row spans ±10 of its centre, and the
--- miss is 4), so this is a cosmetic ceiling on the alignment, not a break -- but
--- it is a real one, and it is asserted here so a change to either number is
--- caught rather than discovered on screen.
+-- The slide clamp keeps the diamond NOTCH_EDGE_INSET (14) clear of the popout's
+-- corners. While the popout HUNG FROM THE ROW'S TOP that clamp bit on every row
+-- shorter than 2 x 14 = 28: the row's centre sat inside the inset and the point
+-- stopped 14 below the popout's top instead of reaching it, leaving the beam
+-- running at a slight diagonal. Centring the popout on the row retires that
+-- whole class of miss -- the row's centre IS the popout's centre, which is as
+-- far from either corner as a point can get.
 do
     local win, row = outsideWindow(), outsideRow(ROW.y, 20)
     local p = popout({ key = "outsidethin" })
-    local thinY = ROW.y + 10 - FRAME_H / 2                      -- top of a 20-tall row
-    p.frame:SetFakeCenter(CX + OUT_X, CY + thinY)
+    p.frame:SetFakeCenter(CX + OUT_X, CY + ROW.y)
     p:Follow(row, { outsideOf = win })
-    eq(p.frame._points[1][5], thinY, "thin: the popout still hangs from the row's top")
-    eq(p.beam.core._start.y, thinY + FRAME_H / 2 - 14,
-        "thin: the point stops at the corner inset rather than reaching the row's centre")
-    check(p.beam.core._start.y < ROW.y, "thin: ...which is a little below it")
-    check(p.beam.core._end.y >= ROW.y - 10 and p.beam.core._end.y <= ROW.y + 10,
-        "thin: and the beam still lands ON the row")
+    eq(p.frame._points[1][5], ROW.y, "thin: a 20-tall row centres the popout exactly as any other does")
+    eq(p.beam.core._start.y, ROW.y, "thin: so the point reaches the row's centre instead of stopping short")
+    eq(p.beam.core._end.y, ROW.y, "thin: ...and the beam runs dead level rather than at a diagonal")
     p:Close()
+end
+
+-- The clamp has NOT gone, it has just stopped mattering for the everyday case.
+-- It still bites when the window clamp has pulled the popout off its row -- a row
+-- against the window's own edge with a panel that only just fits beside it.
+do
+    -- A 396-tall popout in a 400-tall window leaves 2px of slack, so a row 190
+    -- above the window's middle cannot be centred on: the popout is held at y = 2
+    -- and the row is 188 above THAT. The point may slide 396/2 - 14 = 184, so it
+    -- stops at 186 -- 4 short of the row, and clear of the corner, which is what
+    -- the inset is for.
+    local TALL = 396
+    local thin = { x = ROW.x, y = 190, w = ROW_W, h = 20 }
+    local _, _, y = UI.PopoutOutsidePos(WIN, thin, FRAME_W, TALL, DOCK_GAP, 1920, 1080)
+    eq(y, WIN_H / 2 - TALL / 2, "inset: the window clamp pulls a tall popout off its row")
+    local pr = { x = OUT_X, y = y, w = FRAME_W, h = TALL }
+    local _, ty = UI.PopoutNotchTip(pr, "right", 0, thin)
+    eq(ty, y + TALL / 2 - 14, "inset: and the point stops at the corner inset rather than reaching it")
+    check(ty < thin.y, "inset: ...a little short of the row, which is the cosmetic ceiling that remains")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

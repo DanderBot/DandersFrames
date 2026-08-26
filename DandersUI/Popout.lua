@@ -137,7 +137,7 @@ end
 -- list the row was picked from, and every scroll drags it across that list. So it
 -- docks outside the WINDOW's vertical edge instead, at the ROW's height -- the
 -- window stays wholly readable, and the popout still visibly belongs to one row
--- because it hangs from that row's top and the beam crosses to it.
+-- because it is centred on that row and the beam crosses to it.
 --
 -- Two rects, therefore, not one: the WINDOW decides x (which edge, and how far
 -- out), the ROW decides y. Which is also why this cannot be expressed as a frame
@@ -147,15 +147,23 @@ end
 -- PopoutDockPos, so the dock, the glide's destination and the tests all read one
 -- answer. nil for a missing rect.
 --
+-- ⚠ CENTRED ON THE ROW, not hung from its top. Hanging from the top is the story
+-- right/left docking tells, and for a SHORT popout the two readings agree -- but
+-- a tall one hung by its top puts its whole body below the row, so a group with
+-- a dozen controls opened from the third row of a list ends up level with the
+-- twelfth. "At the row's height" is what this placement promises, and the centre
+-- is what actually delivers it.
+--
 -- The clamps, in order (later wins, because being off-screen is worse than being
 -- level with the wrong part of the window):
---   1. THE POPOUT'S TOP is clamped into the window's vertical span. Applied
---      ALWAYS, not only when the row is clipped: for a row in view its top is
---      already inside that span, so the clamp is a no-op and "top level with the
---      row's top" holds exactly. For a row scrolled out of the window it is what
---      keeps the popout beside the LIST rather than trailing off after a row that
---      is no longer drawn. Only the TOP is clamped, so a popout taller than the
---      window still hangs below it rather than being squeezed.
+--   1. THE WHOLE POPOUT is clamped into the window's vertical span -- WHEN IT
+--      FITS THERE. For a row in view with a popout shorter than the window this
+--      is usually a no-op and "centred on the row" holds exactly; for a row
+--      scrolled out of the window it is what keeps the popout beside the LIST
+--      rather than trailing off after a row that is no longer drawn. A popout
+--      TALLER than the window has no position that satisfies the clamp, so it
+--      stands down rather than pinning the panel to an arbitrary edge -- the
+--      screen clamp below takes it from there.
 --   2. The whole popout is clamped fully on screen.
 function UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)
     if not (win and row) then return nil end
@@ -177,11 +185,16 @@ function UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)
         -- SetClampedToScreen deal with the overhang, exactly as _PickSide does.
     end
     local x = (side == "left") and leftX or rightX
-    -- Hang from the row's TOP, the same story right/left docking tells: the
-    -- popout reads as a continuation of the thing's header.
-    local top = row.y + row.h / 2
-    top = min(max(top, win.y - win.h / 2), win.y + win.h / 2)
-    local y = top - h / 2
+    -- Level with the row, measured from the middle of both.
+    local y = row.y
+    -- Into the window's vertical span. `slack` is how far the popout's centre may
+    -- stray from the window's before an edge of it leaves the window; negative
+    -- means the popout is taller than the window and no such position exists, so
+    -- the clamp stands down rather than jamming the panel against an edge.
+    local slack = win.h / 2 - h / 2
+    if slack >= 0 then
+        y = min(max(y, win.y - slack), win.y + slack)
+    end
     local halfH = (screenH or 0) / 2
     y = min(max(y, -halfH + h / 2), halfH - h / 2)
     return side, x, y
