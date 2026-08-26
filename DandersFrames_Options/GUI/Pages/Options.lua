@@ -1881,6 +1881,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- over explicitly. One definition, both branches.
         local function BorderOff() return db.frameShowBorder == false end
 
+        -- Cleared on EVERY build, classic included. It only ever has entries in
+        -- the popout layout, and a map left behind by a previous new-UI build
+        -- would point the settings-search jump at rows this build has retired.
+        self._popoutRowForKey = nil
+
         if DF:IsClassicSettingsLayout() then
             local borderTools = {
                 group  = appearanceGroup,
@@ -1923,6 +1928,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 end
             end
             self._popoutHolders = {}
+
+            -- ===== WHAT THE SETTINGS SEARCH NEEDS BACK =====================
+            -- Search builds its registry by re-running every page's builder, so
+            -- the eager holders below already put all seventeen popout controls
+            -- into it, in this same "Appearance" section context -- an inline
+            -- result recreates its own widget from that metadata and edits fine
+            -- wherever the source widget happens to live. Two things do NOT
+            -- survive the change of shape, and both are put back here:
+            --
+            --  (a) THE HOISTED TOGGLES. noShowToggle / noEnableToggle suppress
+            --      the two checkboxes, and the CHECKBOX FACTORY is what
+            --      registered "Show Border" and "Border Shadow" with search.
+            --      The settings are still live -- the rows' own ticks write
+            --      them -- so losing the hits would make a toggleable setting
+            --      unfindable. Registered by hand below, same L key and same db
+            --      key, so both layouts carry the identical entry.
+            --  (b) WHICH ROW OWNS A SETTING. A hit on a popout-only control
+            --      (Border Thickness, Shadow Offset X, ...) navigates to the
+            --      Appearance section, which in this layout IS the two rows --
+            --      the control is behind one of them. This map lets the jump
+            --      open it; without it the landing is correct but empty-looking.
+            self._popoutRowForKey = {}
 
             -- Every pane currently mounted in a panel, so a toggle can re-flow
             -- the group a user is looking at as well as the rows on the page.
@@ -1996,6 +2023,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 end
 
                 local pending = fresh()
+                -- The eagerly built group comes back ALONGSIDE the mount
+                -- function: it is the one instance that exists at page-build
+                -- time, so it is the one whose children can be read for the
+                -- search map below. Later instances build the same controls
+                -- from the same builder, so nothing is missed by ignoring them.
                 return function(po, pane)
                     local st = pending or fresh()
                     pending = nil
@@ -2007,7 +2039,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     st.group:SetWidth(POPOUT_W)
                     st.group:Show()
                     ReflowPane(st)
-                end
+                end, pending.group
             end
 
             -- ☠ NOT GUI:RefreshCurrentPage, which is what today's inline
@@ -2081,6 +2113,36 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- than frozen at the table this build captured.
             local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
 
+            -- ---- the two search repairs, per the note at the top -----------
+            -- (b) Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not
+            -- from a key list and not from a name prefix -- "frameBorder" would
+            -- claim keys no popout owns (the row toggles themselves) and would
+            -- miss any spelled differently. Every shared factory stamps
+            -- container.searchEntry, so a control added to either builder is
+            -- covered without anyone having to remember this exists.
+            local function ClaimKeys(row, group)
+                if not (row and group and group.groupChildren) then return end
+                for _, e in ipairs(group.groupChildren) do
+                    local se = e.widget and e.widget.searchEntry
+                    local k  = se and (se.dbKey or se.searchKey)
+                    if type(k) == "string" then self._popoutRowForKey[k] = row end
+                end
+            end
+
+            -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
+            -- map: the tick is ON the row, so the section jump already lands on
+            -- the control the user searched for and opening the panel on top of
+            -- that would be noise. The callback is the one the suppressed
+            -- checkbox would have carried, so an inline result behaves as the
+            -- inline checkbox does in classic. Guarded on the METHOD, not just
+            -- the table -- Search is in this companion but the page must not care.
+            local function RegisterHoistedToggle(row, label, key)
+                local S = DF.Search
+                if not (S and S.RegisterCheckbox) then return end
+                row.searchEntry = S:RegisterCheckbox(label, key, nil, false, OnBorderToggle)
+                if S.LinkSourceWidget then S:LinkSourceWidget(row) end
+            end
+
             -- window vs clipTo: the WINDOW decides where the panel stands (it
             -- docks outside its edge); the page's SCROLL FRAME decides whether the
             -- row is still on screen, and `self` IS that ScrollFrame -- self.child
@@ -2093,7 +2155,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- and that is what follows the mode (GUI:SetAccent is written
             -- alongside every SelectedMode change), so party purple and raid
             -- orange come for free. The page rebuilds on a mode switch anyway.
-            appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
+            local borderMount, borderContent = PopoutContent(function(group, holder, reflow)
+                BuildBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggles = true,
+                })
+            end)
+            local borderRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Border"],
                 db       = RowDB,
                 toggle   = { key = "frameShowBorder" },
@@ -2102,15 +2171,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 onToggle = OnBorderToggle,
                 window   = DF.GUIFrame,
                 clipTo   = self,
-                build    = PopoutContent(function(group, holder, reflow)
-                    BuildBorderGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        hoistToggles = true,
-                    })
-                end),
+                build    = borderMount,
             }))
+            ClaimKeys(borderRow, borderContent)
+            RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder")
 
+            local shadowMount, shadowContent = PopoutContent(function(group, holder, reflow)
+                BuildBorderShadowGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    -- Still needed INSIDE the popout: with Show Border off,
+                    -- the four shadow sub-controls grey exactly as they do
+                    -- inline. The row's own toggle gate is a different
+                    -- mechanism and does not cover this one.
+                    shadowDisableWhen = BorderOff,
+                    hoistToggles = true,
+                })
+            end)
             local shadowRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Border Shadow"],
                 db       = RowDB,
@@ -2120,19 +2197,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 onToggle = OnBorderToggle,
                 window   = DF.GUIFrame,
                 clipTo   = self,
-                build    = PopoutContent(function(group, holder, reflow)
-                    BuildBorderShadowGroup({
-                        group = group, parent = holder,
-                        refreshStates = reflow,
-                        -- Still needed INSIDE the popout: with Show Border off,
-                        -- the four shadow sub-controls grey exactly as they do
-                        -- inline. The row's own toggle gate is a different
-                        -- mechanism and does not cover this one.
-                        shadowDisableWhen = BorderOff,
-                        hoistToggles = true,
-                    })
-                end),
+                build    = shadowMount,
             }))
+            ClaimKeys(shadowRow, shadowContent)
+            RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled")
             -- The dependent grey, in the page's own idiom: the group's
             -- RefreshChildStates drives row:SetEnabled off this, and the row's
             -- explicit SetEnabled overrides its opts.enabled from there on, so

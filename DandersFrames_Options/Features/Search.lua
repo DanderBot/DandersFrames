@@ -735,8 +735,12 @@ function Search:CreateResultWidget(parent, entry, index)
     end)
 
     -- Click to navigate
+    -- The key goes along for the ride so the jump can finish the job on a page
+    -- whose control lives behind a popout row -- see NavigateToTab. Same
+    -- dbKey-then-searchKey precedence the card cache uses, so the two agree on
+    -- what identifies a setting.
     breadcrumb:SetScript("OnClick", function()
-        Search:NavigateToTab(entry.tab, entry.section)
+        Search:NavigateToTab(entry.tab, entry.section, entry.dbKey or entry.searchKey)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
     
@@ -884,7 +888,9 @@ end
 -- ============================================================
 -- NAVIGATION
 -- ============================================================
-function Search:NavigateToTab(tabName, sectionName)
+-- settingKey is optional and is only consulted for the popout-row case below;
+-- every existing caller that passes two arguments behaves exactly as before.
+function Search:NavigateToTab(tabName, sectionName, settingKey)
     if not tabName then return end
 
     -- Clear search. SelectTab hides the results itself, but the box keeps its text
@@ -921,6 +927,37 @@ function Search:NavigateToTab(tabName, sectionName)
     else
         DF:DebugWarn("SEARCH", "LinkToSetting unavailable — breadcrumb cannot navigate")
     end
+
+    self:OpenOwningPopoutRow(tabName, settingKey)
+end
+
+-- ★ THE POPOUT-ROW HALF OF THE JUMP. A page may hand a block of its settings to
+-- a popout row -- a row on the page, its controls inside a panel that opens off
+-- it -- and then the control a result points at has NOTHING of its own on the
+-- page to scroll to. The section jump above still lands correctly (the ROW is in
+-- that section, and it is what gets flashed), so this is a last step rather than
+-- a replacement: open the row that owns the setting, so the control the user
+-- searched for is actually on screen when they arrive.
+--
+-- ⚠ THE MAP IS LOOKED UP AFTER THE JUMP, NEVER CAPTURED BEFORE IT. Switching to
+-- a page can rebuild it, and a rebuild retires every row -- a reference taken
+-- beforehand would open a panel wired to the previous build's db table.
+--
+-- Deliberately page-agnostic: any page may publish `page._popoutRowForKey`
+-- (db key -> row) and gets this for free; a page with none costs one nil lookup.
+-- The delay clears GUI:LinkToSetting's own two timings (0.12 for the tab to
+-- build, then 0.05 for the scroll to settle) so the row is in its final place
+-- before a panel is docked beside it.
+function Search:OpenOwningPopoutRow(tabName, settingKey)
+    if not settingKey or not tabName then return end
+    C_Timer.After(0.2, function()
+        local page = DF.GUI and DF.GUI.Pages and DF.GUI.Pages[tabName]
+        local map  = page and page._popoutRowForKey
+        local row  = map and map[settingKey]
+        -- IsShown, because a row hidden by its own hideOn is not a place to
+        -- dock a panel; OpenPopout, because an older embedded kit may not have it.
+        if row and row.OpenPopout and row:IsShown() then row:OpenPopout() end
+    end)
 end
 
 function Search:ScrollToSection(tabName, sectionName)

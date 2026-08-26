@@ -677,6 +677,35 @@ if GUI.CreateBorderShadowControls then
     eq(tonumber(declaredShadow), #shadowRec, "counts: the Border Shadow row's count is what its pane mounts")
     eq(#borderRec, 13, "counts: which is 13 -- the golden 14 less the hoisted Show Border")
     eq(#shadowRec, 4, "counts: and 4 -- the golden 5 less the hoisted Border Shadow")
+
+    -- ---- and the two toggles the SEARCH registry would otherwise lose ----
+    -- Dropping the checkboxes drops what registered them: the checkbox FACTORY
+    -- is the only thing that ever put "Show Border" and "Border Shadow" into the
+    -- settings search. The page registers them by hand instead, and this pins
+    -- those calls to the golden rows they replace -- so renaming the label or
+    -- the key in CreateBorderControls fails here rather than silently leaving
+    -- the two layouts findable by different words.
+    -- Source-read for the same reason the counts above are: the page file is far
+    -- too tangled in the panel to build headlessly, but the call is still a
+    -- claim that can be checked against the inventory.
+    do
+        local got = {}
+        for label, key in pageSrc:gmatch('RegisterHoistedToggle%(%w+,%s*L%["([^"]+)"%],%s*"([^"]+)"%)') do
+            got[#got + 1] = { label, key }
+        end
+        eq(#got, 2, "hoisted search: the page registers exactly the two hoisted toggles")
+        local want = { GOLDEN[1], GOLDEN[15] }
+        for i = 1, 2 do
+            if got[i] then
+                eq(got[i][1], want[i][2],
+                   string.format("hoisted search: entry %d uses the golden label", i))
+                eq(got[i][2], want[i][3],
+                   string.format("hoisted search: entry %d uses the golden db key", i))
+            else
+                check(false, string.format("hoisted search: entry %d missing (wanted %s)", i, want[i][2]))
+            end
+        end
+    end
 end
 
 -- ---- restore the global --------------------------------------------
