@@ -191,6 +191,11 @@ local function SortGroupedRaidFrames(units)
                 header:SetAttribute("groupBy", nil)
                 header:SetAttribute("groupingOrder", nil)
                 header:SetAttribute("groupFilter", nil)
+                -- Written raw, so drop SetHeaderAttribute's cache: it still
+                -- describes whatever DF's own sorting last set, and would
+                -- skip the write that restores it. (Same pattern as the
+                -- party site above.)
+                if DF.ClearHeaderAttributeCache then DF:ClearHeaderAttributeCache(header) end
                 sorted = true
             end
         end
