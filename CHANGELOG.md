@@ -10,30 +10,20 @@
 
 ### Bug Fixes
 
-* (Click-Casting) Fix Set Focus and Assist missing from the spell picker's Grid view. (by Krathe)
-* (Highlights) Fix the selection and aggro borders drawing a pixel thicker than the thickness you set, and growing again on the next mouseover or target change. (by Krathe)
-* (Aura Designer) Fix the Aura Designer's enable being shared between Party and Raid, so switching mode tabs appeared to turn it on or off by itself. (by Krathe)
-* (Aura Designer) Fix "recolour health bar when missing" applying at all times instead of only when the aura is missing. (by Krathe)
-* (Aura Designer) Fix missing-aura borders, backgrounds and tints going dark for the rest of the session after entering and leaving test mode. (by Krathe)
 * (Targeted Spells) The Targeted List drops a caster's bar the moment it dies — bars no longer linger for a second or two on dead mobs, and a cast with no cast time no longer shows a huge garbage countdown. (by Krathe)
 * (Targeted Spells) Personal targeted icons no longer shuffle sideways as casts start and expire: new casts join at the end, showing icons hold their place, and the row re-centres as icons come and go. Also fixes the Max Icons cap being able to hide the one cast that was actually aimed at you. (by Krathe)
 * (Tooltips) Fix a suppressed frame tooltip re-appearing a moment later, fix pet frame tooltips ignoring the tooltip settings entirely, and fix the tooltip flashing up when a modifier key is pressed while the mouse is already on a frame. (by Krathe)
-* (Icons) Fix role, leader, raid target and ready check icons flashing to full brightness on frames that are faded for being out of range or dead. (by Krathe)
 * (Raid Frames) Fix turning Use Group-Based Layout on or off silently re-orienting the raid, so rows stay rows and columns stay columns. (by Krathe)
 * (Auto Layouts) Fix a layout showing a false override on Growth Direction, with a mismatched global and a reset that applied the wrong orientation. (by Krathe)
-* (Auto Layouts) Fix aura sizes and counts from a layout's overrides not applying to the preview until you nudged a slider. (by Krathe)
-* (Buffs) Fix the missing-buff strip staying hidden after a player is resurrected following a wipe. (by Krathe)
-* (Settings) Fix the settings window keeping the colour of whichever mode tab was open when the session started. (by Krathe)
-* (Settings) Fix texture preview swatches showing the wrong texture after a reload or at the start of a session. (by Krathe)
 * (Test Mode) Fix preview auras being left behind on your real party and raid frames after leaving test mode or locking frames, showing icons nobody actually has until a reload.
 * (Test Mode) Leaving test mode no longer briefly freezes the game while frames return to their real auras.
-* (Test Mode) The Defensives on/off is back in the test panel, alongside the count slider it drives. (by Krathe)
 
 ### Changes
 
 * (Resource Bar) The Size controls now rename themselves to match the bar's orientation, and a new **Adjust For Frame Border** option decides whether a matched bar tucks inside the frame border or spans the full health bar. (by Krathe)
 * (Defensive Icons) The stack count now uses the addon's own font at a smaller size, matching every other piece of DF text. Profiles that set their own font or scale keep it. (by Krathe)
 * (Debuffs) "Any Dispel Type" and "All Dispellable" were the same filter, so they are now one option. (by Krathe)
+* (Test Mode) The Defensives on/off is back in the test panel, alongside the count slider it drives. (by Krathe)
 
 ## [5.3.0]
 
