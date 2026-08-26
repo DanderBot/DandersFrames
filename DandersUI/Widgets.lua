@@ -887,7 +887,15 @@ function UI:CreateGroupBox(parent, opts)
     title:SetTextColor(a.r, a.g, a.b)
     -- Accent is per host and can change for the session (DF flips it on the
     -- party/raid switch), so the title follows it like a section header does.
-    host:RegisterAccentListener(function(c) title:SetTextColor(c.r, c.g, c.b) end)
+    --
+    -- ⚠ REGISTERED AGAINST THE BOX, and kept on it. This used to hand the host a
+    -- bare closure that nothing could ever take back off the listener list, so a
+    -- panel that rebuilds its group boxes left one dead listener per box behind
+    -- every time and SetAccent walked a list that only grew. Naming the owner
+    -- makes the entry droppable -- `host:UnregisterAccentListener(box)` from a
+    -- teardown path, and automatically once the box itself is collectible.
+    box._accentListener = function(c) title:SetTextColor(c.r, c.g, c.b) end
+    host:RegisterAccentListener(box._accentListener, box)
     box.title = title
 
     local content = CreateFrame("Frame", nil, box)
