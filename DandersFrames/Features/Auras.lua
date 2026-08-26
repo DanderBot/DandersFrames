@@ -2866,6 +2866,33 @@ local function rowTuningSig(cfg)
     }, "|")
 end
 
+-- ☠ CONFIRM THE RETARGET ACTUALLY RE-PARSED, AND SAY SO WHEN IT DID NOT.
+-- NativeBackend:setUnit already does a partition bounce out of combat, which is SUPPOSED to
+-- make the container drop the previous occupant's parse. Field evidence says it does not
+-- always land: a shaman's own Earth Shield stayed on a frame after "party3 -> party2", out
+-- of combat, with the log showing the three retargets and then nothing at all
+-- (2026-08-26 22:14). A buff nobody re-casts generates no UNIT_AURA on the new unit, so a
+-- missed re-parse has nothing to correct it and the icon sits there until a reload.
+--
+-- Handle:Refresh is the addon-callable re-parse and it RETURNS whether a genuine one
+-- happened, so this is a fix and an instrument at once: it forces the parse, and a "did NOT
+-- happen" line is the bounce having failed rather than an unexplained icon.
+-- ✅ Source-confirmed combat-safe (see the note on Handle:Refresh). No combat gate needed
+-- anyway — in combat the retarget itself defers to regen, so this cannot be reached there.
+-- ⚠ Cheap: the drives call this only on an ACTUAL unit change, never per pass.
+local function confirmRetarget(h, label, unit)
+    if not (h and h.Refresh) then return end
+    local ok, reparsed = pcall(h.Refresh, h)
+    if not ok then
+        DF:DebugWarn("AURAROW", "%s: retarget re-parse THREW on %s", label, tostring(unit))
+    elseif not reparsed then
+        DF:DebugWarn("AURAROW", "%s: retarget re-parse did NOT happen on %s - the row may "
+            .. "still be showing the previous occupant", label, tostring(unit))
+    else
+        DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))
+    end
+end
+
 -- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
 -- icons (no double row), keeps it on the frame's unit, and applies setting changes. The
 -- container self-updates from UNIT_AURA, so there is no per-tick render here.
@@ -2910,6 +2937,7 @@ function DF:DriveBuffFactory(frame, db)
             InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfBuffFactoryHidden = InCombatLockdown() or nil
+        if not InCombatLockdown() then confirmRetarget(h, "buff", frame.unit) end
     elseif frame.dfBuffFactoryHidden and not InCombatLockdown() then
         DF:Debug("AURAROW", "buff: regen, unhiding row after deferred retarget")
         frame.dfBuffFactoryHidden = nil
@@ -3112,6 +3140,7 @@ function DF:DriveDebuffFactory(frame, db)
             InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfDebuffFactoryHidden = InCombatLockdown() or nil
+        if not InCombatLockdown() then confirmRetarget(h, "debuff", frame.unit) end
     elseif frame.dfDebuffFactoryHidden and not InCombatLockdown() then
         DF:Debug("AURAROW", "debuff: regen, unhiding row after deferred retarget")
         frame.dfDebuffFactoryHidden = nil
@@ -3439,6 +3468,7 @@ function DF:DriveDefensiveFactory(frame, db)
             InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfDefFactoryHidden = InCombatLockdown() or nil
+        if not InCombatLockdown() then confirmRetarget(h, "defensive", frame.unit) end
     elseif frame.dfDefFactoryHidden and not InCombatLockdown() then
         DF:Debug("AURAROW", "defensive: regen, unhiding row after deferred retarget")
         frame.dfDefFactoryHidden = nil
