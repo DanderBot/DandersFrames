@@ -55,7 +55,7 @@ local ICON_PATH = UI.MEDIA .. "Icons\\"
 
 local CreateFrame, UIParent, CreateColor = CreateFrame, UIParent, CreateColor
 local GetCursorPosition = GetCursorPosition
-local ipairs, pairs, tonumber, type = ipairs, pairs, tonumber, type
+local ipairs, pairs, tonumber, type, next = ipairs, pairs, tonumber, type, next
 local tinsert, tremove, wipe = table.insert, table.remove, wipe
 local format = string.format
 local math = math
@@ -266,6 +266,27 @@ local function CreateColorPickerFrame(host, hasAlpha)
     local useSquarePicker = preferSquarePicker
     local isUpdatingInputs = false  -- Prevent recursive updates
 
+    -- ============================================================
+    -- DRAG PARTICIPATION
+    -- ------------------------------------------------------------
+    -- Every bar in this picker is a DRAG: press, move, release, with the colour
+    -- changing continuously in between. A consumer that defers settings work
+    -- until a drag ends has no way to know one is happening unless it is told,
+    -- so each bar announces itself through the same two hooks a slider uses.
+    --
+    -- Declared up here, ahead of UpdateAllColors, because that function reads
+    -- them -- a Lua local is only an upvalue for closures created BELOW it.
+    --
+    -- dragHeld      which bars are currently held, keyed by name. Balance is
+    --               PER BAR: only a bar that actually called onDragStart calls
+    --               onDragStop, so a stray mouseup on a bar that never started
+    --               one cannot decrement a count it never incremented.
+    -- lastPreview   the colour the consumer's live callback last ran for, so a
+    --               held-still cursor does not re-preview an unchanged colour.
+    local dragHeld = {}
+    local lastPreviewKey = nil
+    local function AnyDragHeld() return next(dragHeld) ~= nil end
+
     -- Main frame
     -- ⚠ THE GLOBAL NAME IS LOAD-BEARING. "DFColorPickerTest" is registered in
     -- UISpecialFrames (that is what makes Escape close the picker) and is the
@@ -328,6 +349,18 @@ local function CreateColorPickerFrame(host, hasAlpha)
 
     -- OnHide handler - treat as cancel if not applied
     testFrame:SetScript("OnHide", function(self)
+        -- ☠ A BAR STILL HELD WHEN THE PICKER GOES AWAY MUST STILL RELEASE.
+        -- Escape closes this frame from anywhere, mid-drag included, and a
+        -- consumer that REFCOUNTS drags never gets the missing onDragStop back --
+        -- "a drag is in progress" would then be stuck on for the rest of the
+        -- session. Inlined rather than calling EndDrag: this handler is installed
+        -- long before that closure exists.
+        for name in pairs(dragHeld) do
+            dragHeld[name] = nil
+            host:Call("onDragStop")
+        end
+        lastPreviewKey = nil
+
         if not self.appliedColor then
             -- Closing via Escape or other means - treat as cancel
             if self.onCancelCallback then
@@ -832,11 +865,29 @@ local function CreateColorPickerFrame(host, hasAlpha)
 
         -- Call live preview callback if set (but not during initialization)
         if testFrame.onChangeCallback and not testFrame.skipOnChange then
+            local alpha = testFrame.hasAlpha and currentAlpha or 1
+            -- ☠ ONE PREVIEW PER COLOUR WHILE A BAR IS HELD. Each bar's OnUpdate
+            -- already runs at most once per rendered frame, but the MOUSEDOWN
+            -- that starts the drag drives this too -- so the first frame of a
+            -- drag fired the consumer's callback twice for the same colour --
+            -- and a cursor held still re-fires it every frame for a colour that
+            -- has not moved. The consumer's callback is a full settings apply on
+            -- a lot of sites; repeating it for an identical colour is pure cost.
+            --
+            -- Only while dragging. A click, a palette swatch, a typed hex, the
+            -- Default button: all preview unconditionally, as they always did.
+            if AnyDragHeld() then
+                local key = format("%.5f,%.5f,%.5f,%.5f", r, g, b, alpha)
+                if key == lastPreviewKey then return end
+                lastPreviewKey = key
+            else
+                lastPreviewKey = nil
+            end
             testFrame.onChangeCallback({
                 r = r,
                 g = g,
                 b = b,
-                a = testFrame.hasAlpha and currentAlpha or 1
+                a = alpha
             })
         end
     end
@@ -912,10 +963,45 @@ local function CreateColorPickerFrame(host, hasAlpha)
 
     local isDraggingSquare, isDraggingHue, isDraggingAlpha, isDraggingCircleValue = false, false, false, false
 
+    -- The two halves of the announcement declared at the top of this function.
+    --
+    -- ☠ THE LIGHTWEIGHT SLOT IS DELIBERATELY nil. A consumer's onDragStart takes
+    -- a "preview this one property cheaply" function and is free to call it every
+    -- frame for the length of the drag. This picker's preview mechanism is
+    -- already its OWN onChange callback, so handing that back as the lightweight
+    -- would re-enter the consumer through a second door on every frame -- the
+    -- callback driving the consumer's throttle, driving the callback.
+    local function BeginDrag(name)
+        if dragHeld[name] then return end
+        dragHeld[name] = true
+        host:Call("onDragStart", nil, name .. " drag", nil)
+    end
+    local function EndDrag(name)
+        if not dragHeld[name] then return end
+        dragHeld[name] = nil
+        lastPreviewKey = nil
+        host:Call("onDragStop")
+    end
+
+    -- Was the button let go somewhere this frame never heard about? A mouseup
+    -- that lands on another frame (or outside the window) never reaches the bar
+    -- that is still dragging, and the drag would be held open for the rest of
+    -- the session -- which, with a refcounted consumer, pins "a drag is in
+    -- progress" on permanently.
+    --
+    -- ☠ IsMouseButtonDown is resolved as a GLOBAL, AT CALL TIME. A file-scope
+    -- alias would freeze whatever the global was at load, and a stub answering
+    -- `false` would end every drag on its first frame. A NIL global means
+    -- "cannot ask" and the check is SKIPPED rather than read as a release.
+    local function MouseWasReleased()
+        return IsMouseButtonDown ~= nil and not IsMouseButtonDown("LeftButton")
+    end
+
     squareFrame:EnableMouse(true)
     squareFrame:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDraggingSquare = true
+            BeginDrag("square")
             local scale = self:GetEffectiveScale()
             local cursorX, cursorY = GetCursorPosition()
             cursorX, cursorY = cursorX / scale, cursorY / scale
@@ -924,8 +1010,13 @@ local function CreateColorPickerFrame(host, hasAlpha)
             UpdateAllColors()
         end
     end)
-    squareFrame:SetScript("OnMouseUp", function() isDraggingSquare = false end)
+    squareFrame:SetScript("OnMouseUp", function() isDraggingSquare = false; EndDrag("square") end)
     squareFrame:SetScript("OnUpdate", function(self)
+        if isDraggingSquare and MouseWasReleased() then
+            isDraggingSquare = false
+            EndDrag("square")
+            return
+        end
         if isDraggingSquare then
             local scale = self:GetEffectiveScale()
             local cursorX, cursorY = GetCursorPosition()
@@ -940,6 +1031,7 @@ local function CreateColorPickerFrame(host, hasAlpha)
     hueBar:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDraggingHue = true
+            BeginDrag("hue")
             local scale = self:GetEffectiveScale()
             local _, cursorY = GetCursorPosition()
             cursorY = cursorY / scale
@@ -947,8 +1039,13 @@ local function CreateColorPickerFrame(host, hasAlpha)
             UpdateAllColors()
         end
     end)
-    hueBar:SetScript("OnMouseUp", function() isDraggingHue = false end)
+    hueBar:SetScript("OnMouseUp", function() isDraggingHue = false; EndDrag("hue") end)
     hueBar:SetScript("OnUpdate", function(self)
+        if isDraggingHue and MouseWasReleased() then
+            isDraggingHue = false
+            EndDrag("hue")
+            return
+        end
         if isDraggingHue then
             local scale = self:GetEffectiveScale()
             local _, cursorY = GetCursorPosition()
@@ -959,11 +1056,17 @@ local function CreateColorPickerFrame(host, hasAlpha)
     end)
 
     -- Alpha bar handlers (for both square and circle mode)
+    --
+    -- ⚠ ONE drag name for BOTH bars, matching the one `isDraggingAlpha` flag
+    -- they already share. Exactly one of the two is on screen at a time (the
+    -- square/circle pill swaps them), so they cannot both be held -- and the
+    -- per-name guard makes a second BeginDrag a no-op either way.
     local function SetupAlphaBarHandlers(bar)
         bar:EnableMouse(true)
         bar:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
                 isDraggingAlpha = true
+                BeginDrag("alpha")
                 local scale = self:GetEffectiveScale()
                 local _, cursorY = GetCursorPosition()
                 cursorY = cursorY / scale
@@ -971,8 +1074,13 @@ local function CreateColorPickerFrame(host, hasAlpha)
                 UpdateAllColors()
             end
         end)
-        bar:SetScript("OnMouseUp", function() isDraggingAlpha = false end)
+        bar:SetScript("OnMouseUp", function() isDraggingAlpha = false; EndDrag("alpha") end)
         bar:SetScript("OnUpdate", function(self)
+            if isDraggingAlpha and MouseWasReleased() then
+                isDraggingAlpha = false
+                EndDrag("alpha")
+                return
+            end
             if isDraggingAlpha then
                 local scale = self:GetEffectiveScale()
                 local _, cursorY = GetCursorPosition()
@@ -991,6 +1099,7 @@ local function CreateColorPickerFrame(host, hasAlpha)
     circleValueBar:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDraggingCircleValue = true
+            BeginDrag("value")
             local scale = self:GetEffectiveScale()
             local _, cursorY = GetCursorPosition()
             cursorY = cursorY / scale
@@ -998,8 +1107,13 @@ local function CreateColorPickerFrame(host, hasAlpha)
             UpdateAllColors()
         end
     end)
-    circleValueBar:SetScript("OnMouseUp", function() isDraggingCircleValue = false end)
+    circleValueBar:SetScript("OnMouseUp", function() isDraggingCircleValue = false; EndDrag("value") end)
     circleValueBar:SetScript("OnUpdate", function(self)
+        if isDraggingCircleValue and MouseWasReleased() then
+            isDraggingCircleValue = false
+            EndDrag("value")
+            return
+        end
         if isDraggingCircleValue then
             local scale = self:GetEffectiveScale()
             local _, cursorY = GetCursorPosition()
@@ -1042,15 +1156,23 @@ local function CreateColorPickerFrame(host, hasAlpha)
         UpdateAllColors()
     end
 
+    -- The wheel is the circle mode's hue+sat drag -- the same gesture as the
+    -- square, on a different shape -- so it announces itself the same way.
     wheelFrame:EnableMouse(true)
     wheelFrame:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDraggingWheel = true
+            BeginDrag("wheel")
             UpdateWheelFromCursor(self)
         end
     end)
-    wheelFrame:SetScript("OnMouseUp", function() isDraggingWheel = false end)
+    wheelFrame:SetScript("OnMouseUp", function() isDraggingWheel = false; EndDrag("wheel") end)
     wheelFrame:SetScript("OnUpdate", function(self)
+        if isDraggingWheel and MouseWasReleased() then
+            isDraggingWheel = false
+            EndDrag("wheel")
+            return
+        end
         if isDraggingWheel then
             UpdateWheelFromCursor(self)
         end

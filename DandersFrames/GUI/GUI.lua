@@ -156,7 +156,17 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
         if AP and AP.RefreshTabOverrideStars then AP:RefreshTabOverrideStars() end
     end,
 
-    -- ---- live refresh + slider drag -----------------------------
+    -- ---- live refresh + drag bookkeeping ------------------------
+    -- BOTH refresh hooks land on the same coalescing sink now, one frame apart
+    -- from nothing: ThrottledUpdateAll is a deprecated alias for UpdateAll, and
+    -- UpdateAll is an arm-stub (Core\ApplyScheduler.lua), so however many times
+    -- a page fires either of these inside one rendered frame, one pass runs.
+    --
+    -- The drag pair is REFCOUNTED host-side (Core.lua): the widget kit is not the
+    -- only surface that holds a drag open -- the colour picker's bars do too --
+    -- and every start must be matched by exactly one stop. onDragStop no longer
+    -- performs the general full update; the kit's release path asks for that
+    -- through refreshNow.
     refresh    = function() DF:ThrottledUpdateAll() end,
     refreshNow = function() DF:UpdateAll() end,
     onDragStart = function(lightFn, name, previewMode) DF:OnSliderDragStart(lightFn, name, previewMode) end,
@@ -1211,6 +1221,44 @@ function GUI.GapCheck(mode)
 end
 -- (Removed) GUI.GapCheckAll — a no-arg alias for GapCheck("all"), superseded once the
 -- dispatcher started forwarding the mode argument. Zero callers.
+
+-- ============================================================
+-- /df debug guiperf -- count the hook calls a settings change actually drives
+--
+-- Every hook a widget factory fires (refresh, refreshNow, onSettingWritten,
+-- onDragStart/Stop, interceptWrite, …) goes through DandersUI's UI:Call, so the
+-- pack can count them without knowing anything about us. This is the DF-side
+-- door onto that: start, drag a slider, stop, report.
+--
+-- The question it answers is the one no screenshot can: how many full applies
+-- one drag of one slider costs. "It feels laggy" and "it fires forty times a
+-- second" look identical from the outside.
+--
+-- Debug output — developer-facing, so deliberately unlocalised like the rest of
+-- the /df debug dumps.
+-- ============================================================
+function DF:GUIPerf(action)
+    action = action and action:lower() or "report"
+    -- ⚠ The pack reports through the `debug` hook's printer, which is silent
+    -- unless PERF is a logged category. Without this line a report with debug
+    -- off prints NOTHING and reads as "the counters recorded nothing".
+    if not (DF.DebugActive and DF:DebugActive("PERF")) then
+        DF:Say("GUI hook perf", "PERF logging is off — enable it in the debug console or output goes nowhere", "WARN")
+    end
+    if action == "start" then
+        GUI:PerfStart()
+        DF:Say("GUI hook perf", "RECORDING", "GOOD")
+        DF:Say("Drag a slider, then: " .. DF:CmdPath("guiperf") .. " stop")
+    elseif action == "stop" then
+        GUI:PerfStop()
+        DF:Say("GUI hook perf", "STOPPED", "NEUTRAL")
+        GUI:PerfReport()
+    elseif action == "report" then
+        GUI:PerfReport()
+    else
+        DF:Err("guiperf: expected start, stop or report.")
+    end
+end
 
 -- ============================================================
 -- DESIGNER PRESET PROMPTS (DandersFrames-only)

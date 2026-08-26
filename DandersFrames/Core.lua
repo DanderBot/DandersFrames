@@ -430,6 +430,7 @@ DF.COMMAND_SIBLINGS = {
     guiwidth  = {},
     adpin     = {},
     gapcheck  = { "all", "clear" },
+    guiperf   = { "start", "stop", "report" },
     -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
     -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
     -- asked.
@@ -546,6 +547,7 @@ DF.DEBUG_GROUP_OF = {
     casthistory = "click", clearhistory = "click", resetconflict = "click",
 
     pixelcheck = "gui", gapcheck = "gui", navprobe = "gui", guiwidth = "gui",
+    guiperf = "gui",
     tdmirror = "gui", colorhook = "gui", overridedebug = "gui", atlas = "gui",
     icons = "gui",
 
@@ -651,8 +653,21 @@ end
 
 -- Debug flag for slider updates (enable the GUI category in the debug console)
 
--- Track active slider dragging state
-DF.sliderDragging = false
+-- Track active slider dragging state.
+--
+-- ⚠ REFCOUNTED, not a boolean. More than one surface can hold a drag open at
+-- once -- the colour picker's bars announce themselves through the same two
+-- hooks now, and a picker opened from a settings page can be dragged while some
+-- other widget is mid-gesture. With a plain boolean, whichever one released
+-- FIRST cleared the flag for both, and every "am I dragging?" reader below went
+-- false while a bar was still being held.
+--
+-- `DF.sliderDragging` stays a DERIVED BOOLEAN and is what everything reads
+-- (Core.lua's health-colour gate, GUI.lua's isDragging hook, TestMode's throttle
+-- and its frame-count slider). Nothing outside this section should read the
+-- count.
+DF.sliderDragCount = 0          -- how many surfaces are holding a drag open
+DF.sliderDragging = false       -- derived: sliderDragCount > 0
 DF.sliderLightweightFunc = nil  -- The lightweight update function to call during drag
 DF.sliderLightweightName = nil  -- Name of the lightweight function for debug
 DF.sliderUpdateCallCount = 0    -- Call counter for debugging
@@ -666,12 +681,20 @@ local lastSizeUpdate = 0
 -- funcName: optional name for debug output
 -- usePreviewMode: if true, hide frame elements for better performance
 function DF:OnSliderDragStart(lightweightFunc, funcName, usePreviewMode)
+    DF.sliderDragCount = (DF.sliderDragCount or 0) + 1
     DF.sliderDragging = true
+
+    -- ONE lightweight slot, last writer wins. Two overlapping drags cannot both
+    -- be previewed through a single slot, and the second one is the one the
+    -- user is actually moving. A drag that supplies no lightweight (the colour
+    -- picker's bars) therefore CLEARS the slot -- which is correct: the outgoing
+    -- function was for a bar nobody is holding any more.
     DF.sliderLightweightFunc = lightweightFunc
     DF.sliderLightweightName = funcName or "unknown"
     DF.sliderUpdateCallCount = 0  -- Reset counter
-    
-    DF:Debug("GUI", "Slider drag START - %s%s",
+
+    DF:Debug("GUI", "Slider drag START (%d held) - %s%s",
+        DF.sliderDragCount,
         lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
             or "no lightweight function (will skip until release)",
         usePreviewMode and " (PREVIEW MODE)" or "")
@@ -679,16 +702,37 @@ end
 
 -- Called when a slider stops being dragged (mouse up)
 function DF:OnSliderDragStop()
-    DF:Debug("GUI", "Slider drag STOP - %s lightweight calls, now FULL UpdateAll()",
-        tostring(DF.sliderUpdateCallCount))
-    
-    DF.sliderDragging = false
+    local count = (DF.sliderDragCount or 0) - 1
+    if count < 0 then
+        -- A stop with no matching start. Floored rather than allowed to go
+        -- negative, or the next real drag would have to climb back to 1 before
+        -- sliderDragging read true again.
+        DF:DebugWarn("GUI", "Slider drag STOP with no drag held - refcount underflow")
+        count = 0
+    end
+    DF.sliderDragCount = count
+    DF.sliderDragging = count > 0
+
+    DF:Debug("GUI", "Slider drag STOP (%d still held) - %s lightweight calls",
+        count, tostring(DF.sliderUpdateCallCount))
+
+    -- Still someone holding a bar: keep the lightweight slot and do NOT run the
+    -- test-mode catch-up below, which is the "the gesture is over" pass.
+    if count > 0 then return end
+
     DF.sliderLightweightFunc = nil
     DF.sliderLightweightName = nil
-    
-    -- Perform full update now that dragging has stopped
+
+    -- ⚠ RAID TEST MODE ONLY. The generic full sweep is no longer requested from
+    -- here: the widget kit's release path calls the `refreshNow` hook, which
+    -- asks for exactly the same "all" and coalesces with whatever the setting's
+    -- own callback scheduled. The old `else DF:UpdateAll()` arm was therefore a
+    -- duplicate request and is gone.
+    --
+    -- This branch is NOT a duplicate and must stay: "all" does not cover
+    -- UpdateAllRaidPetFrames, so removing it would leave the raid test preview's
+    -- pet frames stale for the rest of the drag.
     local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-    
     if isRaidMode and DF.raidTestMode then
         if DF.UpdateRaidTestFrames then
             DF:UpdateRaidTestFrames()
@@ -696,27 +740,24 @@ function DF:OnSliderDragStop()
         if DF.UpdateAllRaidPetFrames then
             DF:UpdateAllRaidPetFrames()
         end
-    else
-        DF:UpdateAll()
-        -- UpdateAll already calls UpdateAllPetFrames
     end
 end
 
--- Called during slider value changes
--- If dragging with a lightweight function, call it directly (throttled)
--- If dragging without lightweight function, skip entirely until release
--- If not dragging, call UpdateAll directly (no throttle)
+-- ⚠ DEPRECATED -- A PLAIN ALIAS FOR DF:UpdateAll(), and deleted next minor.
+--
+-- The throttle it is named for is the apply scheduler's job now: DF:UpdateAll()
+-- is an arm-stub, so repeat calls inside one rendered frame coalesce on their
+-- own (Core\ApplyScheduler.lua). The drag branch that used to live here -- swap
+-- in the slider's lightweight function, or skip entirely -- is gone: the widget
+-- kit no longer routes per-tick refresh through the host during a drag. It
+-- pumps its own preview once per rendered frame and commits once on release,
+-- so there is nothing left for this to decide.
+--
+-- Callers reaching this through the GUI `refresh` hook during someone ELSE's
+-- drag now request a full "all" per call instead of a lightweight one. That is
+-- bounded, not unbounded: the sink collapses every request in a frame into one
+-- pass. Point new code at DF:UpdateAll() directly.
 function DF:ThrottledUpdateAll()
-    if DF.sliderDragging then
-        if DF.sliderLightweightFunc then
-            -- During drag with lightweight function, call it (has its own throttle)
-            DF.sliderLightweightFunc()
-        end
-        -- If no lightweight func, just skip until release
-        return
-    end
-    
-    -- Not dragging - just call UpdateAll directly
     DF:UpdateAll()
 end
 
@@ -6430,6 +6471,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("gapcheck",     "GUI spacing probe (add 'all' or 'clear')", true, "[all|clear]")
         sub("navprobe",     "nav menu row probe", true, "[n]")
         sub("guiwidth",     "GUI width dump", true)
+        sub("guiperf",      "count the hook calls a settings change drives", true, "<start|stop|report>")
         sub("tdmirror",     "Text Designer mirror state", true)
         -- Performance
         sub("profiler",     "open the profiler UI")
@@ -7146,6 +7188,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- artefact. All four look the same on screen.
                 if DF.GUI and DF.GUI.NavProbe then
                     DF.GUI.NavProbe(tonumber(msg:match("(%d+)$")))
+                else
+                    DF:Say("GUI module not loaded.")
+                end
+            elseif msg == "guiperf" or msg:match("^guiperf%s+%a+$") then
+                -- Counts the hook calls one settings change drives, at DandersUI's
+                -- UI:Call chokepoint. Start, drag a slider, stop -- the report says
+                -- how many full applies that single drag cost.
+                if DF.GUIPerf then
+                    DF:GUIPerf(msg:match("^guiperf%s+(%a+)$"))
                 else
                     DF:Say("GUI module not loaded.")
                 end
@@ -8036,12 +8087,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         DF:UpdateLiveRaidFrames()
                     end
                 else
-                    if DF.UpdateAllFrames then
-                        DF:UpdateAllFrames()
+                    -- _Now: login/init seam. The click-cast registration, the
+                    -- rested indicator and the flat-layout pass below all run
+                    -- in this same tick and expect the frames to exist and be
+                    -- laid out already.
+                    if DF.UpdateAllFrames_Now then
+                        DF:UpdateAllFrames_Now()
                     end
                 end
             end
-            
+
             -- Register click casting now that frames are ready
             if DF.RegisterClickCastFrames then
                 DF:RegisterClickCastFrames()
@@ -8072,14 +8127,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Flat layout refresh to ensure correct positioning on load
             local raidDb = DF:GetRaidDB()
             if IsInRaid() and not raidDb.raidUseGroups and not InCombatLockdown() then
+                -- _Now: login/init seam. UpdateRaidGroupLabels immediately below
+                -- reads the header positions these two produce ("needs headers
+                -- to be positioned first").
                 if DF.headersInitialized then
-                    DF:ApplyHeaderSettings()
+                    DF:ApplyHeaderSettings_Now()
                 end
-                if DF.UpdateRaidLayout then
-                    DF:UpdateRaidLayout()
+                if DF.UpdateRaidLayout_Now then
+                    DF:UpdateRaidLayout_Now()
                 end
             end
-            
+
             -- Update raid group labels (needs headers to be positioned first)
             if DF.UpdateRaidGroupLabels then
                 DF:UpdateRaidGroupLabels()
@@ -8338,6 +8396,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
         -- Apply queued updates after combat
+        -- Left on the arm-stub deliberately: DF:UpdateAll() now just marks the
+        -- "all" kind dirty, so this replay folds into the apply scheduler's own
+        -- drain (Core\ApplyScheduler.lua) instead of running a second full sweep
+        -- beside it. The scheduler has its own PLAYER_REGEN_ENABLED re-queue for
+        -- work it held back during combat; this is the older needsUpdate path
+        -- that the _Now bodies still set, and the two now converge on one pass.
         if DF.needsUpdate then
             DF.needsUpdate = false
             DF:UpdateAll()
@@ -8509,12 +8573,14 @@ end)
 -- UPDATE ALL
 -- ============================================================
 
-function DF:UpdateAll()
+-- The real body. DF:UpdateAll() is now an arm-stub that coalesces requests
+-- through DF.Apply -- see Core\ApplyScheduler.lua.
+function DF:UpdateAll_Now()
     if InCombatLockdown() then
         DF.needsUpdate = true
         return
     end
-    
+
     DF:SyncLinkedSections()
 
     -- Invalidate aura layout so all frames re-apply layout on next aura update
@@ -8542,8 +8608,11 @@ function DF:UpdateAll()
         end
     elseif DF.testMode then
         -- In party test mode, update party frames
-        if DF.UpdateAllFrames then
-            DF:UpdateAllFrames()
+        -- ⚠ _Now, not the stub: this body already runs FROM the scheduler's
+        -- drain, so re-arming here would push the work one more frame out on
+        -- every single pass -- forever.
+        if DF.UpdateAllFrames_Now then
+            DF:UpdateAllFrames_Now()
         end
         if DF.RefreshTestFrames then
             DF:RefreshTestFrames()
@@ -8554,23 +8623,24 @@ function DF:UpdateAll()
         end
     elseif editingRaid then
         -- Editing raid settings (not in test mode), update raid layout
-        if DF.UpdateRaidLayout then
-            DF:UpdateRaidLayout()
+        -- _Now for the same reason as the branch above.
+        if DF.UpdateRaidLayout_Now then
+            DF:UpdateRaidLayout_Now()
         end
     elseif IsInRaid() and not (DF.IsInArena and DF:IsInArena()) then
         -- In a live raid: update raid layout AND header visibility
         -- (UpdateHeaderVisibility may also fire from Headers.lua's REGEN handler
         -- via pendingVisibilityUpdate — that's harmless, the call is idempotent)
-        if DF.UpdateRaidLayout then
-            DF:UpdateRaidLayout()
+        if DF.UpdateRaidLayout_Now then
+            DF:UpdateRaidLayout_Now()
         end
         if DF.UpdateHeaderVisibility then
             DF:UpdateHeaderVisibility()
         end
     else
         -- Default: update party frames
-        if DF.UpdateAllFrames then
-            DF:UpdateAllFrames()
+        if DF.UpdateAllFrames_Now then
+            DF:UpdateAllFrames_Now()
         end
         -- Update rested indicator
         if DF.UpdateRestedIndicator then
@@ -8718,19 +8788,26 @@ function DF:FullProfileRefresh()
     -- === RECONFIGURE HEADER ORIENTATION ===
     -- Must be called before layout updates so headers use the new profile's
     -- growDirection, growthAnchor, and selfPosition settings
-    if DF.ApplyHeaderSettings then
-        DF:ApplyHeaderSettings()
+    -- ⚠ SYNC SEAM. A profile switch/import/reset must have LANDED by the time
+    -- this function returns -- the rest of the body (FlatRaidFrames layout, the
+    -- Aura Designer re-drive, the container reposition, the GUI rebuild) reads
+    -- the state these three produce, and the external API returns to its caller
+    -- straight after. So these are the `_Now` bodies, not the arm-stubs.
+    -- Their source order (headers, frames, raidLayout) is also NOT the drain
+    -- order, which is the second reason it cannot go through the sink.
+    if DF.ApplyHeaderSettings_Now then
+        DF:ApplyHeaderSettings_Now()
     end
 
     -- === UPDATE LAYOUTS ===
     -- Update party layout (this handles positioning, visibility, etc.)
-    if DF.UpdateAllFrames then
-        DF:UpdateAllFrames()
+    if DF.UpdateAllFrames_Now then
+        DF:UpdateAllFrames_Now()
     end
-    
+
     -- Update raid layout
-    if DF.UpdateRaidLayout then
-        DF:UpdateRaidLayout()
+    if DF.UpdateRaidLayout_Now then
+        DF:UpdateRaidLayout_Now()
     end
 
     -- Re-apply Aura Designer indicators from the new profile: re-syncs the
@@ -8852,8 +8929,9 @@ function DF:FullProfileRefresh()
     -- === REFRESH NAME TRUNCATION ===
     -- UpdateAllFrames only pushes attribute changes; name truncation requires
     -- a full visible-frame pass to recalculate text widths.
-    if DF.RefreshAllVisibleFrames then
-        DF:RefreshAllVisibleFrames()
+    -- _Now: same sync seam as the three above.
+    if DF.RefreshAllVisibleFrames_Now then
+        DF:RefreshAllVisibleFrames_Now()
     end
 
     -- === UPDATE MINIMAP BUTTON ===

@@ -28,7 +28,7 @@ local addonName, NS = ...
 
 -- ☠ MUST match MINOR in Core.lua. Bumping one without the other disables the
 -- options half at the next login -- see the README's split-loading section.
-local EXPECTED_MINOR = 8
+local EXPECTED_MINOR = 10
 
 -- `true` on the LibStub call: a missing library is a case handled below, not an
 -- error to throw at the user.

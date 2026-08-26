@@ -1501,12 +1501,42 @@ function UI:CreateTextArea(parent, opts)
     return well
 end
 
+-- PREVIEW vs COMMIT -- the two halves of a drag, and which opt is which.
+-- ------------------------------------------------------------
+-- A drag is a stream of values the user is still choosing between, ending in
+-- ONE value they chose. Those are different events and they get different
+-- callbacks (the same split Cell draws between its onValueChangedFn and
+-- afterValueChangedFn):
+--
+--   opts.lightweight   PREVIEW. Runs only while the bar is being dragged, at
+--                      most once per rendered frame, and only when the snapped
+--                      value actually moved. Make it cheap and make it about
+--                      the one property the slider changes.
+--   opts.onChanged     COMMIT. Runs ONCE, on release -- and once on a typed
+--                      value in the box. NEVER per drag tick.
+--
+-- The db write is NOT part of that split: the bound value is written on every
+-- tick, exactly as before, so anything that reads the setting mid-drag sees the
+-- live number. Only the WORK moves.
+--
+-- ⚠ A slider with no `lightweight` previews NOTHING during a drag except its own
+-- value readout. It does not fall back to onChanged or to the refresh hook --
+-- a per-tick full settings sweep is the cost this split exists to remove. Give
+-- a slider a lightweight if its drag should be visible.
+--
+-- ⚠ The whole split needs a host that publishes `onDragStart`. A host without
+-- one (a consumer that does not care about drag cost) gets the older behaviour
+-- unchanged: refresh + onChanged on every value change.
+--
 -- opts:
 --   label                       min, max, step        REQUIRED
 --   get() -> value / set(value) the value binding; omit both for a read-only bar
---   onChanged()                 full-refresh callback, skipped while dragging
---   lightweight()               per-frame callback during a drag (hooks.onDragStart takes it)
---   previewMode                 ask the host to strip live chrome during the drag
+--   onChanged()                 COMMIT callback -- release and typed entry only
+--   lightweight()               PREVIEW callback -- per rendered frame, drag only
+--   previewMode                 DEPRECATED and consumed by nothing. Still passed
+--                               through to hooks.onDragStart for signature
+--                               compatibility; deleted next minor. Do not add
+--                               new call sites.
 --   accent {r,g,b}              pinned accent instead of the host one
 --   tooltip                     as before, read at hover time off the container
 --   dbRef = { db, key }         optional settings metadata. A slider WITHOUT it
@@ -1589,10 +1619,22 @@ function UI:CreateSlider(parent, opts)
     slider:SetHitRectInsets(-4, -4, -8, -8)
     container.slider = slider  -- Store reference for reset
     
-    -- Track whether this slider is actively being dragged
+    -- Track whether this slider is actively being dragged.
+    -- ⚠ ALSO THE COMMIT-ONCE FLAG. The release path clears it FIRST, so a stolen
+    -- mouseup and the real OnMouseUp that follows it cannot both commit.
     local isDragging = false
-    
-    -- Store preview mode flag for this slider
+
+    -- Does this consumer take part in the preview/commit split at all? Answered
+    -- from the host's hooks, which are fixed at NewHost time, so this is read
+    -- once. A host with no onDragStart (DandersMover, say) never learns a drag is
+    -- happening, so a deferred commit would simply never arrive -- those hosts
+    -- keep the older per-change behaviour.
+    local hasDragHooks = host:Hook("onDragStart") ~= nil
+
+    -- The snapped value written this tick, and the one the last preview ran for.
+    local pendingValue, lastPreviewed = nil, nil
+
+    -- Store preview mode flag for this slider (deprecated -- see the opts block)
     local sliderUsePreviewMode = usePreviewMode or false
     
     -- Thumb
@@ -1729,18 +1771,80 @@ function UI:CreateSlider(parent, opts)
         self:RefreshValue()
     end
 
+    -- The end of a drag, from either door: the real OnMouseUp, or the OnUpdate
+    -- noticing the button is no longer held (see OnDragUpdate).
+    --
+    -- ORDER MATTERS. isDragging is cleared FIRST -- it is the commit-once flag,
+    -- and a stolen mouseup followed by the real OnMouseUp must produce one
+    -- commit, not two. Then the host's drag bookkeeping is released (that call
+    -- is pure bookkeeping now: nothing applies from it), then the commit runs,
+    -- then the generic full sweep. `refreshNow` is the sweep every other widget
+    -- asks for; the consumer is free to coalesce it with whatever onChanged
+    -- already scheduled.
+    local function ReleaseDrag()
+        if not isDragging then return end
+        isDragging = false
+        slider:SetScript("OnUpdate", nil)
+        pendingValue, lastPreviewed = nil, nil
+
+        host:Call("onDragStop")
+        if callback then callback() end
+        host:Call("refreshNow")
+
+        -- Update override indicators after drag ends
+        if container.UpdateOverrideIndicators then
+            container:UpdateOverrideIndicators(slider:GetValue())
+        end
+    end
+
+    -- The preview pump. One of these per rendered frame while the bar is held,
+    -- which is the whole point: OnValueChanged can fire many times inside one
+    -- frame and none of them do any work now.
+    local function OnDragUpdate()
+        -- ☠ IsMouseButtonDown IS RESOLVED AS A GLOBAL, AT CALL TIME -- the same
+        -- shape ApplyScheduler uses for InCombatLockdown, and for the same
+        -- reason. A file-scope alias would freeze whatever the global was at
+        -- load, and a stub that answers `false` would end every drag on its
+        -- first frame. A NIL global means "cannot ask" (headless, or a client
+        -- that does not publish it) and the check is SKIPPED rather than read as
+        -- a release.
+        if isDragging and IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+            -- The mouseup went somewhere else -- another frame took it, or the
+            -- cursor left the window. Treat it as the release it was.
+            ReleaseDrag()
+            return
+        end
+        if pendingValue ~= nil and pendingValue ~= lastPreviewed then
+            lastPreviewed = pendingValue
+            if lightweightUpdate then lightweightUpdate() end
+        end
+    end
+
     -- Track drag start - pass the lightweight update function, name for debug, and preview mode
     slider:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDragging = true
             local funcName = lightweightUpdate and ((dbKey or label or "slider") .. " lightweight") or nil
             host:Call("onDragStart", lightweightUpdate, funcName, sliderUsePreviewMode)
+            if hasDragHooks then
+                pendingValue, lastPreviewed = nil, nil
+                slider:SetScript("OnUpdate", OnDragUpdate)
+            end
         end
     end)
-    
-    -- Track drag end - do full update when slider is released
+
+    -- Track drag end - commit once when the slider is released
     slider:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and isDragging then
+        if button ~= "LeftButton" then return end
+        if hasDragHooks then
+            -- A no-op if OnDragUpdate already released on a stolen mouseup.
+            ReleaseDrag()
+            return
+        end
+        -- LEGACY HOST (no onDragStart hook): unchanged from before the split --
+        -- every value change already committed on its own, so there is nothing
+        -- to do here but the bookkeeping and the indicators.
+        if isDragging then
             isDragging = false
             host:Call("onDragStop")
             -- Update override indicators after drag ends
@@ -1749,7 +1853,27 @@ function UI:CreateSlider(parent, opts)
             end
         end
     end)
-    
+
+    -- ☠ A DRAG THAT IS HIDDEN MID-GESTURE STILL HAS TO RELEASE. The host's drag
+    -- state is a REFCOUNT now, so a start with no matching stop does not clear
+    -- itself the next time some other slider is released -- it pins "a drag is
+    -- in progress" on for the rest of the session. A page switch under a held
+    -- bar (rare, but a keybind can do it) stops the OnUpdate, so the stolen-
+    -- mouseup door above cannot answer for this one.
+    --
+    -- Bookkeeping ONLY, deliberately: no onChanged, no refreshNow. The db was
+    -- written on every tick, and whatever hid the slider is rebuilding the page
+    -- anyway; firing a settings commit out of a page teardown would be a
+    -- surprise the user never asked for.
+    slider:SetScript("OnHide", function()
+        if isDragging then
+            isDragging = false
+            slider:SetScript("OnUpdate", nil)
+            pendingValue, lastPreviewed = nil, nil
+            host:Call("onDragStop")
+        end
+    end)
+
     slider:SetScript("OnShow", function()
         local v = ReadValue()
         if v ~= nil then UpdateValue(v) end
@@ -1781,9 +1905,25 @@ function UI:CreateSlider(parent, opts)
             input:SetText(FormatValue(value))
         end
         UpdateFill()
-        -- Use targeted update system - lightweight during drag, full on release
+
+        -- DRAGGING: the value is now written (above) and the readout is current,
+        -- and that is ALL this tick does. No refresh, no callback -- the preview
+        -- is pumped once per rendered frame from OnDragUpdate and the commit
+        -- happens once, on release.
+        --
+        -- ⚠ The old code called `refresh` here on every tick AND skipped the
+        -- callback "because it will run via UpdateAll on release" -- which it
+        -- never did: nothing on the release path called it. That is the bug this
+        -- split fixes, and it is why onChanged now fires from ReleaseDrag.
+        if hasDragHooks and isDragging then
+            pendingValue = value
+            return
+        end
+
+        -- NOT dragging (a programmatic SetValue -- the override reset above is
+        -- one), or a host that does not publish drag hooks: commit per change,
+        -- exactly as before.
         host:Call("refresh")
-        -- Skip callback during drag - it will run via UpdateAll on release
         if callback and not host:Call("isDragging") then
             callback()
         end
@@ -1823,11 +1963,17 @@ function UI:CreateSlider(parent, opts)
                 container:UpdateOverrideIndicators(val)
             end
 
-            -- FIX 2025-01-20: Call callback OR lightweightUpdate (some sliders have nil callback)
+            -- A TYPED VALUE IS A COMMIT, so it runs onChanged -- once -- and
+            -- nothing else.
+            --
+            -- ⚠ NO lightweight fallback here any more (it used to run when
+            -- onChanged was absent). `lightweight` is the PREVIEW callback now:
+            -- it exists to make a drag visible cheaply, and a slider that only
+            -- has one is a slider whose full apply is the refreshNow below.
+            -- Falling back to it would run a partial update in place of a
+            -- complete one.
             if callback then
                 callback()
-            elseif lightweightUpdate then
-                lightweightUpdate()
             end
 
             -- Guaranteed full update (SetValue may not fire OnValueChanged if value didn't change)

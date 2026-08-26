@@ -140,10 +140,15 @@ function DandersFrames_Import(str, profileKey)
     end
     
     -- Update frames
-    if DF.UpdateAll then
-        DF:UpdateAll()
+    -- ⚠ SYNC SEAM. This is the external (Wago / UI-pack) import API: it returns
+    -- true to a caller that then treats the profile as applied, so the sweep has
+    -- to have landed before the return, not one frame later. `_Now`, not the
+    -- arm-stub. (The normal path above goes through FullProfileRefresh, which is
+    -- synchronous for the same reason.)
+    if DF.UpdateAll_Now then
+        DF:UpdateAll_Now()
     end
-    
+
     return true
 end
 

@@ -731,7 +731,11 @@ local function installHooks()
     hooksecurefunc(DF, "UpdateRaidContainerPosition", guarded(refreshRaid))
     -- The raid rect also changes without the position changing: relayout, flat-grid
     -- resize, and the mover/test-container size sync.
-    hooksecurefunc(DF, "UpdateRaidLayout",            guarded(refreshRaid))
+    -- ⚠ HOOK THE BODY, NOT THE STUB. DF:UpdateRaidLayout is now an arm-stub that
+    -- only marks the layout dirty (Core\ApplyScheduler.lua), so a post-hook on it
+    -- would fire BEFORE the layout runs and re-solve against the old rect. The
+    -- `_Now` body is where the rect actually moves.
+    hooksecurefunc(DF, "UpdateRaidLayout_Now",        guarded(refreshRaid))
     hooksecurefunc(DF, "SyncRaidMoverToContainer",    guarded(refreshRaid))
     if DF.FlatRaidFrames then
         hooksecurefunc(DF.FlatRaidFrames, "UpdateContainerSize", guarded(refreshRaid))
