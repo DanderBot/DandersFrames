@@ -4977,18 +4977,33 @@ SlashCmdList["DFAURAS"] = function(msg)
         tostring(select(4, GetBuildInfo()))))
 
     -- Find the frame driving this unit.
+    -- ★ TWO PASSES, AND THE SECOND IS WHY THIS IS USABLE MID-RAID. An exact token match
+    -- only helps when you already know the raid index of the frame that is misbehaving,
+    -- which you never do while looking at one. The UnitIsUnit pass makes `mouseover`,
+    -- `target` and a player's NAME resolve to whichever frame is driving them, so the
+    -- workflow is "point at the broken frame, run the command".
+    -- ⚠ pcall'd: UnitIsUnit throws on a token for a unit that does not exist, and a dump
+    -- that errors while you are trying to catch something transient is worse than useless.
     local target
     if DF.IterateAllFrames then
         DF:IterateAllFrames(function(f)
             if not target and f.unit == unit then target = f end
         end)
+        if not target then
+            DF:IterateAllFrames(function(f)
+                if not target and f.unit then
+                    local ok, same = pcall(UnitIsUnit, f.unit, unit)
+                    if ok and same then target = f end
+                end
+            end)
+        end
     end
     if not target then
         -- Reuse the writer opened above; a second DF:Out here printed the
         -- separator rule and the title twice on the not-found path.
         -- IterateAllFrames covers party/raid/arena, not pets or pinned sets.
         o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
-        o:Line("Try player, party1..4 or raid1..40, and make sure the frames are shown.", "NEUTRAL")
+        o:Line("Try player, mouseover, target, a raid1..40 token, or a player name — and make sure the frames are shown.", "NEUTRAL")
         o:Siblings("auras")
         return
     end
