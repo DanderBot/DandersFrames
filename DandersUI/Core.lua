@@ -19,7 +19,7 @@ local addonName, NS = ...
 -- ☠ Bumping MINOR means bumping EXPECTED_MINOR in OptionsCore.lua in the SAME
 -- commit -- the options manifest compares the two for equality and goes inert on
 -- a mismatch. See the README's split-loading section.
-local MAJOR, MINOR = "DandersUI-1.0", 10
+local MAJOR, MINOR = "DandersUI-1.0", 11
 local UI = LibStub:NewLibrary(MAJOR, MINOR)
 if not UI then return end
 -- The handshake the other four files read. `NS` is the HOST addon's private

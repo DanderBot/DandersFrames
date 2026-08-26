@@ -56,7 +56,10 @@ local math, table = math, table
 -- ============================================================
 
 function UI:CreateSettingsGroup(parent, width, opts)
-    -- opts can be a boolean (legacy: collapsible) or a table { collapsible, showSummary }
+    -- opts can be a boolean (legacy: collapsible) or a table
+    -- { collapsible, showSummary, collapseKey, chromeless, padding }.
+    -- chromeless and padding are opt-in and change nothing for a call site that
+    -- passes neither -- see where each is read below.
     --
     -- ⚠ (Removed) onCollapseChanged. It was stored here and fired from both collapse
     -- paths, and NOTHING ever set it -- so neither guard could fire and the callback
@@ -83,7 +86,14 @@ function UI:CreateSettingsGroup(parent, width, opts)
     group.collapsed = false
 
     -- Visual styling - subtle background and border
-    local padding = 10
+    --
+    -- opts.padding overrides the inset the column is laid out at. ONE number for
+    -- both the field and the local: LayoutChildren reads self.padding, so the two
+    -- must not be allowed to disagree. 0 is a legal value (a group mounted inside
+    -- a surface that already pads, e.g. a popout pane), which is why this is a
+    -- type test rather than an `or` -- `0 or 10` would happen to work in Lua, but
+    -- the test says what is meant.
+    local padding = (type(opts.padding) == "number") and opts.padding or 10
     local margin = 10  -- Space between groups
     group.padding = padding
     group.margin = margin
@@ -94,10 +104,18 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- whole border reading too heavy when it did NOT split. The border no longer
     -- has to survive being split, because it no longer splits -- so the alpha
     -- went back to the value that was right in the first place.
-    CreateElementBackdrop(group, {
-        bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
-        borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
-    })
+    --
+    -- opts.chromeless skips the box entirely -- no fill, no border. For a group
+    -- that is not a box ON a page but the whole CONTENTS of another surface: a
+    -- popout pane already draws its own panel, and a faint bordered rectangle
+    -- inside it reads as a second, smaller panel rather than as the panel's
+    -- contents.
+    if not opts.chromeless then
+        CreateElementBackdrop(group, {
+            bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
+            borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
+        })
+    end
 
     -- The consumer's persisted collapse map, or nil when it keeps none (the pack
     -- has no SavedVariables of its own). Every reader below guards for nil, which

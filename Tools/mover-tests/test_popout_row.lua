@@ -1424,5 +1424,176 @@ do
     eq(row.plate._edge.r, UI.Colors.border.r, "active/accent: closing hands the plate back to the neutral border")
 end
 
+-- ============================================================
+-- 18. A SETTINGS GROUP AS THE PANE'S CONTENT
+-- The demo mounts loose widgets straight into the pane, and every rule above was
+-- written against that. A real settings PAGE cannot: its group's AddWidget
+-- RE-PARENTS each control into the group frame, so a pane built by a page hands
+-- the gate ONE direct child -- the group -- and arming that child buys nothing.
+-- A group has no SetEnabled, and EnableMouse(false) on a frame does NOT stop its
+-- children taking input, so a "dead" pane would still be fully clickable and its
+-- declared count would be measured against 1.
+--
+-- So a group is opened up: its groupChildren are the roster, and the group frame
+-- itself is left off it -- which is why rewire has to reach the group's own
+-- state pass separately.
+-- ============================================================
+
+-- A stand-in for CreateSettingsGroup's observable shape: the two markers the
+-- roster keys off, a groupChildren list of { widget = ... } entries, and the
+-- child-state pass the gate hands the pane back to.
+local function fakeGroup(pane, n, bag, seen)
+    local g = CreateFrame("Frame", nil, pane)
+    g.isSettingsGroup = true
+    g.groupChildren = {}
+    for i = 1, n do
+        -- Parented to the GROUP, exactly as AddWidget re-parents them, so the
+        -- pane really does have one direct child.
+        local w = CreateFrame("Frame", nil, g)
+        bag[i] = w
+        g.groupChildren[i] = { widget = w }
+    end
+    g.RefreshChildStates = function() seen.passes = seen.passes + 1 end
+    return g
+end
+
+do
+    local win, bag, seen = window(), {}, { passes = 0 }
+    local db, group = { on = false }, nil
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Grouped", db = db, toggle = { key = "on" },
+        summary = function() return "live" end,
+        count = 3, window = win,
+        build = function(_, pane)
+            group = fakeGroup(pane, 3, bag, seen)
+            pane:SetHeight(70)
+        end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    eq(po._rowPanes[row].pane:GetNumChildren(), 1,
+        "group: the pane really does have ONE direct child")
+    eq(#po._rowPanes[row].kids, 3, "group: ...and the roster is the three widgets inside it")
+
+    -- The gate reaches the INNER widgets, which is the whole point.
+    check(bag[1]:IsEnabled() == false, "group: a pane built for an off row greys the group's children")
+    check(bag[2]:IsEnabled() == false and bag[3]:IsEnabled() == false, "group: ...every one of them")
+
+    -- ...and leaves the group FRAME alone. Dimming it would double up on the
+    -- children's own 0.4, and its mouse state governs nothing.
+    eq(group:GetAlpha(), 1, "group: the group frame itself is not dimmed as decoration")
+    check(rawget(group, "_dfGateApply") == nil, "group: nor armed as though it were a widget")
+
+    -- Opening the gate hands the pane back to the group's own pass -- the only
+    -- thing that re-derives its children's disableOn states.
+    eq(seen.passes, 0, "group: a shut gate runs no state pass")
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    check(bag[1]:IsEnabled(), "group: the toggle lifted the gate off the inner widgets")
+    eq(seen.passes, 1, "group: and re-ran the group's own child-state pass")
+
+    -- The borrow still holds through a group: a widget its own logic disabled is
+    -- not resurrected by the gate opening.
+    bag[2]:SetEnabled(false)
+    row.checkButton:SetChecked(false)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    check(bag[1]:IsEnabled() == false, "group: shutting takes the live one down")
+    row.checkButton:SetChecked(true)
+    row.checkButton:GetScript("OnClick")(row.checkButton)
+    check(bag[1]:IsEnabled(), "group: opening restores the one the gate took")
+    check(bag[2]:IsEnabled() == false, "group: and not the one it never took")
+    row:ClosePopout()
+end
+
+-- THE COUNT CHECK IS MEASURED AGAINST THE ROSTER. Against the pane's direct
+-- children a group would answer 1, and every honest declaration on a real page
+-- would report as a mismatch.
+do
+    local win, bag, seen = window(), {}, { passes = 0 }
+    local before = #dbgLog
+    local right = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "GroupRight", db = {}, count = 4, window = win,
+        build = function(_, pane) fakeGroup(pane, 4, bag, seen); pane:SetHeight(70) end,
+    }), 60)
+    right:OpenPopout()
+    eq(#dbgLog, before, "group/count: four widgets in a group answer a declared 4")
+    host:CloseAllPopoutRows()
+
+    local wrong = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "GroupWrong", db = {}, count = 9, window = win,
+        build = function(_, pane) fakeGroup(pane, 4, bag, seen); pane:SetHeight(70) end,
+    }), -60)
+    wrong:OpenPopout()
+    eq(#dbgLog, before + 1, "group/count: a wrong declaration still reports")
+    check(dbgLog[#dbgLog].msg:find("4"),
+        "group/count: ...naming the roster's four, not the pane's one child")
+    host:CloseAllPopoutRows()
+end
+
+-- ============================================================
+-- 19. THE PANE'S HEIGHT IS NOT A CONSTANT
+-- paneFor measures the pane once, at build, and swapTo used to replay that
+-- number forever. A pane holding a settings group re-flows whenever a hideOn
+-- inside it changes (a style dropdown revealing a texture picker), so the panel
+-- was left sized to a column that no longer exists -- a gap under the last
+-- control, or a control cut off below the frame.
+-- ============================================================
+do
+    local win, pane = window(), nil
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Grows", db = {}, window = win,
+        build = function(_, p) pane = p; p:SetHeight(80) end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    eq(po.content:GetHeight(), 80, "resync: the panel opened at the pane's build height")
+    pane:SetHeight(140)
+    eq(po.content:GetHeight(), 80, "resync: a re-flow underneath it is not noticed on its own")
+    po:SyncRowPaneHeight()
+    eq(po.content:GetHeight(), 140, "resync: the public resync re-measures the active pane")
+    eq(po.frame:GetHeight(), TITLE_H + PAD + 140 + PAD, "resync: ...and the frame follows it")
+    row:ClosePopout()
+end
+
+-- A CACHED pane re-flowed while another row had the panel: the swap back has to
+-- re-measure, because nothing else will.
+do
+    local win, panes = window(), {}
+    local function mk(name, dy, h)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = {}, window = win,
+            build = function(_, p) panes[name] = p; p:SetHeight(h) end,
+        }), dy)
+    end
+    local a, b = mk("RA", 100, 60), mk("RB", -100, 90)
+    a:OpenPopout()
+    local po = a.popout
+    eq(po.content:GetHeight(), 60, "resync/swap: A opened at its own height")
+    b:OpenPopout()
+    panes.RA:SetHeight(200)
+    a:OpenPopout()
+    eq(po.content:GetHeight(), 200, "resync/swap: swapping back re-reads the cached pane")
+    host:CloseAllPopoutRows()
+end
+
+-- A SCROLL-WRAPPED pane is left alone by both paths. Its host is the scroll
+-- region and rec.h IS the cap, so re-measuring the pane inside it would open a
+-- panel taller than the screen -- which is the thing the cap exists to stop.
+do
+    local win, pane = window(), nil
+    local cap = UIParent:GetHeight() * 0.6
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "TallResync", db = {}, window = win,
+        build = function(_, p) pane = p; p:SetHeight(2000) end,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    eq(po.content:GetHeight(), cap, "resync/cap: a wrapped pane opens at the cap")
+    pane:SetHeight(3000)
+    po:SyncRowPaneHeight()
+    eq(po.content:GetHeight(), cap, "resync/cap: and the resync leaves it there")
+    row:ClosePopout()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit
