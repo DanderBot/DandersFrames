@@ -1651,6 +1651,25 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
             DF._adDeniedHostFrames = DF._adDeniedHostFrames or {}
             DF._adDeniedHostFrames[frame] = true
         end
+        -- ☠ THE WRITE ITSELF, LOGGED, BECAUSE READING THE CODE HAS STOPPED PAYING.
+        -- The probe proves this anchor accepts a write and holds it — forcing the identical
+        -- ApplyOORAlpha call takes it to 0.20 and it reads back 0.20. Yet at probe time it
+        -- is 1.00, with the pass having run and seen inRange=false and nothing refused.
+        -- Those cannot all be true unless either the write is not happening when we think,
+        -- or something puts it back. Three theories died to that contradiction; this line
+        -- settles it instead of a fourth.
+        -- ⚠ Reads the alpha back IMMEDIATELY. A value of 1.00 on the line after writing 0.20
+        -- means the setter did nothing; 0.20 here with 1.00 at probe time means something
+        -- else overwrites it afterwards, and the timestamps say what.
+        if DF.DebugActive and DF:DebugActive("AURACONTAINER") then
+            local okRead, now = pcall(slotHost.GetAlpha, slotHost)
+            DF:Debug("AURACONTAINER",
+                "AD slot-host fade: unit=%s oorOn=%s inRange=%s wanted=%s ok=%s readback=%s",
+                tostring(frame.unit), tostring(oorOn),
+                (issecretvalue and issecretvalue(inRange)) and "SECRET" or tostring(inRange),
+                tostring(oorOn and ((inRange == false) and oorAlpha or 1.0) or 1.0),
+                tostring(okSlot), okRead and string.format("%.2f", now or 0) or "unreadable")
+        end
     end
 end
 
