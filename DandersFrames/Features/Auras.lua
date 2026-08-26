@@ -312,6 +312,10 @@ local DISPEL_SPELLS = {
         -- ☠ A PET SPELL, and the only one here that is. Singe Magic belongs to the Imp, so
         -- the probe must ask the PET spellbook rather than the player's. Both peers also
         -- re-check it on UNIT_PET, which is why that event joins the capability watcher.
+        -- ✅ 2026-08-26, verified BOTH ways: unknown with no Imp out, known with one
+        -- summoned. That is the only live proof the PET bank resolves at all — nothing else
+        -- in this table takes that branch, so a broken Enum.SpellBookSpellBank.Pet would
+        -- have shown up as "?" here and nowhere else.
         { id = 89808,  types = { Magic = true }, pet = true },                   -- Singe Magic (Imp)
     },
 }
