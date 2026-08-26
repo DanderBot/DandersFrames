@@ -231,20 +231,51 @@ UI.RowHeight = {
 -- GroupInnerWidth falls back to for exactly this reason.
 UI.PopoutContentWidth = 260
 
--- The popout shell's own box model. Here rather than as file-locals in
--- Popout.lua because BOTH numbers are load-bearing OUTSIDE the shell: a consumer
--- that lays out a fixed-height panel has to know what the chrome costs it before
--- it can size its content, and the shell's height is exactly
--- titleHeight + pad + content + pad.
+-- ============================================================
+-- THE POPOUT SHELL'S BOX MODEL
 --
--- 28, not the original 22. The tallest thing in the title bar is the 18px close
--- button, so 22 left it 2px of air top and bottom and the row read as packed --
--- title, badge, pin and cross all jammed against each other and against the
--- panel's own accent border. 28 is that 18 plus 5 above and 5 below, which is
--- the smallest number at which the bar reads as a BAR rather than as a strip the
--- buttons happen to overflow.
-UI.PopoutTitleHeight = 28
--- The outer inset around the content, and now the gap UNDER the title bar too --
+-- Here rather than as file-locals in Popout.lua because these numbers are
+-- load-bearing OUTSIDE the shell: a consumer that lays out a fixed-height panel
+-- has to know what the chrome costs it before it can size its content, and the
+-- shell's height is exactly titleHeight + pad + content + pad.
+--
+-- THE TITLE BAR IS A STRIP, not merely the region the buttons happen to live in.
+-- Giving it a height was the first half of that (28, from an 18px close button
+-- plus 5 above and below -- the original 22 left 2px of air and the row read as
+-- packed). It was still not enough: with the row centred in the whole strip the
+-- caption sat as close to the panel's own accent border as it did to the content
+-- below it, so nothing said where the chrome stopped and the body began except
+-- the spacing, and the spacing was symmetric.
+--
+-- So the strip now carries three things of its own, and all three are here for
+-- the reason PopoutRow's metrics are: a look retuned by editing the widget
+-- drifts from the look everything else was tuned against.
+UI.PopoutTitle = {
+    -- Air between the popout's TOP EDGE and the title row. The row is centred in
+    -- what is left, so this is pure top padding -- the caption stops sitting on
+    -- the border and the bar gains a top margin the body does not have.
+    topPad   = 6,
+    -- The row itself: the tallest control in it (the 18px cross) plus 5 above
+    -- and 5 below. This is the OLD PopoutTitleHeight -- the bar did not shrink,
+    -- it gained a margin.
+    row      = 28,
+    -- The strip's fill, as an alpha of C_PANEL laid over the panel's C_BACKGROUND
+    -- ground. That token pair IS the kit's "slightly raised", so the strip lifts
+    -- off the body without inventing a colour; a shade under 1 so the chrome
+    -- stays as translucent as the panel it sits on.
+    fill     = 0.9,
+    -- ...and the hairline under it, as an alpha of C_BORDER. Same idiom as the
+    -- dropdown menu's group separator further down this kit -- the only other
+    -- line the GUI draws INSIDE a surface -- but a shade heavier than that one's
+    -- 0.6: a group rule only has to part two halves of one list, this one has to
+    -- part the chrome from the body, and at 0.6 over the raised strip it came out
+    -- a hint darker than the strip's own edge and read as nothing at all.
+    sepAlpha = 0.8,
+}
+-- Derived, so the two can never be set to numbers that disagree -- the same rule
+-- UI.PopoutRow.slot follows. This is the number a consumer sizes against.
+UI.PopoutTitleHeight = UI.PopoutTitle.topPad + UI.PopoutTitle.row
+-- The outer inset around the content, and the gap UNDER the title bar too --
 -- see Popout.lua's _Resize, where the content used to be anchored flush against
 -- the bar while carrying 2 x this much slack below it.
 UI.PopoutPad = 10

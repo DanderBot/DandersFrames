@@ -31,7 +31,8 @@ KIT.RowHeight = { groupTitle = 26, checkbox = 35 }
 -- Theme.lua). The panel mounts into the shell's `content` and measures nothing
 -- but its own rows, so these only have to EXIST -- but they have to exist before
 -- Popout.lua loads, or the shell errors on the first arithmetic it does with them.
-KIT.PopoutTitleHeight = 28
+KIT.PopoutTitle = { topPad = 6, row = 28, fill = 0.9, sepAlpha = 0.8 }
+KIT.PopoutTitleHeight = KIT.PopoutTitle.topPad + KIT.PopoutTitle.row
 KIT.PopoutPad = 10
 
 function KIT:GetAccent() return COLORS.accent end
