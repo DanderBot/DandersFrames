@@ -1,5 +1,13 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* (Aura Designer) Fix layout and filter group indicators staying at full brightness on out-of-range players when element-specific fading is on — placed indicators faded, groups next to them did not. (by Krathe)
+* (Dispel) "Only Dispellable by You" now follows your talents everywhere, live. A Shaman's poison dispel appears and disappears with Poison Cleansing Totem, a Priest without Improved Purify no longer sees diseases they cannot cure, and talent changes apply to the overlay and the debuff row without a reload. (by Krathe)
+* (Dispel) Fix a Dwarf's bleed dispel lighting up on other players' frames after roster changes — Stoneform only cleanses yourself, so bleeds now show as dispellable only on your own frame. (by Krathe)
+
 ## [5.3.1]
 
 ### New Features

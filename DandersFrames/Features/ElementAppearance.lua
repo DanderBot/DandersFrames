@@ -1667,25 +1667,6 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
             DF._adDeniedHostFrames = DF._adDeniedHostFrames or {}
             DF._adDeniedHostFrames[frame] = true
         end
-        -- ☠ THE WRITE ITSELF, LOGGED, BECAUSE READING THE CODE HAS STOPPED PAYING.
-        -- The probe proves this anchor accepts a write and holds it — forcing the identical
-        -- ApplyOORAlpha call takes it to 0.20 and it reads back 0.20. Yet at probe time it
-        -- is 1.00, with the pass having run and seen inRange=false and nothing refused.
-        -- Those cannot all be true unless either the write is not happening when we think,
-        -- or something puts it back. Three theories died to that contradiction; this line
-        -- settles it instead of a fourth.
-        -- ⚠ Reads the alpha back IMMEDIATELY. A value of 1.00 on the line after writing 0.20
-        -- means the setter did nothing; 0.20 here with 1.00 at probe time means something
-        -- else overwrites it afterwards, and the timestamps say what.
-        if DF.DebugActive and DF:DebugActive("AURACONTAINER") then
-            local okRead, now = pcall(slotHost.GetAlpha, slotHost)
-            DF:Debug("AURACONTAINER",
-                "AD slot-host fade: unit=%s oorOn=%s inRange=%s wanted=%s ok=%s readback=%s",
-                tostring(frame.unit), tostring(oorOn),
-                (issecretvalue and issecretvalue(inRange)) and "SECRET" or tostring(inRange),
-                tostring(oorOn and ((inRange == false) and oorAlpha or 1.0) or 1.0),
-                tostring(okSlot), okRead and string.format("%.2f", now or 0) or "unreadable")
-        end
     end
 end
 
@@ -1772,17 +1753,17 @@ function DF:DebugADAlphaHosts(unit)
         and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
     o:Field("slot-owner anchor", probe(slotHost), "NEUTRAL")
 
-    -- ★ WHAT THE ALPHAS ACTUALLY ARE, not merely whether a write is permitted. The
-    -- writability half answered "everything fine" while the fade was plainly broken, and I
-    -- then produced three contradictory theories from reading code instead of measuring.
-    -- ☠ THE TWO MODES TAKE DIFFERENT ROUTES, which is why one of them works:
-    --   whole-frame (oorEnabled off) -- the FRAME is faded and the alpha CASCADES to the
-    --     indicator. Nothing needs to write to an AD host at all. Field: works.
-    --   element (oorEnabled on) -- the frame is deliberately PINNED at base so each element
-    --     owns its own look, and the ONLY thing that fades AD is one write to the
-    --     slot-owner anchor. Field: does not work.
-    -- So the question was never "can we write". It is "what value did that one write leave,
-    -- and does it reach the icon" -- both readable, on DF-owned frames, for free.
+    -- ★ WHAT THE ALPHAS ACTUALLY ARE, not merely whether a write is permitted — a fade can
+    -- be broken while every write probe answers "fine" (2026-08-26: the group containers
+    -- were missing from the walk entirely, so no write was ever attempted; writability
+    -- probes had nothing to refuse).
+    -- ☠ THE TWO OOR MODES TAKE DIFFERENT ROUTES, and a reading means nothing without
+    -- knowing which is active:
+    --   whole-frame (oorEnabled off) -- the FRAME is faded and alpha CASCADES down.
+    --     Nothing needs to write to an AD host at all.
+    --   element (oorEnabled on) -- the frame is PINNED at base so each element owns its own
+    --     look; slot-backed indicators fade via one write to the slot-owner anchor, group
+    --     containers via the walk writing their own wrapper.
     local pdb = GetDB(frame)
     o:Section("Alpha readings")
     o:Line(string.format("mode: %s", (pdb and pdb.oorEnabled)
@@ -1842,18 +1823,13 @@ function DF:DebugADAlphaHosts(unit)
         .. "inRange=false and the anchor still 1.00 => the write itself was rejected.",
         "NEUTRAL")
 
-    -- ☠☠ THE DECIDING EXPERIMENT, because the readings above can all look right while the
-    -- fade is still wrong: pass ran, saw out-of-range, nothing refused, anchor still 1.00.
-    -- Every explanation left standing is about WHEN the write happened, not whether it
-    -- can. So do it now and read the result back.
-    --   anchor goes to the configured alpha => the mechanism works, and the live failure is
-    --     that the write did not happen at the moment it needed to (the AD pass runs on a
-    --     range EDGE, and GetSlotOwnerAlphaHost returns nil until the owner is stood up --
-    --     if the anchor did not exist on that edge the block is skipped silently, queues
-    --     nothing, and nothing retries until the next transition).
-    --   anchor stays at 1.00 => the write executes and does nothing, which is the
-    --     engine-owns-the-alpha case we already hit on the dispel overlay, and the fade has
-    --     to ride a DF dim frame instead.
+    -- ☠☠ THE DECIDING EXPERIMENT for a stuck slot-anchor fade: write it NOW and read the
+    -- result back, separating "the write never ran when it needed to" (anchor takes the
+    -- configured alpha here) from "the setter executes and does nothing" (stays 1.00 — the
+    -- engine-owns-the-alpha case met on the dispel overlay, needing a DF dim frame
+    -- instead). ⚠ Note this covers the slot-owner anchor ONLY — group containers fade via
+    -- the walk over their own wrappers, and a group that will not fade is diagnosed by the
+    -- per-store alpha readings above, not by this write.
     -- ⚠ This WRITES. It is a diagnostic that changes state on purpose, and it will fix the
     -- frame in front of you as a side effect — which is itself the answer.
     if slotHost then
