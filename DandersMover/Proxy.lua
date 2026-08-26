@@ -76,7 +76,7 @@ local TAG_PAD = 3                        -- padding of the floating title pill
 -- slabs in build order. Lock/save/discard fades the whole overlay out over
 -- FADE_OUT and only then tears it down (DismissAll). Combat suspend stays
 -- instant -- Session:Suspend hides the unlock frame directly.
-local FADE_IN, FADE_OUT, STAGGER = 0.25, 0.2, 0.035
+local FADE_IN, FADE_OUT, STAGGER = 0.45, 0.4, 0.035
 local ZONE_DASH_W = 3                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
