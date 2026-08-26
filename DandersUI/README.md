@@ -104,6 +104,10 @@ The library has no SavedVariables and depends on nothing but LibStub.
 | `registerSearch` | `(kind, label, key, widget, meta)` | no search index |
 | `onIndicatorsRefreshed` | `()` | no-op |
 | `onPopupOpen` | `()` | no-op |
+| `pickerStore` | `() -> store` with `saved` / `recent` / `square` | colour picker remembers nothing past a reload |
+| `debug` | `(cat) -> printer or nil` | silent |
+| `onSectionToggled` | `(key, expanded)` | no-op |
+| `scrollToSection` | `(page, section) -> widget` | link-to-setting controls don't render |
 
 `state` is `"none"`, `"runtime"` (overridden by something the user cannot reset here),
 `"overridden"` (differs from the global, resettable) or `"editing"` (matches the global).

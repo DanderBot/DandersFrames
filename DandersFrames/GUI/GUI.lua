@@ -20,7 +20,43 @@ local addonName, DF = ...
 -- with their positional signatures on top of the pack's native ones.
 -- ============================================================
 local L = DF.L
-local format, rawget, tostring, type = string.format, rawget, tostring, type
+local format, rawget, rawset, tostring, type = string.format, rawget, rawset, tostring, type
+local setmetatable = setmetatable
+
+-- ============================================================
+-- COLOUR-PICKER STORE
+-- ------------------------------------------------------------
+-- The pack asks for a store with three fields -- saved, recent, square -- and
+-- knows nothing about our SavedVariables. This proxy maps those three names onto
+-- the keys the picker has always written, so the on-disk layout stays
+-- byte-identical and no migration is needed.
+--
+-- ☠ DandersFramesDB_v2 is read AT ACCESS TIME, not captured: this file loads
+-- before the SV table is guaranteed to exist, and a captured nil would strand
+-- every read on an empty table forever. A write creates the SV table if it is
+-- still missing, mirroring the picker's own save guard.
+--
+-- Anything OTHER than the three mapped names lives on the proxy itself, so the
+-- pack can keep scratch state next to the persistent fields without it leaking
+-- into SavedVariables.
+local PICKER_KEYS = {
+    saved  = "colorPickerSaved",
+    recent = "colorPickerRecent",
+    square = "colorPickerSquare",
+}
+local pickerStore = setmetatable({}, {
+    __index = function(_, key)
+        local mapped = PICKER_KEYS[key]
+        if not mapped then return nil end
+        return DandersFramesDB_v2 and DandersFramesDB_v2[mapped]
+    end,
+    __newindex = function(t, key, value)
+        local mapped = PICKER_KEYS[key]
+        if not mapped then return rawset(t, key, value) end
+        if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
+        DandersFramesDB_v2[mapped] = value
+    end,
+})
 
 -- ☠ Declared on its own line first. `local GUI = LibStub(...):NewHost(...)`
 -- would put the closures below in the scope BEFORE the local exists, so every
@@ -145,6 +181,37 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
             -- Hand the entry a reference back so an inline search result can read
             -- the tooltip the caller sets on the widget after the factory returns.
             if Search.LinkSourceWidget then Search:LinkSourceWidget(widget) end
+        end
+    end,
+
+    -- ---- options-module bridges ---------------------------------
+    -- Consumed by pack code that lives in the load-on-demand options manifest
+    -- (Libs\DandersUI\DandersUI_Options.xml). Wiring them from the RESIDENT host
+    -- is deliberate: a host is created once and its hooks table is never
+    -- rebuilt, so the bridges have to exist before the companion loads. Until
+    -- that pack code lands they are simply never called.
+
+    -- Persistent colour-picker memory. See the proxy at the top of this file:
+    -- the three field names the pack uses map onto the SavedVariables keys the
+    -- picker has always written.
+    pickerStore = function() return pickerStore end,
+
+    -- Category debug printer, so pack code logs through /df debug like ours does.
+    debug = function(cat) return DF:MakeDebugPrinter(cat) end,
+
+    -- A collapsible settings group opened or closed. The Aura Designer page owns
+    -- its own layout and has to re-run it either way; BuildPage pages re-flow
+    -- themselves and need nothing here.
+    onSectionToggled = function(key, expanded)
+        if DF.AuraDesigner_RefreshPage then DF:AuraDesigner_RefreshPage() end
+    end,
+
+    -- Jump the settings scroll to a section header and hand back the widget it
+    -- landed on, for the caller to flash. Search lives in the options companion,
+    -- so both the table and the method are guarded (same reason as registerSearch).
+    scrollToSection = function(page, section)
+        if DF.Search and DF.Search.ScrollToSection then
+            return DF.Search:ScrollToSection(page, section)
         end
     end,
 })
