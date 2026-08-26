@@ -853,8 +853,22 @@ local function BuildDirectDebuffFilters(db, claimed)
     end
     if dispelOn and not (claimed and claimed.dispellable) then
         if playerMode then
+            -- ☠ SAME TALENT OVER-REPORT AS THE OVERLAY, SAME SUBTRACTION. This record and
+            -- the overlay's main slot ride the identical engine flag, so a priest without
+            -- Improved Purify saw disease here too. Fixing only the overlay would have been
+            -- worse than fixing neither: the two displays would disagree about the same
+            -- debuff on the same frame, which reads as a rendering fault rather than a
+            -- capability one.
+            -- ⚠ ALL mode is deliberately untouched — it rides DISPELLABLE, which is
+            -- capability-independent by Blizzard's own definition and correctly shows
+            -- everything dispellable by anyone.
+            -- ✅ The row's tuning signature already serialises excludeDispelTypes (cfSig,
+            -- per record via filterTuningSig), so this moves the sig and re-tunes in place.
+            local dispelCF = notImportant()
+            local cantCleanse = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+            if cantCleanse then dispelCF.excludeDispelTypes = cantCleanse end
             filters[#filters + 1] = { filter = "HARMFUL|" .. dispelToken,
-                                      key = "dispel", candidateFilters = cfFor(false, notImportant()) }
+                                      key = "dispel", candidateFilters = cfFor(false, dispelCF) }
             -- ★ ENGINE-FLAG GAP REPAIR (Shaman poison via totem -- see
             -- DF:GetEngineDispelFlagGaps above for the whole story). A sibling
             -- record for the types the flag misses: negates the flag token so it
