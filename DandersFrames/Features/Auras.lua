@@ -198,6 +198,183 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- ★ THREE OUTCOMES, NOT TWO. nil means "cannot tell" and is logged once --
 -- distinct from a confident false. A capability probe that cannot run must say
 -- so rather than quietly answering "no".
+-- ============================================================
+-- PLAYER DISPEL CAPABILITY (talent-aware)
+-- ============================================================
+-- ☠ THE ENGINE'S FLAG IS CLASS/SPEC SHAPED AND TALENTS ARE NOT PART OF IT — in BOTH
+-- directions. It misses capability a talent GRANTS (a shaman's Poison Cleansing Totem) and
+-- asserts capability a talent GATES (a priest's disease cure, which needs Improved Purify).
+-- Field-reported both ways.
+--
+-- ★ THIS IS A SPELLBOOK QUESTION, NOT AN AURA QUESTION, which is why it is answerable at
+-- all under the 12.1 lockdown. Aura DATA is sealed; the player's own spellbook never was. I
+-- told Krathe more than once that talent-aware dispels were impossible, and that was the
+-- two conflated — worth remembering before repeating it.
+--
+-- ⚠ EVERY ID IN THIS TABLE NEEDS FIELD VALIDATION, class by class. A wrong ID silently
+-- mis-renders dispels for a whole class, and offline there is no way to confirm one. That
+-- is what `/df debug dispelcap` is for: it prints what we concluded and the spell that
+-- concluded it, so a bad entry shows up as a disagreement with the character in front of
+-- you rather than as a quietly wrong overlay. Entries marked UNVERIFIED have not been
+-- checked on a live character yet.
+--
+-- ⚠ NOT COPIED. Peer libraries solve the same problem (ElvUI's LibDispel, VuhDo's
+-- VUHDO_PLAYER_DISPEL_ABILITIES) and the METHOD is theirs — probe the spellbook per class,
+-- treat talent entries separately. The table below is ours, retail-only, and deliberately
+-- omits the classic/vanilla branches those libraries carry.
+--
+-- ☠ `talent = true` selects the probe. C_SpellBook.IsSpellKnown answers "does the player
+-- KNOW this", which is the only correct question for a talent; IsSpellInSpellBook answers
+-- "should this appear in the spellbook" and returns TRUE FOR UNKNOWN TALENT ENTRIES by
+-- Blizzard's own documentation. We shipped the wrong one once already. ⚠ ElvUI's LibDispel
+-- makes exactly this split — IsSpellKnown for Improved Purify, the spellbook probe for the
+-- shaman totem — which is why their shaman case has the bug we just fixed and their priest
+-- case does not.
+local DISPEL_SPELLS = {
+    DRUID = {
+        { id = 88423,  types = { Magic = true, Curse = true, Poison = true } },  -- Nature's Cure (Resto)  UNVERIFIED
+        { id = 2782,   types = { Curse = true, Poison = true } },                -- Remove Corruption      UNVERIFIED
+    },
+    MAGE = {
+        { id = 475,    types = { Curse = true } },                              -- Remove Curse           UNVERIFIED
+    },
+    MONK = {
+        { id = 115450, types = { Magic = true, Poison = true, Disease = true } },-- Detox (Mistweaver)     UNVERIFIED
+        { id = 218164, types = { Poison = true, Disease = true } },             -- Detox (non-MW)         UNVERIFIED
+    },
+    PALADIN = {
+        { id = 4987,   types = { Magic = true, Poison = true, Disease = true } },-- Cleanse (Holy)         UNVERIFIED
+        { id = 213644, types = { Poison = true, Disease = true } },             -- Cleanse Toxins         UNVERIFIED
+    },
+    PRIEST = {
+        { id = 527,    types = { Magic = true } },                              -- Purify (Disc/Holy)     UNVERIFIED
+        { id = 213634, types = { Disease = true } },                            -- Purify Disease (Shadow) UNVERIFIED
+        -- ★ THE REPORTED CASE. Disc/Holy cure disease only with this talent, and the engine
+        -- flag claims they always can.
+        { id = 390632, types = { Disease = true }, talent = true },              -- Improved Purify        UNVERIFIED
+    },
+    SHAMAN = {
+        { id = 77130,  types = { Magic = true, Curse = true } },                -- Purify Spirit (Resto)  UNVERIFIED
+        { id = 51886,  types = { Curse = true } },                              -- Cleanse Spirit         UNVERIFIED
+        -- ✅ VERIFIED in game 2026-08-26 (Krathe): both directions, no reload.
+        { id = 383013, types = { Poison = true }, talent = true },               -- Poison Cleansing Totem
+    },
+    EVOKER = {
+        { id = 360823, types = { Magic = true, Poison = true } },               -- Naturalize (Preservation) UNVERIFIED
+        { id = 365585, types = { Poison = true } },                             -- Expunge                UNVERIFIED
+    },
+}
+
+-- Races whose racial clears a type no class spell covers. ✅ Dwarf/Bleed verified in game.
+-- ☠ SELF ONLY — a racial cleanses its own caster. See GetEngineDispelFlagGaps.
+local RACIAL_DISPEL = {
+    Dwarf = { Bleed = true },   -- Stoneform
+}
+
+-- ⚠ Same three-outcome contract as the totem probe: nil means "could not tell", which is
+-- NOT the same as false. A capability probe that cannot run must say so.
+local function PlayerKnowsSpell(id, isTalent)
+    local sb = C_SpellBook
+    local bank = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
+    if not (sb and bank) then return nil end
+    if sb.IsSpellKnown then
+        return sb.IsSpellKnown(id, bank) and true or false
+    end
+    -- Talent entries have no safe fallback: the spellbook probe returns true for unknown
+    -- ones, so answering from it would re-create the exact over-report this table exists to
+    -- remove. Say "cannot tell" instead of guessing yes.
+    if isTalent then return nil end
+    if sb.IsSpellInSpellBook then
+        return sb.IsSpellInSpellBook(id, bank, true) and true or false
+    end
+    return nil
+end
+
+-- What can this player actually dispel, right now? Returns a type map plus a per-type note
+-- of which spell granted it, for the debug dump. Never cached — a talent edit changes the
+-- answer and a cached one would survive exactly that.
+function DF:GetPlayerDispelCapability()
+    local _, class = UnitClass("player")
+    local types, via = {}, {}
+    for _, entry in ipairs(DISPEL_SPELLS[class] or {}) do
+        if PlayerKnowsSpell(entry.id, entry.talent) == true then
+            for t in pairs(entry.types) do
+                if not types[t] then
+                    types[t] = true
+                    via[t] = entry.id
+                end
+            end
+        end
+    end
+    local _, race = UnitRace("player")
+    local racial = race and RACIAL_DISPEL[race]
+    return types, via, racial
+end
+
+-- ☠ THE VALIDATION TOOL FOR THE TABLE ABOVE, and the reason it is safe to ship a table of
+-- unverified spell IDs at all. Every ID is a claim about a class the author may not have
+-- played; this prints the claim and the evidence side by side so a wrong one is visible on
+-- the character that disproves it, rather than silently mis-rendering that class's overlay.
+-- ⚠ Read the PROBE column: "known" means C_SpellBook.IsSpellKnown said yes, "unknown" means
+-- it said no, and "?" means it could not answer — which for a talent entry is deliberate
+-- (the spellbook fallback over-reports talents, so it is refused rather than guessed).
+-- ☠ DECLARED HERE, BELOW ITS DATA, NOT BESIDE THE OTHER DEBUG DUMPS. The first cut sat
+-- above DISPEL_SPELLS and PlayerKnowsSpell, so both compiled as nil GLOBALS — legal Lua
+-- that parses clean and dies at the call. The `_ENV` globals diff is what caught it; it is
+-- the second time this file has done it to me in one session.
+function DF:DebugDispelCapability()
+    local _, class = UnitClass("player")
+    local _, race = UnitRace("player")
+    local o = DF:Out("Dispel Capability", (class or "?") .. " / " .. (race or "?"))
+
+    local entries = DISPEL_SPELLS[class]
+    o:Section("Spells probed")
+    if not entries then
+        o:Line("No dispel spells are curated for this class — it is treated as dispelling "
+            .. "nothing. If that is wrong, the class is missing from DISPEL_SPELLS.", "WARN")
+    else
+        for _, e in ipairs(entries) do
+            local known = PlayerKnowsSpell(e.id, e.talent)
+            local list = {}
+            for t in pairs(e.types) do list[#list + 1] = t end
+            table.sort(list)
+            local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
+            o:Line(string.format("%-7d %-26s %-9s %s%s",
+                e.id, tostring(name or "(name unavailable)"),
+                known == true and "known" or (known == false and "unknown" or "?"),
+                table.concat(list, "/"), e.talent and "   [talent]" or ""),
+                known == true and "GOOD" or nil)
+        end
+    end
+
+    local types, via, racial = DF:GetPlayerDispelCapability()
+    o:Section("Conclusion — what DF thinks you can cleanse")
+    local any = false
+    for _, t in ipairs({ "Magic", "Curse", "Disease", "Poison", "Bleed" }) do
+        local from = via[t]
+        local racialFrom = racial and racial[t]
+        if types[t] or racialFrom then
+            any = true
+            o:Line(string.format("%-8s yes   %s", t,
+                from and ("via spell " .. from) or (racialFrom and ("via the " .. tostring(race)
+                    .. " racial — SELF ONLY") or "")), "GOOD")
+        else
+            o:Line(string.format("%-8s no", t))
+        end
+    end
+    if not any then
+        o:Line("Nothing — 'Only Dispellable by You' should show an empty overlay.", "WARN")
+    end
+
+    o:Section("Cross-check")
+    o:Line("Compare the yes/no column against the character in front of you. A row that "
+        .. "disagrees means that entry's spell ID is wrong, not that the feature is broken "
+        .. "— the IDs are curated offline and most are still unverified.", "NEUTRAL")
+    o:Line("⚠ The overlay does NOT drive off this table yet. It still uses the engine's "
+        .. "RAID_PLAYER_DISPELLABLE flag plus the gap repair, so a disagreement here is a "
+        .. "finding to fix, not a live fault.", "NEUTRAL")
+end
+
 local ENGINE_GAP_POISON = { Poison = true }
 -- ★ THE RACIAL GAP. RAID_PLAYER_DISPELLABLE knows class and spec dispels, and NOTHING a
 -- class learns removes a Bleed -- only the Dwarf racial, Stoneform. So without this, "Only
