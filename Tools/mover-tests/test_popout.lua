@@ -40,6 +40,7 @@ function UI:CreateLabel(parent, opts)
     if opts and opts.text then fs:SetText(opts.text) end
     return fs
 end
+UI.CreateLabelNative = UI.CreateLabel   -- lib files call the shim-proof alias
 -- Buttons come back SHOWN, as a freshly created WoW button does -- "the pin
 -- button hides once pinned" is only a real assertion if it started visible.
 local function stubButton(opts)

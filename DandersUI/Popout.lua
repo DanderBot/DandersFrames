@@ -1193,7 +1193,11 @@ function UI:CreatePopout(opts)
     -- The title takes whatever the buttons left. Anchored to the pin (or the
     -- cross when there is none) rather than to a measured width, so the two
     -- layouts need no arithmetic between them.
-    po.titleFS = host:CreateLabel(f, { size = 11, color = UI.Colors and UI.Colors.text })
+    -- ☠ CreateLabelNative, not CreateLabel: on the DandersFrames host the bare
+    -- name is shadowed by a POSITIONAL shim (opts lands in its `text` slot and
+    -- SetText gets a table). The mover host has no shims, which is why this
+    -- only ever erupts under DF. Same rule as Sections/ColorPicker.
+    po.titleFS = host:CreateLabelNative(f, { size = 11, color = UI.Colors and UI.Colors.text })
     po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
     po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
     if po.titleFS.SetWordWrap then po.titleFS:SetWordWrap(false) end

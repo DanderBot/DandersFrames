@@ -47,6 +47,9 @@ end
 function KIT:CreateLabel(_, opts)
     return stubFontString(opts and opts.text)
 end
+-- The lib's own files call the *Native aliases (host shims may shadow the
+-- bare names); in the stub they are the same function.
+KIT.CreateLabelNative = KIT.CreateLabel
 
 -- Every button ever built by the panel, so "the panel has no session verbs on
 -- it" can be asserted over the whole set rather than over the handful of fields
