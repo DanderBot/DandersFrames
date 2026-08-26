@@ -272,7 +272,22 @@ gap to the next row included. Any region the shell tethers to may declare
 `region.popoutInset = { left, right, top, bottom }` (pixels trimmed off each
 edge), and every rect the shell takes of it honours that: the source outline is
 drawn round the ink, the beam aims at the ink, the clip gate tests the ink, and
-the settings placement measures the ink. Undeclared means "the whole frame".
+the settings placement measures the ink. Undeclared means "the whole frame". The
+inset is stated in the **region's own** units — the design pixels it lays itself
+out in — so a scaled surface declares the same numbers an unscaled one does.
+
+**Scale.** A popout can dock outside a window that carries its own `SetScale`
+(DandersFrames' settings window has a user scale slider), and a frame's
+`GetCenter`/`GetWidth` answer in that frame's **own** coordinate space, not
+UIParent's. The shell converts on both legs — every rect it reads is multiplied
+into UIParent units, and every offset it writes back (a screen anchor, a beam
+endpoint, the connection point's slide) is divided into the units of the frame
+receiving it. Consumers do not have to do anything; the thing to know is that a
+number you read out of `po` (a rect, a dock position) is in UIParent units and
+is **not** interchangeable with a `SetPoint` offset on a scaled frame. Left
+unconverted the error is `distance-from-screen-centre × (1/scale − 1)`, which at
+a window edge is over a hundred pixels — the beam stopping dead in the gutter
+beside its row rather than touching the plate.
 
 **The accent cascade.** A popout's accent is not just its chrome. Whenever the
 accent is applied — at open, and on every `SetAccent` — the popout walks its own

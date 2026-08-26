@@ -259,6 +259,51 @@ local function insetOf(region)
     return ins[1] or 0, ins[2] or 0, ins[3] or 0, ins[4] or 0
 end
 
+-- ---- the one coordinate space ------------------------------------
+
+-- ☠ A FRAME'S OWN GEOMETRY IS NOT IN UIPARENT UNITS, and every rect in this file
+-- is declared to be. GetCenter / GetWidth / GetHeight answer in the frame's OWN
+-- coordinate space -- the screen divided by its EFFECTIVE scale -- and a SetPoint
+-- offset is read back in that same space. So a region living under a SCALED
+-- window and a popout living at UIParent scale are measured with two different
+-- rulers, and this file compares them constantly: the dock, the beam, the clip
+-- gate and the connection point are all differences between the two.
+--
+-- The error is not a rounding wobble. It is (distance from UIParent's centre) x
+-- (1/scale - 1) on BOTH axes, so out at the edge of a settings window scaled to
+-- 85% it is well over a hundred pixels -- which is what the beam's far end
+-- stopping dead in the gutter beside its row, and the panel docking a long way
+-- clear of the window, both were (in-game, 2026-08-26). DandersFrames' settings
+-- window carries a user scale slider; /df popoutdemo's window carries none,
+-- which is the whole reason the demo never showed this.
+--
+-- Note which half was NOT wrong: the source outline is ANCHORED to the region
+-- rather than computed from it, so it stayed on the plate throughout. That is
+-- exactly the asymmetry the report describes -- the outline lighting the row
+-- while the beam pointed at empty space beside it.
+--
+-- This ratio converts a region's own units to UIParent's. Everything that reads
+-- geometry off a frame multiplies by it; everything that hands a number BACK to
+-- a frame (a SetPoint offset, a line endpoint) divides by that frame's own.
+--
+-- ⚠ TEXTURES AND FONTSTRINGS HAVE NO GetEffectiveScale. They are regions, so
+-- they answer GetCenter/GetWidth perfectly well -- in their PARENT's space --
+-- and `tetherSource` is documented as a region, not as a frame. So walk up to
+-- the nearest thing that has one rather than quietly falling back to 1, which
+-- would be the whole bug again for a consumer that tethers to a texture.
+local function scaleRatio(region)
+    local us = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()
+    if type(us) ~= "number" or us <= 0 then return 1 end
+    local node, hops = region, 0
+    while node and hops < 8 do
+        local es = node.GetEffectiveScale and node:GetEffectiveScale()
+        if type(es) == "number" and es > 0 then return es / us end
+        node = node.GetParent and node:GetParent() or nil
+        hops = hops + 1
+    end
+    return 1
+end
+
 -- Rect of a region in UIParent-centre units, inset to its ink; nil while it has
 -- no geometry yet.
 local function rectOf(region)
@@ -266,16 +311,39 @@ local function rectOf(region)
     local cx, cy = region:GetCenter()
     if not cx then return nil end
     local ux, uy = UIParent:GetCenter()
-    local x, y = cx - ux, cy - uy
     local w, h = region:GetWidth() or 0, region:GetHeight() or 0
     local l, r, t, b = insetOf(region)
     if l ~= 0 or r ~= 0 or t ~= 0 or b ~= 0 then
         -- Trimming the left edge moves the centre right by half of it, and so on
         -- round the four; the size loses both edges of each axis.
-        x, y = x + (l - r) / 2, y + (b - t) / 2
+        -- ⚠ IN THE REGION'S OWN UNITS, before the conversion below. popoutInset
+        -- is declared by the region in the units it lays ITSELF out in -- a row's
+        -- 6px gap is 6 design pixels, not 6 screen ones -- so trimming after the
+        -- scaling would take a scaled edge off an unscaled number.
+        cx, cy = cx + (l - r) / 2, cy + (b - t) / 2
         w, h = max(w - l - r, 0), max(h - t - b, 0)
     end
-    return { x = x, y = y, w = w, h = h }
+    -- ...and into UIParent-centre units, which is what every caller believes it
+    -- has been handed. Exactly a no-op at scale 1, which is most of them.
+    local k = scaleRatio(region)
+    return { x = cx * k - ux, y = cy * k - uy, w = w * k, h = h * k }
+end
+
+-- A frame's own size in UIParent units -- rectOf's pair, for the callers that
+-- want a size without a position (the dock and the glide both have to size the
+-- popout before they know where it is going).
+local function sizeOf(frame)
+    if not frame then return 0, 0 end
+    local k = scaleRatio(frame)
+    return (frame:GetWidth() or 0) * k, (frame:GetHeight() or 0) * k
+end
+
+-- Place a frame at a UIParent-centre position. The offset goes back into the
+-- FRAME's own units on the way out -- the return leg of rectOf, and the reason
+-- this is one function rather than four copies of the same SetPoint.
+local function placeAt(frame, x, y)
+    local k = scaleRatio(frame)
+    frame:SetPoint("CENTER", UIParent, "CENTER", x / k, y / k)
 end
 
 -- Per dock side: the popout's OWN edge that faces the source, and the outward
@@ -443,6 +511,11 @@ end
 
 -- Absolute placement, for consumers that own their own layout. No source, so
 -- nothing to follow and nothing to tether to.
+--
+-- ⚠ NOT run through placeAt, deliberately: x/y come from the CONSUMER's own
+-- layout, not from this file's rect maths, so they are already an offset in the
+-- popout frame's own units -- which is what a consumer computing a position for
+-- its own panel has. The conversion belongs to numbers that came out of rectOf.
 function Popout:PlaceFree(x, y)
     self.free = true
     self.following = false
@@ -490,22 +563,23 @@ function Popout:_Dock()
     -- ticker earns the difference back -- it re-docks on a row move AND on a
     -- window move, so the pair still tracks for free.
     local wr = self.outsideOf and rectOf(self.outsideOf) or nil
+    local fw, fh = sizeOf(f)
     if wr then
         -- Its own baseline, alongside the source's: a pure width-resize moves the
         -- window's edge without moving the row at all (see _Tick).
         self._winX, self._winY, self._winW, self._winH = wr.x, wr.y, wr.w, wr.h
-        local side, x, y = UI.PopoutOutsidePos(wr, sr, f:GetWidth() or 0, f:GetHeight() or 0,
+        local side, x, y = UI.PopoutOutsidePos(wr, sr, fw, fh,
                                                DOCK_GAP, UIParent:GetWidth() or 0,
                                                UIParent:GetHeight() or 0, self.forcedSide)
         f:ClearAllPoints()
-        f:SetPoint("CENTER", UIParent, "CENTER", x, y)
+        placeAt(f, x, y)
         self.side = side
         self:_Present(side)
         return
     end
     self._winX, self._winY, self._winW, self._winH = nil, nil, nil, nil
 
-    local side = self:_PickSide(sr, f:GetWidth() or 0, f:GetHeight() or 0)
+    local side = self:_PickSide(sr, fw, fh)
     f:ClearAllPoints()
     if side == "left" then f:SetPoint("TOPRIGHT", src, "TOPLEFT", -DOCK_GAP, 0)
     elseif side == "below" then f:SetPoint("TOP", src, "BOTTOM", 0, -DOCK_GAP)
@@ -567,7 +641,7 @@ function Popout:_StartGlide()
     local sr = rectOf(self.source)
     local from = rectOf(f)
     if not (sr and from) then return false end
-    local w, h = f:GetWidth() or 0, f:GetHeight() or 0
+    local w, h = sizeOf(f)
     -- The destination comes from the SAME function the dock uses -- PopoutDockPos
     -- beside a source, PopoutOutsidePos outside a window -- so the landing is
     -- exact in either mode rather than approximately exact in one of them.
@@ -594,7 +668,7 @@ function Popout:_StartGlide()
     self._gToX, self._gToY = tx, ty
     self._gX, self._gY = from.x, from.y
     f:ClearAllPoints()
-    f:SetPoint("CENTER", UIParent, "CENTER", from.x, from.y)
+    placeAt(f, from.x, from.y)
     self:_StartTick()
     -- The connected chrome commits to the NEW source at once -- beam and outline
     -- both -- so the slide is the panel travelling TOWARDS something already
@@ -618,7 +692,7 @@ function Popout:_AdvanceGlide(elapsed)
     self._gX, self._gY = x, y
     local f = self.frame
     f:ClearAllPoints()
-    f:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    placeAt(f, x, y)
     -- The beam's near end is on the moving frame, so it is redrawn per frame;
     -- the source outline is anchored to the source and does not move at all.
     self:_UpdateBeam()
@@ -811,7 +885,10 @@ function Popout:_UpdateNotch()
     -- CENTRE on the edge, so exactly half the diamond stands proud of the
     -- border and the other half sits over it -- one shape crossing the line
     -- rather than a marker parked beside it.
-    n:SetPoint("CENTER", self.frame, spec[1], ox, oy)
+    -- The slide is a UIParent-unit difference and the offset is read in the
+    -- popout frame's own units, so it comes back through that frame's ratio.
+    local nk = scaleRatio(self.frame)
+    n:SetPoint("CENTER", self.frame, spec[1], ox / nk, oy / nk)
     n:Show()
 end
 
@@ -859,8 +936,13 @@ function Popout:_UpdateSourceOutline()
         -- to be lighting, with the overhang sitting in the gap above the next
         -- row. Same rect rectOf() reports, so outline, beam and clip gate agree.
         local l, r, t, b = insetOf(region)
-        o:SetPoint("TOPLEFT", region, "TOPLEFT", l, -t)
-        o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", -r, b)
+        -- popoutInset is in the REGION's units and this frame is not the region:
+        -- it hangs off the popout's parent (see _EnsureSourceOutline), so the
+        -- trim is read back in THAT frame's units. Same conversion the beam makes
+        -- -- which is the point, since the two have to describe one rect.
+        local ik = scaleRatio(region) / scaleRatio(o)
+        o:SetPoint("TOPLEFT", region, "TOPLEFT", l * ik, -t * ik)
+        o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", -r * ik, b * ik)
         local c = self:GetAccent()
         self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
     end
@@ -984,8 +1066,10 @@ end
 -- drawn from last frame's position lags visibly behind the panel it leaves.
 function Popout:_FrameRect()
     if self.gliding and self._gX then
-        local f = self.frame
-        return { x = self._gX, y = self._gY, w = f:GetWidth() or 0, h = f:GetHeight() or 0 }
+        -- _gX/_gY are already UIParent-centre (they came out of the same dock
+        -- maths), so only the SIZE needs converting -- see sizeOf.
+        local w, h = sizeOf(self.frame)
+        return { x = self._gX, y = self._gY, w = w, h = h }
     end
     return rectOf(self.frame)
 end
@@ -1067,10 +1151,13 @@ function Popout:_UpdateBeam()
         b:SetFrameLevel(pl > 1 and pl - 1 or 1)
     end
     local c = self:GetAccent()
+    -- Both endpoints are UIParent-centre; a line's offsets are read in the units
+    -- of the frame it belongs to, so they go back through that frame's ratio.
+    local bk = scaleRatio(b)
     for _, line in ipairs({ b.glow, b.core }) do
         if line then
-            line:SetStartPoint("CENTER", UIParent, ax, ay)
-            line:SetEndPoint("CENTER", UIParent, bx, by)
+            line:SetStartPoint("CENTER", UIParent, ax / bk, ay / bk)
+            line:SetEndPoint("CENTER", UIParent, bx / bk, by / bk)
         end
     end
     if b.glow then
@@ -1132,7 +1219,7 @@ function Popout:Pin(silent)
     local f = self.frame
     if at then
         f:ClearAllPoints()
-        f:SetPoint("CENTER", UIParent, "CENTER", at.x, at.y)
+        placeAt(f, at.x, at.y)
     end
 
     -- Draggable ONLY now: a docked popout that could be dragged would fight the

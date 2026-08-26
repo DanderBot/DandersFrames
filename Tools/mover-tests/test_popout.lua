@@ -1476,4 +1476,184 @@ do
     check(ty < thin.y, "inset: ...a little short of the row, which is the cosmetic ceiling that remains")
 end
 
+-- ============================================================
+-- 13. THE SCALED WINDOW -- the real settings page's geometry
+-- ------------------------------------------------------------
+-- ☠ A FRAME'S OWN GEOMETRY IS NOT IN UIPARENT UNITS. GetCenter/GetWidth answer
+-- in the frame's OWN coordinate space -- the screen divided by its EFFECTIVE
+-- scale -- and DandersFrames' settings window carries a user scale slider. Every
+-- rect in Popout.lua is declared to be in UIParent-centre units, so a region
+-- under that window has to be converted before it can be compared with the
+-- popout's (which lives at UIParent scale) or handed to a screen anchor.
+--
+-- Left unconverted, the error is (distance from UIParent's centre) x (1/s - 1),
+-- which at the window's edge is over a hundred pixels: the popout docked a long
+-- way clear of the window and the beam's far end stopped short of the row's
+-- plate, hanging in dead space to the right of it. Reported in-game 2026-08-26,
+-- and invisible in /df popoutdemo for the reason it is invisible in every test
+-- above -- an unscaled window is the one case where the two spaces agree.
+--
+-- The scene below is the real one, in the real proportions: a 1000 x 700 window
+-- at 85%, and a 260-wide row whose plate stops well inside the window's right
+-- edge (page padding + scrollbar gutter + the column beside it).
+-- ============================================================
+local S = 0.85                       -- the settings window's scale slider
+-- own units -> UIParent units, and back. The window and everything in it is
+-- laid out in DESIGN pixels (its own space); the popout and the beam are not.
+local function up(v) return v * S end
+local function own(v) return v / S end
+
+do
+    -- ---- the window ------------------------------------------------
+    -- 1000 x 700 design pixels, centred on the screen -> 850 x 595 on it.
+    local SW_OWN, SH_OWN = 1000, 700
+    local win = source(SW_OWN, SH_OWN, own(CX), own(CY))
+    win:SetScale(S)
+    local WIN_RIGHT = up(SW_OWN) / 2                  -- +425 from the screen centre
+
+    -- ---- the row ---------------------------------------------------
+    -- A PopoutRow's real box model: a 50-tall SLOT whose bottom 6 is the gap to
+    -- the next row, so the visible plate is the top 44. Declared exactly as
+    -- PopoutRow.lua declares it -- in the row's OWN units, which is what the
+    -- inset protocol is stated in.
+    local SLOT_OWN, PLATE_OWN, GAP_OWN, ROW_W_OWN = 50, 44, 6, 260
+    -- Where the PLATE's right edge lands: 120 screen px inside the window's own
+    -- right edge. That is the page padding, the scrollbar gutter and the column
+    -- to its right -- the stretch of dead space the beam has to cross, and the
+    -- stretch it was stopping short in.
+    local PLATE_RIGHT = WIN_RIGHT - 120
+    local PLATE_CY    = 80                            -- above the screen centre
+    -- Back out the SLOT's centre from the plate's, in UIParent units, then say
+    -- it in the row's own units -- which is the only space the stub can be told
+    -- a centre in, and the only one WoW would answer one in.
+    local ROW_CX = PLATE_RIGHT - up(ROW_W_OWN) / 2
+    local ROW_CY = PLATE_CY - up(GAP_OWN) / 2
+    local row = source(ROW_W_OWN, SLOT_OWN, own(CX + ROW_CX), own(CY + ROW_CY))
+    row:SetScale(S)
+    row.popoutInset = { 0, 0, 0, GAP_OWN }
+
+    -- Where the dock is about to put it. Said UP FRONT because the stub resolves
+    -- no anchors: the beam's NEAR end is read off the frame's own rect, so a
+    -- frame left at the origin would draw the beam from off-screen and the far
+    -- end would clamp onto the wrong face of the row. Every live dock test above
+    -- seeds it the same way.
+    local DOCK_X = WIN_RIGHT + DOCK_GAP + FRAME_W / 2
+    local DOCK_Y = PLATE_CY - FRAME_H / 6
+
+    local p = popout({ key = "scaled" })
+    p.frame:SetFakeCenter(CX + DOCK_X, CY + DOCK_Y)
+    p:Follow(row, { outsideOf = win })
+
+    -- ---- the dock --------------------------------------------------
+    -- The popout is a child of UIParent, so its own space IS UIParent's and the
+    -- anchor it records is read straight off.
+    eq(p.side, "right", "scaled: it still docks outside the window's right edge")
+    eq(p.frame._points[1][4], DOCK_X,
+        "scaled: a gap clear of the window's edge ON SCREEN, not of its unscaled rect")
+    eq(p.frame._points[1][5], DOCK_Y,
+        "scaled: and a third down from the PLATE's screen height")
+
+    -- ---- the beam --------------------------------------------------
+    -- The whole of the report: the far end has to land ON the plate's edge --
+    -- the accent-bordered box the user sees, and the same rect the source
+    -- outline is drawn round -- not somewhere out in the gutter beside it.
+    check(p.beam:IsShown(), "scaled: the beam is up")
+    eq(p.beam.core._start.x, WIN_RIGHT + DOCK_GAP, "scaled: it leaves the popout's left face")
+    eq(p.beam.core._end.x, PLATE_RIGHT, "scaled: and TOUCHES the plate's right edge")
+    eq(p.beam.core._end.y, PLATE_CY, "scaled: dead level with the plate, gap and all")
+    eq(p.beam.core._start.y, PLATE_CY, "scaled: ...so the beam runs flat rather than at a diagonal")
+
+    -- The source outline is ANCHORED to the row, so it was always right; this is
+    -- the assertion that the beam now agrees with it about where the row is.
+    eq(p.srcOutline._points[1][2], row, "scaled: the outline is still on the row itself")
+    -- The outline hangs off the popout's PARENT, not off the row, so the row's
+    -- own 6px gap is read back at the parent's scale -- the same trip the beam
+    -- makes, which is what keeps the two describing one rect.
+    eq(p.srcOutline._points[2][5], up(GAP_OWN),
+        "scaled: the outline trims the gap at the scale it is actually drawn at")
+    p:Close()
+end
+
+-- A row that declares SIDE padding too: the beam stops at the ink, not at the
+-- slot, and the inset is read in the row's own units before the conversion.
+do
+    local SW_OWN = 1000
+    local win = source(SW_OWN, 700, own(CX), own(CY))
+    win:SetScale(S)
+    local WIN_RIGHT = up(SW_OWN) / 2
+
+    local SLOT_W_OWN, PAD_OWN = 260, 20
+    local SLOT_RIGHT = WIN_RIGHT - 120
+    local row = source(SLOT_W_OWN, 44, own(CX + SLOT_RIGHT - up(SLOT_W_OWN) / 2), own(CY))
+    row:SetScale(S)
+    row.popoutInset = { PAD_OWN, PAD_OWN, 0, 0 }
+
+    local p = popout({ key = "scaledinset" })
+    p.frame:SetFakeCenter(CX + WIN_RIGHT + DOCK_GAP + FRAME_W / 2, CY - FRAME_H / 6)
+    p:Follow(row, { outsideOf = win })
+    eq(p.beam.core._end.x, SLOT_RIGHT - up(PAD_OWN),
+        "inset: the beam lands on the INK's edge, a scaled pad inside the slot's")
+    p:Close()
+end
+
+-- tetherSource is documented as a REGION, and a texture is one: it answers
+-- GetCenter/GetWidth in its parent's space and has no GetEffectiveScale of its
+-- own. Falling back to 1 for those would be the whole bug again, so the ratio
+-- walks up to the nearest frame that can answer.
+do
+    local SW_OWN = 1000
+    local win = source(SW_OWN, 700, own(CX), own(CY))
+    win:SetScale(S)
+    local WIN_RIGHT = up(SW_OWN) / 2
+    local row = source(260, 44, own(CX + 100), own(CY))
+    row:SetScale(S)
+
+    -- A bare region: no SetScale, no GetEffectiveScale, parented to the scaled
+    -- row. Built by hand rather than from FakeUIFrame, whose stubs answer
+    -- everything -- including the method whose ABSENCE is the case under test.
+    local TEX_W = 120
+    local TEX_RIGHT = WIN_RIGHT - 200
+    local tex = {
+        GetCenter = function() return own(CX + TEX_RIGHT) - TEX_W / 2, own(CY) end,
+        GetWidth  = function() return TEX_W end,
+        GetHeight = function() return 20 end,
+        GetParent = function() return row end,
+        IsShown   = function() return true end,
+    }
+    setmetatable(tex, { __index = function() return function() end end })
+
+    local p = popout({ key = "scaledtex", tetherSource = tex })
+    p.frame:SetFakeCenter(CX + WIN_RIGHT + DOCK_GAP + FRAME_W / 2, CY - FRAME_H / 6)
+    p:Follow(row, { outsideOf = win })
+    eq(p.beam.core._end.x, TEX_RIGHT,
+        "texregion: the beam lands on the texture's edge, measured at its PARENT's scale")
+    p:Close()
+end
+
+-- The clip gate is a comparison of two rects, and both of them are under the
+-- scaled window: a row inside the viewport keeps its chrome, one scrolled clear
+-- of it loses the lot.
+do
+    local win = source(1000, 700, own(CX), own(CY))
+    win:SetScale(S)
+    -- The viewport: the window less its title bar and padding, so a row can be
+    -- inside the WINDOW and outside the LIST -- the case clipTo exists for.
+    local sf = source(960, 560, own(CX), own(CY - 40))
+    sf:SetScale(S)
+    local row = source(260, 44, own(CX + 100), own(CY))
+    row:SetScale(S)
+
+    local p = popout({ key = "scaledclip" })
+    p:Follow(row, { outsideOf = win, clipTo = sf })
+    check(p.beam:IsShown(), "scaledclip: a row inside the viewport keeps its beam")
+
+    -- Scrolled off the top of the LIST while still inside the window: 340 own
+    -- units up puts the row clear of the 560-tall viewport and only just clear
+    -- of the 700-tall window, which is the stretch the window-only gate missed.
+    row:SetFakeCenter(own(CX + 100), own(CY - 40) + 340)
+    p:_UpdateBeam()
+    check(not p.beam:IsShown(), "scaledclip: scrolled out of the viewport takes it away again")
+    p:Close()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
