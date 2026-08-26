@@ -27,6 +27,43 @@ Media paths resolve inside the **embedding** addon
 (`Interface\AddOns\<YourAddon>\Libs\DandersUI\Media\`), so the `Media` folder has
 to travel with the copy.
 
+## Split loading
+
+The pack ships **two** manifests. `DandersUI.xml` is the base half — everything a
+running addon needs. `DandersUI_Options.xml` is the settings-panel half: surfaces
+only a settings window ever builds, so an addon that opens its panel on demand
+should not pay for them at login.
+
+```
+Libs\LibStub\LibStub.lua
+Libs\DandersUI\DandersUI.xml            <- the resident addon
+...
+Libs\DandersUI\DandersUI_Options.xml    <- the load-on-demand companion addon
+```
+
+The two are normally listed by **different addons**: the base half by the resident
+one, the options half by its `LoadOnDemand` companion. Each of them needs its own
+`Libs\DandersUI` copy (junction locally, real copy in CI via `Tools/sync-libs.sh`),
+because a TOC can only reference files inside its own addon folder. Listing both
+manifests in one addon also works and is the simpler case.
+
+`OptionsCore.lua` heads the options manifest and installs the `NS.__DandersUI`
+handshake for the files after it. Because it may load in an addon that never
+loaded `Core.lua`, it resolves the library through **LibStub** rather than the
+handshake, and falls back to `NS.__DandersUI` only for the same-addon case. If the
+base half is missing, or is a different revision, it prints one plain error and
+returns **without** setting the handshake — so every later file's
+`local UI = NS.__DandersUI; if not UI then return end` guard makes it inert
+instead of throwing per file. `UI.MEDIA` is left alone: it points inside whichever
+addon carries the base copy.
+
+☠ **`EXPECTED_MINOR` in `OptionsCore.lua` must track `MINOR` in `Core.lua`.** Any
+commit that bumps `MINOR` bumps `EXPECTED_MINOR` in the same commit. They are
+compared for **equality**, not "at least" — an options half paired with any other
+revision refuses to load, which is the point: LibStub hands the whole session to
+the highest-MINOR base copy, and a mismatched options half would build on
+surfaces that copy may not have.
+
 ## Getting a host
 
 Every consumer takes its own HOST rather than using the library directly, because
