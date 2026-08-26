@@ -288,6 +288,22 @@ panels coexist. The popout's content width is `UI.PopoutContentWidth` (260 — t
 settings-group inner width every factory is already built for, so widgets mount
 unchanged).
 
+**The row is a plate, and it says which one is open.** Every metric it draws with
+lives in `UI.PopoutRow` (Theme.lua) — a 44px plate in a 50px slot, the inner
+padding, the column gaps, the glyph sizes, the two type sizes and the state
+alphas — so the look is retuned there rather than inside the widget. At rest the
+plate is the kit's element fill inside the kit's element border, the same pair a
+dropdown wears; hovering brightens it. When the panel that is up is about THIS
+row, the plate wears the row's accent as its border plus a wash inside it, and
+the label takes the accent too — so a column of rows always shows which one the
+floating panel belongs to, including after a retarget glide, and including a row
+whose panel was pinned loose. Active is answered by walking the row's bound
+instances, not kept as a flag, so a pinned panel and the shared one can each
+light their own row. Toggled OFF outranks active on the label: a feature that is
+switched off has nothing to be the subject of. The count sits in a small pill of
+its own — darker fill, its own 1px border, fixed size — and a row with no
+declared count draws no pill while keeping the column.
+
 **Toggled off gates the pane.** When the row's toggle is off, every widget the
 build mounted into that row's pane greys and stops taking input — `SetEnabled(false)`
 where the widget has one, a dim to the same 0.4 where it does not — so a switched-off
@@ -323,7 +339,10 @@ walks the pane's direct children and cannot reach past a wrapper that answers no
 Returns the row frame with `.Refresh()` / `.refreshContent(db)` (the settings-group
 refresh path), `:SetEnabled(bool)` (an explicit call overrides `opts.enabled` from
 then on), `:SetAccent(c)` (re-tints the row and every panel it has open, pinned
-included), `:OpenPopout()`, `:ClosePopout(reason)` and `.popout`.
+included), `:OpenPopout()`, `:ClosePopout(reason)` and `.popout`. Its parts are
+`.plate` (the bordered surface everything else is anchored inside), `.checkButton`,
+`.label`, `.summary`, `.badgePill` / `.badge`, `.gear` and `.chevron`. Lay a column
+of them out at `UI.PopoutRow.slot` apart — `row.preferredHeight` already carries it.
 
 The close matrix is the consumer's to wire, through two host verbs:
 `host:CloseUnpinnedPopoutRows(reason)` (page switch — pinned panels survive) and
