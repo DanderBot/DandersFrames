@@ -1708,6 +1708,50 @@ function DF:DebugADAlphaHosts(unit)
         and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
     o:Field("slot-owner anchor", probe(slotHost), "NEUTRAL")
 
+    -- ★ WHAT THE ALPHAS ACTUALLY ARE, not merely whether a write is permitted. The
+    -- writability half answered "everything fine" while the fade was plainly broken, and I
+    -- then produced three contradictory theories from reading code instead of measuring.
+    -- ☠ THE TWO MODES TAKE DIFFERENT ROUTES, which is why one of them works:
+    --   whole-frame (oorEnabled off) -- the FRAME is faded and the alpha CASCADES to the
+    --     indicator. Nothing needs to write to an AD host at all. Field: works.
+    --   element (oorEnabled on) -- the frame is deliberately PINNED at base so each element
+    --     owns its own look, and the ONLY thing that fades AD is one write to the
+    --     slot-owner anchor. Field: does not work.
+    -- So the question was never "can we write". It is "what value did that one write leave,
+    -- and does it reach the icon" -- both readable, on DF-owned frames, for free.
+    local pdb = GetDB(frame)
+    o:Section("Alpha readings")
+    o:Line(string.format("mode: %s", (pdb and pdb.oorEnabled)
+        and "ELEMENT (per-element fades)" or "WHOLE-FRAME (cascade)"))
+    o:Line(string.format("configured AD out-of-range alpha: %s",
+        tostring((pdb and pdb.oorAuraDesignerAlpha) or 0.2)))
+    local function alphaOf(f, label)
+        if not f then o:Field(label, "absent", "NEUTRAL") return end
+        local okA, a = pcall(f.GetAlpha, f)
+        local okE, e = pcall(f.GetEffectiveAlpha, f)
+        o:Field(label, string.format("alpha=%s effective=%s",
+            okA and string.format("%.2f", a or 0) or "unreadable",
+            okE and string.format("%.2f", e or 0) or "n/a"), "NEUTRAL")
+    end
+    alphaOf(frame, "unit frame")
+    alphaOf(slotHost, "slot-owner anchor")
+    local astore = frame.dfADFactory
+    if astore then
+        for _, storeKey in ipairs(AD_STORE_KEYS) do
+            local t = astore[storeKey]
+            if t then
+                for entryKey, entry in pairs(t) do
+                    local h = entry and entry.handle
+                    local f = (h and h.GetAlphaHost) and h:GetAlphaHost() or nil
+                    if f then alphaOf(f, storeKey .. "/" .. tostring(entryKey)) end
+                end
+            end
+        end
+    end
+    o:Line("⚠ Compare the effective alphas against the configured value above. Anchor faded "
+        .. "but an indicator not = the cascade breaks between them. Anchor itself unfaded = "
+        .. "the one write that should have faded it never landed.", "NEUTRAL")
+
     local store = frame.dfADFactory
     if not store then
         o:Line("This frame has no Aura Designer factory store — nothing to probe.", "WARN")
