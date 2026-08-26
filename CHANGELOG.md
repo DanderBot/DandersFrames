@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### New Features
-- (Icons) Pings now show on frames. When a group member pings a player, the ping icon appears on that player's frame, matching the default raid frames. Find it under Indicators > Icons > Ping Icon, with the usual scale, position and hide-in-combat options.
+
 - (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon. It is the foundation for a shared positioning system across Danders addons — frame-to-frame snapping, anchoring elements to each other, undo/redo and save/discard. This release only includes the addon and its demo (`/mover demo`); DandersFrames' own frames move over to it in a later update.
 - (Frames) Party and raid frames can now be moved with DandersMover, including snapping them to and anchoring them onto other addons' elements.
 - (Frames) Pinned sets, the personal targeted-spells block and the targeted list can now be moved with DandersMover too, including anchoring a pinned set to any other element. Unlocking party frames shows only party movers, unlocking raid frames only raid movers (other addons' movers can be shown from the legend or DandersMover's settings), and a pinned set you had anchored to the frames through the Anchor To dropdown stays anchored.
@@ -12,19 +12,39 @@
 - (DandersMover) The element panel now reads as part of the mover it is editing — matching outlines on both and a short glowing line joining them — and slides across when you pick a different mover. Pin it and it detaches: it stops following your selection and carries on editing its own mover, which wears a marker so you can see which one the panel belongs to. Editing in a panel pins it automatically (there is a toggle for that under the mover's Editor settings), and its cross closes it. Clicking empty space no longer deselects, so the camera and the rest of your UI stay usable while movers are unlocked; Esc backs out a step at a time.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
 
+### Bug Fixes
+
+### Changes
+
+- The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
+
+## [5.3.1]
+
+### New Features
+
+* (Icons) Pings now show on frames. When a group member pings a player, the ping icon appears on that player's frame, matching the default raid frames. Find it under Indicators > Icons > Ping Icon, with the usual scale, position and hide-in-combat options.
 * (Tooltips) Every DF tooltip type now has its own **Show Out of Combat** and **Show In Combat** setting, each offering Show, Hold Shift, Hold Ctrl, Hold Alt or Hidden — so frame tooltips can, for example, appear only while holding Alt out of combat and never in combat. This replaces the Disable In Combat checkboxes for frame and binding tooltips; existing choices carry over. (by Krathe)
+* (Auto Layouts) Layouts can now be renamed. Click a layout's name to open its dialog, which now carries the name alongside the player range. (by Krathe)
 
 ### Bug Fixes
-- (Test Mode) Fix preview auras being left behind on your real party and raid frames after leaving test mode or locking frames, showing icons nobody actually has until a reload.
 
 * (Targeted Spells) The Targeted List drops a caster's bar the moment it dies — bars no longer linger for a second or two on dead mobs, and a cast with no cast time no longer shows a huge garbage countdown. (by Krathe)
 * (Targeted Spells) Personal targeted icons no longer shuffle sideways as casts start and expire: new casts join at the end, showing icons hold their place, and the row re-centres as icons come and go. Also fixes the Max Icons cap being able to hide the one cast that was actually aimed at you. (by Krathe)
 * (Tooltips) Fix a suppressed frame tooltip re-appearing a moment later, fix pet frame tooltips ignoring the tooltip settings entirely, and fix the tooltip flashing up when a modifier key is pressed while the mouse is already on a frame. (by Krathe)
+* (Raid Frames) Fix turning Use Group-Based Layout on or off silently re-orienting the raid, so rows stay rows and columns stay columns. (by Krathe)
+* (Auto Layouts) Fix a layout showing a false override on Growth Direction, with a mismatched global and a reset that applied the wrong orientation. (by Krathe)
+* (Dispel) Fix the dispel overlay staying dark on poisons for a Shaman carrying Poison Cleansing Totem. (by Krathe)
+* (Dispel) Fix "Only Dispellable by You" never lighting for bleeds on a Dwarf, whose Stoneform clears them. (by Krathe)
 * (Missing Buffs) Fix missing buff icons going stale and never coming back — most often after a raider walked out of range, and after a wipe. The icons stayed hidden until you re-buffed that player, a fight started, or you reloaded. (by Krathe)
+* (Test Mode) Fix preview auras being left behind on your real party and raid frames after leaving test mode or locking frames, showing icons nobody actually has until a reload.
+* (Test Mode) Leaving test mode no longer briefly freezes the game while frames return to their real auras.
 
 ### Changes
-- The settings-panel toolkit is now a shared library built into each Danders addon, so they all share one look and get fixes at the same time.
-- The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
+
+* (Resource Bar) The Size controls now rename themselves to match the bar's orientation, and a new **Adjust For Frame Border** option decides whether a matched bar tucks inside the frame border or spans the full health bar. (by Krathe)
+* (Defensive Icons) The stack count now uses the addon's own font at a smaller size, matching every other piece of DF text. Profiles that set their own font or scale keep it. (by Krathe)
+* (Debuffs) "Any Dispel Type" and "All Dispellable" were the same filter, so they are now one option. (by Krathe)
+* (Test Mode) The Defensives on/off is back in the test panel, alongside the count slider it drives. (by Krathe)
 
 ## [5.3.0]
 
