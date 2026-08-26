@@ -14,6 +14,8 @@
 
 ### Bug Fixes
 
+- (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
+
 ### Changes
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.

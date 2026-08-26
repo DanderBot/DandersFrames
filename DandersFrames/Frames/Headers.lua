@@ -555,6 +555,56 @@ local UnregisterStateDriver = UnregisterStateDriver
 -- ever executed it, and header positioning is done by the plain-Lua functions in this file.
 
 -- ============================================================
+-- UNIT MENU CLASSIFIER FIX
+-- 12.1 zoned-out raid member -> PET menu misclassification. Blizzard's
+-- SECURE_ACTIONS.togglemenu (SecureTemplates.lua) classifies the menu via a
+-- UnitIsUnit/UnitIsOtherPlayersBattlePet chain that runs BEFORE UnitIsPlayer,
+-- and its token special-cases cover party/boss/focus/arena but NOT raid. For a
+-- raid member whose unit data hasn't streamed (zoned elsewhere / out of range)
+-- those engine checks misfire and the chain resolves a PET-family menu
+-- (field capture: OTHERBATTLEPET, bug #1102). The default UI never runs this
+-- code path -- Blizzard frames resolve the menu type per frame -- so only
+-- togglemenu addons show it. Credit: Ellesmere (EllesmereUI) for the approach.
+--
+-- Fix: post-hook the opener. A PET-family menu opening for a raid/party token
+-- whose GUID is a Player is that exact misfire -- re-open the correct player
+-- menu. The correct `which` comes from the TOKEN, not unit APIs: identity
+-- reads (UnitInRaid & co) can be SECRET for exactly these unstreamed units.
+-- The re-open runs from this (tainted) hook, so protected items (Set Focus /
+-- Follow) can throw for THAT menu instance only -- the trade for not showing
+-- a pet menu on a player. Legitimate pet menus (unit "pet"/"partypetN"/
+-- "raidpetN") never match the signature. Installed lazily from frame init and
+-- the click-cast menu proxy; zero cost until a menu actually opens.
+-- ============================================================
+
+local menuClassifierHooked = false
+function DF:InstallUnitMenuClassifierFix()
+    if menuClassifierHooked or type(UnitPopup_OpenMenu) ~= "function" then return end
+    menuClassifierHooked = true
+    local reopening = false
+    hooksecurefunc("UnitPopup_OpenMenu", function(which, contextData)
+        if reopening then return end
+        if which ~= "PET" and which ~= "OTHERPET" and which ~= "OTHERBATTLEPET" then return end
+        local unit = contextData and contextData.unit
+        if type(unit) ~= "string" then return end
+        local lu = unit:lower()
+        local isRaidToken = lu:match("^raid[0-9]+$") ~= nil
+        if not isRaidToken and not lu:match("^party[0-9]+$") then return end
+        local guid = UnitGUID(unit)
+        if issecretvalue and issecretvalue(guid) then return end
+        if type(guid) ~= "string" or not guid:find("^Player%-") then return end
+        DF:Debug("HEADERS", "UnitMenuClassifierFix: %s menu opened for player token %s - reopening as %s",
+            which, unit, isRaidToken and "RAID_PLAYER" or "PARTY")
+        reopening = true
+        -- FRESH context table, never the inbound one: OpenMenu enriches its
+        -- contextData in place (playerLocation/accountInfo) and asserts those
+        -- fields are nil on entry -- re-passing the first open's table throws.
+        UnitPopup_OpenMenu(isRaidToken and "RAID_PLAYER" or "PARTY", { unit = unit })
+        reopening = false
+    end)
+end
+
+-- ============================================================
 -- HEADER CHILD INITIALIZATION
 -- Called from XML OnLoad when header creates a child frame
 -- ============================================================
@@ -625,6 +675,11 @@ function DF:InitializeHeaderChild(frame)
     -- basic click-to-target always works regardless of CC state or timing.
     frame:SetAttribute("type1", "target")
     frame:SetAttribute("type2", "togglemenu")
+
+    -- Any frame with a togglemenu right-click can hit the 12.1 pet-menu
+    -- misclassification; make sure the opener hook is in place (no-op after
+    -- the first call).
+    DF:InstallUnitMenuClassifierFix()
     
     -- Register for ping system (makes frames pingable)
     DF:RegisterFrameForPing(frame)
