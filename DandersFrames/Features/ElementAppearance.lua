@@ -1807,6 +1807,34 @@ function DF:DebugADAlphaHosts(unit)
         .. "inRange=false and the anchor still 1.00 => the write itself was rejected.",
         "NEUTRAL")
 
+    -- ☠☠ THE DECIDING EXPERIMENT, because the readings above can all look right while the
+    -- fade is still wrong: pass ran, saw out-of-range, nothing refused, anchor still 1.00.
+    -- Every explanation left standing is about WHEN the write happened, not whether it
+    -- can. So do it now and read the result back.
+    --   anchor goes to the configured alpha => the mechanism works, and the live failure is
+    --     that the write did not happen at the moment it needed to (the AD pass runs on a
+    --     range EDGE, and GetSlotOwnerAlphaHost returns nil until the owner is stood up --
+    --     if the anchor did not exist on that edge the block is skipped silently, queues
+    --     nothing, and nothing retries until the next transition).
+    --   anchor stays at 1.00 => the write executes and does nothing, which is the
+    --     engine-owns-the-alpha case we already hit on the dispel overlay, and the fade has
+    --     to ride a DF dim frame instead.
+    -- ⚠ This WRITES. It is a diagnostic that changes state on purpose, and it will fix the
+    -- frame in front of you as a side effect — which is itself the answer.
+    if slotHost then
+        local oorAlpha = (pdb and pdb.oorAuraDesignerAlpha) or 0.2
+        local okForce = pcall(ApplyOORAlpha, slotHost, frame.dfInRange, 1.0, oorAlpha)
+        local okRead, after = pcall(slotHost.GetAlpha, slotHost)
+        o:Section("Forced write")
+        o:Line(string.format("wrote via ApplyOORAlpha: %s   anchor now: %s",
+            okForce and "accepted" or "REFUSED",
+            okRead and string.format("%.2f", after or 0) or "unreadable"),
+            (okForce and okRead and after and after < 0.99) and "GOOD" or "BAD")
+        o:Line("Faded now => timing, not writability: the write never ran on the range edge. "
+            .. "Still 1.00 => the setter executes and does nothing, and the fade needs a "
+            .. "DF-owned dim layer instead.", "NEUTRAL")
+    end
+
     local store = frame.dfADFactory
     if not store then
         o:Line("This frame has no Aura Designer factory store — nothing to probe.", "WARN")
