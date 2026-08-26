@@ -1055,7 +1055,7 @@ end
 -- editing profile's mode, and this function just names it with the widget's own map.
 -- ⚠ ONE resolver for both call sites below on purpose: they format identically, and
 -- fixing the class in one and not its sibling is a standing failure mode in this file.
-local function ResolveGlobalDisplay(self, globalValue, getGlobal)
+local function ResolveGlobalDisplay(self, globalValue)
     if type(globalValue) == "boolean" then
         return globalValue and L["Yes"] or L["No"]
     elseif type(globalValue) == "number" then
@@ -1162,7 +1162,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
 
             local getGlobal = function(k) return AutoProfilesUI:GetRuntimeGlobalValue(k) end
             local globalValue = getGlobal(dbKey)
-            local globalDisplay = ResolveGlobalDisplay(self, globalValue, getGlobal)
+            local globalDisplay = ResolveGlobalDisplay(self, globalValue)
 
             self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
             self.overrideGlobalText:ClearAllPoints()
@@ -1188,7 +1188,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
             self.overrideResetBtn:Hide()
         end
 
-        local globalDisplay = ResolveGlobalDisplay(self, globalValue, getGlobal)
+        local globalDisplay = ResolveGlobalDisplay(self, globalValue)
 
         -- Show global value inline with label
         self.overrideGlobalText:SetText(string.format(L["(Global: %s)"], globalDisplay))
