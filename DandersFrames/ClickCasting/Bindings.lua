@@ -49,6 +49,9 @@ end
 -- targeting keeps working at any range. Returns nil if we're in combat.
 local proxyCount = 0
 function CC:EnsureClickProxy(frame)
+    -- The proxy's togglemenu runs Blizzard's misclassifying menu resolver too;
+    -- ensure the pet-menu classifier fix is hooked (no-op after first call).
+    DF:InstallUnitMenuClassifierFix()
     if frame.dfClickProxy then return frame.dfClickProxy end
     -- Returns nil by contract (caller falls back to the @mouseover path);
     -- the proxy is created on the next out-of-combat binding pass.
