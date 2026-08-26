@@ -866,10 +866,18 @@ function DF:InitializeHeaderChild(frame)
                 -- handles all unit events and dispatches via unitFrameMap[unit].
             end
             
-            -- Trigger a comprehensive update for the frame
-            if actualUnit then
+            -- Trigger a comprehensive update for the frame. Coalesced per
+            -- frame: a join burst can reassign the same child several times
+            -- in one render frame (each header update re-sorts), and each
+            -- reassignment queued its own identical FullFrameRefresh for the
+            -- next tick. One flag, cleared when the timer runs, keeps it to
+            -- one repaint per child per burst — the repaint reads self.unit
+            -- at fire time, so it always paints the FINAL unit of the burst.
+            if actualUnit and not self._dfFullRefreshQueued then
+                self._dfFullRefreshQueued = true
 
                 C_Timer.After(0, function()
+                    self._dfFullRefreshQueued = nil
                     if self:IsVisible() and self.unit then
                         -- Use full frame refresh for complete update
                         if DF.FullFrameRefresh then
