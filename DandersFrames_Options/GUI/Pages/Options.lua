@@ -1574,6 +1574,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         appearanceGroup:AddWidget(GUI:CreateLabel(self.child,
             L["Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those."],
             260), 60)
+
+        -- Classic-layout fallback for the settings redesign. Account-level and
+        -- stored at the ROOT of the SavedVariable, so it takes the get/set form of
+        -- the factory rather than a (dbTable, key) pair — same shape the Blizzard /
+        -- minimap toggles above use for their non-db storage. No overrideKey: this
+        -- is not a profile setting, so it has no auto-profile override to indicate.
+        --
+        -- ⚠ TEMPORARY. Remove this control (and DF:IsClassicSettingsLayout) once the
+        -- popout redesign is finished.
+        local classicCheck = appearanceGroup:AddWidget(GUI:CreateCheckbox(
+            self.child, L["Use classic settings layout"],
+            nil, nil,
+            function()
+                -- Every page picks its container at BUILD time, so a page already
+                -- built in the other mode would re-show with stale layout. Drop every
+                -- page's build cache, then rebuild the one on screen right now.
+                if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
+                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+            end,
+            function() return DF:IsClassicSettingsLayout() end,
+            function(val) DF:SetClassicSettingsLayout(val) end
+        ), 30)
+        classicCheck.tooltip = L["Show settings groups in the old inline layout instead of the new popout rows. A temporary aid while the redesign settles in — this option will be removed in a later update."]
+
         Add(appearanceGroup, nil, 2)
 
         -- ===== LANGUAGE GROUP (Column 2, Bottom) =====
