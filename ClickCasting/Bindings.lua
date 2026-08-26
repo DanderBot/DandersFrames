@@ -2026,14 +2026,38 @@ function CC:BuildMacroTextForBinding(binding, forGlobalBinding)
         -- Bindings store the spell name from the language the client was using at
         -- creation time.  We must re-resolve via spell ID so the macro contains
         -- the name WoW's parser expects on the current client language.
-        -- IMPORTANT: Always use the BASE spell name, never the override name.
-        -- WoW's /cast command is override-aware and will automatically resolve
-        -- base spells to their current form (e.g. /cast Flash of Light will cast
-        -- Benediction when the proc is active). Using the override name in the
-        -- macro causes "spell not learned" errors when the proc expires.
+        --
+        -- Override handling — two distinct cases:
+        --   1. Proc-style override (e.g. Flash of Light -> Benediction): the
+        --      base is permanently in the spellbook; the override is transient.
+        --      Keep the BASE name — /cast resolves the proc at click time, and
+        --      using the override name would cause "spell not learned" errors
+        --      when the proc expires.
+        --   2. Spec-replacement override (e.g. Remove Corruption -> Nature's
+        --      Cure for Resto Druid): the base is NOT directly castable in this
+        --      spec; only the override is in the spellbook. Use the OVERRIDE
+        --      name — /cast on the base name would fail to resolve.
+        --
+        -- Distinguish via IsSpellInSpellBook(includeOverrides=false): if the
+        -- base is directly in the book, it's proc-style; if not, it's a spec
+        -- replacement. This matches what IsSpellKnownByName already does at
+        -- bind-time, applied here at macro-build-time too. ApplyBindings is
+        -- called on ACTIVE_PLAYER_SPECIALIZATION_CHANGED / TRAIT_CONFIG_UPDATED
+        -- so the macro is regenerated when the resolution would change.
         local spellName = binding.spellName
         if binding.spellId then
-            local localizedName = GetLocalizedSpellName(binding.spellId)
+            local resolvedId = binding.spellId
+            if C_Spell.GetOverrideSpell and C_SpellBook and C_SpellBook.IsSpellInSpellBook then
+                local baseInBookDirect = C_SpellBook.IsSpellInSpellBook(
+                    binding.spellId, Enum.SpellBookSpellBank.Player, false)
+                if not baseInBookDirect then
+                    local overrideId = C_Spell.GetOverrideSpell(binding.spellId)
+                    if overrideId and overrideId ~= binding.spellId then
+                        resolvedId = overrideId
+                    end
+                end
+            end
+            local localizedName = GetLocalizedSpellName(resolvedId)
             if localizedName then
                 spellName = localizedName
             end
