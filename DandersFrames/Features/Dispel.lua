@@ -2707,6 +2707,15 @@ function DF:DriveDispelOverlayFactory(frame, db)
         -- one button each time (AddAuraSlot is add-only). ApplyTuning routes overlay mode
         -- through the live slot-side setters, carries its own combat deferral, and rebuilds
         -- itself under test mode. Records carry onInit — see dispelFilterRecords.
+        -- "I changed a setting and nothing happened" is always answered by WHICH SIG MOVED,
+        -- and this row had no such line at all. It is the proof for the dispel-type map fix:
+        -- on a frame whose self-ness flips (own frame <-> someone else's) the map differs
+        -- while key set and filter strings do not, so before that fix NEITHER sig moved and
+        -- this branch was never reached. Seeing a TUNE here on that transition IS the fix
+        -- working; seeing none means the plan and the signature have drifted apart again.
+        DF:Debug("DISPEL", "overlay: TUNE unit=%s self=%s  %s -> %s",
+            tostring(frame.unit), tostring(isSelf),
+            tostring(frame.dispelFactoryTuneSig), tostring(tuneSig))
         frame.dispelFactoryTuneSig = tuneSig
         h:ApplyTuning({ filter = dispelFilterRecords(slots, db, frame) })
         -- Fall through: the unit upkeep and style pass below still apply.
