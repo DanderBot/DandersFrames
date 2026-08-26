@@ -43,7 +43,14 @@ local Fx = UI.Fx
 -- height is TITLE_H + PAD + content + PAD, and a consumer sizing a fixed panel
 -- has to be able to work that out without reading this file.
 local PAD        = UI.PopoutPad          -- outer inset around the content
-local TITLE_H    = UI.PopoutTitleHeight  -- the title bar strip
+local TITLE_H    = UI.PopoutTitleHeight  -- the title bar strip, top pad included
+local TITLE      = UI.PopoutTitle        -- topPad / row / fill / sepAlpha
+-- The strip is TALLER than the row it holds: the top pad is margin, not part of
+-- the row. Everything in the row therefore hangs half a top-pad BELOW the bar's
+-- own centre, which is what puts it centred in the region under that margin.
+-- One number, applied to the two anchors that actually reach the bar (the icon
+-- on the left, the cross on the right); everything else chains off those.
+local TITLE_DY   = -TITLE.topPad / 2
 -- The title bar's INTERNAL composition, which nothing outside can use and so
 -- stays here. HDR_EDGE is the cross's inset from the bar's right edge, HDR_GAP
 -- the gap between two adjacent glyph buttons, and TITLE_GAP the wider air either
@@ -1344,9 +1351,38 @@ function UI:CreatePopout(opts)
     bar:SetHeight(TITLE_H)
     po.titleBar = bar
 
+    -- WHERE THE CHROME STOPS AND THE BODY STARTS, said out loud rather than left
+    -- to the spacing: a slightly raised fill over the strip, and a hairline under
+    -- it. Both are drawn on the FRAME, not on the bar -- the bar is a CHILD, and
+    -- a child's textures draw above every layer of its parent, so a fill anchored
+    -- to the bar would paint straight over the popout's accent border along the
+    -- top and the two upper corners. On the frame at a sublevel BELOW the border
+    -- (which lives at ARTWORK 7, see ApplyPixelBorder) the border wins the edges
+    -- and the strip runs the full width underneath it, which is what makes the
+    -- separator meet both side borders instead of stopping short of them.
+    local titleFill = f:CreateTexture(nil, "ARTWORK", nil, 1)
+    titleFill:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    titleFill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+    local fillC = UI.Colors and UI.Colors.panel
+    if fillC then titleFill:SetColorTexture(fillC.r, fillC.g, fillC.b, TITLE.fill) end
+    po.titleFill = titleFill
+
+    -- ONE unit tall, not the pixel border's two device pixels. That doctrine
+    -- (see Theme.lua's PIXEL BORDER) is about an edge crossing the device grid
+    -- while its content SCROLLS -- this line is static inside a panel that never
+    -- scrolls, and the kit's other in-surface separator (the dropdown menu's
+    -- group rule) is drawn exactly this way. Matching it keeps the two one idiom.
+    local titleSep = f:CreateTexture(nil, "ARTWORK", nil, 2)
+    titleSep:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+    titleSep:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+    titleSep:SetHeight(1)
+    local sepC = UI.Colors and UI.Colors.border
+    if sepC then titleSep:SetColorTexture(sepC.r, sepC.g, sepC.b, TITLE.sepAlpha) end
+    po.titleSep = titleSep
+
     local iconTex = f:CreateTexture(nil, "OVERLAY")
     iconTex:SetSize(ICON_SIZE, ICON_SIZE)
-    iconTex:SetPoint("LEFT", bar, "LEFT", PAD, 0)
+    iconTex:SetPoint("LEFT", bar, "LEFT", PAD, TITLE_DY)
     iconTex:Hide()
     po.iconTex = iconTex
 
@@ -1354,7 +1390,7 @@ function UI:CreatePopout(opts)
         size = CLOSE_SIZE,
         onClick = function() po:Close("cross") end,
     })
-    po.closeBtn:SetPoint("RIGHT", bar, "RIGHT", -HDR_EDGE, 0)
+    po.closeBtn:SetPoint("RIGHT", bar, "RIGHT", -HDR_EDGE, TITLE_DY)
 
     if po.pinnable then
         po.pinBtn = host:CreateGlyphButton(f, {

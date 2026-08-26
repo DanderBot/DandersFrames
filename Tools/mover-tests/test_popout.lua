@@ -21,14 +21,20 @@ local NS = ...
 local UI = NS.__DandersUI
 
 UI.MEDIA = ""
-UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5, b = 0.5 } }
+-- panel/border are the title strip's two tokens: the raised fill over the body
+-- and the hairline under the bar.
+UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5, b = 0.5 },
+              panel = { r = 0.12, g = 0.12, b = 0.12 }, border = { r = 0.25, g = 0.25, b = 0.25 } }
 
 -- ---- Theme.lua metrics --------------------------------------------
 -- Mirrors of the real values, for the reason test_popout_row.lua spells out at
 -- its own copy: Theme.lua is not loadable headless (it wants GetPhysicalScreenSize,
 -- Mixin and BackdropTemplateMixin), and Popout.lua reads both of these at FILE
 -- SCOPE -- so they have to be here before the load at the foot of this block.
-UI.PopoutTitleHeight = UI.PopoutTitleHeight or 28
+-- Mirrored whole, and PopoutTitleHeight DERIVED from it exactly as Theme.lua
+-- derives it, so a retune of the strip cannot leave the two disagreeing here.
+UI.PopoutTitle = UI.PopoutTitle or { topPad = 6, row = 28, fill = 0.9, sepAlpha = 0.8 }
+UI.PopoutTitleHeight = UI.PopoutTitleHeight or (UI.PopoutTitle.topPad + UI.PopoutTitle.row)
 UI.PopoutPad = UI.PopoutPad or 10
 
 local ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
@@ -746,11 +752,55 @@ end
 -- is a deliberate one, made in one place), the tallest control in it clears both
 -- edges, and the content below is inset by the same PAD on both sides of the
 -- panel rather than hugging the bar with double the slack underneath.
+--
+-- ...and the second half of the same complaint, which the height alone did not
+-- answer: the row was centred in the WHOLE strip, so the caption was as close to
+-- the panel's accent border as it was to the content, and nothing but the
+-- spacing said where the chrome stopped. Now the strip carries a top MARGIN, a
+-- raised fill and a hairline under it -- so the claims below are also that the
+-- row hangs under that margin rather than being centred through it, and that the
+-- separator exists and is drawn in the border tone.
 do
     local p = popout({ key = "titlebar" })
     eq(p.titleBar:GetHeight(), UI.PopoutTitleHeight, "titlebar: its height is the theme's, not a literal")
-    local clearance = (UI.PopoutTitleHeight - p.closeBtn:GetHeight()) / 2
-    check(clearance >= 4, "titlebar: the tallest control in it clears both edges")
+    eq(UI.PopoutTitleHeight, UI.PopoutTitle.topPad + UI.PopoutTitle.row,
+        "titlebar: the published height is the top pad plus the row, not a second literal")
+    check(UI.PopoutTitle.topPad > 0, "titlebar: the strip has real air above its row")
+
+    -- The clearance the row actually gets, measured in the region UNDER the top
+    -- margin -- not across the whole strip, which would count the margin twice
+    -- and pass however badly the row was centred.
+    local clearance = (UI.PopoutTitle.row - p.closeBtn:GetHeight()) / 2
+    check(clearance >= 4, "titlebar: the tallest control in it clears both edges of the row")
+
+    -- Both offsets of an anchor against a given relative frame. Read off the
+    -- recorded anchors, because the stub resolves none of them.
+    local function offsetOf(region, rel)
+        for _, pt in ipairs(region._points) do
+            if pt[2] == rel then return pt[4], pt[5] end
+        end
+    end
+
+    -- The row hangs half a top-pad below the bar's own centre, which is what
+    -- centres it in that region rather than in the strip.
+    eq(select(2, offsetOf(p.closeBtn, p.titleBar)), -UI.PopoutTitle.topPad / 2,
+        "titlebar: the cross sits centred under the top margin, not through it")
+    eq(select(2, offsetOf(p.iconTex, p.titleBar)), -UI.PopoutTitle.topPad / 2,
+        "titlebar: ...and so does the icon the caption chains off")
+
+    -- THE SEPARATION, said in ink rather than in spacing. Both pieces are on the
+    -- FRAME, not on the bar: a texture on the bar (a child) would draw over the
+    -- popout's own accent border along the top and the upper corners.
+    check(p.titleSep ~= nil, "titlebar: there is a separator under the bar")
+    eq(p.titleSep:GetHeight(), 1, "titlebar: ...drawn as a hairline")
+    eq(p.titleSep._color.r, UI.Colors.border.r, "titlebar: ...in the border tone")
+    eq(p.titleSep._color.a, UI.PopoutTitle.sepAlpha, "titlebar: ...at the theme's separator weight")
+    local sepPts = p.titleSep._points
+    eq(sepPts[1][1], "BOTTOMLEFT", "titlebar: the separator starts at the bar's bottom-left")
+    eq(sepPts[2][1], "BOTTOMRIGHT", "titlebar: ...and runs the full width to its bottom-right")
+    check(p.titleFill ~= nil, "titlebar: the strip carries its own raised fill")
+    eq(p.titleFill._color.r, UI.Colors.panel.r, "titlebar: ...in the kit's panel tone over the body")
+    eq(p.titleFill._color.a, UI.PopoutTitle.fill, "titlebar: ...at the theme's strip alpha")
 
     -- The frame's box model, stated as the arithmetic the consumer is promised.
     eq(p.frame:GetHeight(), UI.PopoutTitleHeight + UI.PopoutPad + 50 + UI.PopoutPad,
@@ -760,14 +810,8 @@ do
     eq(cpt[3], -(UI.PopoutTitleHeight + UI.PopoutPad),
         "titlebar: ...and hangs a PAD BELOW the bar rather than flush against it")
 
-    -- The gaps across the button cluster. Read off the recorded anchors, because
-    -- the stub resolves none of them -- what is being asserted is that no gap in
-    -- the row is one of the old 2/4px ones.
-    local function offsetOf(region, rel)
-        for _, pt in ipairs(region._points) do
-            if pt[2] == rel then return pt[4] end
-        end
-    end
+    -- The gaps across the button cluster -- what is being asserted is that no gap
+    -- in the row is one of the old 2/4px ones.
     check(-offsetOf(p.closeBtn, p.titleBar) >= 6, "titlebar: the cross stands off the bar's right edge")
     check(-offsetOf(p.pinBtn, p.closeBtn) >= 6, "titlebar: the pin is not jammed against the cross")
     check(-offsetOf(p.titleFS, p.pinBtn) >= 8, "titlebar: and the caption stops clear of the pin")

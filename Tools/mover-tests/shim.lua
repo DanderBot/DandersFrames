@@ -104,6 +104,10 @@ function FakeUIFrame(w, h, cx, cy)
     function f:HookScript(name, fn) self._scripts[name] = fn end
     function f:GetScript(name) return self._scripts[name] end
     function f:SetVertexColor(r, g, b, a) self._vertex = { r = r, g = g, b = b, a = a } end
+    -- Recorded for the same reason FakeLine records it: a flat-colour texture is
+    -- only observable as the colour it was handed (the popout's title strip and
+    -- the hairline under it are both one of these).
+    function f:SetColorTexture(r, g, b, a) self._color = { r = r, g = g, b = b, a = a } end
     function f:SetTexture(path) self._texture = path return true end
     function f:GetTexture() return self._texture end
     function f:SetText(t) self._text = t or "" end
