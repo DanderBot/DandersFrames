@@ -1569,6 +1569,34 @@ local function dispelFactoryPlanAndSig(db, selfOnly)
     for i = 1, #slots do
         st[#st + 1] = slots[i].key                             -- key set: structural
         tu[#tu + 1] = slots[i].key .. "=" .. slots[i].filter    -- string: tunable
+        -- ☠☠ THE DISPEL-TYPE MAP IS TUNABLE STATE AND IT WAS IN NEITHER SIGNATURE.
+        -- Field report (tRp, resto shaman DWARF, v5.3.1): "bleeds are now shown with dispel
+        -- overlay on other players (which are not dwarf) when being a dwarf".
+        -- Cause: for a dwarf shaman the gap slot exists in BOTH plans — own frame and
+        -- everyone else's — with the SAME key and the SAME filter string
+        -- ("HARMFUL|!RAID_PLAYER_DISPELLABLE"). Only includeDispelTypes differs:
+        -- {Poison,Bleed} on self, {Poison} elsewhere. With the map absent from both sigs
+        -- the struct sig matched (no rebuild) AND the tuning sig matched (no re-tune), so
+        -- the container silently kept whatever map it was first built with. A frame built
+        -- while driving the player then carried Bleed for the rest of the session — and
+        -- header children get reassigned to other units by roster churn, which is how a
+        -- self-only repair ended up lighting bleeds on the whole raid.
+        -- ⚠ The dfDispelSelf latch added with that repair was necessary but NOT sufficient:
+        -- it forces a re-PLAN on the self/non-self edge, and the re-plan then produced
+        -- identical signatures, so nothing was ever applied. Recomputing is not applying.
+        -- TUNING, not structural: SetAuraSlotCandidateFilters is a live mutator, so this
+        -- re-pushes in place with no teardown (and no stranded buttons — AddAuraSlot is
+        -- add-only).
+        local scf = slots[i].candidateFilters
+        local idt = scf and scf.includeDispelTypes
+        if idt then
+            -- Sorted, so the same set always serialises identically — an unordered pairs()
+            -- walk would move the signature at random and re-tune every drive.
+            local types = {}
+            for k in pairs(idt) do types[#types + 1] = tostring(k) end
+            table.sort(types)
+            tu[#tu + 1] = slots[i].key .. ":idt=" .. table.concat(types, ",")
+        end
         -- ROLES are structural: the carriers a slot builds are created + bound ONCE in
         -- the secure init, so toggling the ring / gradient / EDGE strips must rebuild.
         -- They used to be separate slot keys (and so rode the loop above); now that one
