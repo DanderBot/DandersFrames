@@ -3366,6 +3366,19 @@ eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 eventFrame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+-- ☠ THE PLAYER'S OWN DEAD STATE IS A FILTER INPUT, so it needs events like any other.
+-- Blizzard's "RAID" aura filter means "harmful auras THE PLAYER CAN DISPEL"
+-- (AuraUtil.AuraFilters), so it matches nothing while you are dead or a ghost — and the
+-- debuff row's category records keep themselves mutually exclusive by NEGATING it
+-- (`|!RAID`). Dead, that negation subtracts nothing, several records claim the same
+-- debuff at once, and groups do not dedupe against each other: the row renders
+-- duplicates, overlapping, past the Max Debuffs cap. Field-reported by Krathe with a
+-- screenshot of the same debuff drawn twice side by side.
+-- All three, not just PLAYER_DEAD: ALIVE fires on a resurrect in place, UNGHOST on
+-- running back. Missing either half leaves the row stuck in its dead-state shape.
+eventFrame:RegisterEvent("PLAYER_DEAD")
+eventFrame:RegisterEvent("PLAYER_ALIVE")
+eventFrame:RegisterEvent("PLAYER_UNGHOST")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")  -- Fires when spec changes
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")  -- Fires when talents change
 eventFrame:RegisterEvent("UNIT_PET")  -- Fires when a pet is summoned/dismissed
@@ -7823,6 +7836,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- saved flag DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left
         -- alone (stripping saved keys is a separate call).
 
+    elseif event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
+        -- ☠ READ THE UNIT, DO NOT INFER FROM THE EVENT NAME. PLAYER_ALIVE fires both on a
+        -- real resurrect AND on releasing to a graveyard (you become a ghost, which is
+        -- still "dead" for every capability filter). Deriving the state from the event
+        -- would set it to alive at exactly the moment it is least true.
+        if DF.SetPlayerDeadState then DF:SetPlayerDeadState(UnitIsDeadOrGhost("player")) end
+        return
+
     elseif event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Core.lua:GROUP_ROSTER_UPDATE") end
 
@@ -7897,6 +7918,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- left it nil until that fight ended — and every "Hide in Combat" icon reads
         -- it, so they would all sit visible for the rest of the pull.
         DF.playerInCombat = UnitAffectingCombat("player") and true or false
+
+        -- Same reasoning for the tracked dead state: PLAYER_DEAD/ALIVE/UNGHOST are the
+        -- only writers, so a /reload while dead (or releasing and running back through a
+        -- zone change) would leave it nil and the debuff row in its ALIVE shape while the
+        -- engine was filtering in its DEAD one -- the exact mismatch this state exists to
+        -- close. Seed it here, then let the transitions own it.
+        if DF.SetPlayerDeadState then DF:SetPlayerDeadState(UnitIsDeadOrGhost("player")) end
 
         -- ☠ ARENA PET ENTRY POINT. See the RegisterEvent comment: ProcessRosterUpdate
         -- returns in its arena branch long before the pet dispatch, so without this

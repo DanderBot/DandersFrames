@@ -473,6 +473,20 @@ local function BuildDirectDebuffFilters(db, claimed)
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
         -- "RAID" is negatable (only INCLUDE_NAME_PLATE_ONLY and MAW are not —
         -- AuraUtil.AuraFilters / IsValidFilterString).
+        --
+        -- ⚠ 2026-08-26: this line briefly dropped the negation while the player was dead
+        -- (c46e4771, reverted here). Blizzard's comment on the token is "harmful auras THE
+        -- PLAYER CAN DISPEL", and the guess was that a dead player therefore matches
+        -- nothing, so the records deduping against it had to stop at the same moment.
+        -- ☠ THE GUESS WAS UNVERIFIED AND MAY BE BACKWARDS. The token is evaluated
+        -- engine-side (C_UnitAuras.IsAuraFilteredOutByInstanceID) and is not readable from
+        -- the Lua dump, so "empties" and "fails open" are equally consistent with the
+        -- source — and only ONE of this row's records negates RAID for a typical config
+        -- (nonplayer), which makes the empties case a straight TRANSFER that cannot add
+        -- icons. The field report is that dying ADDS them. Do not re-apply either
+        -- direction without a capture: /dfauras now prints the per-group counts
+        -- (raid=N nonplayer=N) beside the player's dead state, and running it once alive
+        -- and once dead on the same unit distinguishes the two outright.
         if excludeRaid and raidOn then s = s .. "|!RAID" end
         return s
     end
@@ -2756,6 +2770,28 @@ function DF:DriveDebuffFactory(frame, db)
 end
 
 -- ============================================================
+-- PLAYER DEAD STATE (tracked, diagnostic)
+-- ============================================================
+-- Written ONLY by PLAYER_DEAD / PLAYER_ALIVE / PLAYER_UNGHOST and seeded at
+-- PLAYER_ENTERING_WORLD (Core.lua) — the DF.playerInCombat convention, and never a raw
+-- UnitIsDeadOrGhost read at the point of use, which would be right only on whichever pass
+-- happened to follow the transition.
+--
+-- ⚠ NOTHING ACTS ON THIS TODAY, ON PURPOSE, and that is not an oversight to tidy away.
+-- The filter change that did act on it rested on an unverified reading of Blizzard's RAID
+-- token and was reverted before it shipped — see neg() in BuildDirectDebuffFilters for
+-- what is and is not known. The state stays because /dfauras prints it: a field report of
+-- a debuff row misbehaving *only while the reporter is dead* needs the death edge stamped
+-- on the dump, or every capture has to be taken twice to mean anything.
+-- Give it a consumer again only once a log says which way the token actually moves.
+function DF:SetPlayerDeadState(dead)
+    dead = dead and true or false
+    if DF.playerIsDead == dead then return end
+    DF.playerIsDead = dead
+    DF:Debug("AURAROW", "player dead state -> %s", tostring(dead))
+end
+
+-- ============================================================
 -- DEFENSIVE-ICON FACTORY BRIDGE (pilot — first non-buff consumer)
 -- Routes the defensive row through DF.AuraContainer on 12.1 using the native
 -- BIG_DEFENSIVE / EXTERNAL_DEFENSIVE filters. Reuses the buff bridge's config SHAPE
@@ -4279,6 +4315,23 @@ end
 -- Render one container handle's live config. `h.config.filter` is the same
 -- value normalizeFilters() consumes, so this prints the groups Blizzard is
 -- actually being asked to build.
+-- How many frames a group is CURRENTLY using, straight from the engine
+-- (CustomAuraContainerSharedMixin:GetAuraGroupFrameCount -> the group's frame provider).
+-- ★ This is the number the eye sees, and it is the one thing no amount of reading the
+-- config can tell you: config.max is what each group is ALLOWED, this is what it TOOK.
+-- Blizzard models a non-existent group as an empty one, so an unknown key answers 0
+-- rather than throwing — safe to ask for every record including slot-mode ones.
+-- ⚠ pcall'd and secrecy-checked anyway: a count derived from a secret aura set could
+-- become secret, and tostring on a secret makes the whole output line VANISH.
+local function groupFrameCount(h, key)
+    local c = h.backend and h.backend.container
+    if not c or not c.GetAuraGroupFrameCount then return nil end
+    local ok, n = pcall(c.GetAuraGroupFrameCount, c, key)
+    if not ok then return nil end
+    if issecretvalue and issecretvalue(n) then return "secret" end
+    return n
+end
+
 local function dumpRow(o, label, h)
     if not h then
         o:Section(label)
@@ -4306,21 +4359,43 @@ local function dumpRow(o, label, h)
         tostring(cfg.max),
         tostring(sort and sort.method or "default"),
         tostring(sort and sort.direction or "Normal")))
+    -- ☠ max IS PER GROUP, NOT PER ROW. Blizzard caps at AddAuraGroup/
+    -- SetAuraGroupMaxFrameCount, so a row built from N filter records can render up to
+    -- N x max. The per-group counts below plus the TOTAL are the only way to see that
+    -- happening — and the only way to tell "one group overfilled" apart from "the same
+    -- aura landed in two groups", which look identical on screen.
+    -- The player's own dead state rides along because it changes what the ENGINE
+    -- matches: "RAID" means "harmful auras the player can dispel", and the identity gate
+    -- flips which candidate filters are applicable on harmful auras
+    -- (isHarmful and UnitCanAssist -> filters NOT applied). Run this alive and dead on
+    -- the same unit and diff the two dumps; that pair is the whole diagnosis.
+    o:Line(format("player: dead=%s  (RAID token and harmful spell-ID filters both move with this)",
+        tostring(DF.playerIsDead)))
 
     local filter = cfg.filter
     if type(filter) == "string" then
-        pr(o, "group 1: %s", filter)
+        local n = groupFrameCount(h, "df1")
+        pr(o, "group 1: %s   showing=%s", filter, tostring(n))
         return
     elseif type(filter) ~= "table" then
         pr(o, "filter: %s (unexpected type)", tostring(filter))
         return
     end
 
+    local total, counted = 0, true
     for i, f in ipairs(filter) do
         local str, key, cf
         if type(f) == "string" then str = f
         elseif type(f) == "table" then str, key, cf = f.filter, f.key, f.candidateFilters end
-        pr(o, "group %d%s: %s", i, key and (" [" .. tostring(key) .. "]") or "", tostring(str))
+        -- Mirror the build's own key derivation (`rec.key or "df"..i`), or the count
+        -- would be asked for a key the container never registered and answer 0.
+        -- `shown`, not `n`: the candidateFilters block below declares its own `n` for map
+        -- sizes, and two counts one nested inside the other is exactly how a dump starts
+        -- reporting the wrong number.
+        local shown = groupFrameCount(h, key or ("df" .. i))
+        if type(shown) == "number" then total = total + shown else counted = false end
+        pr(o, "group %d%s: %s   showing=%s", i, key and (" [" .. tostring(key) .. "]") or "",
+            tostring(str), tostring(shown))
         if cf then
             for _, ck in ipairs({ "isBossAura", "isRoleAura", "isBossOrRoleAura", "isPriorityAura",
                                   "isStealable", "canApplyAura", "isFromPlayerOrPlayerPet", "maxDuration" }) do
@@ -4335,6 +4410,20 @@ local function dumpRow(o, label, h)
                 end
             end
         end
+    end
+
+    -- THE LINE THIS WHOLE DUMP EXISTS FOR: what the row is allowed vs what it drew.
+    -- Flagged BAD when the total exceeds the setting, because that is the user-visible
+    -- claim ("Max Debuffs 3") being false — not a curiosity.
+    if counted then
+        local cap = tonumber(cfg.max)
+        local overCap = cap and total > cap
+        o:Line(format("TOTAL showing=%d across %d group%s (max=%s per GROUP%s)",
+            total, #filter, #filter == 1 and "" or "s", tostring(cfg.max),
+            cap and format(", so up to %d for this row", cap * #filter) or ""),
+            overCap and "BAD" or nil)
+    else
+        o:Line("TOTAL showing: unavailable (a group count could not be read)", "WARN")
     end
 end
 
