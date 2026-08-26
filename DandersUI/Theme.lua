@@ -220,6 +220,17 @@ UI.RowHeight = {
     groupTitle  = 11.9 + UI.RowGap,
 }
 
+-- THE standard content width for a floating panel that carries settings widgets
+-- -- today the popout a PopoutRow opens.
+--
+-- 260 is not a taste: it IS the inner width of a settings group (280 constructed
+-- width - 2 x 10 padding, see CreateSettingsGroup), which is the column every
+-- widget factory in this kit was sized and measured against. Anything else means
+-- a slider or a dropdown lifted out of a page and dropped into a popout renders
+-- at a width it has never been laid out at -- and it is the same 260 that
+-- GroupInnerWidth falls back to for exactly this reason.
+UI.PopoutContentWidth = 260
+
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
 -- own their height (drift-proof); everything else uses the height it was handed, then the widget's
 -- own preferred height, then a sane default.

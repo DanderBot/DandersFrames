@@ -113,3 +113,6 @@ Debug\MemoryTest.lua
 # Profiler window; engine and SetScript hook stay resident in Debug/Profiler.lua
 Debug\ProfilerUI.lua
 Debug\AttachmentScan.lua
+# Permanent workbench for the DandersUI popout look (/df popoutdemo). Plain lib
+# widgets over a throwaway table -- no settings page is involved.
+GUI\PopoutDemo.lua

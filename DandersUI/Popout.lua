@@ -119,6 +119,71 @@ function UI.PopoutDockPos(src, side, w, h, gap)
     return nil
 end
 
+-- ---- outside-a-window placement ----------------------------------
+
+-- THE SETTINGS PLACEMENT. A popout about a ROW inside a scrolling WINDOW must not
+-- dock beside the row: docked there it lands ON the window, covering the very
+-- list the row was picked from, and every scroll drags it across that list. So it
+-- docks outside the WINDOW's vertical edge instead, at the ROW's height -- the
+-- window stays wholly readable, and the popout still visibly belongs to one row
+-- because it hangs from that row's top and the beam crosses to it.
+--
+-- Two rects, therefore, not one: the WINDOW decides x (which edge, and how far
+-- out), the ROW decides y. Which is also why this cannot be expressed as a frame
+-- anchor -- see the clamps below, and _Dock's outsideOf arm.
+--
+-- Returns side ("right"/"left"), x, y -- the popout's CENTRE, same units as
+-- PopoutDockPos, so the dock, the glide's destination and the tests all read one
+-- answer. nil for a missing rect.
+--
+-- The clamps, in order (later wins, because being off-screen is worse than being
+-- level with the wrong part of the window):
+--   1. THE POPOUT'S TOP is clamped into the window's vertical span. Applied
+--      ALWAYS, not only when the row is clipped: for a row in view its top is
+--      already inside that span, so the clamp is a no-op and "top level with the
+--      row's top" holds exactly. For a row scrolled out of the window it is what
+--      keeps the popout beside the LIST rather than trailing off after a row that
+--      is no longer drawn. Only the TOP is clamped, so a popout taller than the
+--      window still hangs below it rather than being squeezed.
+--   2. The whole popout is clamped fully on screen.
+function UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)
+    if not (win and row) then return nil end
+    gap = gap or DOCK_GAP
+    w, h = w or 0, h or 0
+    -- Only left/right mean anything out here: above/below a window is not
+    -- "outside its vertical edge", it is somewhere else entirely.
+    local side = (forcedSide == "left" or forcedSide == "right") and forcedSide or nil
+    local rightX = win.x + win.w / 2 + gap + w / 2
+    local leftX  = win.x - win.w / 2 - gap - w / 2
+    if not side then
+        -- HORIZONTAL fit only. y is clamped below, so the vertical axis can never
+        -- be the reason a side does not fit and must not get a vote -- letting it
+        -- vote would flip the popout across the window because of a tall content
+        -- block, which is not a horizontal problem.
+        local halfW = (screenW or 0) / 2
+        side = (rightX + w / 2 <= halfW and rightX - w / 2 >= -halfW) and "right" or "left"
+        -- Neither side fits (a window wider than the screen): stay right and let
+        -- SetClampedToScreen deal with the overhang, exactly as _PickSide does.
+    end
+    local x = (side == "left") and leftX or rightX
+    -- Hang from the row's TOP, the same story right/left docking tells: the
+    -- popout reads as a continuation of the thing's header.
+    local top = row.y + row.h / 2
+    top = min(max(top, win.y - win.h / 2), win.y + win.h / 2)
+    local y = top - h / 2
+    local halfH = (screenH or 0) / 2
+    y = min(max(y, -halfH + h / 2), halfH - h / 2)
+    return side, x, y
+end
+
+-- Do two rects overlap at all? The out-of-view test for a row in a scroll child:
+-- clipped rows stay IsShown(), so the only honest question is whether the row's
+-- rect is still inside the window's.
+local function rectsOverlap(a, b)
+    if not (a and b) then return false end
+    return abs(a.x - b.x) < (a.w + b.w) / 2 and abs(a.y - b.y) < (a.h + b.h) / 2
+end
+
 -- "Still beside it": the two rects are within `gap` of touching on BOTH axes.
 -- A docked popout sits DOCK_GAP from its source and overlaps it on the other
 -- axis, so it passes; drag it away and it stops passing.
@@ -258,6 +323,12 @@ local popoutMeta = { __index = Popout }
 -- "below"); without it the side is picked by what fits. Re-docks for free
 -- whenever the region moves -- see _Tick.
 --
+-- opts.outsideOf = <window frame> switches to the SETTINGS PLACEMENT: `region`
+-- is then a ROW INSIDE that window, and the popout docks outside the WINDOW's
+-- vertical edge at the row's height rather than beside the row itself (see
+-- UI.PopoutOutsidePos). Only "left"/"right" are meaningful for opts.side there.
+-- The mode lives on the instance, so a plain Follow afterwards clears it.
+--
 -- RETARGETING a popout that is already up (a different region while it is
 -- following) GLIDES it across instead of teleporting: see _StartGlide.
 function Popout:Follow(region, opts)
@@ -265,6 +336,7 @@ function Popout:Follow(region, opts)
     local prev = self.source
     self.source = region
     self.forcedSide = opts and opts.side or nil
+    self.outsideOf = opts and opts.outsideOf or nil
     self.free = false
     -- A pinned popout has been taken off its leash by hand; re-pointing its
     -- SOURCE (so the beam knows where to land) must not drag it back to it.
@@ -290,6 +362,7 @@ function Popout:PlaceFree(x, y)
     self.free = true
     self.following = false
     self.gliding = false
+    self.outsideOf = nil        -- absolute placement is not docked to anything
     local f = self.frame
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", x or 0, y or 0)
@@ -323,6 +396,29 @@ function Popout:_Dock()
     -- The ticker's baseline is taken HERE, not on the first tick: without it the
     -- very next frame would read "the source moved" and re-dock for nothing.
     self._srcX, self._srcY, self._srcW, self._srcH = sr.x, sr.y, sr.w, sr.h
+
+    -- THE SETTINGS PLACEMENT takes an EXPLICIT SCREEN ANCHOR, not a frame anchor,
+    -- and that is not a shortcut: the y depends on the ROW *and* on two clamps
+    -- (the window's vertical span, then the screen), and no SetPoint against
+    -- either frame can express a value that is a function of both. The follow
+    -- ticker earns the difference back -- it re-docks on a row move AND on a
+    -- window move, so the pair still tracks for free.
+    local wr = self.outsideOf and rectOf(self.outsideOf) or nil
+    if wr then
+        -- Its own baseline, alongside the source's: a pure width-resize moves the
+        -- window's edge without moving the row at all (see _Tick).
+        self._winX, self._winY, self._winW, self._winH = wr.x, wr.y, wr.w, wr.h
+        local side, x, y = UI.PopoutOutsidePos(wr, sr, f:GetWidth() or 0, f:GetHeight() or 0,
+                                               DOCK_GAP, UIParent:GetWidth() or 0,
+                                               UIParent:GetHeight() or 0, self.forcedSide)
+        f:ClearAllPoints()
+        f:SetPoint("CENTER", UIParent, "CENTER", x, y)
+        self.side = side
+        self:_Present(side)
+        return
+    end
+    self._winX, self._winY, self._winW, self._winH = nil, nil, nil, nil
+
     local side = self:_PickSide(sr, f:GetWidth() or 0, f:GetHeight() or 0)
     f:ClearAllPoints()
     if side == "left" then f:SetPoint("TOPRIGHT", src, "TOPLEFT", -DOCK_GAP, 0)
@@ -386,8 +482,20 @@ function Popout:_StartGlide()
     local from = rectOf(f)
     if not (sr and from) then return false end
     local w, h = f:GetWidth() or 0, f:GetHeight() or 0
-    local side = self:_PickSide(sr, w, h)
-    local tx, ty = UI.PopoutDockPos(sr, side, w, h, DOCK_GAP)
+    -- The destination comes from the SAME function the dock uses -- PopoutDockPos
+    -- beside a source, PopoutOutsidePos outside a window -- so the landing is
+    -- exact in either mode rather than approximately exact in one of them.
+    local side, tx, ty
+    local wr = self.outsideOf and rectOf(self.outsideOf) or nil
+    if wr then
+        side, tx, ty = UI.PopoutOutsidePos(wr, sr, w, h, DOCK_GAP,
+                                           UIParent:GetWidth() or 0, UIParent:GetHeight() or 0,
+                                           self.forcedSide)
+        self._winX, self._winY, self._winW, self._winH = wr.x, wr.y, wr.w, wr.h
+    else
+        side = self:_PickSide(sr, w, h)
+        tx, ty = UI.PopoutDockPos(sr, side, w, h, DOCK_GAP)
+    end
     if not tx then return false end
 
     -- The ticker's baseline moves to the NEW source now, so the first tick of
@@ -453,6 +561,26 @@ function Popout:GetAccent()
     return self.accent or self.host:GetAccent()
 end
 
+-- Set (or clear) this instance's accent override and repaint every piece of
+-- chrome that carries it, WHILE IT IS UP. adopt() already applies opts.accent at
+-- open time; this is the live path -- a consumer that re-themes (a party/raid
+-- mode switch, a per-row colour changing under an open panel) has nothing else
+-- to call, and a popout left in the old colour while its source has changed is
+-- the one thing the shared-border story cannot survive.
+--
+-- nil resets to the host accent. The source outline repaints through
+-- _ApplyAccent, which re-runs ApplyPixelBorder on it unconditionally --
+-- _UpdateSourceOutline itself only repaints on a TARGET change, so it would not
+-- have noticed a colour change on a shown outline.
+function Popout:SetAccent(c)
+    self.accent = normColor(c)
+    self:_ApplyAccent()
+    self:_UpdateNotch()
+    self:_UpdateBeam()
+    self:_UpdateSourceOutline()
+    return self
+end
+
 -- Repaint everything the accent colours. Called on every adopt, so a pooled
 -- popout re-opened after a theme change comes up in the current colour rather
 -- than in whatever it was built in.
@@ -469,6 +597,29 @@ function Popout:_ApplyAccent()
     end
 end
 
+-- ---- the connected chrome's one gate -----------------------------
+
+-- Is the thing the chrome points at actually DRAWN?
+--
+-- ⚠ IsShown() CANNOT ANSWER THIS. A row scrolled out of a scroll child is still
+-- shown -- it is CLIPPED by the scroll frame, and clipping leaves no flag on the
+-- row. So in the settings placement the honest test is geometric: does the row's
+-- rect still overlap the window it lives in. Outside that mode there is no
+-- clipper to ask about, and the answer is always yes.
+--
+-- Only the CHROME is gated. The popout stays up and stays docked (its y clamps
+-- into the window's span, see PopoutOutsidePos) -- scrolling a list must not
+-- close the panel you scrolled the list to configure. The beam, the connection
+-- point and the source outline go, because all three are claims about a row that
+-- is no longer on screen.
+function Popout:_TetherClipped()
+    local win = self.outsideOf
+    if not win then return false end
+    local wr = rectOf(win)
+    if not wr then return false end
+    return not rectsOverlap(wr, rectOf(self:_TetherRegion()))
+end
+
 -- ---- the connection point ----------------------------------------
 
 -- The accent diamond centred on the source-facing edge. Shown only while the
@@ -479,6 +630,7 @@ function Popout:_UpdateNotch()
     local n = self.notch
     if not n then return end
     local spec = (not self.closed) and self.following and not self.pinned
+                 and not self:_TetherClipped()
                  and NOTCH_SIDE[self.side] or nil
     if not spec then n:Hide() return end
     -- Slide along the edge to meet the source (see PopoutNotchTip): the offset
@@ -522,7 +674,7 @@ end
 -- this only has to run when the state or the target changes.
 function Popout:_UpdateSourceOutline()
     local want = self.following and not self.pinned and not self.closed
-                 and self.frame:IsShown()
+                 and self.frame:IsShown() and not self:_TetherClipped()
     local region = want and self:_TetherRegion() or nil
     if region and not rectOf(region) then region = nil end
     if not region then
@@ -618,6 +770,20 @@ function Popout:_Tick(elapsed)
                           or sr.w ~= self._srcW or sr.h ~= self._srcH)
     if moved then self._srcX, self._srcY, self._srcW, self._srcH = sr.x, sr.y, sr.w, sr.h end
 
+    -- THE SETTINGS PLACEMENT WATCHES TWO RECTS. The row alone is not enough: drag
+    -- the window's right edge and the popout's whole x is wrong while the row --
+    -- centred in a scroll child that just got narrower -- may not have moved at
+    -- all. So the window carries its own baseline. Guarded on the mode, so the
+    -- ordinary follow still pays for exactly one rect compare per tick.
+    if self.outsideOf then
+        local wr = rectOf(self.outsideOf)
+        if wr and (wr.x ~= self._winX or wr.y ~= self._winY
+                   or wr.w ~= self._winW or wr.h ~= self._winH) then
+            self._winX, self._winY, self._winW, self._winH = wr.x, wr.y, wr.w, wr.h
+            moved = true
+        end
+    end
+
     -- A re-dock redraws the chrome on the way through (_Dock -> _Present), so
     -- there is nothing else to do for a source move. A PINNED popout wears no
     -- connected chrome at all, so a move it is not following costs one compare.
@@ -693,7 +859,7 @@ end
 --               visually detached, full stop.
 function Popout:_UpdateBeam()
     local want = self.following and not self.pinned and not self.closed
-                 and self.frame:IsShown()
+                 and self.frame:IsShown() and not self:_TetherClipped()
     local target = want and self:_TetherRegion() or nil
     local tr = target and rectOf(target) or nil
     local pr = tr and self:_FrameRect() or nil
@@ -932,6 +1098,9 @@ end
 --   parent        frame to parent to (default UIParent)
 --   width         CONTENT width; the height follows what build mounted
 --   build(popout, content)   called ONCE per instance
+--   headerControls(popout, bar) -> leftFrame, rightFrame   also ONCE per
+--                 instance; either may be nil. The shell anchors them in the
+--                 title bar and re-anchors the title around them
 --   onClose(popout, reason)  reason: "cross"|"family"|"source"|"api"
 --   onPin(popout) / onUnpin(popout)
 --   canAutoPin    boolean or function(popout); false makes AutoPin a no-op
@@ -1028,6 +1197,44 @@ function UI:CreatePopout(opts)
     po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
     po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
     if po.titleFS.SetWordWrap then po.titleFS:SetWordWrap(false) end
+
+    -- ---- header controls ------------------------------------------
+    -- A consumer may put its own controls IN the title bar -- the shell stays
+    -- ignorant of what they are and only says where they go: `left` where the
+    -- icon and title start, `right` inboard of the pin/close cluster, with the
+    -- title squeezed between whatever came back.
+    --
+    -- ONCE per instance, like build and for the same reason: these are frames,
+    -- and a pooled popout re-targeted at something else re-BINDS them rather
+    -- than rebuilding them. A consumer that needs them re-pointed does it from
+    -- its own retarget path -- the shell has nothing to re-point them AT.
+    --
+    -- Nothing is touched when the consumer passes none, so the layout of every
+    -- popout that has no header controls is exactly what it was.
+    if type(opts.headerControls) == "function" then
+        local left, right = opts.headerControls(po, bar)
+        po.headerLeft, po.headerRight = left, right
+        if left or right then
+            -- Both points re-set together: the title's span is defined by the
+            -- pair, and re-stating only the one that changed would leave it
+            -- anchored to a frame the other control now sits in front of.
+            po.titleFS:ClearAllPoints()
+            if left then
+                left:ClearAllPoints()
+                left:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
+                po.titleFS:SetPoint("LEFT", left, "RIGHT", 4, 0)
+            else
+                po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
+            end
+            if right then
+                right:ClearAllPoints()
+                right:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+                po.titleFS:SetPoint("RIGHT", right, "LEFT", -4, 0)
+            else
+                po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+            end
+        end
+    end
 
     -- ---- content --------------------------------------------------
     local content = CreateFrame("Frame", nil, f)

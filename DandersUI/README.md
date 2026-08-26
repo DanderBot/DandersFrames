@@ -209,6 +209,7 @@ something to dock to.
 | `canAutoPin` | boolean or `function(popout)`, evaluated per call; false makes `AutoPin` a no-op |
 | `tetherSource` | region or `function(popout) -> region` — the far end of the beam and the source outline, for when the thing the popout is *about* is not the thing it docked to |
 | `accent` | `{r,g,b[,a]}` overriding the host accent for this popout's border, connection point, beam and source outline. Re-read on every open, so a pooled popout tracks a theme change |
+| `headerControls(popout, bar)` | returns `leftFrame, rightFrame` (either may be nil) — the consumer's own controls IN the title bar. Called ONCE per instance, like `build`, and for the same reason: a pooled popout re-targeted at something else re-BINDS them (the consumer's job) rather than rebuilding them. The shell anchors `left` where the title starts, `right` inboard of the pin/close cluster, and squeezes the title between them |
 
 `onUnpin`, `actions` and `badge` are accepted and reserved: v1 never unpins and
 draws neither.
@@ -216,16 +217,59 @@ draws neither.
 | Call | Purpose |
 |---|---|
 | `po:Follow(region, opts)` | Dock beside `region` and track it. `opts.side` forces `"left"` / `"right"` / `"above"` / `"below"`; without it the side is whichever fits on screen. Handed a NEW region while already up and following, it glides across. On a pinned popout it only re-points the tether |
+| `po:Follow(row, { outsideOf = window })` | The **settings placement**: `row` lives inside `window` (typically in a scroll child), and the popout docks outside the WINDOW's vertical edge at the ROW's height rather than beside the row — so it never covers the list the row was picked from. Only `"left"` / `"right"` are meaningful for `opts.side`; it flips to the window's left edge when the right lacks screen room. The tether chrome stays on the ROW, and hides (popout still up and docked) while the row is scrolled out of the window's rect. A plain `Follow` clears the mode |
 | `po:PlaceFree(x, y)` | Absolute placement, for consumers that own their own layout: no source, so nothing to follow and nothing to tether to. Stops a glide |
 | `po:Pin([silent])`, `po:AutoPin()`, `po:IsPinned()` | Take it off its leash: it stops following, drops the connection point, beam and source outline, becomes draggable by its title bar, and from there the only way out is the cross. `AutoPin` is the same thing gated on `canAutoPin` and without the confirm pop |
 | `po:SetHeader(title, icon)`, `po:GetTitle()` | Title bar contents |
 | `po:Resize()` | Re-fit the height after changing the content's height |
 | `po:GetAccent()` | The colour this popout's chrome is drawn in: `opts.accent`, else the host accent |
+| `po:SetAccent(c)` | Live re-tint of a popout that is already up: border, connection point, beam and source outline all repaint. `nil` hands it back to the host accent. `adopt` paints at open time; this is the only way to repaint one mid-flight (a party/raid mode switch under an open panel) |
 | `po:HideChrome()` | Take the beam and the source outline down at once, animations cancelled — for a consumer hiding the popout by hand (a combat suspend, a drag). Neither is a child of `po.frame`, so nothing else would |
 | `po:Close([reason])`, `po:IsShown()` | Close hands `reason` to `onClose`. A pinned instance is discarded; an unpinned one goes back to the pool |
-| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
+| `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutOutsidePos` is the settings placement's whole geometry — it answers `side, x, y` for a popout standing outside `win` at `row`'s height, clamping the popout's top into the window's vertical span and then the whole popout onto the screen; the dock, the retarget glide and the tests all read that one answer. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
 
 `po.frame` is the shell, `po.content` the frame `build` was handed.
+
+### Popout rows (options manifest)
+
+`UI:CreatePopoutRow(parent, opts)` — a settings row that hands its controls to a
+popout: toggle, name, live summary, count badge, chevron, and the whole row opens
+a popout docked outside the settings window (`Follow(row, { outsideOf = window })`)
+carrying the group's real controls. Lives in `DandersUI_Options.xml` (PopoutRow.lua),
+so resident addons never pay for it.
+
+**One panel across every row of a host.** All rows share one popout key
+(`opts.popoutKey` overrides), so clicking another row glides the SAME panel across.
+Each row's content is a pane built once per (instance, row) by `opts.build(popout,
+pane)` — the build must SIZE its pane — and swapped in on retarget. A pane taller
+than 60% of the screen gets the kit scroll region. Pinning promotes the instance out
+with the pinned row's content; the next row click gets a fresh instance, and pinned
+panels coexist. The popout's content width is `UI.PopoutContentWidth` (260 — the
+settings-group inner width every factory is already built for, so widgets mount
+unchanged).
+
+| Opt | Purpose |
+|---|---|
+| `label` | **required** row name (the consumer localises) |
+| `db` | table or `function -> table`, re-resolved on every refresh, handed to `summary` / `enabled` |
+| `toggle` | `{ db = t\|fn, key = "k" }` (db defaults to `opts.db`) or `{ get, set }` |
+| `summary` | `fn(db) -> string`, rendered live in the row. Authoring rule: max 4 items, fixed order, `·` separated, labels/units only where a bare value is ambiguous |
+| `offText` | the word shown instead of the summary while toggled off (default: host `L["Off"]`) |
+| `count` | declared control count — the badge, and what the build-time count check compares against (mounted child FRAMES; mismatch reaches the host `debug("popoutrow")` hook) |
+| `build(popout, pane)` | mounts the group's widgets, once per (instance, row); must size the pane |
+| `accent` | per-row accent override; `enabled` — bool or `fn(db)`, false greys the whole row (popout still opens) |
+| `onToggle(v)` | after a toggle write from the row OR the popout header (one write path, both stay in sync) |
+| `window` | **required** to open: the frame the popout docks outside of |
+| `title` | popout header title (default: `label`) |
+
+Returns the row frame with `.Refresh()` / `.refreshContent(db)` (the settings-group
+refresh path), `:SetEnabled(bool)` (an explicit call overrides `opts.enabled` from
+then on), `:SetAccent(c)` (re-tints the row and every panel it has open, pinned
+included), `:OpenPopout()`, `:ClosePopout(reason)` and `.popout`.
+
+The close matrix is the consumer's to wire, through two host verbs:
+`host:CloseUnpinnedPopoutRows(reason)` (page switch — pinned panels survive) and
+`host:CloseAllPopoutRows(reason)` (window close — takes everything).
 
 ## Fx
 
