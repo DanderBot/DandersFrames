@@ -274,6 +274,13 @@ local DISPEL_SPELLS = {
     },
     MONK = {
         { id = 115450, types = { Magic = true, Poison = true, Disease = true } },-- Detox (Mistweaver)
+        -- ✅ 2026-08-26, confirmed from the talent tooltip itself: SpellID 218164,
+        -- "Removes all Poison and Disease effects", Rank 0/1 — a talent NOT in the default
+        -- loadout. So a monk who has not taken it genuinely cannot dispel, and reading
+        -- unknown here is the right answer rather than a missing capability.
+        -- ★ Another non-override talent that tracks correctly as a BASE entry, like the
+        -- mage's Remove Curse — the spellbook probe returned false untalented. See the note
+        -- on the talent flag above.
         { id = 218164, types = { Poison = true, Disease = true } },              -- Detox (Brewmaster/Windwalker)
         -- ⚠ Poison/Disease, NOT Magic. My first pass had this one exactly backwards.
         { id = 388874, types = { Poison = true, Disease = true }, talent = true },-- Improved Detox
