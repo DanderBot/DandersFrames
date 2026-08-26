@@ -39,8 +39,19 @@ local min, max, abs = math.min, math.max, math.abs
 
 local Fx = UI.Fx
 
-local PAD        = 10        -- outer inset around the content
-local TITLE_H    = 22        -- the title bar strip
+-- The box model comes from the theme (see Theme.lua's note on both): the frame's
+-- height is TITLE_H + PAD + content + PAD, and a consumer sizing a fixed panel
+-- has to be able to work that out without reading this file.
+local PAD        = UI.PopoutPad          -- outer inset around the content
+local TITLE_H    = UI.PopoutTitleHeight  -- the title bar strip
+-- The title bar's INTERNAL composition, which nothing outside can use and so
+-- stays here. HDR_EDGE is the cross's inset from the bar's right edge, HDR_GAP
+-- the gap between two adjacent glyph buttons, and TITLE_GAP the wider air either
+-- side of the title text -- wider because a caption butted up against a glyph
+-- reads as a label FOR that glyph.
+local HDR_EDGE   = 6
+local HDR_GAP    = 6
+local TITLE_GAP  = 8
 local DOCK_GAP   = 12        -- popout <-> source distance when docked
 local ADJ_GAP    = 16        -- "still beside it" slack, for UI.PopoutIsAdjacent
 local POP_DUR    = 0.22      -- entrance
@@ -1178,7 +1189,7 @@ function UI:CreatePopout(opts)
         size = CLOSE_SIZE,
         onClick = function() po:Close("cross") end,
     })
-    po.closeBtn:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
+    po.closeBtn:SetPoint("RIGHT", bar, "RIGHT", -HDR_EDGE, 0)
 
     if po.pinnable then
         po.pinBtn = host:CreateGlyphButton(f, {
@@ -1187,7 +1198,7 @@ function UI:CreatePopout(opts)
             tooltip = { title = L and L["Pin"] or "Pin" },
             onClick = function() po:Pin() end,
         })
-        po.pinBtn:SetPoint("RIGHT", po.closeBtn, "LEFT", -2, 0)
+        po.pinBtn:SetPoint("RIGHT", po.closeBtn, "LEFT", -HDR_GAP, 0)
     end
 
     -- The title takes whatever the buttons left. Anchored to the pin (or the
@@ -1198,8 +1209,8 @@ function UI:CreatePopout(opts)
     -- SetText gets a table). The mover host has no shims, which is why this
     -- only ever erupts under DF. Same rule as Sections/ColorPicker.
     po.titleFS = host:CreateLabelNative(f, { size = 11, color = UI.Colors and UI.Colors.text })
-    po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
-    po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+    po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", TITLE_GAP, 0)
+    po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -TITLE_GAP, 0)
     if po.titleFS.SetWordWrap then po.titleFS:SetWordWrap(false) end
 
     -- ---- header controls ------------------------------------------
@@ -1225,24 +1236,28 @@ function UI:CreatePopout(opts)
             po.titleFS:ClearAllPoints()
             if left then
                 left:ClearAllPoints()
-                left:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
-                po.titleFS:SetPoint("LEFT", left, "RIGHT", 4, 0)
+                left:SetPoint("LEFT", iconTex, "RIGHT", HDR_GAP, 0)
+                po.titleFS:SetPoint("LEFT", left, "RIGHT", TITLE_GAP, 0)
             else
-                po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
+                po.titleFS:SetPoint("LEFT", iconTex, "RIGHT", TITLE_GAP, 0)
             end
             if right then
                 right:ClearAllPoints()
-                right:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
-                po.titleFS:SetPoint("RIGHT", right, "LEFT", -4, 0)
+                right:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -HDR_GAP, 0)
+                po.titleFS:SetPoint("RIGHT", right, "LEFT", -TITLE_GAP, 0)
             else
-                po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -4, 0)
+                po.titleFS:SetPoint("RIGHT", po.pinBtn or po.closeBtn, "LEFT", -TITLE_GAP, 0)
             end
         end
     end
 
     -- ---- content --------------------------------------------------
+    -- ⚠ -(TITLE_H + PAD), not -TITLE_H. The height has always been
+    -- TITLE_H + PAD + h + PAD, so anchoring the content flush against the bar put
+    -- BOTH pads at the bottom: the first control sat hard against the title while
+    -- 20px of nothing hung under the last one. Same height, symmetric now.
     local content = CreateFrame("Frame", nil, f)
-    content:SetPoint("TOPLEFT", PAD, -TITLE_H)
+    content:SetPoint("TOPLEFT", PAD, -(TITLE_H + PAD))
     content:SetWidth(po.width)
     content:SetHeight(1)
     po.content = content

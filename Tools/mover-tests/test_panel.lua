@@ -27,6 +27,12 @@ KIT.Space = { section = 10 }
 KIT.RowGap = 14
 KIT.RowGapTight = 8
 KIT.RowHeight = { groupTitle = 26, checkbox = 35 }
+-- The popout shell's box model, which it reads from the theme at FILE SCOPE (see
+-- Theme.lua). The panel mounts into the shell's `content` and measures nothing
+-- but its own rows, so these only have to EXIST -- but they have to exist before
+-- Popout.lua loads, or the shell errors on the first arithmetic it does with them.
+KIT.PopoutTitleHeight = 28
+KIT.PopoutPad = 10
 
 function KIT:GetAccent() return COLORS.accent end
 function KIT:CreatePanelBackdrop() end

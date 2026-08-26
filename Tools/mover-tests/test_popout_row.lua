@@ -67,12 +67,14 @@ end
 UI.RowGap = UI.RowGap or 14
 UI.RowHeight = UI.RowHeight or { checkbox = 35 }
 UI.PopoutContentWidth = UI.PopoutContentWidth or 260
+UI.PopoutTitleHeight = UI.PopoutTitleHeight or 28
+UI.PopoutPad = UI.PopoutPad or 10
 UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true end
 
 local ROW_H   = UI.RowHeight.checkbox
 local PLATE_H = ROW_H - UI.RowGap
 local PW      = UI.PopoutContentWidth
-local TITLE_H, PAD = 22, 10
+local TITLE_H, PAD = UI.PopoutTitleHeight, UI.PopoutPad
 
 -- ---- widget stubs PopoutRow touches -------------------------------
 -- StyleCheckButton's whole observable contract from here: it sizes the box, it

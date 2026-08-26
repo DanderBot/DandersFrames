@@ -230,6 +230,15 @@ draws neither.
 
 `po.frame` is the shell, `po.content` the frame `build` was handed.
 
+**The box model.** `po.frame`'s height is
+`UI.PopoutTitleHeight + UI.PopoutPad + <content height> + UI.PopoutPad`, and its
+width is `opts.width + 2 × UI.PopoutPad` — both numbers live in `Theme.lua` so a
+consumer laying out a fixed-height panel can work out what the chrome costs it
+without reading `Popout.lua`. The title bar is `UI.PopoutTitleHeight` tall and
+holds the icon, the caption, whatever `headerControls` returned, the pin and the
+cross; the content hangs one `PAD` below it, with the same `PAD` under and either
+side of it.
+
 ### Popout rows (options manifest)
 
 `UI:CreatePopoutRow(parent, opts)` — a settings row that hands its controls to a

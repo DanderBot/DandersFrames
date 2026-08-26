@@ -23,6 +23,14 @@ local UI = NS.__DandersUI
 UI.MEDIA = ""
 UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5, b = 0.5 } }
 
+-- ---- Theme.lua metrics --------------------------------------------
+-- Mirrors of the real values, for the reason test_popout_row.lua spells out at
+-- its own copy: Theme.lua is not loadable headless (it wants GetPhysicalScreenSize,
+-- Mixin and BackdropTemplateMixin), and Popout.lua reads both of these at FILE
+-- SCOPE -- so they have to be here before the load at the foot of this block.
+UI.PopoutTitleHeight = UI.PopoutTitleHeight or 28
+UI.PopoutPad = UI.PopoutPad or 10
+
 local ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
 function UI:GetAccent() return ACCENT end
 -- Both backdrop factories RECORD what they were asked to paint: the accent
@@ -79,9 +87,13 @@ local function source(w, h, x, y)
 end
 
 -- Every popout in these tests is 100 wide with a 50-tall content, so the frame
--- is 120 x (22 + 10 + 50 + 10) = 120 x 92. The dock geometry below is worked
--- out from those numbers.
-local W, FRAME_W, FRAME_H = 100, 120, 92
+-- is (100 + 2 x PAD) x (TITLE_H + PAD + 50 + PAD) = 120 x 98. Stated as the
+-- arithmetic rather than as two literals: the title bar's height is a THEME
+-- number now, and a test that hard-codes what it happens to be today reports a
+-- deliberate change to it as a dock-geometry failure.
+local W = 100
+local FRAME_W = W + UI.PopoutPad * 2
+local FRAME_H = UI.PopoutTitleHeight + UI.PopoutPad + 50 + UI.PopoutPad
 local DOCK_GAP = 12
 
 local builds = 0
@@ -348,8 +360,8 @@ do
     eq(core._color.a, 0.55, "beam: ...at the core alpha")
     eq(glow._color.a, 0.15, "beam: ...and the glow at the under-glow alpha")
     eq(core._start.rel, UIParent, "beam: endpoints are stated in UIParent-centre units")
-    -- The popout's rect is { x = 112, y = -26, 120 x 92 }; right-docked, the
-    -- connection point's tip is half a notch left of its left edge.
+    -- The popout's rect is { x = 112, y = 20 - FRAME_H/2, FRAME_W x FRAME_H };
+    -- right-docked, the connection point's tip is half a notch left of its left edge.
     eq(core._start.x, 112 - FRAME_W / 2, "beam: it starts under the connection point, on the frame edge")
     -- The tip SLIDES along the edge to meet the source: the source's centre
     -- (y = 0) is inside the edge's clamp range, so the tip sits level with it
@@ -422,7 +434,7 @@ do
     eq(first[1], "CENTER", "glide: it takes an explicit screen anchor for the ride")
     eq(first[2], UIParent, "glide: ...off UIParent, not the source")
     eq(first[4], 112, "glide: starting exactly where it already was")
-    eq(first[5], -26, "glide: ...on both axes")
+    eq(first[5], 20 - FRAME_H / 2, "glide: ...on both axes")
     -- The connected chrome commits to the NEW source at once.
     eq(p.srcOutline._points[1][2], b, "glide: the source outline snaps to the new source at once")
 
@@ -702,6 +714,42 @@ do
     p:SetHeader("Bare")
     check(not p.iconTex:IsShown(), "header: dropping the icon hides it")
     eq(p:GetTitle(), "Bare", "header: the title reads back")
+    p:Close()
+end
+
+-- ---- the title bar has room to breathe ----------------------------
+-- The bar used to be 22 tall around an 18px close button, and every gap in it was
+-- 2 or 4 -- so title, badge, pin and cross were packed against each other and the
+-- caption sat all but on the panel's own accent border. The claims here are the
+-- ones that stop that coming back: the bar is a THEME number (so a change to it
+-- is a deliberate one, made in one place), the tallest control in it clears both
+-- edges, and the content below is inset by the same PAD on both sides of the
+-- panel rather than hugging the bar with double the slack underneath.
+do
+    local p = popout({ key = "titlebar" })
+    eq(p.titleBar:GetHeight(), UI.PopoutTitleHeight, "titlebar: its height is the theme's, not a literal")
+    local clearance = (UI.PopoutTitleHeight - p.closeBtn:GetHeight()) / 2
+    check(clearance >= 4, "titlebar: the tallest control in it clears both edges")
+
+    -- The frame's box model, stated as the arithmetic the consumer is promised.
+    eq(p.frame:GetHeight(), UI.PopoutTitleHeight + UI.PopoutPad + 50 + UI.PopoutPad,
+        "titlebar: height is title + pad + content + pad")
+    local cpt = p.content._points[1]
+    eq(cpt[2], UI.PopoutPad, "titlebar: the content is inset by PAD on the left")
+    eq(cpt[3], -(UI.PopoutTitleHeight + UI.PopoutPad),
+        "titlebar: ...and hangs a PAD BELOW the bar rather than flush against it")
+
+    -- The gaps across the button cluster. Read off the recorded anchors, because
+    -- the stub resolves none of them -- what is being asserted is that no gap in
+    -- the row is one of the old 2/4px ones.
+    local function offsetOf(region, rel)
+        for _, pt in ipairs(region._points) do
+            if pt[2] == rel then return pt[4] end
+        end
+    end
+    check(-offsetOf(p.closeBtn, p.titleBar) >= 6, "titlebar: the cross stands off the bar's right edge")
+    check(-offsetOf(p.pinBtn, p.closeBtn) >= 6, "titlebar: the pin is not jammed against the cross")
+    check(-offsetOf(p.titleFS, p.pinBtn) >= 8, "titlebar: and the caption stops clear of the pin")
     p:Close()
 end
 

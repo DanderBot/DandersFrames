@@ -62,6 +62,13 @@ local CHECK_TICK = 9
 local GEAR_SIZE  = 14
 local CHEV_SIZE  = 10
 local GAP        = 6
+-- The count badge is given a FIXED width wherever it is drawn, and its text is
+-- laid out inside that box rather than sizing it. A FontString that sizes itself
+-- moves everything anchored off it, which is how a column of rows ends up with
+-- its gears and chevrons at three different x positions -- see the column block
+-- in the row build. 18 holds three digits of the 10px face; a group with more
+-- than 999 controls has a bigger problem than a clipped badge.
+local BADGE_W    = 18
 
 -- ⚠ NO rowKind. rowKind drives UI.RowCompact's run-tightening, and a value that
 -- is not IN RowCompact silently BREAKS a run of checkboxes it sits between --
@@ -271,7 +278,12 @@ local function buildHeaderControls(host, po, bar)
     end)
     po._hdrToggle = cb
 
+    -- Fixed width here too: ONE panel serves every row, so a swap from a 3-control
+    -- group to a 14-control one would otherwise widen this badge and shove the
+    -- title's right edge across mid-glide.
     local badge = host:CreateLabelNative(bar, { size = 10, color = C_TEXT_DIM })
+    badge:SetWidth(BADGE_W)
+    if badge.SetJustifyH then badge:SetJustifyH("RIGHT") end
     po._hdrBadge = badge
     return cb, badge
 end
