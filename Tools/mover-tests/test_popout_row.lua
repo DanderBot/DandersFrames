@@ -801,5 +801,76 @@ do
     bare:ClosePopout()
 end
 
+-- ============================================================
+-- 14. THE COLUMNS LINE UP
+-- A stack of these rows has to read as a TABLE: the chevron, the count and the
+-- gear in the same place on every row, and the summaries right-aligned with one
+-- another. They did not -- the badge sized itself to its text and the gear and
+-- summary were anchored off its left edge, so a "3" row and a "14" row put both
+-- 6px apart.
+--
+-- The stub resolves no anchors, so "the same place" is asked of the recorded
+-- anchor chain instead: resolve each column's RIGHT edge as an offset from the
+-- plate's, and two rows carrying different counts must answer identically.
+--
+-- ⚠ WHICH HALF OF THIS ACTUALLY BITES. The stub's FontStrings never auto-size,
+-- so under the OLD layout both rows resolved to the same (wrong) x and the
+-- two-row comparison passed regardless -- it is documentation of the rule, not a
+-- guard on it. The guard is the block of literal positions after it: those pin
+-- the gear and the summary to the badge COLUMN's width rather than to whatever
+-- its text measured, which is the thing that was broken. Verified by reverting
+-- the fix: the three literals fail, the comparisons do not.
+-- ============================================================
+local CHEV_SIZE, GEAR_SIZE, GAP, BADGE_W = 10, 14, 6, 18
+
+local function rightEdgeFrom(region, plate)
+    if region == plate then return 0 end
+    for _, pt in ipairs(region._points) do
+        local point, rel, relPoint, x = pt[1], pt[2], pt[3], pt[4] or 0
+        if point == "RIGHT" then
+            local base = rightEdgeFrom(rel, plate)
+            -- Anchored to the neighbour's LEFT edge: step back across its width.
+            if relPoint == "LEFT" then base = base - (rel:GetWidth() or 0) end
+            return base + x
+        end
+    end
+end
+
+do
+    local win = window()
+    local function counted(n)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = "Row " .. n, db = { on = true }, toggle = { key = "on" },
+            summary = function() return "a summary of some length" end,
+            count = n, build = counting("cols" .. n, 50), window = win,
+        }))
+    end
+    local few, many = counted(3), counted(14)
+    eq(few.badge:GetText(), "3", "cols: the two rows really are carrying different counts")
+    eq(many.badge:GetText(), "14", "cols: ...one of them twice as wide as the other in text")
+
+    -- The badge is a fixed COLUMN, not a box that grows with its number. This is
+    -- the one that caused the rest.
+    eq(few.badge:GetWidth(), BADGE_W, "cols: the badge is a fixed-width column")
+    eq(many.badge:GetWidth(), few.badge:GetWidth(), "cols: the same width whatever it says")
+
+    for _, part in ipairs({ "chevron", "badge", "gear", "summary" }) do
+        local a = rightEdgeFrom(few[part], few.plate)
+        local b = rightEdgeFrom(many[part], many.plate)
+        check(a ~= nil, "cols: " .. part .. " resolves to the plate's right edge")
+        eq(b, a, "cols: " .. part .. " sits at the same x on both rows")
+    end
+
+    -- ...and where those columns actually are, so a change to one of the four
+    -- constants is a deliberate one rather than a silent drift.
+    local p = few.plate
+    eq(rightEdgeFrom(few.chevron, p), 0, "cols: the chevron is flush with the plate's right edge")
+    eq(rightEdgeFrom(few.badge, p), -(CHEV_SIZE + GAP), "cols: the badge column ends a gap inboard of it")
+    eq(rightEdgeFrom(few.gear, p), -(CHEV_SIZE + GAP + BADGE_W + GAP),
+        "cols: the gear a gap inboard of the badge COLUMN, not of its text")
+    eq(rightEdgeFrom(few.summary, p), -(CHEV_SIZE + GAP + BADGE_W + GAP + GEAR_SIZE + GAP),
+        "cols: and the summary right-aligns a gap inboard of the gear")
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit

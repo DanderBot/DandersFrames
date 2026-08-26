@@ -387,6 +387,14 @@ function UI:CreatePopoutRow(parent, opts)
         row.checkButton = cb
     end
 
+    -- ---- the right-hand columns -----------------------------------
+    -- ☠ FIXED COLUMNS, every one of them, and NOT ONE anchored off a self-sizing
+    -- thing. The badge used to take whatever width its text wanted, and the gear
+    -- and the summary hung off its left edge -- so a row reading "3" and a row
+    -- reading "14" put their gears 6px apart and their summaries with them, and a
+    -- column of these read as a ragged list instead of a table. Every offset
+    -- below is a constant, so the four columns land at the same x on every row of
+    -- a parent whatever any of them happens to say.
     local chevron = row:CreateTexture(nil, "OVERLAY")
     chevron:SetSize(CHEV_SIZE, CHEV_SIZE)
     chevron:SetPoint("RIGHT", plate, "RIGHT", 0, 0)
@@ -396,15 +404,19 @@ function UI:CreatePopoutRow(parent, opts)
 
     -- The count badge sits between the gear and the chevron and is drawn in the
     -- accent, so "how much is in here" reads as part of the way IN rather than
-    -- as another value in the summary.
+    -- as another value in the summary. LEFT-justified inside its fixed box: the
+    -- number belongs to the gear beside it, so the slack goes on the other side
+    -- where the chevron's own fixed column swallows it.
     local badge = host:CreateLabelNative(row, { size = 10, color = C_TEXT_DIM })
+    badge:SetWidth(BADGE_W)
+    if badge.SetJustifyH then badge:SetJustifyH("LEFT") end
     badge:SetPoint("RIGHT", chevron, "LEFT", -GAP, 0)
     badge:SetText(row._count and tostring(row._count) or "")
     row.badge = badge
 
     local gear = row:CreateTexture(nil, "OVERLAY")
     gear:SetSize(GEAR_SIZE, GEAR_SIZE)
-    gear:SetPoint("RIGHT", badge, "LEFT", -4, 0)
+    gear:SetPoint("RIGHT", badge, "LEFT", -GAP, 0)
     gear:SetTexture(ICON_PATH .. "settings")
     gear:SetVertexColor(1, 1, 1, 0.6)
     row.gear = gear
@@ -419,7 +431,9 @@ function UI:CreatePopoutRow(parent, opts)
     -- The summary is ANCHORED between the label and the gear cluster rather than
     -- sized from its own text, and right-justified. Both matter: a box that
     -- resized itself would shuffle the row every time the value changed, and a
-    -- value flush against the way in is where the eye already is.
+    -- value flush against the way in is where the eye already is. Its RIGHT edge
+    -- is a constant off the plate now that the gear's is, so a stack of rows
+    -- right-aligns its values against one another as well as against the gear.
     local summary = host:CreateLabelNative(row, { size = 10, color = C_TEXT_DIM })
     summary:SetPoint("LEFT", label, "RIGHT", GAP, 0)
     summary:SetPoint("RIGHT", gear, "LEFT", -GAP, 0)
