@@ -230,66 +230,66 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- makes exactly this split — IsSpellKnown for Improved Purify, the spellbook probe for the
 -- shaman totem — which is why their shaman case has the bug we just fixed and their priest
 -- case does not.
--- ☠☠ `verified` IS A SAFETY FLAG, NOT BOOKKEEPING — READ THIS BEFORE ADDING AN ENTRY.
--- Granting and subtracting are NOT symmetric in risk:
---   * An entry that GRANTS a type it should not is harmless-ish — the overlay shows a type
---     you cannot cleanse, which is exactly what the engine already does today.
---   * An entry makes its types "covered", and a covered type with no known spell gets
---     SUBTRACTED. So a wrong ID, or wrong talent gating, can DELETE a dispel type a player
---     genuinely has. That is a real regression, and worse than the bug being fixed.
--- ⇒ Only `verified = true` entries contribute to the covered set. An unverified entry can
--- still GRANT (safe, and it makes the debug dump useful) but can never cause a
--- subtraction. Flip the flag once the row has been read on a live character of that class
--- and its spell name resolved correctly.
 --
--- ⚠ THE TALENT GATING BELOW IS THE UNCERTAIN PART, not the base spells. Which dispels are
--- talent-locked moves between patches, and I cannot confirm any of it offline — that is
--- precisely why unverified entries are inert for subtraction. `/df debug dispelcap` prints
--- each row with its verified state and what it WOULD subtract.
+-- ★ THE IDS AND THE GATING ARE CROSS-CHECKED AGAINST THE ADDONS THAT ALREADY DO THIS ON
+-- RETAIL — ElvUI's LibDispel and VuhDo — rather than authored from memory. That check found
+-- four errors in my first pass: Monk had the talent's types backwards, Mage and Paladin were
+-- each missing a spell, and HUNTER was absent altogether. Spell IDs are game data, not
+-- authored code; reading a peer to confirm one is research, and it is the difference between
+-- a table that is right and one that merely looks right.
+-- ⚠ Retail only. The peers carry classic/TBC branches (Abolish Poison, Devour Magic ranks,
+-- Disease Cleansing Totem) that have no place here.
 local DISPEL_SPELLS = {
     DRUID = {
-        { id = 88423,  types = { Magic = true, Curse = true, Poison = true } },   -- Nature's Cure (Resto)
-        { id = 2782,   types = { Curse = true, Poison = true } },                 -- Remove Corruption
+        { id = 88423,  types = { Magic = true, Poison = true, Curse = true } },  -- Nature's Cure (Resto)
+        { id = 2782,   types = { Poison = true, Curse = true } },                -- Remove Corruption
+    },
+    EVOKER = {
+        { id = 360823, types = { Magic = true, Poison = true } },                -- Naturalize (Preservation)
+        { id = 365585, types = { Poison = true } },                              -- Expunge (Devastation)
+        { id = 374251, types = { Poison = true, Disease = true, Curse = true, Bleed = true } }, -- Cauterizing Flame
+        { id = 378438, types = { Magic = true } },                               -- Scouring Flame (PvP talent)
+    },
+    HUNTER = {
+        -- ☠ NEARLY MISSED ENTIRELY. Hunters dispel on retail through a talent-granted
+        -- salve, which is why a from-memory table left the class out and would have treated
+        -- every hunter as dispelling nothing.
+        { id = 459517, types = { Poison = true, Disease = true }, talent = true },
     },
     MAGE = {
         { id = 475,    types = { Curse = true } },                               -- Remove Curse
+        -- ⚠ Grants Magic AS WELL as Curse — the half a from-memory entry drops.
+        { id = 412113, types = { Curse = true, Magic = true } },                 -- Greater Invisibility line
     },
     MONK = {
-        { id = 115450, types = { Poison = true, Disease = true } },              -- Detox (Mistweaver)
-        { id = 218164, types = { Poison = true, Disease = true } },              -- Detox (non-MW)
-        -- ⚠ Believed to be the talent that adds Magic for Mistweaver. Gating unconfirmed.
-        { id = 388874, types = { Magic = true }, talent = true },                 -- Improved Detox
+        { id = 115450, types = { Magic = true, Poison = true, Disease = true } },-- Detox (Mistweaver)
+        { id = 218164, types = { Poison = true, Disease = true } },              -- Detox (Brewmaster/Windwalker)
+        -- ⚠ Poison/Disease, NOT Magic. My first pass had this one exactly backwards.
+        { id = 388874, types = { Poison = true, Disease = true }, talent = true },-- Improved Detox
     },
     PALADIN = {
-        { id = 4987,   types = { Magic = true, Poison = true, Disease = true } }, -- Cleanse (Holy)
+        { id = 4987,   types = { Magic = true, Poison = true, Disease = true } },-- Cleanse (Holy)
+        { id = 1152,   types = { Poison = true, Disease = true } },              -- Purify
         { id = 213644, types = { Poison = true, Disease = true } },              -- Cleanse Toxins
     },
     PRIEST = {
-        { id = 527,    types = { Magic = true }, verified = true },              -- Purify (Disc/Holy)
-        { id = 213634, types = { Disease = true }, verified = true },            -- Purify Disease (Shadow)
-        -- ★ THE REPORTED CASE. Disc/Holy cure disease only with this talent, and the engine
-        -- flag claims they always can. ✅ Confirmed both directions in game, 2026-08-26.
-        { id = 390632, types = { Disease = true }, talent = true, verified = true }, -- Improved Purify
+        { id = 527,    types = { Magic = true } },                               -- Purify (Disc/Holy)
+        { id = 32375,  types = { Magic = true } },                               -- Mass Dispel
+        { id = 213634, types = { Disease = true } },                             -- Purify Disease (Shadow)
+        -- ★ THE REPORTED CASE. ✅ Confirmed both directions in game, 2026-08-26.
+        { id = 390632, types = { Disease = true }, talent = true },              -- Improved Purify
     },
     SHAMAN = {
         { id = 77130,  types = { Magic = true, Curse = true } },                 -- Purify Spirit (Resto)
         { id = 51886,  types = { Curse = true } },                               -- Cleanse Spirit
         -- ✅ Confirmed both directions in game, 2026-08-26 (Krathe).
-        { id = 383013, types = { Poison = true }, talent = true, verified = true }, -- Poison Cleansing Totem
-    },
-    EVOKER = {
-        { id = 360823, types = { Magic = true, Poison = true } },                -- Naturalize (Preservation)
-        { id = 365585, types = { Poison = true } },                              -- Expunge
-        -- ⚠ Believed to clear several types on a talent. Types and gating both unconfirmed.
-        { id = 374251, types = { Curse = true, Poison = true, Disease = true, Bleed = true },
-          talent = true },                                                        -- Cauterizing Flame
+        { id = 383013, types = { Poison = true }, talent = true },                -- Poison Cleansing Totem
     },
     WARLOCK = {
-        -- ⚠ PET-DEPENDENT, which nothing else here is: Singe Magic belongs to the Imp, so
-        -- knowing it is not the same as being able to use it right now. Listed so the class
-        -- is not silently treated as dispelling nothing; deliberately left unverified so it
-        -- can never subtract until someone works out the pet condition.
-        { id = 89808,  types = { Magic = true } },                               -- Singe Magic (Imp)
+        -- ☠ A PET SPELL, and the only one here that is. Singe Magic belongs to the Imp, so
+        -- the probe must ask the PET spellbook rather than the player's. Both peers also
+        -- re-check it on UNIT_PET, which is why that event joins the capability watcher.
+        { id = 89808,  types = { Magic = true }, pet = true },                   -- Singe Magic (Imp)
     },
 }
 
@@ -301,20 +301,31 @@ local RACIAL_DISPEL = {
 
 -- ⚠ Same three-outcome contract as the totem probe: nil means "could not tell", which is
 -- NOT the same as false. A capability probe that cannot run must say so.
-local function PlayerKnowsSpell(id, isTalent)
-    local sb = C_SpellBook
-    local bank = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
-    if not (sb and bank) then return nil end
-    if sb.IsSpellKnown then
-        return sb.IsSpellKnown(id, bank) and true or false
+-- ☠☠ TWO PROBES, AND WHICH ONE IS RIGHT DEPENDS ON THE ENTRY.
+--   talent entries -> IsSpellKnown. IsSpellInSpellBook returns TRUE FOR UNKNOWN TALENTS by
+--     Blizzard's own doc, which is the over-report that showed poison for every shaman.
+--   base entries   -> IsSpellInSpellBook with includeOverrides. A base spell replaced by an
+--     upgraded version is still usable, and only the spellbook probe follows that chain;
+--     IsSpellKnown on the superseded ID can answer false and lose the capability.
+-- ⚠ Using one call for both is wrong in one direction or the other, which is why the peers
+-- split it exactly here too. I had it as IsSpellKnown for everything and would have started
+-- losing overridden base spells.
+local function PlayerKnowsSpell(id, isTalent, isPet)
+    local sb, en = C_SpellBook, Enum and Enum.SpellBookSpellBank
+    if not (sb and en) then return nil end
+    local bank = isPet and en.Pet or en.Player
+    if not bank then return nil end
+    if isTalent then
+        if sb.IsSpellKnown then return sb.IsSpellKnown(id, bank) and true or false end
+        -- No safe fallback for a talent: the spellbook probe would answer yes for one the
+        -- player does not have, recreating the exact bug this exists to remove. Say
+        -- "cannot tell" rather than guess.
+        return nil
     end
-    -- Talent entries have no safe fallback: the spellbook probe returns true for unknown
-    -- ones, so answering from it would re-create the exact over-report this table exists to
-    -- remove. Say "cannot tell" instead of guessing yes.
-    if isTalent then return nil end
     if sb.IsSpellInSpellBook then
         return sb.IsSpellInSpellBook(id, bank, true) and true or false
     end
+    if sb.IsSpellKnown then return sb.IsSpellKnown(id, bank) and true or false end
     return nil
 end
 
@@ -325,7 +336,7 @@ function DF:GetPlayerDispelCapability()
     local _, class = UnitClass("player")
     local types, via = {}, {}
     for _, entry in ipairs(DISPEL_SPELLS[class] or {}) do
-        if PlayerKnowsSpell(entry.id, entry.talent) == true then
+        if PlayerKnowsSpell(entry.id, entry.talent, entry.pet) == true then
             for t in pairs(entry.types) do
                 if not types[t] then
                     types[t] = true
@@ -364,17 +375,13 @@ function DF:GetDispelTypesToExclude()
     local types = DF:GetPlayerDispelCapability()
     if next(types) == nil then return nil end   -- the list proved nothing here; do not act
 
-    -- ☠ VERIFIED ENTRIES ONLY. This is the covered set, and covered-but-unknown is what
-    -- gets SUBTRACTED — so an unverified row must never reach it, or a wrong ID deletes a
-    -- dispel type the player actually has. Unverified rows still GRANT (see
-    -- GetPlayerDispelCapability); they just cannot take anything away.
+    -- Every type this class can cleanse in principle, per the table above. Covered-but-not-
+    -- known is what gets SUBTRACTED, so this set is the whole claim the correction rests on
+    -- -- which is why the table is cross-checked against the peers rather than remembered.
     local covered = {}
     for _, e in ipairs(entries) do
-        if e.verified then
-            for t in pairs(e.types) do covered[t] = true end
-        end
+        for t in pairs(e.types) do covered[t] = true end
     end
-    if next(covered) == nil then return nil end
 
     local exclude
     for t in pairs(covered) do
@@ -409,7 +416,7 @@ function DF:DebugDispelCapability()
             .. "nothing. If that is wrong, the class is missing from DISPEL_SPELLS.", "WARN")
     else
         for _, e in ipairs(entries) do
-            local known = PlayerKnowsSpell(e.id, e.talent)
+            local known = PlayerKnowsSpell(e.id, e.talent, e.pet)
             local list = {}
             for t in pairs(e.types) do list[#list + 1] = t end
             table.sort(list)
@@ -419,7 +426,7 @@ function DF:DebugDispelCapability()
                 known == true and "known" or (known == false and "unknown" or "?"),
                 table.concat(list, "/"),
                 e.talent and " [talent]" or "",
-                e.verified and " ✅" or " ⚠ unverified"),
+                e.pet and " [pet]" or ""),
                 known == true and "GOOD" or nil)
         end
     end
@@ -451,9 +458,9 @@ function DF:DebugDispelCapability()
     local exclude = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
     if not exclude then
         o:Line("Nothing subtracted — the engine's answer stands unchanged.")
-        o:Line("Either this class has no VERIFIED entries yet (unverified rows can grant, "
-            .. "never subtract), or nothing it can theoretically cleanse is missing.",
-            "NEUTRAL")
+        o:Line("Either this class is not in the table, nothing it can cleanse in principle "
+            .. "is missing, or no spell probed known at all — that last one leaves the "
+            .. "engine alone on purpose.", "NEUTRAL")
     else
         local list = {}
         for t in pairs(exclude) do list[#list + 1] = t end
@@ -468,9 +475,9 @@ function DF:DebugDispelCapability()
     o:Line("Compare the yes/no column against the character in front of you. A row that "
         .. "disagrees means that entry's spell ID or its talent gating is wrong, not that "
         .. "the feature is broken.", "NEUTRAL")
-    o:Line("⚠ Rows marked unverified are inert for subtraction by design. Confirm the name "
-        .. "resolves and the known/unknown column matches the character, then the entry can "
-        .. "be marked verified and start correcting the engine.", "NEUTRAL")
+    o:Line("⚠ The check that matters is the NAME column: if a row resolves to a spell that "
+        .. "is not the one the comment claims, that ID is wrong and its types are being "
+        .. "attributed to the wrong ability.", "NEUTRAL")
 end
 
 local ENGINE_GAP_POISON = { Poison = true }
@@ -587,6 +594,10 @@ do
         local capWatcher = CreateFrame("Frame")
         capWatcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
         capWatcher:RegisterEvent("SPELLS_CHANGED")
+        -- ⚠ Warlock's only dispel is the Imp's, so summoning or swapping a pet changes what
+        -- the player can cleanse without any talent or spellbook event firing. Both peers
+        -- re-check on this event for the same reason.
+        capWatcher:RegisterUnitEvent("UNIT_PET", "player")
         capWatcher:SetScript("OnEvent", function()
             local now = capabilitySig()
             if now == lastKnown then return end
