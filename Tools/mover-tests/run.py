@@ -42,6 +42,14 @@ lua.globals().load_addon_file = lambda name: run(ADDON / name, "DandersMover", n
 # file's `NS.__DandersUI` finds the table Fx already installed onto -- the test
 # stubs the kit surface it needs onto that table first, then loads.
 lua.globals().load_ui_file = lambda name: run(HERE.parents[1] / "DandersUI" / name, "DandersUI", ns)
+# ...and the same door with a ns of the CALLER's choosing. The options manifest's
+# head builds the `NS.__DandersUI` handshake itself, so a test of that handshake
+# has to hand it a FRESH namespace rather than the shared one above.
+lua.globals().load_ui_file_into = lambda name, tns: run(HERE.parents[1] / "DandersUI" / name, "DandersUI", tns)
+# Source text only, for a compile-only (loadstring) syntax check that must not
+# run the file. Read here rather than in Lua so the path resolves the same way
+# every other load does, whatever the cwd is.
+lua.globals().ui_file_source = lambda name: (HERE.parents[1] / "DandersUI" / name).read_text(encoding="utf-8")
 
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
 for test in sorted(HERE.glob("test_*.lua")):
