@@ -80,7 +80,7 @@ UIParent = FakeFrame(960, 540, 1920, 1080, 1)
 function FakeLine()
     local l = { _shown = false, _alpha = 1, _thickness = 0,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false,
-                fxTo = false, fxScale = false }
+                fxTo = false, fxScale = false, fxMove = false }
     function l:SetStartPoint(point, rel, x, y) self._start = { point = point, rel = rel, x = x, y = y } end
     function l:SetEndPoint(point, rel, x, y) self._end = { point = point, rel = rel, x = x, y = y } end
     function l:SetThickness(t) self._thickness = t end
@@ -106,7 +106,7 @@ function FakeUIFrame(w, h, cx, cy)
                 _lines = {}, _textures = {}, _text = "", _flags = {},
                 _allPoints = false,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false,
-                fxTo = false, fxScale = false }
+                fxTo = false, fxScale = false, fxMove = false }
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
     function f:SetShown(v) self._shown = v and true or false end

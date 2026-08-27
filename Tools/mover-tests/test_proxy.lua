@@ -29,7 +29,7 @@ local function stubFrame()
     -- the same fallback would make a never-set one read as truthy.
     local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false,
-                fxScale = false, tagShown = false, hovered = false,
+                fxScale = false, fxMove = false, tagShown = false, hovered = false,
                 _mouse = false, _border = false }
     function f:CreateAnimationGroup() return stubAnimationGroup() end
     function f:Show() self._shown = true end
