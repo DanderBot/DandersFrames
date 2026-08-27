@@ -560,6 +560,17 @@ function DF:CreateGUI()
         if GUI.ParkPage and GUI.Pages and GUI.CurrentPageName then
             GUI:ParkPage(GUI.Pages[GUI.CurrentPageName])
         end
+        -- ...and the page that was cross-fading OUT, if the window was closed
+        -- inside the ~90ms of a tab switch (see THE PAGE CROSSFADE). Its own fade
+        -- can no longer finish -- hiding the window stops the animation -- so the
+        -- callback that would have parked it never runs, and it would sit
+        -- parented and shown until the next tab change. It IS hidden here, unlike
+        -- the current page above: nothing is coming back to it.
+        if GUI.ParkPage and GUI._fadingPage then
+            GUI._fadingPage:Hide()
+            GUI:ParkPage(GUI._fadingPage)
+            GUI._fadingPage = nil
+        end
     end)
     
     -- =========================================================================
@@ -2201,8 +2212,17 @@ function DF:CreateGUI()
 
     -- Move a page out of the window's frame tree. Idempotent and cheap; the page
     -- is expected to be hidden already (every caller hides first).
+    --
+    -- ★ A PARKED PAGE IS ALWAYS AT ALPHA 1, and this is the one place that can
+    -- guarantee it. Pages cross-fade on a tab switch (see THE PAGE CROSSFADE), so
+    -- a page can be part-way through a fade when something ELSE decides to put it
+    -- away -- a second tab click, the window closing, search's index pass sweeping
+    -- all 34 of them. Fx.Cancel stops whatever was running and restores the
+    -- resting alpha, so no path can leave a page in the dock at 0.3 to come back
+    -- translucent later. Free when nothing is animating.
     function GUI:ParkPage(page)
         if not page or page._parked then return end
+        if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end
         page:SetParent(GUI._pageDock)
         page._parked = true
     end
@@ -2499,13 +2519,37 @@ function DF:CreateGUI()
         -- verbs. Guarded for an older embedded copy of the pack.
         if GUI.CloseUnpinnedPopoutRows then GUI:CloseUnpinnedPopoutRows("pageSwitch") end
 
+        -- ★ THE PAGE CROSSFADE.
+        -- ------------------------------------------------------------
+        -- The page being left fades out while the page arriving fades in, over
+        -- each other. Every page is anchored to the SAME two corners of `content`,
+        -- so the two occupy the identical rect and there is no layout to jump --
+        -- which is what makes a crossfade the right shape here rather than a
+        -- fade-out followed by a fade-in. Sequencing them would put ~90ms of
+        -- nothing-happening in front of every tab click, and a tab click that does
+        -- not respond for a tenth of a second reads as lag, not as polish.
+        --
+        -- ⚠ ONLY WHEN THERE IS SOMETHING TO CROSS-FADE FROM: a visible outgoing
+        -- page, a different one arriving, and a window already on screen. The
+        -- FIRST page of a window-open gets nothing -- the window itself is fading
+        -- in around it, and a second fade inside that one only reads as slow.
+        local fading = frame:IsShown()
+            and leavingTab and leavingTab ~= name
+            and GUI.Pages[leavingTab] or nil
+        if fading and not fading:IsShown() then fading = nil end
+
         -- Hide every page, and PARK the ones we are not about to show. Hiding
         -- alone is what the eight-second window open was made of: a hidden page
         -- still parented under the window is a subtree the engine walks on every
         -- Show and Hide of it. See THE PAGE DOCK.
+        --
+        -- ...except the one that is fading: it stays shown, and parks itself at
+        -- the end of its own fade. Everything else here is unchanged.
         for k, page in pairs(GUI.Pages) do
-            page:Hide()
-            if k ~= name then GUI:ParkPage(page) end
+            if page ~= fading then
+                page:Hide()
+                if k ~= name then GUI:ParkPage(page) end
+            end
         end
         -- The rail is not cleared here: it is about to be GLIDED onto the new row
         -- further down, and taking it off screen first is exactly the blink the
@@ -2574,6 +2618,30 @@ function DF:CreateGUI()
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
             GUI.Pages[name]:RefreshCached()
             if GUI.Pages[name].RefreshStates then GUI.Pages[name]:RefreshStates() end
+        end
+
+        -- The crossfade itself, AFTER the incoming page has been adopted, shown,
+        -- rebuilt and re-stated. Everything expensive about a tab switch happens
+        -- between those lines, and a fade started before it would simply stall on
+        -- the build -- and would show a frame of half-laid-out page while it did.
+        -- Nothing renders between the Show above and the FadeIn here: it is all
+        -- one frame.
+        if fading then
+            -- Tracked so the window's OnHide can finish the job if it is closed
+            -- inside the fade -- a stopped animation never calls its onDone.
+            GUI._fadingPage = fading
+            GUI.Fx.FadeOut(fading, 0.09, function()
+                if GUI._fadingPage == fading then GUI._fadingPage = nil end
+                -- ⚠ ASK AGAIN BEFORE HIDING. Fx already skips a cancelled fade's
+                -- onDone, and hiding a frame cancels its animations -- but "hide
+                -- and park this page" is exactly the deferred callback you do not
+                -- want landing on a page the user has clicked straight back to.
+                -- Spamming two tabs must not be able to park the one on screen.
+                if GUI.Pages[GUI.CurrentPageName] == fading then return end
+                fading:Hide()
+                GUI:ParkPage(fading)
+            end)
+            if GUI.Pages[name] then GUI.Fx.FadeIn(GUI.Pages[name], 0.12) end
         end
         local nc = GetThemeColor()
         if GUI.Tabs[name] then
