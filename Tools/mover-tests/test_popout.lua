@@ -87,6 +87,13 @@ CreateFrame = function(_, _, parent)
     local f = FakeUIFrame()
     f._children = {}
     f.GetChildren = function(self) return unpack(self._children) end
+    -- The PARENT, recorded, because effective scale is inherited through it (see
+    -- shim.lua) and two frames in this file are only ever parented, never scaled
+    -- by hand: the beam and the source outline both hang off the popout frame's
+    -- parent. Under a scaled UIParent that inheritance is the only thing that
+    -- gives either of them the scale the client would give it -- and the beam's
+    -- endpoints are divided by exactly that number on the way out.
+    if type(parent) == "table" and f.SetFakeParent then f:SetFakeParent(parent) end
     -- rawget: FakeUIFrame answers every unknown key with a no-op FUNCTION, so a
     -- plain read would hand back that function and #kids would blow up on it.
     if type(parent) == "table" then
@@ -1929,5 +1936,297 @@ do
     eq(p.frame:GetScale(), 1, "scaleone: an unscaled window leaves the popout at 1.0")
     p:Close()
 end
+
+-- ============================================================
+-- 16. A SCALED UIPARENT -- the client's own UI Scale slider
+-- ------------------------------------------------------------
+-- ☠ EVERY TEST ABOVE RUNS AT UIParent SCALE 1, and that is not the client most
+-- people play. The UI Scale slider in the game's own options puts UIParent at
+-- something like 0.9, and from that moment UIParent's OWN coordinate space stops
+-- being screen pixels: a 3840-wide screen at 0.9 makes UIParent 4266 units wide,
+-- so its centre -- the origin every rect in Popout.lua is stated against -- is at
+-- 2133, not 1920.
+--
+-- That matters because the file's whole contract is a ROUND TRIP through that
+-- origin. rectOf SUBTRACTS UIParent:GetCenter() and placeAt (and the beam's
+-- SetStartPoint) ADD it back by anchoring to "CENTER of UIParent". If the two
+-- halves ever disagreed about which space that centre is in, every number would
+-- come out displaced by a CONSTANT while keeping its LENGTH -- a beam of exactly
+-- the right length drawn in the wrong place. Nothing above could catch it: at
+-- scale 1 UIParent's own units and screen pixels are the same numbers, so a
+-- confusion between them is invisible.
+--
+-- ⚠ THE SCENE BELOW IS THE REAL ONE, from an in-game probe (Danders, 2026-08-27,
+-- settings window at 100% GUI scale). Every input is a number read off a live
+-- frame, and the expected outputs are the ones the probe read back off the beam.
+-- It is here as the REPRO for "the beam does not reach the row plate" -- and what
+-- it establishes is that the geometry was never what was wrong: the endpoints the
+-- probe found are exactly the endpoints correct geometry produces.
+--
+-- The control is the DOCK, which was visually RIGHT in the same probe. It makes
+-- the identical round trip through the identical origin, so if the origin were
+-- displaced the panel would be displaced with it. Asserting both here is what
+-- keeps that argument honest rather than rhetorical.
+-- ============================================================
+local UP_SAVE = { cx = UIParent._cx, cy = UIParent._cy,
+                  w = UIParent._w, h = UIParent._h, scale = UIParent._scale }
+
+-- ⚠ MUTATED IN PLACE, never swapped. Popout.lua captures UIParent as a FILE-SCOPE
+-- local when it loads (`local CreateFrame, UIParent, C_Timer = ...`), so
+-- reassigning the global here would leave the library still measuring against the
+-- old 1920x1080 rect and the whole section would silently test nothing.
+local function setUIParent(screenW, screenH, scale)
+    UIParent._scale = scale
+    UIParent._w, UIParent._h = screenW / scale, screenH / scale
+    UIParent._cx, UIParent._cy = UIParent._w / 2, UIParent._h / 2
+end
+
+-- Where a beam endpoint actually lands ON SCREEN. The offset it was handed is
+-- read in the BEAM FRAME's units and measured from UIParent's CENTRE, so this is
+-- the resolution the client would do -- and stating it in pixels is the only way
+-- to ask "does the beam touch the plate?" without re-using the same unit
+-- bookkeeping the answer is supposed to be checked against.
+local function beamScreen(p, pt)
+    local ucx, ucy = UIParent:GetCenter()
+    local u, k = UIParent:GetEffectiveScale(), p.beam:GetEffectiveScale()
+    return ucx * u + pt.x * k, ucy * u + pt.y * k
+end
+
+-- ...and the same resolution for the popout's own CENTER anchor, taken from the
+-- offset it RECORDED rather than from the fake centre the test seeded. Seeding is
+-- how the stub is told where a frame ended up; reading the answer back out of the
+-- seed would be checking the test against itself.
+local function dockScreenX(p)
+    local pt = p.frame._points[1]
+    local ucx = UIParent:GetCenter()
+    return ucx * UIParent:GetEffectiveScale() + pt[4] * p.frame:GetEffectiveScale()
+end
+
+local function screenRight(f) return f:GetRight() * f:GetEffectiveScale() end
+
+do
+    -- ---- the probe's world -----------------------------------------
+    local U = 0.9                                  -- the client's UI Scale slider
+    setUIParent(3840, 2160, U)
+    local UCX, UCY = UIParent:GetCenter()          -- 2133.33, 1200 -- NOT 1920, 1080
+
+    -- ---- the probe's numbers, verbatim -----------------------------
+    -- All four are frame-own-unit readings, and every one of these frames sits at
+    -- the same effective scale (the settings window's GUI scale was 100%, so it
+    -- matches UIParent's), which is why they are directly comparable with each
+    -- other -- and why the probe could see DOCK_GAP as a clean 12.
+    local WIN_RIGHT_OWN  = 2490
+    local ROW_LEFT_OWN   = 2168
+    local ROW_RIGHT_OWN  = 2428
+    local POP_LEFT_OWN   = 2502
+    local ROW_DY         = 86                      -- the row's centre above UIParent's
+    local ROW_W_OWN      = ROW_RIGHT_OWN - ROW_LEFT_OWN
+    eq(ROW_W_OWN, 260, "uiscale: the probe's row is 260 wide")
+    eq(POP_LEFT_OWN - WIN_RIGHT_OWN, DOCK_GAP,
+        "uiscale: ...and it sat exactly a dock gap clear of the window's edge")
+
+    -- ---- the frames ------------------------------------------------
+    -- The window carries no scale of its own: it is a child of UIParent at 100%,
+    -- so its effective scale IS UIParent's and its own units are UIParent's own
+    -- units. 1000 x 700 of them, positioned so its right edge lands on 2490.
+    local WIN_W_OWN, WIN_H_OWN = 1000, 700
+    local win = source(WIN_W_OWN, WIN_H_OWN, WIN_RIGHT_OWN - WIN_W_OWN / 2, UCY)
+    win:SetFakeParent(UIParent)
+    -- The row, inside it. A plain plate: the ink inset has its own tests in
+    -- section 13, and a failure here should point at the ORIGIN, not at a trim.
+    local row = source(ROW_W_OWN, 44, (ROW_LEFT_OWN + ROW_RIGHT_OWN) / 2, UCY + ROW_DY)
+    row:SetFakeParent(win)
+
+    eq(UIParent:GetEffectiveScale(), U, "uiscale: UIParent is on the slider's scale")
+    eq(win:GetEffectiveScale(), U, "uiscale: and the window inherits it at 100%")
+    eq(row:GetEffectiveScale(), U, "uiscale: as does the row inside it")
+
+    -- ---- the answers, in UIParent-centre units ---------------------
+    local WIN_RIGHT = WIN_RIGHT_OWN - UCX          -- 356.67
+    local ROW_RIGHT = ROW_RIGHT_OWN - UCX          -- 294.67 -- the probe read 295
+    local POP_LEFT  = POP_LEFT_OWN - UCX           -- 368.67 -- the probe read 369
+    local DOCK_X    = POP_LEFT + FRAME_W / 2
+    local DOCK_Y    = ROW_DY - FRAME_H / 6
+
+    local p = popout({ key = "uiscale" })
+    p.frame:SetFakeCenter(UCX + DOCK_X, UCY + DOCK_Y)
+    p:Follow(row, { outsideOf = win })
+
+    -- The popout takes the window's scale, and the window's scale is UIParent's,
+    -- so the multiplier is 1 -- but its EFFECTIVE scale is still the slider's,
+    -- which is the number the beam is divided by on the way out.
+    eq(p.frame:GetScale(), 1, "uiscale: a 100% window asks for no multiplier")
+    eq(p.frame:GetEffectiveScale(), U, "uiscale: ...but the popout still renders at the slider's scale")
+    eq(p.beam:GetEffectiveScale(), U, "uiscale: and so does the beam, parented alongside it")
+
+    -- ---- THE CONTROL: the dock, which was visually right ------------
+    eq(p.side, "right", "uiscale: it docks outside the window's right edge")
+    eq(p.frame._points[1][2], UIParent, "uiscale: by an explicit anchor to UIParent's centre")
+    eq(p.frame._points[1][4], DOCK_X, "uiscale: at the x the outside placement computed")
+    -- ...and on screen, the gap is DOCK_GAP UIParent units -- 10.8 pixels at 0.9,
+    -- which is the number a ruler held up to the monitor would find.
+    eq(dockScreenX(p) - FRAME_W / 2 * U, screenRight(win) + DOCK_GAP * U,
+        "uiscale: the panel lands a dock gap clear of the window's edge ON SCREEN")
+
+    -- ---- THE BEAM, which was reported wrong -------------------------
+    check(p.beam:IsShown(), "uiscale: the beam is up")
+    eq(p.beam.core._start.rel, UIParent, "uiscale: its endpoints are stated against UIParent's centre")
+    eq(p.beam.core._start.x, POP_LEFT, "uiscale: it leaves the popout's left face -- the probe's 369")
+    eq(p.beam.core._end.x, ROW_RIGHT, "uiscale: and lands on the row's right face -- the probe's 295")
+    eq(p.beam.core._start.y, ROW_DY, "uiscale: slid level with the row -- the probe's 86")
+    eq(p.beam.core._end.y, ROW_DY, "uiscale: dead level, so the beam runs flat")
+    -- The length the probe measured, and the length the gap plus the corridor
+    -- actually is: 12 across the dock gap, then 62 in over the window's own
+    -- padding and scrollbar gutter to the plate.
+    eq(p.beam.core._start.x - p.beam.core._end.x, POP_LEFT_OWN - ROW_RIGHT_OWN,
+        "uiscale: 74 long -- the dock gap plus the window's right-hand corridor")
+
+    -- ---- and where that puts it ON SCREEN ---------------------------
+    -- The claim the whole report is about, said in pixels: the far end is ON the
+    -- plate's edge, not 130-odd short of it out in the gutter. If the round trip
+    -- through UIParent's centre were mismatched, THIS is the assertion that would
+    -- fail while every UIParent-unit assertion above still passed.
+    local sx = beamScreen(p, p.beam.core._start)
+    local ex = beamScreen(p, p.beam.core._end)
+    eq(ex, screenRight(row), "uiscale: the beam's far end touches the row's edge, in screen pixels")
+    eq(sx, dockScreenX(p) - FRAME_W / 2 * U, "uiscale: and its near end leaves the popout's left face")
+    eq(sx - ex, (POP_LEFT_OWN - ROW_RIGHT_OWN) * U,
+        "uiscale: 74 UIParent units is 66.6 pixels at this scale, not 74 of them")
+
+    -- The connection point slid up to meet the row, and the offset it was given
+    -- goes back through the popout's OWN ratio -- 1 here, because the popout and
+    -- UIParent are on the same effective scale.
+    local np = p.notch._points[#p.notch._points]
+    eq(np[3], "LEFT", "uiscale: the point is on the popout's left edge")
+    eq(np[5], ROW_DY - DOCK_Y, "uiscale: slid up to sit level with the row")
+    p:Close()
+end
+
+-- THE COMPOUND CASE: a scaled UIParent *and* a settings window on a scale slider
+-- of its own. Two conversions stacked, which is the arrangement the file's whole
+-- ratio layer exists for -- and the one no test could reach while UIParent was
+-- pinned at 1, because the region's own scale and UIParent's were never both
+-- interesting at once.
+do
+    local U, S = 0.64, 0.85                        -- min UI scale, window at 85%
+    setUIParent(2560, 1440, U)
+    local UCX, UCY = UIParent:GetCenter()          -- 2000, 1125
+
+    local WIN_W_OWN, WIN_H_OWN = 1000, 700         -- DESIGN pixels, the window's own
+    local win = source(WIN_W_OWN, WIN_H_OWN, UCX / S, UCY / S)
+    win:SetFakeParent(UIParent)
+    win:SetScale(S)
+    eq(win:GetEffectiveScale(), U * S, "compound: the window's effective scale is both of them")
+    -- The window's own units are UIParent's times S, so its half-width is 425 of
+    -- UIParent's, not 500.
+    local WIN_RIGHT = WIN_W_OWN * S / 2
+
+    -- A row 120 UIParent units inside that edge -- the page padding, the scrollbar
+    -- gutter and the column beside it, exactly as section 13 models them.
+    local ROW_W_OWN = 260
+    local PLATE_RIGHT, PLATE_DY = WIN_RIGHT - 120, 80
+    local row = source(ROW_W_OWN, 44,
+                       (UCX + PLATE_RIGHT - ROW_W_OWN * S / 2) / S, (UCY + PLATE_DY) / S)
+    row:SetFakeParent(win)
+
+    -- The popout wears the window's scale, so its 120x104 box is 102x88.4 of
+    -- UIParent's units -- and the dock is computed in those.
+    local PFW, PFH = FRAME_W * S, FRAME_H * S
+    local DOCK_X, DOCK_Y = WIN_RIGHT + DOCK_GAP + PFW / 2, PLATE_DY - PFH / 6
+
+    local p = popout({ key = "compound" })
+    p.frame:SetFakeCenter((UCX + DOCK_X) / S, (UCY + DOCK_Y) / S)
+    p:Follow(row, { outsideOf = win })
+
+    eq(p.frame:GetScale(), S, "compound: the popout takes the window's multiplier, not its effective scale")
+    eq(p.frame:GetEffectiveScale(), U * S, "compound: so the two render at the same size")
+    eq(p.beam:GetEffectiveScale(), U, "compound: the beam is NOT scaled with them -- it is UIParent's")
+
+    eq(p.frame._points[1][4], DOCK_X / S, "compound: the dock offset is read in the popout's own units")
+    eq(p.beam.core._start.x, WIN_RIGHT + DOCK_GAP, "compound: the beam leaves the popout's left face")
+    eq(p.beam.core._end.x, PLATE_RIGHT, "compound: and TOUCHES the plate, 120 in from the window's edge")
+    eq(p.beam.core._end.y, PLATE_DY, "compound: dead level with it")
+
+    -- ...and in pixels, through both scales at once.
+    local ex = beamScreen(p, p.beam.core._end)
+    eq(ex, screenRight(row), "compound: the far end is on the row's edge on screen, through both scales")
+    local sx = beamScreen(p, p.beam.core._start)
+    eq(sx, dockScreenX(p) - PFW / 2 * U, "compound: and the near end on the popout's face")
+
+    -- The source outline is ANCHORED, so it never needed the round trip -- which
+    -- is why it stayed on the plate throughout the report while the beam was
+    -- being blamed. Asserted here so the asymmetry is on the record.
+    eq(p.srcOutline._points[1][2], row, "compound: the outline is anchored to the row, not computed")
+    p:Close()
+end
+
+-- THE BEAM ON A SCALE OF ITS OWN. Both blocks above leave scaleRatio(beam) at 1:
+-- the beam hangs off the popout's PARENT, and in the settings that parent is
+-- UIParent, so the divide on the way out is a no-op and a bug in it would not
+-- show. It is not always UIParent -- `opts.parent` exists precisely so a consumer
+-- can hang its popouts off a session overlay (the mover's unlock overlay), and an
+-- overlay may carry a scale. Then the beam's own units are neither the popout's
+-- nor UIParent's, and every endpoint has to come back through that third ratio.
+do
+    -- Round numbers on purpose: this block is about ONE division, and it should
+    -- fail with an arithmetic that can be checked by eye.
+    local U, OS = 0.5, 0.5
+    setUIParent(1920, 1080, U)
+    local UCX, UCY = UIParent:GetCenter()          -- 1920, 1080 in UIParent's own units
+
+    local overlay = source(10, 10, 0, 0)
+    overlay:SetFakeParent(UIParent)
+    overlay:SetScale(OS)
+    eq(overlay:GetEffectiveScale(), U * OS, "beamscale: the overlay is half of a half")
+
+    -- The thing being followed is at UIParent's scale, like a mover proxy on the
+    -- screen rather than inside the overlay's coordinate space.
+    local SRC_X, SRC_WH = 200, 40
+    local src = source(SRC_WH, SRC_WH, UCX + SRC_X, UCY)
+    src:SetFakeParent(UIParent)
+
+    local p = popout({ key = "beamscale", parent = overlay })
+    eq(p.beam == nil, true, "beamscale: no beam before it is placed")
+
+    -- The popout is a quarter-scale surface, so its 120x104 box is 60x52 of
+    -- UIParent's units -- and the plain right dock hangs it from the source's TOP.
+    local PW, PH = FRAME_W * OS, FRAME_H * OS
+    local DOCK_X = SRC_X + SRC_WH / 2 + DOCK_GAP + PW / 2
+    local DOCK_Y = SRC_WH / 2 - PH / 2
+    p.frame:SetFakeCenter((UCX + DOCK_X) / OS, (UCY + DOCK_Y) / OS)
+    p:Follow(src)
+
+    eq(p.frame:GetEffectiveScale(), U * OS, "beamscale: the popout inherits the overlay's scale")
+    eq(p.beam:GetEffectiveScale(), U * OS, "beamscale: and so does the beam, hung off the same parent")
+
+    -- THE DIVISION. The endpoints are UIParent-centre units; the beam frame's own
+    -- units are twice as coarse, so the offsets it is handed are twice the number.
+    local TIP_X  = DOCK_X - PW / 2                 -- the popout's left face
+    local FACE_X = SRC_X + SRC_WH / 2              -- the source's right face
+    eq(p.beam.core._start.x, TIP_X / OS, "beamscale: the near end comes back through the BEAM's ratio")
+    eq(p.beam.core._end.x, FACE_X / OS, "beamscale: and so does the far end")
+    eq(p.beam.core._start.y, 0, "beamscale: slid level with the source")
+
+    -- ...which is the same place on screen either way, and that is the point.
+    local sx, sy = beamScreen(p, p.beam.core._start)
+    local ex = beamScreen(p, p.beam.core._end)
+    eq(sx, (UCX + TIP_X) * U, "beamscale: on screen the near end is still on the popout's face")
+    eq(ex, src:GetRight() * src:GetEffectiveScale(), "beamscale: and the far end still touches the source")
+    eq(sy, UCY * U, "beamscale: dead level with the source's centre")
+
+    -- The connection point makes the same trip through the POPOUT's ratio, which
+    -- here is the same number -- the two frames are siblings under the overlay.
+    local np = p.notch._points[#p.notch._points]
+    eq(np[5], (0 - DOCK_Y) / OS, "beamscale: the point's slide is read in the popout's own units")
+    p:Close()
+end
+
+-- Put the client back, or every test file after this one is measuring against a
+-- 4000-unit screen.
+UIParent._cx, UIParent._cy = UP_SAVE.cx, UP_SAVE.cy
+UIParent._w, UIParent._h = UP_SAVE.w, UP_SAVE.h
+UIParent._scale = UP_SAVE.scale
+eq(UIParent:GetEffectiveScale(), 1, "uiscale: the shim's UIParent is restored")
+eq(select(1, UIParent:GetCenter()), CX, "uiscale: ...centre and all")
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
