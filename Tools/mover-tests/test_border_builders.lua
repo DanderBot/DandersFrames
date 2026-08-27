@@ -706,6 +706,65 @@ if GUI.CreateBorderShadowControls then
             end
         end
     end
+
+    -- ---- and WHERE the two rows are mounted ----
+    -- The rows are the whole of the Appearance section in the popout layout, so
+    -- the container they go in is a layout decision, not a detail: a 280 box in
+    -- column 2 leaves a row ending ~300px inside the window with its popout's
+    -- beam crossing half the page. The band is that same container built at the
+    -- PAGE's usable width, chromeless, and laid out across both columns.
+    --
+    -- Source-read for the same reason the counts and the hoisted toggles above
+    -- are -- the page cannot be built headlessly -- and pinned as a pair, so a
+    -- future edit cannot widen the container without also freeing it from a
+    -- column, or vice versa.
+    do
+        -- ⚠ SCOPED TO THE FRAME PAGE'S BLOCK, not to the whole file. `sizeGroup`
+        -- and `appearanceGroup` are the house names for those two boxes and other
+        -- pages in this same file use both, so a whole-file count answers about
+        -- the Pet page as readily as about this one.
+        local blockStart = pageSrc:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true)
+        local blockEnd   = pageSrc:find("if classicLayout then Add(appearanceGroup, nil, 2) end", 1, true)
+        check(blockStart ~= nil, "band: the Frame page decides the layout mode by name")
+        check(blockEnd ~= nil and blockStart and blockEnd > blockStart,
+              "band: ...and closes the Appearance block with the classic-only Add")
+        local pageSrc = pageSrc:sub(blockStart or 1, (blockEnd or 1) + 60)
+
+        local function pageHas(needle, msg)
+            check(pageSrc:find(needle, 1, true) ~= nil, "band: " .. msg)
+        end
+        pageHas("local classicLayout = DF:IsClassicSettingsLayout()",
+                "the layout mode is decided ONCE, before the container is built")
+        -- Classic: the box it has always been, in column 2, added in place.
+        pageHas("appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)",
+                "classic still builds the 280 box")
+        pageHas("if classicLayout then Add(appearanceGroup, nil, 2) end",
+                "...and still adds it to column 2, where it has always been")
+        -- Popout: the band. Width from the page helper (never a literal), no box
+        -- chrome, and added across both columns.
+        pageHas("GUI.PageUsableWidth(GUI.PageChildWidth(",
+                "the band is built at the width the layout pass will stretch it to")
+        pageHas("GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })",
+                "...with no box chrome, because the rows ARE the surface")
+        pageHas('Add(appearanceGroup, nil, "both")',
+                "...and spans both columns")
+        -- The band's padding is DEFAULT (the popout PANE is the zero-padding
+        -- case, not this). That is what lands a row's right edge on the same
+        -- corridor as a slider's value box -- see test_page_parking.
+        check(pageSrc:find("bandW, { chromeless = true, padding", 1, true) == nil,
+              "band: the band keeps the standard box padding, so its rows end at the corridor")
+        -- Exactly one Add per layout: the band's is hoisted above the Frame Size
+        -- group (so "both" syncs two columns that are still at the top rather
+        -- than punching a hole mid-page), and the classic one stays at the
+        -- bottom of the block. Two unconditional Adds would lay it out twice.
+        local adds = 0
+        for _ in pageSrc:gmatch("Add%(appearanceGroup,") do adds = adds + 1 end
+        eq(adds, 2, "band: the container is added once per layout, never unconditionally")
+        local bandAt    = pageSrc:find('Add(appearanceGroup, nil, "both")', 1, true)
+        local sizeAddAt = pageSrc:find("Add(sizeGroup, nil, 1)", 1, true)
+        check(bandAt and sizeAddAt and bandAt < sizeAddAt,
+              "band: it is added BEFORE the first column box, so it lands above the columns")
+    end
 end
 
 -- ---- restore the global --------------------------------------------

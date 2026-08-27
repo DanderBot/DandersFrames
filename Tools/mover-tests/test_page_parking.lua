@@ -321,8 +321,16 @@ do
     -- drift from the child the way a second literal did.
     has("local childWidth = GUI.PageChildWidth(contentWidth)",
         "the column maths measures against the CHILD, not the content box outside it")
-    has("local usableWidth = childWidth - 2 * SettingsBox.colMargin",
-        "the usable width is derived from the child, not declared beside it")
+    -- ...and the usable width is now a HELPER rather than a line inside the
+    -- layout loop, because a page needs the same number: a full-width feature
+    -- band has to be BUILT at the width the loop is about to stretch it to, or
+    -- its children lay out at the group's constructed 280 on the first pass.
+    has("function GUI.PageUsableWidth(childWidth)",
+        "the usable width is a helper, so a page can ask for it too")
+    has("return (childWidth or 0) - 2 * SettingsBox.colMargin",
+        "...still derived from the child and the page's own margin")
+    has("local usableWidth = GUI.PageUsableWidth(childWidth)",
+        "...and the layout loop goes through it rather than keeping a copy")
     -- Rule 2 of the two-column test: column 2 has to fit the rect the ScrollFrame
     -- clips to, or its box loses its right border at the cutover.
     has("and (math.floor(contentWidth / 2) + SettingsBox.group) <= childWidth",
@@ -332,6 +340,11 @@ do
     -- reserve the gutter twice and show it once.
     has("GUI.PinScrollBar(page, content, -inset, inset)",
         "the page's scrollbar is pinned into the gutter against the content box")
+    -- The two numbers the band's width arithmetic below borrows from the window
+    -- rather than from the kit. Pinned so a wider nav (or a bigger default
+    -- window) fails here instead of quietly making 521 wrong.
+    has("tabFrame:SetWidth(SnapLen(frame, 155))", "the nav pane is 155 wide")
+    has("local defaultWidth, defaultHeight = 760, 520", "...and the window opens at 760")
 
     do
         local PAGE_WINDOW_PAD, PAGE_INSET = 12, 8
@@ -357,6 +370,38 @@ do
         -- and the child then fills it -- the change that returned 8px to the page.
         eq(scroll.gutter - PAGE_INSET, 6,
            "corridor: the right edge gives up 6px to the bar and takes back 14 from the child")
+
+        -- ---- AND THE SAME CORRIDOR FOR A FEATURE ROW ----------------
+        -- A full-width feature band is a CHROMELESS group, not a bare widget on
+        -- the page: no fill, no border, but the standard box padding. That is
+        -- what puts a row's right edge on the SAME line a slider's value box in
+        -- an ordinary box lands on -- the corridor above, unchanged -- instead of
+        -- 10px further out where a padding-less container would put it.
+        local bandRowEdge = box.pad + box.colMargin + scroll.gutter + PAGE_WINDOW_PAD
+        eq(bandRowEdge, corridor,
+           "corridor: a full-width feature row ends on the same line as a boxed widget")
+
+        -- What the band actually BUYS, at the 760 default window: the content box
+        -- is the window less its two margins and the nav pane, the child is that
+        -- less the inset and the gutter, and a row is the child less the page's
+        -- two margins and the band's two paddings. The old 280-box row stopped
+        -- ~300px inside the window; this is the number that replaces it.
+        -- The nav pane's width and the gap beside it are Panel.lua's, pinned as
+        -- source above (`navGap    = 8,`) and by the nav's own SetWidth(155).
+        local NAV_W, NAV_GAP, DEFAULT_WIN = 155, 8, 760
+        local contentW = DEFAULT_WIN - PAGE_WINDOW_PAD - NAV_W - NAV_GAP - PAGE_WINDOW_PAD
+        local childW   = contentW - PAGE_INSET - scroll.gutter
+        local rowW     = childW - 2 * box.colMargin - 2 * box.pad
+        check(contentW < box.minCol * 2 + box.colGutter,
+              "band: the default window is a ONE-column page, so the band is the whole of it")
+        eq(rowW, 521, "band: a feature row is 521 wide at the default window")
+        -- ...against what it was inside the 280 box: the inner width of a group.
+        eq(rowW - (box.group - 2 * box.pad), 261,
+           "band: which is 261px wider than the same row inside a 280 box")
+        -- And the old row's right edge really was ~300 inside the window.
+        eq(childW - (box.colMargin + box.pad + (box.group - 2 * box.pad))
+           + scroll.gutter + PAGE_WINDOW_PAD, 302,
+           "band: the boxed row used to stop 302px inside the window; the band stops at 41")
     end
 
     -- ---- SelectTab: park the outgoing, adopt the incoming ------------

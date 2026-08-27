@@ -1727,5 +1727,78 @@ do
     row:ClosePopout()
 end
 
+-- ============================================================
+-- 12. A STRETCHED ROW
+-- The row is built at 260 but it is a SLOT, not a fixed-width card: a consumer
+-- that lays it out full-width (the Frame page's Appearance band, which spans
+-- both columns) hands it whatever the page has. Everything the row draws has to
+-- travel with that edge -- and so does the popout's beam, which is the whole
+-- reason the width matters. A row that stops 280px into a 550px page leaves its
+-- panel connected by a line across half the page.
+-- ============================================================
+do
+    -- The plate is the ink, and it is anchored to BOTH of the row's top corners
+    -- rather than sized -- which is what makes the row's width the plate's.
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Stretch", db = { on = true }, toggle = { key = "on" }, count = 3,
+    })
+    local pts = {}
+    for _, p in ipairs(row.plate._points) do pts[p[1]] = p end
+    check(pts.TOPLEFT ~= nil, "stretch: the plate is pinned to the row's top-LEFT")
+    check(pts.TOPRIGHT ~= nil, "stretch: ...and to its top-RIGHT, so it follows the width")
+    eq(row.plate:GetParent(), row, "stretch: ...and it is the row's own child")
+    -- The gap the slot carries is the only thing trimmed off the row's rect, so
+    -- the popout's outline and beam measure the FULL width, not an inset one.
+    local ins = row.popoutInset
+    eq(ins[1], 0, "stretch: nothing is trimmed off the row's left")
+    eq(ins[2], 0, "stretch: ...or its right")
+    eq(ins[3], 0, "stretch: ...or its top")
+    eq(ins[4], M.gap, "stretch: only the slot's bottom gap, which is not painted")
+end
+
+-- ...and the beam gets SHORTER as the row gets wider, because it lands on the
+-- row's near face. Two rows sharing a left edge and a y, one at a settings
+-- box's width and one at a page's: same popout, same dock, different landing.
+do
+    local win = window()
+    local LEFT = CX - 260          -- both rows start here
+    local function stretched(name, w)
+        local r = host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = {}, window = win, build = counting(name, 60),
+        })
+        r:SetSize(w, ROW_H)
+        r:SetFakeCenter(LEFT + w / 2, CY)
+        r:Show()
+        return r
+    end
+
+    -- Where the dock puts the panel, STATED rather than measured (the stub
+    -- resolves no anchors -- same arrangement test_popout.lua's beam case uses).
+    -- The same spot for both, so the only thing that moves is the row's edge.
+    local DOCK_X, DOCK_Y = CX + 420, CY
+    local function beamEndX(row)
+        row:OpenPopout()
+        local po = row.popout
+        po.frame:SetFakeCenter(DOCK_X, DOCK_Y)
+        po:Follow(row, { outsideOf = win })
+        local core = po.beam.core
+        local sx, ex = core._start.x, core._end.x
+        host:CloseAllPopoutRows("test")
+        return ex, sx - ex, core._end.y
+    end
+
+    local narrowEnd, narrowLen, narrowY = beamEndX(stretched("BeamNarrow", 260))
+    local wideEnd,   wideLen,   wideY   = beamEndX(stretched("BeamWide", 520))
+
+    -- In UIParent-centre units the narrow row's right edge is at CX, the wide
+    -- one's 260 further out; the connection point is further right than either,
+    -- so the beam clamps onto that edge in both cases.
+    eq(narrowEnd, LEFT + 260 - CX, "stretch: the beam lands on the narrow row's right edge")
+    eq(wideEnd,   LEFT + 520 - CX, "stretch: ...and on the WIDE row's, 260px further out")
+    eq(narrowLen - wideLen, 260, "stretch: so the beam is exactly the extra width shorter")
+    check(wideLen < narrowLen, "stretch: ...which is the short hop the band is for")
+    eq(narrowY, wideY, "stretch: and it still crosses level -- the width moved nothing else")
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit

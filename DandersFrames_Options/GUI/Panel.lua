@@ -71,6 +71,15 @@ local SettingsBox = GUI.SettingsBox
 function GUI.PageChildWidth(contentWidth)
     return (contentWidth or 0) - PageBox.inset - PageBox.gutter
 end
+-- ...and the width a page's WIDGETS get: the child less the page's own left and
+-- right margins. This is what a layoutCol "both" widget is stretched to, so it
+-- is also what a PAGE has to be able to ask for -- a full-width settings group
+-- built at its constructed 280 and only widened by the layout pass would lay its
+-- children out at 260 on the build and not correct them until the next refresh.
+-- Derived here rather than copied there, for the reason PageChildWidth exists.
+function GUI.PageUsableWidth(childWidth)
+    return (childWidth or 0) - 2 * SettingsBox.colMargin
+end
 -- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
 -- slider drag, slider release), each listing the surfaces it knew about — so a surface
 -- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
@@ -248,7 +257,11 @@ local function PageRefreshStates(self)
     -- a number that had to be kept in step by hand with the child's own `- 30`
     -- and with the scrollbar room inside it, which is the arrangement that let
     -- the gutter be counted twice.
-    local usableWidth = childWidth - 2 * SettingsBox.colMargin
+    --
+    -- Through GUI.PageUsableWidth, because a PAGE needs the same number now: a
+    -- full-width feature band has to be BUILT at the width this loop is about to
+    -- stretch it to, or its first layout runs at the constructed 280.
+    local usableWidth = GUI.PageUsableWidth(childWidth)
 
     -- Check if editing banner is active (adds 50px at top)
     local bannerOffset = 0
