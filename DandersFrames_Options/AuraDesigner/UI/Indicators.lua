@@ -1068,24 +1068,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     -- animation gone those profiles resolved to a border that drew nothing.
                     animate = true,
                 },
-                -- ☠ ONLY THE PORTED EFFECTS ARE OFFERED HERE. This border lives on a
-                -- container button subtree, where the shared OnUpdate driver is refused
-                -- once auras are secret — so an effect that still rides it would look
-                -- fine at the target dummy and freeze the moment you pulled, which is
-                -- the exact behaviour that got animation retired in the first place.
-                -- DF Chase runs as declarative Translation groups (Border.lua,
-                -- "DF_ORBIT, DECLARATIVE") and is confirmed animating in combat.
-                -- ★ DELETE A LINE FROM THIS SET AS EACH EFFECT IS PORTED. Rough order of
-                -- difficulty: BLINK (a hard on/off alpha pair) and DF_PROC (its 6x5 atlas
-                -- maps onto a native FlipBook) are close to direct; DF_PULSATE drives the
-                -- border WRAPPER's alpha, which also carries the out-of-range fade, so it
-                -- needs its own host; DF_DASH wants masked strips translating one pattern
-                -- cycle; DF_PIXEL walks BARS that change orientation at every corner and a
-                -- Translation cannot resize mid-flight, so it needs a real rethink.
-                animExcludeTypes = {
-                    DF_PULSATE = true, DF_DASH = true, BLINK = true,
-                    DF_PROC = true, DF_FLASH = true, DF_PIXEL = true,
-                },
+                -- ★ THE WHOLE SET IS OFFERED AGAIN. Every effect now has a declarative
+                -- twin that runs on a container button subtree, where the shared OnUpdate
+                -- driver is refused once auras are secret — see "DECLARATIVE EFFECTS" in
+                -- Frames/Border.lua. There was an animExcludeTypes filter here while only
+                -- DF Chase was ported; it is gone rather than emptied, because an empty
+                -- exclude set reads as "someone meant to restrict this and forgot".
+                -- ⚠ If a NEW effect type is ever added, give it a declarative twin or put
+                -- the filter back for it — on this surface an OnUpdate-only effect looks
+                -- correct at a target dummy and freezes on the pull.
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
