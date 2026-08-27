@@ -1144,6 +1144,77 @@ end
 -- Show/Hide/SetAlpha(1) on icon.highlightFrame two lines later: two computations of one
 -- visual with the second silently winning, which is the shape the live-pathway rule
 -- exists to prevent. The fabricated flag is DATA and belongs here, in the live decision.
+-- ============================================================
+-- LCG A/B HARNESS — /df debug lcgflash (LOCAL ONLY, hold back from PRs)
+-- ============================================================
+-- Renders the REAL LibCustomGlow ButtonGlow in place of DF Flash on these icons, so
+-- the DF-owned reimplementation can be judged against the genuine article on the same
+-- screen, same icon, same cast — not against memory.
+--
+-- ☠ NO VENDORED CODE. DF removed its embedded LCG on 12.1 and the house rule is to
+-- reimplement the method, never ship the library — this borrows the copy another
+-- loaded addon (NSRT / Grid2 / VuhDo) has already registered with LibStub, at runtime,
+-- for a debug toggle that never reaches a PR. If none of those addons is loaded the
+-- toggle says so instead of silently doing nothing.
+local function lcgLib()
+    return LibStub and LibStub.GetLibrary
+        and LibStub:GetLibrary("LibCustomGlow-1.0", true) or nil
+end
+
+-- Swap one border's DF_FLASH for the real ButtonGlow while the toggle is on.
+-- Mutates `spec` (strips the animation) so DF.Border renders the static ring only and
+-- the two implementations never draw on top of each other.
+-- ☠ START ONLY ON A FRAME WITH NO ACTIVE GLOW. Grid2 carries a crash note on LCG's
+-- reuse branch: a second Start on a live glow runs GetAlpha maths that throws when the
+-- frame's alpha has gone secret — and these icons take SetAlphaFromBoolean off the
+-- secret isImportant, so that is not hypothetical here. The fresh-acquire path reads
+-- nothing; skipping the restart is the entire mitigation.
+local function lcgFlashSwap(frame, spec)
+    if not frame then return end
+    local lcg = DF._debugLCGFlash and lcgLib() or nil
+    if lcg and spec and spec.animation and spec.animation.type == "DF_FLASH" then
+        spec.animation = nil
+        if not frame._ButtonGlow then
+            -- nil colour = the untouched classic look; that IS the reference.
+            lcg.ButtonGlow_Start(frame)
+        end
+    elseif frame._ButtonGlow then
+        local lib = lcgLib()
+        if lib and lib.ButtonGlow_Stop then lib.ButtonGlow_Stop(frame) end
+    end
+end
+
+function DF:ToggleLCGFlashDebug()
+    DF._debugLCGFlash = not DF._debugLCGFlash
+    local o = DF:Out("LCG Flash A/B", DF._debugLCGFlash and "on" or "off")
+    if DF._debugLCGFlash and not lcgLib() then
+        o:Line("LibCustomGlow-1.0 is not loaded — enable NSRT, Grid2 or VuhDo, which embed it.", "BAD")
+        DF._debugLCGFlash = false
+        return
+    end
+    o:Line(DF._debugLCGFlash
+        and "Personal targeted icons now render the REAL LCG ButtonGlow wherever DF Flash is configured."
+        or  "Personal targeted icons are back on DF Flash.")
+    if DF._debugLCGFlash then
+        o:Line("Applies to each icon on its next render — a new cast, or toggle the test preview.")
+    else
+        -- OFF releases immediately: a shown icon might not re-render for a while, and
+        -- a lingering borrowed glow over a resumed DF Flash would corrupt the very
+        -- comparison this exists for.
+        local lib = lcgLib()
+        if lib and lib.ButtonGlow_Stop then
+            for _, icon in ipairs(personalIcons) do
+                if icon.iconFrame and icon.iconFrame._ButtonGlow then
+                    lib.ButtonGlow_Stop(icon.iconFrame)
+                end
+                if icon.highlightFrame and icon.highlightFrame._ButtonGlow then
+                    lib.ButtonGlow_Stop(icon.highlightFrame)
+                end
+            end
+        end
+    end
+end
+
 local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
     -- No borderColor read here: the colour comes from DF.Border:BuildSpec via the
     -- canonical personalTargetedSpell* keys, so a second local read went unused.
@@ -1198,6 +1269,7 @@ local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
         if highlightImportant and spellID and icon.highlightBorder then
             local spec = DF.Border:BuildSpec(db, "personalTargetedSpellImportant", { iconMode = true })
             spec.enabled = true
+            lcgFlashSwap(icon.highlightFrame, spec)   -- A/B harness: no-op unless toggled
             DF.Border:Apply(icon.highlightBorder, spec)
             icon.highlightFrame:Show()
             if importantOverride ~= nil then
@@ -1206,6 +1278,7 @@ local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
                 icon.highlightFrame:SetAlphaFromBoolean(C_Spell.IsSpellImportant(spellID))
             end
         else
+            lcgFlashSwap(icon.highlightFrame, nil)    -- highlight off -> release any LCG glow
             if icon.highlightBorder then DF.Border:Apply(icon.highlightBorder, { enabled = false }) end
             icon.highlightFrame:Hide()
         end
@@ -1220,6 +1293,7 @@ local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
         local spec = DF.Border:BuildSpec(db, "personalTargetedSpell", { iconMode = true })
         spec.enabled = showBorder
         spec.size    = borderSize
+        lcgFlashSwap(icon.iconFrame, spec)            -- A/B harness: no-op unless toggled
         DF.Border:Apply(icon.border, spec)
     end
 

@@ -7078,6 +7078,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- rather than by asking them anything.
                 local unit = msg:match("^adalpha%s+(%S+)$")
                 if DF.DebugADAlphaHosts then DF:DebugADAlphaHosts(unit) end
+            elseif msg == "lcgflash" then
+                -- A/B: swap DF Flash on the personal targeted icons for the REAL
+                -- LibCustomGlow ButtonGlow (borrowed from another loaded addon's
+                -- LibStub registration — nothing vendored). LOCAL ONLY.
+                if DF.ToggleLCGFlashDebug then DF:ToggleLCGFlashDebug() end
             elseif msg == "flashgeom" then
                 -- Live quad sizes of the DF Flash/Proc layers on the personal targeted
                 -- icons — outer glow, ants, host, and the ants/outer ratio (LCG holds
