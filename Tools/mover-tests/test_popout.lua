@@ -1143,6 +1143,30 @@ do
     eq(y, ROW.y - 600 / 6, "outside: a popout taller than the window keeps the third rule on its row")
 end
 
+-- ...AND THAT IS WHAT MAKES THE PLACEMENT WORK FOR A SOURCE IN THE HEADER.
+-- The settings window's UI Scale panel opens from a 20px glyph in the top deck,
+-- not from a row in a scrolling list -- and "a third down the popout" measured
+-- off something that high would hang the panel's top off the top of the window.
+-- The window clamp is what stops it: for any source in the header band the
+-- answer saturates, and the panel's top edge lands FLUSH with the window's.
+do
+    local SHORT_H = 60                                   -- title bar + one control
+    local glyph = { x = 260, y = WIN_H / 2 - 15, w = 20, h = 20 }   -- deck 1, right end
+    local side, x, y = UI.PopoutOutsidePos(WIN, glyph, FRAME_W, SHORT_H, DOCK_GAP, 1920, 1080)
+    eq(side, "right", "header: a glyph in the top deck still docks outside the window's edge")
+    eq(x, OUT_X, "header: ...at the same x as any other source -- the WINDOW decides that")
+    eq(y, WIN_H / 2 - SHORT_H / 2,
+        "header: and its top edge lands flush with the window's top, not above it")
+    -- A source one deck lower is BELOW the saturation point, so the third rule
+    -- takes over again and the panel follows it down -- still wholly inside the
+    -- window, which is the invariant that matters. Both readings are correct;
+    -- what must never happen is a top edge above the window's.
+    local lower = { x = 260, y = WIN_H / 2 - 45, w = 20, h = 20 }   -- deck 2
+    local _, _, y2 = UI.PopoutOutsidePos(WIN, lower, FRAME_W, SHORT_H, DOCK_GAP, 1920, 1080)
+    eq(y2, lower.y - SHORT_H / 6, "header: a deck-2 source is clear of the clamp and follows the third rule")
+    check(y2 + SHORT_H / 2 <= WIN_H / 2, "header: ...and is still wholly inside the window")
+end
+
 -- Missing rects have no answer, the same way PopoutDockPos has none.
 do
     eq(UI.PopoutOutsidePos(nil, ROW, FRAME_W, FRAME_H, DOCK_GAP, 1920, 1080), nil,

@@ -508,6 +508,15 @@ function DF:CreateGUI()
         -- Escape, /df, and the combat auto-close -- so this is the one place it
         -- needs saying. Guarded for an older embedded copy of the pack.
         if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("windowClosed") end
+        -- ...and the header's own popout, which is not a row and so is not in
+        -- that store. Same reasoning exactly: it stands outside this frame, so
+        -- hiding the window does not take it, and it would be left floating over
+        -- the game docked to an edge that is no longer there. It is pinnable, so
+        -- the shell's source-death close (which only fires for unpinnable
+        -- popouts) will never do it either.
+        if GUI.ScalePopout and not GUI.ScalePopout.closed then
+            GUI.ScalePopout:Close("windowClosed")
+        end
 
         -- Park the page that was on screen (see THE PAGE DOCK). With the window
         -- closed nothing needs it in the tree, and leaving it there is one more
@@ -519,39 +528,79 @@ function DF:CreateGUI()
         end
     end)
     
-    -- Title bar (handles dragging like old addon)
-    -- Uses FULLSCREEN_DIALOG strata so it stays above dropdown menus and popups,
-    -- allowing the window to be dragged even when settings panels are open.
-    local titleBar = CreateFrame("Frame", nil, frame)
-    titleBar:SetHeight(30)
-    titleBar:SetPoint("TOPLEFT", 0, 0)
-    titleBar:SetPoint("TOPRIGHT", -30, 0)
-    titleBar:EnableMouse(true)
-    titleBar:RegisterForDrag("LeftButton")
-    titleBar:SetScript("OnDragStart", function() frame:StartMoving() end)
-    titleBar:SetScript("OnDragStop", function()
+    -- =========================================================================
+    -- THE TWO-DECK HEADER
+    -- -------------------------------------------------------------------------
+    -- The window's chrome is TWO strips, and they answer two different
+    -- questions. Deck 1 is IDENTITY -- what am I looking at, whose settings are
+    -- these, and the three window-level affordances (scale, changelog, close).
+    -- Deck 2 is OPERATION -- which mode am I editing, and the verbs that act on
+    -- it (undo/redo, Test, Unlock).
+    --
+    -- The band they occupy is NOT new. The old header already ran 0..-64: a
+    -- title strip at 0..-30 and an unnamed row of toolbar buttons at -32..-56,
+    -- anchored to the window rather than to anything, with the UI Scale slider
+    -- parked at its right end. So this is a re-HOUSING, not a growth -- the two
+    -- decks are the same 64px, the content still starts at -64, and the window's
+    -- default height is untouched. (The delegation spec assumed a single-row
+    -- header and budgeted ~26px for the second; the budget was already spent.)
+    --
+    -- ⚠ BOTH DECKS DRAG. The title strip always did; the toolbar row never did,
+    -- which made half the window's chrome a dead zone.
+    --
+    -- Deck 1 keeps FULLSCREEN_DIALOG strata so the window stays draggable even
+    -- with a dropdown or popup open. Deck 2 deliberately does NOT: its children
+    -- are the mode tabs and the Test/Unlock buttons, which have always lived at
+    -- the window's own DIALOG strata, and promoting them would raise them over
+    -- page menus that open upward into the header band.
+    -- =========================================================================
+    local function SaveWindowPos()
         frame:StopMovingOrSizing()
         -- Save position so it persists across sessions
         local point, _, relPoint, x, y = frame:GetPoint()
         local ws = DF:GetWindowState()
         ws.point, ws.relPoint, ws.x, ws.y = point, relPoint, x, y
-    end)
+    end
+
+    local titleBar = CreateFrame("Frame", nil, frame)
+    titleBar:SetHeight(30)
+    titleBar:SetPoint("TOPLEFT", 0, 0)
+    -- Full width now, where it used to stop 30px short to keep off the close
+    -- button. The whole right-hand cluster sits at frame level 210 against this
+    -- strip's 200, so every control still takes its own clicks and every GAP
+    -- between them drags the window.
+    titleBar:SetPoint("TOPRIGHT", 0, 0)
+    titleBar:EnableMouse(true)
+    titleBar:RegisterForDrag("LeftButton")
+    titleBar:SetScript("OnDragStart", function() frame:StartMoving() end)
+    titleBar:SetScript("OnDragStop", SaveWindowPos)
     titleBar:SetFrameStrata("FULLSCREEN_DIALOG")
     titleBar:SetFrameLevel(200)
-    
+    GUI.HeaderDeck1 = titleBar
+
+    -- ★ THE PRODUCT LABEL AND THE BUILD TAG ARE TWO STRINGS NOW, not one
+    -- concatenation. The name is the product label -- theme-coloured, and the
+    -- SEAM the future product dropdown opens from (it becomes the opener; the
+    -- tag stays put beside it). The version follows it dim and small, because
+    -- "which build am I on" is reference information, not the window's title.
     local title = titleBar:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     title:SetPoint("LEFT", 12, 0)
+    title:SetText("DandersFrames")
+    GUI.HeaderProductLabel = title      -- ← seam: the product dropdown's opener
     local versionStr = DF.VERSION or "Unknown"
     local channelTags = { alpha = " |cffff8800alpha|r", beta = " |cffff8800beta|r" }
     local channelTag = channelTags[DF.RELEASE_CHANNEL] or ""
-    title:SetText("DandersFrames " .. versionStr .. channelTag)
+    local versionTag = titleBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    versionTag:SetPoint("LEFT", title, "RIGHT", 6, 0)
+    versionTag:SetText(versionStr .. channelTag)
+    versionTag:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     local c = GetThemeColor()
     title:SetTextColor(c.r, c.g, c.b)
     title.UpdateTheme = function()
         local nc = GetThemeColor()
         title:SetTextColor(nc.r, nc.g, nc.b)
     end
-    
+
     -- Close button with icon
     local closeBtn = GUI:CreateCloseButton(frame, { size = 20, onClick = function()
         -- Fade, then hide. FadeOut's cancel semantics make this safe against a
@@ -580,6 +629,108 @@ function DF:CreateGUI()
     infoBtn:HookScript("OnLeave", function(self)
         self.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end)
+
+    -- =========================================================================
+    -- DECK 1 RIGHT CLUSTER: profile chip, scale, changelog, close
+    -- -------------------------------------------------------------------------
+    -- Chained right-to-left off the close button, so the cluster's right edge is
+    -- fixed and it grows leftward into the title's space -- the same direction
+    -- the UI Scale row used to grow for the same reason (a long label has room
+    -- on the left and none on the right).
+    -- =========================================================================
+
+    -- ⤢ UI SCALE. The slider used to sit in the toolbar row, permanently on
+    -- screen, spending 155px of the window's widest strip on a control that is
+    -- touched once and then never again. It is a WINDOW option, so it now lives
+    -- where the window's own options live: behind this glyph, in a popout.
+    -- Forward-declared because the popout is built further down, after the
+    -- pieces it docks against exist.
+    local OpenScalePopout
+    local scaleBtn = GUI:CreateGlyphButton(frame, {
+        texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+        width = 20, height = 20, iconSize = 15,
+        color    = C_TEXT_DIM,
+        tooltip  = { title = L["Scale"], lines = { L["Scale the settings window."] } },
+        onClick  = function() OpenScalePopout() end,
+    })
+    scaleBtn:SetPoint("TOPRIGHT", infoBtn, "TOPLEFT", -4, 0)
+    scaleBtn:SetFrameStrata("FULLSCREEN_DIALOG")
+    scaleBtn:SetFrameLevel(210)
+    GUI.ScaleButton = scaleBtn
+
+    -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting,
+    -- and it used to be answerable only by walking to the Profiles page. The
+    -- chip is the shared inline dropdown -- same opener, same menu, same
+    -- keyboard-free click -- reading and writing through the profile system's
+    -- own accessors (DF:GetProfiles / DF:GetCurrentProfile / DF:SetProfile), so
+    -- a switch from here is the same switch the Profiles page performs.
+    -- menuAlign RIGHT: the opener sits near the window's right edge and the menu
+    -- is usually wider, so surplus width grows leftward instead of off-screen.
+    -- _order, not the dropdown's default alphabetical sort: DF:GetProfiles
+    -- already orders the list the way the Profiles page shows it (Default
+    -- pinned first, the rest alphabetical), and the two must not disagree.
+    local function BuildProfileOptions()
+        local order = {}
+        local options = { _order = order }
+        for _, name in ipairs(DF:GetProfiles()) do
+            order[#order + 1] = name
+            options[name] = { value = name, text = name }
+        end
+        return options
+    end
+    local profileChip = GUI:CreateDropdown(
+        titleBar, "", BuildProfileOptions(),
+        nil, nil, nil,
+        function() return DF:GetCurrentProfile() end,          -- customGet
+        function(name)                                          -- customSet
+            if name == DF:GetCurrentProfile() then return end
+            DF:SetProfile(name)
+            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+        end,
+        { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
+    )
+    profileChip:SetSize(126, 20)
+    profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -6, 0)
+    profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
+    GUI.ProfileChip = profileChip
+
+    -- The runtime auto-layout overlay, said in the header's own voice. When an
+    -- auto layout is driving the live raid frames the profile named on the chip
+    -- is not the whole story, and the addon has exactly one glyph for "something
+    -- is overriding this" -- the shared override marker. Same dot, same colour,
+    -- same tooltip shape as the one beside Unlock.
+    local profileOverrideStar = GUI:CreateOverrideMarker(titleBar, 12)
+    profileOverrideStar:SetPoint("RIGHT", profileChip, "LEFT", -2, 0)
+    profileOverrideStar.tooltipText = L["Override active"]
+
+    -- Repainted from UpdateThemeColors, which every mode switch and every
+    -- window show already runs -- the two moments the answer can have changed
+    -- without this window being open to see it.
+    local function UpdateProfileChip()
+        -- UpdateText, NOT RebuildOptions: the MENU already rebuilds itself from
+        -- optionsFunc on every open, and the opener's caption falls back to the
+        -- raw value for a name the build-time list never had -- so a profile
+        -- created since then still reads correctly, without paying for a menu
+        -- row rebuild on every mode switch.
+        if profileChip.UpdateText then profileChip:UpdateText() end
+        local AP = DF.AutoProfilesUI
+        local layout = AP and AP.IsLayoutActive and AP:IsLayoutActive()
+            and AP.GetActiveLayoutName and AP:GetActiveLayoutName()
+        if layout then
+            profileOverrideStar.tooltipSubText = format(L["Profile: %s"], layout)
+            profileOverrideStar:Show()
+        else
+            profileOverrideStar:Hide()
+        end
+    end
+    GUI.UpdateProfileChip = UpdateProfileChip
+
+    -- The title yields to the cluster rather than running under it: at the
+    -- window's 520 minimum a long build tag and a long profile name would
+    -- otherwise overlap. Two anchors + no wrap means the tag clips instead.
+    versionTag:SetPoint("RIGHT", profileOverrideStar, "LEFT", -8, 0)
+    versionTag:SetJustifyH("LEFT")
+    versionTag:SetWordWrap(false)
 
     -- Changelog overlay (covers full content area below title bar)
     local changelogOverlay = CreateFrame("Frame", nil, frame, "BackdropTemplate")
@@ -1084,51 +1235,74 @@ function DF:CreateGUI()
         end
     end)
     
+    -- =========================================================================
+    -- DECK 2 (operation): mode tabs left, verbs right
+    -- -------------------------------------------------------------------------
+    -- The strip the mode tabs and Test/Unlock have always drawn in, now an
+    -- actual frame -- which is what lets it DRAG (the buttons are its children,
+    -- so they take their own clicks and the gaps between them move the window)
+    -- and what lets the two clusters be anchored to its edges rather than to
+    -- absolute offsets into the window.
+    --
+    -- ⚠ NO STRATA OF ITS OWN. See the header note on deck 1: these buttons must
+    -- stay at the window's DIALOG strata, where they have always been.
+    -- =========================================================================
+    local deck2 = CreateFrame("Frame", nil, frame)
+    deck2:SetPoint("TOPLEFT", 0, -30)
+    deck2:SetPoint("TOPRIGHT", 0, -30)
+    deck2:SetHeight(30)
+    deck2:EnableMouse(true)
+    deck2:RegisterForDrag("LeftButton")
+    deck2:SetScript("OnDragStart", function() frame:StartMoving() end)
+    deck2:SetScript("OnDragStop", SaveWindowPos)
+    deck2:SetFrameLevel(frame:GetFrameLevel() + 1)
+    GUI.HeaderDeck2 = deck2
+
     -- Party/Raid mode toggle buttons
-    local btnParty = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    -- Head of the toolbar chain (Party <- Raid <- Clicks <- Test <- Unlock), so
-    -- this offset is what every button along it inherits.
-    btnParty:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -32))
+    local btnParty = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    -- Head of the LEFT chain (Party <- Raid <- Clicks), so this offset is what
+    -- every button along it inherits. The +1 lifts the 24px button off deck 2's
+    -- centre onto the exact row the old absolute -32 put it on, so nothing in
+    -- the header moves by a pixel.
+    btnParty:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnParty, 12), 1)
     -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives it.
     GUI:StyleButton(btnParty, { tab = true, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
-    
-    local btnRaid = CreateFrame("Button", nil, frame, "BackdropTemplate")
+
+    local btnRaid = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
     GUI:StyleButton(btnRaid, { tab = true, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.RaidButton = btnRaid  -- Store for external access
-    
+
     -- Click Casting tab button
-    local btnClicks = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    local btnClicks = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
     GUI:StyleButton(btnClicks, { tab = true, text = L["BINDS"], accent = { r = 0.2, g = 0.8, b = 0.4 }, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
 
     -- =========================================================================
-    -- TEST MODE BUTTON (next to CLICKS tab)
+    -- DECK 2 RIGHT CLUSTER: undo / redo / Test / Unlock / override marker
+    -- -------------------------------------------------------------------------
+    -- The verbs. They used to trail the mode tabs on the LEFT -- Party, Raid,
+    -- Binds, then Test and Unlock, one undifferentiated run of five buttons in
+    -- which "which mode am I in" and "do the thing" looked identical. Split to
+    -- opposite ends of the deck, the tabs read as tabs and the verbs as verbs.
+    --
+    -- ⚠ ANCHORED RIGHT-TO-LEFT, and the marker anchors AFTER the button it
+    -- belongs to, so the cluster's right edge is fixed while a translated
+    -- "Unlock"/"Test" grows the chain leftward into empty deck. Every offset is
+    -- still snapped for the reason the old left-hand chain was: nothing
+    -- position-corrects these after the fact, so a fraction anywhere in the
+    -- chain accumulates along it.
+    --
+    -- The marker keeps its place immediately RIGHT of Unlock, so the space it
+    -- needs is reserved whether it is showing or not: the 33 below is the 12 of
+    -- window margin, plus the 4 of gap and the 17 from Unlock's edge to the
+    -- dot's (the marker's hit frame is 3px larger than the dot on each side).
     -- =========================================================================
-    local btnTest = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    -- Snapped gap + snapped width below: the toolbar is a CHAIN (Clicks <- Test
-    -- <- Unlock <- override marker) and controls are not position-corrected after
-    -- the fact, so every offset and width in the chain has to be a whole number
-    -- of device pixels or the fraction accumulates rightwards.
-    btnTest:SetPoint("LEFT", btnClicks, "RIGHT", SnapLen(btnTest, 12), 0)
-    GUI:StyleButton(btnTest, {
-        width = 75, height = 24,
-        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off", size = 18, color = C_TEXT_DIM },
-        text = L["Test"],
-    })
-    GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
-    btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    -- Content-fit width (less dead space)
-    btnTest:SetWidth(SnapLenUp(btnTest, math.ceil(btnTest.Text:GetStringWidth()) + 38))
-    GUI.TestButton = btnTest
-    
-    -- =========================================================================
-    -- LOCK/UNLOCK BUTTON (next to Test button)
-    -- =========================================================================
-    local btnLock = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnLock:SetPoint("LEFT", btnTest, "RIGHT", SnapLen(btnLock, 4), 0)
+
+    local btnLock = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    btnLock:SetPoint("RIGHT", deck2, "RIGHT", SnapLen(btnLock, -33), 1)
     GUI:StyleButton(btnLock, {
         width = 80, height = 24,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock", size = 18, color = C_TEXT_DIM },
@@ -1140,15 +1314,56 @@ function DF:CreateGUI()
     -- button (real label set in UpdateLockButtonState).
     btnLock:SetWidth(SnapLenUp(btnLock, math.ceil(btnLock.Text:GetStringWidth()) + 38))
     GUI.LockButton = btnLock
-    
+
     -- Position override marker (shown next to the lock button when the frame
     -- position is overridden in the layout being edited). Shared marker helper →
     -- dot + hover tooltip, one colour with every other override marker.
-    local positionOverrideStar = GUI:CreateOverrideMarker(frame, 14)
+    local positionOverrideStar = GUI:CreateOverrideMarker(deck2, 14)
     positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", SnapLen(positionOverrideStar, 4), 0)
     positionOverrideStar.tooltipText = L["Override active"]
     positionOverrideStar.tooltipSubText = L["The frame position is overridden in this layout."]
     GUI.PositionOverrideStar = positionOverrideStar
+
+    local btnTest = CreateFrame("Button", nil, deck2, "BackdropTemplate")
+    btnTest:SetPoint("RIGHT", btnLock, "LEFT", SnapLen(btnTest, -4), 0)
+    GUI:StyleButton(btnTest, {
+        width = 75, height = 24,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off", size = 18, color = C_TEXT_DIM },
+        text = L["Test"],
+    })
+    GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
+    btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- Content-fit width (less dead space)
+    btnTest:SetWidth(SnapLenUp(btnTest, math.ceil(btnTest.Text:GetStringWidth()) + 38))
+    GUI.TestButton = btnTest
+
+    -- ★ UNDO / REDO SLOTS, BUILT AND HIDDEN. The settings undo engine lands
+    -- later; its two controls belong here, at the head of the verb cluster, and
+    -- reserving the geometry now means the header does not get re-laid out when
+    -- it does. They are hidden until DF.SettingsUndo exists, because a visible
+    -- button that cannot do anything is worse than no button -- and because they
+    -- are the LEFTMOST pair, hiding them leaves no hole: nothing anchors past
+    -- them. When the engine arrives it wires OnClick, enables/greys them from
+    -- its own stacks, and shows them.
+    local btnRedo = GUI:CreateGlyphButton(deck2, {
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+        width = 22, height = 22, iconSize = 16,
+        color = C_TEXT_DIM,
+        tooltip = { title = L["Redo"] },
+    })
+    btnRedo:SetPoint("RIGHT", btnTest, "LEFT", SnapLen(btnRedo, -12), 0)
+    local btnUndo = GUI:CreateGlyphButton(deck2, {
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_left",
+        width = 22, height = 22, iconSize = 16,
+        color = C_TEXT_DIM,
+        tooltip = { title = L["Undo"] },
+    })
+    btnUndo:SetPoint("RIGHT", btnRedo, "LEFT", SnapLen(btnUndo, -4), 0)
+    GUI.UndoButton, GUI.RedoButton = btnUndo, btnRedo
+    if not DF.SettingsUndo then
+        btnUndo:Hide()
+        btnRedo:Hide()
+    end
     
     -- Function to update position override indicator
     local function UpdatePositionOverrideIndicator()
@@ -1287,82 +1502,119 @@ function DF:CreateGUI()
     end)
     
     -- =========================================================================
-    -- UI SCALE SLIDER (top right, always visible with larger min frame size)
-    -- =========================================================================
-    local scaleContainer = CreateFrame("Frame", nil, frame)
-    scaleContainer:SetSize(155, 24)
-    scaleContainer:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -32)
-    
-    -- ★ ANCHORED FROM THE RIGHT, so a longer label grows LEFTWARD into empty title-bar
-    -- space instead of pushing the slider and the percentage out of a fixed-width box.
+    -- UI SCALE — A POPOUT, NOT A PERMANENT ROW
+    -- -------------------------------------------------------------------------
+    -- ★ THE WINDOW'S OWN OPTIONS GO IN THE POPOUT CONTAINER, the same one a
+    -- feature row on a page opens. This slider used to occupy 155px of the
+    -- header FOREVER -- a control almost every user touches once and then never
+    -- again, permanently in front of every user who has already finished with
+    -- it. Behind the ⤢ in deck 1 it costs 20px and reappears in one click.
     --
-    -- The container is 155px and pinned TOPRIGHT, and this row used to flow the other way
-    -- -- label at the container's LEFT, slider anchored to the label's right, percentage
-    -- to the slider's right. In English "UI Scale:" fits and the row lands inside the box;
-    -- German "UI Skalierung:" is far wider, so everything after it was shoved past the
-    -- right edge of the window. Reversing the chain (percentage pinned RIGHT, slider left
-    -- of it, label left of that) makes the row's right edge fixed and its left edge free,
-    -- which is the direction there is room in.
-    local scaleLabel = scaleContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    scaleLabel:SetText(L["UI Scale:"])
-    scaleLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    
-    local scaleSlider = CreateFrame("Slider", nil, scaleContainer, "BackdropTemplate")
-    scaleSlider:SetSize(65, 14)
-    scaleSlider:SetOrientation("HORIZONTAL")
-    scaleSlider:SetMinMaxValues(0.6, 1.4)
-    scaleSlider:SetValueStep(0.05)
-    scaleSlider:SetObeyStepOnDrag(true)
-    scaleSlider:SetValue(savedScale)
-    CreateElementBackdrop(scaleSlider)
-    
-    -- Thumb texture
-    local thumb = scaleSlider:CreateTexture(nil, "OVERLAY")
-    thumb:SetSize(12, 14)
-    thumb:SetColorTexture(0.5, 0.5, 0.5, 1)
-    scaleSlider:SetThumbTexture(thumb)
-    
-    -- The RIGHT-hand end of the reversed chain: percentage pinned to the container's right
-    -- edge, slider to its left, label to the slider's left. Declared here rather than at
-    -- each widget's creation so the whole chain reads in one place.
-    local scaleValue = scaleContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    -- ⚠ FIXED WIDTH, because the slider hangs off this string's LEFT edge. Unsized,
-    -- the string narrows when "100%" drops to "95%" and the whole chain -- slider
-    -- included -- shifts under the cursor MID-DRAG, the exact drift the comment on
-    -- OnValueChanged below exists to prevent. Wide enough for "100%".
-    scaleValue:SetWidth(34)
-    scaleValue:SetJustifyH("RIGHT")
-    scaleValue:SetPoint("RIGHT", scaleContainer, "RIGHT", 0, 0)
-    scaleSlider:SetPoint("RIGHT", scaleValue, "LEFT", -4, 0)
-    scaleLabel:SetPoint("RIGHT", scaleSlider, "LEFT", -6, 0)
-    scaleValue:SetText(string.format("%.0f%%", savedScale * 100))
-    scaleValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    -- Only update text while dragging (not main frame scale - that causes cursor drift)
-    -- But DO update popup panels live
-    scaleSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value * 20 + 0.5) / 20  -- Round to 0.05
-        scaleValue:SetText(string.format("%.0f%%", value * 100))
-        -- Update popup panels live (they don't cause cursor drift)
-        ApplyGUIScale(nil, value)   -- panels only; the main frame waits for mouse-up
-    end)
-    
-    -- Apply scale only on mouse release to avoid cursor drift issues
-    scaleSlider:SetScript("OnMouseUp", function(self)
-        local value = math.floor(self:GetValue() * 20 + 0.5) / 20
-        ApplyGUIScale(frame, value)
-        DF:GetWindowState().scale = value
-        -- A new scale changes how many device pixels a UI unit covers, so
-        -- every border on screen has to be re-derived at the new thickness.
-        -- This is the ONLY action that does: nothing else in the GUI writes
-        -- windowState.scale, and moving or resizing the window leaves it alone.
-        GUI:RefreshPixelBorders()
-    end)
-
-    GUI.ScaleSlider = scaleSlider
-    GUI.ScaleContainer = scaleContainer
+    -- The control itself is a VERBATIM move: same range, same 0.05 step, same
+    -- split between OnValueChanged (text + panels, live) and OnMouseUp (the
+    -- window itself, once the mouse is off it), for the cursor-drift reason the
+    -- comments below have always given. Only its parent changed.
+    --
+    -- ⚠ Built LAZILY, on the first click. Everything downstream reads the scale
+    -- from DF:GetWindowState() rather than from the `savedScale` this function
+    -- captured at window-build time, because by the time the popout is first
+    -- opened that capture can be several changes stale (/df resetgui, another
+    -- session's saved value).
+    --
+    -- ⚠ NOT a registered scaled surface. In `outsideOf` mode the popout shell
+    -- syncs its own scale to the window's (Popout:_SyncWindowScale), so
+    -- registering it would scale it twice.
     -- =========================================================================
-    -- END TOP BAR CONTROLS
+    local scalePopout
+    OpenScalePopout = function()
+        -- Second click on the glyph closes it, like any toggle.
+        if scalePopout and not scalePopout.closed and scalePopout:IsShown() then
+            scalePopout:Close("api")
+            return
+        end
+        scalePopout = GUI:CreatePopout({
+            key      = "df.uiscale",
+            title    = L["Scale"],
+            icon     = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+            width    = 150,
+            pinnable = true,
+            build    = function(po, content)
+                local current = (DF:GetWindowState().scale) or 1
+
+                local scaleSlider = CreateFrame("Slider", nil, content, "BackdropTemplate")
+                scaleSlider:SetHeight(14)
+                scaleSlider:SetOrientation("HORIZONTAL")
+                scaleSlider:SetMinMaxValues(0.6, 1.4)
+                scaleSlider:SetValueStep(0.05)
+                scaleSlider:SetObeyStepOnDrag(true)
+                scaleSlider:SetValue(current)
+                CreateElementBackdrop(scaleSlider)
+
+                -- Thumb texture
+                local thumb = scaleSlider:CreateTexture(nil, "OVERLAY")
+                thumb:SetSize(12, 14)
+                thumb:SetColorTexture(0.5, 0.5, 0.5, 1)
+                scaleSlider:SetThumbTexture(thumb)
+
+                local scaleValue = content:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                -- ⚠ FIXED WIDTH, because the slider hangs off this string's LEFT edge.
+                -- Unsized, the string narrows when "100%" drops to "95%" and the whole
+                -- chain -- slider included -- shifts under the cursor MID-DRAG, the exact
+                -- drift the comment on OnValueChanged below exists to prevent. Wide
+                -- enough for "100%".
+                scaleValue:SetWidth(34)
+                scaleValue:SetJustifyH("RIGHT")
+                -- Same reversed chain the header row used -- percentage pinned to the
+                -- right edge, slider filling everything left of it -- for the same
+                -- reason: the readout's width is fixed and the slider's is what has
+                -- room to give. Both centred on the content strip.
+                scaleValue:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+                scaleSlider:SetPoint("LEFT", content, "LEFT", 0, 0)
+                scaleSlider:SetPoint("RIGHT", scaleValue, "LEFT", -6, 0)
+                scaleValue:SetText(string.format("%.0f%%", current * 100))
+                scaleValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+                -- Only update text while dragging (not main frame scale - that causes
+                -- cursor drift). But DO update popup panels live.
+                scaleSlider:SetScript("OnValueChanged", function(self, value)
+                    value = math.floor(value * 20 + 0.5) / 20  -- Round to 0.05
+                    scaleValue:SetText(string.format("%.0f%%", value * 100))
+                    -- Update popup panels live (they don't cause cursor drift)
+                    ApplyGUIScale(nil, value)   -- panels only; the main frame waits for mouse-up
+                end)
+
+                -- Apply scale only on mouse release to avoid cursor drift issues
+                scaleSlider:SetScript("OnMouseUp", function(self)
+                    local value = math.floor(self:GetValue() * 20 + 0.5) / 20
+                    ApplyGUIScale(frame, value)
+                    DF:GetWindowState().scale = value
+                    -- A new scale changes how many device pixels a UI unit covers, so
+                    -- every border on screen has to be re-derived at the new thickness.
+                    -- This is the ONLY action that does: nothing else in the GUI writes
+                    -- windowState.scale, and moving or resizing the window leaves it alone.
+                    GUI:RefreshPixelBorders()
+                end)
+
+                -- The shell derives the popout's height from what build mounted
+                -- (Popout:_Resize), so the content strip has to state its own.
+                content:SetHeight(20)
+                -- Published for /df resetgui, which pushes 1.0 back into the control
+                -- after resetting the saved state. Nil until the popout is first
+                -- opened, and that call is nil-guarded -- a slider built later reads
+                -- the reset value out of the window state anyway.
+                GUI.ScaleSlider = scaleSlider
+            end,
+        })
+        -- Docked OUTSIDE the window beside the glyph, like a feature row's panel.
+        -- The placement centres the panel on its SOURCE and clamps it into the
+        -- window's vertical span, so a source in the header lands at the top of
+        -- the window's right edge -- which is where a header control's panel
+        -- should be, no forced side needed.
+        scalePopout:Follow(scaleBtn, { outsideOf = frame })
+        GUI.ScalePopout = scalePopout
+    end
+    -- =========================================================================
+    -- END HEADER CONTROLS
     -- =========================================================================
     
     local function UpdateThemeColors()
@@ -1399,7 +1651,13 @@ function DF:CreateGUI()
         end
         
         title.UpdateTheme()
-        
+        -- Deck 1's chip: the profile list can have changed (created, deleted,
+        -- renamed on the Profiles page) and so can the auto-layout overlay, and
+        -- neither event has a reason to reach into the header on its own. This
+        -- runs on every mode switch and on every window show, which is every
+        -- moment the header is about to be looked at.
+        UpdateProfileChip()
+
         -- Update active tab
         local nc = GetThemeColor()
         for name, btn in pairs(GUI.Tabs) do
