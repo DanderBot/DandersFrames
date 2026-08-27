@@ -2204,12 +2204,12 @@ local FLASH_ANTS_TEX    = [[Interface\SpellActivationOverlay\IconAlertAnts]]
 local FLASH_ANTS_FRAMES = 22
 local FLASH_ANTS_COLS   = 5           -- 256/48 = 5 columns in the ants sheet
 local FLASH_ANTS_FW     = 48 / 256    -- one frame's size in UV units
-local FLASH_INTRO_DUR   = 0.5         -- full intro length — classic timing. This was 0.8 on
-                                      -- the theory that slower reads better on small aura
-                                      -- icons; in the field the stretched intro just made
-                                      -- the spark linger and the whole effect read as "not
-                                      -- like a flash". Glows land at 60%, hand-off fills
-                                      -- the rest — at 0.5s those hit LCG's 0.3s exactly.
+local FLASH_INTRO_DUR   = 0.8         -- full intro length (the classic glow runs 0.5s on a
+                                      -- 45px action button; slower reads right on small aura
+                                      -- icons). Glows land at 60%, hand-off fills the rest.
+                                      -- ⚠ Briefly 0.5 during the 2026-08-27 LCG-parity pass,
+                                      -- reverted to the shipped value for a clean A/B
+                                      -- baseline (/df debug lcgflash) before re-judging.
 local FLASH_FRAME_SCALE = 1.4         -- F: glow frame = icon + 20% each side
 -- Crop rectangles inside the IconAlert sheet (facts of the asset's layout):
 local FLASH_UV_SPARK    = { 0.00781250, 0.61718750, 0.00390625, 0.26953125 }
@@ -2251,23 +2251,15 @@ local function setupFlashGlow(border, anim)
     -- other colour desaturates first so the tint reads clean.
     local r, g, b, a = readColor(anim.color or ANIM_WHITE)
     local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
-    -- ☠ DESATURATION IS WHAT MADE THIS "FAT, NOT LIKE A FLASH AT ALL", and the first
-    -- fix under-reached. The art was pulled from the client and MEASURED (128x256
-    -- IconAlert; glow crop 64x64): the halo is a white-hot core falling to a golden
-    -- fringe with its bright band peaking at 0.80 of the quad, and the ant dashes have
-    -- the same hot-cored structure. Desaturating flattens that to a uniform band —
-    -- every layer turns into a thick flat blob. LCG never processes this art at all.
-    --
-    -- The first fix special-cased the ONE stock gold (0.95/0.95/0.32) — and the
-    -- Important-spell highlight seeds a DIFFERENT gold (1/0.8/0), so the surface the
-    -- report came from still desaturated. The real rule is by HUE FAMILY, not by magic
-    -- value: any WARM colour (r >= g >= b) tints the NATIVE art — white stays pure,
-    -- golds deepen the gold, even red gives a red-hot core, all with the structure
-    -- intact. Only a cool/off-ramp hue (blue, green, purple, pink), which multiplies
-    -- against gold to mud, takes the desaturate-then-tint fallback.
-    if desat and r >= g and g >= b then
-        desat = false
-    end
+    -- ⚠ COLOUR PROCESSING IS THE SHIPPED BEHAVIOUR, ON PURPOSE, for the A/B baseline.
+    -- Two attempts to make gold-ish colours render the native art (a stock-gold
+    -- special case, then a warm-hue rule) were both REVERTED at Krathe's call — the
+    -- warm-rule tint read as off-colour in the field, and the honest measurement
+    -- (128x256 IconAlert pulled from the client; band/inner contrast 1.10 tinted vs
+    -- 1.04 desaturated) showed the gain was marginal anyway. So: white renders the
+    -- native art, everything else desaturates and tints, exactly as before
+    -- 2026-08-27. Re-judge against /df debug lcgflash before touching this again —
+    -- LCG passes no colour at all on its default path.
     local spark     = flashSheetTexture(border, "flashSpark",     "BACKGROUND", 0, FLASH_UV_SPARK)
     local inner     = flashSheetTexture(border, "flashInner",     "ARTWORK",    0, FLASH_UV_GLOW)
     local innerOver = flashSheetTexture(border, "flashInnerOver", "ARTWORK",    1, FLASH_UV_GLOWOVER)
@@ -2299,12 +2291,14 @@ local function setupFlashGlow(border, anim)
     ants:SetAlpha(showIntro and 0 or a)
     border._flashTimer = border._flashTimer or 0
     local freq = (anim.frequency and anim.frequency > 0) and anim.frequency or nil
-    -- Ants cycle time. ☠ 0.22 IS THE CLASSIC CRAWL, measured from LCG: its default
-    -- throttle steps one of the 22 frames every 0.01s. The old 0.5 here ran the march
-    -- 2.3x slower, and big dashes crawling lazily read as fat and static rather than
-    -- "marching" — a real part of the not-like-a-flash report, separate from the
-    -- desaturation. The Frequency slider still overrides.
-    border._flashPeriod = freq and (1 / freq) or 0.22
+    -- ⚠ FREQUENCY IS NOT COMPARABLE TO LCG's. Ours is cycles: period = 1/freq (freq 1 =
+    -- one 22-frame lap per second). LCG's is a throttle divisor: frame time
+    -- 0.25/freq*0.01 → a full lap in 0.055/freq seconds — at "the same" freq 1 LCG
+    -- marches ~18x faster, and its no-freq default (0.01s/frame = 0.22s lap) is still
+    -- 2.3x our 0.5 default. Field-confirmed 2026-08-27 ("LCG is much faster at the same
+    -- freq"). Left at the shipped mapping for the A/B baseline; if DF Flash is retuned
+    -- to match, this mapping — not just the default — is what has to move.
+    border._flashPeriod = freq and (1 / freq) or 0.5   -- ants march speed (classic = brisk)
 end
 
 local function flashTick(border, anim, dt)
@@ -2345,7 +2339,7 @@ local function flashTick(border, anim, dt)
     end
     if not (Fw and Fh) then return end   -- no size yet — nothing to draw against
     -- March the ants every frame (mid-crawl when they fade in).
-    local period = border._flashPeriod or 0.22
+    local period = border._flashPeriod or 0.5
     border._flashTimer = (border._flashTimer + dt / period) % 1
     if ants then
         local f   = floor(border._flashTimer * FLASH_ANTS_FRAMES) % FLASH_ANTS_FRAMES
@@ -2476,7 +2470,7 @@ local function buildFlashAnims(border, anim)
     ants:SetSize(Fw * 0.85, Fh * 0.85)
     local groups = border._declAnims or {}
     playFlipBook(ants, FLASH_ANTS_ROWS, FLASH_ANTS_COLS, FLASH_ANTS_FRAMES,
-                 FLASH_ANTS_PX, FLASH_ANTS_PX, border._flashPeriod or 0.22, groups)
+                 FLASH_ANTS_PX, FLASH_ANTS_PX, border._flashPeriod or 0.5, groups)
     local showIntro = not anim.procStart
     if showIntro then
         local d = FLASH_INTRO_DUR
