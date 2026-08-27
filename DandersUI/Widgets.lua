@@ -1807,6 +1807,13 @@ function UI:CreateSlider(parent, opts)
     input:SetAutoFocus(false)
     input:SetTextInsets(2, 2, 0, 0)
     
+    -- The drag bubble's repaint, forward-declared: UpdateFill is the one place
+    -- every path that moves the bar goes through (a drag tick, a typed value, a
+    -- panel resize), so the bubble rides it rather than being poked from four
+    -- call sites. Assigned further down, once FormatValue exists -- the guard
+    -- covers the initial UpdateValue that runs before then.
+    local RefreshBubble
+
     local function UpdateFill()
         local val = slider:GetValue()
         local pct = (val - minVal) / (maxVal - minVal)
@@ -1816,6 +1823,7 @@ function UI:CreateSlider(parent, opts)
         local usable = (track:GetWidth() or 0) - 2
         if usable < 1 then usable = 1 end
         fill:SetWidth(math.max(1, pct * usable))
+        if RefreshBubble then RefreshBubble() end
     end
     -- The track's width is only known once the page layout has resolved its
     -- anchors, and changes again if the panel is resized -- so repaint the fill
@@ -1876,6 +1884,106 @@ function UI:CreateSlider(parent, opts)
         end
     end
     
+    -- ============================================================
+    -- THE DRAG BUBBLE
+    -- ------------------------------------------------------------
+    -- While the bar is HELD, a small readout floats over the thumb and moves with
+    -- it. The number in it is the same number the value box shows -- FormatValue,
+    -- the one function -- so the two can never disagree about how many decimals a
+    -- 0.05-step bar has.
+    --
+    -- Why it is worth having when the box already shows the value: the box is at
+    -- the far RIGHT of the row and the thumb can be anywhere along it, so reading
+    -- a drag means looking away from what you are doing. The bubble puts the
+    -- number where the eye already is.
+    --
+    -- ⚠ BUILT ON THE FIRST DRAG, not at construction. A settings page is hundreds
+    -- of rows and almost none of them are ever dragged; a bubble per slider up
+    -- front is a frame and a font string each for nothing.
+    --
+    -- ⚠ NEVER TAKES THE MOUSE. It sits directly over the bar being dragged, so
+    -- mouse input on it would be input stolen from the gesture that summoned it.
+    --
+    -- ⚠ FIXED WIDTH, sized once to the widest value the bar can show. WoW has no
+    -- tabular-figure font object, so digits are NOT equal width and a box that
+    -- fitted its text would breathe in and out on every tick -- far more
+    -- distracting than the number it is showing. A fixed box with centred text is
+    -- the achievable half of tabular numbers.
+    local bubble
+    local function EnsureBubble()
+        if bubble then return bubble end
+        bubble = CreateFrame("Frame", nil, container, "BackdropTemplate")
+        bubble:EnableMouse(false)
+        bubble:SetFrameLevel((container:GetFrameLevel() or 0) + 10)
+        CreateElementBackdrop(bubble)     -- the kit's own element fill + border
+        bubble.Text = bubble:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        bubble.Text:SetPoint("CENTER", 0, 0)
+        bubble.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        -- The widest thing it will ever have to hold: the longer of the two ends,
+        -- plus the decimals a sub-1 step introduces between them (a 0..1 bar at
+        -- step 0.05 formats its ENDS as "0" and "1" and its middle as "0.65").
+        local sample = FormatValue(maxVal)
+        if #FormatValue(minVal) > #sample then sample = FormatValue(minVal) end
+        if step < 1 then sample = sample .. ".00" end
+        bubble.Text:SetText(sample)
+        bubble:SetSize(math.max(28, math.ceil(bubble.Text:GetStringWidth() or 0) + 10), 16)
+        bubble:Hide()
+        container.dragBubble = bubble     -- exposed for the tests and for a consumer
+        return bubble
+    end
+
+    -- Where it sits: centred on the fill's leading edge -- the same arithmetic
+    -- UpdateFill uses, so the bubble and the bar cannot drift -- and then CLAMPED
+    -- inside the container. Without the clamp a bar at either end pushes half the
+    -- box outside the settings group, where the page's scroll frame clips it.
+    --
+    -- Track-left IS container-left (the track is anchored TOPLEFT 0), which is
+    -- what lets one x serve both.
+    local function PlaceBubble()
+        if not bubble then return end
+        local span = maxVal - minVal
+        local pct = span > 0 and ((slider:GetValue() - minVal) / span) or 0
+        local usable = (track:GetWidth() or 0) - 2
+        if usable < 1 then usable = 1 end
+        local half = (bubble:GetWidth() or 0) / 2
+        local cw = container:GetWidth() or 0
+        local x = 1 + pct * usable
+        if cw > half * 2 then
+            x = math.max(half, math.min(cw - half, x))
+        end
+        bubble:ClearAllPoints()
+        -- Bottom edge 12 below the container's top, i.e. just clear of the 16px
+        -- thumb that straddles the track at -18.
+        bubble:SetPoint("BOTTOM", container, "TOPLEFT", x, -12)
+    end
+
+    RefreshBubble = function()
+        if not (bubble and bubble:IsShown()) then return end
+        bubble.Text:SetText(FormatValue(slider:GetValue()))
+        PlaceBubble()
+    end
+
+    local function ShowBubble()
+        local b = EnsureBubble()
+        if UI.Fx and UI.Fx.Cancel then UI.Fx.Cancel(b) end   -- a fade-out still running
+        b:Show()
+        b:SetAlpha(1)
+        RefreshBubble()
+    end
+
+    -- Fades rather than blinking out: the release is the end of a gesture, and a
+    -- readout that vanishes on the same frame as the mouseup reads as a glitch.
+    -- Via Fx so a second drag started inside the fade cancels it (ShowBubble
+    -- above) instead of racing the deferred Hide.
+    local function HideBubble()
+        if not (bubble and bubble:IsShown()) then return end
+        if UI.Fx and UI.Fx.FadeOut then
+            UI.Fx.FadeOut(bubble, 0.15, function() bubble:Hide() end)
+        else
+            bubble:Hide()
+        end
+    end
+
     -- Wrapper for both pathways: customGet/Set when provided, dbTable[dbKey]
     -- otherwise. Centralising this avoids a sprinkling of `if customGet then`
     -- across every place the slider touches its value.
@@ -1935,6 +2043,7 @@ function UI:CreateSlider(parent, opts)
         isDragging = false
         slider:SetScript("OnUpdate", nil)
         pendingValue, lastPreviewed = nil, nil
+        HideBubble()
 
         host:Call("onDragStop")
         if callback then callback() end
@@ -1973,6 +2082,10 @@ function UI:CreateSlider(parent, opts)
     slider:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDragging = true
+            -- Up before anything else in the gesture: the bar has already jumped
+            -- to where it was pressed, so the readout should be there with it.
+            -- Kit-wide, so every consumer's sliders get it (the mover's included).
+            ShowBubble()
             local funcName = lightweightUpdate and ((dbKey or label or "slider") .. " lightweight") or nil
             host:Call("onDragStart", lightweightUpdate, funcName, sliderUsePreviewMode)
             if hasDragHooks then
@@ -1995,6 +2108,7 @@ function UI:CreateSlider(parent, opts)
         -- to do here but the bookkeeping and the indicators.
         if isDragging then
             isDragging = false
+            HideBubble()
             host:Call("onDragStop")
             -- Update override indicators after drag ends
             if container.UpdateOverrideIndicators then
@@ -2020,6 +2134,15 @@ function UI:CreateSlider(parent, opts)
             slider:SetScript("OnUpdate", nil)
             pendingValue, lastPreviewed = nil, nil
             host:Call("onDragStop")
+        end
+        -- ...and the bubble goes down INSTANTLY, outside the isDragging guard.
+        -- A fade is an animation on a frame whose ancestor is being torn down, and
+        -- the deferred Hide at the end of it would land on a page that has already
+        -- been rebuilt -- which is how a readout gets stranded over a row that no
+        -- longer has a slider under it.
+        if bubble and bubble:IsShown() then
+            if UI.Fx and UI.Fx.Cancel then UI.Fx.Cancel(bubble) end
+            bubble:Hide()
         end
     end)
 
