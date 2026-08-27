@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* (Aura Designer) Fix layout and filter group indicators staying at full brightness on out-of-range players when element-specific fading is on — placed indicators faded, groups next to them did not. (by Krathe)
+
 ## [5.3.1]
 
 ### New Features
