@@ -41,6 +41,9 @@ local UI = {
         accent  = { r = 0.45, g = 0.45, b = 0.95, a = 1 },
         text    = { r = 0.9, g = 0.9, b = 0.9 },
         textDim = { r = 0.5, g = 0.5, b = 0.5 },
+        -- Widgets.lua reads the amber notice token at FILE SCOPE (the
+        -- modified-default dot), so the palette has to reach it.
+        notice  = { r = 0.91, g = 0.66, b = 0.25, a = 1 },
     },
     RowHeight = { slider = 50, checkbox = 35 },
     RowGap = 14,

@@ -2178,13 +2178,47 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- miss any spelled differently. Every shared factory stamps
             -- container.searchEntry, so a control added to either builder is
             -- covered without anyone having to remember this exists.
+            --
+            -- ...and the SAME walk answers a second question: which keys the
+            -- row's amber modified-tick is about. Collected onto the row as
+            -- row._claimedKeys so the tick can ask the diff engine "is any of
+            -- these not the shipped default", which is exactly "does the pane
+            -- behind this row contain a change".
+            --
+            -- ⚠ TWO SOURCES FOR THE KEY, and the second is not belt-and-braces.
+            -- searchEntry is stamped by the SEARCH registration, which is
+            -- guarded on DF.Search existing -- so on a build where search has
+            -- not registered, every key would be missed. container.overrideDbKey
+            -- is stamped by the toolkit's own AddOverrideIndicators, which every
+            -- db-bound control goes through regardless, and it covers the
+            -- colour pickers and checkboxes whose search entries are registered
+            -- by a different route.
             local function ClaimKeys(row, group)
                 if not (row and group and group.groupChildren) then return end
+                local claimed = row._claimedKeys or {}
+                row._claimedKeys = claimed
                 for _, e in ipairs(group.groupChildren) do
-                    local se = e.widget and e.widget.searchEntry
-                    local k  = se and (se.dbKey or se.searchKey)
-                    if type(k) == "string" then self._popoutRowForKey[k] = row end
+                    local w  = e.widget
+                    local se = w and w.searchEntry
+                    local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
+                    if type(k) == "string" then
+                        self._popoutRowForKey[k] = row
+                        claimed[#claimed + 1] = k
+                    end
                 end
+            end
+
+            -- The tick's answer, for a row that has just had its keys claimed.
+            -- Re-read on every refresh (the row calls this, not the other way
+            -- round), so a write inside the popout lights it without anything
+            -- having to be invalidated. DF.Defaults is guarded because this page
+            -- is in the load-on-demand companion and the engine is resident.
+            local function WireModifiedTick(row)
+                if not (row and row.SetModifiedCheck) then return end
+                row:SetModifiedCheck(function(d)
+                    local D = DF.Defaults
+                    return (D and D:Count(d, row._claimedKeys or {}) or 0) > 0
+                end)
             end
 
             -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
@@ -2232,6 +2266,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 build    = borderMount,
             }))
             ClaimKeys(borderRow, borderContent)
+            WireModifiedTick(borderRow)
             RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder")
 
             local shadowMount, shadowContent = PopoutContent(function(group, holder, reflow)
@@ -2258,6 +2293,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 build    = shadowMount,
             }))
             ClaimKeys(shadowRow, shadowContent)
+            WireModifiedTick(shadowRow)
             RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled")
             -- The dependent grey, in the page's own idiom: the group's
             -- RefreshChildStates drives row:SetEnabled off this, and the row's

@@ -48,6 +48,8 @@ C.element    = C.element    or { r = 0.18, g = 0.18, b = 0.18, a = 1 }
 C.border     = C.border     or { r = 0.25, g = 0.25, b = 0.25, a = 1 }
 C.hover      = C.hover      or { r = 0.22, g = 0.22, b = 0.22, a = 1 }
 C.background = C.background or { r = 0.08, g = 0.08, b = 0.08, a = 0.95 }
+-- PopoutRow.lua reads the amber notice token at FILE SCOPE (the modified tick).
+C.notice     = C.notice     or { r = 0.91, g = 0.66, b = 0.25, a = 1 }
 -- The three the demo reads that the popout suites never needed: the panel fill
 -- both title strips are drawn in, and the two accent poles its Accent button
 -- swaps the rows between.
@@ -68,7 +70,7 @@ UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true
 UI.PopoutRow = UI.PopoutRow or {
     plate = 44, gap = 6, padX = 10, labelGap = 10, colGap = 6,
     check = 16, checkTick = 9, gear = 14, chevron = 10,
-    badgeW = 22, badgeH = 16,
+    badgeW = 22, badgeH = 16, modTick = 5,
     labelSize = 12, summarySize = 11, badgeSize = 10,
     restFill = 0.55, hoverFill = 0.75, restBorder = 0.5,
     activeFill = 0.14, activeHover = 0.20, activeBorder = 1,

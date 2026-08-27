@@ -48,6 +48,10 @@ local max = math.max
 local C_TEXT, C_TEXT_DIM = UI.Colors.text, UI.Colors.textDim
 local C_ELEMENT, C_BORDER = UI.Colors.element, UI.Colors.border
 local C_HOVER, C_BACKGROUND = UI.Colors.hover, UI.Colors.background
+-- The amber notice token. The per-control modified-dots inside the popout wear
+-- it too (Widgets.lua), so the row and the controls it opens say "not the
+-- shipped default" in one colour.
+local C_NOTICE = UI.Colors.notice
 local ICON_PATH = UI.MEDIA .. "Icons\\"
 
 -- EVERY metric this file draws with lives in Theme.lua (UI.PopoutRow), for the
@@ -562,6 +566,12 @@ end
 --              (instance, row), and it must size its pane. A pane that re-flows
 --              LATER (a hideOn inside it changed) tells the panel so with
 --              popout:SyncRowPaneHeight()
+--   modified   fn(db) -> bool. True paints a small amber tick on the count
+--              badge, meaning "at least one setting behind this row is not the
+--              shipped default". Absent = no tick is ever drawn, which is every
+--              consumer that has not opted in. Also settable AFTER creation with
+--              row:SetModifiedCheck(fn) -- a consumer that learns the group's
+--              key set by WALKING the pane it built cannot know it at this point
 --   accent     {r,g,b[,a]} per-row accent override (else the host accent)
 --   enabled    bool or fn(db) -> bool; false greys the WHOLE row, and the popout
 --              still opens -- the controls inside gate themselves. ⚠ A SEPARATE
@@ -588,8 +598,8 @@ end
 --              which is nothing unless the consumer called host:SetSurfaceStyle
 --
 -- Returns the row frame with .Refresh() / .refreshContent(db), :SetEnabled(bool),
--- :SetAccent(c), :SetSurface(style) / :GetSurface(), :OpenPopout(),
--- :ClosePopout(reason) and .popout.
+-- :SetModifiedCheck(fn), :SetAccent(c), :SetSurface(style) / :GetSurface(),
+-- :OpenPopout(), :ClosePopout(reason) and .popout.
 function UI:CreatePopoutRow(parent, opts)
     local host = self
     opts = opts or {}
@@ -614,6 +624,7 @@ function UI:CreatePopoutRow(parent, opts)
     row._label   = opts.label or ""
     row._title   = opts.title or row._label
     row._count   = opts.count
+    row._modified = (type(opts.modified) == "function") and opts.modified or nil
     row._build   = opts.build
     row._window  = opts.window
     row._clipTo  = opts.clipTo
@@ -754,6 +765,25 @@ function UI:CreatePopoutRow(parent, opts)
     if badge.SetJustifyH then badge:SetJustifyH("CENTER") end
     badge:SetText(row._count and tostring(row._count) or "")
     row.badge = badge
+
+    -- The MODIFIED TICK -- "something behind this row is not the shipped
+    -- default". Parented to the PILL rather than to the plate, deliberately: it
+    -- then inherits the pill's own "no count declared, no pill" hide below and
+    -- can never be left floating beside a column that is not drawn.
+    --
+    -- Notched on the pill's top-right CORNER (its CENTRE on the corner, so it
+    -- straddles the border rather than sitting inside the chip): the count is
+    -- already the thing that says "how much is in here", and a mark on that chip
+    -- is the smallest place on the row that is unambiguously about the group's
+    -- CONTENTS rather than about its name or its current value. Anywhere in the
+    -- text columns would read as part of the label or the summary.
+    local modTick = badgePill:CreateTexture(nil, "OVERLAY")
+    modTick:SetSize(M.modTick, M.modTick)
+    modTick:SetTexture(ICON_PATH .. "dot")
+    modTick:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
+    modTick:SetPoint("CENTER", badgePill, "TOPRIGHT", 0, 0)
+    modTick:Hide()
+    row.modifiedTick = modTick
 
     -- No count declared, no pill: an empty bordered box beside the chevron is a
     -- chip that says nothing. The COLUMN stays either way -- the gear is anchored
@@ -927,6 +957,17 @@ function UI:CreatePopoutRow(parent, opts)
         local text = on and (opts.summary and opts.summary(db) or "") or offText
         summary:SetText(text or "")
 
+        -- The modified tick rides the SUMMARY's cadence, which is the point: a
+        -- write inside the popout already repaints the row's summary, so the
+        -- tick is live for free and cannot drift from what the row is reporting.
+        -- Guarded on the CHECK, not on the texture -- a consumer that never
+        -- declared one leaves the tick hidden for the row's whole life.
+        --
+        -- Painted whatever the toggle says. A group that is switched off still
+        -- HOLDS non-default values, and hiding the mark there would say it had
+        -- been reset. The row's own dim carries "not currently doing anything".
+        if row._modified then modTick:SetShown(row._modified(db) and true or false) end
+
         -- Dependent-grey dims the WHOLE row, toggle included. Toggled-off dims
         -- only what the toggle governs -- so the tick you need to click to turn
         -- it back on never fades with everything it controls.
@@ -955,6 +996,18 @@ function UI:CreatePopoutRow(parent, opts)
     -- its own predicate cannot fight each other every refresh.
     function row:SetEnabled(enabled)
         row._enabledOverride = enabled and true or false
+        row.Refresh()
+        return row
+    end
+
+    -- Declare (or withdraw) the modified check AFTER creation. Every other opt
+    -- on this row is known at the call, and this one often is not: a consumer
+    -- that derives the group's key set by WALKING the pane it just built has
+    -- nothing to hand CreatePopoutRow at the moment it calls it. Repaints
+    -- immediately, so a caller does not also have to remember a Refresh.
+    function row:SetModifiedCheck(fn)
+        row._modified = (type(fn) == "function") and fn or nil
+        if not row._modified then modTick:Hide() end
         row.Refresh()
         return row
     end

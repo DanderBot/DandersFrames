@@ -120,6 +120,18 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
         return "editing", AP:GetGlobalValue(key)
     end,
 
+    -- ...and the OTHER comparison, which is not an override at all. The three
+    -- hooks around it ask "does this differ from the auto-layout global"; this
+    -- one asks "does this differ from the value DandersFrames SHIPS", which is
+    -- true in party mode as readily as in raid and has nothing to do with auto
+    -- layouts. Read-only. DF.Defaults answers false for any table it cannot
+    -- resolve, so an aura proxy or a scratch table simply never dots.
+    isModifiedDefault = function(db, key)
+        local D = DF.Defaults
+        if not (D and key) then return false end
+        return D:IsModified(db, key)
+    end,
+
     -- Drops the layout override AND writes the true global back into the live
     -- table, so the widget can redraw from db[key] straight after.
     resetOverride = function(db, key)

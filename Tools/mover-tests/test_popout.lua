@@ -24,7 +24,10 @@ UI.MEDIA = ""
 -- panel/border are the title strip's two tokens: the raised fill over the body
 -- and the hairline under the bar.
 UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5, b = 0.5 },
-              panel = { r = 0.12, g = 0.12, b = 0.12 }, border = { r = 0.25, g = 0.25, b = 0.25 } }
+              panel = { r = 0.12, g = 0.12, b = 0.12 }, border = { r = 0.25, g = 0.25, b = 0.25 },
+              -- The amber notice token, mirrored from Theme.lua: PopoutRow.lua reads it
+              -- at FILE SCOPE for the modified tick, so a palette without it cannot load.
+              notice = { r = 0.91, g = 0.66, b = 0.25, a = 1 } }
 
 -- ---- Theme.lua metrics --------------------------------------------
 -- Mirrors of the real values, for the reason test_popout_row.lua spells out at

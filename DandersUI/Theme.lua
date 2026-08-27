@@ -489,6 +489,11 @@ UI.PopoutRow = {
     -- clipped badge.
     badgeW    = 22,
     badgeH    = 16,
+    -- The modified tick: a notch on the pill's top-right corner saying "something
+    -- behind this row is not the shipped default". 5px, and it wants to stay
+    -- small -- it is a mark on a chip, not a fourth column, and anything that
+    -- reads as a glyph in its own right would compete with the count inside it.
+    modTick   = 5,
 
     -- Type hierarchy. The label is the row's subject and the summary is its
     -- detail, so they are a size apart rather than both at the body size -- which
