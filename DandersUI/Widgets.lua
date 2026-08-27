@@ -2465,9 +2465,11 @@ function UI:CreateSlider(parent, opts)
 
         WriteValue(value)
 
-        -- If editing a profile, also set the override
-        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, value) end
-        
+        -- If editing a profile, also set the override. The label rides along for
+        -- a host that wants to NAME the change (an undo toast); a host that does
+        -- not care simply ignores the fourth argument.
+        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, value, label) end
+
         if not input:HasFocus() then
             input:SetText(FormatValue(value))
         end
@@ -2522,8 +2524,8 @@ function UI:CreateSlider(parent, opts)
             self:SetText(FormatValue(val))
             UpdateFill()
 
-            -- If editing a profile, also set the override
-            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val) end
+            -- If editing a profile, also set the override (labelled, as above)
+            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val, label) end
 
             -- Update override indicators
             if container.UpdateOverrideIndicators then
@@ -2853,7 +2855,9 @@ function UI:CreateAnchorGrid(parent, opts)
             return false
         end
         if key == keyH then setH(value) else setV(value) end
-        if dbTable then host:Call("onSettingWritten", dbTable, key, value) end
+        -- The grid's own label names BOTH keys: they are two halves of one
+        -- control, and "Anchor" is what the user sees above them.
+        if dbTable then host:Call("onSettingWritten", dbTable, key, value, label) end
         return true
     end
 
@@ -3242,8 +3246,11 @@ function UI:CreateDropdown(parent, opts)
                         dbTable[dbKey] = optKey
                     end
 
-                    -- If editing a profile, also set the override
-                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey) end
+                    -- If editing a profile, also set the override. ⚠ The
+                    -- DROPDOWN's label, not the chosen option's text: the label
+                    -- names the setting that moved, which is what stays true
+                    -- whichever option was picked.
+                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey, label) end
 
                     UpdateText()
                     menuFrame:Hide()

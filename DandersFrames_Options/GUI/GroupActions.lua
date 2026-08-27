@@ -36,6 +36,16 @@ local DF = DandersFrames
 --    recording an edit that changed nothing would put a key into a layout's
 --    override set that the user never touched.
 --
+-- AND THE UNDO ENGINE LISTENS TO THE SAME BRACKET (DF.SettingsUndo), which is
+-- why neither verb needs to build an undo of its own -- but it does mean the two
+-- verbs have to say what they ARE:
+--   * A RESET is ONE thing the user did to a whole group, so its writes are
+--     wrapped in a GROUP and collapse into a single undo entry labelled with the
+--     row. N separate entries would make undoing a reset an N-press chore.
+--   * A HOLD is not an edit at all. It is a preview the user asked to SEE, and
+--     both halves of it write through the bracket -- so both halves are
+--     SUSPENDED and a press-and-hold records nothing in either direction.
+--
 -- No state, no events, no frames. Every function takes what it needs and hands
 -- back a plain table; nothing is remembered between calls.
 -- ============================================================
@@ -120,12 +130,22 @@ end
 -- of. Passed in rather than derived: the caller is the settings page and it
 -- already knows (GUI.SelectedMode), and asking the engine to work it back out
 -- from the table would mean re-deriving a fact at the one moment it is certain.
-function GroupActions:ResetKeys(host, db, keys, mode)
+--
+-- `label` is what the collapsed undo entry is called -- the row's display name,
+-- passed by the caller for the same reason `mode` is: the page knows it and the
+-- engine would have to guess. Optional; without one the group entry is unnamed
+-- and a consumer falls back to its own wording.
+function GroupActions:ResetKeys(host, db, keys, mode, label)
     local changes = {}
     if type(db) ~= "table" or type(keys) ~= "table" then return changes end
 
     mode = ResolveMode(db, mode)
     local D = DF.Defaults
+    -- ONE undo entry for the whole reset. Opened even when nothing turns out to
+    -- be modified: the lib drops an empty group, so the cost of a reset that
+    -- changed nothing is a push that never happens.
+    local SU = DF.SettingsUndo
+    if SU then SU:BeginGroup(label) end
     for _, key in ipairs(keys) do
         local def = DefaultFor(mode, key)
         if def ~= nil then
@@ -142,6 +162,7 @@ function GroupActions:ResetKeys(host, db, keys, mode)
             end
         end
     end
+    if SU then SU:EndGroup() end
     return changes
 end
 
@@ -158,6 +179,11 @@ function GroupActions:BeginHold(host, db, keys, mode)
 
     mode = ResolveMode(db, mode)
     local D = DF.Defaults
+    -- A preview is not an edit: nothing here reaches the undo stack. Suspended
+    -- across the whole loop rather than per write, so a hold over twenty keys is
+    -- one suspension and cannot half-record if a key in the middle is skipped.
+    local SU = DF.SettingsUndo
+    if SU then SU:Suspend() end
     for _, key in ipairs(keys) do
         local def = DefaultFor(mode, key)
         if def ~= nil then
@@ -171,6 +197,7 @@ function GroupActions:BeginHold(host, db, keys, mode)
             end
         end
     end
+    if SU then SU:Resume() end
     return snapshot
 end
 
@@ -185,10 +212,16 @@ end
 function GroupActions:EndHold(host, db, keys, snapshot)
     if type(db) ~= "table" or type(keys) ~= "table" or type(snapshot) ~= "table" then return end
 
+    -- The other half of the preview, suspended for the other half of the reason:
+    -- recording the restore would leave an undo entry whose "old" is a default
+    -- the user never chose and whose "new" is what they already had.
+    local SU = DF.SettingsUndo
+    if SU then SU:Suspend() end
     for _, key in ipairs(keys) do
         local old = snapshot[key]
         if old ~= nil then
             BracketedWrite(host, db, key, old)
         end
     end
+    if SU then SU:Resume() end
 end

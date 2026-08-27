@@ -63,6 +63,12 @@ Core\RosterEvents.lua
 # The page half is in the companion. ☠ Must load after Core.lua: it calls
 # DF:RegisterLocaleRefresh at file scope.
 Core\AutoProfiles.lua
+# The settings undo stack. Resident because it records from the WRITE BRACKET
+# (GUI\GUI.lua's interceptWrite / onSettingWritten hooks), which lives in the
+# resident host -- and because the fences that clear it are profile switches,
+# imports and auto-layout swaps, none of which need the panel to have been
+# opened. Session-scoped: no SavedVariables.
+Core\SettingsUndo.lua
 
 # Debug Console (loads early so all modules can use DF:Debug)
 Debug\DebugConsole.lua

@@ -946,7 +946,10 @@ function UI:CreatePopoutRow(parent, opts)
                         return
                     end
                     tdb[t.key] = v
-                    host:Call("onSettingWritten", tdb, t.key, v)
+                    -- The row's title names the tick: the toggle has no label of
+                    -- its own (it IS the row), so the row's own heading is the
+                    -- only thing a consumer could show for it.
+                    host:Call("onSettingWritten", tdb, t.key, v, row._title)
                 end
             end
         end

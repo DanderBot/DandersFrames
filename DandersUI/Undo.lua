@@ -96,3 +96,13 @@ function Stack:CanUndo() return #self.entries > 0 end
 function Stack:CanRedo() return #self.redo > 0 end
 function Stack:Peek() local e = self.entries[#self.entries]; return e and e.label end
 function Stack:PeekRedo() local e = self.redo[#self.redo]; return e and e.label end
+
+-- ...and the whole entry, for a consumer that stores its OWN fields on the table
+-- it pushed. Peek answers the label because that is all a plain undo button
+-- needs; a host that wants to say WHICH setting moved, or to decide whether the
+-- surface showing it is even on screen, has to read the fields it put there
+-- itself. Handed back by reference deliberately -- the entry is the consumer's
+-- table, and copying it here would hand back something its closures do not close
+-- over.
+function Stack:PeekEntry() return self.entries[#self.entries] end
+function Stack:PeekRedoEntry() return self.redo[#self.redo] end
