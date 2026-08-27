@@ -79,7 +79,12 @@ ns["__DandersUI"]["HidePixelBorder"] = lua.eval(
 # re-load -- test_round.lua loads it again under its own UI.MEDIA to pin the
 # texture paths, and that re-load is what those assertions run against.
 run(HERE.parents[1] / "DandersUI" / "Round.lua", "DandersUI", ns)
-for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Fx.lua", "Registry.lua"):
+
+# DandersUndo-1.0's canonical home moved from DandersMover to DandersUI, so the
+# resident DandersFrames addon gets the lib without the (optional) mover installed.
+run(HERE.parents[1] / "DandersUI" / "Undo.lua", "DandersUI", ns)
+
+for name in ("Locales/enUS.lua", "Solver.lua", "Fx.lua", "Registry.lua"):
     p = ADDON / name
     if p.exists():
         run(p, "DandersMover", ns)

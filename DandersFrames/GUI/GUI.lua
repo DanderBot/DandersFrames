@@ -148,6 +148,14 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- The raid-mode gate lives HERE, not in the pack.
     interceptWrite = function(db, key, value)
         if not key then return false end
+        -- ☠ THE UNDO CAPTURE COMES FIRST, BEFORE THE REDIRECT DECISION. This hook
+        -- is the only moment in the write where db[key] still holds the OLD
+        -- value, and the answer below does not change that -- a redirected write
+        -- simply never reaches onSettingWritten, so its capture is never
+        -- committed. Taking the capture after the redirect check would leave
+        -- every raid-mode write under a running layout uncapturable.
+        local SU = DF.SettingsUndo
+        if SU then SU:OnInterceptWrite(db, key, value) end
         if GUI.SelectedMode ~= "raid" then return false end
         local AP = DF.AutoProfilesUI
         if not AP then return false end
@@ -156,11 +164,21 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
 
     -- Record the override when a layout is being edited. The plain write has
     -- already landed in db[key] by the time this runs.
-    onSettingWritten = function(db, key, value)
+    --
+    -- `label` is the widget's display name, forwarded by the kit for anything
+    -- that shows the user what changed. The auto-profile half ignores it.
+    --
+    -- ⚠ AUTO-PROFILE FIRST, UNDO SECOND. The layout recorder is the SEMANTIC
+    -- half of the write and its behaviour is unchanged by anything below it;
+    -- the undo engine only observes. Reordering them would put a bookkeeping
+    -- concern in front of the one that decides what the profile stores.
+    onSettingWritten = function(db, key, value, label)
         local AP = DF.AutoProfilesUI
         if AP and key and AP:IsEditing() then
             AP:SetProfileSetting(key, value)
         end
+        local SU = DF.SettingsUndo
+        if SU then SU:OnSettingWritten(db, key, value, label) end
     end,
 
     onIndicatorsRefreshed = function()
@@ -181,8 +199,20 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- through refreshNow.
     refresh    = function() DF:ThrottledUpdateAll() end,
     refreshNow = function() DF:UpdateAll() end,
-    onDragStart = function(lightFn, name, previewMode) DF:OnSliderDragStart(lightFn, name, previewMode) end,
-    onDragStop  = function() DF:OnSliderDragStop() end,
+    --
+    -- The undo engine rides the same pair, and for the same reason it is
+    -- refcounted: a slider fires onSettingWritten once per step crossed, so
+    -- "one entry per drag" is a question about the gesture, not about the writes.
+    onDragStart = function(lightFn, name, previewMode)
+        DF:OnSliderDragStart(lightFn, name, previewMode)
+        local SU = DF.SettingsUndo
+        if SU then SU:OnDragStart() end
+    end,
+    onDragStop  = function()
+        DF:OnSliderDragStop()
+        local SU = DF.SettingsUndo
+        if SU then SU:OnDragStop() end
+    end,
     isDragging  = function() return DF.sliderDragging and true or false end,
 
     -- ---- settings search ----------------------------------------

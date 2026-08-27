@@ -2130,6 +2130,15 @@ function AutoProfilesUI:EvaluateAndApply()
     end
     if newProfile == nil and self.activeRuntimeProfile == nil then return end
 
+    -- ☠ THE UNDO FENCE, and it belongs BELOW the two no-change guards above --
+    -- not at the head of this function. Evaluation runs on every roster change,
+    -- zone change and combat drop; clearing there would wipe the user's undo
+    -- history every time somebody joined the group. Only a layout that ACTUALLY
+    -- swaps (including none -> layout and layout -> none, both of which reach
+    -- this line) changes what the raid settings under an entry mean.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
+
     DF:Debug("AUTOPROFILE", "EvaluateAndApply: switching \"%s\" -> \"%s\"", oldName, newName)
     DF:Debug("RAIDPOS", "AutoProfile SWITCH: \"%s\" -> \"%s\" (raid size=%d)", oldName, newName, GetNumGroupMembers())
 

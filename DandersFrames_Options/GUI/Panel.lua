@@ -1445,34 +1445,150 @@ function DF:CreateGUI()
     btnTest:SetWidth(SnapLenUp(btnTest, math.ceil(btnTest.Text:GetStringWidth()) + 38))
     GUI.TestButton = btnTest
 
-    -- ★ UNDO / REDO SLOTS, BUILT AND HIDDEN. The settings undo engine lands
-    -- later; its two controls belong here, at the head of the verb cluster, and
-    -- reserving the geometry now means the header does not get re-laid out when
-    -- it does. They are hidden until DF.SettingsUndo exists, because a visible
-    -- button that cannot do anything is worse than no button -- and because they
-    -- are the LEFTMOST pair, hiding them leaves no hole: nothing anchors past
-    -- them. When the engine arrives it wires OnClick, enables/greys them from
-    -- its own stacks, and shows them.
+    -- ★ UNDO / REDO. The head of the verb cluster, and the leftmost pair, so
+    -- nothing anchors past them -- which is what makes the "hide them" arm below
+    -- leave no hole in the header.
+    --
+    -- ⚠ THE GATE STAYS. `DF.SettingsUndo` is a RESIDENT module and this is the
+    -- load-on-demand companion, so the two halves can be different builds (a
+    -- user who updated one folder and not the other). A visible button that
+    -- cannot do anything is worse than no button.
+    --
+    -- Forward-declared because the two glyphs take their onClick at build time
+    -- and the verbs need the buttons to grey themselves afterwards.
+    local DoUndo, DoRedo
     local btnRedo = GUI:CreateGlyphButton(deck2, {
-        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right",
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\redo",
         width = 22, height = 22, iconSize = 16,
         color = C_TEXT_DIM,
         tooltip = { title = L["Redo"] },
+        onClick = function() if DoRedo then DoRedo() end end,
     })
     btnRedo:SetPoint("RIGHT", btnTest, "LEFT", SnapLen(btnRedo, -12), 0)
     local btnUndo = GUI:CreateGlyphButton(deck2, {
-        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_left",
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\undo",
         width = 22, height = 22, iconSize = 16,
         color = C_TEXT_DIM,
         tooltip = { title = L["Undo"] },
+        onClick = function() if DoUndo then DoUndo() end end,
     })
     btnUndo:SetPoint("RIGHT", btnRedo, "LEFT", SnapLen(btnUndo, -4), 0)
     GUI.UndoButton, GUI.RedoButton = btnUndo, btnRedo
     if not DF.SettingsUndo then
         btnUndo:Hide()
         btnRedo:Hide()
+    else
+        local Undo = DF.SettingsUndo
+
+        -- ---- what the toast says -------------------------------------
+        --
+        -- The verb plus the widget's own name, and -- only when it is cheap and
+        -- readable -- what the value moved between. NUMBERS ONLY: a colour is a
+        -- table and a font is a path, and neither belongs on a one-line toast.
+        -- Booleans are skipped too. The locale has an "Off" but no "On" (the
+        -- one is a dropdown option, the other has never been needed), and
+        -- inventing a string to decorate a toast would be a translation burden
+        -- for a detail the setting's own name already implies.
+        --
+        -- %.4g, because a slider step lands on 0.30000000000000004 as readily as
+        -- on 0.3 and the toast has to read like the number the user set.
+        local function Detail(entry)
+            if type(entry.old) == "number" and type(entry.new) == "number" then
+                return string.format(" (%.4g → %.4g)", entry.old, entry.new)
+            end
+            return ""
+        end
+
+        local function Announce(pattern, entry)
+            if not entry then return end
+            GUI:ShowToast({
+                parent = frame,
+                text = string.format(pattern, entry.label or "") .. Detail(entry),
+            })
+        end
+
+        function DoUndo()
+            local ok, entry = Undo:Undo()
+            if ok then Announce(L["Undid: %s"], entry) end
+        end
+
+        function DoRedo()
+            local ok, entry = Undo:Redo()
+            if ok then Announce(L["Redid: %s"], entry) end
+        end
+
+        -- ---- grey when there is nothing left to do -------------------
+        -- Driven off the stack's own "Changed" callback (push, undo, redo and
+        -- clear all fire it), so a profile switch that wipes the stack greys the
+        -- pair without this file knowing profiles exist. Run once here too: a
+        -- freshly built header has an empty stack.
+        local undoOwner = {}
+        local function RefreshUndoButtons()
+            btnUndo:SetGlyphEnabled(Undo:CanUndo())
+            btnRedo:SetGlyphEnabled(Undo:CanRedo())
+        end
+        RefreshUndoButtons()
+        local stack = Undo:GetStack()
+        if stack and stack.RegisterCallback then
+            stack.RegisterCallback(undoOwner, "Changed", RefreshUndoButtons)
+        end
+
+        -- ---- the keys ------------------------------------------------
+        -- Ctrl-Z undoes; Ctrl-Shift-Z and Ctrl-Y both redo. The same bindings
+        -- the mover's session uses, so the two editors do not disagree.
+        --
+        -- ☠ SetPropagateKeyboardInput IS PROTECTED IN COMBAT for an insecure
+        -- frame, and unlike the mover's unlock overlay THIS window can be open
+        -- in a fight. So the keyboard is only ever armed while the window is
+        -- shown AND out of combat: OnShow arms it, OnHide disarms it, and the
+        -- watcher below disarms on the way into combat and re-arms on the way
+        -- out. With the keyboard off the handler never runs, so the protected
+        -- call is never reached rather than being guarded inside it.
+        --
+        -- ⚠ ESCAPE STAYS PROPAGATED, which is what still closes the window: it
+        -- is not handled here, so the frame is told to pass it on and
+        -- UISpecialFrames gets it.
+        --
+        -- ⚠ NO EDIT-BOX FOCUS SWEEP, and none is needed -- a focused EditBox
+        -- takes keyboard input itself and the parent frame's OnKeyDown never
+        -- sees the keystroke. That is why the mover's session, which types into
+        -- the same kind of field, does not have one either.
+        local function OnUndoKeyDown(f, key)
+            local handled = false
+            if IsControlKeyDown() then
+                if key == "Z" then
+                    if IsShiftKeyDown() then DoRedo() else DoUndo() end
+                    handled = true
+                elseif key == "Y" then
+                    DoRedo()
+                    handled = true
+                end
+            end
+            f:SetPropagateKeyboardInput(not handled)
+        end
+
+        local function ArmUndoKeys(on)
+            if on and InCombatLockdown() then on = false end
+            frame:EnableKeyboard(on and true or false)
+            frame:SetScript("OnKeyDown", on and OnUndoKeyDown or nil)
+        end
+
+        frame:HookScript("OnShow", function() ArmUndoKeys(true) end)
+        frame:HookScript("OnHide", function() ArmUndoKeys(false) end)
+
+        local undoCombatWatcher = CreateFrame("Frame")
+        undoCombatWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+        undoCombatWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+        undoCombatWatcher:SetScript("OnEvent", function(_, event)
+            if event == "PLAYER_REGEN_DISABLED" then
+                ArmUndoKeys(false)
+            elseif frame:IsShown() then
+                ArmUndoKeys(true)
+            end
+        end)
     end
-    
+
+
     -- Function to update position override indicator
     local function UpdatePositionOverrideIndicator()
         -- Debug mode shows indicator

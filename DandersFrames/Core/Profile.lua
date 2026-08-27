@@ -73,6 +73,11 @@ function DF:ResetProfile(mode)
     local L = DF.L
     if not DF.db or not DF.db[mode] then return end
     local defaults = (mode == "party" and DF.PartyDefaults or DF.RaidDefaults)
+    -- ☠ THE UNDO STACK IS FENCED HERE. DF.db[mode] is about to be REPLACED, so
+    -- every entry holding a reference to the outgoing table would undo into a
+    -- table nothing reads any more -- silently, since the write itself succeeds.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
     DF.db[mode] = DF:DeepCopy(defaults)
     DF:FullProfileRefresh()
     local modeLabel = mode == "party" and "Party" or "Raid"
@@ -96,6 +101,13 @@ function DF:ResetFullProfile()
     -- `{}` rather than nil to match the fresh-profile shape exactly; readers are
     -- nil-guarded either way.
     DF.db.linkedSections = {}
+    -- Fenced HERE as well as inside the two ResetProfile calls below, and not
+    -- redundantly: this function also discards profile-ROOT tables the per-mode
+    -- resets never reach (the designer preset libraries, the filter overrides),
+    -- so the stack is stale from this line onwards rather than from the first
+    -- mode reset. Clear is idempotent, so the overlap costs nothing.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
     self:ResetProfile("party")
     self:ResetProfile("raid")
     if self.ResetDesignerPresets then self:ResetDesignerPresets() end
@@ -344,6 +356,11 @@ function DF:SetProfile(name)
         DF.AutoProfilesUI.pendingAutoProfileEval = false
     end
     DF.raidOverrides = nil
+    -- ...and the undo stack with them. Every entry names a table inside the
+    -- profile being left behind, so an undo pressed after the switch would write
+    -- a value into settings the user is no longer looking at.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
     -- Clear the Global Fonts temp selection so the page re-initialises from
     -- the new profile's font settings rather than showing the old profile's
     -- last-used font until the next /reload.
@@ -2000,6 +2017,14 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- conversion has to run on the import path too -- otherwise the import renders from
     -- the legacy fallback until some later login happens to convert it.
     if DF.MigrateHealthColorStops then DF:MigrateHealthColorStops() end
+
+    -- The import has landed, so anything the undo stack still holds describes
+    -- values the payload has just overwritten -- or tables it replaced outright.
+    -- Fenced after the apply rather than before it: the import can bail out at a
+    -- dozen points above, and a stack cleared by an import that never happened is
+    -- work the user loses for nothing.
+    local SU = DF.SettingsUndo
+    if SU then SU:Clear() end
 
     DF:FullProfileRefresh()
     DF:Say(L["Profile imported successfully!"])

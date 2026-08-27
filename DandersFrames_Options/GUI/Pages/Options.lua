@@ -2300,7 +2300,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         onClick     = function()
                             local GA = DF.GroupActions
                             if not GA then return end
-                            GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                            -- The row's own heading names the collapsed undo
+                            -- entry: a reset is one thing the user did to THIS
+                            -- group, and the group is what they will look for.
+                            GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode,
+                                         row._title or row._label)
                             RefreshAfterGroupWrite()
                             row.Refresh()
                         end,

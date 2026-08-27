@@ -1496,6 +1496,7 @@ L["Rebuild the element list from your current built-in name, health, and status 
 L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."] = true
 L["Recovered %d raid settings from interrupted auto layout editing session."] = true
 L["Red X"] = true
+L["Redid: %s"] = true
 L["Redo"] = true
 L["Reduced Max Health"] = true
 L["Refresh"] = true
@@ -1813,6 +1814,7 @@ L["Trinkets & Items"] = true
 L["Truncate Mode"] = true
 L["Turn on Others Only for an effect to ignore your own casts."] = true
 L["Unavailable while an auto layout is active or being edited."] = true
+L["Undid: %s"] = true
 L["under %d%%"] = true
 L["under %ds"] = true
 L["Undo"] = true

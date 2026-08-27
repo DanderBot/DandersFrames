@@ -2,12 +2,15 @@ local addonName, NS = ...
 
 -- ============================================================
 -- DANDERSUNDO-1.0
--- Generic undo/redo stacks. No knowledge of movers. Entries are closures.
+-- Generic undo/redo stacks. Host-agnostic; entries are closures.
+-- Lives in DandersUI so every host gets it from the shared kit.
+-- CallbackHandler is resolved lazily (first Undo:New), so hosts are free
+-- to list this manifest before or after CallbackHandler-1.0.
 -- ============================================================
-local MAJOR, MINOR = "DandersUndo-1.0", 1
+local MAJOR, MINOR = "DandersUndo-1.0", 2
 local Undo = LibStub:NewLibrary(MAJOR, MINOR)
 if not Undo then return end
-local CallbackHandler = LibStub("CallbackHandler-1.0")
+local CallbackHandler
 
 local tremove, tinsert = table.remove, table.insert
 local pcall, geterrorhandler = pcall, geterrorhandler
@@ -16,6 +19,7 @@ local Stack = {}
 Stack.__index = Stack
 
 function Undo:New(opts)
+    CallbackHandler = CallbackHandler or LibStub("CallbackHandler-1.0")
     local s = setmetatable({
         limit = (opts and opts.limit) or 100,
         entries = {},     -- undo stack, top at end
@@ -92,3 +96,13 @@ function Stack:CanUndo() return #self.entries > 0 end
 function Stack:CanRedo() return #self.redo > 0 end
 function Stack:Peek() local e = self.entries[#self.entries]; return e and e.label end
 function Stack:PeekRedo() local e = self.redo[#self.redo]; return e and e.label end
+
+-- ...and the whole entry, for a consumer that stores its OWN fields on the table
+-- it pushed. Peek answers the label because that is all a plain undo button
+-- needs; a host that wants to say WHICH setting moved, or to decide whether the
+-- surface showing it is even on screen, has to read the fields it put there
+-- itself. Handed back by reference deliberately -- the entry is the consumer's
+-- table, and copying it here would hand back something its closures do not close
+-- over.
+function Stack:PeekEntry() return self.entries[#self.entries] end
+function Stack:PeekRedoEntry() return self.redo[#self.redo] end

@@ -854,6 +854,8 @@ end
 --       state rather than snapping back to the original default.
 --   :SetGlyphHover(bool)  suppress the hover brighten -- an "off" state should
 --       not light up under the mouse.
+--   :SetGlyphEnabled(bool)  the grey-when-disabled state: clicks off, hover off
+--       and the kit's 0.4 dim, in one call.
 function UI:CreateGlyphButton(parent, opts)
     local host = self
     opts = opts or {}
@@ -887,6 +889,24 @@ function UI:CreateGlyphButton(parent, opts)
 
     function btn:SetGlyphHover(enabled)
         self._glyphHover = enabled and true or false
+    end
+
+    -- The grey-when-disabled state, in ONE call, because a glyph needs all three
+    -- halves of it and every site was otherwise going to write them itself:
+    -- clicks off, the hover brighten off (an inert button that lights up under
+    -- the mouse still reads as clickable), and the dim.
+    --
+    -- 0.4 is the kit's disabled alpha -- the same number CreateSlider,
+    -- CreateCheckbox, CreateEditBox and StyleButton's SetEnabled all take, so a
+    -- greyed glyph sits at the same weight as a greyed control beside it.
+    function btn:SetGlyphEnabled(enabled)
+        enabled = enabled and true or false
+        self:SetEnabled(enabled)
+        self:SetGlyphHover(enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        -- A button disabled UNDER THE CURSOR keeps whatever hover tint it was
+        -- wearing, and the hover it will never get again cannot restore it.
+        self.Icon:SetVertexColor(unpack(self._glyphRest))
     end
 
     -- opts.tooltip takes EITHER a bare title string or a full ShowTooltip spec
@@ -2465,9 +2485,11 @@ function UI:CreateSlider(parent, opts)
 
         WriteValue(value)
 
-        -- If editing a profile, also set the override
-        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, value) end
-        
+        -- If editing a profile, also set the override. The label rides along for
+        -- a host that wants to NAME the change (an undo toast); a host that does
+        -- not care simply ignores the fourth argument.
+        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, value, label) end
+
         if not input:HasFocus() then
             input:SetText(FormatValue(value))
         end
@@ -2522,8 +2544,8 @@ function UI:CreateSlider(parent, opts)
             self:SetText(FormatValue(val))
             UpdateFill()
 
-            -- If editing a profile, also set the override
-            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val) end
+            -- If editing a profile, also set the override (labelled, as above)
+            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val, label) end
 
             -- Update override indicators
             if container.UpdateOverrideIndicators then
@@ -2853,7 +2875,9 @@ function UI:CreateAnchorGrid(parent, opts)
             return false
         end
         if key == keyH then setH(value) else setV(value) end
-        if dbTable then host:Call("onSettingWritten", dbTable, key, value) end
+        -- The grid's own label names BOTH keys: they are two halves of one
+        -- control, and "Anchor" is what the user sees above them.
+        if dbTable then host:Call("onSettingWritten", dbTable, key, value, label) end
         return true
     end
 
@@ -3242,8 +3266,11 @@ function UI:CreateDropdown(parent, opts)
                         dbTable[dbKey] = optKey
                     end
 
-                    -- If editing a profile, also set the override
-                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey) end
+                    -- If editing a profile, also set the override. ⚠ The
+                    -- DROPDOWN's label, not the chosen option's text: the label
+                    -- names the setting that moved, which is what stays true
+                    -- whichever option was picked.
+                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey, label) end
 
                     UpdateText()
                     menuFrame:Hide()
