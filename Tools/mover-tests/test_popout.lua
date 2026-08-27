@@ -1693,17 +1693,32 @@ end
 -- 2026-08-27 with the window at 100% scale (i.e. with the scale conversion of
 -- section 13 already in and ruled out).
 --
--- Clearing the WINDOW is not enough, and that was the bug: the old margin was the
--- window's level + 10, while the row itself is already the window's level plus
--- four or five (window -> content -> page -> scroll child -> row -> plate) and a
--- settings window's own widgets bump their level off their container by +10 for a
--- control that must draw over its neighbours and by +50 for a disabled overlay
--- laid across a group. WINDOW_CLEARANCE is the margin that beats all of them.
+-- ☠ AND NO LEVEL INSIDE THE WINDOW'S STRATA EVER FIXED IT. Two margins were tried
+-- and both were measured off the window while staying in its strata: +10 (under
+-- the row itself, which is already window+5 through content -> page -> scroll
+-- child -> row -> plate, and far under widgets that bump themselves +10 to draw
+-- over a neighbour or +50 for a group's disabled overlay), then +60 (past every
+-- bump a window is known to make -- and still not drawn).
+--
+-- Danders' decisive experiment closed it: geometry proven correct (section 16),
+-- level maths proven correct, and beam:SetFrameStrata("TOOLTIP") renders the beam
+-- fully and correctly. Something within DIALOG outranks any level we can set, and
+-- it was never identified -- so the contract is no longer arithmetic inside the
+-- window's strata. THE CHROME TAKES THE STRATA ONE STEP ABOVE THE WINDOW'S, and
+-- the level goes back to a small constant because a strata boundary is absolute.
+--
+-- The constant is not free to grow. The settings window is DIALOG but its OWN
+-- title bar is FULLSCREEN_DIALOG 200 and its close/info buttons 210 -- in the very
+-- strata the chrome moves up to -- so the chrome has to stay well under 200 or a
+-- popout could cover the cross.
 -- ============================================================
--- Mirrors Popout.lua's own constant, for the reason the theme metrics at the top
--- of this file are mirrored: a retune of the margin should fail HERE, out loud,
--- rather than quietly re-baseline itself.
-local CLEARANCE = 60
+-- Mirrors Popout.lua's own constants, for the reason the theme metrics at the top
+-- of this file are mirrored: a retune should fail HERE, out loud, rather than
+-- quietly re-baseline itself.
+local OUT_LEVEL = 10
+-- The window's own chrome, from DandersFrames_Options/GUI/Panel.lua -- the ceiling
+-- the popout must stay under, not something this file sets.
+local WINDOW_TITLEBAR_LEVEL = 200
 
 do
     local win, row = outsideWindow(), outsideRow()
@@ -1711,25 +1726,29 @@ do
     p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
     p:Follow(row, { outsideOf = win })
 
-    local WL = win:GetFrameLevel()
-    eq(p.frame:GetFrameLevel(), WL + CLEARANCE,
-        "stack: the popout stands a full clearance above the window, not +10")
-    eq(p.beam:GetFrameLevel(), WL + CLEARANCE - 1,
+    eq(p.frame:GetFrameLevel(), OUT_LEVEL,
+        "stack: the popout's level is a small constant now, not a margin off the window")
+    eq(p.beam:GetFrameLevel(), OUT_LEVEL - 1,
         "stack: the beam is in the sliver just under it -- over the body, under the notch")
-    eq(p.srcOutline:GetFrameLevel(), WL + CLEARANCE - 1,
+    eq(p.srcOutline:GetFrameLevel(), OUT_LEVEL - 1,
         "stack: and so is the source outline, which lies ON a row inside the window")
+    check(p.frame:GetFrameLevel() < WINDOW_TITLEBAR_LEVEL,
+        "stack: and it stays under the window's own title bar, which is in the SAME strata")
 
-    -- One strata for the three, and it is the WINDOW's: a level only orders frames
-    -- within a strata, so a beam one strata below what it crosses is under it
-    -- whatever its level says.
-    eq(p.frame._flags.strata, "DIALOG", "stack: the popout is on the window's strata")
-    eq(p.beam._flags.strata, "DIALOG", "stack: the beam with it")
-    eq(p.srcOutline._flags.strata, "DIALOG", "stack: the outline too -- the three are one object")
+    -- ONE STRATA ABOVE the window, not the window's own. A level only orders frames
+    -- within a strata, and the whole finding is that no level inside DIALOG is
+    -- enough -- so the three leave DIALOG together. FULLSCREEN_DIALOG, not
+    -- FULLSCREEN: that one is the client's full-screen-effects strata and is
+    -- stepped over deliberately (see NEVER_LAND in Popout.lua).
+    eq(win:GetFrameStrata(), "DIALOG", "stack: (the window under test is a DIALOG one, as the real one is)")
+    eq(p.frame._flags.strata, "FULLSCREEN", "stack: the popout is one strata ABOVE the window -- a literal step, FULLSCREEN included")
+    eq(p.beam._flags.strata, "FULLSCREEN", "stack: the beam with it")
+    eq(p.srcOutline._flags.strata, "FULLSCREEN", "stack: the outline too -- the three are one object")
     p:Close()
 end
 
 -- A window that is NOT where the last one was in the stack: the popout is placed
--- against whatever it is actually handed, strata and level both.
+-- one above whatever it is actually handed.
 do
     local win, row = outsideWindow(), outsideRow()
     win:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1737,37 +1756,112 @@ do
     local p = popout({ key = "stackhigh" })
     p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
     p:Follow(row, { outsideOf = win })
-    eq(p.frame:GetFrameLevel(), 90 + CLEARANCE, "stack: measured off THIS window's level")
-    eq(p.frame._flags.strata, "FULLSCREEN_DIALOG", "stack: ...and it follows its strata up")
-    eq(p.beam._flags.strata, "FULLSCREEN_DIALOG", "stack: the beam does not get left behind on DIALOG")
-    eq(p.srcOutline._flags.strata, "FULLSCREEN_DIALOG", "stack: nor the outline")
+    eq(p.frame._flags.strata, "TOOLTIP", "stack: measured one step off THIS window's strata")
+    eq(p.beam._flags.strata, "TOOLTIP", "stack: the beam does not get left behind on FULLSCREEN_DIALOG")
+    eq(p.srcOutline._flags.strata, "TOOLTIP", "stack: nor the outline")
+    eq(p.frame:GetFrameLevel(), OUT_LEVEL, "stack: the level is the same constant wherever the window sits")
 
-    -- ⚠ AND IT IS RE-DERIVED, not taken once. DandersFrames' settings window is
-    -- SetToplevel(true): it raises itself above everything in its strata the
-    -- moment it is clicked, WITHOUT MOVING A PIXEL -- so the two-rect compare the
-    -- ticker already does cannot see it, and a level taken once at Follow is stale
-    -- from the first click onwards. That is a beam that was fine when the panel
-    -- opened and sank under the window a moment later.
+    -- ⚠ THE WINDOW'S LEVEL IS NO LONGER AN INPUT, and that is the point.
+    -- DandersFrames' settings window is SetToplevel(true): it raises itself above
+    -- everything in its strata the moment it is clicked, WITHOUT MOVING A PIXEL --
+    -- so the two-rect compare the ticker does cannot see it, and a level MEASURED
+    -- off the window went stale from the first click onwards. A constant cannot.
     win:SetFrameLevel(400)
     p.frame:GetScript("OnUpdate")(p.frame)
-    eq(p.frame:GetFrameLevel(), 400 + CLEARANCE, "stack: a window RAISE is caught on the next tick")
-    eq(p.beam:GetFrameLevel(), 400 + CLEARANCE - 1, "stack: the beam comes up with it")
-    eq(p.srcOutline:GetFrameLevel(), 400 + CLEARANCE - 1, "stack: and so does the outline")
+    eq(p.frame:GetFrameLevel(), OUT_LEVEL, "stack: a window RAISE cannot drag the popout's level with it")
+    eq(p.beam:GetFrameLevel(), OUT_LEVEL - 1, "stack: nor the beam's")
+    eq(p.srcOutline:GetFrameLevel(), OUT_LEVEL - 1, "stack: nor the outline's")
+    check(p.frame:GetFrameLevel() < WINDOW_TITLEBAR_LEVEL,
+        "stack: so it cannot ratchet up past the window's title bar either")
 
-    -- EXACTLY the clearance, never "at least" it: settling on one answer is what
-    -- stops a raise from ratcheting the pair ten levels higher every time, and it
-    -- lets a popout re-pointed at a lower window come back down.
-    win:SetFrameLevel(20)
+    -- A window that changes STRATA under a popout that is already up IS still an
+    -- input, and it is why the sync stays on the ticker at all.
+    win:SetFrameStrata("HIGH")
     p.frame:GetScript("OnUpdate")(p.frame)
-    eq(p.frame:GetFrameLevel(), 20 + CLEARANCE, "stack: it settles back down again rather than ratcheting")
+    eq(p.frame._flags.strata, "DIALOG", "stack: a window strata change is caught on the next tick")
+    eq(p.beam._flags.strata, "DIALOG", "stack: the beam comes down with it")
+    eq(p.srcOutline._flags.strata, "DIALOG", "stack: and the outline")
 
     -- Leaving the mode puts everything back on the base strata. A POOLED popout is
-    -- re-used for whatever the next consumer asks of it, and one that inherited a
-    -- window's strata must not carry it into a placement that has no window.
+    -- re-used for whatever the next consumer asks of it, and one that was raised
+    -- for a window must not carry that into a placement that has no window.
+    win:SetFrameStrata("FULLSCREEN_DIALOG")
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(p.frame._flags.strata, "TOOLTIP", "stack: (raised again, so the hand-back below is a real move)")
     p:Follow(row)
     eq(p.frame._flags.strata, "DIALOG", "stack: a plain Follow hands the popout back to DIALOG")
     eq(p.beam._flags.strata, "DIALOG", "stack: the beam with it")
     eq(p.srcOutline._flags.strata, "DIALOG", "stack: and the outline")
+    p:Close()
+end
+
+-- A window ALREADY at the top of the ladder: the step caps rather than falling off
+-- the end. Answering nil there would drop the chrome back to the base strata --
+-- i.e. UNDER the window -- which is worse than sharing one with it.
+do
+    local win, row = outsideWindow(), outsideRow()
+    win:SetFrameStrata("TOOLTIP")
+    local p = popout({ key = "stacktop" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+    eq(p.frame._flags.strata, "TOOLTIP", "stack: a TOOLTIP window shares its strata rather than losing the chrome")
+    eq(p.beam._flags.strata, "TOOLTIP", "stack: the beam with it")
+    p:Close()
+end
+
+-- FULLSCREEN is in the ladder but is never landed on: a window on it gets the same
+-- answer a DIALOG one does. It is the client's full-screen-effects strata, and the
+-- idiom for "must draw over a dialog" is FULLSCREEN_DIALOG.
+do
+    local win, row = outsideWindow(), outsideRow()
+    win:SetFrameStrata("FULLSCREEN")
+    local p = popout({ key = "stackfs" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+    eq(p.frame._flags.strata, "FULLSCREEN_DIALOG", "stack: a FULLSCREEN window still puts the chrome on FULLSCREEN_DIALOG")
+    p:Close()
+end
+
+-- PINNING keeps the raise. A pinned popout drops the beam and the outline (see
+-- section 2) but it is still a panel standing over the window it came from, and
+-- dropping it back to DIALOG would put it under the page it is floating on.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "stackpin" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+    p:Pin(true)
+    eq(p.frame._flags.strata, "FULLSCREEN", "stack: a pinned popout keeps the raised strata")
+    eq(p.frame:GetFrameLevel(), OUT_LEVEL, "stack: ...and the constant level with it")
+    check(not p.beam:IsShown(), "stack: but the beam is gone, because pinning is visually detached")
+    p:Close()
+end
+
+-- ☠ HEADROOM, WHICH IS WHAT THE CONSTANT IS REALLY FOR.
+--
+-- A dropdown opened INSIDE the popout used to beat it by strata alone: the kit
+-- pins its menus to FULLSCREEN_DIALOG and the popout was on DIALOG. Now the popout
+-- is on FULLSCREEN_DIALOG too, so the two are ordered by LEVEL -- the menu is built
+-- as a descendant of its opener, which is a descendant of the popout, and the
+-- client derives a child's level from its parent's. That only holds while the
+-- popout's own level leaves room ABOVE it for a subtree, and room BELOW the
+-- window's title bar at 200. A margin measured off a SetToplevel window had
+-- neither; a small constant has both.
+--
+-- Asserted as the headroom rather than by building a fake widget chain: the shim's
+-- GetFrameLevel does not derive a child's level from its parent (see shim.lua), so
+-- a stub tree would only restate the assumption instead of testing it. The
+-- menu-over-opener guarantee itself lives in Widgets.lua's RaiseMenuOverOpener.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "stackmenu" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+    local lvl = p.frame:GetFrameLevel()
+    check(lvl + 50 < WINDOW_TITLEBAR_LEVEL,
+        "stack: 50 levels of room above the popout for what is mounted in it, still clear of the title bar")
+    check(lvl > 1,
+        "stack: and room BELOW it, so the beam has a level to sit on")
     p:Close()
 end
 

@@ -2034,6 +2034,42 @@ UI.CreateSliderNative = UI.CreateSlider
 UI._menus = UI._menus or {}
 function UI:RegisterMenu(frame) UI._menus[frame] = true end
 
+-- The strata a dropdown menu floats on by default: high enough to clear the page
+-- it was opened from, and below TOOLTIP so GameTooltip still shows over it.
+local MENU_STRATA = "FULLSCREEN_DIALOG"
+
+-- ☠ AT LEAST THE OPENER'S STRATA, not a fixed one.
+--
+-- A menu must draw over the thing it was opened from, full stop. Nailing it to
+-- FULLSCREEN_DIALOG delivered that for as long as every opener sat below
+-- FULLSCREEN_DIALOG, and that stopped being true: a popout docked OUTSIDE a
+-- window takes one strata ABOVE that window's (see Popout.lua's OUTSIDE_LEVEL),
+-- so a dropdown inside a popout docked off a FULLSCREEN_DIALOG window would be
+-- forced DOWN, behind the very panel it belongs to.
+--
+-- TOOLTIP is the only strata above FULLSCREEN_DIALOG, so the check is that one
+-- name rather than a ladder. The popout's raise caps there for the same reason.
+--
+-- Called at creation AND on every open: the opener's strata is not settled at
+-- creation, because a pooled popout is raised when it is Follow'd -- long after
+-- the widgets inside it were built.
+--
+-- The level only moves if it has to. A menu is created as a CHILD of its opener
+-- and so already outranks it; this is the backstop for one that has ended up
+-- level with or under the opener, not a level it is handed every time.
+local function RaiseMenuOverOpener(menu, opener)
+    local want = MENU_STRATA
+    if opener.GetFrameStrata and opener:GetFrameStrata() == "TOOLTIP" then
+        want = "TOOLTIP"
+    end
+    -- Unconditional, even when the menu already reads as `want`: setting it is what
+    -- PINS the strata, so the menu keeps it if the popout around it later drops
+    -- back to DIALOG. A read-first guard would leave that case merely inheriting.
+    menu:SetFrameStrata(want)
+    local ol = opener.GetFrameLevel and opener:GetFrameLevel() or 0
+    if (menu:GetFrameLevel() or 0) <= ol then menu:SetFrameLevel(ol + 1) end
+end
+
 -- ☠ Lives with the registry it iterates, deliberately. This was in a consumer
 -- for a while, which left the pack able to REGISTER a menu but not close one --
 -- and CreateDropdown below does register. Nothing broke, because one caller
@@ -2447,7 +2483,7 @@ function UI:CreateDropdown(parent, opts)
     else
         menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     end
-    menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    RaiseMenuOverOpener(menuFrame, btn)
     host:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -2796,6 +2832,10 @@ function UI:CreateDropdown(parent, opts)
             else
                 menuFrame:SetWidth(math.max(btn:GetWidth() or 0, menuContentW + 24))
             end
+            -- Re-asserted here, not just at creation: the opener may have been
+            -- raised since (a pooled popout takes its strata when it is Follow'd,
+            -- long after the widgets inside it were built).
+            RaiseMenuOverOpener(menuFrame, btn)
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
             if searchBox then searchBox:SetFocus() end
