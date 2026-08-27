@@ -1157,19 +1157,19 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
             
             menuBtn:SetScript("OnClick", function()
-                -- Runtime override protection
-                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+                -- The host bracket (GUI.lua's interceptWrite / onSettingWritten),
+                -- replacing the hand-written copy of it that stood here: the
+                -- redirect gate and the override record are the same two rules,
+                -- and going through the hooks is what makes the write visible to
+                -- everything else wired to them -- the undo engine among them.
+                if GUI:Call("interceptWrite", dbTable, dbKey, opt.key) then
                     UpdateText()
                     menuFrame:Hide()
                     if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
                     return
                 end
                 dbTable[dbKey] = opt.key
-                -- Track override when editing a profile
-                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                    DF.AutoProfilesUI:SetProfileSetting(dbKey, opt.key)
-                end
+                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label)
                 if container.UpdateOverrideIndicators then
                     container:UpdateOverrideIndicators(opt.key)
                 end
@@ -1507,9 +1507,9 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
             
             menuBtn:SetScript("OnClick", function()
-                -- Runtime override protection
-                if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-                   and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, opt.key) then
+                -- The host bracket, same conversion and same reason as the
+                -- texture dropdown above.
+                if GUI:Call("interceptWrite", dbTable, dbKey, opt.key) then
                     UpdateText()
                     menuFrame:Hide()
                     if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(opt.key) end
@@ -1517,10 +1517,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 end
                 -- Store font NAME in database (not path)
                 dbTable[dbKey] = opt.key
-                -- Track override when editing a profile
-                if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
-                    DF.AutoProfilesUI:SetProfileSetting(dbKey, opt.key)
-                end
+                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label)
                 if container.UpdateOverrideIndicators then
                     container:UpdateOverrideIndicators(opt.key)
                 end

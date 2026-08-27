@@ -527,3 +527,178 @@ do
     widgetWrite(party, "frameWidth", 200, "Frame Width")
     eq(depth(), 1, "clear: the engine keeps recording after a fence")
 end
+
+-- ============================================================
+-- 12. THE OLD COLOUR PICKER'S SESSION
+-- ------------------------------------------------------------
+-- DandersFrames_Options/GUI/SettingsWidgets.lua's CreateColorPicker drives
+-- Blizzard's ColorPickerFrame, and that widget does not WRITE a colour -- it
+-- mutates the stored table field by field, dozens of times, as the user drags.
+-- There is no single write to bracket, so that factory calls the engine's two
+-- halves DIRECTLY around each mutation and holds a gesture open for the length
+-- of the picking session.
+--
+-- The factory itself cannot be loaded here (it is 3000 lines of live client
+-- surface), so what is pinned is the PATTERN it uses -- and the pattern is the
+-- part that has to hold, because every one of its rules is an invariant the
+-- engine provides rather than something the factory can check for itself:
+--   * a session of N ticks is ONE entry, spanning the whole session;
+--   * a CANCELLED session is no entry at all;
+--   * a session re-entered while the picker is still up splits cleanly, and
+--     leaves the gesture refcount where it found it.
+--
+-- ⚠ THE TABLE IS MUTATED IN PLACE AND COMMITTED BY REFERENCE. That is the shape
+-- that makes this worth a test of its own: `value` and `db[key]` are the same
+-- table, so the engine's landed-plainly check compares a table with itself, and
+-- everything that makes the entry meaningful comes from the COPIES it takes on
+-- either side.
+-- ============================================================
+
+-- One drag tick, exactly as swatchFunc / opacityFunc spell it.
+local function pickerTick(db, key, r, g, b, a, label)
+    SU:OnInterceptWrite(db, key, nil)      -- BEFORE: db[key] still holds the old colour
+    local c = db[key]
+    c.r, c.g, c.b, c.a = r, g, b, a        -- the mutation, in place
+    SU:OnSettingWritten(db, key, db[key], label)   -- AFTER, by reference
+end
+
+do
+    -- ---- a completed session ----------------------------------------
+    reset()
+    local live = party.frameBorderColor    -- the table the picker will mutate
+    SU:BeginGesture()
+    pickerTick(party, "frameBorderColor", 0.8, 0,   0,   1, "Border Colour")
+    pickerTick(party, "frameBorderColor", 0.5, 0.2, 0,   1, "Border Colour")
+    pickerTick(party, "frameBorderColor", 0,   0,   1,   1, "Border Colour")
+    eq(depth(), 0, "colour session: nothing is pushed while the picker is open")
+
+    SU:EndGesture()
+    eq(depth(), 1, "colour session: ☠ three drag ticks are ONE entry")
+    local e = stack():PeekEntry()
+    check(deepsame(e.old, { r = 1, g = 0, b = 0, a = 1 }),
+        "colour session: `old` is the colour from before the picker opened")
+    check(deepsame(e.new, { r = 0, g = 0, b = 1, a = 1 }),
+        "colour session: ...and `new` is the one the user settled on")
+    check(party.frameBorderColor == live,
+        "colour session: (the live table was mutated in place, never replaced)")
+    check(e.old ~= live and e.new ~= live,
+        "colour session: ☠ neither end of the entry is the live table, or both would read as the last tick")
+
+    SU:Undo()
+    check(deepsame(party.frameBorderColor, { r = 1, g = 0, b = 0, a = 1 }),
+        "colour session: one undo press restores the colour the user started with")
+    SU:Redo()
+    check(deepsame(party.frameBorderColor, { r = 0, g = 0, b = 1, a = 1 }),
+        "colour session: ...and redo puts the picked one back")
+
+    -- ---- a cancelled session ----------------------------------------
+    -- cancelFunc restores originalColor by the same mutate-and-commit, so to the
+    -- engine it is one more tick that happens to land on the starting value. The
+    -- merged entry is then zero-delta, and zero-delta entries are dropped.
+    reset()
+    SU:BeginGesture()
+    pickerTick(party, "frameBorderColor", 0, 1, 0, 1, "Border Colour")
+    pickerTick(party, "frameBorderColor", 0, 1, 1, 1, "Border Colour")
+    pickerTick(party, "frameBorderColor", 1, 0, 0, 1, "Border Colour")   -- the cancel restore
+    SU:EndGesture()
+    eq(depth(), 0, "cancelled session: ☠ a cancelled pick leaves NOTHING to undo")
+    check(deepsame(party.frameBorderColor, { r = 1, g = 0, b = 0, a = 1 }),
+        "cancelled session: ...and the colour is back where it started")
+    check(SU:CanUndo() == false, "cancelled session: the undo button has nothing to offer")
+
+    -- ---- a session re-entered while the picker is still up -----------
+    -- The factory's OnClick closes an already-open gesture before opening its
+    -- own, because ColorPickerFrame is a singleton and a Setup on a shown picker
+    -- never fires the OnHide that would otherwise have closed the first one.
+    reset()
+    SU:BeginGesture()
+    pickerTick(party, "frameBorderColor", 0, 1, 0, 1, "Border Colour")
+    SU:EndGesture()                        -- the re-entry guard, then the new session
+    SU:BeginGesture()
+    pickerTick(party, "frameBorderColor", 0, 0, 1, 1, "Border Colour")
+    SU:EndGesture()
+
+    eq(depth(), 2, "re-entered session: two sessions are two entries, not one merged blur")
+    check(deepsame(stack().entries[1].new, { r = 0, g = 1, b = 0, a = 1 }),
+        "re-entered session: the first entry ends where the first session did")
+    check(deepsame(stack().entries[2].old, { r = 0, g = 1, b = 0, a = 1 }),
+        "re-entered session: ...and the second starts there")
+
+    -- ☠ NO DEPTH LEAK. An unbalanced guard would leave the refcount above zero,
+    -- and every write for the rest of the session would silently accumulate into
+    -- a gesture that never closes -- which looks exactly like "undo stopped
+    -- working" and nothing else in this suite would catch it.
+    widgetWrite(party, "frameWidth", 140, "Frame Width")
+    eq(depth(), 3, "re-entered session: ☠ a plain write after it pushes immediately -- no gesture left open")
+    SU:Undo(); SU:Undo(); SU:Undo()
+    check(SU:CanUndo() == false, "re-entered session: three presses empty the stack -- the count was right")
+end
+
+-- ============================================================
+-- 13. THE COMPANION'S WIDGETS GO THROUGH THE HOST HOOKS
+-- ------------------------------------------------------------
+-- SOURCE, not behaviour -- the settings-panel factories are load-on-demand
+-- companion files full of live frame calls and cannot be loaded here. What they
+-- USED to do is the whole reason this section exists: each of them wrote out the
+-- runtime-redirect gate and the override record by hand, which is a second
+-- spelling of what GUI.lua's two hooks already do -- and a write that skips the
+-- hooks is a write the engine above never sees. Every checkbox, edit box and
+-- media dropdown in the panel was un-undoable because of it.
+--
+-- The needles are CALL SHAPES, not line numbers and not bare names: the prose in
+-- these files talks about HandleRuntimeWrite freely, so only the fully qualified
+-- call is counted.
+-- ============================================================
+do
+    local function countOf(src, needle)
+        local n, from = 0, 1
+        while true do
+            local s = src:find(needle, from, true)
+            if not s then return n end
+            n, from = n + 1, s + 1
+        end
+    end
+
+    local widgets  = options_file_source("GUI/SettingsWidgets.lua")
+    local controls = options_file_source("GUI/Controls.lua")
+
+    -- ---- the inlined gate is gone -----------------------------------
+    eq(countOf(widgets, "DF.AutoProfilesUI:HandleRuntimeWrite("), 0,
+       "companion: SettingsWidgets no longer calls the redirect gate by hand")
+    eq(countOf(controls, "DF.AutoProfilesUI:HandleRuntimeWrite("), 0,
+       "companion: ...and neither does Controls")
+
+    -- ---- ...replaced by the bracket ---------------------------------
+    -- Two apiece: the checkbox and the edit box in SettingsWidgets, the texture
+    -- and font dropdowns in Controls. The colour picker is deliberately NOT one
+    -- of them -- it has no redirect gate to route through and never had.
+    eq(countOf(widgets, 'GUI:Call("interceptWrite"'), 2,
+       "companion: the checkbox and the edit box ask the host before they write")
+    eq(countOf(widgets, 'GUI:Call("onSettingWritten"'), 2,
+       "companion: ...and tell it afterwards")
+    eq(countOf(controls, 'GUI:Call("interceptWrite"'), 2,
+       "companion: the texture and font dropdowns ask too")
+    eq(countOf(controls, 'GUI:Call("onSettingWritten"'), 2,
+       "companion: ...and announce")
+
+    -- ---- the colour picker's direct wiring --------------------------
+    -- Three mutation sites -- the swatch, the opacity bar and the cancel restore
+    -- -- each bracketed by the engine's own pair, inside one gesture.
+    eq(countOf(widgets, "SU:OnInterceptWrite(dbTable, dbKey"), 3,
+       "companion: every colour mutation captures first")
+    eq(countOf(widgets, "SU:OnSettingWritten(dbTable, dbKey"), 3,
+       "companion: ...and commits after, the cancel restore included")
+    check(countOf(widgets, "SU:BeginGesture()") == 1 and countOf(widgets, "SU:EndGesture()") == 1,
+       "companion: the picking session opens and closes exactly one gesture")
+
+    -- ☠ AND IT OPENS AFTER SETUP. Setting up an ALREADY SHOWN picker takes the
+    -- frame down and puts it back, firing the OnHide that closes the gesture --
+    -- so a gesture opened before the setup call is closed by the client
+    -- mid-setup, and every drag tick that follows pushes an entry of its own.
+    -- Nothing else here can see that: it is an ordering bug in a file this suite
+    -- cannot load, and in game it looks like the undo stack filling with noise.
+    local setupAt = widgets:find("ColorPickerFrame:SetupColorPickerAndShow(info)", 1, true)
+    local beginAt = widgets:find("SU:BeginGesture()", 1, true)
+    check(setupAt ~= nil and beginAt ~= nil and beginAt > setupAt,
+       "companion: ☠ the picking gesture opens AFTER the picker is set up, not before")
+end

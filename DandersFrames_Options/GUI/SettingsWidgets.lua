@@ -1665,20 +1665,34 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
             tostring(dbKey), tostring(overrideKey), tostring(val))
 
-        -- Runtime override protection: redirect to baseline, skip refresh
-        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-           and DF.AutoProfilesUI:HandleRuntimeWrite(effectiveOverrideKey, val) then
+        -- ☠ THE HOST BRACKET, NOT A SECOND COPY OF IT. What stood here was the
+        -- runtime-redirect gate and the override record written out by hand --
+        -- the same two rules GUI.lua's `interceptWrite` / `onSettingWritten`
+        -- hooks apply, spelled again because this factory predates the hooks
+        -- existing. Two spellings of one rule drift; worse, the inlined one is
+        -- invisible to everything ELSE that hangs off the bracket, and the undo
+        -- engine records from exactly those two hooks -- so every checkbox in the
+        -- panel was an edit the user could not undo.
+        --
+        -- ⚠ The BRACKET key is effectiveOverrideKey (the auto-profile key, which
+        -- is not always dbKey and may be nil -- the hook answers false for a nil
+        -- key, as the inlined gate effectively did). The WRITE below is unchanged:
+        -- customSet if the caller supplied one, else dbTable[dbKey]. When those
+        -- two keys differ, or a customSet puts the value somewhere else, the undo
+        -- engine's "did it land plainly in db[key]" test fails and it records
+        -- nothing -- which is right, because db[key] is then not the store.
+        if GUI:Call("interceptWrite", dbTable, effectiveOverrideKey, val) then
             if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(val) end
             return
         end
 
         if customSet then customSet(val) elseif dbTable and dbKey then dbTable[dbKey] = val end
 
-        -- If editing a profile, also set the override (use effectiveOverrideKey)
-        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and effectiveOverrideKey then
-            DF.AutoProfilesUI:SetProfileSetting(effectiveOverrideKey, val)
-        end
-        
+        -- The other half: records the layout override while a profile is being
+        -- edited (what the removed SetProfileSetting call did) and commits the
+        -- undo entry.
+        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, val, label)
+
         -- Update override indicators
         if container.UpdateOverrideIndicators then
             container:UpdateOverrideIndicators(val)
@@ -2040,17 +2054,22 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     local function SaveValue()
         if dbTable and dbKey then
             local val = editbox:GetText()
-            -- Runtime override protection
-            if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-               and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, val) then
+            -- The host bracket, for the reason spelled out on CreateCheckbox
+            -- above: the redirect gate and the override record used to be written
+            -- out here by hand, which kept this widget's writes out of sight of
+            -- everything hooked to the bracket -- the undo engine included.
+            --
+            -- ⚠ OnEditFocusLost calls this whether or not anything was typed, so
+            -- clicking through a box "saves" the value already in it. Nothing
+            -- filters those out here and nothing needs to: the redirect and
+            -- override halves have always been fed them, and the undo engine drops
+            -- a commit whose old and new values are equal.
+            if GUI:Call("interceptWrite", dbTable, dbKey, val) then
                 if frame.UpdateOverrideIndicators then frame:UpdateOverrideIndicators(val) end
                 return
             end
             dbTable[dbKey] = val
-            -- Track override when editing a profile
-            if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-                DF.AutoProfilesUI:SetProfileSetting(dbKey, val)
-            end
+            GUI:Call("onSettingWritten", dbTable, dbKey, val, label)
             if frame.UpdateOverrideIndicators then
                 frame:UpdateOverrideIndicators(val)
             end
@@ -2294,6 +2313,53 @@ function GUI:CreateRangeSlider(parent, opts)
     return track
 end
 
+-- ============================================================
+-- THE OLD PICKER'S UNDO GESTURE
+-- ------------------------------------------------------------
+-- CreateColorPicker below drives Blizzard's ColorPickerFrame, which MUTATES the
+-- stored colour table field by field on every drag tick. There is no single
+-- write to bracket, and -- unlike the checkbox and the edit box above -- no
+-- runtime-redirect gate here to route through either; adding one would change
+-- what this widget does, which is not what this is for. So the undo engine is
+-- wired DIRECTLY around the picking session instead of through the host hooks:
+--
+--   open the picker -> BeginGesture, every tick -> capture + commit,
+--   picker hides    -> EndGesture.
+--
+-- The engine merges same-key commits inside an open gesture (the FIRST old value
+-- is kept, the newest replaces the last), so a session of forty drag ticks is
+-- ONE undo entry describing the colour before the picker opened and the colour
+-- the user settled on. A cancel restores the original numbers through the same
+-- pair, which makes the merged entry zero-delta -- and a zero-delta entry is
+-- dropped, so a cancelled pick leaves nothing to undo.
+--
+-- ColorPickerFrame is a singleton, so this state is module-scope: only one
+-- picking session can be open at a time, whichever of the 87 pickers opened it.
+local pickerGestureOpen = false
+local pickerCloseHooked = false
+
+-- Closes the session's gesture, once, from wherever the session actually ended.
+-- Idempotent because two paths race for it: a cancel closes it itself (see
+-- cancelFunc) so its restore is guaranteed to land INSIDE the gesture whatever
+-- order the client fires cancelFunc and OnHide in, and the OnHide hook below
+-- catches every other way out -- OK, Escape, or the frame being hidden from
+-- under us.
+local function ClosePickerGesture()
+    if not pickerGestureOpen then return end
+    pickerGestureOpen = false
+    local SU = DF.SettingsUndo
+    if SU then SU:EndGesture() end
+end
+
+-- Installed on first use rather than at file load: this file is the load-on-
+-- demand companion, but ColorPickerFrame is still a frame we do not own, and one
+-- hook for the session is enough.
+local function EnsurePickerCloseHook()
+    if pickerCloseHooked then return end
+    pickerCloseHooked = true
+    ColorPickerFrame:HookScript("OnHide", ClosePickerGesture)
+end
+
 function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback, lightweightCallback, useLightweight)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 28)
@@ -2379,6 +2445,13 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         -- Store original values for cancel
         local originalColor = {r = c.r, g = c.g, b = c.b, a = c.a or 1}
 
+        -- The undo engine, for the picking session about to start (see THE OLD
+        -- PICKER'S UNDO GESTURE above the factory). Resolved and hooked HERE
+        -- because the three callbacks below close over it; the gesture itself is
+        -- opened after setup, at the bottom of this handler.
+        EnsurePickerCloseHook()
+        local SU = DF.SettingsUndo
+
         -- Blizzard's SetupColorPickerAndShow fires swatchFunc once DURING
         -- setup (its SetColorRGB triggers OnColorSelect — the source comments
         -- it). That spurious fire re-writes the unchanged colour and runs the
@@ -2395,16 +2468,24 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 if hasAlpha and ColorPickerFrame.GetColorAlpha then
                     a = ColorPickerFrame:GetColorAlpha() or 1
                 end
+                -- Capture BEFORE the mutation, exactly as interceptWrite does --
+                -- this is the last moment the stored table still holds the value
+                -- the tick is about to overwrite.
+                if SU then SU:OnInterceptWrite(dbTable, dbKey, nil) end
                 dbTable[dbKey].r = r
                 dbTable[dbKey].g = g
                 dbTable[dbKey].b = b
                 dbTable[dbKey].a = a
-                
+
                 -- If editing a profile, also set the override
                 if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and dbKey then
                     DF.AutoProfilesUI:SetProfileSetting(dbKey, {r = r, g = g, b = b, a = a})
                 end
-                
+                -- ...and the commit, AFTER the auto-profile half -- the same
+                -- order GUI.lua's onSettingWritten runs the two in. Merged into
+                -- the open gesture, so this is a tick, not an entry.
+                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label) end
+
                 UpdateSwatch()
                 -- Use lightweight callback during dragging if available
                 if useLightweight and lightweightCallback then
@@ -2420,7 +2501,11 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 if ColorPickerFrame.GetColorAlpha then
                     local a = ColorPickerFrame:GetColorAlpha()
                     if a then
+                        -- Same capture/commit pair as swatchFunc: the opacity bar
+                        -- is a drag over the same stored table.
+                        if SU then SU:OnInterceptWrite(dbTable, dbKey, nil) end
                         dbTable[dbKey].a = a
+                        if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label) end
                         UpdateSwatch()
                         -- Use lightweight callback during dragging if available
                         if useLightweight and lightweightCallback then
@@ -2434,10 +2519,24 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
             end or nil,
             cancelFunc = function(restore)
                 -- Restore original color on cancel
+                -- ...through the SAME capture/commit pair as a drag tick, because
+                -- to the engine that is all this is: one more tick, landing on the
+                -- colour the session started from. The merged gesture entry then
+                -- has old == new, and the engine drops those -- so a cancelled
+                -- pick is not something the user can undo.
+                if SU then SU:OnInterceptWrite(dbTable, dbKey, nil) end
                 dbTable[dbKey].r = originalColor.r
                 dbTable[dbKey].g = originalColor.g
                 dbTable[dbKey].b = originalColor.b
                 dbTable[dbKey].a = originalColor.a
+                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label) end
+                -- ⚠ Closed HERE, not left to the OnHide hook. The client is free
+                -- to run cancelFunc from inside its own OnHide, which is BEFORE
+                -- our hook -- but it is equally free to run it from the button and
+                -- hide afterwards. Closing here makes the restore land inside the
+                -- gesture either way; ClosePickerGesture is idempotent, so the
+                -- OnHide hook that follows finds nothing left to do.
+                ClosePickerGesture()
                 UpdateSwatch()
                 DF:UpdateAll()
                 if callback then callback() end
@@ -2494,6 +2593,23 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         GUI:MarkColorPickerCall()
         ColorPickerFrame:SetupColorPickerAndShow(info)
         settingUp = false
+
+        -- ☠ THE GESTURE OPENS AFTER SETUP, NOT BEFORE IT. Setting up an ALREADY
+        -- SHOWN picker takes the frame down and puts it back, which fires the
+        -- OnHide hook -- so a gesture opened a line above this would be closed by
+        -- the client mid-setup, and every drag tick that followed would push an
+        -- entry of its own. Opening here also puts the spurious swatchFunc that
+        -- setup fires (see the note by `settingUp`) outside the session, where it
+        -- belongs: it is not an edit.
+        --
+        -- The close first is the other half of the same problem: a picker that
+        -- was re-set without ever hiding leaves its previous session open, and
+        -- that session ends here rather than swallowing this one.
+        if SU then
+            ClosePickerGesture()
+            SU:BeginGesture()
+            pickerGestureOpen = true
+        end
     end)
     
     container.SetEnabled = function(self, enabled)
