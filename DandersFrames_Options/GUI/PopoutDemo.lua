@@ -25,23 +25,24 @@
 -- should stay touching the row's plate, and clicking another row should land the
 -- panel exactly beside it.
 --
--- THE CORNERS BUTTON, the rounded-corner trial. Cycles Square (what we ship) ->
--- R4 -> R6 -> R8, swapping FOUR surfaces at once: the row plates, this window
--- itself, this window's title strip, and -- with a popout open -- the panel's own
--- chrome and ITS title strip. The popout's accent border becomes a rounded ring
--- in the accent colour; both title strips become top-corners-only surfaces so
--- they follow the curve of the panel under them instead of squaring it off.
--- PROTOTYPE: it drives UI:CreateRoundedSurface (DandersUI/Round.lua), which no
--- real settings page touches, and Square restores the shipping look exactly.
--- What it is FOR is judging whether the curve stays crisp at a real UI scale, so
--- cycle the Scale button underneath each radius rather than looking at 100% only.
+-- THE CORNERS BUTTON, the radius workbench. Cycles Square -> R4 -> R6 -> R8,
+-- swapping the row plates, this window, its title strip and -- with a popout
+-- open -- the panel's chrome, its title strip and the outline it lays over the
+-- active row, all through ONE call per row: row:SetSurface.
 --
--- ...and rounded mode also takes TWO PIECES OF SQUARE CHROME out of the way,
--- both of them things that read as a second corner beside a rounded one: the
--- popout's source outline (the accent box the shell lays over the active row --
--- see hookPopout) and the title bars' cross, which is nudged inboard of the arc
--- (see insetTitleButton). Both are per-instance and both come straight back on
--- Square.
+-- ☠ WHAT THIS BUTTON IS FOR HAS CHANGED, and reading it as the old trial will
+-- mislead you. The trial is over: the shell ships ROUNDED AT R8 (Theme.lua's
+-- UI.SurfaceStyle, declared on the host in DandersFrames/GUI/GUI.lua), and every
+-- surface this button touches is driven by the same first-class `surface` option
+-- the real settings window uses -- no shadowed methods, no swapped backdrop
+-- functions, nothing here the pages do not also have. What remains is the one
+-- thing the shipping window cannot do: put several radii on screen in sequence,
+-- under the Scale button, so a retune of UI.SurfaceStyle.radius can be LOOKED at
+-- before it is made.
+--
+-- So "Square" here is no longer "what we ship" -- it is this workbench asking for
+-- square explicitly (surface = false) against a host that is rounded, which is
+-- also the only test anywhere that the override works.
 --
 -- Dev-facing on purpose: every string is a plain literal and NOTHING here is
 -- localised. Same rule as the rest of /df debug -- these words are for whoever
@@ -387,345 +388,106 @@ local function applyScale(f, btn)
 end
 
 -- ============================================================
--- CORNER SWITCHER -- the rounded-corner trial.
+-- CORNER SWITCHER -- the radius workbench.
 --
--- ⚠ PROTOTYPE, AND ONLY HERE. UI:CreateRoundedSurface (DandersUI/Round.lua) is a
--- parallel primitive to the kit's square CreateElementBackdrop; no real settings
--- page touches it, and this button is the only thing in the addon that does. The
--- question it exists to answer is whether the corners read CRISP at the scale
--- Danders actually plays at -- see the SLICE CONTRACT note in Round.lua's header
--- -- so cycle it with the Scale button and look at the curve, not at the colours.
--- The OTHER thing to drive is the popout's open/close animation: the surface is a
--- single nine-sliced texture per layer precisely so no joint can flicker open
--- while Fx runs the frame's scale through fractional values, and repeating that
--- at R6 is the test that shape change was made to pass.
+-- ⚠ WHAT THIS USED TO BE, because the shape of the code changed completely and
+-- the old shape is what a reader will be expecting. It used to reach INTO the
+-- library: it swapped the row plate's SetBackdropColor / SetBackdropBorderColor
+-- for shims that painted a rounded surface, shadowed the popout instance's
+-- _ApplyAccent to repaint its chrome after the base had run, shadowed
+-- _UpdateSourceOutline to suppress an outline the shell had no rounded version
+-- of, and wrapped row.OpenPopout to install the pair on a pooled panel the first
+-- time it appeared. Five shadows, all of them per-instance, all of them things
+-- the real settings pages could not have.
 --
--- Two widths on screen at once, deliberately: the row plates and this window take
--- a 1px ring and the popout's accent border takes 2px, which is the pair worth
--- comparing. The two title strips carry NO ring at all -- they are a fill that has
--- to follow the curve of the panel beneath them, not an outlined thing of their
--- own, and giving them an edge would draw a second line where the separator
--- already is. Note
--- that neither is quite the square version's weight -- the kit's pixel border is
--- 2 DEVICE pixels at 0.7 alpha, while these are 1 and 2 UI UNITS at full alpha
--- -- so a rounded edge reads a little lighter at 1px and a little heavier at
--- 2px than the square one it replaced. That is a property of the trial, not a
--- bug to squint at.
+-- Every one of those is now a first-class option and the shadows are gone. The
+-- rounded paint, the rounded title strip, the rounded source outline and the
+-- cross's clearance from the arc all live INSIDE the shells, driven by
+-- `opts.surface` -- so what this button exercises is exactly the code path the
+-- settings window runs, which is the only way a workbench is worth having.
 --
--- SQUARES RESTORE EXACTLY. Going back to Square hides the rounded textures (they
--- are ours; nothing else takes them down) and re-issues the ORIGINAL factory
--- call, so the demo returns to the shipping look rather than to an approximation
--- of it.
+-- The window is the one surface still painted here, and that is correct: it is
+-- not a kit object. It uses the same three shared moves the real window uses
+-- (ApplyRoundedChrome, ApplyRoundedStrip, InsetTitleButton).
 -- ============================================================
-local CORNER_MODES = { false, 4, 6, 8 }     -- false = the square look we ship
+local CORNER_MODES = { false, 4, 6, 8 }     -- false = square, asked for explicitly
 local cornerIndex  = 1
 
 local function cornerRadius() return CORNER_MODES[cornerIndex] end
 
--- ---- the title bar's cross, and the corner it was standing in --------
+-- The style table for the selected radius, in the shape every shell takes.
 --
--- The other half of the same report: the cross's square hover box poked past the
--- panel's rounded top-right corner. It is a StyleButton -- a filled, 1px-outlined
--- rectangle -- parked HDR_EDGE in from the bar's right edge, which was chosen
--- against a square panel where "in from the edge" is the same distance whatever
--- height you read it at. Against an arc it is not: the last few units of the top
--- band belong to the curve, and a square box sitting in them reads as a corner
--- laid over a corner.
+-- ⚠ BUILT PER RADIUS RATHER THAN HANDING OVER UI.SurfaceStyle. The shipping
+-- token is ONE radius (8) and this window's whole job is the other ones -- but
+-- the two WIDTHS are read off the token rather than re-picked here, so a retune
+-- of how heavy a panel ring or a row ring is shows up in the workbench without
+-- anyone remembering to copy it across.
 --
--- The fix is clearance, not a second rounded surface. A tr-only rounded backdrop
--- on the button would only be right if the button were flush INTO the panel's
--- corner, which it is not (it is inset on both axes and it is a different size
--- from the corner box), so it would put a curve of the wrong radius near a curve
--- of the right one -- which is the same complaint again. Moving it inboard by
--- half the radius takes it out of the corner box entirely at every radius the
--- trial offers, and costs one anchor.
---
--- ⚠ THE ORIGINAL OFFSET IS REMEMBERED, not recomputed. HDR_EDGE and the title
--- row's vertical nudge are Popout.lua file-locals; reading the anchor back and
--- shifting it means this stays correct if either is ever retuned, and means the
--- Square restore is the ORIGINAL number rather than an equal-looking literal
--- copied over here. Stored on the first shift so a second radius shifts from the
--- original rather than from the last shift -- the same rule roundPlate follows
--- for the backdrop methods it swaps.
-local function edgeInset(radius)
-    return radius and floor(radius / 2 + 0.5) or 0
-end
-
-local function insetTitleButton(btn, radius)
-    if type(btn) ~= "table" or type(btn.GetPoint) ~= "function" then return end
-    local point, rel, relPoint, x, y = btn:GetPoint(1)
-    -- The 5-value shape or nothing. GetPoint always answers that in-game, so this
-    -- is really a guard against being handed a button anchored some other way --
-    -- and refusing is the right answer there, because re-issuing a point from
-    -- values that do not mean what this thinks they mean would MOVE the button
-    -- somewhere arbitrary rather than leave it where it was.
-    if not point or type(rel) ~= "table" then return end
-    if btn._demoSquareX == nil then btn._demoSquareX = x or 0 end
-    btn:ClearAllPoints()
-    -- Inboard is NEGATIVE x here: every one of these hangs off a RIGHT anchor.
-    btn:SetPoint(point, rel, relPoint, btn._demoSquareX - edgeInset(radius), y or 0)
-end
-
--- ---- the row plates ------------------------------------------------
--- The plate's hover/active repaint lives in a closure inside PopoutRow.lua and
--- drives plate:SetBackdropColor / :SetBackdropBorderColor. Rather than reach in
--- there, the two METHODS are swapped for ones that paint the rounded surface --
--- the same trick ApplyPixelBorder uses to keep ~150 existing hover call sites
--- working after their border stopped being a backdrop edge. So the row keeps
--- calling exactly what it always called, and hover and the active accent wash
--- both stay live on a rounded plate with no changes in the library.
-local function roundPlate(plate, radius)
-    plate:SetBackdrop(nil)
-    UI:HidePixelBorder(plate)
-
-    local M = UI.PopoutRow
-    local rs = UI:CreateRoundedSurface(plate, {
-        radius      = radius,
-        borderWidth = 1,
-        fill        = { C.element.r, C.element.g, C.element.b, M.restFill },
-        border      = { C.border.r, C.border.g, C.border.b, M.restBorder },
-    })
-
-    -- Saved ONCE. A second round at a different radius must not capture the
-    -- shims as though they were the originals -- that would make Square
-    -- unreachable, and the failure would look like the button not working.
-    if not plate._demoSquareFill then
-        plate._demoSquareFill   = plate.SetBackdropColor
-        plate._demoSquareBorder = plate.SetBackdropBorderColor
-    end
-    plate.SetBackdropColor       = function(_, r, g, b, a) rs:SetFillColor(r, g, b, a) end
-    plate.SetBackdropBorderColor = function(_, r, g, b, a) rs:SetBorderColor(r, g, b, a) end
-end
-
-local function squarePlate(plate)
-    local rs = UI:GetRoundedSurface(plate)
-    if rs then rs:Hide() end
-    if plate._demoSquareFill then
-        plate.SetBackdropColor       = plate._demoSquareFill
-        plate.SetBackdropBorderColor = plate._demoSquareBorder
-    end
-    -- The ORIGINAL call, verbatim from PopoutRow.lua's build. CreateElementBackdrop
-    -- re-issues the backdrop AND re-shows the pixel border, and it reinstalls the
-    -- border shim over the method just restored above -- which is correct: that
-    -- shim IS the shipping behaviour.
-    local M = UI.PopoutRow
-    GUI:CreateElementBackdrop(plate, {
-        bgColor     = { C.element.r, C.element.g, C.element.b, M.restFill },
-        borderColor = { C.border.r, C.border.g, C.border.b, M.restBorder },
-    })
-end
-
--- ---- the title strip ------------------------------------------------
---
--- ☠ THE SQUARE STRIP WAS PAINTING OVER THE ROUNDED CORNERS, and that is the whole
--- of what "the title bar isn't rounded" turned out to be. `titleFill` is a flat
--- texture on the popout's FRAME at ARTWORK sublevel 1, and ARTWORK is above the
--- whole of BACKGROUND -- where the rounded surface lives. In SQUARE mode that is
--- harmless, because the pixel border sits higher again (ARTWORK 7) and wins the
--- edges. In rounded mode there is no pixel border to win them: the strip simply
--- covered the two upper arcs with a square block of C_PANEL, which against the
--- world behind the panel reads as an unmistakably square corner.
---
--- So in rounded mode the strip stops being that texture and becomes a SURFACE
--- with tl/tr round and bl/br square, at the same radius as the panel, so its
--- curve lies exactly on the panel fill's.
---
--- WHERE IT SITS, and why it needs Round's `sublevel` and `anchorTo` at all:
---
---     BACKGROUND -4   the panel's fill
---     BACKGROUND -3   THIS -- the strip, over the fill...
---     BACKGROUND -2   the panel's accent ring, over the strip
---
--- It has to be UNDER the ring or it eats the border along the top exactly the way
--- the square texture did, and a texture is only under the ring if it is on the
--- same frame (a child frame's regions draw above all of its parent's layers). So
--- the surface goes on the popout FRAME at a sublevel of its own, measured against
--- the title BAR's rect.
-local STRIP_SUBLEVEL = -3
-
--- Fill tokens verbatim from Popout.lua's own titleFill: C_PANEL at PopoutTitle's
--- alpha. Deliberately not "something that shows up better" -- the trial is about
--- the SHAPE, and a strip that changed colour when it changed corners would make
--- the two modes incomparable.
-local function roundStrip(frame, bar, radius)
-    return UI:CreateRoundedSurface(frame, {
-        radius   = radius,
-        corners  = { tl = true, tr = true },
-        border   = false,
-        fill     = { C.panel.r, C.panel.g, C.panel.b, UI.PopoutTitle.fill },
-        sublevel = STRIP_SUBLEVEL,
-        anchorTo = bar,
-    })
-end
-
-local function squareStrip(frame, titleFill)
-    local s = UI:GetRoundedSurface(frame, STRIP_SUBLEVEL)
-    if s then s:Hide() end
-    if titleFill then titleFill:Show() end
-end
-
--- ---- the popout's own chrome ---------------------------------------
--- The panel backdrop, the accent border -- which in rounded mode becomes the
--- rounded RING in the accent colour -- and the title strip above. The notch and
--- the beam are left alone: they are pointers, not chrome, and rounding them is a
--- separate question.
---
--- The SEPARATOR is left exactly as the library built it, full width and square.
--- Note what that costs in rounded mode: it is at ARTWORK 2 and the ring is at
--- BACKGROUND -2, so unlike the square mode's pixel border the ring does not win
--- the edges, and the hairline runs the last two pixels ACROSS the accent border
--- at both ends. Worth a look when judging the shape.
-local function paintPopoutChrome(po)
-    local f, radius = po.frame, cornerRadius()
-    -- Both modes, first: the cross has to come back to its own offset on Square
-    -- as reliably as it moves off it on R4, and putting the call before the
-    -- branch is what makes that one statement instead of two.
-    insetTitleButton(po.closeBtn, radius)
-    if not radius then
-        local rs = UI:GetRoundedSurface(f)
-        if rs then rs:Hide() end
-        squareStrip(f, po.titleFill)
-        return
-    end
-    -- The square backdrop has just been re-issued by the base _ApplyAccent (see
-    -- the hook below), so it is taken down again here rather than assumed gone:
-    -- the rounded fill sits at a NEGATIVE BACKGROUND sublevel, under a backdrop's
-    -- bgFile, so leaving it would simply render the square on top.
-    f:SetBackdrop(nil)
-    UI:HidePixelBorder(f)
-    local c = po:GetAccent()
-    UI:CreateRoundedSurface(f, {
-        radius      = radius,
-        borderWidth = 2,
-        fill        = { C.panel.r, C.panel.g, C.panel.b, 1 },
-        border      = { c.r, c.g, c.b, c.a or 1 },
-    })
-    if po.titleFill and po.titleBar then
-        po.titleFill:Hide()
-        roundStrip(f, po.titleBar, radius)
-    end
-end
-
--- Popout instances are POOLED per key and all four rows share one, so this runs
--- at most once per instance. Shadowing the method on the INSTANCE (its metatable
--- __index is the Popout class) leaves every other popout in the game untouched,
--- which is the whole point of doing it here rather than in the library.
---
--- ☠ "A SECOND CORNER AROUND A SELECTED OBJECT" -- the second shadow below.
--- The active row wore its rounded accent plate AND a square accent rectangle
--- around it, and the outer one is not the row's at all. It is the popout shell's
--- SOURCE OUTLINE: a 1px accent box the pack lays over whatever the panel is
--- tethered to, so the popout and the thing it is about share an edge
--- (Popout.lua, _UpdateSourceOutline). It goes on with ApplyPixelBorder, which is
--- square by construction and has no rounded sibling, so in rounded mode it
--- traced a hard rectangle round a plate that had just been given a curve.
---
--- In the trial the ROW'S OWN active ring already does that job -- same accent,
--- same rect, and round -- so the shell's outline is redundant here rather than
--- merely ugly, and it is suppressed rather than restyled.
---
--- The shadow READS THE MODE ON EVERY CALL instead of being installed and
--- removed. That is what makes Square exact: there is nothing to uninstall, the
--- call simply falls through to the real method again. _HideSourceOutline rather
--- than a bare Hide, because it also forgets which region the outline was
--- anchored to -- so the restore re-anchors instead of coming back on a stale
--- target, which matters here precisely because the demo's popout is pooled and
--- retargeted from row to row.
-local function hookPopout(po)
-    if po._demoCornerHooked then return end
-    po._demoCornerHooked = true
-    local base = po._ApplyAccent
-    po._ApplyAccent = function(self)
-        base(self)
-        paintPopoutChrome(self)
-    end
-    local baseOutline = po._UpdateSourceOutline
-    po._UpdateSourceOutline = function(self)
-        if cornerRadius() then
-            self:_HideSourceOutline()
-            return
-        end
-        baseOutline(self)
-    end
-end
-
-local function eachOpenPopout(fn)
-    local seen = {}
-    for _, r in pairs(rows) do
-        local po = r.popout
-        if po and not po.closed and not seen[po] then
-            seen[po] = true
-            fn(po)
-        end
-    end
+-- `false`, not nil, for square: nil means "ask the host", and the host is
+-- rounded. This is the only place in the addon that asks for the override.
+local function cornerStyle()
+    local r = cornerRadius()
+    if not r then return false end
+    local base = UI.SurfaceStyle
+    return {
+        style          = "rounded",
+        radius         = r,
+        borderWidth    = base.borderWidth,
+        rowBorderWidth = base.rowBorderWidth,
+    }
 end
 
 -- ---- the demo window's own chrome ----------------------------------
--- The window was the one surface the trial did not reach: its rows and its
--- popouts rounded while the box they all sat in stayed hard-cornered, which made
--- the shape impossible to judge as a whole -- a rounded panel standing against a
--- square one reads as a mistake rather than as a look.
+-- The window was the one surface the original trial did not reach: its rows and
+-- its popouts rounded while the box they all sat in stayed hard-cornered, which
+-- made the shape impossible to judge as a whole. Same three moves as the real
+-- settings window, against the window's own tokens rather than an accent.
 --
--- The same two moves as the popout, against the window's own tokens rather than
--- an accent: CreatePanelBackdrop's C_PANEL fill and C_BORDER edge. ONE unit of
--- ring, not the popout's two -- the popout's is heavier on purpose (it is the
--- accent, and it is the shared-edge story), and a neutral window border matching
--- the row plates keeps the demo showing both weights at once.
-local function paintWindowChrome(f)
-    local radius = cornerRadius()
+-- ONE unit of ring, not the popout's two -- the popout's is heavier on purpose
+-- (it is the accent, and it is the shared-edge story), and a neutral window
+-- border matching the row plates keeps the demo showing both weights at once.
+local function paintWindowChrome(f, style)
     -- The window's cross sits in its top-right corner box too -- and closer than
     -- the popout's does, because this title bar is the shorter of the two. Its
     -- three sibling buttons chain off its LEFT, so moving it moves the cluster.
-    insetTitleButton(f.closeBtn, radius)
-    if not radius then
-        local rs = UI:GetRoundedSurface(f)
-        if rs then rs:Hide() end
-        squareStrip(f, f.titleFill)
-        -- The ORIGINAL call, verbatim from buildWindow. Re-issues the backdrop and
-        -- re-shows the pixel border, the same way squarePlate restores a row.
+    UI:InsetTitleButton(f.closeBtn, style and style.radius or nil)
+    if not style then
+        UI:RemoveRoundedChrome(f)
+        UI:RemoveRoundedStrip(f)
+        if f.titleFill then f.titleFill:Show() end
+        -- The ORIGINAL call, verbatim from buildWindow. Re-issues the backdrop
+        -- and re-shows the pixel border.
         GUI:CreatePanelBackdrop(f)
         return
     end
-    f:SetBackdrop(nil)
-    UI:HidePixelBorder(f)
-    UI:CreateRoundedSurface(f, {
-        radius      = radius,
-        borderWidth = 1,
+    UI:ApplyRoundedChrome(f, {
+        radius      = style.radius,
+        borderWidth = style.rowBorderWidth,
         fill        = { C.panel.r, C.panel.g, C.panel.b, C.panel.a or 1 },
         border      = { C.border.r, C.border.g, C.border.b, 1 },
     })
     if f.titleFill and f.titleBar then
         f.titleFill:Hide()
-        roundStrip(f, f.titleBar, radius)
+        UI:ApplyRoundedStrip(f, f.titleBar, style.radius,
+            { C.panel.r, C.panel.g, C.panel.b, UI.PopoutTitle.fill })
     end
 end
 
 -- The FRAME is passed in rather than read off the file-local `win`, for applyScale's
 -- reason: this runs once during buildWindow, before the toggle has assigned it.
+--
+-- ONE call per row, and the row does the rest: it re-issues its plate's chrome,
+-- replays its own state paint through it (so a hovered or ACTIVE plate comes
+-- back in the colour it should be), re-declares its radius on the tether
+-- contract, and forwards the style to every panel it has open -- pinned ones
+-- included. That last step is what repaints the popout's chrome, its title strip
+-- and the outline it lays over the active row, all of which used to need
+-- shadows here.
 local function applyCorners(f, btn)
+    local style = cornerStyle()
+    for _, r in pairs(rows) do r:SetSurface(style) end
+    if f then paintWindowChrome(f, style) end
     local radius = cornerRadius()
-    for _, r in pairs(rows) do
-        if radius then roundPlate(r.plate, radius) else squarePlate(r.plate) end
-        -- Repaint through the row's own state machine, so a plate that is
-        -- hovered or ACTIVE comes back in the colour it should be rather than at
-        -- the rest colours the factory call above just wrote.
-        r.Refresh()
-    end
-    if f then paintWindowChrome(f) end
-    -- _ApplyAccent is hooked, so this repaints the chrome in EITHER direction:
-    -- rounded mode paints the ring, square mode reissues the panel backdrop and
-    -- the hook then hides the rounded textures.
-    --
-    -- ...and the source outline is driven SEPARATELY, because _ApplyAccent does
-    -- not touch whether it is SHOWN -- it only repaints one that already is (see
-    -- Popout.lua). Without this the outline would keep whatever state it had when
-    -- the button was pressed: still square-outlining the active row after a
-    -- switch INTO a radius, and still missing after a switch back to Square,
-    -- until something else happened to re-dock the panel.
-    eachOpenPopout(function(po)
-        po:_ApplyAccent()
-        po:_UpdateSourceOutline()
-    end)
     if btn then btn:SetText(radius and format("Corners: R%d", radius) or "Corners: Square") end
 end
 
@@ -787,12 +549,12 @@ local function buildWindow()
     })
     -- ⚠ THE 5-ARGUMENT FORM, where this was `SetPoint("RIGHT", -6, 0)`. Same
     -- anchor -- the implicit relative frame IS the parent -- but written out, so
-    -- insetTitleButton can read it back and re-issue it. Popout.lua's own cross
-    -- is anchored the long way for no reason but house style; here it is load
-    -- bearing.
+    -- UI:InsetTitleButton can read it back and re-issue it. Popout.lua's own
+    -- cross is anchored the long way for no reason but house style; here it is
+    -- load bearing.
     closeBtn:SetPoint("RIGHT", bar, "RIGHT", -6, 0)
-    -- Kept, because the corner trial moves it: insetTitleButton needs a handle on
-    -- the cross, and the three buttons below chain off it so they come along.
+    -- Kept, because the corner pass moves it: UI:InsetTitleButton needs a handle
+    -- on the cross, and the three buttons below chain off it so they come along.
     f.closeBtn = closeBtn
 
     local accentBtn = GUI:CreateButtonNative(bar, {
@@ -829,14 +591,13 @@ local function buildWindow()
         text = "Corners: Square", width = 96, height = 18, style = "ghost",
         fitText = false,
         tooltip = { title = "Corner Radius", lines = {
-            "Cycle the demo between the square look we ship and rounded corners",
-            "at radius 4, 6 and 8. PROTOTYPE -- nothing outside this window changes.",
+            "Cycle this window between square and rounded corners at radius 4, 6",
+            "and 8. The settings window itself ships at R8 -- this is where the",
+            "other radii can be looked at before that number is retuned.",
             "Swaps the row plates, this window and its title strip, and -- with a",
-            "popout open -- the panel's chrome and its title strip too: the accent",
-            "border becomes a rounded ring, and neither title bar squares off the",
-            "corners under it any more.",
-            "Rounded mode also drops the square accent outline the panel lays over",
-            "the active row, and nudges both crosses clear of the arc.",
+            "popout open -- the panel's chrome, its title strip, the outline it",
+            "lays over the active row, and both crosses' clearance from the arc.",
+            "Nothing outside this window changes.",
             "THE question: are the corners crisp at your UI scale? Cycle the Scale",
             "button underneath each radius and watch the curve, not the colour.",
         } },
@@ -891,6 +652,12 @@ local function buildWindow()
             -- change would then pull that tick back to the host colour even
             -- though the switcher had given the row one of its own.
             accent   = accentColor(),
+            -- ☠ AT BUILD, AND EXPLICITLY, for a reason that only exists now that
+            -- the shell ships rounded: the HOST is R8, so a row that said nothing
+            -- would come up round while the button beside it read "Square". The
+            -- workbench's shape is its own from the first frame, and the button
+            -- is the only thing that changes it.
+            surface  = cornerStyle(),
         })
         row:SetWidth(childW)
         row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
@@ -899,30 +666,12 @@ local function buildWindow()
         -- row's box model moves this list with it.
         y = y + (row.preferredHeight or UI.PopoutRow.slot)
 
-        -- The corner trial's one hook into the row. A popout is built lazily on
-        -- the first click and pooled thereafter, so there is no earlier moment at
-        -- which its frame exists to round -- and a plain "round it when the
-        -- button is pressed" would miss every panel opened afterwards.
-        local baseOpen = row.OpenPopout
-        row.OpenPopout = function(self, ...)
-            local ret = baseOpen(self, ...)
-            local po = self.popout
-            if po then
-                hookPopout(po)
-                -- Fires the hook once for a panel that was already open in
-                -- square mode and has just been retargeted to this row.
-                po:_ApplyAccent()
-                -- ...and again for the outline, which the open we just wrapped
-                -- has ALREADY shown: OpenPopout runs the pack's placement, which
-                -- ends in _Present -> _UpdateSourceOutline, and on the very first
-                -- click that happens before hookPopout above has installed the
-                -- shadow. So the first panel of the session would come up in
-                -- rounded mode still wearing the square outline. Re-running it
-                -- now goes through the shadow and takes it straight back down.
-                po:_UpdateSourceOutline()
-            end
-            return ret
-        end
+        -- ⚠ AND NOTHING ELSE. There used to be an OpenPopout wrapper here that
+        -- installed the corner shadows on the pooled panel the first time it
+        -- appeared, plus two immediate re-runs to catch the chrome the shell had
+        -- already painted before the shadows existed. The row forwards its style
+        -- to every panel it opens, so a panel is the right shape when it arrives
+        -- and there is no window in which it is the wrong one.
 
         rows[def.name] = row
     end

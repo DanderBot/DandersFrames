@@ -51,6 +51,23 @@ local UI = {
         end,
     },
 }
+-- ---- the surface style, borrowed whole from the shared library table --
+-- The group box wears whichever shape the HOST declared (see CreateSettingsGroup's
+-- note on why this one surface is not told per call site), so this private kit
+-- needs the resolver and the rounded primitive. They are TAKEN, not written: the
+-- shared table already carries the real Theme.lua resolver and the real Round.lua
+-- (run.py lifts both), and a second implementation here would be a test that
+-- agrees with itself.
+do
+    local SHARED = NS.__DandersUI
+    for _, name in ipairs({ "SurfaceStyle", "ResolveSurfaceStyle", "SetSurfaceStyle",
+                            "GetSurfaceStyle", "HidePixelBorder",
+                            "CreateRoundedSurface", "GetRoundedSurface",
+                            "ApplyRoundedChrome", "RemoveRoundedChrome" }) do
+        UI[name] = SHARED[name]
+    end
+end
+
 -- No snapping: every offset below is asserted as the arithmetic the layout did,
 -- and a rounding pass would make those numbers about the device grid instead.
 function UI.SnapLen(_, n) return n end
@@ -202,6 +219,75 @@ do
     g:LayoutChildren()
     eq(a:GetWidth(), 260, "popout shape: a control mounts at the full content width")
     eq(g:GetHeight(), 55, "popout shape: and the group measures its rows exactly")
+end
+
+
+-- ============================================================
+-- 5. THE SURFACE STYLE
+--
+-- ☠ THIS IS THE ONE SURFACE IN THE PACK THAT IS NOT TOLD PER CALL SITE, and the
+-- reason is arithmetic: every other shell that can wear either shape is built at
+-- a handful of places and can be handed a style, while a settings group is built
+-- at something over a hundred, on every page. Threading a style through all of
+-- them means the ONE that gets missed is the box that stays square in a round
+-- window -- so the style is asked for once, off the HOST that declared it.
+--
+-- Which makes the DEFAULT the load-bearing assertion: a host that declared
+-- nothing has to build exactly the box it always did, because that is every call
+-- site in DandersMover and every call site in DandersFrames on the day before
+-- the shell went round.
+-- ============================================================
+print("-- Group: a host that declared no style builds the square box")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    check(g._elementOpts ~= nil, "no style: the square element backdrop is what was issued")
+    check(UI:GetRoundedSurface(g) == nil, "no style: and no rounded surface exists")
+end
+
+print("-- Group: a rounded host rounds the box, at the ROW weight")
+do
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    local rs = UI:GetRoundedSurface(g)
+    check(rs ~= nil and rs:IsShown(), "rounded: the box wears a rounded surface")
+    local r, w = rs:GetRadius()
+    eq(r, UI.SurfaceStyle.radius, "rounded: at the declared radius")
+    -- A page column is a STACK of these boxes, and at the panel's two units a
+    -- column of them reads as a grid of frames rather than as sections of a page.
+    eq(w, UI.SurfaceStyle.rowBorderWidth, "rounded: and the row border width, not the panel's")
+    -- The COLOURS are the square box's, verbatim: 3% white over an 8% white edge.
+    -- The only thing that changed is the corner.
+    eq(rs.fillA, 0.03, "rounded: the same 3% fill")
+    eq(rs.borderA, 0.08, "rounded: inside the same 8% border")
+    check(rawget(g, "_pxHidden") == true, "rounded: the square pixel border came down")
+    host:SetSurfaceStyle(nil)
+end
+
+print("-- Group: chromeless outranks the style")
+do
+    -- A group mounted as the whole contents of another surface is not a box ON a
+    -- page, it IS the contents -- and a faint ROUNDED rectangle inside a panel
+    -- reads as a second panel every bit as much as a square one does.
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 260, { chromeless = true, padding = 0 })
+    eq(rawget(g, "_elementOpts"), nil, "chromeless: no square box")
+    check(UI:GetRoundedSurface(g) == nil, "chromeless: and no rounded one either")
+    host:SetSurfaceStyle(nil)
+end
+
+print("-- Group: opts.surface overrides the host, both ways")
+do
+    -- The per-box escape hatch. Nothing in the pages uses it today; it exists so
+    -- a box that must not follow the shell has a way to say so that is not
+    -- "chromeless", which means something else entirely.
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { surface = UI.SurfaceStyle })
+    check(UI:GetRoundedSurface(g) ~= nil, "an explicit style rounds a box on a square host")
+
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    local sq = host:CreateSettingsGroup(FakeUIFrame(), 280, { surface = false })
+    check(UI:GetRoundedSurface(sq) == nil, "...and false squares one on a rounded host")
+    check(sq._elementOpts ~= nil, "...with the square backdrop issued as before")
+    host:SetSurfaceStyle(nil)
 end
 
 CreateFrame = prevCreateFrame

@@ -30,6 +30,55 @@ ns = lua.table()
 ns["__DandersUI"] = lua.table()
 ns.Lib = ns.Lib or lua.eval("{ callbacks = { Fire = function() end } }")   # winner marker: the lost-copy guards check NS.Lib
 run(HERE.parents[1] / "DandersUI" / "Fx.lua", "DandersMover", ns)
+
+# ---- the surface style, taken from the REAL Theme.lua -------------------
+# Popout / PopoutRow / Sections all resolve opts.surface through
+# UI.ResolveSurfaceStyle, which Theme.lua owns. In-game the manifest guarantees
+# it (Theme.lua is listed before Round.lua and Popout.lua in DandersUI.xml);
+# headless, nothing loads the theme half, so without this every suite that
+# builds a popout would nil-call on the first adopt.
+#
+# ☠ THE REAL FUNCTIONS, NOT A COPY OF THEM. Theme.lua loads clean under the shim
+# (it declares tables and functions and touches no frame at file scope), so it is
+# loaded into a THROWAWAY namespace and exactly four names are lifted across.
+# Re-implementing the resolver here would mean a test suite that agrees with a
+# stub rather than with the library -- and `false means square, nil means ask the
+# host` is precisely the kind of rule that drifts when it is written twice.
+#
+# The throwaway namespace is what keeps this surgical: Theme.lua also installs
+# CreateElementBackdrop, the pixel border, the colour table and the whole box
+# model, and every suite below stubs its own versions of those. None of that is
+# copied over.
+_theme_ns = lua.table()
+_theme_ui = lua.table()
+_theme_ui["_state"] = lua.table()
+_theme_ui["_priv"] = lua.table()
+_theme_ns["__DandersUI"] = _theme_ui
+run(HERE.parents[1] / "DandersUI" / "Theme.lua", "DandersUI", _theme_ns)
+for _name in ("SurfaceStyle", "ResolveSurfaceStyle", "SetSurfaceStyle", "GetSurfaceStyle"):
+    ns["__DandersUI"][_name] = _theme_ui[_name]
+
+# ⚠ THE PIXEL BORDER IS NOT LIFTED, either half, and the reason is the fake
+# frames rather than the functions. FakeUIFrame's metatable answers EVERY unset
+# key with a no-op function, so the real HidePixelBorder's `frame._pxBorder`
+# comes back truthy and it indexes a function; the real ApplyPixelBorder builds
+# textures and re-derives its weight from GetPhysicalScreenSize, which the shim
+# does not answer. Both are stubbed instead -- ApplyPixelBorder per suite (each
+# wants its own recording), HidePixelBorder here, because the rounded chrome
+# helpers call it on every rounded paint and nothing asserts anything about it
+# beyond "it was taken down".
+ns["__DandersUI"]["HidePixelBorder"] = lua.eval(
+    "function(_, frame) if frame then frame._pxHidden = true end return frame end")
+
+# ...and Round.lua, for the same reason and with less ceremony: the popout's
+# chrome paint calls UI:RemoveRoundedChrome / RemoveRoundedStrip on EVERY paint,
+# square included (each shape has to take the other down -- see _PaintChrome), so
+# every suite that builds a popout needs the module present even though none of
+# the square ones ever draws a curve. It is a base-manifest file that loads
+# before Popout.lua in-game, it declares no frames, and it is idempotent on a
+# re-load -- test_round.lua loads it again under its own UI.MEDIA to pin the
+# texture paths, and that re-load is what those assertions run against.
+run(HERE.parents[1] / "DandersUI" / "Round.lua", "DandersUI", ns)
 for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Fx.lua", "Registry.lua"):
     p = ADDON / name
     if p.exists():

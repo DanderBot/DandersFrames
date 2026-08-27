@@ -57,9 +57,10 @@ local math, table = math, table
 
 function UI:CreateSettingsGroup(parent, width, opts)
     -- opts can be a boolean (legacy: collapsible) or a table
-    -- { collapsible, showSummary, collapseKey, chromeless, padding }.
-    -- chromeless and padding are opt-in and change nothing for a call site that
-    -- passes neither -- see where each is read below.
+    -- { collapsible, showSummary, collapseKey, chromeless, padding, surface }.
+    -- chromeless, padding and surface are opt-in and change nothing for a call
+    -- site that passes none -- see where each is read below. `surface` overrides
+    -- the host's declared style for this one box (`false` forces it square).
     --
     -- ⚠ (Removed) onCollapseChanged. It was stored here and fired from both collapse
     -- paths, and NOTHING ever set it -- so neither guard could fire and the callback
@@ -113,11 +114,40 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- popout pane already draws its own panel, and a faint bordered rectangle
     -- inside it reads as a second, smaller panel rather than as the panel's
     -- contents.
+    --
+    -- ⚠ THE BOX FOLLOWS THE CONSUMER'S SURFACE STYLE, and it is the one surface
+    -- here that takes it from the HOST rather than from an opt. Every other
+    -- shell that can wear either shape is built at a handful of call sites and
+    -- can be told; a settings group is built at something over a hundred, on
+    -- every page, and threading a style through all of them would mean the ONE
+    -- that got missed is the box that stays square in a round window. So the
+    -- style is asked for once, here, off the host that declared it -- a consumer
+    -- that declared nothing gets exactly the square box it always had.
+    --
+    -- ☠ THIS SKINS BOTH LAYOUT MODES. The classic (non-container) page layout
+    -- and the container one draw the SAME group frame -- they differ in how the
+    -- boxes are arranged, not in what a box is -- so rounding it rounds both.
+    -- That is the intended reading (the skin is shared chrome, like the header),
+    -- but it does mean classic-mode pages change shape without anything on the
+    -- classic path being touched.
     if not opts.chromeless then
-        CreateElementBackdrop(group, {
-            bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
-            borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
-        })
+        local style = UI.ResolveSurfaceStyle(host, opts.surface)
+        if style then
+            UI:ApplyRoundedChrome(group, {
+                radius      = style.radius,
+                -- The ROW weight. A page column is a stack of these boxes, and at
+                -- the panel's two units a column of them reads as a grid of
+                -- frames rather than as sections of one page.
+                borderWidth = style.rowBorderWidth or style.borderWidth,
+                fill        = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
+                border      = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
+            })
+        else
+            CreateElementBackdrop(group, {
+                bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
+                borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
+            })
+        end
     end
 
     -- The consumer's persisted collapse map, or nil when it keeps none (the pack

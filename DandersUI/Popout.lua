@@ -76,9 +76,14 @@ local ICON_SIZE  = 14
 -- The connection point: a small accent diamond centred on the edge the popout
 -- docked against, half of it proud of the border. 10 is the size at which the
 -- tip still reads as a POINT against a 2-device-pixel border without becoming a
--- shape in its own right. Square corners everywhere -- the popout's border, the
--- source outline and this notch are all straight lines, so the three read as one
--- piece of chrome rather than three decorations.
+-- shape in its own right.
+--
+-- ⚠ THE NOTCH IS NOT RESTYLED BY opts.surface, and it does not need to be: it is
+-- a POINTER, not a panel edge -- one small diamond crossing the border, which
+-- reads the same whether the line it crosses is straight or curved. The beam is
+-- the same case. What the rounded style DOES have to reach is everything that
+-- draws a CORNER: the panel's own ring, the title strip over it, the source
+-- outline, and the cross that stands in the corner box.
 local NOTCH_SIZE = 10
 -- Two layered lines, not one: a wide soft under-glow so the beam reads over
 -- busy art, and a thin bright core so it still reads as a LINE.
@@ -1050,24 +1055,90 @@ function Popout:_CascadeAccent()
     cascadeInto(self.frame, self:GetAccent(), 0)
 end
 
--- Repaint everything the accent colours. Called on every adopt, so a pooled
--- popout re-opened after a theme change comes up in the current colour rather
--- than in whatever it was built in.
+-- ---- the panel's own chrome, in whichever style it wears ----------
+--
+-- ONE function, two paints, because the two have to be each other's exact
+-- opposite: switching a live popout between them (the chrome workbench does it
+-- on a button, and a consumer that re-themes could) must leave nothing of the
+-- other behind. Square leaves rounded TEXTURES on the frame (they are ours;
+-- nothing else takes them down) and rounded leaves a square BACKDROP under it
+-- (which would render straight over the rounded fill -- see ApplyRoundedChrome).
+-- So each arm takes the other down before it paints.
+function Popout:_PaintChrome(c)
+    local f, s = self.frame, self.surface
+    if not s then
+        UI:RemoveRoundedChrome(f)
+        UI:RemoveRoundedStrip(f)
+        if self.titleFill then self.titleFill:Show() end
+        -- The accent goes on as the panel's own 1px BORDER, which is the whole
+        -- "the popout and the thing it is about share an edge" idea -- and it
+        -- runs through the pixel-border machinery, so it lands on the device
+        -- grid like every other outlined surface in the kit, with square
+        -- corners.
+        self.host:CreatePanelBackdrop(f, { borderColor = c })
+        return
+    end
+    -- ...and rounded, the accent is the RING. Same story, same colour, same
+    -- weight relationship to the row's own ring -- a curve instead of a corner.
+    local panel = UI.Colors and UI.Colors.panel
+    UI:ApplyRoundedChrome(f, {
+        radius      = s.radius,
+        borderWidth = s.borderWidth,
+        fill        = panel and { panel.r, panel.g, panel.b, 1 } or nil,
+        border      = { c.r, c.g, c.b, c.a or 1 },
+    })
+    -- The strip stops being the flat ARTWORK texture and becomes a top-corners
+    -- surface under the ring, so it follows the panel's curve instead of
+    -- squaring it off. See ApplyRoundedStrip for why it cannot stay a texture.
+    if self.titleFill and self.titleBar then
+        self.titleFill:Hide()
+        -- The strip's own tokens, verbatim from the flat texture it replaces
+        -- (C_PANEL at PopoutTitle's alpha) -- so the two shapes differ by their
+        -- corners and by nothing else.
+        UI:ApplyRoundedStrip(f, self.titleBar, s.radius,
+            panel and { panel.r, panel.g, panel.b, TITLE.fill } or nil)
+    end
+end
+
+-- Repaint everything the accent colours, AND everything the surface style
+-- shapes. Called on every adopt, so a pooled popout re-opened after a theme
+-- change comes up in the current colour rather than in whatever it was built in
+-- -- and, since adopt re-resolves the style too, in the current SHAPE rather
+-- than in whichever caller happened to build it.
 function Popout:_ApplyAccent()
     local c = self:GetAccent()
-    -- The accent goes on as the panel's own 1px BORDER, which is the whole
-    -- "the popout and the thing it is about share an edge" idea -- and it runs
-    -- through the pixel-border machinery, so it lands on the device grid like
-    -- every other outlined surface in the kit, with square corners.
-    self.host:CreatePanelBackdrop(self.frame, { borderColor = c })
+    self:_PaintChrome(c)
+    -- The title bar's cross, and the corner it would otherwise be standing in.
+    -- BOTH modes, unconditionally: the cross has to come back to the shell's own
+    -- offset on square as reliably as it moves off it when rounded, and putting
+    -- the call before any branch is what makes that one statement instead of two.
+    UI:InsetTitleButton(self.closeBtn, self.surface and self.surface.radius or nil)
     if self.notch then self.notch:SetVertexColor(c.r, c.g, c.b, c.a or 1) end
-    if self.srcOutline then
-        self.host:ApplyPixelBorder(self.srcOutline, { c.r, c.g, c.b, c.a or 1 })
-    end
+    if self.srcOutline then self:_PaintSourceOutline(c) end
     -- ...and the widgets INSIDE it, which are not chrome and do not read this
     -- popout's colour on their own.
     self:_CascadeAccent()
 end
+
+-- ---- the surface style -------------------------------------------
+
+-- Change the style this instance wears and repaint everything that carries it.
+-- The live path, for the same reason SetAccent has one: a consumer that switches
+-- style under an open panel has nothing else to call.
+--
+-- The source OUTLINE is re-committed rather than merely repainted: which of the
+-- two outlines it wears depends on the style AND on the source's declared
+-- radius, and that decision is only taken when the outline (re-)anchors -- so
+-- the target is forgotten first, and the next update re-decides from scratch.
+function Popout:SetSurface(style)
+    self.surface = UI.ResolveSurfaceStyle(self.host, style)
+    self._outlineOn, self._outlineRadius = nil, nil
+    self:_ApplyAccent()
+    self:_UpdateSourceOutline()
+    return self
+end
+
+function Popout:GetSurface() return self.surface end
 
 -- ---- the connected chrome's one gate -----------------------------
 
@@ -1145,6 +1216,23 @@ end
 -- it is about wear the SAME border and the beam reads as a join between two
 -- pieces of one object rather than a line to something unrelated.
 --
+-- ☠ AND "THE SAME BORDER" IS WHY IT HAS TWO PAINTS. The outline used to be
+-- ApplyPixelBorder and nothing else, which is square by construction. Lay that
+-- over a ROUNDED row plate and you get the complaint the trial actually
+-- produced: a second corner around a selected object -- a hard rectangle traced
+-- round a plate that had just been given a curve. The trial's answer was to
+-- suppress the outline entirely in rounded mode and let the row's own active
+-- ring stand for it; that only worked because the row happened to have one, and
+-- it silently dropped the shell's half of the shared-edge story for every other
+-- kind of source.
+--
+-- So the outline follows the SOURCE'S shape instead. A source declares its curve
+-- on the tether contract (`region.popoutRadius`, beside the popoutInset it
+-- already declares) and a rounded popout tracing a source that declares one
+-- draws a rounded RING at that radius; a square source, or a square popout,
+-- keeps the pixel border exactly as it shipped. The two are mutually exclusive
+-- and each paint takes the other down -- see _PaintSourceOutline.
+--
 -- Its own frame, parented to the popout's PARENT for the same reason the beam
 -- is: a consumer that parents its popouts to a session overlay (so hiding the
 -- overlay suspends everything) must get this in that bargain too.
@@ -1160,6 +1248,49 @@ function Popout:_EnsureSourceOutline()
     self.srcOutline = o
     self:_SyncChromeLevel()
     return o
+end
+
+-- Which curve, if any, the outline is currently wearing -- decided when it
+-- anchors (that is the only moment the source, and so its declared radius, is in
+-- hand) and read back by every later repaint. A rounded popout over a square
+-- source answers nil and gets the pixel border, which is right: the outline is a
+-- statement about the SOURCE'S edge, not about the panel's.
+function Popout:_OutlineRadius(region)
+    if not self.surface or type(region) ~= "table" then return nil end
+    local r = rawget(region, "popoutRadius")
+    return (type(r) == "number") and r or nil
+end
+
+-- Paint the outline in whichever of the two it is wearing, and take the other
+-- one down. Both halves matter: a style switch under an open panel walks from
+-- one to the other, and a frame left carrying both draws a square box and a
+-- rounded ring at once -- which is the exact defect this whole branch exists to
+-- remove, arrived at from the other direction.
+function Popout:_PaintSourceOutline(c)
+    local o = self.srcOutline
+    if not o then return end
+    c = c or self:GetAccent()
+    local radius = self._outlineRadius
+    if not radius then
+        UI:RemoveRoundedChrome(o)
+        self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
+        return
+    end
+    UI:HidePixelBorder(o)
+    -- RING ONLY. The outline lies ON TOP of the thing it is outlining, so a fill
+    -- of any alpha is a pane of glass over the row -- see Round's SetFillShown.
+    --
+    -- The ROW weight, not the panel's. This ring has to land exactly on the
+    -- source's own edge, and a source in this pack is a row plate, which the
+    -- style draws at rowBorderWidth. The panel's heavier ring is the accent
+    -- making a statement about itself; this one is agreeing with something.
+    local s = self.surface
+    UI:CreateRoundedSurface(o, {
+        radius      = radius,
+        borderWidth = (s and (s.rowBorderWidth or s.borderWidth)) or 1,
+        fill        = false,
+        border      = { c.r, c.g, c.b, c.a or 1 },
+    })
 end
 
 -- The outline is ANCHORED to the region, so it tracks a moving source for free;
@@ -1195,8 +1326,12 @@ function Popout:_UpdateSourceOutline()
         local ik = scaleRatio(region) / scaleRatio(o)
         o:SetPoint("TOPLEFT", region, "TOPLEFT", l * ik, -t * ik)
         o:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", -r * ik, b * ik)
-        local c = self:GetAccent()
-        self.host:ApplyPixelBorder(o, { c.r, c.g, c.b, c.a or 1 })
+        -- Decided HERE and remembered, because this is the one call that has the
+        -- region in hand. Every later repaint (an accent change, a style change)
+        -- reads it back rather than re-deriving it from a source it would have
+        -- to go and fetch again.
+        self._outlineRadius = self:_OutlineRadius(region)
+        self:_PaintSourceOutline()
     end
     if o:IsShown() then return end
     if Fx then Fx.FadeIn(o, BEAM_DUR) else o:Show() end
@@ -1204,8 +1339,10 @@ end
 
 function Popout:_HideSourceOutline()
     -- Forgotten, so the next show re-anchors: the target it comes back on may
-    -- not be the one it went down against.
+    -- not be the one it went down against -- and, since the shape follows the
+    -- SOURCE, may not be the same shape either.
     self._outlineOn = nil
+    self._outlineRadius = nil
     local o = self.srcOutline
     if not o or not o:IsShown() then return end
     if Fx then Fx.FadeOut(o, BEAM_DUR, function() o:Hide() end) else o:Hide() end
@@ -1223,7 +1360,7 @@ function Popout:HideChrome()
     if self.srcOutline then
         if Fx then Fx.Cancel(self.srcOutline) end
         self.srcOutline:Hide()
-        self._outlineOn = nil
+        self._outlineOn, self._outlineRadius = nil, nil
     end
 end
 
@@ -1589,6 +1726,15 @@ function Popout:IsShown() return self.frame:IsShown() end
 local function adopt(po, opts)
     po.family      = opts.family
     po.accent      = normColor(opts.accent)
+    -- ☠ RE-RESOLVED ON EVERY ADOPT, and that is what keeps the style alive
+    -- through the pool. A popout is handed back to whichever row asks for its
+    -- key next, and a style resolved once at build would be the FIRST caller's
+    -- -- so a rounded consumer that reopened a panel first opened from
+    -- somewhere square would get the square one back, with no way to see why.
+    -- The outline's remembered shape goes with it: which of the two paints it
+    -- wears depends on this, and the next _UpdateSourceOutline re-decides.
+    po.surface     = UI.ResolveSurfaceStyle(po.host, opts.surface)
+    po._outlineOn, po._outlineRadius = nil, nil
     po.onClose     = opts.onClose
     po.onPin       = opts.onPin
     po.onUnpin     = opts.onUnpin          -- accepted; v1 never unpins
@@ -1634,6 +1780,16 @@ end
 --   tetherSource  region or function -> region; the beam's far end
 --   accent        {r,g,b[,a]} overriding the HOST accent for this popout's
 --                 border, connection point, beam and source outline
+--   surface       the SURFACE STYLE this panel wears (Theme.lua's
+--                 UI.SurfaceStyle). A table rounds it at that radius and border
+--                 weight -- panel fill and accent ring, a top-corners title
+--                 strip, the cross nudged clear of the arc, and a rounded source
+--                 outline over any source that declares a radius. `false` forces
+--                 SQUARE even on a host that has opted in. OMIT and the popout
+--                 takes whatever the host declared, which is nothing unless the
+--                 consumer called host:SetSurfaceStyle -- so an existing caller
+--                 that says nothing keeps the square panel it has always had,
+--                 and DandersMover is untouched
 --   actions / badge          reserved, accepted and ignored
 function UI:CreatePopout(opts)
     local host = self

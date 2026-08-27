@@ -5,11 +5,21 @@ if not UI then return end
 -- ============================================================
 -- ROUNDED SURFACE -- a rounded-corner backdrop, from TWO nine-sliced textures.
 --
--- ⚠ PROTOTYPE. This is a PARALLEL primitive to CreateElementBackdrop /
--- CreatePanelBackdrop, not a replacement for either, and no real settings page
--- goes through it. It exists so the rounded look can be judged in-game -- a
--- consumer's chrome workbench drives it behind a cycle button -- before anyone
--- decides whether the GUI wants it. The library names no consumer; see Core.lua.
+-- A PARALLEL primitive to CreateElementBackdrop / CreatePanelBackdrop, not a
+-- replacement for either. Which of the two a surface wears is the SURFACE STYLE
+-- (Theme.lua's UI.SurfaceStyle, and the host opt-in beside it): a consumer that
+-- declares one gets the rounded paint through the shells that read it -- the
+-- popout, the popout row, the settings group -- and a consumer that declares
+-- nothing keeps the square backdrop it has always had. The library names no
+-- consumer; see Core.lua.
+--
+-- ⚠ THE TRIAL IS OVER, and the header used to say the opposite ("no real
+-- settings page goes through it"). The nine-slice was judged in-game at every
+-- baked radius and at four UI scales through the chrome workbench's Corners
+-- button, came out gap-free through the popout's open/close animation, and the
+-- settings shell now ships rounded at R8. The workbench remains -- it is still
+-- the only place several radii can be compared side by side -- but it drives the
+-- same first-class options every real surface does, not shadows of its own.
 --
 -- ------------------------------------------------------------
 -- ☠ WHY THIS IS NOT FIFTEEN TEXTURES ANY MORE -- read this first.
@@ -131,7 +141,7 @@ if not UI then return end
 
 local rawget, type, ipairs = rawget, type, ipairs
 local setmetatable, format = setmetatable, string.format
-local abs = math.abs
+local abs, floor = math.abs, math.floor
 
 -- Resolved at file scope like every other media path in the pack (see
 -- PopoutRow's ICON_PATH). UI.MEDIA is stamped by Core.lua, which loads first.
@@ -331,7 +341,7 @@ end
 -- this.
 local function updateShown(s)
     local drawn = not s.hidden
-    s.fill:SetShown(drawn and true or false)
+    s.fill:SetShown((drawn and s.hasFill) and true or false)
     s.ring:SetShown((drawn and s.hasBorder and s.sliced) and true or false)
 end
 
@@ -464,6 +474,22 @@ function Surface:SetBorderShown(shown)
     return self
 end
 
+-- The FILL alone, and the mirror of the above: opts.fill = false starts here.
+--
+-- ☠ RING-ONLY IS NOT "a fill at alpha zero". A surface laid OVER something the
+-- caller wants to keep seeing -- the popout shell's source outline, which is a
+-- ring traced round a row plate that is already painted -- must not draw an
+-- interior at all. A transparent quad happens to look the same and is not: it is
+-- still a texture in the stack, still rasterised, and one SetFillColor from a
+-- caller repainting every state's colours in one sweep away from covering the
+-- thing it was supposed to outline. So the fill is SWITCHED OFF, exactly the way
+-- the ring is, and a later SetFillColor does not bring it back.
+function Surface:SetFillShown(shown)
+    self.hasFill = shown and true or false
+    updateShown(self)
+    return self
+end
+
 -- ============================================================
 -- THE FACTORY
 --
@@ -478,6 +504,9 @@ end
 --                                      are what v1 bakes -- anything else is
 --                                      refused with a message. See resolveShape.
 --        fill         {r,g,b,a}       (default UI.Colors.element)
+--                     false           no interior at all -- a RING-ONLY surface,
+--                                      for an outline traced over something that
+--                                      has to stay visible under it
 --        border       {r,g,b,a}       (default UI.Colors.border)
 --                     false           no ring at all
 --        borderWidth  1 | 2           (default 1)
@@ -537,7 +566,8 @@ function UI:CreateRoundedSurface(frame, opts)
     s.anchorTo    = opts.anchorTo or s.anchorTo
 
     local Colors = UI.Colors or {}
-    local fr, fg, fb, fa = unpackColor(opts.fill, Colors.element)
+    local hasFill = opts.fill ~= false
+    local fr, fg, fb, fa = unpackColor(hasFill and opts.fill or nil, Colors.element)
     s.fillR, s.fillG, s.fillB, s.fillA = fr, fg, fb, fa
 
     local hasBorder = opts.border ~= false
@@ -548,7 +578,7 @@ function UI:CreateRoundedSurface(frame, opts)
     retexture(s)
     paintFill(s)
     paintBorder(s)
-    s.hidden, s.hasBorder = false, hasBorder
+    s.hidden, s.hasFill, s.hasBorder = false, hasFill, hasBorder
     updateShown(s)
     return s
 end
@@ -559,4 +589,127 @@ end
 function UI:GetRoundedSurface(frame, sublevel)
     local store = type(frame) == "table" and rawget(frame, "_dfRoundSurfaces")
     return store and store[sublevel or FILL_SUBLEVEL] or nil
+end
+
+-- ============================================================
+-- THE CHROME MOVES
+--
+-- Three things every rounded surface in the pack has to do, gathered here rather
+-- than repeated at each site -- because each of the three is a TRAP that reads as
+-- a one-liner and was got wrong at least once during the trial.
+-- ============================================================
+
+-- ---- 1. the square backdrop has to come DOWN ------------------------
+--
+-- ☠ AND IT DOES NOT COME DOWN ON ITS OWN. The rounded fill sits at a NEGATIVE
+-- BACKGROUND sublevel, UNDER a backdrop's bgFile at BACKGROUND 0 -- so a frame
+-- that keeps its square backdrop renders the SQUARE, in front of a rounded
+-- surface that is drawing perfectly. The failure looks like "the rounded surface
+-- did not work" and is nothing of the kind, which is why this is one call.
+--
+-- The pixel border goes too: it lives at ARTWORK 7, ABOVE everything the surface
+-- draws, so a frame that keeps it wears a hard rectangle over its own arc.
+--
+-- opts is CreateRoundedSurface's, verbatim. Returns the surface.
+function UI:ApplyRoundedChrome(frame, opts)
+    if type(frame) ~= "table" then return nil end
+    if type(frame.SetBackdrop) == "function" then frame:SetBackdrop(nil) end
+    UI:HidePixelBorder(frame)
+    return UI:CreateRoundedSurface(frame, opts)
+end
+
+-- The way back. HIDDEN, not discarded: the textures are ours and nothing else
+-- takes them down, which is the same bargain HidePixelBorder makes. The caller
+-- re-issues whichever square backdrop it built with -- the pack cannot know
+-- whether that was a panel or an element.
+function UI:RemoveRoundedChrome(frame, sublevel)
+    local s = UI:GetRoundedSurface(frame, sublevel)
+    if s then s:Hide() end
+    return frame
+end
+
+-- ---- 2. the title strip ---------------------------------------------
+--
+-- ☠ A SQUARE TITLE STRIP PAINTS OVER THE ROUNDED CORNERS, and that is the whole
+-- of what "the title bar isn't rounded" turned out to be during the trial. A
+-- title strip is normally a flat texture on the frame at ARTWORK 1, and ARTWORK
+-- is above the whole of BACKGROUND -- where the rounded surface lives. With a
+-- square backdrop that is harmless, because the pixel border sits higher again
+-- (ARTWORK 7) and wins the edges. Rounded, there is no pixel border to win them:
+-- the strip simply covers the two upper arcs with a square block.
+--
+-- So a rounded strip is a SURFACE with tl/tr round and bl/br square, at the same
+-- radius as the panel, and it has to interleave with the panel's own two layers:
+--
+--     BACKGROUND -4   the panel's fill
+--     BACKGROUND -3   THIS -- the strip, over the fill...
+--     BACKGROUND -2   the panel's ring, over the strip
+--
+-- Under the ring or it eats the border along the top exactly the way the square
+-- texture did; and a texture is only under the ring if it is on the SAME FRAME (a
+-- child frame's regions draw above all of its parent's layers). Hence the split
+-- between whose textures (`frame`) and whose rect (`bar`).
+UI.RoundStripSublevel = -3
+
+-- fill is {r,g,b,a} -- the caller's own strip colour, so the two modes differ by
+-- their corners and by nothing else.
+function UI:ApplyRoundedStrip(frame, bar, radius, fill)
+    if type(frame) ~= "table" or type(bar) ~= "table" then return nil end
+    return UI:CreateRoundedSurface(frame, {
+        radius   = radius,
+        corners  = { tl = true, tr = true },
+        border   = false,
+        fill     = fill,
+        sublevel = UI.RoundStripSublevel,
+        anchorTo = bar,
+    })
+end
+
+function UI:RemoveRoundedStrip(frame)
+    local s = UI:GetRoundedSurface(frame, UI.RoundStripSublevel)
+    if s then s:Hide() end
+    return frame
+end
+
+-- ---- 3. the title bar's buttons stand in the corner box -------------
+--
+-- A cross parked a fixed distance in from a bar's right edge was chosen against a
+-- SQUARE panel, where "in from the edge" is the same distance whatever height you
+-- read it at. Against an arc it is not: the last few units of the top band belong
+-- to the curve, and a square hover box sitting in them reads as a corner laid
+-- over a corner.
+--
+-- The fix is CLEARANCE, not a second rounded surface on the button. A tr-only
+-- backdrop there would only be right if the button were flush INTO the corner,
+-- which it is not (it is inset on both axes and it is a different size from the
+-- corner box) -- so it would put a curve of the wrong radius beside a curve of
+-- the right one, which is the same complaint again. Half the radius takes it out
+-- of the corner box at every radius that has art, and costs one anchor.
+function UI.SurfaceEdgeInset(radius)
+    if type(radius) ~= "number" then return 0 end
+    return floor(radius / 2 + 0.5)
+end
+
+-- ⚠ THE ORIGINAL OFFSET IS REMEMBERED, NOT RECOMPUTED, and it is remembered on
+-- the FIRST shift only. Reading the anchor back means this stays correct if the
+-- shell ever retunes its own edge inset, and means the square restore is the
+-- ORIGINAL number rather than an equal-looking literal copied to a second place.
+-- Storing it once is what keeps a second radius shifting from the original
+-- rather than from the last shift -- compounding is the failure that looks fine
+-- for three presses and walks the button across the bar in ten.
+function UI:InsetTitleButton(btn, radius)
+    if type(btn) ~= "table" or type(btn.GetPoint) ~= "function" then return btn end
+    local point, rel, relPoint, x, y = btn:GetPoint(1)
+    -- The 5-value shape or nothing. GetPoint always answers that in-game, so this
+    -- is really a guard against being handed a button anchored some other way --
+    -- and refusing is right there, because re-issuing a point from values that do
+    -- not mean what this thinks they mean would MOVE the button somewhere
+    -- arbitrary rather than leave it where it was.
+    if not point or type(rel) ~= "table" then return btn end
+    if rawget(btn, "_dfSquareX") == nil then btn._dfSquareX = x or 0 end
+    btn:ClearAllPoints()
+    -- Inboard is NEGATIVE x: every title-bar button in the pack hangs off a
+    -- RIGHT anchor.
+    btn:SetPoint(point, rel, relPoint, btn._dfSquareX - UI.SurfaceEdgeInset(radius), y or 0)
+    return btn
 end

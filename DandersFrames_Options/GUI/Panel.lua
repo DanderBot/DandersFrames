@@ -13,6 +13,9 @@ local L = DF.L
 local S = GUI._state
 local C_PANEL, C_ELEMENT, C_BORDER, C_ACCENT, C_RAID, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.accent, GUI.Colors.raid, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
+-- The window's own ground. Only the window is drawn in it -- every panel inside
+-- is C_PANEL over it -- which is why it has not been needed in this file before.
+local C_BACKGROUND = GUI.Colors.background
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -465,7 +468,33 @@ function DF:CreateGUI()
     frame:EnableMouse(true)
     ApplyGUIScale(frame, savedScale)
     -- Note: Dragging is handled by titleBar, not main frame
-    CreatePanelBackdrop(frame)
+    -- =========================================================================
+    -- THE WINDOW'S SHAPE
+    -- -------------------------------------------------------------------------
+    -- ROUNDED, at whatever radius the consumer declared (GUI.lua's
+    -- SetSurfaceStyle call, off Theme.lua's UI.SurfaceStyle -- R8 today). This is
+    -- the outermost surface of the whole settings shell, so it is the one that
+    -- has to agree with the popouts, the feature rows and the group boxes inside
+    -- it: a rounded panel standing in a square window reads as a mistake rather
+    -- than as a look, which is precisely what the in-game trial found when the
+    -- window was the one surface it did not reach.
+    --
+    -- The COLOURS are CreatePanelBackdrop's, verbatim -- C_BACKGROUND over a hard
+    -- black edge -- so the only thing that changed is the corner. Declaring
+    -- nothing falls back to that exact call, which is what DandersMover's window
+    -- still gets.
+    local SURFACE = GUI:GetSurfaceStyle()
+    if SURFACE then
+        GUI:ApplyRoundedChrome(frame, {
+            radius      = SURFACE.radius,
+            borderWidth = SURFACE.borderWidth,
+            fill        = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b,
+                            C_BACKGROUND.a or 0.95 },
+            border      = { 0, 0, 0, 1 },
+        })
+    else
+        CreatePanelBackdrop(frame)
+    end
     frame:Hide()
     DF.GUIFrame = frame
 
@@ -578,6 +607,42 @@ function DF:CreateGUI()
     titleBar:SetFrameLevel(200)
     GUI.HeaderDeck1 = titleBar
 
+    -- ---- deck 1's strip ------------------------------------------------
+    -- The raised fill and the hairline under it, drawn exactly the way a popout
+    -- draws its own title strip and off the same UI.PopoutTitle tokens -- so the
+    -- window's chrome and the chrome of every panel that docks beside it are one
+    -- idiom rather than two that happen to sit next to each other.
+    --
+    -- ⚠ ON THE FRAME, NOT ON THE DECK, and that is what makes the rounded case
+    -- work at all: a child frame's textures draw above EVERY layer of its parent,
+    -- so a fill anchored to deck 1 would paint straight over the window's own
+    -- top corners and square them off. On the frame it lands between the rounded
+    -- fill and the rounded ring -- see ApplyRoundedStrip.
+    --
+    -- ★ THIS IS A LOOK CHANGE BEYOND THE CORNERS. The header had no strip of any
+    -- kind before; deck 1 now reads as chrome rather than as the top of the body,
+    -- and the hairline says where the identity deck ends. Both modes get it, for
+    -- the trial's own reason: a strip that existed only when rounded would make
+    -- the two shapes differ by more than their shape.
+    local titleFill = frame:CreateTexture(nil, "ARTWORK", nil, 1)
+    titleFill:SetPoint("TOPLEFT", titleBar, "TOPLEFT", 0, 0)
+    titleFill:SetPoint("BOTTOMRIGHT", titleBar, "BOTTOMRIGHT", 0, 0)
+    titleFill:SetColorTexture(C_PANEL.r, C_PANEL.g, C_PANEL.b, GUI.PopoutTitle.fill)
+    GUI.HeaderDeck1Fill = titleFill
+
+    local titleSep = frame:CreateTexture(nil, "ARTWORK", nil, 2)
+    titleSep:SetPoint("BOTTOMLEFT", titleBar, "BOTTOMLEFT", 0, 0)
+    titleSep:SetPoint("BOTTOMRIGHT", titleBar, "BOTTOMRIGHT", 0, 0)
+    titleSep:SetHeight(1)
+    titleSep:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, GUI.PopoutTitle.sepAlpha)
+    GUI.HeaderDeck1Sep = titleSep
+
+    if SURFACE then
+        titleFill:Hide()
+        GUI:ApplyRoundedStrip(frame, titleBar, SURFACE.radius,
+            { C_PANEL.r, C_PANEL.g, C_PANEL.b, GUI.PopoutTitle.fill })
+    end
+
     -- ★ THE PRODUCT LABEL AND THE BUILD TAG ARE TWO STRINGS NOW, not one
     -- concatenation. The name is the product label -- theme-coloured, and the
     -- SEAM the future product dropdown opens from (it becomes the opener; the
@@ -607,13 +672,16 @@ function DF:CreateGUI()
         -- re-Show mid-fade (the deferred Hide is skipped).
         GUI.Fx.FadeOut(frame, 0.25, function() frame:Hide() end)
     end })
-    closeBtn:SetPoint("TOPRIGHT", -8, -5)
+    -- ⚠ THE 5-ARGUMENT FORM, where this was `SetPoint("TOPRIGHT", -8, -5)`. Same
+    -- anchor -- the implicit relative frame IS the parent -- but written out, so
+    -- the corner-clearance pass below can read it back and re-issue it.
+    closeBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -5)
     closeBtn:SetFrameStrata("FULLSCREEN_DIALOG")
     closeBtn:SetFrameLevel(210)
 
     -- Info button (changelog)
     local infoBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    infoBtn:SetPoint("TOPRIGHT", -32, -5)
+    infoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -32, -5)   -- 5-arg: see closeBtn
     infoBtn:SetFrameStrata("FULLSCREEN_DIALOG")
     infoBtn:SetFrameLevel(210)
     -- Icon-only changelog button via the shared styler (backdrop + hover); the hook
@@ -629,6 +697,20 @@ function DF:CreateGUI()
     infoBtn:HookScript("OnLeave", function(self)
         self.Icon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     end)
+
+    -- ---- clearance for the arc -----------------------------------------
+    -- The cross's square hover box sits in the window's top-right corner box, and
+    -- once that corner is an arc it reads as a corner laid over a corner. The
+    -- shared inset moves it inboard by half the radius, which takes it out of the
+    -- corner box at every radius that has art (see UI:InsetTitleButton).
+    --
+    -- BOTH buttons, and only these two: they are the only members of the right
+    -- cluster anchored absolutely to the window's TOPRIGHT -- the scale glyph and
+    -- the profile chip chain leftward off them -- so shifting the pair by the
+    -- same amount moves the whole cluster without changing a single gap in it.
+    -- A no-op when nothing is rounded, because the inset for a nil radius is 0.
+    GUI:InsetTitleButton(closeBtn, SURFACE and SURFACE.radius or nil)
+    GUI:InsetTitleButton(infoBtn,  SURFACE and SURFACE.radius or nil)
 
     -- =========================================================================
     -- DECK 1 RIGHT CLUSTER: profile chip, scale, changelog, close

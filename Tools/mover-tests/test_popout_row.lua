@@ -200,10 +200,11 @@ SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_ON = 1 }
 -- a documented part of this widget's contract -- could never be true.
 --
 -- The rule that separates the two here is the codebase's own: an underscore
--- prefix means a field, and no WoW method is named that way. `popout` is the one
--- public field this widget publishes without one.
+-- prefix means a field, and no WoW method is named that way. `popout` and
+-- `popoutRadius` -- the tether contract's shape half, which a square row clears
+-- back to nil -- are the two public fields this widget publishes without one.
 local function dataAwareMeta(k)
-    if k == "popout" then return nil end
+    if k == "popout" or k == "popoutRadius" then return nil end
     if type(k) == "string" and k:byte(1) == 95 then return nil end   -- "_"
     return function() end
 end
@@ -1798,6 +1799,187 @@ do
     eq(narrowLen - wideLen, 260, "stretch: so the beam is exactly the extra width shorter")
     check(wideLen < narrowLen, "stretch: ...which is the short hop the band is for")
     eq(narrowY, wideY, "stretch: and it still crosses level -- the width moved nothing else")
+end
+
+
+-- ============================================================
+-- THE SURFACE STYLE -- opts.surface
+--
+-- The plate wears one of two shapes, and the row's THREE STATES -- rest, hover,
+-- and the accent wash of the open row -- have to reach whichever one is on
+-- screen. That is the whole difficulty: there are already four ways into the
+-- state paint (a hover, a retarget, a toggle write, an accent change) and none
+-- of them may learn which shape it is painting.
+--
+-- ☠ WHAT THIS REPLACED. The in-game trial routed the states by SWAPPING the
+-- plate's SetBackdropColor / SetBackdropBorderColor for shims that painted a
+-- rounded surface -- two sets of methods on one frame, restorable only by
+-- remembering the originals, and invisible to anyone reading paintState. The
+-- shape is one function now and the state paint calls it with four numbers
+-- twice, so what these tests assert is that the SAME state machine drives both.
+--
+-- ☠ AND THE SQUARE HALF IS AN ASSERTION ABOUT DandersMover. It shares this file
+-- and never declares a style, so "no style, backdrop colours, no rounded
+-- surface, no declared radius" is the mover's row unchanged.
+-- ============================================================
+
+local R8 = { style = "rounded", radius = 8, borderWidth = 2, rowBorderWidth = 1 }
+
+local function plateSurface(row) return UI:GetRoundedSurface(row.plate) end
+
+print("-- Row: no style declared is the square plate, unchanged")
+do
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Border", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "2px" end, build = counting("sqplate", 40, 1),
+        window = window(),
+    }))
+    check(row:GetSurface() == nil, "square: the row carries no style")
+    check(plateSurface(row) == nil, "square: and no rounded surface was ever created")
+    check(row.plate._elementOpts ~= nil, "square: the element backdrop is what was issued")
+    eq(row.plate._fill.a, M.restFill, "square: painted at the rest alpha")
+    -- The tether contract's shape half stays UNDECLARED, which is what tells the
+    -- popout shell to trace this plate with a square pixel border.
+    check(rawget(row, "popoutRadius") == nil, "square: the row declares no curve")
+end
+
+print("-- Row: a rounded style paints the plate's chrome and declares its curve")
+do
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Border", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "2px" end, build = counting("rndplate", 40, 1),
+        window = window(), surface = R8,
+    }))
+    local rs = plateSurface(row)
+    check(rs ~= nil and rs:IsShown(), "rounded: the plate wears a rounded surface")
+    local r, w = rs:GetRadius()
+    eq(r, 8, "rounded: at the style's radius")
+    -- ☠ THE ROW WEIGHT, NOT THE PANEL'S. A column of forty plates at the popout's
+    -- two units reads as a grid of boxes rather than as a list -- which is why
+    -- the one token carries both numbers and each site picks its own.
+    eq(w, 1, "rounded: and the style's ROW border width, not the panel's")
+    check(rawget(row.plate, "_pxHidden") == true, "rounded: the square pixel border came down")
+    eq(rawget(row, "popoutRadius"), 8, "rounded: the curve is declared on the tether contract")
+end
+
+print("-- Row: every state reaches the rounded plate")
+do
+    local db = { on = true }
+    local win = window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Border", db = db, toggle = { key = "on" },
+        summary = function() return "2px" end, build = counting("rndstate", 40, 1),
+        window = win, surface = R8,
+    }))
+    local rs = plateSurface(row)
+    eq(rs.fillA, M.restFill, "rest: the surface carries the rest alpha")
+    eq(rs.borderA, M.restBorder, "rest: ...inside the rest border")
+
+    row:GetScript("OnEnter")()
+    eq(rs.fillR, UI.Colors.hover.r, "hover: lifted to the hover colour")
+    eq(rs.fillA, M.hoverFill, "hover: ...and brightened")
+    row:GetScript("OnLeave")()
+    eq(rs.fillA, M.restFill, "hover: and leaving puts it back")
+
+    -- ACTIVE is the state that used to need the swapped methods most: it is
+    -- reached from a retarget rather than from anything the row itself does.
+    row:OpenPopout()
+    eq(rs.borderR, ACCENT.r, "active: opening puts the accent on the ring")
+    eq(rs.borderA, M.activeBorder, "active: at full strength")
+    eq(rs.fillR, ACCENT.r, "active: and washes the inside with it")
+    eq(rs.fillA, M.activeFill, "active: ...as a WASH, not a fill")
+    row:GetScript("OnEnter")()
+    eq(rs.fillA, M.activeHover, "active: hovering an open row brightens the wash")
+    row:GetScript("OnLeave")()
+    eq(rs.fillA, M.activeFill, "active: and settles back")
+
+    row:SetAccent({ r = 1, g = 0.5, b = 0, a = 1 })
+    eq(rs.fillR, 1, "accent: a re-tint repaints the open row's wash")
+    eq(rs.borderR, 1, "accent: ...and its ring")
+    host:CloseAllPopoutRows("test")
+end
+
+print("-- Row: the style is FORWARDED to the panel the row opens")
+do
+    -- ☠ NOT LEFT TO THE HOST. The panel and the plate it comes out of are one
+    -- object as far as the eye is concerned -- they share an accent, a beam and
+    -- an outline traced on the plate at the plate's own radius -- so a row given
+    -- an explicit style and a panel resolving its own would disagree about the
+    -- shape of the thing they are both drawing.
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Border", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "2px" end, build = counting("fwd", 40, 1),
+        window = window(), surface = R8,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    check(po.surface ~= nil, "the panel took the row's style")
+    eq(po.surface.radius, 8, "...at the row's radius")
+    -- The outline the shell lays over the plate follows the plate's declared
+    -- curve, which is what makes the pair read as one object.
+    local ring = UI:GetRoundedSurface(po.srcOutline)
+    check(ring ~= nil and ring:IsShown(), "and the outline over the plate is a matching ring")
+    eq(ring:GetRadius(), 8, "...at the plate's radius")
+    host:CloseAllPopoutRows("test")
+end
+
+print("-- Row: a SQUARE row forces its panel square, on a rounded host")
+do
+    -- `row._surface` is nil for a square row and nil means "ask the host" to the
+    -- popout -- so the row has to spell the override out as an explicit false.
+    -- This is the case the chrome workbench lives in.
+    host:SetSurfaceStyle(R8)
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Border", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "2px" end, build = counting("sqonround", 40, 1),
+        window = window(), surface = false,
+    }))
+    check(row:GetSurface() == nil, "the row is square, though the host is not")
+    check(plateSurface(row) == nil, "...its plate never took a rounded surface")
+    row:OpenPopout()
+    check(row.popout.surface == nil, "...and neither did the panel it opened")
+    host:CloseAllPopoutRows("test")
+
+    -- ...while a row that says nothing on that same host is rounded.
+    local dflt = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Shadow", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "4px" end, build = counting("dfltround", 40, 1),
+        window = window(),
+    }))
+    check(dflt:GetSurface() ~= nil, "a row that declares nothing takes the host's style")
+    eq(rawget(dflt, "popoutRadius"), 8, "...and declares its curve")
+    host:SetSurfaceStyle(nil)
+end
+
+print("-- Row: SetSurface swaps the shape live, and takes its panels with it")
+do
+    local win = window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Border", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "2px" end, build = counting("live", 40, 1),
+        window = win, surface = R8,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    local rs = plateSurface(row)
+    check(rs:IsShown() and po.surface ~= nil, "start: both round")
+
+    row:SetSurface(false)
+    check(not rs:IsShown(), "square: the plate's rounded textures go down")
+    check(row.plate._elementOpts ~= nil, "square: the element backdrop is re-issued")
+    -- REPLAYED through the state machine, not left on the factory's rest colours:
+    -- this row is ACTIVE, so it has to come back wearing the accent wash.
+    eq(row.plate._fill.r, ACCENT.r, "square: and the ACTIVE wash is repainted, not lost")
+    check(rawget(row, "popoutRadius") == nil, "square: the declared curve is withdrawn")
+    check(po.surface == nil, "square: the open panel followed the row")
+
+    row:SetSurface(R8)
+    check(plateSurface(row) == rs, "rounded again: the SAME surface, not a second pair")
+    check(rs:IsShown(), "rounded again: and it is up")
+    eq(rs.fillR, ACCENT.r, "rounded again: still wearing the active wash")
+    eq(rawget(row, "popoutRadius"), 8, "rounded again: and the curve is re-declared")
+    check(po.surface ~= nil, "rounded again: the panel came along")
+    host:CloseAllPopoutRows("test")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

@@ -1,24 +1,29 @@
 local NS = ...
 
 -- ============================================================
--- THE CORNER TRIAL'S DEMO WIRING -- DandersFrames_Options/GUI/PopoutDemo.lua
+-- THE RADIUS WORKBENCH -- DandersFrames_Options/GUI/PopoutDemo.lua
 -- ------------------------------------------------------------
--- test_round.lua covers the rounded SURFACE. This covers the two things the demo
--- does AROUND it, both of which are answers to "there is a second corner beside
--- the rounded one" and both of which have to undo themselves exactly when the
--- Corners button comes back round to Square:
+-- test_round.lua covers the rounded SURFACE and the surface STYLE; test_popout
+-- and test_popout_row cover what each shell does with a style it is handed. This
+-- file covers the workbench that drives all of it from one button, and the two
+-- claims that only a cycling button can make:
 --
---   1. the popout shell's SOURCE OUTLINE -- a square accent box the pack lays
---      over the active row -- is suppressed while a radius is selected, and comes
---      back on Square
---   2. the title bars' CROSS is nudged inboard of the arc, and returns to its
---      original offset on Square
+--   1. the SOURCE OUTLINE swaps between a rounded ring (at the SOURCE's declared
+--      radius) and the square pixel border, in both directions, through every
+--      path that re-commits it -- a re-dock, a retarget, an accent change, a
+--      close and re-open
+--   2. the title bars' CROSS is nudged inboard of the arc and returns to its
+--      ORIGINAL offset on Square, shifted from that original every time rather
+--      than compounded
 --
--- Both are per-INSTANCE shadows on a pooled popout, which is the shape that goes
--- wrong quietly: a shadow installed one click too late, or a restore that writes
--- a literal instead of the value it replaced, both look fine until the third or
--- fourth press of the button. Neither is visible from in-game without watching
--- for it, and the trial is being judged on exactly this.
+-- ☠ THE SHAPE OF THIS FILE'S SUBJECT CHANGED COMPLETELY. It used to test five
+-- per-instance SHADOWS the demo installed on the library -- swapped backdrop
+-- methods on the row plate, a shadowed _ApplyAccent, a shadowed
+-- _UpdateSourceOutline that SUPPRESSED the outline in rounded mode, and an
+-- OpenPopout wrapper to install the lot on a pooled panel. Every one of those is
+-- a first-class option now, and the outline is no longer suppressed -- it
+-- follows the source's shape. Assertions written against the old behaviour would
+-- pass here only by accident, so they were rewritten rather than adjusted.
 --
 -- ☠ ONE RUNTIME, SHARED LIBRARY TABLE. run.py loads every test_*.lua into the
 -- same LuaRuntime in alphabetical order, so test_popout / test_popout_row have
@@ -84,9 +89,9 @@ if not UI.ApplyPixelBorder then
         return frame
     end
 end
--- The demo calls this on every surface it takes rounded, and Theme.lua is not
--- loadable headless. Recorded rather than a bare no-op, so "did the rounded path
--- actually take the square border down" stays answerable.
+-- Normally run.py's, and it records the same way: "did the rounded path actually
+-- take the square border down" has to stay answerable. Kept as a fallback for a
+-- harness that stopped providing it.
 if not UI.HidePixelBorder then
     function UI:HidePixelBorder(frame) frame._pxHidden = true return frame end
 end
@@ -109,8 +114,15 @@ if not UI.StyleCheckButton then
 end
 -- Same rule as test_popout_row's frame stub: a missing DATA field must read nil,
 -- not the catch-all no-op function, or `row.popout == nil` can never be true.
+--
+-- `popoutRadius` is on the list for the same reason as `popout`: it is the
+-- tether contract's SHAPE half, a row sets it to nil when it goes square, and a
+-- metatable that answered a function there would make "this row declares no
+-- curve" untestable. (The library itself reads it with rawget, so only the test
+-- is affected -- but a harness that cannot express the nil is a harness that
+-- cannot catch the row forgetting to clear it.)
 local function dataAwareMeta(k)
-    if k == "popout" then return nil end
+    if k == "popout" or k == "popoutRadius" then return nil end
     if type(k) == "string" and k:byte(1) == 95 then return nil end   -- "_"
     return function() end
 end
@@ -316,117 +328,148 @@ end
 -- ============================================================
 -- 1. THE SOURCE OUTLINE
 --
--- The shell draws a square accent box over whatever the panel is tethered to. In
--- rounded mode the row already wears a ROUND accent ring of its own, so the two
--- together are the "second corner around a selected object" this fixes.
+-- The shell draws an accent outline over whatever the panel is tethered to. It
+-- used to be a pixel border and nothing else -- square by construction -- so in
+-- rounded mode it traced a hard rectangle round a plate that had just been given
+-- a curve: "a second corner around a selected object".
+--
+-- ☠ AND THE ANSWER IS NO LONGER "TAKE IT AWAY". The trial's fix was to suppress
+-- the outline entirely while a radius was selected and let the row's own active
+-- ring stand in for it -- which worked only because the source happened to BE a
+-- row, and silently dropped the shell's half of the shared-edge story for any
+-- other kind of source. The shipping shell instead follows the SOURCE'S shape: a
+-- source declares its curve on the tether contract (row.popoutRadius, set by the
+-- row when it takes a rounded surface) and the outline becomes a rounded RING at
+-- that radius. Square source, or square panel, and it is the pixel border
+-- exactly as it always was.
+--
+-- So what these blocks assert is the SWAP, not a suppression, and every one of
+-- them would have passed against the old suppression only by accident.
 -- ============================================================
+
+-- Which of the two paints the outline is currently wearing. The ring is a
+-- rounded surface on the outline's own frame; the square one is the pixel
+-- border, which this harness records as _pxColor (test_popout_row's stub).
+local function outlineRing(po)
+    local o = rawget(po, "srcOutline")
+    if not o then return nil end
+    local rs = UI:GetRoundedSurface(o)
+    if rs and rs:IsShown() then return rs end
+    return nil
+end
 
 -- ☠ THE COLD OPEN GOES FIRST, and the order is the assertion.
 --
--- A popout is POOLED and hooked ONCE, on the first open that reaches it. So the
--- only moment in a session at which the shell can present a panel before the
--- demo's shadow exists is the VERY FIRST open -- and if that happens while a
--- radius is selected, the pack has already run _Present -> _UpdateSourceOutline
--- unhooked and put a square box on the row.
+-- A popout is POOLED, and the only moment in a session at which the shell can
+-- present a panel before anything has told it what shape to be is the VERY FIRST
+-- open. Under the old demo that was a real hazard -- the shadows were installed
+-- by a wrapper that ran after the shell had already painted -- and it is what
+-- the whole first-class `surface` option removes: the row forwards its style
+-- into CreatePopout, so the panel is the right shape before it is placed.
 --
--- That is why the demo re-runs the outline immediately after installing the
--- hook, and it is why this block cannot be moved further down the file: open one
--- popout in Square first and every later "from cold" is a lie -- the instance is
--- already hooked, the shadow catches the present, and a test written after it
--- passes with the re-run deleted.
+-- This block cannot be moved further down the file: open one popout in Square
+-- first and every later "from cold" is a lie, because the instance already
+-- exists and every later open is an adopt.
 print("-- Round demo: the FIRST popout of the session, opened in rounded mode")
 do
     pressCorners(1)                                  -- Square -> R4
     eq(cornerLabel(), "Corners: R4", "one press lands on R4")
+    eq(border.popoutRadius, 4, "R4: the row declares its curve on the tether contract")
     border:OpenPopout()
     local po = border.popout
     check(po ~= nil, "the row opened a popout")
-    check(rawget(po, "srcOutline") == nil or not po.srcOutline:IsShown(),
-          "R4: it comes up with no square outline at all")
+    check(po.surface ~= nil and po.surface.radius == 4,
+          "R4: the panel took the row's style, not the host's")
+    local ring = outlineRing(po)
+    check(ring ~= nil, "R4: the outline is up, and it is a ROUNDED ring")
+    eq(ring:GetRadius(), 4, "R4: at the source's radius, not the panel's")
+    -- RING ONLY. The outline lies on top of the plate it is outlining, so a fill
+    -- of any alpha would be a pane of glass over the row.
+    check(ring.hasFill == false, "R4: ...and it draws no interior at all")
 end
 
-print("-- Round demo: Square is what puts one there")
+print("-- Round demo: Square is the pixel border, exactly as it shipped")
 do
-    -- The control for every "not shown" above and below: the shell really does
-    -- draw this outline for these rows in this harness, so a suppressed one is a
-    -- suppression rather than geometry that never showed anything.
     local po = border.popout
     pressCorners(3)                                  -- R4 -> R6 -> R8 -> Square
     eq(cornerLabel(), "Corners: Square", "three more presses come back to Square")
-    check(po.srcOutline ~= nil, "square: the shell built its source outline")
-    check(po.srcOutline:IsShown(), "square: ...and it is up, exactly as it ships")
+    check(po.srcOutline ~= nil and po.srcOutline:IsShown(),
+          "square: the outline is still up -- it is not suppressed in either mode")
+    check(outlineRing(po) == nil, "square: and the rounded ring is down")
+    check(po.srcOutline._pxColor ~= nil, "square: the pixel border is what is drawn")
     eq(po.srcOutline._points[1][2], border, "square: on the row the panel is about")
+    eq(border.popoutRadius, nil, "square: the row declares no curve")
 end
 
-print("-- Round demo: a radius suppresses it")
+print("-- Round demo: a radius swaps the paint, in both directions")
 do
     local po = border.popout
     pressCorners(1)                                  -- Square -> R4
-    eq(cornerLabel(), "Corners: R4", "one press lands on R4")
-    check(not po.srcOutline:IsShown(), "R4: the square outline is taken down")
-    -- FORGOTTEN, not merely hidden: _HideSourceOutline clears the target it was
-    -- anchored to, which is what makes the restore below re-anchor rather than
-    -- come back on whichever row it happened to go down against.
-    check(rawget(po, "_outlineOn") == nil, "R4: ...and the target it was on is forgotten")
-
+    local ring = outlineRing(po)
+    check(ring ~= nil, "R4: the ring is back")
+    eq(ring:GetRadius(), 4, "R4: at four")
     pressCorners(1)                                  -- R4 -> R6
-    check(not po.srcOutline:IsShown(), "R6: still down")
+    eq(outlineRing(po):GetRadius(), 6, "R6: the ring re-textures rather than stacking")
     pressCorners(1)                                  -- R6 -> R8
-    check(not po.srcOutline:IsShown(), "R8: still down")
+    eq(outlineRing(po):GetRadius(), 8, "R8: and again at eight")
 end
 
-print("-- Round demo: the suppression survives everything that re-docks")
+print("-- Round demo: the ring survives everything that re-docks")
 do
     local po = border.popout
     -- _Present is the shell's "put it there and show the chrome" path and it ends
-    -- in _UpdateSourceOutline. If the demo had suppressed the outline ONCE rather
-    -- than shadowing the method, every re-dock -- and there is one per source move
-    -- -- would put it straight back.
+    -- in _UpdateSourceOutline. A shape committed ONCE rather than re-decided on
+    -- every anchor would be lost here.
     po:_Present(po.side)
-    check(not po.srcOutline:IsShown(), "R8: a re-dock does not bring it back")
+    check(outlineRing(po) ~= nil, "R8: a re-dock keeps the ring")
 
-    -- ...and neither does a retarget, which commits the chrome to the new source
-    -- at once through a different call site again.
+    -- ...and a retarget, which commits the chrome to a new source through a
+    -- different call site again -- and re-reads the NEW source's declared curve.
     shadow:OpenPopout()
     check(shadow.popout == po, "the popout is pooled and shared between rows")
-    check(not po.srcOutline:IsShown(), "R8: retargeting to another row does not bring it back")
+    check(outlineRing(po) ~= nil, "R8: retargeting to another row keeps it")
+    eq(po.srcOutline._points[1][2], shadow, "R8: ...anchored to the row it moved to")
 
-    -- ...nor an accent change, which repaints every piece of chrome that carries
-    -- the colour.
+    -- ...nor does an accent change, which repaints every piece of chrome that
+    -- carries the colour and must repaint the RING rather than reinstating the
+    -- pixel border underneath it.
     po:SetAccent({ r = 1, g = 0.5, b = 0, a = 1 })
-    check(not po.srcOutline:IsShown(), "R8: an accent change does not bring it back")
+    local ring = outlineRing(po)
+    check(ring ~= nil, "R8: an accent change keeps it a ring")
+    eq(ring.borderR, 1, "R8: ...repainted in the new accent")
 end
 
-print("-- Round demo: Square brings it back")
+print("-- Round demo: Square puts the pixel border back")
 do
     local po = shadow.popout
     pressCorners(1)                                  -- R8 -> Square
     eq(cornerLabel(), "Corners: Square", "the fourth press is back to Square")
-    check(po.srcOutline:IsShown(), "square: the outline returns")
+    check(outlineRing(po) == nil, "square: the ring is taken down")
+    check(po.srcOutline:IsShown(), "square: and the outline itself is still up")
     -- ...on the row the panel is ACTUALLY on now, not the one it was on when the
-    -- radius was selected. That is the whole reason the hide forgets its target.
-    eq(po.srcOutline._points[1][2], shadow, "square: ...anchored to the row it came back on")
+    -- radius was selected. That is why the hide forgets its target AND its shape.
+    eq(po.srcOutline._points[1][2], shadow, "square: anchored to the row it came back on")
 end
 
-print("-- Round demo: closing and re-opening does not resurrect it")
+print("-- Round demo: closing and re-opening rebuilds the right shape")
 do
     -- A CLOSE is the one path that takes the whole connected chrome down by hand
     -- (HideChrome), so the re-open builds the outline's state back up from
-    -- nothing. Not the same case as the cold open at the top of this file -- the
-    -- instance is pooled and stays hooked across a close -- but it is the other
-    -- way the outline's shown-state gets rebuilt, and it has to land on the same
-    -- answer.
+    -- nothing -- target, shown-state and shape alike.
     host:CloseAllPopoutRows("test")
     pressCorners(2)                                  -- Square -> R4 -> R6
     eq(cornerLabel(), "Corners: R6", "back into rounded mode")
     border:OpenPopout()
     local po = border.popout
-    check(po ~= nil and not po.srcOutline:IsShown(),
-          "R6: a re-opened popout still comes up with no square outline")
+    check(po ~= nil, "the row re-opened a popout")
+    local ring = outlineRing(po)
+    check(ring ~= nil and ring:GetRadius() == 6,
+          "R6: a re-opened popout comes up with the ring at the current radius")
 
     pressCorners(2)                                  -- R6 -> R8 -> Square
     eq(cornerLabel(), "Corners: Square", "and back to Square")
-    check(po.srcOutline:IsShown(), "square: which restores it")
+    check(outlineRing(po) == nil and po.srcOutline:IsShown(),
+          "square: which restores the pixel border")
 end
 
 -- ============================================================
