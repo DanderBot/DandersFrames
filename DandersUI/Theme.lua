@@ -220,6 +220,67 @@ UI.RowHeight = {
     groupTitle  = 11.9 + UI.RowGap,
 }
 
+-- ============================================================
+-- THE THEMED SCROLLBAR'S FOOTPRINT
+--
+-- StyleScrollBar slims the bar and strips its track, but it does not MOVE it --
+-- so every surface that carries a scrolling pane has to know how much room to
+-- leave beside that pane, and until now every one of them guessed: 18 in
+-- CreateTextArea ("room right of the scroll for the themed scrollbar"), 20 at
+-- three dropdown menus, 14 at the settings nav, and -- worst of the four -- 14
+-- taken off the settings PAGE's scroll CHILD, which reserves the room INSIDE
+-- the pane the bar is not drawn in. That last one is paid twice: the child
+-- stops 14 short of the viewport AND the bar sits outside the viewport in the
+-- page's own inset, so the corridor between the last widget and the window edge
+-- carries 14px of blank that nothing occupies.
+--
+-- One number, and it is the number a consumer subtracts: bar + pad.
+UI.Scroll = {
+    -- What StyleScrollBar sizes the bar to. Read there rather than repeated,
+    -- so a slimmer bar reclaims its gutter everywhere instead of leaving the
+    -- old one behind as dead air.
+    bar = 10,
+    -- Air between the bar and the pane it scrolls. The settings nav has run at
+    -- 4 since it was built (navPad) and reads correctly, so this is the value
+    -- the look was already tuned against -- not a fresh guess.
+    pad = 4,
+}
+-- Derived, so the two can never be set to numbers that disagree -- the same
+-- rule UI.PopoutTitleHeight and UI.PopoutRow.slot follow.
+UI.Scroll.gutter = UI.Scroll.bar + UI.Scroll.pad
+
+-- ============================================================
+-- THE SETTINGS COLUMN'S BOX MODEL
+--
+-- A settings page is a column (or two) of settings groups, and the four numbers
+-- that place them had been copied rather than shared: the group's constructed
+-- width and its inset live in CreateSettingsGroup, the page's own left margin
+-- and its two-column threshold in the host's page layout, and Search.lua then
+-- carries a fourth copy of all of them by COMMENT ("copied from the page layout
+-- rather than invented"). A comment is not a link -- change one and the others
+-- keep the old value while claiming to mirror it.
+UI.SettingsBox = {
+    -- A settings group's constructed width. CreateSettingsGroup's `width or`
+    -- default, the search result card's cap, and the column width the page
+    -- lays out against are all THIS.
+    group      = 280,
+    -- The group's own column inset. CreateSettingsGroup's `padding or` default.
+    -- Small enough that the box's border still reads as a box's border rather
+    -- than a frame around whitespace, and it is the ONE piece of the corridor
+    -- that is doing visible work.
+    pad        = 10,
+    -- The page's left margin: where column 1 starts inside the scroll child,
+    -- and the matching margin left on the right of the widest widget.
+    colMargin  = 5,
+    -- Minimum column width for the two-column layout, and it deliberately
+    -- EXCEEDS `group` so the page collapses to one column BEFORE the columns
+    -- touch, leaving a small gutter at the cutover instead of overlapping for
+    -- the last few pixels.
+    minCol     = 285,
+    -- The slack the threshold demands on top of two minimum columns.
+    colGutter  = 20,
+}
+
 -- THE standard content width for a floating panel that carries settings widgets
 -- -- today the popout a PopoutRow opens.
 --
@@ -229,7 +290,10 @@ UI.RowHeight = {
 -- a slider or a dropdown lifted out of a page and dropped into a popout renders
 -- at a width it has never been laid out at -- and it is the same 260 that
 -- GroupInnerWidth falls back to for exactly this reason.
-UI.PopoutContentWidth = 260
+--
+-- DERIVED from the pair it is that arithmetic on, so the sentence above stays
+-- true by construction rather than by anyone remembering to redo the sum.
+UI.PopoutContentWidth = UI.SettingsBox.group - 2 * UI.SettingsBox.pad
 
 -- ============================================================
 -- THE POPOUT SHELL'S BOX MODEL
@@ -890,10 +954,36 @@ local function StyleScrollBar(scrollFrame)
     if sb.Back then sb.Back:Hide() sb.Back:SetSize(1, 1) end
     if sb.Forward then sb.Forward:Hide() sb.Forward:SetSize(1, 1) end
 
-    -- Slim width
-    sb:SetWidth(10)
+    -- Slim width. UI.Scroll.bar, not a literal: the gutter every consumer
+    -- reserves beside its pane is bar + pad, and a bar that is retuned here
+    -- without moving that number leaves the difference behind as dead air.
+    sb:SetWidth(UI.Scroll.bar)
 end
 UI.StyleScrollBar = StyleScrollBar
+
+-- Park a styled scrollbar in the gutter of the surface AROUND the pane, rather
+-- than wherever ScrollFrameTemplate's own anchors put it.
+--
+-- ☠ WHY THIS IS NOT OPTIONAL POLISH. The template anchors the bar OUTSIDE the
+-- ScrollFrame's right edge, which is why every consumer in this kit insets its
+-- pane and leaves room there -- but "leaves room" is all they do, so the bar
+-- lands at the template's offset inside that room and the surface has no say in
+-- it. The settings nav has pinned its own bar by hand since it was built, for
+-- exactly this reason, and it is the only pane in the addon whose bar sits
+-- where the design says it should. This is that hand-rolled block, published.
+--
+-- `region` is the surface the bar should hug -- the panel/box the pane sits in,
+-- NOT the pane. The bar's outer edge lands `pad` inside that region's right
+-- edge, so region-right minus the gutter is exactly where the pane must stop.
+-- topY/bottomY are the region-relative y offsets of the pane it scrolls.
+function UI.PinScrollBar(scrollFrame, region, topY, bottomY, pad)
+    local sb = scrollFrame and scrollFrame.ScrollBar
+    if not (sb and region and sb.ClearAllPoints) then return end
+    pad = pad or UI.Scroll.pad
+    sb:ClearAllPoints()
+    sb:SetPoint("TOPRIGHT", region, "TOPRIGHT", -pad, topY or 0)
+    sb:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", -pad, bottomY or 0)
+end
 
 -- ============================================================
 -- SHARED WITH THE SETTINGS-PANEL WIDGETS

@@ -520,6 +520,111 @@ local PROFILED_FUNCTIONS = {
     -- Blizzard integration
     -- ----------------------------------------------------------
     "UpdateBlizzardFrameVisibility",
+
+    -- ----------------------------------------------------------
+    -- Settings apply path (bulk, GUI-driven)
+    -- What one write from a settings control actually costs. Every widget in
+    -- the options window funnels into UpdateAll or ThrottledUpdateAll, and a
+    -- slider DRAG fires its callback on every tick of the mouse — so the row
+    -- that matters here is calls-per-drag as much as ms-per-call.
+    --
+    -- The Lightweight* family is the OTHER half: each one is the narrow path a
+    -- single control takes instead of the full sweep, and the whole premise of
+    -- the split is that they are cheap. That premise has never been measured.
+    -- Listing all of them says which ones are actually light and which are a
+    -- full rebuild wearing a different name.
+    --
+    -- ⚠ Several take an argument (auraType and friends). The profiler wraps by
+    -- NAME and passes the argument list through untouched, so that is fine —
+    -- but it does mean the per-frame-type bucket lands in "?" for any of them
+    -- whose first argument is not a frame, which is most of them.
+    --
+    -- GUI.PageRefreshStates is the settings window's own half: the hideOn /
+    -- disableOn / refreshContent sweep plus the column reflow, run over every
+    -- widget on the open page. It resolves through DF.GUI, whose host table
+    -- takes the wrapper as a plain write, and Panel.lua's pages dispatch
+    -- through the NAME so the wrap is seen by pages built before the run.
+    -- ----------------------------------------------------------
+    -- ⚠ TWO KINDS OF ROW LIVE HERE, and mixing them up misreads the profile.
+    --
+    -- REQUEST RATE. These five are now arm-stubs (Core\ApplyScheduler.lua): they
+    -- mark a kind dirty and return, so their ms columns are ~0 by design. What
+    -- they still measure -- and the reason they are kept -- is the CALL COUNT:
+    -- how many times a click or a slider drag asked for a sweep. That number is
+    -- the thing the scheduler exists to decouple from real work, so watching it
+    -- stay high while the _Now counts stay at one per rendered frame is the
+    -- coalescing working.
+    -- ⚠ The other two request-rate rows, "UpdateAllFrames" and
+    -- "RefreshAllVisibleFrames", are already listed under Bulk sweeps above --
+    -- listing a name twice would wrap it twice and leave Stop() restoring a
+    -- wrapper, so they are not repeated here.
+    "UpdateAll",
+    "ApplyHeaderSettings",
+    "UpdateRaidLayout",
+    "ThrottledUpdateAll",
+    --
+    -- REAL COST. The `_Now` bodies are where the sweep actually happens -- one
+    -- run per dirty kind per drain, plus the sync seams that call them directly
+    -- (FullProfileRefresh, login/init, the external import API, test mode).
+    -- These are the rows to read for ms-per-call and total time.
+    "UpdateAll_Now",
+    "UpdateAllFrames_Now",
+    "RefreshAllVisibleFrames_Now",
+    "ApplyHeaderSettings_Now",
+    "UpdateRaidLayout_Now",
+
+    "FullProfileRefresh",
+    "GUI.PageRefreshStates",
+
+    "LightweightUpdateFrameSize",
+    "LightweightUpdateFrameSpacing",
+    "LightweightUpdateRaidLayout",
+    "LightweightUpdateFrameScale",
+    "LightweightUpdateFontShadows",
+    "LightweightUpdatePowerBarSize",
+    "LightweightUpdateBorder",
+    "LightweightUpdateIconPosition",
+    "LightweightUpdateIconAlpha",
+    "LightweightUpdateAuraPosition",
+    "LightweightUpdateHighlight",
+    "LightweightUpdatePowerBarPosition",
+    "LightweightUpdateAbsorbBar",
+    "LightweightUpdateHealAbsorbBar",
+    "LightweightUpdateDispelOverlay",
+    "LightweightUpdateDefensiveIcons",
+    "LightweightUpdateMissingBuff",
+    "LightweightUpdateGroupLabels",
+    "LightweightUpdateAuraStackText",
+    "LightweightUpdateAuraDurationText",
+    "LightweightUpdateAuraBorder",
+    "LightweightUpdateFrameLevel",
+    "LightweightUpdateHealthColor",
+    "LightweightUpdateBackgroundColor",
+    "LightweightUpdateBorderColor",
+    "LightweightUpdateAbsorbBarColor",
+    "LightweightUpdateReducedMaxHealthColor",
+    "LightweightUpdateHealAbsorbBarColor",
+    "LightweightUpdateSelectionHighlightColor",
+    "LightweightUpdateMissingBuffBorderColor",
+    "LightweightUpdateDefensiveIconColors",
+    "LightweightUpdateGroupLabelColor",
+    "LightweightUpdateResourceBarBackgroundColor",
+    "LightweightUpdateResourceBarBorder",
+    "LightweightUpdateResourceBarBorderColor",
+    "LightweightUpdateResourceBarFrameLevel",
+    -- Frames/Pets.lua
+    "LightweightUpdatePetFrames",
+    -- Features/TargetedSpells.lua
+    "LightweightUpdateTargetedListBarColor",
+    "LightweightUpdateTargetedListBorderColor",
+    "LightweightUpdateTargetedListHighlightColor",
+    -- TestMode.lua (options companion, like GUI.PageRefreshStates: resolves
+    -- only once the settings panel has loaded — before that, Start names them
+    -- as missing). These are the drag path itself while test mode is on.
+    "LightweightPositionPartyTestFrames",
+    "LightweightPositionRaidTestFrames",
+    "LightweightPositionRaidTestFramesFlat",
+    "LightweightUpdateTestFrameCount",
 }
 
 -- ============================================================

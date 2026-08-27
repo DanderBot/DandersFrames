@@ -1574,6 +1574,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         appearanceGroup:AddWidget(GUI:CreateLabel(self.child,
             L["Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those."],
             260), 60)
+
+        -- Classic-layout fallback for the settings redesign. Account-level and
+        -- stored at the ROOT of the SavedVariable, so it takes the get/set form of
+        -- the factory rather than a (dbTable, key) pair — same shape the Blizzard /
+        -- minimap toggles above use for their non-db storage. No overrideKey: this
+        -- is not a profile setting, so it has no auto-profile override to indicate.
+        --
+        -- ⚠ TEMPORARY. Remove this control (and DF:IsClassicSettingsLayout) once the
+        -- popout redesign is finished.
+        local classicCheck = appearanceGroup:AddWidget(GUI:CreateCheckbox(
+            self.child, L["Use classic settings layout"],
+            nil, nil,
+            function()
+                -- Every page picks its container at BUILD time, so a page already
+                -- built in the other mode would re-show with stale layout. Drop every
+                -- page's build cache, then rebuild the one on screen right now.
+                if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
+                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+            end,
+            function() return DF:IsClassicSettingsLayout() end,
+            function(val) DF:SetClassicSettingsLayout(val) end
+        ), 30)
+        classicCheck.tooltip = L["Show settings groups in the old inline layout instead of the new popout rows. A temporary aid while the redesign settles in — this option will be removed in a later update."]
+
         Add(appearanceGroup, nil, 2)
 
         -- ===== LANGUAGE GROUP (Column 2, Bottom) =====
@@ -1806,24 +1830,384 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- classColor + roleColor are now first-class helper include flags (no
         -- bespoke "Use Class Color" extra needed). (Pixel-Perfect Scaling moved
         -- to General > Settings > Rendering — it's a global, mode-agnostic flag.)
-        GUI:CreateBorderControls(appearanceGroup, db, "frame", {
-            parent       = self.child,
-            include      = {
-                -- Frame Border is the outer chrome of the unit. It's a
-                -- structural element, not an alert surface, so animations
-                -- don't fit the design — removed in Stage 4.0 after Stage
-                -- 3 used it as a dev playground.
-                inset = true, offset = true, blendMode = true,
-                gradient = true, shadow = true,
-                classColor = true, roleColor = true,
-                alpha = true,
-            },
-            fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
-            lightUpdate  = function() DF:LightweightUpdateBorder() end,
-            lightColors  = function() DF:LightweightUpdateBorderColor() end,
-            refreshStates = function() if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end end,
-            sizeMin = 1, sizeMax = 16, sizeStep = 1,
-        })
+        --
+        -- Border and Border Shadow are TWO builders, each taking the group and
+        -- parent it should build into, because popout gate two mounts them as two
+        -- separate popout rows. Here they are mounted back-to-back into the one
+        -- Appearance group, which is the same panel, in the same order, as the
+        -- single CreateBorderControls call they replaced.
+        --
+        -- ⚠ shadowDisableWhen is not decoration. In the single call the shadow
+        -- rows greyed with Show Border because CreateBorderControls' own
+        -- composition loop reached them; split out, the shadow builder is never
+        -- inside that loop, so the same predicate has to be handed to it.
+        local function BuildBorderGroup(tools)
+            GUI:CreateBorderControls(tools.group, db, "frame", {
+                parent       = tools.parent,
+                include      = {
+                    -- Frame Border is the outer chrome of the unit. It's a
+                    -- structural element, not an alert surface, so animations
+                    -- don't fit the design — removed in Stage 4.0 after Stage
+                    -- 3 used it as a dev playground.
+                    inset = true, offset = true, blendMode = true,
+                    gradient = true,
+                    classColor = true, roleColor = true,
+                    alpha = true,
+                },
+                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
+                lightUpdate  = function() DF:LightweightUpdateBorder() end,
+                lightColors  = function() DF:LightweightUpdateBorderColor() end,
+                refreshStates = tools.refreshStates,
+                sizeMin = 1, sizeMax = 16, sizeStep = 1,
+                noShowToggle = tools.hoistToggles or nil,
+            })
+        end
+        local function BuildBorderShadowGroup(tools)
+            GUI:CreateBorderShadowControls(tools.group, db, "frame", {
+                parent       = tools.parent,
+                -- No lightColors: the shadow colour picker commits through
+                -- fullUpdate, exactly as it did inside the single call.
+                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
+                lightUpdate  = function() DF:LightweightUpdateBorder() end,
+                refreshStates = tools.refreshStates,
+                hideWhen     = tools.shadowHideWhen,
+                disableWhen  = tools.shadowDisableWhen,
+                noEnableToggle = tools.hoistToggles or nil,
+            })
+        end
+        -- Show Border off greys the shadow block, in BOTH layouts. In the single
+        -- call it fell out of CreateBorderControls' own composition loop; split
+        -- out (and split again into two popouts) the predicate has to be handed
+        -- over explicitly. One definition, both branches.
+        local function BorderOff() return db.frameShowBorder == false end
+
+        -- Cleared on EVERY build, classic included. It only ever has entries in
+        -- the popout layout, and a map left behind by a previous new-UI build
+        -- would point the settings-search jump at rows this build has retired.
+        self._popoutRowForKey = nil
+
+        if DF:IsClassicSettingsLayout() then
+            local borderTools = {
+                group  = appearanceGroup,
+                parent = self.child,
+                refreshStates = function() if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end end,
+                shadowDisableWhen = BorderOff,
+            }
+            BuildBorderGroup(borderTools)
+            BuildBorderShadowGroup(borderTools)
+        else
+            -- ===== THE SAME TWO GROUPS, AS TWO POPOUT ROWS ==================
+            -- Nineteen controls become two rows: a name, what it is currently
+            -- set to, a count and a way in. The Appearance header above stays --
+            -- the rows are contents of the box, not a replacement for it.
+            local POPOUT_W = GUI.PopoutContentWidth or 260
+
+            -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT.
+            -- Every route into this builder is a REBUILD -- a party/raid switch,
+            -- a profile switch, the classic-layout flip, and the settings search
+            -- registry, which is built by re-running every page's builder -- and
+            -- an open popout from the PREVIOUS build is showing widgets wired to
+            -- the db table THAT build captured. After a mode switch that table is
+            -- the other mode's, so a slider dragged in a stale panel writes live
+            -- settings into the wrong mode. Guarded rather than called bare, so
+            -- an older embedded copy of the pack without the verb cannot break
+            -- the page.
+            if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
+
+            -- Retire the previous build's holders. They are deliberately NOT in
+            -- self.children -- anything in that list is laid out into one of the
+            -- page's columns, and these must never appear ON the page -- so
+            -- DoBuild's own retire loop never sees them and this is the only
+            -- thing that does.
+            if self._popoutHolders then
+                local trash = GUI._trashFrame
+                for _, holder in ipairs(self._popoutHolders) do
+                    holder:Hide()
+                    holder:ClearAllPoints()
+                    if trash then holder:SetParent(trash) end
+                end
+            end
+            self._popoutHolders = {}
+
+            -- ===== WHAT THE SETTINGS SEARCH NEEDS BACK =====================
+            -- Search builds its registry by re-running every page's builder, so
+            -- the eager holders below already put all seventeen popout controls
+            -- into it, in this same "Appearance" section context -- an inline
+            -- result recreates its own widget from that metadata and edits fine
+            -- wherever the source widget happens to live. Two things do NOT
+            -- survive the change of shape, and both are put back here:
+            --
+            --  (a) THE HOISTED TOGGLES. noShowToggle / noEnableToggle suppress
+            --      the two checkboxes, and the CHECKBOX FACTORY is what
+            --      registered "Show Border" and "Border Shadow" with search.
+            --      The settings are still live -- the rows' own ticks write
+            --      them -- so losing the hits would make a toggleable setting
+            --      unfindable. Registered by hand below, same L key and same db
+            --      key, so both layouts carry the identical entry.
+            --  (b) WHICH ROW OWNS A SETTING. A hit on a popout-only control
+            --      (Border Thickness, Shadow Offset X, ...) navigates to the
+            --      Appearance section, which in this layout IS the two rows --
+            --      the control is behind one of them. This map lets the jump
+            --      open it; without it the landing is correct but empty-looking.
+            self._popoutRowForKey = {}
+
+            -- Every pane currently mounted in a panel, so a toggle can re-flow
+            -- the group a user is looking at as well as the rows on the page.
+            local mounted = {}
+
+            -- Re-flow one mounted group and put the panel back around it. The
+            -- pane is sized from the group's own FRAME height, not from
+            -- LayoutChildren's return: that return adds the between-groups
+            -- margin, which a lone group filling a popout has no use for.
+            local function ReflowPane(st)
+                local g = st.group
+                if not g then return end
+                g:LayoutChildren()
+                g:RefreshChildStates()
+                if st.pane then st.pane:SetHeight(math.max(g:GetHeight() or 1, 1)) end
+                -- ...and the panel around the pane. The kit fixes a pane's height
+                -- at build, and a hideOn inside this group moves it afterwards
+                -- (Border Style = TEXTURE reveals the texture dropdown).
+                local po = st.po
+                if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
+            end
+
+            local function ReflowMounted()
+                for _, st in ipairs(mounted) do
+                    if not (st.po and st.po.closed) then ReflowPane(st) end
+                end
+            end
+
+            -- ONE row's popout content, built EAGERLY -- here, at page build
+            -- time, into a hidden holder -- rather than on the first open. Two
+            -- reasons, either sufficient on its own:
+            --
+            --   (a) the settings SEARCH registry is built by re-running every
+            --       page's builder, so a widget that does not exist until the
+            --       user opens a popout is a widget search can never find.
+            --   (b) CreateBorderControls SEEDS db keys at build time -- the
+            --       colour source, and the colour table itself on a profile that
+            --       has none. Moving those writes to first-open would move WHEN a
+            --       profile changes shape, which is exactly what the export
+            --       byte-identity gate measures.
+            --
+            -- The shell runs a row's `build` ONCE PER INSTANCE, not once per row,
+            -- so a SECOND instance (pin one, then click the row again) asks for
+            -- content a second time. The first call adopts the pre-built group;
+            -- every later one builds a fresh one through the same builder. Which
+            -- is why this is a factory rather than one captured group -- and why
+            -- each group carries its own `st`, so the refresh wired into group
+            -- one cannot re-flow group two.
+            local function PopoutContent(buildInto)
+                local function fresh()
+                    local st = {}
+                    local holder = CreateFrame("Frame", nil, self.child)
+                    holder:SetSize(POPOUT_W, 1)
+                    holder:Hide()
+                    self._popoutHolders[#self._popoutHolders + 1] = holder
+                    -- chromeless + zero padding: the popout already draws a
+                    -- panel, and a faint bordered box inside one reads as a
+                    -- second, smaller panel. The width is the popout's own
+                    -- content width, so each control mounts at exactly the width
+                    -- it has inline on the page.
+                    st.group = GUI:CreateSettingsGroup(holder, POPOUT_W,
+                                                       { chromeless = true, padding = 0 })
+                    st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+                    -- What the style / colour-source dropdowns call. Cheap, and
+                    -- deliberately NOT a page rebuild: see the toggle below.
+                    buildInto(st.group, holder, function()
+                        ReflowPane(st)
+                        self:RefreshStates()
+                    end)
+                    return st
+                end
+
+                local pending = fresh()
+                -- The eagerly built group comes back ALONGSIDE the mount
+                -- function: it is the one instance that exists at page-build
+                -- time, so it is the one whose children can be read for the
+                -- search map below. Later instances build the same controls
+                -- from the same builder, so nothing is missed by ignoring them.
+                return function(po, pane)
+                    local st = pending or fresh()
+                    pending = nil
+                    st.po, st.pane = po, pane
+                    mounted[#mounted + 1] = st
+                    st.group:SetParent(pane)
+                    st.group:ClearAllPoints()
+                    st.group:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
+                    st.group:SetWidth(POPOUT_W)
+                    st.group:Show()
+                    ReflowPane(st)
+                end, pending.group
+            end
+
+            -- ☠ NOT GUI:RefreshCurrentPage, which is what today's inline
+            -- checkboxes call. A rebuild retires every widget on the page --
+            -- including the row whose popout the user is toggling FROM, and the
+            -- panel's own header tick. The rebuild was only ever doing two things
+            -- for these two controls: re-running the hideOn and disableOn passes.
+            -- self:RefreshStates() does both and destroys nothing.
+            local function OnBorderToggle()
+                UpdateFrames()
+                DF:LightweightUpdateBorder()
+                -- The rows: the toggled row's own summary, and the other row's
+                -- dependent grey (Show Border governs Border Shadow).
+                self:RefreshStates()
+                -- ...and the panes, because Show Border also greys the shadow
+                -- block from inside the shadow popout.
+                ReflowMounted()
+            end
+
+            -- The summaries. Hand-authored per the agreed convention: at most
+            -- four items, a fixed order, separated by "\194\183", labels or units
+            -- only where a bare number would be ambiguous, WORDS localised and
+            -- numbers raw. Every read is guarded -- a profile mid-migration may
+            -- be missing any of these keys, and a summary is not worth an error.
+            local function BorderSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local size = tonumber(d.frameBorderSize)
+                if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+                local style = d.frameBorderStyle
+                parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                                 or (style == "TEXTURE" and L["Texture"])
+                                 or L["Solid"]
+                -- STATIC is the default and says nothing; the other two are the
+                -- whole reason a border may not be the colour beneath it.
+                local src = d.frameBorderColorSource
+                if src == "CLASS" then parts[#parts + 1] = L["Class"]
+                elseif src == "ROLE" then parts[#parts + 1] = L["Role"] end
+                -- Only when it is actually doing something. A row reading
+                -- "α 1.00" on every default profile is noise.
+                local c = d.frameBorderColor
+                local a = type(c) == "table" and tonumber(c.a) or nil
+                if a and a < 1 then parts[#parts + 1] = format("\206\177 %.2f", a) end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            local function ShadowSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local size = tonumber(d.frameBorderShadowSize)
+                if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+                local ox = tonumber(d.frameBorderShadowOffsetX) or 0
+                local oy = tonumber(d.frameBorderShadowOffsetY) or 0
+                if ox ~= 0 or oy ~= 0 then
+                    parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- The declared counts, and where they come from: the T1 golden
+            -- inventory is 19 rows -- Show Border plus 13 border controls, then
+            -- the Border Shadow toggle plus 4 shadow controls. Both toggles are
+            -- HOISTED onto the rows (noShowToggle / noEnableToggle), so what the
+            -- two panes actually mount is 13 and 4.
+            -- Guarded by test_border_builders.lua, which builds both popout-shape
+            -- calls and counts what comes out.
+            local BORDER_COUNT, SHADOW_COUNT = 13, 4
+
+            -- db as a FUNCTION, which is what the kit contract asks for: the row
+            -- re-resolves on every refresh, so a mode switch is followed rather
+            -- than frozen at the table this build captured.
+            local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
+
+            -- ---- the two search repairs, per the note at the top -----------
+            -- (b) Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not
+            -- from a key list and not from a name prefix -- "frameBorder" would
+            -- claim keys no popout owns (the row toggles themselves) and would
+            -- miss any spelled differently. Every shared factory stamps
+            -- container.searchEntry, so a control added to either builder is
+            -- covered without anyone having to remember this exists.
+            local function ClaimKeys(row, group)
+                if not (row and group and group.groupChildren) then return end
+                for _, e in ipairs(group.groupChildren) do
+                    local se = e.widget and e.widget.searchEntry
+                    local k  = se and (se.dbKey or se.searchKey)
+                    if type(k) == "string" then self._popoutRowForKey[k] = row end
+                end
+            end
+
+            -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
+            -- map: the tick is ON the row, so the section jump already lands on
+            -- the control the user searched for and opening the panel on top of
+            -- that would be noise. The callback is the one the suppressed
+            -- checkbox would have carried, so an inline result behaves as the
+            -- inline checkbox does in classic. Guarded on the METHOD, not just
+            -- the table -- Search is in this companion but the page must not care.
+            local function RegisterHoistedToggle(row, label, key)
+                local S = DF.Search
+                if not (S and S.RegisterCheckbox) then return end
+                row.searchEntry = S:RegisterCheckbox(label, key, nil, false, OnBorderToggle)
+                if S.LinkSourceWidget then S:LinkSourceWidget(row) end
+            end
+
+            -- window vs clipTo: the WINDOW decides where the panel stands (it
+            -- docks outside its edge); the page's SCROLL FRAME decides whether the
+            -- row is still on screen, and `self` IS that ScrollFrame -- self.child
+            -- is the scrolling content inside it. They are not the same rect, and
+            -- gating on the window alone would leave the beam drawn over the
+            -- window's own chrome for the 50-odd pixels between the row leaving
+            -- the viewport and its rect leaving the window.
+            --
+            -- No accent is passed: a row with none falls back to the HOST accent,
+            -- and that is what follows the mode (GUI:SetAccent is written
+            -- alongside every SelectedMode change), so party purple and raid
+            -- orange come for free. The page rebuilds on a mode switch anyway.
+            local borderMount, borderContent = PopoutContent(function(group, holder, reflow)
+                BuildBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggles = true,
+                })
+            end)
+            local borderRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = RowDB,
+                toggle   = { key = "frameShowBorder" },
+                summary  = BorderSummary,
+                count    = BORDER_COUNT,
+                onToggle = OnBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            ClaimKeys(borderRow, borderContent)
+            RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder")
+
+            local shadowMount, shadowContent = PopoutContent(function(group, holder, reflow)
+                BuildBorderShadowGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    -- Still needed INSIDE the popout: with Show Border off,
+                    -- the four shadow sub-controls grey exactly as they do
+                    -- inline. The row's own toggle gate is a different
+                    -- mechanism and does not cover this one.
+                    shadowDisableWhen = BorderOff,
+                    hoistToggles = true,
+                })
+            end)
+            local shadowRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border Shadow"],
+                db       = RowDB,
+                toggle   = { key = "frameBorderShadowEnabled" },
+                summary  = ShadowSummary,
+                count    = SHADOW_COUNT,
+                onToggle = OnBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = shadowMount,
+            }))
+            ClaimKeys(shadowRow, shadowContent)
+            RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled")
+            -- The dependent grey, in the page's own idiom: the group's
+            -- RefreshChildStates drives row:SetEnabled off this, and the row's
+            -- explicit SetEnabled overrides its opts.enabled from there on, so
+            -- the two cannot fight. Set AFTER AddWidget, like every other
+            -- disableOn on this page. The Border row has no dependency.
+            shadowRow.disableOn = function(d) return (d or db).frameShowBorder == false end
+        end
         Add(appearanceGroup, nil, 2)
 
         -- ===== FRAME FADE GROUP (Column 2) =====

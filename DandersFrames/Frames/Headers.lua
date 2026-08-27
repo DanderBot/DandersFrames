@@ -4342,7 +4342,9 @@ end
 
 -- Refresh ALL visible frames (both test and live)
 -- Use this for settings callbacks that need to update whichever frames are currently visible
-function DF:RefreshAllVisibleFrames()
+-- The real body. DF:RefreshAllVisibleFrames() is now an arm-stub that coalesces
+-- requests through DF.Apply -- see Core\ApplyScheduler.lua.
+function DF:RefreshAllVisibleFrames_Now()
     if DF.testMode or DF.raidTestMode then
         -- In test mode, refresh test frames
         if DF.RefreshTestFrames then
@@ -6966,7 +6968,9 @@ end
 -- Reads settings and applies them to headers
 -- ============================================================
 
-function DF:ApplyHeaderSettings()
+-- The real body. DF:ApplyHeaderSettings() is now an arm-stub that coalesces
+-- requests through DF.Apply -- see Core\ApplyScheduler.lua.
+function DF:ApplyHeaderSettings_Now()
     if DF:DebugActive("FLATRAID") then
         DF:Debug("FLATRAID", "ApplyHeaderSettings: called from\n%s", debugstack(2, 10, 0) or "unknown")
     end
@@ -7132,7 +7136,10 @@ function DF:FinalizeHeaderInit()
     end
     
     -- Apply settings from DB
-    DF:ApplyHeaderSettings()
+    -- ⚠ SYNC SEAM (login/init). Everything below in this function -- the
+    -- visibility setup inside the ADDON_LOADED grace window especially -- runs
+    -- on the assumption the headers have already been configured. `_Now`.
+    DF:ApplyHeaderSettings_Now()
 
     -- ============================================================
     -- CRITICAL: Set up header visibility during the ADDON_LOADED
@@ -7708,7 +7715,11 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             DF.arenaHeader:SetAttribute("sortMethod", "INDEX")
         end
         
-        DF:ApplyHeaderSettings()
+        -- ⚠ SYNC SEAM (login / PLAYER_ENTERING_WORLD). RebuildUnitFrameMap
+        -- immediately below reads the header children this call reassigns --
+        -- the comment there spells out that a deferred rebuild silently drops
+        -- every UNIT_HEALTH event. `_Now`.
+        DF:ApplyHeaderSettings_Now()
         DF:Debug("ROSTER", "PEW: ApplyHeaderSettings() complete")
 
         -- FIX: Rebuild unitFrameMap immediately after ApplyHeaderSettings.

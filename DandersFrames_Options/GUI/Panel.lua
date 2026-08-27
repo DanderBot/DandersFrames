@@ -21,6 +21,56 @@ local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
+
+-- ============================================================
+-- THE CONTENT CORRIDOR
+-- ------------------------------------------------------------
+-- Every number between the right edge of a widget on a page and the right edge
+-- of the settings window, in one table -- because the popout a feature row opens
+-- DOCKS OUTSIDE THAT EDGE and runs a beam back to the row, so this stack is the
+-- length of that beam and it was five literals in four functions.
+--
+--   window edge -> content box      windowPad  (paired with the nav's own left
+--                                              margin: the two boxes sit at the
+--                                              same distance from the window)
+--   content box -> page viewport    inset on the left/top/bottom, GUTTER on the
+--                                   right
+--   the gutter                      is the SCROLLBAR's, and now holds it
+--   page viewport -> first widget   SettingsBox.colMargin, both sides
+--
+-- ☠ THE GUTTER WAS BEING PAID FOR TWICE. The scroll CHILD was built at
+-- `content:GetWidth() - 30` -- the page's two 8px insets plus 14 of scrollbar
+-- room -- so page content stopped 14px short of the viewport it sits in. But
+-- ScrollFrameTemplate anchors its bar OUTSIDE the ScrollFrame, so the bar was
+-- never in that 14: it sat beyond the viewport, in the page's own inset and the
+-- window's margin, while the 14 stayed blank. The corridor carried the
+-- scrollbar's width twice and showed it once.
+--
+-- Now the RIGHT edge of the viewport is inset by the gutter instead of by
+-- `inset`, the bar is pinned into that gutter against the content box (the
+-- idiom the settings nav has used by hand since it was built -- see navPad
+-- below), and the child fills the viewport. Same bar, same air beside it, 8px
+-- of blank returned to the page and 14px of it now occupied by something you
+-- can see.
+local PageBox = {
+    windowPad = 12,   -- window edge -> the nav pane / the content box
+    navGap    = 8,    -- nav pane -> content box
+    inset     = 8,    -- content box -> page viewport (left / top / bottom)
+    gutter    = GUI.Scroll.gutter,  -- ...and on the right, where the bar lives
+}
+GUI.PageBox = PageBox
+-- The column geometry is the KIT's (settings groups are its widgets), so it
+-- lives in the shared metrics beside the group width it is derived from.
+local SettingsBox = GUI.SettingsBox
+
+-- The page viewport's width, and therefore its scroll child's, for a given
+-- content-box width. THREE sites need it -- CreateSubTab sizes the child at
+-- build time, PageRefreshStates re-sizes it on every layout, and the column
+-- maths measures its widgets against it -- and all three used to carry their own
+-- copy of the arithmetic (`- 30`, `- 30`, `- 40`).
+function GUI.PageChildWidth(contentWidth)
+    return (contentWidth or 0) - PageBox.inset - PageBox.gutter
+end
 -- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
 -- slider drag, slider release), each listing the surfaces it knew about — so a surface
 -- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
@@ -70,6 +120,306 @@ local function ApplyGUIScale(frame, value)
     end
 end
 
+-- ============================================================
+-- PAGE STATE REFRESH
+-- ------------------------------------------------------------
+-- The hideOn / disableOn / refreshContent sweep plus the two-column reflow,
+-- run for every widget on the open page. It is the settings window's half of
+-- the apply path: one write from a control drives this over the whole page.
+--
+-- ☠ ONE SHARED FUNCTION, not a closure built per page. It used to be defined
+-- inside BuildPage, which made it unreachable from DF and therefore
+-- unmeasurable -- the profiler resolves its targets as paths against DF, so a
+-- per-page local can never be one. Published as GUI.PageRefreshStates below,
+-- and pages DISPATCH through that name rather than capturing this value (see
+-- the assignment in BuildPage for why).
+--
+-- The parameter is named `self` because it IS the page and the body is the
+-- former closure verbatim: renaming it would have put 250 lines of noise in a
+-- diff whose whole point is that nothing changed.
+local function PageRefreshStates(self)
+    if not self.children then return end
+    local db = DF.db[GUI.SelectedMode]
+    if not db then return end
+    
+    -- First pass: handle SettingsGroups - layout their children and calculate heights
+    for _, widget in ipairs(self.children) do
+        if widget.isSettingsGroup then
+            -- Layout children within the group (handles hideOn internally)
+            widget:LayoutChildren()
+            -- Process disableOn for group children
+            widget:RefreshChildStates()
+        end
+    end
+    
+    -- Second pass: handle regular widgets and group visibility
+    for _, widget in ipairs(self.children) do
+        -- Keep any blocked-overlay (top-level widget or group) in sync.
+        -- Skip SettingsGroup children - they're handled by their parent group
+        if widget.settingsGroup then
+            -- Already handled by group's LayoutChildren
+        elseif widget.isSettingsGroup then
+            -- For groups, check collapsible section state AND group-level hideOn
+            local shouldHide = false
+            
+            -- Check if parent collapsible section is collapsed
+            if widget.collapsibleSection and not widget.collapsibleSection.expanded then
+                shouldHide = true
+            end
+            
+            -- Check group's own hideOn
+            if not shouldHide and widget.hideOn then
+                shouldHide = widget.hideOn(db)
+            end
+            
+            if shouldHide then
+                widget:Hide()
+            else
+                widget:Show()
+            end
+        else
+            -- Regular widget processing
+            if widget.disableOn then
+                local shouldDisable = widget.disableOn(db)
+                if widget.SetEnabled then
+                    widget:SetEnabled(not shouldDisable)
+                end
+            end
+            
+            -- Check if widget should be hidden
+            local shouldHide = false
+            
+            -- First check if parent collapsible section is collapsed
+            if widget.collapsibleSection and not widget.collapsibleSection.expanded then
+                shouldHide = true
+            end
+            
+            -- Then check widget's own hideOn
+            if not shouldHide and widget.hideOn then
+                shouldHide = widget.hideOn(db)
+            end
+            
+            if shouldHide then
+                widget:Hide()
+            else
+                widget:Show()
+                -- Call refreshContent hook for dynamic content updates
+                if widget.refreshContent then
+                    widget:refreshContent(db)
+                end
+            end
+        end
+    end
+    
+    -- Determine column layout based on content area width.
+    -- Two-column settings groups are SettingsBox.group wide and placed at
+    -- x = colMargin, while column 2 starts at contentWidth/2 — so they begin to
+    -- overlap once contentWidth drops below ~570. minCol must exceed the group
+    -- width (was a stale 270) so the layout collapses to one column BEFORE the
+    -- columns touch, leaving a small gutter at the cutover instead of
+    -- overlapping for the last few pixels.
+    --
+    -- ☠ AND THAT WAS ONLY HALF THE TEST. Two columns need two things to be true
+    -- and only the first was ever checked:
+    --
+    --   1. the columns must not touch      -- the minCol rule above
+    --   2. column 2 must FIT IN THE VIEWPORT, which is NOT the content box: it
+    --      is the content box less the page's inset and the scrollbar gutter,
+    --      and column 2 is pinned to the CONTENT's midpoint. So the further the
+    --      viewport is inset, the sooner floor(contentWidth/2) + a group's width
+    --      runs off the right of the rect the ScrollFrame clips to.
+    --
+    -- Rule 1 alone let the cutover clip. It always did -- a column-2 box lost its
+    -- last pixel at the exact threshold -- and it went unnoticed at 1px; with the
+    -- viewport now stopping at the scrollbar rather than 6px past it, the same
+    -- unchecked condition would have cut up to 7px off the box's right border.
+    -- The layout is not "collapse when the columns touch", it is "collapse when
+    -- either column stops fitting", so it now says so.
+    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
+    local childWidth = GUI.PageChildWidth(contentWidth)
+    local minColumnWidth = SettingsBox.minCol
+    local usesTwoColumns =
+        contentWidth >= (minColumnWidth * 2 + SettingsBox.colGutter)
+        and (math.floor(contentWidth / 2) + SettingsBox.group) <= childWidth
+
+    -- The width a page's widgets actually have, DERIVED rather than a literal:
+    -- the scroll child (see GUI.PageChildWidth) less the page's own left and
+    -- right margins. It was `contentWidth - 40`, "extra padding for scrollbar" —
+    -- a number that had to be kept in step by hand with the child's own `- 30`
+    -- and with the scrollbar room inside it, which is the arrangement that let
+    -- the gutter be counted twice.
+    local usableWidth = childWidth - 2 * SettingsBox.colMargin
+
+    -- Check if editing banner is active (adds 50px at top)
+    local bannerOffset = 0
+    if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+        bannerOffset = 50
+    end
+    
+    -- Layout - adjust column positions based on available width
+    local x1, maxY = SettingsBox.colMargin, 0
+    local col2X = usesTwoColumns and math.floor(contentWidth / 2) or x1
+    -- The page's TOP margin, deliberately still a literal: it happens to equal
+    -- colMargin today, and tying the vertical rhythm to a horizontal number is
+    -- how one edit moves the other axis by accident.
+    local y1, y2 = -5 - bannerOffset, -5 - bannerOffset
+    
+    -- First, position any right-aligned elements (like Copy buttons) at absolute top-right
+    for _, widget in ipairs(self.children) do
+        if widget.rightAlign and widget:IsShown() then
+            widget:ClearAllPoints()
+            -- Both offsets snapped: this widget is the HEAD of the
+            -- Reset/Sync/Copy chain, so a fraction here is inherited by
+            -- every button to its left, and the buttons are no longer
+            -- nudged back onto the grid individually.
+            widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT",
+                SnapLen(self.child, -10), SnapLen(self.child, -5 - bannerOffset))
+        end
+    end
+    
+    -- Reserve space below the right-aligned row (Reset Page / Sync / Copy).
+    --
+    -- This used to subtract a flat 40 with the comment "button height ~26 +
+    -- 14 padding" -- a GUESS, not a measurement. Any page whose row is not
+    -- exactly 26 tall got a different gap under it, so the first box sat at
+    -- a different height on every page and the row appeared to shift.
+    -- Measure the row instead and add a fixed pad, so the gap below the
+    -- buttons is identical everywhere by construction.
+    --
+    -- The scan is ALSO gated on IsShown() now, matching the positioning loop
+    -- above. It was not, so a page carrying a HIDDEN right-aligned widget
+    -- still reserved the 40 and opened with an empty band above its first
+    -- box -- the pages Krathe saw "starting further down" with nothing there.
+    local RIGHT_ROW_PAD = 14
+    local rightRowH = 0
+    for _, widget in ipairs(self.children) do
+        if widget.rightAlign and widget:IsShown() then
+            rightRowH = math.max(rightRowH, widget:GetHeight() or 0)
+        end
+    end
+    if rightRowH > 0 then
+        -- Snapped for the same reason every other layout number is: an
+        -- unsnapped offset puts everything below it off the pixel grid.
+        local reserve = SnapLen(self.child, rightRowH + RIGHT_ROW_PAD)
+        y1 = y1 - reserve
+        y2 = y2 - reserve
+    end
+    
+    for _, widget in ipairs(self.children) do
+        -- Skip widgets that belong to a SettingsGroup (they're positioned by the group)
+        if widget.settingsGroup then
+            -- Do nothing - parent group handles positioning
+        elseif widget.rightAlign then
+            -- Already positioned above, skip
+        elseif widget.isSyncPoint then
+            -- Sync point: align both columns to the lowest Y position
+            local syncY = math.min(y1, y2)
+            y1 = syncY
+            y2 = syncY
+        elseif widget:IsShown() then
+            -- For SettingsGroups, use calculated height
+            local h = widget.layoutHeight or 0
+            if widget.isSettingsGroup and widget.calculatedHeight then
+                h = widget.calculatedHeight
+            end
+            
+            widget:ClearAllPoints()
+
+            -- Set height for frame-based widgets (like header containers)
+            if widget.text and widget.SetHeight and h > 0 then
+                widget:SetHeight(h)
+            end
+            
+            -- Apply indent offset if specified (for child/sub-options)
+            -- Supports: true (20px), or a number for multiple levels (e.g. 2 = 40px)
+            local indentOffset = 0
+            if widget.indent then
+                if type(widget.indent) == "number" then
+                    indentOffset = widget.indent * 20
+                else
+                    indentOffset = 20
+                end
+            end
+            
+            -- Snap the offsets and widths this loop hands out, for the same
+            -- reason CreateSettingsGroup:LayoutChildren does: a widget placed
+            -- straight onto the page (a banner, a full-width note, a
+            -- collapsible section) never passes through a group, so this is
+            -- the only place its geometry can be put on the grid. See SnapLen.
+            local snapX = SnapLen(widget, x1 + indentOffset)
+
+            if widget.layoutCol == "both" then
+                local startY = math.min(y1, y2)
+                widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
+                -- Set width to span both columns (with scrollbar padding)
+                widget:SetWidth(SnapLen(widget, usableWidth - indentOffset))
+                y1 = startY - h
+                y2 = startY - h
+            elseif widget.layoutCol == 2 and usesTwoColumns then
+                widget:SetPoint("TOPLEFT", SnapLen(widget, col2X + indentOffset),
+                                SnapLen(widget, y2))
+                -- Reduce width for indented widgets to maintain alignment
+                if indentOffset > 0 and widget.SetWidth then
+                    local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
+                    widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
+                end
+                y2 = y2 - h
+            else
+                -- Column 1, or column 2 when in single-column mode
+                widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
+                -- Reduce width for indented widgets to maintain alignment
+                if indentOffset > 0 and widget.SetWidth then
+                    local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
+                    widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
+                end
+                y1 = y1 - h
+            end
+            
+            local currentBottom = math.min(y1, y2)
+            if math.abs(currentBottom) > maxY then maxY = math.abs(currentBottom) end
+        end
+    end
+    local contentH = maxY + 40 + bannerOffset
+
+    -- FOOTER: the See-Also bar is designed as one, so on a page whose
+    -- content does not fill the viewport it should sit at the BOTTOM
+    -- rather than floating halfway down with dead space under it. On a
+    -- page that does fill (or overflow) the viewport it already lands at
+    -- the end of the flow, which reads correctly -- so this only moves it
+    -- when there is spare room, and the long-page case is untouched.
+    --
+    -- Done by stretching the scroll child to the viewport height and
+    -- anchoring the footer to the child's BOTTOM: the child is what the
+    -- flow is measured against, so this keeps the footer inside the
+    -- scrolled content (it still scrolls with a long page) instead of
+    -- floating over it.
+    local footer
+    for _, w in ipairs(self.children) do
+        if w.isPageFooter and w:IsShown() then footer = w break end
+    end
+    if footer then
+        local viewH = self:GetHeight() or 0
+        if viewH > contentH then
+            contentH = viewH
+            footer:ClearAllPoints()
+            footer:SetPoint("BOTTOMLEFT", self.child, "BOTTOMLEFT",
+                SnapLen(self.child, x1), SnapLen(self.child, GUI.Space.footer))
+            footer:SetWidth(SnapLen(footer, usableWidth))
+        end
+    end
+
+    self.child:SetHeight(contentH)
+
+    -- Update scroll child width to match the page viewport. GUI.PageChildWidth,
+    -- not a second copy of the arithmetic: CreateSubTab sizes the child the same
+    -- way at build time, and these two drifting apart is what a shared helper is
+    -- for.
+    if self.child and GUI.contentFrame then
+        self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))
+    end
+end
+GUI.PageRefreshStates = PageRefreshStates
+
 function DF:CreateGUI()
     if DF.GUIFrame then return end
     
@@ -112,7 +462,21 @@ function DF:CreateGUI()
     -- lives on the close button below and on the DF:ToggleGUI wrapper at the
     -- foot of this file; Esc (UISpecialFrames) hides directly and stays
     -- instant, as does the mover bridge's close-on-unlock.
-    frame:HookScript("OnShow", function(f) GUI.Fx.FadeIn(f, 0.3) end)
+    --
+    -- ★ AND IT IS WHERE THE CURRENT PAGE COMES BACK OUT OF THE PAGE DOCK. The
+    -- OnHide below parks it; this adopts it. Hooked on the FRAME rather than
+    -- bolted onto DF:ToggleGUI because several paths show this window directly
+    -- without going through a SelectTab afterwards (Core.lua's debug open, the
+    -- mover bridge, the test-mode reopen), and a window that came back blank on
+    -- any one of them would be a far worse bug than the one being fixed.
+    -- AdoptPage no-ops when the page is not parked, so this is free on the paths
+    -- that never parked it.
+    frame:HookScript("OnShow", function(f)
+        if GUI.AdoptPage and GUI.Pages and GUI.CurrentPageName then
+            GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
+        end
+        GUI.Fx.FadeIn(f, 0.3)
+    end)
     
     -- Allow closing with Escape key
     tinsert(UISpecialFrames, "DandersFramesGUI")
@@ -122,6 +486,23 @@ function DF:CreateGUI()
         local AutoProfilesUI = DF.AutoProfilesUI
         if AutoProfilesUI and AutoProfilesUI:IsEditing() then
             AutoProfilesUI:ExitEditing(true)  -- Skip UI updates since GUI is closing
+        end
+        -- Popout rows stand OUTSIDE this frame, so hiding the window does not
+        -- hide them -- they would be left floating over the game with nothing to
+        -- dock against. CloseAll, not CloseUnpinned: a pinned panel is pinned
+        -- loose from the ROW, not from the window, and the window going away
+        -- takes it too. Every path that hides the panel lands here -- the cross,
+        -- Escape, /df, and the combat auto-close -- so this is the one place it
+        -- needs saying. Guarded for an older embedded copy of the pack.
+        if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("windowClosed") end
+
+        -- Park the page that was on screen (see THE PAGE DOCK). With the window
+        -- closed nothing needs it in the tree, and leaving it there is one more
+        -- subtree the next Show has to walk. It is NOT hidden -- its own shown
+        -- flag stays set, so the OnShow hook above brings it straight back
+        -- visible with a single SetParent and needs no state of its own.
+        if GUI.ParkPage and GUI.Pages and GUI.CurrentPageName then
+            GUI:ParkPage(GUI.Pages[GUI.CurrentPageName])
         end
     end)
     
@@ -1259,8 +1640,8 @@ function DF:CreateGUI()
     -- fractional baseline -- which is what is left of the nav ghost now that the
     -- dead band between rows is gone.
     local tabFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -64))
-    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, 12), SnapLen(frame, 36))
+    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, -64))
+    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, 36))
     tabFrame:SetWidth(SnapLen(frame, 155))
     CreateElementBackdrop(tabFrame)
     tabFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.5)
@@ -1269,8 +1650,13 @@ function DF:CreateGUI()
     -- SEARCH BAR
     -- =========================================================================
     local searchBar = nil
-    local navPad = SnapLen(tabFrame, 4) or 4
-    local navRight = SnapLen(tabFrame, -14) or -14
+    -- ★ THE PRECEDENT THE PAGES NOW FOLLOW. The nav has pinned its own bar into
+    -- its own gutter since it was built, and these were the two literals that did
+    -- it: 4 of air beside the bar, 14 of room reserved for bar-plus-air. They are
+    -- GUI.Scroll.pad and GUI.Scroll.gutter exactly -- same values, now the same
+    -- numbers, so the nav and the pages cannot be retuned apart.
+    local navPad = SnapLen(tabFrame, GUI.Scroll.pad) or GUI.Scroll.pad
+    local navRight = SnapLen(tabFrame, -GUI.Scroll.gutter) or -GUI.Scroll.gutter
     local tabScrollStartY = -navPad
     if DF.Search then
         searchBar = DF.Search:CreateSearchBar(tabFrame)
@@ -1370,14 +1756,75 @@ function DF:CreateGUI()
     -- perfect and the surface it is clipped against is what is wrong. Krathe
     -- spotted the symmetry before the numbers did.
     local content = CreateFrame("Frame", nil, frame)
-    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, 8), 0)
+    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, PageBox.navGap), 0)
     content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
-        SnapLen(frame, -12), SnapLen(frame, 36))
+        SnapLen(frame, -PageBox.windowPad), SnapLen(frame, 36))
     CreateElementBackdrop(content)
     content:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     GUI.contentFrame = content
     GUI.tabFrame = tabFrame
-    
+
+    -- =========================================================================
+    -- THE PAGE DOCK
+    -- -------------------------------------------------------------------------
+    -- ☠ EVERY BUILT PAGE USED TO STAY PARENTED TO `content`, SHOWN OR NOT, and
+    -- that is what made opening the settings window take EIGHT SECONDS. Settings
+    -- search indexes by BUILDING every page (Search:BuildFullRegistry), so one
+    -- search leaves all 34 of them fully populated -- 700+ widgets, plus the
+    -- Aura/Text Designer machinery -- hanging hidden off this one frame. From
+    -- then on GUIFrame:Show() measured 7774ms and Hide() about 2000ms, with only
+    -- ~52 of our own OnShow handlers firing in the whole 7.7s: the cost is the
+    -- ENGINE walking that hidden subtree for visibility, not Lua we run.
+    -- Reparenting the non-current pages away dropped the same Show to 90ms.
+    --
+    -- So a page that is not the one on screen lives HERE instead: a detached,
+    -- permanently hidden frame with no parent at all, outside the window's tree
+    -- entirely. Deliberately NOT GUI._trashFrame -- trash means dead and never
+    -- coming back (that is where a rebuild retires a page's old children); the
+    -- dock means alive and parked, and every page in it is expected back.
+    --
+    -- ⚠ A parked page KEEPS ITS ANCHORS to `content` -- which is why the
+    -- SetPoint in CreateSubTab names `content` explicitly instead of leaning on
+    -- the omitted-relativeTo default. A parked page therefore still measures at
+    -- its real size and can be BUILT in place, which is exactly what search's
+    -- index pass does to all 34 of them.
+    GUI._pageDock = CreateFrame("Frame")
+    GUI._pageDock:Hide()
+
+    -- Move a page out of the window's frame tree. Idempotent and cheap; the page
+    -- is expected to be hidden already (every caller hides first).
+    function GUI:ParkPage(page)
+        if not page or page._parked then return end
+        page:SetParent(GUI._pageDock)
+        page._parked = true
+    end
+
+    -- ...and bring it back, re-asserting the anchors rather than trusting them to
+    -- have survived the round trip.
+    --
+    -- ⚠ Scale comes back WITH the parent. The dock sits at 1.0 while the window
+    -- is scaled, and a page must never register as a scaled surface (it is INSIDE
+    -- the window, so it would be scaled twice -- see RegisterScaledSurface), so
+    -- re-parenting is the whole of it: the page re-inherits the window's scale
+    -- chain and nothing caches an effective scale while it is parked.
+    --
+    -- Early-out when the page is not parked, so callers on hot paths
+    -- (RefreshCurrentPage, the window's OnShow) can call it unconditionally.
+    function GUI:AdoptPage(page)
+        if not page or not page._parked then return end
+        page:SetParent(content)
+        page._parked = nil
+        local inset = page._contentInset or PageBox.inset
+        -- The RIGHT edge is the gutter, not the inset -- the scrollbar lives
+        -- between the viewport and the content box's edge. Stored beside the
+        -- inset for the same reason it is: a parked page has to come back at the
+        -- width it was built at, and search builds every page while parked.
+        local gutter = page._contentGutter or PageBox.gutter
+        page:ClearAllPoints()
+        page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
+    end
+
     -- =========================================================================
     -- CLICK CASTING PANEL (full width, replaces normal content when active)
     -- =========================================================================
@@ -1636,7 +2083,22 @@ function DF:CreateGUI()
             GUI.pendingSectionBadges[leavingTab] = nil
         end
 
-        for k, page in pairs(GUI.Pages) do page:Hide() end
+        -- Popout rows: leaving the page invalidates the rows the open panel is
+        -- ABOUT -- the row it is tethered to is about to be hidden, and the
+        -- controls inside it belong to a page nobody is looking at. UNPINNED
+        -- only: a panel the user deliberately pinned loose is theirs to keep
+        -- across a page change, which is the whole difference between the two
+        -- verbs. Guarded for an older embedded copy of the pack.
+        if GUI.CloseUnpinnedPopoutRows then GUI:CloseUnpinnedPopoutRows("pageSwitch") end
+
+        -- Hide every page, and PARK the ones we are not about to show. Hiding
+        -- alone is what the eight-second window open was made of: a hidden page
+        -- still parented under the window is a subtree the engine walks on every
+        -- Show and Hide of it. See THE PAGE DOCK.
+        for k, page in pairs(GUI.Pages) do
+            page:Hide()
+            if k ~= name then GUI:ParkPage(page) end
+        end
         for k, btn in pairs(GUI.Tabs) do
             if btn.accent then btn.accent:Hide() end
             -- Check if tab is disabled (e.g., during Auto Profile editing)
@@ -1694,6 +2156,10 @@ function DF:CreateGUI()
                 DF.Search.CurrentSection = nil
             end
             
+            -- Out of the dock and back under the content frame BEFORE the Show,
+            -- so it is never shown while detached (and so RefreshCached below
+            -- builds against the real geometry).
+            GUI:AdoptPage(GUI.Pages[name])
             GUI.Pages[name]:Show()
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
             GUI.Pages[name]:RefreshCached()
@@ -1752,6 +2218,12 @@ function DF:CreateGUI()
             return
         end
         if GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName] then
+            -- Belt and braces for the reopen path: DF:ToggleGUI shows the window
+            -- and then calls this, and the window's OnShow has already adopted
+            -- the page by the time we get here -- but refreshing a page that is
+            -- still in the dock would lay out against nothing, so make sure.
+            -- No-ops when it is not parked.
+            GUI:AdoptPage(GUI.Pages[GUI.CurrentPageName])
             GUI.Pages[GUI.CurrentPageName]:Refresh()
             if GUI.Pages[GUI.CurrentPageName].RefreshStates then
                 GUI.Pages[GUI.CurrentPageName]:RefreshStates()
@@ -1928,17 +2400,41 @@ function DF:CreateGUI()
         -- surface every page is measured against was the one it could not touch.
         -- Snapping the OFFSETS is the fix that works for a two-corner frame:
         -- correct the numbers going in, since the box itself can't be nudged.
-        local inset = SnapLen(content, 8) or 8
-        page:SetPoint("TOPLEFT", inset, -inset)
-        page:SetPoint("BOTTOMRIGHT", -inset, inset)
+        --
+        -- ⚠ `content` IS NAMED EXPLICITLY, and the inset is kept on the page.
+        -- A page is reparented to the page dock whenever it is not the one on
+        -- screen (see THE PAGE DOCK), and these two points have to keep pointing
+        -- at the content frame across that trip -- a parked page that measured
+        -- zero could not be built, and search builds all of them. GUI:AdoptPage
+        -- re-asserts exactly these two lines from page._contentInset and
+        -- page._contentGutter.
+        --
+        -- ★ THE RIGHT EDGE IS THE GUTTER, NOT THE INSET -- see THE CONTENT
+        -- CORRIDOR at the head of this file. The viewport stops where the
+        -- scrollbar begins, the bar is pinned into the strip between there and
+        -- the content box's edge, and the child then fills the viewport instead
+        -- of stopping another 14px short of it for a bar that was never drawn
+        -- inside it.
+        local inset = SnapLen(content, PageBox.inset) or PageBox.inset
+        local gutter = SnapLen(content, PageBox.gutter) or PageBox.gutter
+        page._contentInset = inset
+        page._contentGutter = gutter
+        page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
 
         StyleScrollBar(page)
+        -- Against `content`, not against the page: the bar hugs the CONTENT
+        -- BOX's inner right edge, which is the window's own margin away from the
+        -- window edge. Left on ScrollFrameTemplate's own anchors it floated
+        -- outside the viewport at whatever offset the template picks, which is
+        -- how the corridor ended up carrying the gutter twice.
+        GUI.PinScrollBar(page, content, -inset, inset)
 
         local child = CreateFrame("Frame", nil, page)
         -- Snapped for the same reason: content is positioned against this child,
         -- so a fractional width put every right edge inside it off-grid too
         -- (pixelcheck reported w-0.16).
-        child:SetSize(SnapLen(page, (content:GetWidth() or 0) - 30) or 1, 1)
+        child:SetSize(SnapLen(page, GUI.PageChildWidth(content:GetWidth() or 0)) or 1, 1)
         page:SetScrollChild(child)
         page.child = child
         page.tabName = name
@@ -2273,256 +2769,12 @@ function DF:CreateGUI()
             DoBuild(self)
         end
 
-        page.RefreshStates = function(self)
-            if not self.children then return end
-            local db = DF.db[GUI.SelectedMode]
-            if not db then return end
-            
-            -- First pass: handle SettingsGroups - layout their children and calculate heights
-            for _, widget in ipairs(self.children) do
-                if widget.isSettingsGroup then
-                    -- Layout children within the group (handles hideOn internally)
-                    widget:LayoutChildren()
-                    -- Process disableOn for group children
-                    widget:RefreshChildStates()
-                end
-            end
-            
-            -- Second pass: handle regular widgets and group visibility
-            for _, widget in ipairs(self.children) do
-                -- Keep any blocked-overlay (top-level widget or group) in sync.
-                -- Skip SettingsGroup children - they're handled by their parent group
-                if widget.settingsGroup then
-                    -- Already handled by group's LayoutChildren
-                elseif widget.isSettingsGroup then
-                    -- For groups, check collapsible section state AND group-level hideOn
-                    local shouldHide = false
-                    
-                    -- Check if parent collapsible section is collapsed
-                    if widget.collapsibleSection and not widget.collapsibleSection.expanded then
-                        shouldHide = true
-                    end
-                    
-                    -- Check group's own hideOn
-                    if not shouldHide and widget.hideOn then
-                        shouldHide = widget.hideOn(db)
-                    end
-                    
-                    if shouldHide then
-                        widget:Hide()
-                    else
-                        widget:Show()
-                    end
-                else
-                    -- Regular widget processing
-                    if widget.disableOn then
-                        local shouldDisable = widget.disableOn(db)
-                        if widget.SetEnabled then
-                            widget:SetEnabled(not shouldDisable)
-                        end
-                    end
-                    
-                    -- Check if widget should be hidden
-                    local shouldHide = false
-                    
-                    -- First check if parent collapsible section is collapsed
-                    if widget.collapsibleSection and not widget.collapsibleSection.expanded then
-                        shouldHide = true
-                    end
-                    
-                    -- Then check widget's own hideOn
-                    if not shouldHide and widget.hideOn then
-                        shouldHide = widget.hideOn(db)
-                    end
-                    
-                    if shouldHide then
-                        widget:Hide()
-                    else
-                        widget:Show()
-                        -- Call refreshContent hook for dynamic content updates
-                        if widget.refreshContent then
-                            widget:refreshContent(db)
-                        end
-                    end
-                end
-            end
-            
-            -- Determine column layout based on content area width.
-            -- Two-column settings groups are 280px wide and placed at x=5 (right
-            -- edge 285), while column 2 starts at contentWidth/2 — so they begin to
-            -- overlap once contentWidth drops below ~570. minColumnWidth must exceed
-            -- the 280 group width (was a stale 270) so the layout collapses to one
-            -- column BEFORE the columns touch, leaving a ~10px gutter at the cutover
-            -- instead of overlapping for the last ~10px.
-            local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
-            local minColumnWidth = 285  -- ≥ the 280 group width + a small gutter
-            local usesTwoColumns = contentWidth >= (minColumnWidth * 2 + 20)
-            
-            -- Account for scrollbar and padding when calculating usable width
-            local usableWidth = contentWidth - 40  -- Extra padding for scrollbar
-            
-            -- Check if editing banner is active (adds 50px at top)
-            local bannerOffset = 0
-            if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
-                bannerOffset = 50
-            end
-            
-            -- Layout - adjust column positions based on available width
-            local x1, maxY = 5, 0
-            local col2X = usesTwoColumns and math.floor(contentWidth / 2) or x1
-            local y1, y2 = -5 - bannerOffset, -5 - bannerOffset
-            
-            -- First, position any right-aligned elements (like Copy buttons) at absolute top-right
-            for _, widget in ipairs(self.children) do
-                if widget.rightAlign and widget:IsShown() then
-                    widget:ClearAllPoints()
-                    -- Both offsets snapped: this widget is the HEAD of the
-                    -- Reset/Sync/Copy chain, so a fraction here is inherited by
-                    -- every button to its left, and the buttons are no longer
-                    -- nudged back onto the grid individually.
-                    widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT",
-                        SnapLen(self.child, -10), SnapLen(self.child, -5 - bannerOffset))
-                end
-            end
-            
-            -- Reserve space below the right-aligned row (Reset Page / Sync / Copy).
-            --
-            -- This used to subtract a flat 40 with the comment "button height ~26 +
-            -- 14 padding" -- a GUESS, not a measurement. Any page whose row is not
-            -- exactly 26 tall got a different gap under it, so the first box sat at
-            -- a different height on every page and the row appeared to shift.
-            -- Measure the row instead and add a fixed pad, so the gap below the
-            -- buttons is identical everywhere by construction.
-            --
-            -- The scan is ALSO gated on IsShown() now, matching the positioning loop
-            -- above. It was not, so a page carrying a HIDDEN right-aligned widget
-            -- still reserved the 40 and opened with an empty band above its first
-            -- box -- the pages Krathe saw "starting further down" with nothing there.
-            local RIGHT_ROW_PAD = 14
-            local rightRowH = 0
-            for _, widget in ipairs(self.children) do
-                if widget.rightAlign and widget:IsShown() then
-                    rightRowH = math.max(rightRowH, widget:GetHeight() or 0)
-                end
-            end
-            if rightRowH > 0 then
-                -- Snapped for the same reason every other layout number is: an
-                -- unsnapped offset puts everything below it off the pixel grid.
-                local reserve = SnapLen(self.child, rightRowH + RIGHT_ROW_PAD)
-                y1 = y1 - reserve
-                y2 = y2 - reserve
-            end
-            
-            for _, widget in ipairs(self.children) do
-                -- Skip widgets that belong to a SettingsGroup (they're positioned by the group)
-                if widget.settingsGroup then
-                    -- Do nothing - parent group handles positioning
-                elseif widget.rightAlign then
-                    -- Already positioned above, skip
-                elseif widget.isSyncPoint then
-                    -- Sync point: align both columns to the lowest Y position
-                    local syncY = math.min(y1, y2)
-                    y1 = syncY
-                    y2 = syncY
-                elseif widget:IsShown() then
-                    -- For SettingsGroups, use calculated height
-                    local h = widget.layoutHeight or 0
-                    if widget.isSettingsGroup and widget.calculatedHeight then
-                        h = widget.calculatedHeight
-                    end
-                    
-                    widget:ClearAllPoints()
-
-                    -- Set height for frame-based widgets (like header containers)
-                    if widget.text and widget.SetHeight and h > 0 then
-                        widget:SetHeight(h)
-                    end
-                    
-                    -- Apply indent offset if specified (for child/sub-options)
-                    -- Supports: true (20px), or a number for multiple levels (e.g. 2 = 40px)
-                    local indentOffset = 0
-                    if widget.indent then
-                        if type(widget.indent) == "number" then
-                            indentOffset = widget.indent * 20
-                        else
-                            indentOffset = 20
-                        end
-                    end
-                    
-                    -- Snap the offsets and widths this loop hands out, for the same
-                    -- reason CreateSettingsGroup:LayoutChildren does: a widget placed
-                    -- straight onto the page (a banner, a full-width note, a
-                    -- collapsible section) never passes through a group, so this is
-                    -- the only place its geometry can be put on the grid. See SnapLen.
-                    local snapX = SnapLen(widget, x1 + indentOffset)
-
-                    if widget.layoutCol == "both" then
-                        local startY = math.min(y1, y2)
-                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
-                        -- Set width to span both columns (with scrollbar padding)
-                        widget:SetWidth(SnapLen(widget, usableWidth - indentOffset))
-                        y1 = startY - h
-                        y2 = startY - h
-                    elseif widget.layoutCol == 2 and usesTwoColumns then
-                        widget:SetPoint("TOPLEFT", SnapLen(widget, col2X + indentOffset),
-                                        SnapLen(widget, y2))
-                        -- Reduce width for indented widgets to maintain alignment
-                        if indentOffset > 0 and widget.SetWidth then
-                            local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
-                        end
-                        y2 = y2 - h
-                    else
-                        -- Column 1, or column 2 when in single-column mode
-                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
-                        -- Reduce width for indented widgets to maintain alignment
-                        if indentOffset > 0 and widget.SetWidth then
-                            local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
-                        end
-                        y1 = y1 - h
-                    end
-                    
-                    local currentBottom = math.min(y1, y2)
-                    if math.abs(currentBottom) > maxY then maxY = math.abs(currentBottom) end
-                end
-            end
-            local contentH = maxY + 40 + bannerOffset
-
-            -- FOOTER: the See-Also bar is designed as one, so on a page whose
-            -- content does not fill the viewport it should sit at the BOTTOM
-            -- rather than floating halfway down with dead space under it. On a
-            -- page that does fill (or overflow) the viewport it already lands at
-            -- the end of the flow, which reads correctly -- so this only moves it
-            -- when there is spare room, and the long-page case is untouched.
-            --
-            -- Done by stretching the scroll child to the viewport height and
-            -- anchoring the footer to the child's BOTTOM: the child is what the
-            -- flow is measured against, so this keeps the footer inside the
-            -- scrolled content (it still scrolls with a long page) instead of
-            -- floating over it.
-            local footer
-            for _, w in ipairs(self.children) do
-                if w.isPageFooter and w:IsShown() then footer = w break end
-            end
-            if footer then
-                local viewH = self:GetHeight() or 0
-                if viewH > contentH then
-                    contentH = viewH
-                    footer:ClearAllPoints()
-                    footer:SetPoint("BOTTOMLEFT", self.child, "BOTTOMLEFT",
-                        SnapLen(self.child, x1), SnapLen(self.child, GUI.Space.footer))
-                    footer:SetWidth(SnapLen(footer, usableWidth))
-                end
-            end
-
-            self.child:SetHeight(contentH)
-
-            -- Update scroll child width to match content area
-            if self.child and GUI.contentFrame then
-                self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)
-            end
-        end
+        -- ☠ DISPATCHED BY NAME, not captured. The profiler instruments a target
+        -- by REPLACING DF.GUI.PageRefreshStates, and every page is built the
+        -- first time the window opens -- long before a profiling run starts --
+        -- so a page holding the function VALUE would keep calling the unwrapped
+        -- original and the target would read zero calls forever.
+        page.RefreshStates = function(self) return GUI.PageRefreshStates(self) end
     end
     
     -- Trash frame: detached from the GUI hierarchy. Old page children are

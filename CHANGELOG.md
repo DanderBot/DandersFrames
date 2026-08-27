@@ -14,12 +14,15 @@
 
 ### Bug Fixes
 
+- (Settings) Fix the settings window freezing the game for several seconds every time you opened or closed it after using the search box.
 - (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
 - (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
+- (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.
 
 ### Changes
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
+- (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
 
 ## [5.3.1]
 

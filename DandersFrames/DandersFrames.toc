@@ -46,6 +46,11 @@ Core\Config.lua
 Core\Changelog.lua
 Core\Profile.lua
 Core.lua
+# The coalescing sink for the five heavy settings sweeps. Must load after
+# Core.lua: it replaces DF:UpdateAll with an arm-stub, and Core.lua defines the
+# real body (as UpdateAll_Now). The other four bodies land later in Frames\*.lua
+# -- fine, both halves are only looked up at runtime.
+Core\ApplyScheduler.lua
 Designer\Presets.lua
 Core\RosterEvents.lua
 # Auto-profile switching engine. Resident because it is live behaviour -- it has

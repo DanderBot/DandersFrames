@@ -537,9 +537,20 @@ function P:Build(filter, animate)
     self:ShowLegend()
 end
 
-function P:Refresh(id)
-    local b = self.proxies[id]
-    if not b or b.dragging then return end
+-- The GEOMETRY half of a refresh: the slab's size and centre re-measured from
+-- the element's CURRENT rect, plus the coords readout. Returns whether it
+-- actually ran.
+--
+-- Split out of Refresh so a sweep can re-measure a whole subtree and repaint
+-- ONCE at the end: Highlight walks every slab, so calling it per element costs
+-- n passes for the same answer one pass gives.
+--
+-- ☠ A SLAB BEING DRAGGED IS LEFT ALONE. The drag owns its position for as long
+-- as the button is down (its OnUpdate SetPoints it to the cursor every frame),
+-- and it re-reads the record on drop -- EndDrag -> apply -> RefreshAll. Writing
+-- geometry here mid-drag would fight the cursor.
+local function syncGeometry(b)
+    if not b or b.dragging then return false end
     local el = b.element
     local rect = Registry:GetRect(el)
     local pos = Registry:GetPos(el)
@@ -561,10 +572,39 @@ function P:Refresh(id)
     -- Hidden frames keep a full-strength slab; the muted "hidden" word carries
     -- the state on its own.
     b.coords:SetText(shown and format("%d, %d", cx, cy) or L["hidden"])
+    return true
+end
+
+-- One slab re-measured, no repaint. For callers that are about to repaint
+-- anyway (SyncMany) or that only care about geometry.
+function P:SyncElement(id) return syncGeometry(self.proxies[id]) end
+
+-- Re-measure a batch of slabs, then repaint ONCE. `ids` may name things that
+-- have no proxy at all -- a pure anchor target, an element outside the session
+-- filter, an id from a consumer's key list that was never movable -- and those
+-- are skipped rather than being an error.
+function P:SyncMany(ids)
+    local any = false
+    for i = 1, #ids do
+        if syncGeometry(self.proxies[ids[i]]) then any = true end
+    end
+    if any then self:Highlight(NS.Session and NS.Session.selected) end
+    return any
+end
+
+function P:Refresh(id)
+    if not syncGeometry(self.proxies[id]) then return end
     self:Highlight(NS.Session and NS.Session.selected)
 end
 
 function P:RefreshAll() for id in pairs(self.proxies) do self:Refresh(id) end end
+
+-- Is any slab under the cursor right now? Callers that would otherwise put
+-- session chrome back on screen (the panel a drag deliberately hid) ask first.
+function P:IsDragging()
+    for _, b in pairs(self.proxies) do if b.dragging then return true end end
+    return false
+end
 
 function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do

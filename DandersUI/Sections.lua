@@ -56,7 +56,10 @@ local math, table = math, table
 -- ============================================================
 
 function UI:CreateSettingsGroup(parent, width, opts)
-    -- opts can be a boolean (legacy: collapsible) or a table { collapsible, showSummary }
+    -- opts can be a boolean (legacy: collapsible) or a table
+    -- { collapsible, showSummary, collapseKey, chromeless, padding }.
+    -- chromeless and padding are opt-in and change nothing for a call site that
+    -- passes neither -- see where each is read below.
     --
     -- ⚠ (Removed) onCollapseChanged. It was stored here and fired from both collapse
     -- paths, and NOTHING ever set it -- so neither guard could fire and the callback
@@ -71,7 +74,10 @@ function UI:CreateSettingsGroup(parent, width, opts)
     local host = self
 
     local group = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    group:SetSize(width or 280, 10)  -- Height will be calculated dynamically
+    -- UI.SettingsBox.group, not a literal 280: the page's column layout and the
+    -- search result card both size against this same number, and a literal here
+    -- is what let them drift into three copies that only a comment tied together.
+    group:SetSize(width or UI.SettingsBox.group, 10)  -- Height will be calculated dynamically
     group.groupChildren = {}
     group.isSettingsGroup = true
     group.collapsible = opts.collapsible or false
@@ -83,7 +89,14 @@ function UI:CreateSettingsGroup(parent, width, opts)
     group.collapsed = false
 
     -- Visual styling - subtle background and border
-    local padding = 10
+    --
+    -- opts.padding overrides the inset the column is laid out at. ONE number for
+    -- both the field and the local: LayoutChildren reads self.padding, so the two
+    -- must not be allowed to disagree. 0 is a legal value (a group mounted inside
+    -- a surface that already pads, e.g. a popout pane), which is why this is a
+    -- type test rather than an `or` -- `0 or 10` would happen to work in Lua, but
+    -- the test says what is meant.
+    local padding = (type(opts.padding) == "number") and opts.padding or UI.SettingsBox.pad
     local margin = 10  -- Space between groups
     group.padding = padding
     group.margin = margin
@@ -94,10 +107,18 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- whole border reading too heavy when it did NOT split. The border no longer
     -- has to survive being split, because it no longer splits -- so the alpha
     -- went back to the value that was right in the first place.
-    CreateElementBackdrop(group, {
-        bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
-        borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
-    })
+    --
+    -- opts.chromeless skips the box entirely -- no fill, no border. For a group
+    -- that is not a box ON a page but the whole CONTENTS of another surface: a
+    -- popout pane already draws its own panel, and a faint bordered rectangle
+    -- inside it reads as a second, smaller panel rather than as the panel's
+    -- contents.
+    if not opts.chromeless then
+        CreateElementBackdrop(group, {
+            bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
+            borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
+        })
+    end
 
     -- The consumer's persisted collapse map, or nil when it keeps none (the pack
     -- has no SavedVariables of its own). Every reader below guards for nil, which
@@ -454,8 +475,9 @@ end
 -- before the card is sized); the floor keeps a mid-relayout zero from producing a negative
 -- wrap width, which renders as a single unwrapped line running off the panel.
 function UI:GroupInnerWidth(group)
-    if not group then return 260 end
-    return math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+    local fallback = UI.PopoutContentWidth
+    if not group then return fallback end
+    return math.max(40, (group:GetWidth() or fallback) - 2 * (group.padding or UI.SettingsBox.pad))
 end
 
 -- Shared link HOVER colour: the rest colour (the host accent) LIGHTENED toward white. Keeps

@@ -58,13 +58,24 @@ local function loadOptionsCore(ns)
     return capturing(function() load_ui_file_into("OptionsCore.lua", ns) end)
 end
 
+-- ---- the pinned minor ----------------------------------------------
+-- ☠ READ OUT OF THE SOURCE, never typed in here. These blocks used to hardcode
+-- the number, so the first MINOR bump after they were written failed four
+-- assertions that had nothing to do with the change -- and the fix each time is
+-- to edit a test to match a constant it does not own. The whole point of the
+-- check under test is that the two numbers track each other; this reads the one
+-- the manifest actually pins and derives the neighbours from it.
+local EXPECTED = tonumber(ui_file_source("OptionsCore.lua"):match("EXPECTED_MINOR%s*=%s*(%d+)"))
+check(EXPECTED ~= nil, "setup: EXPECTED_MINOR is readable out of OptionsCore.lua")
+local OLDER, NEWER = EXPECTED - 2, EXPECTED + 1
+
 -- ============================================================
 -- 1. THE HANDSHAKE, RESOLVED THROUGH LIBSTUB
 -- The normal case: the options manifest rides its own addon, so its NS is empty
 -- and the base half has to be found through the one registry both halves share.
 -- ============================================================
 do
-    local base = { MINOR = 8, name = "base-8" }
+    local base = { MINOR = EXPECTED, name = "base-expected" }
     local ns = {}
     local lines = withLibStub(base, function(asked)
         local out = loadOptionsCore(ns)
@@ -111,24 +122,24 @@ end
 -- to carry both numbers, because "update your addons" is useless without them.
 -- ============================================================
 do
-    local old = { MINOR = 6, name = "base-6" }
+    local old = { MINOR = OLDER, name = "base-older" }
     local ns = {}
     local lines = withLibStub(old, function() return loadOptionsCore(ns) end)
     check(ns.__DandersUI == nil, "mismatch: an older base half does NOT get the handshake")
     eq(#lines, 1, "mismatch: one line")
-    check(lines[1]:find("6", 1, true) ~= nil, "mismatch: the line names the minor it found")
-    check(lines[1]:find("8", 1, true) ~= nil, "mismatch: ...and the minor it wanted")
+    check(lines[1]:find(tostring(OLDER), 1, true) ~= nil, "mismatch: the line names the minor it found")
+    check(lines[1]:find(tostring(EXPECTED), 1, true) ~= nil, "mismatch: ...and the minor it wanted")
 end
 
 -- A NEWER base half is refused on exactly the same terms: the check is
 -- `~=`, not `<`, because a shape change cuts both ways.
 do
-    local newer = { MINOR = 9 }
+    local newer = { MINOR = NEWER }
     local ns = {}
     local lines = withLibStub(newer, function() return loadOptionsCore(ns) end)
     check(ns.__DandersUI == nil, "mismatch: a NEWER base half is refused too")
     eq(#lines, 1, "mismatch: ...with one line")
-    check(lines[1]:find("9", 1, true) ~= nil, "mismatch: naming the newer minor it found")
+    check(lines[1]:find(tostring(NEWER), 1, true) ~= nil, "mismatch: naming the newer minor it found")
 end
 
 -- ============================================================
@@ -138,8 +149,8 @@ end
 -- other addon's copy that won the race.
 -- ============================================================
 do
-    local mine = { MINOR = 8, name = "same-addon" }
-    local theirs = { MINOR = 8, name = "someone-else" }
+    local mine = { MINOR = EXPECTED, name = "same-addon" }
+    local theirs = { MINOR = EXPECTED, name = "someone-else" }
     local ns = { __DandersUI = mine }
     local lines = withLibStub(theirs, function(asked)
         local out = loadOptionsCore(ns)
@@ -159,7 +170,7 @@ end
 -- happen.) The resident half is unaffected: its files read the key at their own
 -- load time, which has already passed.
 do
-    local stale = { MINOR = 6, name = "stale-in-addon" }
+    local stale = { MINOR = OLDER, name = "stale-in-addon" }
     local ns = { __DandersUI = stale }
     local lines = withLibStub(nil, function() return loadOptionsCore(ns) end)
     eq(#lines, 1, "stale: a mismatched in-addon copy is still reported")

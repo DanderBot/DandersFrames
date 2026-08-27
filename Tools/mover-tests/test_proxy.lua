@@ -435,6 +435,95 @@ do
 end
 
 -- ============================================================
+-- LIVE RESIZE
+-- A slab is exactly as big as the frame it stands in for, so a settings slider
+-- pulled WHILE the movers are unlocked has to show on the slab as it moves. The
+-- lib's moved-target sweep is what notices the resize (Core.lua); this is the
+-- half that puts it on screen -- and it must be a re-MEASURE, not a re-solve:
+-- a free element has no anchor, so its record does not change at all when the
+-- frames inside it get wider.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, snapToFrames = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("Z", { title = "Z" })
+    -- Mutable rects: the tests move them the way a settings sweep moves the
+    -- real ones, and the elements report whatever they currently say.
+    local box   = { x = 0, y = 0, w = 200, h = 80 }
+    local child = { x = 300, y = 0, w = 60, h = 40 }
+    R:Register("Z", "box", { title = "box", frame = FakeFrame(960, 540, 200, 80),
+        getRect = function() return box end,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    R:Register("Z", "child", { title = "child", frame = FakeFrame(960, 540, 60, 40),
+        getRect = function() return child end,
+        getPos = function() return { point = "CENTER", x = 300, y = 0 } end,
+        onChanged = function() end })
+    P:Build()
+    local bBox, bChild = P.proxies["Z:box"], P.proxies["Z:child"]
+    eq(bBox:GetWidth(), 200, "resize: the slab is built at the element's current width")
+
+    -- THE BUG. The element got wider and there is no anchor to re-solve, so the
+    -- record is untouched; only a re-measure can show it.
+    box.w, box.h = 400, 120
+    check(P:SyncElement("Z:box"), "resize: SyncElement runs for a live proxy")
+    eq(bBox:GetWidth(), 400, "resize: the slab takes the element's new width")
+    eq(bBox:GetHeight(), 120, "resize: ...and its new height")
+
+    -- The batch entry point, which is what the sweep uses: several slabs in one
+    -- pass, ids with no proxy skipped rather than erroring.
+    box.w, child.w = 500, 90
+    check(P:SyncMany({ "Z:box", "Z:child", "Z:nope" }), "resize: SyncMany syncs what it can")
+    eq(bBox:GetWidth(), 500, "resize: batch re-measured the first slab")
+    eq(bChild:GetWidth(), 90, "resize: ...and the second")
+    check(not P:SyncMany({ "Z:nope" }), "resize: nothing but unknown ids is a no-op")
+
+    -- ☠ A SLAB UNDER THE CURSOR OWNS ITS OWN GEOMETRY. Its OnUpdate SetPoints it
+    -- to the cursor every frame, so writing size/position from a sweep would
+    -- fight the drag; the drop re-reads the record instead.
+    bChild.dragging = true
+    child.w = 150
+    check(not P:SyncElement("Z:child"), "resize: a dragged slab is skipped")
+    eq(bChild:GetWidth(), 90, "resize: ...and keeps the size the drag is using")
+    check(P:IsDragging(), "resize: IsDragging sees the drag in flight")
+    bChild.dragging = false
+    P:SyncElement("Z:child")
+    eq(bChild:GetWidth(), 150, "resize: the drop lets the pending size through")
+    check(not P:IsDragging(), "resize: IsDragging clears with the drag")
+
+    -- Refresh is still "sync then repaint", and still a no-op for a missing proxy.
+    box.w = 260
+    P:Refresh("Z:box")
+    eq(bBox:GetWidth(), 260, "resize: Refresh still re-measures")
+    check(pcall(P.Refresh, P, "Z:nope"), "resize: Refresh of a missing proxy does not error")
+
+    -- ZONES ARE BUILT PER DRAG from live rects, so a target that resized between
+    -- two drags offers its seats on the NEW rect -- nothing is cached per session.
+    local function zoneFor(id, edge, align)
+        for _, z in ipairs(P.dragZones) do
+            if z.target == id and z.edge == edge and z.align == align then return z end
+        end
+    end
+    P:ShowZones(R:Get("Z:child"))
+    local zBefore = zoneFor("Z:box", "right", "center")
+    check(zBefore ~= nil, "zones: the box offers a right-edge seat")
+    P:HideZones()
+    box.w = 800
+    P:ShowZones(R:Get("Z:child"))
+    local zAfter = zoneFor("Z:box", "right", "center")
+    check(zAfter ~= nil and zAfter.x > zBefore.x, "zones: the next drag measures the box's new width")
+    P:HideZones()
+
+    P:DestroyAll()
+    R:UnregisterAddon("Z")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
 -- THE STRIP'S SESSION VERBS
 -- Spelled out in words here, and offered again as an icon row on the element
 -- panel. Undo and Redo are the two whose enabled state is not a setting, and

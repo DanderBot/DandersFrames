@@ -100,7 +100,7 @@ The library has no SavedVariables and depends on nothing but LibStub.
 | `interceptWrite` | `(db, key, value) -> handled` | writes always land |
 | `onSettingWritten` | `(db, key, value)` | no-op |
 | `refresh` / `refreshNow` | `()` | no-op |
-| `onDragStart` / `onDragStop` / `isDragging` | `(lightFn, name, previewMode)` / `()` / `() -> bool` | no drag bracketing |
+| `onDragStart` / `onDragStop` / `isDragging` | `(lightFn, name, previewMode)` / `()` / `() -> bool` | no drag bracketing — sliders commit per change instead of the preview/commit split below |
 | `registerSearch` | `(kind, label, key, widget, meta)` | no search index |
 | `onIndicatorsRefreshed` | `()` | no-op |
 | `onPopupOpen` | `()` | no-op |
@@ -120,7 +120,7 @@ All take `(parent, opts)` and return the widget frame.
 
 | Factory | Key opts |
 |---|---|
-| `CreateSlider` | `label, min, max, step, get, set, onChanged, lightweight, previewMode, accent, dbRef` |
+| `CreateSlider` | `label, min, max, step, get, set, onChanged, lightweight, accent, dbRef` (`previewMode` accepted, deprecated, ignored) |
 | `CreateDropdown` | `label, options, get, set, onChanged, dbRef, accent, inline, optionsFunc, searchable, menuAlign, maxVisible, onRuntimeWrite` |
 | `CreateAnchorGrid` | `label, getH, setH, getV, setV, onChanged, dbRef = { db, keyH, keyV }, transposedFn, verticalInertFn, wrapMirroredFn` |
 | `CreateCheckbox` | `label, get, set, onChanged, tooltip, accent, size` |
@@ -143,6 +143,33 @@ widget and none of the override machinery.
 `CreateSlider` and `CreateDropdown` have **no `tooltip` opt** — they attach the house
 tooltip to their label, and read the spec off the returned widget. Set
 `widget.tooltip = "text"` (or a `{ title, lines }` table) after creating it.
+
+## Preview vs commit (sliders and the colour picker)
+
+A drag is a stream of values the user is still choosing between, ending in ONE
+value they chose. `CreateSlider` gives those different events different slots
+(the same split Cell draws between `onValueChangedFn` and `afterValueChangedFn`):
+
+- **`lightweight` is the PREVIEW.** It runs only while the bar is held, at most
+  once per rendered frame (pumped from an OnUpdate, not from OnValueChanged),
+  and only when the snapped value actually moved. Make it cheap.
+- **`onChanged` is the COMMIT.** It runs exactly once — on release after a drag,
+  and on a typed value in the box. Never per drag tick.
+- The bound value (`set` / `dbRef`) is still written on every tick; only the
+  work moves.
+- A slider with **no `lightweight` previews nothing** during a drag except its
+  own readout. It does not fall back to `onChanged` or the `refresh` hook.
+- `previewMode` is deprecated: accepted, passed through to `onDragStart` for
+  signature compatibility, consumed by nothing. Deleted next minor.
+
+The split needs a host that publishes `onDragStart`/`onDragStop`; without them a
+slider keeps the older per-change behaviour (refresh + `onChanged` on every value
+change). The hooks are refcount-friendly: every start is matched by exactly one
+stop, including stolen mouseups (release outside the bar) and a slider hidden
+mid-drag. The colour picker's five drag surfaces (square, hue, alpha, circle
+value, wheel) announce themselves through the same two hooks, with the live
+`onChange` callback bounded to one call per changed colour while a bar is held;
+its commit stays on OK/Apply.
 
 ## Other API
 
@@ -245,7 +272,22 @@ gap to the next row included. Any region the shell tethers to may declare
 `region.popoutInset = { left, right, top, bottom }` (pixels trimmed off each
 edge), and every rect the shell takes of it honours that: the source outline is
 drawn round the ink, the beam aims at the ink, the clip gate tests the ink, and
-the settings placement measures the ink. Undeclared means "the whole frame".
+the settings placement measures the ink. Undeclared means "the whole frame". The
+inset is stated in the **region's own** units — the design pixels it lays itself
+out in — so a scaled surface declares the same numbers an unscaled one does.
+
+**Scale.** A popout can dock outside a window that carries its own `SetScale`
+(DandersFrames' settings window has a user scale slider), and a frame's
+`GetCenter`/`GetWidth` answer in that frame's **own** coordinate space, not
+UIParent's. The shell converts on both legs — every rect it reads is multiplied
+into UIParent units, and every offset it writes back (a screen anchor, a beam
+endpoint, the connection point's slide) is divided into the units of the frame
+receiving it. Consumers do not have to do anything; the thing to know is that a
+number you read out of `po` (a rect, a dock position) is in UIParent units and
+is **not** interchangeable with a `SetPoint` offset on a scaled frame. Left
+unconverted the error is `distance-from-screen-centre × (1/scale − 1)`, which at
+a window edge is over a hundred pixels — the beam stopping dead in the gutter
+beside its row rather than touching the plate.
 
 **The accent cascade.** A popout's accent is not just its chrome. Whenever the
 accent is applied — at open, and on every `SetAccent` — the popout walks its own

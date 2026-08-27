@@ -724,14 +724,167 @@ local function applyBoth()
     Mover:Apply(ADDON_KEY, "targetedList")
 end
 
+-- ============================================================
+-- LAYOUT -> ANCHOR RE-SOLVE
+-- ============================================================
+-- ☠ A SIZE CHANGE IS NOT A POSITION CHANGE, and only the position half ever
+-- announced itself. Every hook above is on a function that MOVES something. Frame
+-- Width, Frame Height, spacing, padding move nothing -- they resize the frames
+-- INSIDE the container, which changes the rect other elements are anchored to
+-- without any of those functions running. So a buff row snapped to the party
+-- frames' right edge sat at the x/y it was solved to at the OLD width until
+-- something unrelated happened to re-solve it. Reported in game as "when
+-- adjusting widths of frames, anchor locations don't update at all".
+--
+-- The apply scheduler is the main seam. Every settings sweep that can resize a
+-- frame funnels into it, and the end of its drain is the first moment the new
+-- geometry is on screen and measurable. A slider DRAG gets there too: the drag
+-- pump runs the lightweight preview once per rendered frame and the live-frames
+-- branch of that preview asks the scheduler for `headers` / `raidLayout`
+-- (Core.lua's LightweightUpdateFrameSize), so a held slider produces a drain, and
+-- therefore a pass, every frame.
+--
+-- ☠ THE TEST-MODE PREVIEW SKIPS THE SCHEDULER ENTIRELY, and that is the case that
+-- matters most: a mover session forces test mode on, and GetPartyVisibleRect
+-- measures the TEST frames while it is. LightweightUpdateFrameSize's test branch
+-- returns before it ever reaches ApplyHeaderSettings, re-laying the preview out
+-- by hand instead, so nothing arms a drain and the drag would only settle on
+-- mouse-up. Those three preview entry points are hooked below.
+--
+-- COALESCED TO ONE PASS PER RENDERED FRAME. Several of those triggers fire inside
+-- one frame (a preview re-layout calls the positioner it is hooked alongside), and
+-- the pass measures every DF target, so running it per trigger would be the
+-- expensive way to get the same answer. C_Timer.After(0) also puts it after
+-- everything else that frame has done, which is exactly where it wants to be.
+--
+-- COMBAT needs nothing here. The drain runs no combat-unsafe kind while locked
+-- down, so the pass does not even fire from that door; when it does, the lib
+-- defers a secure element's onChanged to PLAYER_REGEN_ENABLED itself
+-- (DandersMover NS:Notify) and replays it on the way out.
+--
+-- NO LOOP. Two independent brakes: `guarded` (the pass cannot re-enter itself,
+-- and collapses the Update*ContainerPosition hooks that its own re-solves fire),
+-- and Mover:RefreshMovedTargets, which measures first and does nothing at all
+-- unless a rect moved by more than half a pixel.
+
+local layoutKeys = {}
+
+local function appendKeys(src)
+    if not src then return end
+    for _, key in ipairs(src) do layoutKeys[#layoutKeys + 1] = key end
+end
+
+-- Every DF target whose RECT a frame-layout sweep can move: the two containers,
+-- the "whichever group is up" alias, each registered pinned set (their containers
+-- hold unit frames and resize with them), and the per-unit / per-group slot
+-- targets -- which are the ones users most often anchor to, and which move with
+-- the frames themselves rather than with the container.
+-- Rebuilt per pass: the pinned list and the slot list both change at runtime.
+-- The two targeted displays are NOT here -- they resize only with their own
+-- settings, and their own apply functions are already hooked above.
+local function collectLayoutKeys()
+    wipe(layoutKeys)
+    layoutKeys[1], layoutKeys[2], layoutKeys[3] = "party", "raid", "group"
+    appendKeys(Bridge.pinnedKeys.party)
+    appendKeys(Bridge.pinnedKeys.raid)
+    if Bridge.SubTargetKeys then
+        appendKeys(Bridge:SubTargetKeys("party"))
+        appendKeys(Bridge:SubTargetKeys("raid"))
+    end
+    return layoutKeys
+end
+
+local function resolveAfterLayout()
+    -- The count is MOVED TARGETS, not re-solved elements: with nothing anchored to
+    -- DF at all this still reports the containers changing size, and re-solves
+    -- nothing. At rest it is 0 and this line is silent -- which is the check for
+    -- "is something looping", so keep the wording honest about what it counts.
+    local moved = Mover:RefreshMovedTargets(ADDON_KEY, collectLayoutKeys())
+    if moved > 0 then
+        DF:Debug("LAYOUT", "MoverBridge: %d anchor target(s) changed size/position after a layout apply", moved)
+    end
+end
+
+-- Hoisted, not built per call: these are the hot path during a slider drag, and
+-- C_Timer.After keeps the SAME function object every frame this way.
+local guardedResolve = guarded(resolveAfterLayout)
+local resolvePending = false
+
+local function onResolveTick()
+    resolvePending = false
+    guardedResolve()
+end
+
+local function requestResolve()
+    if resolvePending then return end
+    resolvePending = true
+    C_Timer.After(0, onResolveTick)
+end
+
+-- Door 2: the test-mode preview, which re-lays the visible frames out by hand and
+-- never touches the apply scheduler. All three live in the load-on-demand options
+-- companion, so they are not here when Init runs -- the ADDON_LOADED waiter below
+-- is what gets them. RefreshTestFramesWithLayout is the width/height path and the
+-- two positioners are the spacing/sorting path (RefreshTestFramesWithLayout ends
+-- by calling them, which is what the per-frame coalescing is for).
+local OPTIONS_ADDON = "DandersFrames_Options"
+local PREVIEW_HOOKS = {
+    "RefreshTestFramesWithLayout",
+    "LightweightPositionPartyTestFrames",
+    "LightweightPositionRaidTestFrames",
+}
+
+-- true once the hooks are on (or already were), false while the companion is
+-- still out -- that is what tells the caller whether it needs the waiter.
+local function installPreviewHooks()
+    if Bridge.previewHooked then return true end
+    -- All three ship in the same file, so one being present means all are; keyed
+    -- off the first so a partial install can never latch the flag.
+    if not DF[PREVIEW_HOOKS[1]] then return false end
+    Bridge.previewHooked = true
+    for _, name in ipairs(PREVIEW_HOOKS) do
+        if DF[name] then hooksecurefunc(DF, name, requestResolve) end
+    end
+    return true
+end
+
 local function installHooks()
+    -- Sizes, not positions -- see LAYOUT -> ANCHOR RE-SOLVE above. Gated on the
+    -- lib version: DandersMover is an OptionalDep the user installs separately, so
+    -- the copy in front of us can predate the RefreshMovedTargets that landed in
+    -- MINOR 2. Without it anchors simply keep the pre-fix behaviour; nothing else
+    -- in this file depends on the pass.
+    if Mover.RefreshMovedTargets then
+        -- Door 1: the apply scheduler, for every settings sweep that runs a real
+        -- layout pass. Guarded on the method too -- the scheduler is core, but this
+        -- file has to keep loading if it ever is not.
+        if DF.Apply and DF.Apply.AddPostDrain then
+            DF.Apply:AddPostDrain(requestResolve)
+        end
+        -- Door 2 is in the companion. Init runs on DandersFrames' own
+        -- ADDON_LOADED, long before anything pulls that in, so nearly every
+        -- login takes the waiter -- it is the normal path, not the fallback.
+        if not installPreviewHooks() then
+            local waiter = CreateFrame("Frame")
+            waiter:RegisterEvent("ADDON_LOADED")
+            waiter:SetScript("OnEvent", function(self, _, name)
+                if name ~= OPTIONS_ADDON then return end
+                self:UnregisterAllEvents()
+                installPreviewHooks()
+            end)
+        end
+    end
     -- Our own rect moved -> re-solve everything anchored TO us. RefreshAnchorTarget only
     -- walks descendants; it never re-fires our own onChanged.
     hooksecurefunc(DF, "UpdateContainerPosition",     guarded(refreshParty))
     hooksecurefunc(DF, "UpdateRaidContainerPosition", guarded(refreshRaid))
     -- The raid rect also changes without the position changing: relayout, flat-grid
     -- resize, and the mover/test-container size sync.
-    hooksecurefunc(DF, "UpdateRaidLayout",            guarded(refreshRaid))
+    -- ⚠ HOOK THE BODY, NOT THE STUB. DF:UpdateRaidLayout is now an arm-stub that
+    -- only marks the layout dirty (Core\ApplyScheduler.lua), so a post-hook on it
+    -- would fire BEFORE the layout runs and re-solve against the old rect. The
+    -- `_Now` body is where the rect actually moves.
+    hooksecurefunc(DF, "UpdateRaidLayout_Now",        guarded(refreshRaid))
     hooksecurefunc(DF, "SyncRaidMoverToContainer",    guarded(refreshRaid))
     if DF.FlatRaidFrames then
         hooksecurefunc(DF.FlatRaidFrames, "UpdateContainerSize", guarded(refreshRaid))

@@ -121,7 +121,9 @@ function DF:InitializeRaidFrames()
 end
 
 
-function DF:UpdateRaidLayout()
+-- The real body. DF:UpdateRaidLayout() is now an arm-stub that coalesces
+-- requests through DF.Apply -- see Core\ApplyScheduler.lua.
+function DF:UpdateRaidLayout_Now()
     local db = DF:GetRaidDB()
     
     if not DF.raidContainer then return end
@@ -1076,7 +1078,9 @@ function DF:UpdateLiveRaidFrames()
     end
 end
 
-function DF:UpdateAllFrames()
+-- The real body. DF:UpdateAllFrames() is now an arm-stub that coalesces
+-- requests through DF.Apply -- see Core\ApplyScheduler.lua.
+function DF:UpdateAllFrames_Now()
     if DF:DebugActive("FLATRAID") then
         DF:Debug("FLATRAID", "UpdateAllFrames: called from\n%s", debugstack(2, 10, 0) or "unknown")
     end

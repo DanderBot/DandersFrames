@@ -4,7 +4,8 @@ local addonName, NS = ...
 -- LIBRARY OBJECT
 -- The public API lives on the LibStub object; internals live on NS.
 -- ============================================================
-local MAJOR, MINOR = "DandersMover-1.0", 1
+-- MINOR 2 adds Lib:RefreshMovedTargets (see MOVED-TARGET SWEEP below).
+local MAJOR, MINOR = "DandersMover-1.0", 2
 local Lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not Lib then return end
 NS.Lib = Lib
@@ -25,6 +26,7 @@ local Registry, Solver = NS.Registry, NS.Solver
 local pairs, ipairs, type, pcall, xpcall, geterrorhandler = pairs, ipairs, type, pcall, xpcall, geterrorhandler
 local InCombatLockdown, CreateFrame, UIParent = InCombatLockdown, CreateFrame, UIParent
 local tinsert, wipe, strsplit, strlower = table.insert, wipe, strsplit, string.lower
+local abs = math.abs
 
 function NS:Print(msg) print("|cff2e9cc9DandersMover:|r " .. tostring(msg)) end
 function NS:Debug(msg) if NS.db and NS.db.debug then print("|cff888888DandersMover:|r " .. tostring(msg)) end end
@@ -159,6 +161,13 @@ local function reapplyMany(targetIds, reason)
         local el = Registry:Get(id)
         if el and NS:ResolveElement(el) then NS:Notify(el, reason or "parent") end
     end
+    -- EVERY descendant's slab re-measures, not just the ones whose record moved.
+    -- A proxy is exactly as big as the frame it stands in for, and an anchored
+    -- element can change SIZE without its solved centre changing at all (a
+    -- centre-on-centre seat, or a growth the offsets absorb) -- so "did the
+    -- record move" is the wrong question to gate the visual on. One pass, one
+    -- repaint at the end; ids with no proxy are skipped.
+    if NS.Proxy then NS.Proxy:SyncMany(order) end
 end
 
 -- Several targets moved at once (a header re-layout that shifts every sub-target):
@@ -176,6 +185,152 @@ end
 
 function NS:ReapplyDescendants(targetId, reason)
     NS:ReapplyDescendantsMany({ targetId }, reason)
+end
+
+-- ============================================================
+-- MOVED-TARGET SWEEP
+-- ============================================================
+-- "Some of my targets may have RESIZED -- re-solve whatever depends on them."
+--
+-- RefreshAnchorTarget is the call for a target that MOVED, and a consumer knows
+-- when that happened: it just ran the function that moved it. A target that
+-- changed SIZE announces nothing -- the consumer's own layout code has no idea an
+-- anchor exists -- so a child snapped to a container's right edge kept the
+-- absolute x/y it was solved to back when the container was a different width.
+-- That is what this sweep is for: the consumer names the keys a layout pass can
+-- resize and calls it on its own layout tick, and the LIB works out whether
+-- anything actually needs re-solving.
+--
+-- Cheap enough to call every rendered frame: it measures the named targets and
+-- returns having done nothing unless one of them really moved.
+--
+-- ☠ THE EPSILON IS LOAD-BEARING. A rect is recomputed from live frame geometry
+-- every time it is asked for, so exact equality lets sub-pixel jitter (a scale
+-- ratio, a fractional container size) report "moved" forever, and every report
+-- re-solves and re-notifies the whole subtree. Half a pixel is below anything a
+-- user can see and above anything the maths can wobble by.
+local RECT_EPSILON = 0.5
+
+-- id -> the rect this sweep last solved that target against. Cleared on
+-- Unregister so a churning key list (a consumer re-registering its elements)
+-- cannot grow it without bound.
+NS.lastRect = {}
+
+-- Availability AND geometry in ONE measure. Registry:IsTargetAvailable would
+-- call the consumer's getRect a second time, and this runs over every key on
+-- every tick. nil = not a usable anchor target right now, which is a state of
+-- its own: nil <-> rect counts as a move, because a child holding against a
+-- vanished target has to re-solve the moment it comes back.
+local function targetRect(target)
+    if not Registry:IsRelevant(target) then return nil end
+    if target.getRect then return target.getRect() end
+    local f = Registry:GetFrame(target)
+    if not f or not f:IsShown() then return nil end
+    return Registry:GetRect(target)
+end
+
+local function movedSince(id, r)
+    local prev = NS.lastRect[id]
+    if r == nil then return prev ~= nil end
+    if prev == nil then return true end
+    return abs(prev.x - r.x) > RECT_EPSILON or abs(prev.y - r.y) > RECT_EPSILON
+        or abs(prev.w - r.w) > RECT_EPSILON or abs(prev.h - r.h) > RECT_EPSILON
+end
+
+local function stampRect(id, r)
+    if r == nil then NS.lastRect[id] = nil return end
+    local prev = NS.lastRect[id]
+    if prev then prev.x, prev.y, prev.w, prev.h = r.x, r.y, r.w, r.h
+    else NS.lastRect[id] = { x = r.x, y = r.y, w = r.w, h = r.h } end
+end
+
+-- Reused across sweeps: the ids that moved this pass. Safe to reuse because the
+-- sweep is re-entrancy guarded (below) and ReapplyDescendantsMany copies what it
+-- needs out of it before calling anything back into the consumer.
+local movedIds = {}
+
+-- An open panel is docked to a slab and quotes the record the sweep just
+-- re-solved, so it has to come along when either changes. Three states where it
+-- must NOT: no live session (there is nothing on screen), a combat suspend (the
+-- panels are deliberately hidden and Panel:Refresh re-shows pinned ones), and a
+-- drag in flight (onDragStart hides the FOLLOWING panel on purpose, and a
+-- refresh would plant it straight back under the cursor).
+local function refreshSessionPanel()
+    if not (NS.Panel and NS.Session) then return end
+    if not NS.Session:IsActive() or NS.Session:IsSuspended() then return end
+    if NS.Proxy and NS.Proxy:IsDragging() then return end
+    NS.Panel:Refresh()
+end
+
+local function sweepMoved(addon, keys)
+    local n = 0
+    for _, key in ipairs(keys) do
+        local target = Registry:GetTarget(Registry.Id(addon, key))
+        if target and movedSince(target.id, targetRect(target)) then
+            n = n + 1
+            movedIds[n] = target.id
+        end
+    end
+    for i = n + 1, #movedIds do movedIds[i] = nil end
+    if n == 0 then return 0 end
+
+    -- A moved target that is ALSO a movable element and is itself anchored has
+    -- just had its own SIZE change, and Solver.Resolve takes the child's w/h --
+    -- so its own solved position is stale too. It has to settle BEFORE the
+    -- descendant pass, or the children solve against a rect their parent is
+    -- about to leave. ResolveElement returns false when the solve did not
+    -- actually move it, so an unanchored (or already-correct) element notifies
+    -- nothing: that is the other half of "no churn".
+    --
+    -- ⚠ THE REASONS ARE THE EXISTING ONES ON PURPOSE: "reapply" for the element
+    -- itself (what Lib:Apply sends) and "parent" for the descendants (what
+    -- RefreshAnchorTarget sends). Both mean "the lib re-solved you", which is
+    -- exactly what happened, and consumers already branch on that -- DandersFrames'
+    -- pinned sets treat any OTHER reason as a user gesture and void a pending
+    -- migration fold on it. A new reason string here would have been a silent
+    -- behaviour change in someone else's file.
+    for i = 1, n do
+        local el = Registry:Get(movedIds[i])
+        if el and NS:ResolveElement(el) then
+            NS:Notify(el, "reapply")
+        end
+    end
+    NS:ReapplyDescendantsMany(movedIds, "parent")
+
+    -- ☠ THE SLAB HAS TO RE-MEASURE EVEN WHEN THE RECORD DID NOT CHANGE, so this
+    -- is deliberately NOT inside the ResolveElement branch above. A proxy is
+    -- exactly as big as the frame it stands in for, and a FREE element that got
+    -- wider has no anchor to re-solve: ResolveElement returns false for it, and
+    -- the old code read that as "nothing to show". So with the movers unlocked,
+    -- pulling Frame Width grew the real frames while their slab kept the size it
+    -- was built at. Reported in game as "when unlocked and changing a frame
+    -- size, the mover does not update its size".
+    --
+    -- Descendants are already synced by the pass above (reapplyMany); this is
+    -- the swept targets themselves. Ids with no proxy -- a pure anchor target,
+    -- an element outside the session filter, no session open at all -- are
+    -- skipped inside SyncMany.
+    if NS.Proxy then NS.Proxy:SyncMany(movedIds) end
+    refreshSessionPanel()
+
+    -- ☠ RE-STAMP EVERY KEY, FROM A FRESH MEASURE -- not just the ones that read
+    -- as moved at the top. The pass itself moves things: the self-resolve above,
+    -- every descendant it re-solved, and whatever the consumer's onChanged did
+    -- with the position it was handed. Anything measured before that ran is now
+    -- out of date, and stamping only the movers left each re-solved DESCENDANT
+    -- looking changed on the next tick -- one redundant pass every tick forever,
+    -- and a chain of anchors settling one link per tick instead of all at once.
+    --
+    -- The flip side, deliberate: a consumer that resizes one of these targets
+    -- from inside its own onChanged has that change absorbed here rather than
+    -- reported next tick. It is the same statement either way -- "this is the
+    -- state we have now seen" -- and the alternative is a sweep that can never
+    -- go quiet.
+    for _, key in ipairs(keys) do
+        local target = Registry:GetTarget(Registry.Id(addon, key))
+        if target then stampRect(target.id, targetRect(target)) end
+    end
+    return n
 end
 
 -- ============================================================
@@ -209,12 +364,18 @@ function Lib:RegisterAnchorTarget(addon, key, def)
     return target
 end
 function Lib:Unregister(addon, key)
+    local id = Registry.Id(addon, key)
     Registry:Unregister(addon, key)
-    if NS.Proxy then NS.Proxy:Remove(Registry.Id(addon, key)) end
+    NS.lastRect[id] = nil
+    if NS.Proxy then NS.Proxy:Remove(id) end
     registryChanged(addon, key)
 end
 function Lib:UnregisterAddon(addon)
     Registry:UnregisterAddon(addon)
+    local prefix = addon .. ":"
+    for id in pairs(NS.lastRect) do
+        if id:sub(1, #prefix) == prefix then NS.lastRect[id] = nil end
+    end
     if NS.Proxy then NS.Proxy:RemoveAddon(addon) end
     registryChanged(addon)
 end
@@ -241,6 +402,30 @@ function Lib:RefreshAnchorTargets(addon, keys)
     local ids = {}
     for _, key in ipairs(keys) do tinsert(ids, Registry.Id(addon, key)) end
     NS:ReapplyDescendantsMany(ids, "parent")
+end
+
+-- "These targets of mine may have resized." Measures each key, and re-solves the
+-- moved ones plus everything anchored to them. Returns how many actually moved,
+-- so a caller can log or skip follow-up work; 0 means the call did nothing.
+--
+-- Meant to be called on the consumer's LAYOUT tick (after a settings sweep has
+-- re-sized its frames), which is why it is guarded to a no-op rather than a
+-- nested pass: a re-solve notifies the consumer, whose apply path can land right
+-- back here through whatever drives its layout. The guard is what makes that a
+-- stop rather than a loop; the epsilon in the sweep is what makes it converge.
+--
+-- `keys` is read twice -- once to find what moved, once to re-stamp -- so it must
+-- stay valid for the whole call. A reused scratch table is fine (and is what
+-- DandersFrames hands in); rebuilding it from a consumer callback is not.
+local sweeping = false
+
+function Lib:RefreshMovedTargets(addon, keys)
+    if sweeping then return 0 end
+    sweeping = true
+    local ok, res = pcall(sweepMoved, addon, keys)
+    sweeping = false
+    if not ok then geterrorhandler()(res) return 0 end
+    return res
 end
 
 function Lib:Apply(addon, key)

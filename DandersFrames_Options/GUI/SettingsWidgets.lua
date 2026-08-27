@@ -2731,6 +2731,66 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     return w
 end
 
+-- ============================================================
+-- BORDER SHADOW -- the five controls under the "Border Shadow" toggle.
+--
+-- Lifted out of CreateBorderControls for popout gate two: Border and Border
+-- Shadow mount as two SEPARATE popout rows, so each needs a builder that can be
+-- handed its own group. CreateBorderControls still calls this for
+-- include.shadow, so every existing consumer builds exactly what it did.
+--
+-- The widgets come back with hideOn set and the four sub-controls carrying
+-- shadowOff as their disableOn — and NOTHING composed on top. The caller owns
+-- that: CreateBorderControls' end-of-function loop does it for the merged case,
+-- GUI:CreateBorderShadowControls below does it for the standalone one. Applying
+-- it here as well would double-compose the merged path.
+-- ============================================================
+local function BuildBorderShadowWidgets(group, dbTable, prefix, opts, hideOff)
+    local parent        = opts.parent
+    local fullUpdate    = opts.fullUpdate or function() end
+    local lightUpdate   = opts.lightUpdate
+    local refreshStates = opts.refreshStates
+
+    local function key(suffix) return prefix .. suffix end
+    local shadowOnKey = key("BorderShadowEnabled")
+    local w = {}
+
+    -- opts.noEnableToggle: suppress the built-in "Border Shadow" checkbox, the
+    -- same idiom as CreateBorderControls' noShowToggle, for consumers that gate
+    -- the shadow on an external toggle. The sub-controls keep their shadowOff
+    -- grey either way — the key still gates them, it is just not written here.
+    if not opts.noEnableToggle then
+        w.shadowEnabled = group:AddWidget(GUI:CreateCheckbox(parent, L["Border Shadow"], dbTable, shadowOnKey, function()
+            if refreshStates then refreshStates() end
+            fullUpdate()
+        end), 30)
+        w.shadowEnabled.hideOn = hideOff
+    end
+    -- Border Shadow OFF greys (not hides) its sub-controls — a nested boolean
+    -- toggle, same grey-everything rule. The caller's composition ORs its own
+    -- gate on top, so these also grey when Show Border is off.
+    local function shadowOff() return dbTable[shadowOnKey] == false end
+
+    w.shadowColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"],
+        dbTable, key("BorderShadowColor"), true, fullUpdate), 35)
+    w.shadowColor.hideOn = hideOff
+    w.shadowColor.disableOn = shadowOff
+    w.shadowSize = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Size"], 0, 10, 1,
+        dbTable, key("BorderShadowSize"), fullUpdate, lightUpdate, true), 55)
+    w.shadowSize.hideOn = hideOff
+    w.shadowSize.disableOn = shadowOff
+    w.shadowOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset X"], -10, 10, 1,
+        dbTable, key("BorderShadowOffsetX"), fullUpdate, lightUpdate, true), 55)
+    w.shadowOffsetX.hideOn = hideOff
+    w.shadowOffsetX.disableOn = shadowOff
+    w.shadowOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset Y"], -10, 10, 1,
+        dbTable, key("BorderShadowOffsetY"), fullUpdate, lightUpdate, true), 55)
+    w.shadowOffsetY.hideOn = hideOff
+    w.shadowOffsetY.disableOn = shadowOff
+
+    return w
+end
+
 function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     opts = opts or {}
     local parent       = opts.parent
@@ -2971,34 +3031,13 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.blendMode.tooltip = L["How the border colour mixes with whatever is behind it. Blend is normal. Add brightens and is what makes a colour glow. Modulate darkens. Disable ignores opacity entirely and draws the colour flat."]
     end
 
+    -- The shadow block lives in its own builder (above) so gate two can mount it
+    -- as a popout row of its own. Merged onto `w` here, BEFORE the composition
+    -- loop at the end of this function — which is what puts borderOff on top of
+    -- the shadowOff those sub-controls came back carrying.
     if include.shadow then
-        local shadowOnKey = key("BorderShadowEnabled")
-        w.shadowEnabled = group:AddWidget(GUI:CreateCheckbox(parent, L["Border Shadow"], dbTable, shadowOnKey, function()
-            if refreshStates then refreshStates() end
-            fullUpdate()
-        end), 30)
-        w.shadowEnabled.hideOn = hideOff
-        -- Border Shadow OFF greys (not hides) its sub-controls — a nested boolean
-        -- toggle, same grey-everything rule. The end-of-function loop OR-composes
-        -- borderOff, so these also grey when Show Border is off.
-        local function shadowOff() return dbTable[shadowOnKey] == false end
-
-        w.shadowColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Shadow Color"],
-            dbTable, key("BorderShadowColor"), true, fullUpdate), 35)
-        w.shadowColor.hideOn = hideOff
-        w.shadowColor.disableOn = shadowOff
-        w.shadowSize = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Size"], 0, 10, 1,
-            dbTable, key("BorderShadowSize"), fullUpdate, lightUpdate, true), 55)
-        w.shadowSize.hideOn = hideOff
-        w.shadowSize.disableOn = shadowOff
-        w.shadowOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset X"], -10, 10, 1,
-            dbTable, key("BorderShadowOffsetX"), fullUpdate, lightUpdate, true), 55)
-        w.shadowOffsetX.hideOn = hideOff
-        w.shadowOffsetX.disableOn = shadowOff
-        w.shadowOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Shadow Offset Y"], -10, 10, 1,
-            dbTable, key("BorderShadowOffsetY"), fullUpdate, lightUpdate, true), 55)
-        w.shadowOffsetY.hideOn = hideOff
-        w.shadowOffsetY.disableOn = shadowOff
+        local sw = BuildBorderShadowWidgets(group, dbTable, prefix, opts, hideOff)
+        for k, v in pairs(sw) do w[k] = v end
     end
 
     -- ===== Animation (Stage 3) =====
@@ -3076,6 +3115,43 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             widget.disableOn = function(d)
                 if disableWhen and disableWhen(dbTable) then return true end
                 if not isShow and borderOff() then return true end
+                return (prev and prev(d)) or false
+            end
+        end
+    end
+
+    return w
+end
+
+-- Border Shadow on its own, for a consumer that mounts it apart from the rest
+-- of the border — popout gate two, where Border and Border Shadow are two
+-- separate rows with a group each. Identical widgets to the include.shadow
+-- branch above; the difference is only who supplies the gates:
+--   hideWhen    — the consumer's visibility gate, applied to every row. nil (no
+--                 gate) means never hidden, which is what the panel pages pass.
+--   disableWhen — the consumer's grey, applied to EVERY row INCLUDING the
+--                 Border Shadow checkbox. The single-call path's equivalent is
+--                 borderOff, which the loop in CreateBorderControls composes;
+--                 split apart, the mount site passes the same predicate here.
+--   noEnableToggle — suppress the built-in checkbox (see the builder above).
+function GUI:CreateBorderShadowControls(group, dbTable, prefix, opts)
+    opts = opts or {}
+    local hideWhen    = opts.hideWhen
+    local disableWhen = opts.disableWhen
+
+    -- Same shape as CreateBorderControls' hideShow: the predicate reads from the
+    -- captured dbTable, not from the table LayoutChildren passes in.
+    local function hideOff() return hideWhen and hideWhen(dbTable) or false end
+
+    local w = BuildBorderShadowWidgets(group, dbTable, prefix, opts, hideOff)
+
+    -- The consumer's grey, composed on top of whatever the widget already
+    -- carries — nil for the toggle, shadowOff for the four under it.
+    for _, widget in pairs(w) do
+        if type(widget) == "table" and widget.SetEnabled then
+            local prev = widget.disableOn
+            widget.disableOn = function(d)
+                if disableWhen and disableWhen(dbTable) then return true end
                 return (prev and prev(d)) or false
             end
         end

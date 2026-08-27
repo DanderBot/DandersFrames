@@ -164,8 +164,12 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ============================================
         if not DF._iconPreviewHooked then
             DF._iconPreviewHooked = true
-            if DF.UpdateAllFrames then
-                hooksecurefunc(DF, "UpdateAllFrames", function() DF:RefreshIconPreviews() end)
+            -- ⚠ HOOK THE BODY, NOT THE STUB. DF:UpdateAllFrames is now an
+            -- arm-stub that only marks the sweep dirty (Core\ApplyScheduler.lua);
+            -- a post-hook on it would refresh the previews before the sweep it
+            -- is meant to follow. `_Now` is the real body.
+            if DF.UpdateAllFrames_Now then
+                hooksecurefunc(DF, "UpdateAllFrames_Now", function() DF:RefreshIconPreviews() end)
             end
             if DF.UpdateAllFramesStatusIcons then
                 hooksecurefunc(DF, "UpdateAllFramesStatusIcons", function() DF:RefreshIconPreviews() end)

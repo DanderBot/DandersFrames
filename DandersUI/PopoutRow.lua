@@ -130,6 +130,28 @@ end
 -- THE POPOUT SIDE
 -- ============================================================
 
+-- Re-measure the pane that is CURRENTLY showing and put the panel back around
+-- it. A pane's height is not the constant paneFor took it for: a consumer whose
+-- pane holds a settings group re-flows that group whenever a hideOn changes
+-- (Border Style = TEXTURE shows the texture dropdown), and the pane then grows
+-- or shrinks under a panel still sized to what it measured at build.
+--
+-- ⚠ THE CAP DECISION IS STILL BUILD-TIME, so a scroll-wrapped pane is left
+-- alone: its host is the scroll region and its height IS the cap, whatever the
+-- pane inside now measures. The other side of that -- a pane which grows PAST
+-- the cap after build stays unwrapped and simply opens a taller panel (the shell
+-- clamps it to the screen) -- is deliberate: wrapping it here would mean
+-- re-parenting a live pane into a scroll child mid-interaction, under the user's
+-- cursor, which is the exact thing paneFor decides once in order to avoid.
+local function syncRowPaneHeight(po)
+    local rec = po._rowActive
+    if not rec or rec.scroll then return po end
+    rec.h = max(rec.pane:GetHeight() or 0, 1)
+    po.content:SetHeight(rec.h)
+    po:Resize()
+    return po
+end
+
 -- The shell's build, run ONCE PER INSTANCE: a bare container and an empty pane
 -- cache. Everything a ROW puts in the popout is mounted into this later, by
 -- paneFor, so that the instance can outlive any one row's content.
@@ -141,6 +163,9 @@ local function mountBare(po, content)
     po._rowMount = mount
     po._rowPanes = {}
     po._rowActive = nil
+    -- Published on the INSTANCE rather than kept private, because the thing that
+    -- knows a pane re-flowed is the consumer's own control (see below).
+    po.SyncRowPaneHeight = syncRowPaneHeight
 end
 
 local function capHeight()
@@ -227,6 +252,13 @@ end
 -- its own, which is the demo's case.
 local function rewire(po, rec)
     local pane = rec.pane
+    -- Every settings GROUP mounted directly in the pane, FIRST and
+    -- unconditionally. The roster below takes a group's own CHILDREN as the
+    -- gate's widgets and leaves the group itself out of rec.kids, so this is the
+    -- only thing left that reaches the group's disableOn sweep -- and that sweep
+    -- is about the widgets the group owns, so it never doubles up with either
+    -- branch after it.
+    for _, g in ipairs(rec.groups) do safeCall(g.RefreshChildStates, g) end
     if type(pane.RefreshChildStates) == "function" then
         return safeCall(pane.RefreshChildStates, pane)
     end
@@ -317,12 +349,38 @@ local function paneFor(po, row)
     -- row) and never grows afterwards, so the list of widgets the toggle governs
     -- is settled the moment the build returns -- and re-walking GetChildren on
     -- every toggle would only re-derive the same list.
-    local kids = {}
+    --
+    -- ☠ A SETTINGS GROUP IS NOT A WIDGET, it is a bag of them. A consumer that
+    -- mounts a real settings group into the pane (which is what a page does: its
+    -- group's AddWidget RE-PARENTS every control into the group frame) hands this
+    -- walk ONE direct child, and arming that child buys nothing -- a group has no
+    -- SetEnabled, and EnableMouse(false) on a frame does NOT stop its children
+    -- taking input, so the "dead" pane would still be fully clickable. So a group
+    -- is opened up: its groupChildren entries' widgets go on the roster and the
+    -- group frame itself does not. rewire above is what keeps the group's own
+    -- state pass reachable once it is off the list.
+    --
+    -- ⚠ rawget for both markers. A test double (and any frame whose metatable
+    -- answers unknown keys) would report a truthy method for `isSettingsGroup`,
+    -- and a plain read would then treat every ordinary child as a group.
+    local kids, groups = {}, {}
     if type(pane.GetChildren) == "function" then
         for _, w in ipairs({ pane:GetChildren() }) do
             if type(w) == "table" then
-                kids[#kids + 1] = w
-                armGate(w)
+                local entries = rawget(w, "isSettingsGroup") and rawget(w, "groupChildren")
+                if type(entries) == "table" then
+                    groups[#groups + 1] = w
+                    for _, entry in ipairs(entries) do
+                        local cw = entry and entry.widget
+                        if type(cw) == "table" then
+                            kids[#kids + 1] = cw
+                            armGate(cw)
+                        end
+                    end
+                else
+                    kids[#kids + 1] = w
+                    armGate(w)
+                end
             end
         end
     end
@@ -330,7 +388,7 @@ local function paneFor(po, row)
     -- gateShut starts FALSE rather than nil: a pane is built with its widgets in
     -- whatever state the consumer left them, which is the open state, so the
     -- first sync on an already-on row is a no-op instead of a pointless rewire.
-    rec = { pane = pane, host = pane, h = h, kids = kids, gateShut = false }
+    rec = { pane = pane, host = pane, h = h, kids = kids, groups = groups, gateShut = false }
 
     local cap = capHeight()
     if cap > 0 and h > cap then
@@ -359,8 +417,14 @@ local function paneFor(po, row)
     -- pane a second time purely to count it. Frames only -- a label is a
     -- FontString and was never a "control" -- so a row whose count includes its
     -- headers will report a mismatch, which is the report doing its job.
+    --
+    -- Measured against the ROSTER rather than pane:GetNumChildren(), and the two
+    -- only differ where the roster does: a pane of plain direct children collects
+    -- exactly those children, so the number is unchanged there. A pane holding a
+    -- settings group would have counted 1 -- the group -- and reported every
+    -- honest declaration as a mismatch.
     if row._count then
-        local n = pane.GetNumChildren and pane:GetNumChildren() or 0
+        local n = #kids
         if n ~= row._count then
             local dbg = po.host:Call("debug", "popoutrow")
             if dbg then
@@ -416,6 +480,12 @@ local function swapTo(po, row)
     rec.pane:Show()
     rec.host:Show()
     po._rowActive = rec
+    -- RE-MEASURED, not replayed. rec.h was fixed at build, and a CACHED pane may
+    -- have re-flowed since (a hideOn inside it changed while another row had the
+    -- panel), so reapplying the stale number opens the panel at the wrong height
+    -- and leaves a gap or a clipped last row. The scroll-wrapped case keeps its
+    -- number: rec.h IS the cap there -- see syncRowPaneHeight.
+    if not rec.scroll then rec.h = max(rec.pane:GetHeight() or 0, 1) end
     po.content:SetHeight(rec.h)
     po:Resize()
     bindRow(po, row)
@@ -476,15 +546,22 @@ end
 --              FUNCTION -> table, re-resolved on every refresh
 --   toggle     { db = t|fn, key = "k" }  (db defaults to opts.db)
 --              OR { get = fn, set = fn(v) }
+--              A {db, key} write goes through the host's interceptWrite /
+--              onSettingWritten hooks, like every other db-bound widget in the
+--              kit; a {get, set} one does not -- see row._Write
 --              OFF also GATES the popout: every widget in this row's pane greys
 --              and stops taking input. The popout's own header toggle, pin and
 --              cross stay live -- see THE OFF GATE above
 --   summary    fn(db) -> string, rendered live in the row
 --   offText    the single word shown instead of the summary while toggled off
 --   count      declared number of controls in the group (the badge, and the
---              number the build-time count check is measured against)
+--              number the build-time count check is measured against). Counted
+--              off the gate's roster, so a pane whose content is a settings
+--              group is measured by the CONTROLS in it, not by the one child
 --   build      fn(popout, pane) -> mounts the group's widgets; ONCE per
---              (instance, row), and it must size its pane
+--              (instance, row), and it must size its pane. A pane that re-flows
+--              LATER (a hideOn inside it changed) tells the panel so with
+--              popout:SyncRowPaneHeight()
 --   accent     {r,g,b[,a]} per-row accent override (else the host accent)
 --   enabled    bool or fn(db) -> bool; false greys the WHOLE row, and the popout
 --              still opens -- the controls inside gate themselves. ⚠ A SEPARATE
@@ -717,6 +794,20 @@ function UI:CreatePopoutRow(parent, opts)
     -- THE ONE WRITE PATH. The row's tick and the popout header's tick both come
     -- through here, so neither can write somewhere the other does not read, and
     -- the refresh that follows repaints BOTH.
+    --
+    -- ☠ A {db, key} TOGGLE IS A SETTING, AND SETTINGS GO THROUGH THE HOST'S
+    -- SETTING HOOKS. Every other db-bound widget in the kit brackets its write
+    -- with interceptWrite / onSettingWritten (Widgets.lua: the slider's
+    -- OnValueChanged, the dropdown menu button's OnClick, the align grid's
+    -- WriteKey), because a consumer may be running a RUNTIME OVERLAY -- where the
+    -- write belongs to a baseline table rather than the live one -- or EDITING a
+    -- layout, where the write also has to be recorded as an override. This row's
+    -- tick used to write the key bare, so a tick and an ordinary checkbox bound to
+    -- the SAME key disagreed: half the consumer's own panel honoured its overlay
+    -- and half of it wrote straight through. One key, one write path.
+    --
+    -- A {get, set} toggle is NOT the kit's db to gate -- set() IS the consumer's
+    -- write path, and it is left entirely alone.
     function row._Write(v)
         v = v and true or false
         local t = opts.toggle
@@ -724,7 +815,21 @@ function UI:CreatePopoutRow(parent, opts)
             if t.set then safeCall(t.set, v)
             else
                 local tdb = resolveDB(t.db or opts.db)
-                if tdb and t.key then tdb[t.key] = v end
+                if tdb and t.key then
+                    if host:Call("interceptWrite", tdb, t.key, v) then
+                        -- REDIRECTED: the live value did not change, so neither
+                        -- the write nor onToggle happens -- exactly what the
+                        -- slider and the dropdown do (they return before their
+                        -- callback) and what the align grid spells out as
+                        -- `if liveWrite and callback`. The Refresh still runs:
+                        -- the tick has already moved ITSELF by the time it gets
+                        -- here, and only a re-read puts it back on the live value.
+                        row.Refresh()
+                        return
+                    end
+                    tdb[t.key] = v
+                    host:Call("onSettingWritten", tdb, t.key, v)
+                end
             end
         end
         safeCall(opts.onToggle, v)

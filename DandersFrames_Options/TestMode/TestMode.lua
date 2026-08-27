@@ -3260,7 +3260,10 @@ function DF:ApplyTestPreset(preset)
         if db.testAnimateHealth then
             DF:StartTestAnimation()
         end
-        DF:UpdateAllFrames()
+        -- ⚠ _Now, not the arm-stub: RefreshAllTestSurfaces below repaints the
+        -- surfaces this pass rebuilds, so the layout pass has to be finished
+        -- first. A one-frame deferral would invert the two.
+        DF:UpdateAllFrames_Now()
         if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
         RefreshAllTestSurfaces()
     end
@@ -4036,7 +4039,10 @@ function DF:CreateTestPanel()
                     end
                 end)
             elseif not isRaidMode and DF.testMode then
-                DF:UpdateAllFrames()
+                -- ⚠ _Now, not the arm-stub: the RefreshTestFrames right below
+                -- and the After(0) "second pass over settled rects" both depend
+                -- on this rebuild having already happened this tick.
+                DF:UpdateAllFrames_Now()
                 if DF.RefreshTestFrames then DF:RefreshTestFrames() end
                 -- Same second pass as the raid branch above — see that comment.
                 C_Timer.After(0, function()

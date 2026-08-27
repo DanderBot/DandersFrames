@@ -1,8 +1,39 @@
 -- Headless shim: just enough WoW globals for Undo/Solver/Registry.
 geterrorhandler = geterrorhandler or function() return function(err) print("ERROR: " .. tostring(err)) end end
 securecallfunction = securecallfunction or function(f, ...) return f(...) end
-InCombatLockdown = InCombatLockdown or function() return false end
+-- ☠ WoW's xpcall FORWARDS extra arguments to the called function; stock Lua 5.1's
+-- signature is xpcall(f, handler) and silently drops them. DandersMover's
+-- NS:Notify is xpcall(el.onChanged, geterrorhandler(), pos, reason), so under the
+-- unpatched builtin every consumer callback would be handed nil for both -- which
+-- looks exactly like a lib bug and is purely an artefact of the harness.
+do
+    local builtin = xpcall
+    xpcall = function(f, handler, ...)
+        local n = select("#", ...)
+        if n == 0 then return builtin(f, handler) end
+        local args = { ... }
+        return builtin(function() return f(unpack(args, 1, n)) end, handler)
+    end
+end
+-- Combat as a MUTABLE FLAG rather than a fixed answer. DandersMover/Core.lua caches
+-- InCombatLockdown in a file-scope local at load time, so a test that swaps the
+-- GLOBAL afterwards never reaches the lib -- this flag is the only door into its
+-- combat deferral (NS:Notify holding a secure element, NS:FlushPending replaying
+-- it). Defaults to false, so every existing caller sees exactly what it did before.
+-- (Modules that resolve InCombatLockdown at CALL time -- ApplyScheduler -- are
+-- tested by replacing the global instead; test_apply.lua does that and restores it.)
+IN_COMBAT = false
+InCombatLockdown = InCombatLockdown or function() return IN_COMBAT and true or false end
 wipe = wipe or function(t) for k in pairs(t) do t[k] = nil end return t end
+-- The client's UITextureSliceMode, for Round.lua's nine-slice call. Values are
+-- the real ones, not convenient ones.
+--
+-- ⚠ Stretched IS 0, and Round.lua's defensive fallback for a missing Enum is also
+-- 0, so an assertion on the recorded mode proves the surface asked for Stretched
+-- rather than Tiled -- it does NOT prove Enum was consulted. Faking a different
+-- number here to make it prove that would be testing the harness, not the client.
+Enum = Enum or {}
+Enum.UITextureSliceMode = Enum.UITextureSliceMode or { Stretched = 0, Tiled = 1 }
 strsplit = strsplit or function(sep, s) local out = {} for piece in string.gmatch(s, "([^" .. sep .. "]+)") do out[#out + 1] = piece end return unpack(out) end
 
 -- Fake frames: enough for Registry:GetRect.
@@ -73,6 +104,7 @@ function FakeUIFrame(w, h, cx, cy)
     local f = { _shown = false, _alpha = 1, _scale = 1, _w = w or 0, _h = h or 0,
                 _cx = cx or 0, _cy = cy or 0, _points = {}, _scripts = {},
                 _lines = {}, _textures = {}, _text = "", _flags = {},
+                _allPoints = false,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false,
                 fxTo = false, fxScale = false }
     function f:Show() self._shown = true end
@@ -84,7 +116,30 @@ function FakeUIFrame(w, h, cx, cy)
     function f:GetAlpha() return self._alpha end
     function f:SetScale(v) self._scale = v end
     function f:GetScale() return self._scale end
-    function f:GetEffectiveScale() return self._scale end
+    -- ☠ EFFECTIVE scale is INHERITED -- that is the whole difference between it and
+    -- GetScale, and a stub that answered its own scale for both could not model a
+    -- SCALED UIPARENT at all. Every frame parented to UIParent would claim 1.0
+    -- while the thing it is measured against claimed 0.9, so the conversion layer
+    -- in Popout.lua would be handed ratios no real client ever produces -- and the
+    -- one scenario in which a "convert through UIParent's centre" bug could hide
+    -- (a UI scale slider that is not 1) would be untestable by construction.
+    --
+    -- `_parent` is the convention the richer per-file stubs already use
+    -- (test_popout_row, test_sections_group, test_widgets_slider, test_ui_options
+    -- all set it). With no parent this is exactly the old answer, which is why
+    -- every existing test is untouched.
+    --
+    -- ⚠ rawget, for the reason every other read of a private field here uses it:
+    -- the __index fallback answers an UNSET key with a no-op FUNCTION, so a plain
+    -- `self._parent` is truthy on every frame that has never been given one and
+    -- the line below would index a function.
+    function f:SetFakeParent(p) self._parent = p end
+    function f:GetParent() return rawget(self, "_parent") end
+    function f:GetEffectiveScale()
+        local p = rawget(self, "_parent")
+        local pe = type(p) == "table" and p.GetEffectiveScale and p:GetEffectiveScale() or 1
+        return pe * self._scale
+    end
     function f:SetSize(w2, h2) self._w, self._h = w2, h2 end
     function f:SetWidth(w2) self._w = w2 end
     function f:SetHeight(h2) self._h = h2 end
@@ -97,9 +152,31 @@ function FakeUIFrame(w, h, cx, cy)
     function f:GetRight() return self._cx + self._w / 2 end
     function f:GetBottom() return self._cy - self._h / 2 end
     function f:GetTop() return self._cy + self._h / 2 end
-    function f:ClearAllPoints() wipe(self._points) end
+    function f:ClearAllPoints() wipe(self._points); self._allPoints = false end
     function f:SetPoint(...) self._points[#self._points + 1] = { ... } end
     function f:GetNumPoints() return #self._points end
+    -- ☠ A REAL GETTER, not the __index no-op, and the two are NOT the same thing
+    -- to a caller. Real code that re-anchors relative to where a frame already is
+    -- reads its anchor back first (PopoutDemo's insetTitleButton nudges the title
+    -- cross inboard of a rounded corner that way, rather than copying the
+    -- library's private edge constant); against the no-op it gets nothing back
+    -- and silently declines to move, which is a test that passes while the thing
+    -- it is testing does nothing.
+    --
+    -- Answers the 5-value WoW shape (point, relativeTo, relativePoint, x, y) from
+    -- what SetPoint recorded, and nil for an index nobody set -- so the "has this
+    -- been anchored at all" guard real callers write still works.
+    --
+    -- ⚠ The 3-argument SetPoint form ("RIGHT", -6, 0) is recorded VERBATIM, so
+    -- this hands back ("RIGHT", -6, 0, nil, nil) for it -- the stub does not
+    -- resolve an implicit parent, because it does not resolve anchors at all
+    -- (see the note at the head). A test of a re-anchor writes the 5-argument
+    -- form, which is what every caller in this codebase uses.
+    function f:GetPoint(i)
+        local p = self._points[i or 1]
+        if not p then return nil end
+        return p[1], p[2], p[3], p[4], p[5]
+    end
     function f:SetScript(name, fn) self._scripts[name] = fn end
     function f:HookScript(name, fn) self._scripts[name] = fn end
     function f:GetScript(name) return self._scripts[name] end
@@ -110,13 +187,51 @@ function FakeUIFrame(w, h, cx, cy)
     function f:SetColorTexture(r, g, b, a) self._color = { r = r, g = g, b = b, a = a } end
     function f:SetTexture(path) self._texture = path return true end
     function f:GetTexture() return self._texture end
+    -- ☠ RECORDED, not swallowed by the __index no-op. A quarter-circle corner is
+    -- only observable as the TEXCOORDS it was handed -- one baked orientation
+    -- serves all four corners of a rounded surface, so "is the bottom-right
+    -- corner facing the right way" is a question about these eight numbers and
+    -- nothing else. Stored as the raw vararg so the 4-argument form
+    -- (left, right, top, bottom) and the 8-argument one (UL, LL, UR, LR) are
+    -- both readable, and a test can tell which was used from #_texCoord.
+    function f:SetTexCoord(...) self._texCoord = { ... } end
+    -- ☠ NINE-SLICE, RECORDED. A rounded surface is now ONE texture cut into 3 x 3
+    -- by these margins (DandersUI/Round.lua) -- so "does a radius-6 panel actually
+    -- get 6 units of curve" is a question about these four numbers and nothing
+    -- else, exactly the way the old assembly's corner orientation was a question
+    -- about eight texcoords. Margins are TEXTURE PIXELS; the art is baked at one
+    -- texel per UI unit, which is what makes them read as UI units at the far end.
+    --
+    -- ⚠ These two exist HERE, as real methods, precisely so a test can take them
+    -- AWAY: the __index fallback answers any unset key with a truthy no-op, so a
+    -- module's "does this client support slicing" probe can only ever see a
+    -- function unless a test rawsets one of them to false on a texture. That is
+    -- how the fallback path is reached headlessly.
+    function f:SetTextureSliceMargins(l, t, r, b)
+        self._sliceMargins = { l, t, r, b }
+    end
+    function f:SetTextureSliceMode(mode) self._sliceMode = mode end
+    -- Recorded rather than swallowed: a sliced surface IS its rect, so which
+    -- region it was stretched over is the whole of its geometry. Stores the
+    -- target, or `false` when called bare (which means the texture's own parent).
+    --
+    -- ⚠ It does NOT push onto `_points`, and `_allPoints` starts as a plain false
+    -- rather than absent. Both for the __index fallback: several suites assert
+    -- exact `#_points` counts on frames that also SetAllPoints, and an unset key
+    -- would answer a truthy no-op FUNCTION to `t._allPoints`.
+    function f:SetAllPoints(rel) self._allPoints = rel or false end
     function f:SetText(t) self._text = t or "" end
     function f:GetText() return self._text end
     function f:GetStringWidth() return 7 * #self._text end
     function f:SetEnabled(v) self._enabled = v and true or false end
     function f:IsEnabled() return self._enabled ~= false end
-    function f:CreateTexture()
+    -- Layer and sublevel are RECORDED (additively -- every existing caller
+    -- ignores them). Draw order is the whole correctness question for a surface
+    -- assembled from stacked textures: a border ring that lands under its own
+    -- fill is invisible, and nothing else in a headless run can catch that.
+    function f:CreateTexture(name, layer, template, sublevel)
         local t = FakeUIFrame()
+        t._layer, t._sublevel = layer, sublevel
         self._textures[#self._textures + 1] = t
         return t
     end
@@ -137,6 +252,13 @@ function FakeUIFrame(w, h, cx, cy)
     function f:StopMovingOrSizing() self._flags.moving = false end
     function f:SetClampedToScreen(v) self._flags.clamped = v and true or false end
     function f:SetFrameStrata(v) self._flags.strata = v end
+    -- ⚠ A REAL getter, not the __index no-op. The popout's connected chrome takes
+    -- the strata of the window it docks outside of (Popout.lua's _SyncWindowLevel)
+    -- and asks the window for it -- a stub that answered nil would silently take
+    -- the "this surface has no strata" branch and the assertions would pass
+    -- against nothing. Defaults to DIALOG, which is what a UI frame in this kit is
+    -- built at, so a stub nobody set one on still answers honestly.
+    function f:GetFrameStrata() return self._flags.strata or "DIALOG" end
     function f:SetFrameLevel(v) self._flags.level = v end
     function f:GetFrameLevel() return self._flags.level or 1 end
     return setmetatable(f, { __index = function() return function() end end })
