@@ -369,10 +369,11 @@ UI.PopoutTitleHeight = UI.PopoutTitle.topPad + UI.PopoutTitle.row
 -- A popout with no actions never builds one and its height is unchanged, so
 -- every existing consumer is untouched by this table existing.
 UI.PopoutFooter = {
-    -- The strip. 18px button plus 4 above and below -- the same "control plus a
-    -- little air" the title row is built from, at the smaller control size a
-    -- quiet action bar wants.
-    height    = 26,
+    -- The strip. 18px button plus 7 above and below. Was 26 (4 each side): with
+    -- the R8 ring the bottom arc ate the visual clearance and the buttons read
+    -- as touching the border (Danders, 2026-08-27) -- 7 keeps clear air under
+    -- the row at every radius.
+    height    = 32,
     -- The buttons in it. Smaller than the 22 a settings button stands at: this
     -- is a footnote to the panel, not one of its controls.
     btnHeight = 18,
