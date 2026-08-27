@@ -161,6 +161,13 @@ local function reapplyMany(targetIds, reason)
         local el = Registry:Get(id)
         if el and NS:ResolveElement(el) then NS:Notify(el, reason or "parent") end
     end
+    -- EVERY descendant's slab re-measures, not just the ones whose record moved.
+    -- A proxy is exactly as big as the frame it stands in for, and an anchored
+    -- element can change SIZE without its solved centre changing at all (a
+    -- centre-on-centre seat, or a growth the offsets absorb) -- so "did the
+    -- record move" is the wrong question to gate the visual on. One pass, one
+    -- repaint at the end; ids with no proxy are skipped.
+    if NS.Proxy then NS.Proxy:SyncMany(order) end
 end
 
 -- Several targets moved at once (a header re-layout that shifts every sub-target):
@@ -242,6 +249,19 @@ end
 -- needs out of it before calling anything back into the consumer.
 local movedIds = {}
 
+-- An open panel is docked to a slab and quotes the record the sweep just
+-- re-solved, so it has to come along when either changes. Three states where it
+-- must NOT: no live session (there is nothing on screen), a combat suspend (the
+-- panels are deliberately hidden and Panel:Refresh re-shows pinned ones), and a
+-- drag in flight (onDragStart hides the FOLLOWING panel on purpose, and a
+-- refresh would plant it straight back under the cursor).
+local function refreshSessionPanel()
+    if not (NS.Panel and NS.Session) then return end
+    if not NS.Session:IsActive() or NS.Session:IsSuspended() then return end
+    if NS.Proxy and NS.Proxy:IsDragging() then return end
+    NS.Panel:Refresh()
+end
+
 local function sweepMoved(addon, keys)
     local n = 0
     for _, key in ipairs(keys) do
@@ -273,10 +293,25 @@ local function sweepMoved(addon, keys)
         local el = Registry:Get(movedIds[i])
         if el and NS:ResolveElement(el) then
             NS:Notify(el, "reapply")
-            if NS.Proxy then NS.Proxy:Refresh(el.id) end
         end
     end
     NS:ReapplyDescendantsMany(movedIds, "parent")
+
+    -- ☠ THE SLAB HAS TO RE-MEASURE EVEN WHEN THE RECORD DID NOT CHANGE, so this
+    -- is deliberately NOT inside the ResolveElement branch above. A proxy is
+    -- exactly as big as the frame it stands in for, and a FREE element that got
+    -- wider has no anchor to re-solve: ResolveElement returns false for it, and
+    -- the old code read that as "nothing to show". So with the movers unlocked,
+    -- pulling Frame Width grew the real frames while their slab kept the size it
+    -- was built at. Reported in game as "when unlocked and changing a frame
+    -- size, the mover does not update its size".
+    --
+    -- Descendants are already synced by the pass above (reapplyMany); this is
+    -- the swept targets themselves. Ids with no proxy -- a pure anchor target,
+    -- an element outside the session filter, no session open at all -- are
+    -- skipped inside SyncMany.
+    if NS.Proxy then NS.Proxy:SyncMany(movedIds) end
+    refreshSessionPanel()
 
     -- ☠ RE-STAMP EVERY KEY, FROM A FRESH MEASURE -- not just the ones that read
     -- as moved at the top. The pass itself moves things: the self-resolve above,
