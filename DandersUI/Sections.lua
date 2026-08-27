@@ -74,7 +74,10 @@ function UI:CreateSettingsGroup(parent, width, opts)
     local host = self
 
     local group = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    group:SetSize(width or 280, 10)  -- Height will be calculated dynamically
+    -- UI.SettingsBox.group, not a literal 280: the page's column layout and the
+    -- search result card both size against this same number, and a literal here
+    -- is what let them drift into three copies that only a comment tied together.
+    group:SetSize(width or UI.SettingsBox.group, 10)  -- Height will be calculated dynamically
     group.groupChildren = {}
     group.isSettingsGroup = true
     group.collapsible = opts.collapsible or false
@@ -93,7 +96,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- a surface that already pads, e.g. a popout pane), which is why this is a
     -- type test rather than an `or` -- `0 or 10` would happen to work in Lua, but
     -- the test says what is meant.
-    local padding = (type(opts.padding) == "number") and opts.padding or 10
+    local padding = (type(opts.padding) == "number") and opts.padding or UI.SettingsBox.pad
     local margin = 10  -- Space between groups
     group.padding = padding
     group.margin = margin
@@ -472,8 +475,9 @@ end
 -- before the card is sized); the floor keeps a mid-relayout zero from producing a negative
 -- wrap width, which renders as a single unwrapped line running off the panel.
 function UI:GroupInnerWidth(group)
-    if not group then return 260 end
-    return math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+    local fallback = UI.PopoutContentWidth
+    if not group then return fallback end
+    return math.max(40, (group:GetWidth() or fallback) - 2 * (group.padding or UI.SettingsBox.pad))
 end
 
 -- Shared link HOVER colour: the rest colour (the host accent) LIGHTENED toward white. Keeps

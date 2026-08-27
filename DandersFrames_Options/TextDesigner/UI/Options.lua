@@ -2485,7 +2485,9 @@ function DF.BuildTextDesignerPage(GUI, page, db)
         if self.child then
             self.child:SetHeight(self:GetHeight())
             if GUI.contentFrame then
-                self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)
+                -- The shared page-child width, not a copy of it -- see THE
+                -- CONTENT CORRIDOR in GUI/Panel.lua.
+                self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))
             end
         end
         -- Frame size and Preview Scale are settings like any other, so the mock

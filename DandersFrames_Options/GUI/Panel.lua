@@ -21,6 +21,56 @@ local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
+
+-- ============================================================
+-- THE CONTENT CORRIDOR
+-- ------------------------------------------------------------
+-- Every number between the right edge of a widget on a page and the right edge
+-- of the settings window, in one table -- because the popout a feature row opens
+-- DOCKS OUTSIDE THAT EDGE and runs a beam back to the row, so this stack is the
+-- length of that beam and it was five literals in four functions.
+--
+--   window edge -> content box      windowPad  (paired with the nav's own left
+--                                              margin: the two boxes sit at the
+--                                              same distance from the window)
+--   content box -> page viewport    inset on the left/top/bottom, GUTTER on the
+--                                   right
+--   the gutter                      is the SCROLLBAR's, and now holds it
+--   page viewport -> first widget   SettingsBox.colMargin, both sides
+--
+-- ☠ THE GUTTER WAS BEING PAID FOR TWICE. The scroll CHILD was built at
+-- `content:GetWidth() - 30` -- the page's two 8px insets plus 14 of scrollbar
+-- room -- so page content stopped 14px short of the viewport it sits in. But
+-- ScrollFrameTemplate anchors its bar OUTSIDE the ScrollFrame, so the bar was
+-- never in that 14: it sat beyond the viewport, in the page's own inset and the
+-- window's margin, while the 14 stayed blank. The corridor carried the
+-- scrollbar's width twice and showed it once.
+--
+-- Now the RIGHT edge of the viewport is inset by the gutter instead of by
+-- `inset`, the bar is pinned into that gutter against the content box (the
+-- idiom the settings nav has used by hand since it was built -- see navPad
+-- below), and the child fills the viewport. Same bar, same air beside it, 8px
+-- of blank returned to the page and 14px of it now occupied by something you
+-- can see.
+local PageBox = {
+    windowPad = 12,   -- window edge -> the nav pane / the content box
+    navGap    = 8,    -- nav pane -> content box
+    inset     = 8,    -- content box -> page viewport (left / top / bottom)
+    gutter    = GUI.Scroll.gutter,  -- ...and on the right, where the bar lives
+}
+GUI.PageBox = PageBox
+-- The column geometry is the KIT's (settings groups are its widgets), so it
+-- lives in the shared metrics beside the group width it is derived from.
+local SettingsBox = GUI.SettingsBox
+
+-- The page viewport's width, and therefore its scroll child's, for a given
+-- content-box width. THREE sites need it -- CreateSubTab sizes the child at
+-- build time, PageRefreshStates re-sizes it on every layout, and the column
+-- maths measures its widgets against it -- and all three used to carry their own
+-- copy of the arithmetic (`- 30`, `- 30`, `- 40`).
+function GUI.PageChildWidth(contentWidth)
+    return (contentWidth or 0) - PageBox.inset - PageBox.gutter
+end
 -- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
 -- slider drag, slider release), each listing the surfaces it knew about — so a surface
 -- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
@@ -162,19 +212,44 @@ local function PageRefreshStates(self)
     end
     
     -- Determine column layout based on content area width.
-    -- Two-column settings groups are 280px wide and placed at x=5 (right
-    -- edge 285), while column 2 starts at contentWidth/2 — so they begin to
-    -- overlap once contentWidth drops below ~570. minColumnWidth must exceed
-    -- the 280 group width (was a stale 270) so the layout collapses to one
-    -- column BEFORE the columns touch, leaving a ~10px gutter at the cutover
-    -- instead of overlapping for the last ~10px.
+    -- Two-column settings groups are SettingsBox.group wide and placed at
+    -- x = colMargin, while column 2 starts at contentWidth/2 — so they begin to
+    -- overlap once contentWidth drops below ~570. minCol must exceed the group
+    -- width (was a stale 270) so the layout collapses to one column BEFORE the
+    -- columns touch, leaving a small gutter at the cutover instead of
+    -- overlapping for the last few pixels.
+    --
+    -- ☠ AND THAT WAS ONLY HALF THE TEST. Two columns need two things to be true
+    -- and only the first was ever checked:
+    --
+    --   1. the columns must not touch      -- the minCol rule above
+    --   2. column 2 must FIT IN THE VIEWPORT, which is NOT the content box: it
+    --      is the content box less the page's inset and the scrollbar gutter,
+    --      and column 2 is pinned to the CONTENT's midpoint. So the further the
+    --      viewport is inset, the sooner floor(contentWidth/2) + a group's width
+    --      runs off the right of the rect the ScrollFrame clips to.
+    --
+    -- Rule 1 alone let the cutover clip. It always did -- a column-2 box lost its
+    -- last pixel at the exact threshold -- and it went unnoticed at 1px; with the
+    -- viewport now stopping at the scrollbar rather than 6px past it, the same
+    -- unchecked condition would have cut up to 7px off the box's right border.
+    -- The layout is not "collapse when the columns touch", it is "collapse when
+    -- either column stops fitting", so it now says so.
     local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
-    local minColumnWidth = 285  -- ≥ the 280 group width + a small gutter
-    local usesTwoColumns = contentWidth >= (minColumnWidth * 2 + 20)
-    
-    -- Account for scrollbar and padding when calculating usable width
-    local usableWidth = contentWidth - 40  -- Extra padding for scrollbar
-    
+    local childWidth = GUI.PageChildWidth(contentWidth)
+    local minColumnWidth = SettingsBox.minCol
+    local usesTwoColumns =
+        contentWidth >= (minColumnWidth * 2 + SettingsBox.colGutter)
+        and (math.floor(contentWidth / 2) + SettingsBox.group) <= childWidth
+
+    -- The width a page's widgets actually have, DERIVED rather than a literal:
+    -- the scroll child (see GUI.PageChildWidth) less the page's own left and
+    -- right margins. It was `contentWidth - 40`, "extra padding for scrollbar" —
+    -- a number that had to be kept in step by hand with the child's own `- 30`
+    -- and with the scrollbar room inside it, which is the arrangement that let
+    -- the gutter be counted twice.
+    local usableWidth = childWidth - 2 * SettingsBox.colMargin
+
     -- Check if editing banner is active (adds 50px at top)
     local bannerOffset = 0
     if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
@@ -182,8 +257,11 @@ local function PageRefreshStates(self)
     end
     
     -- Layout - adjust column positions based on available width
-    local x1, maxY = 5, 0
+    local x1, maxY = SettingsBox.colMargin, 0
     local col2X = usesTwoColumns and math.floor(contentWidth / 2) or x1
+    -- The page's TOP margin, deliberately still a literal: it happens to equal
+    -- colMargin today, and tying the vertical rhythm to a horizontal number is
+    -- how one edit moves the other axis by accident.
     local y1, y2 = -5 - bannerOffset, -5 - bannerOffset
     
     -- First, position any right-aligned elements (like Copy buttons) at absolute top-right
@@ -282,7 +360,7 @@ local function PageRefreshStates(self)
                                 SnapLen(widget, y2))
                 -- Reduce width for indented widgets to maintain alignment
                 if indentOffset > 0 and widget.SetWidth then
-                    local defaultColWidth = math.floor((usableWidth - 20) / 2)
+                    local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
                     widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
                 end
                 y2 = y2 - h
@@ -291,7 +369,7 @@ local function PageRefreshStates(self)
                 widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
                 -- Reduce width for indented widgets to maintain alignment
                 if indentOffset > 0 and widget.SetWidth then
-                    local defaultColWidth = math.floor((usableWidth - 20) / 2)
+                    local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
                     widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
                 end
                 y1 = y1 - h
@@ -332,9 +410,12 @@ local function PageRefreshStates(self)
 
     self.child:SetHeight(contentH)
 
-    -- Update scroll child width to match content area
+    -- Update scroll child width to match the page viewport. GUI.PageChildWidth,
+    -- not a second copy of the arithmetic: CreateSubTab sizes the child the same
+    -- way at build time, and these two drifting apart is what a shared helper is
+    -- for.
     if self.child and GUI.contentFrame then
-        self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)
+        self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))
     end
 end
 GUI.PageRefreshStates = PageRefreshStates
@@ -1559,8 +1640,8 @@ function DF:CreateGUI()
     -- fractional baseline -- which is what is left of the nav ghost now that the
     -- dead band between rows is gone.
     local tabFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -64))
-    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, 12), SnapLen(frame, 36))
+    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, -64))
+    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, PageBox.windowPad), SnapLen(frame, 36))
     tabFrame:SetWidth(SnapLen(frame, 155))
     CreateElementBackdrop(tabFrame)
     tabFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.5)
@@ -1569,8 +1650,13 @@ function DF:CreateGUI()
     -- SEARCH BAR
     -- =========================================================================
     local searchBar = nil
-    local navPad = SnapLen(tabFrame, 4) or 4
-    local navRight = SnapLen(tabFrame, -14) or -14
+    -- ★ THE PRECEDENT THE PAGES NOW FOLLOW. The nav has pinned its own bar into
+    -- its own gutter since it was built, and these were the two literals that did
+    -- it: 4 of air beside the bar, 14 of room reserved for bar-plus-air. They are
+    -- GUI.Scroll.pad and GUI.Scroll.gutter exactly -- same values, now the same
+    -- numbers, so the nav and the pages cannot be retuned apart.
+    local navPad = SnapLen(tabFrame, GUI.Scroll.pad) or GUI.Scroll.pad
+    local navRight = SnapLen(tabFrame, -GUI.Scroll.gutter) or -GUI.Scroll.gutter
     local tabScrollStartY = -navPad
     if DF.Search then
         searchBar = DF.Search:CreateSearchBar(tabFrame)
@@ -1670,9 +1756,9 @@ function DF:CreateGUI()
     -- perfect and the surface it is clipped against is what is wrong. Krathe
     -- spotted the symmetry before the numbers did.
     local content = CreateFrame("Frame", nil, frame)
-    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, 8), 0)
+    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, PageBox.navGap), 0)
     content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
-        SnapLen(frame, -12), SnapLen(frame, 36))
+        SnapLen(frame, -PageBox.windowPad), SnapLen(frame, 36))
     CreateElementBackdrop(content)
     content:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     GUI.contentFrame = content
@@ -1728,10 +1814,15 @@ function DF:CreateGUI()
         if not page or not page._parked then return end
         page:SetParent(content)
         page._parked = nil
-        local inset = page._contentInset or 8
+        local inset = page._contentInset or PageBox.inset
+        -- The RIGHT edge is the gutter, not the inset -- the scrollbar lives
+        -- between the viewport and the content box's edge. Stored beside the
+        -- inset for the same reason it is: a parked page has to come back at the
+        -- width it was built at, and search builds every page while parked.
+        local gutter = page._contentGutter or PageBox.gutter
         page:ClearAllPoints()
         page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
-        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -inset, inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
     end
 
     -- =========================================================================
@@ -2315,19 +2406,35 @@ function DF:CreateGUI()
         -- screen (see THE PAGE DOCK), and these two points have to keep pointing
         -- at the content frame across that trip -- a parked page that measured
         -- zero could not be built, and search builds all of them. GUI:AdoptPage
-        -- re-asserts exactly these two lines from page._contentInset.
-        local inset = SnapLen(content, 8) or 8
+        -- re-asserts exactly these two lines from page._contentInset and
+        -- page._contentGutter.
+        --
+        -- ★ THE RIGHT EDGE IS THE GUTTER, NOT THE INSET -- see THE CONTENT
+        -- CORRIDOR at the head of this file. The viewport stops where the
+        -- scrollbar begins, the bar is pinned into the strip between there and
+        -- the content box's edge, and the child then fills the viewport instead
+        -- of stopping another 14px short of it for a bar that was never drawn
+        -- inside it.
+        local inset = SnapLen(content, PageBox.inset) or PageBox.inset
+        local gutter = SnapLen(content, PageBox.gutter) or PageBox.gutter
         page._contentInset = inset
+        page._contentGutter = gutter
         page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
-        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -inset, inset)
+        page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
 
         StyleScrollBar(page)
+        -- Against `content`, not against the page: the bar hugs the CONTENT
+        -- BOX's inner right edge, which is the window's own margin away from the
+        -- window edge. Left on ScrollFrameTemplate's own anchors it floated
+        -- outside the viewport at whatever offset the template picks, which is
+        -- how the corridor ended up carrying the gutter twice.
+        GUI.PinScrollBar(page, content, -inset, inset)
 
         local child = CreateFrame("Frame", nil, page)
         -- Snapped for the same reason: content is positioned against this child,
         -- so a fractional width put every right edge inside it off-grid too
         -- (pixelcheck reported w-0.16).
-        child:SetSize(SnapLen(page, (content:GetWidth() or 0) - 30) or 1, 1)
+        child:SetSize(SnapLen(page, GUI.PageChildWidth(content:GetWidth() or 0)) or 1, 1)
         page:SetScrollChild(child)
         page.child = child
         page.tabName = name
