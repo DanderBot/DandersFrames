@@ -2058,7 +2058,7 @@ local function setupProcGlow(border, anim)
     -- anim.procStart = the "Hide Intro Flash" toggle (default nil/false plays it).
     local showIntro = not anim.procStart
     border._procStartElapsed = showIntro and 0 or PROC_START_DURATION
-    border._procGeomW = nil   -- tick re-applies loop spill + burst size
+    border._procGeomW, border._procGeomH = nil, nil   -- tick re-applies spill + burst size
     s:Show(); t:Show()
     s:SetAlpha(showIntro and 1 or 0)
     t:SetAlpha(showIntro and 0 or 1)
@@ -2081,13 +2081,24 @@ local function procTick(border, anim, dt)
     -- lands where the loop WOULD be at inset 0 and visibly jumps. (The non-secret
     -- fallback host:GetWidth() is already inset-adjusted.)
     if w and border._knownW then w = w - 2 * (anim.inset or 0) end
-    if host and w and w > 0 and border._procGeomW ~= w then
-        border._procGeomW = w
-        local off = floor(w * PROC_LOOP_SPILL + 0.5)
+    local h = border._knownH or (host and host:GetHeight())
+    if h and border._knownH then h = h - 2 * (anim.inset or 0) end
+    if host and w and w > 0 and h and h > 0
+        and (border._procGeomW ~= w or border._procGeomH ~= h) then
+        border._procGeomW, border._procGeomH = w, h
+        -- ☠ SPILL AND BURST ARE PER-AXIS, and both used to come from WIDTH alone.
+        -- That is invisible on a square aura icon — where this effect grew up — and
+        -- wrong on anything else: on a wide unit-frame border a width-derived vertical
+        -- spill made the glow several times the frame's height, and a square burst
+        -- ignored the frame's shape completely. Deriving each axis from its own
+        -- dimension keeps the glow the same shape as the thing it is glowing around,
+        -- and is a no-op wherever w == h.
+        local offX = floor(w * PROC_LOOP_SPILL + 0.5)
+        local offY = floor(h * PROC_LOOP_SPILL + 0.5)
         t:ClearAllPoints()
-        t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -off,  off)
-        t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  off, -off)
-        if s then s:SetSize(w * PROC_BURST_SCALE, w * PROC_BURST_SCALE) end
+        t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -offX,  offY)
+        t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  offX, -offY)
+        if s then s:SetSize(w * PROC_BURST_SCALE, h * PROC_BURST_SCALE) end
     end
     local period = border._procPeriod or 1
     border._procTimer = (border._procTimer + dt / period) % 1
@@ -2120,22 +2131,26 @@ end
 local function buildProcAnims(border, anim)
     local t, s, host = border.procTex, border.procStartTex, border._procHost
     if not (t and host) then return false end
-    local w = border._knownW
-    if not w then return false end
+    local w, h = border._knownW, border._knownH
+    if not (w and h) then return false end
     w = w - 2 * (anim.inset or 0)
-    if w <= 0 then return false end
+    h = h - 2 * (anim.inset or 0)
+    if w <= 0 or h <= 0 then return false end
     if not border._procAtlas then return false end
     -- Geometry is applied once here instead of per tick: every number is plain config.
+    -- Per-axis, for the reason spelled out in procTick — a width-derived spill turns a
+    -- wide frame's glow into a tall blob.
     t:SetAtlas(PROC_ATLAS)
-    local off = floor(w * PROC_LOOP_SPILL + 0.5)
+    local offX = floor(w * PROC_LOOP_SPILL + 0.5)
+    local offY = floor(h * PROC_LOOP_SPILL + 0.5)
     t:ClearAllPoints()
-    t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -off,  off)
-    t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  off, -off)
+    t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -offX,  offY)
+    t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  offX, -offY)
     local groups = border._declAnims or {}
     local showIntro = (not anim.procStart) and s and border._procStartAtlas
     if showIntro then
         s:SetAtlas(PROC_START_ATLAS)
-        s:SetSize(w * PROC_BURST_SCALE, w * PROC_BURST_SCALE)
+        s:SetSize(w * PROC_BURST_SCALE, h * PROC_BURST_SCALE)
         s:SetAlpha(1)
         local ag = s:CreateAnimationGroup()
         ag:SetToFinalAlpha(true)
@@ -2242,7 +2257,7 @@ local function setupFlashGlow(border, anim)
     -- anim.procStart = the "Hide Intro Flash" toggle (default nil/false plays it).
     local showIntro = not anim.procStart
     border._flashIntroElapsed = showIntro and 0 or FLASH_INTRO_DUR
-    border._flashGeomW = nil     -- tick sizes everything once the width is known
+    border._flashGeomW, border._flashGeomH = nil, nil   -- tick re-sizes once known
     border._flashSettled = nil
     spark:SetAlpha(0); inner:SetAlpha(0); innerOver:SetAlpha(0)
     outer:SetAlpha(showIntro and 0 or a); outerOver:SetAlpha(0)
@@ -2268,15 +2283,22 @@ local function flashTick(border, anim, dt)
     -- Inset entirely on container icons. (The non-secret fallback host:GetWidth()
     -- is already inset-adjusted.)
     if w and border._knownW then w = w - 2 * (anim.inset or 0) end
-    local F = border._flashF
-    if host and w and w > 0 and border._flashGeomW ~= w then
-        border._flashGeomW = w
-        F = w * FLASH_FRAME_SCALE
-        border._flashF = F
+    -- ☠ PER-AXIS, same correction as DF Proc: F used to be a single width-derived
+    -- number and every layer was sized (F, F), so on a wide unit-frame border the glow
+    -- was a big square that ignored the frame's shape. No-op wherever w == h, which is
+    -- every aura icon — the surface this effect was built for.
+    local h = border._knownH or (host and host:GetHeight())
+    if h and border._knownH then h = h - 2 * (anim.inset or 0) end
+    local Fw, Fh = border._flashFw, border._flashFh
+    if host and w and w > 0 and h and h > 0
+        and (border._flashGeomW ~= w or border._flashGeomH ~= h) then
+        border._flashGeomW, border._flashGeomH = w, h
+        Fw, Fh = w * FLASH_FRAME_SCALE, h * FLASH_FRAME_SCALE
+        border._flashFw, border._flashFh = Fw, Fh
         border._flashSettled = nil   -- re-park the steady glow at the new F
-        if ants then ants:SetSize(F * 0.85, F * 0.85) end
+        if ants then ants:SetSize(Fw * 0.85, Fh * 0.85) end
     end
-    if not F then return end   -- no width yet — nothing to draw against
+    if not (Fw and Fh) then return end   -- no size yet — nothing to draw against
     -- March the ants every frame (mid-crawl when they fade in).
     local period = border._flashPeriod or 0.5
     border._flashTimer = (border._flashTimer + dt / period) % 1
@@ -2300,13 +2322,14 @@ local function flashTick(border, anim, dt)
         -- its steady rect and never moves again; the inner expands F/2→F, its
         -- bright "over" pass fading as they land.
         local kg = min(k / 0.6, 1)
-        local outerS = F * (2 - kg)
-        outer:SetSize(outerS, outerS)
+        -- Sizes are a SCALE on each axis now, not one square number.
+        local outerK = 2 - kg
+        outer:SetSize(Fw * outerK, Fh * outerK)
         outer:SetAlpha(maxA)
         if outerOver then outerOver:SetAlpha(maxA * (1 - kg)) end
         if inner then
-            local innerS = F * (0.5 + 0.5 * kg)
-            inner:SetSize(innerS, innerS)
+            local innerK = 0.5 + 0.5 * kg
+            inner:SetSize(Fw * innerK, Fh * innerK)
             -- holds full until the glows land, then hands off over the last 40%
             local ia = k < 0.6 and 1 or (1 - (k - 0.6) / 0.4)
             inner:SetAlpha(maxA * ia)
@@ -2315,17 +2338,17 @@ local function flashTick(border, anim, dt)
         -- Spark flare over the top: grows F→1.5F while brightening, shrinks back
         -- fading — gone by 80%.
         if spark then
-            local sS, sA
+            local sK, sA
             if k < 0.4 then
                 local ks = k / 0.4
-                sS, sA = F * (1 + 0.5 * ks), ks
+                sK, sA = 1 + 0.5 * ks, ks
             elseif k < 0.8 then
                 local ks = (k - 0.4) / 0.4
-                sS, sA = F * (1.5 - 0.5 * ks), 1 - ks
+                sK, sA = 1.5 - 0.5 * ks, 1 - ks
             else
-                sS, sA = F, 0
+                sK, sA = 1, 0
             end
-            spark:SetSize(sS, sS)
+            spark:SetSize(Fw * sK, Fh * sK)
             spark:SetAlpha(maxA * sA)
         end
         -- Ants crawl in during the last 40%, taking over from the inner glow.
@@ -2336,7 +2359,7 @@ local function flashTick(border, anim, dt)
     border._flashIntroElapsed = FLASH_INTRO_DUR
     if not border._flashSettled then
         border._flashSettled = true
-        outer:SetSize(F, F)
+        outer:SetSize(Fw, Fh)
         outer:SetAlpha(maxA)
         if outerOver then outerOver:SetAlpha(0) end
         if spark then spark:SetAlpha(0) end
@@ -2384,24 +2407,27 @@ end
 local function buildFlashAnims(border, anim)
     local outer, ants, host = border.flashOuter, border.flashAnts, border._flashHost
     if not (outer and ants and host) then return false end
-    local w = border._knownW
-    if not w then return false end
+    local w, h = border._knownW, border._knownH
+    if not (w and h) then return false end
     w = w - 2 * (anim.inset or 0)
-    if w <= 0 then return false end
-    local F = w * FLASH_FRAME_SCALE
-    border._flashF = F
-    border._flashGeomW = w
+    h = h - 2 * (anim.inset or 0)
+    if w <= 0 or h <= 0 then return false end
+    -- Per-axis, matching flashTick — a single width-derived F made the glow a square
+    -- that ignored a wide frame's shape.
+    local Fw, Fh = w * FLASH_FRAME_SCALE, h * FLASH_FRAME_SCALE
+    border._flashFw, border._flashFh = Fw, Fh
+    border._flashGeomW, border._flashGeomH = w, h
     border._flashSettled = true
     local maxA = border._flashMaxA or 1
     local spark, inner = border.flashSpark, border.flashInner
     local innerOver, outerOver = border.flashInnerOver, border.flashOuterOver
     -- Steady sizes, set once.
-    outer:SetSize(F, F)
+    outer:SetSize(Fw, Fh)
     if outerOver then outerOver:ClearAllPoints(); outerOver:SetAllPoints(outer) end
-    if inner then inner:SetSize(F, F) end
+    if inner then inner:SetSize(Fw, Fh) end
     if innerOver then innerOver:ClearAllPoints(); innerOver:SetAllPoints(inner) end
-    if spark then spark:SetSize(F * 1.5, F * 1.5) end
-    ants:SetSize(F * 0.85, F * 0.85)
+    if spark then spark:SetSize(Fw * 1.5, Fh * 1.5) end
+    ants:SetSize(Fw * 0.85, Fh * 0.85)
     local groups = border._declAnims or {}
     playFlipBook(ants, FLASH_ANTS_ROWS, FLASH_ANTS_COLS, FLASH_ANTS_FRAMES,
                  FLASH_ANTS_PX, FLASH_ANTS_PX, border._flashPeriod or 0.5, groups)
