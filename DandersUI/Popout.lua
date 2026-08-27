@@ -85,6 +85,34 @@ local NOTCH_SIZE = 10
 local BEAM_GLOW_W, BEAM_GLOW_A = 5, 0.15
 local BEAM_CORE_W, BEAM_CORE_A = 3, 0.55
 
+-- ---- where the connected chrome sits in the frame stack ----------
+
+-- The floor for the popout, the beam and the source outline: above the ordinary
+-- UI, below the tooltip. The outsideOf placement raises all three onto the
+-- WINDOW's own strata instead -- see _SyncWindowLevel.
+local BASE_STRATA = "DIALOG"
+
+-- ☠ HOW FAR ABOVE THE WINDOW, and why it is not a small number.
+--
+-- The beam does not have to clear the WINDOW. It has to clear everything the
+-- window CONTAINS, because in outsideOf mode its crossing segment is drawn over
+-- the window's body on the way to the row. A settings window's body is several
+-- frames deep before a row is reached (window -> content -> page -> scroll child
+-- -> row -> plate, so the row alone is already the window's level plus four or
+-- five), and the widgets in it bump their own level off their container freely --
+-- +10 for a control that has to draw over its neighbours, +50 for a disabled
+-- overlay laid across a whole group.
+--
+-- The old margin was +10 measured from the WINDOW, which is UNDER every one of
+-- those. The beam then ran beneath the window's body and the only stretch of it
+-- ever drawn was the short one in the outside gap -- which is exactly what "the
+-- beam stops short of the row" looks like. Reported again in-game 2026-08-27 with
+-- the window at 100% scale, i.e. with the scale conversion ruled out.
+--
+-- 60 clears the deepest bump a window is known to make with room to spare, and is
+-- nowhere near the engine's frame-level ceiling.
+local WINDOW_CLEARANCE = 60
+
 -- ============================================================
 -- PURE GEOMETRY
 -- Deliberately free of frames and of host state so the docking and beam rules
@@ -265,9 +293,15 @@ end
 -- is declared to be. GetCenter / GetWidth / GetHeight answer in the frame's OWN
 -- coordinate space -- the screen divided by its EFFECTIVE scale -- and a SetPoint
 -- offset is read back in that same space. So a region living under a SCALED
--- window and a popout living at UIParent scale are measured with two different
+-- window and a popout on a scale of its own are measured with two different
 -- rulers, and this file compares them constantly: the dock, the beam, the clip
 -- gate and the connection point are all differences between the two.
+--
+-- ⚠ AND THE POPOUT IS ONE OF THE SCALED THINGS NOW. In outsideOf mode it takes
+-- the window's scale as its own (see _SyncWindowScale) so its controls match the
+-- page's -- so "the popout is at UIParent scale" is no longer the safe reading it
+-- once was, and nothing below may assume it. Every one of these three functions
+-- already converts, which is exactly why that change needed nothing else.
 --
 -- The error is not a rounding wobble. It is (distance from UIParent's centre) x
 -- (1/scale - 1) on BOTH axes, so out at the edge of a settings window scaled to
@@ -465,6 +499,11 @@ local popoutMeta = { __index = Popout }
 -- UI.PopoutOutsidePos). Only "left"/"right" are meaningful for opts.side there.
 -- The mode lives on the instance, so a plain Follow afterwards clears it.
 --
+-- The mode also binds the popout to the window's SCALE and to its place in the
+-- frame stack: the panel renders at the window's scale so its controls match the
+-- page's, and the panel, the beam and the source outline are all raised clear of
+-- the window and everything in it. See _SyncWindowScale and _SyncWindowLevel.
+--
 -- opts.clipTo = <region> names what actually CLIPS the source -- the scroll
 -- frame, not the window around it. The connected chrome hides while the source
 -- leaves that rect. Defaults to outsideOf, which is nearly always too generous
@@ -481,14 +520,20 @@ function Popout:Follow(region, opts)
     -- The region that actually CLIPS the source (a scroll frame), which is not
     -- the window -- see _TetherClipped.
     self.clipTo = opts and opts.clipTo or nil
-    -- Docking against a window: the popout (and the beam synced just under it)
-    -- must render ABOVE that window and its children -- a scrollbar sitting on
-    -- top of the beam reads as the link being cut.
-    if self.outsideOf and self.outsideOf.GetFrameLevel and self.frame.SetFrameLevel then
-        local wl = self.outsideOf:GetFrameLevel() or 1
-        if (self.frame:GetFrameLevel() or 0) <= wl + 10 then
-            self.frame:SetFrameLevel(wl + 10)
-        end
+    -- Docking against a window: the popout (and the beam and outline synced just
+    -- under it) must render ABOVE that window AND EVERYTHING IN IT -- a scrollbar,
+    -- a page, a group overlay sitting on top of the beam reads as the link being
+    -- cut. Strata, level and scale all key off the window, so all three are
+    -- re-derived here rather than only on the tick: a popout handed a new window
+    -- (or handed none) must not spend a frame in the old one's stack.
+    self:_SyncWindowLevel()
+    if self.outsideOf then
+        self:_SyncWindowScale()
+    elseif not self.pinned then
+        -- Pinning is the one thing that keeps a scale it was given: a pinned
+        -- panel has visually detached from the window, and shrinking it back to
+        -- 1.0 under the user's hand would read as the panel jumping.
+        self:_ClearWindowScale()
     end
     self.free = false
     -- A pinned popout has been taken off its leash by hand; re-pointing its
@@ -522,11 +567,139 @@ function Popout:PlaceFree(x, y)
     self.gliding = false
     self.outsideOf = nil        -- absolute placement is not docked to anything
     self.clipTo = nil           -- ...and nothing is clipping what it is not about
+    -- ...and it is not standing on a window's scale or in a window's part of the
+    -- frame stack either. Both BEFORE the anchor below, because x/y are read in
+    -- the frame's OWN units and the scale is what those units are.
+    self:_ClearWindowScale()
+    self:_SyncWindowLevel()
     local f = self.frame
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", x or 0, y or 0)
     self:_Present("CENTER")
     return self
+end
+
+-- ---- the docked popout's place in the frame stack ----------------
+
+-- Put the beam in the sliver just under the popout: above whatever the popout is
+-- standing over, below the popout itself, because the connection point has to
+-- cover the root the beam emerges from.
+--
+-- Relative to the POPOUT, never to a window, so it is also the whole answer in
+-- the mover's context -- there is no window there, and the popout's own level
+-- (its parent is the unlock overlay) is the only thing the beam can be placed
+-- against.
+--
+-- ☠ THE OUTLINE ONLY JOINS IT WHEN THERE IS A WINDOW, and the asymmetry is not
+-- an oversight. Outside a window the outline is drawn OVER the window's body, so
+-- it has to be lifted with everything else or it is under the very plate it is
+-- outlining. WITHOUT one -- the mover -- it is a SIBLING of the thing it
+-- outlines: both hang off the unlock overlay, and the default level it is built
+-- with is already the one that puts it over a proxy slab at the same level.
+-- Dropping it to popout-1 there would push it a level BELOW that slab and the
+-- outline would simply stop being visible.
+function Popout:_SyncChromeLevel()
+    local f = self.frame
+    if not f.GetFrameLevel then return end
+    local pl = f:GetFrameLevel() or 2
+    local want = pl > 1 and pl - 1 or 1
+    -- Written out rather than looped: a nil beam in an ipairs list would stop the
+    -- walk at index 1 and silently skip the outline behind it.
+    local b, o = self.beam, self.srcOutline
+    if b and b.SetFrameLevel and (b:GetFrameLevel() or 0) ~= want then b:SetFrameLevel(want) end
+    if self.outsideOf and o and o.SetFrameLevel and (o:GetFrameLevel() or 0) ~= want then
+        o:SetFrameLevel(want)
+    end
+end
+
+-- Every piece of the connected chrome into one strata. The three are drawn as one
+-- object, so they cannot be split across two strata -- a level only orders frames
+-- WITHIN a strata, and a beam one strata below the window it crosses is under it
+-- whatever its level says.
+function Popout:_SetChromeStrata(strata)
+    local f = self.frame
+    if f.SetFrameStrata then f:SetFrameStrata(strata) end
+    if self.beam and self.beam.SetFrameStrata then self.beam:SetFrameStrata(strata) end
+    if self.srcOutline and self.srcOutline.SetFrameStrata then
+        self.srcOutline:SetFrameStrata(strata)
+    end
+end
+
+-- Keep the popout -- and with it the beam and the outline -- clear of the WINDOW
+-- it is docked outside of, in strata and in level. See WINDOW_CLEARANCE for why
+-- the margin is what it is.
+--
+-- ⚠ RE-RUN, NOT SET ONCE. DandersFrames' settings window is SetToplevel(true), so
+-- it raises itself to the top of its strata the moment it is clicked -- a level
+-- taken once at Follow is stale from the next click onwards, and the beam sinks
+-- under the window's body for the rest of the panel's life. The follow ticker
+-- re-runs this, which costs two getter calls on a tick that is already reading
+-- two rects.
+--
+-- With no window it puts everything back on the base strata: a POOLED popout is
+-- re-used for whatever the next consumer asks of it, and one that inherited a
+-- window's strata must not carry it into a placement that has no window.
+function Popout:_SyncWindowLevel()
+    local win, f = self.outsideOf, self.frame
+    if not win then
+        if self._winStrata then
+            self._winStrata = nil
+            self:_SetChromeStrata(BASE_STRATA)
+        end
+        self:_SyncChromeLevel()
+        return
+    end
+    local ws = win.GetFrameStrata and win:GetFrameStrata()
+    if type(ws) == "string" and ws ~= "" and self._winStrata ~= ws then
+        self._winStrata = ws
+        self:_SetChromeStrata(ws)
+    end
+    if win.GetFrameLevel and f.SetFrameLevel then
+        -- EXACTLY the clearance, not "at least" it. Settling on one answer is what
+        -- keeps a window raise from ratcheting the pair up ten levels at a time,
+        -- and it lets a popout re-targeted at a lower window come back down.
+        local want = (win:GetFrameLevel() or 1) + WINDOW_CLEARANCE
+        if (f:GetFrameLevel() or 0) ~= want then f:SetFrameLevel(want) end
+    end
+    self:_SyncChromeLevel()
+end
+
+-- ---- the docked popout's scale -----------------------------------
+
+-- MATCH THE WINDOW'S SCALE. A settings window carries a user scale slider, and a
+-- popout parented to UIParent renders at 1.0 whatever that slider says -- so a
+-- slider inside the panel came up visibly bigger than the identical slider on the
+-- page it was opened from, and the two stopped reading as one surface.
+--
+-- SetScale is relative to the PARENT, so the value is the window's effective
+-- scale over the popout parent's. Everything downstream keeps working unchanged:
+-- every rect in this file is in UIParent units and every one of them converts
+-- through the frame's own ratio already (see rectOf / sizeOf / placeAt), so the
+-- dock, the beam endpoints, the notch slide and the glide landing all follow.
+--
+-- ⚠ ONLY IN outsideOf MODE, and only ever undone by _ClearWindowScale. A consumer
+-- that scaled a popout it placed itself is never touched.
+function Popout:_SyncWindowScale()
+    local win, f = self.outsideOf, self.frame
+    if not (win and f.SetScale) then return end
+    local we = win.GetEffectiveScale and win:GetEffectiveScale()
+    if type(we) ~= "number" or we <= 0 then return end
+    local parent = f.GetParent and f:GetParent() or nil
+    local pe = parent and parent.GetEffectiveScale and parent:GetEffectiveScale()
+    if type(pe) ~= "number" or pe <= 0 then
+        pe = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()
+    end
+    if type(pe) ~= "number" or pe <= 0 then pe = 1 end
+    local want = we / pe
+    if self._winScale == want then return end
+    self._winScale = want
+    f:SetScale(want)
+end
+
+function Popout:_ClearWindowScale()
+    if not self._winScale then return end
+    self._winScale = nil
+    if self.frame.SetScale then self.frame:SetScale(1) end
 end
 
 -- The side this popout would dock on for a source rect of `sr`: the consumer's
@@ -563,6 +736,14 @@ function Popout:_Dock()
     -- ticker earns the difference back -- it re-docks on a row move AND on a
     -- window move, so the pair still tracks for free.
     local wr = self.outsideOf and rectOf(self.outsideOf) or nil
+    if wr then
+        -- BEFORE the frame is measured. The popout wears the window's scale, and
+        -- its size in UIParent units is a function of that scale -- measuring
+        -- first would dock a panel at the previous scale's height. The level goes
+        -- with it so a re-dock after a window raise lands back on top.
+        self:_SyncWindowScale()
+        self:_SyncWindowLevel()
+    end
     local fw, fh = sizeOf(f)
     if wr then
         -- Its own baseline, alongside the source's: a pure width-resize moves the
@@ -641,6 +822,13 @@ function Popout:_StartGlide()
     local sr = rectOf(self.source)
     local from = rectOf(f)
     if not (sr and from) then return false end
+    -- Same order as the dock, and for the same reason: the size the destination is
+    -- computed from is the size at the WINDOW's scale. `from` above is a position,
+    -- not a size, so it is read before this and stays the honest start point.
+    if self.outsideOf then
+        self:_SyncWindowScale()
+        self:_SyncWindowLevel()
+    end
     local w, h = sizeOf(f)
     -- The destination comes from the SAME function the dock uses -- PopoutDockPos
     -- beside a source, PopoutOutsidePos outside a window -- so the landing is
@@ -904,9 +1092,14 @@ end
 function Popout:_EnsureSourceOutline()
     if self.srcOutline ~= nil then return self.srcOutline end
     local o = CreateFrame("Frame", nil, self.frame:GetParent() or UIParent)
-    o:SetFrameStrata("DIALOG")
+    -- The popout's strata, whatever that currently is: in outsideOf mode the
+    -- outline is drawn OVER the window's body (it lies on a row inside it), so a
+    -- frame left on the base strata with no level of its own would be under the
+    -- very plate it is supposed to be outlining.
+    o:SetFrameStrata(self._winStrata or BASE_STRATA)
     o:Hide()
     self.srcOutline = o
+    self:_SyncChromeLevel()
     return o
 end
 
@@ -1033,6 +1226,12 @@ function Popout:_Tick(elapsed)
             self._winX, self._winY, self._winW, self._winH = wr.x, wr.y, wr.w, wr.h
             moved = true
         end
+        -- ...AND THE STACK, which is not a rect and so is not covered by the
+        -- compare above. A SetToplevel window raises itself above everything in
+        -- its strata when it is clicked, without moving a pixel -- and from that
+        -- moment the beam's crossing segment is under the window's body. Two
+        -- getter calls and a compare, on a tick that is already reading two rects.
+        self:_SyncWindowLevel()
     end
 
     -- A re-dock redraws the chrome on the way through (_Dock -> _Present), so
@@ -1086,13 +1285,14 @@ function Popout:_EnsureBeam()
     -- rect, so the lines still span the gap.
     local b = CreateFrame("Frame", nil, self.frame:GetParent() or UIParent)
     b:SetAllPoints(UIParent)
-    -- DIALOG, same strata as the source outline and the popout itself: on
+    -- The popout's own strata, which in outsideOf mode is the WINDOW's: on
     -- BACKGROUND the beam ran UNDER whatever window it crossed, so a settings
-    -- window's scrollbar cut the link in half. The LEVEL is synced to sit just
-    -- under the popout on every beam update (see _UpdateBeam) -- the "beam
-    -- emerges from under the notch" trick needs it beneath the popout, and the
-    -- popout is raised above the window it docks against.
-    b:SetFrameStrata("DIALOG")
+    -- window's scrollbar cut the link in half, and one strata below the window is
+    -- the same thing said a different way. The LEVEL is synced to sit just under
+    -- the popout on every beam update (see _SyncChromeLevel) -- the "beam emerges
+    -- from under the notch" trick needs it beneath the popout, and the popout is
+    -- raised clear of the window it docks against.
+    b:SetFrameStrata(self._winStrata or BASE_STRATA)
     b:Hide()
     -- Guarded, and cached as FALSE rather than nil so the guard is asked once:
     -- a headless stub (or any surface without Line objects) simply never gets a
@@ -1100,6 +1300,7 @@ function Popout:_EnsureBeam()
     b.glow = b.CreateLine and b:CreateLine(nil, "ARTWORK", nil, -1) or false
     b.core = b.CreateLine and b:CreateLine(nil, "ARTWORK", nil, 0) or false
     self.beam = b
+    self:_SyncChromeLevel()
     return b
 end
 
@@ -1143,13 +1344,10 @@ function Popout:_UpdateBeam()
 
     local b = self:_EnsureBeam()
     -- Just under the popout, every update: the popout's own level moves (it is
-    -- raised over whatever window it docks against), and the beam must stay in
-    -- the sliver between that window's children and the popout so the notch
-    -- still covers its root.
-    if b.SetFrameLevel and self.frame.GetFrameLevel then
-        local pl = self.frame:GetFrameLevel() or 2
-        b:SetFrameLevel(pl > 1 and pl - 1 or 1)
-    end
+    -- raised clear of whatever window it docks against, and re-raised when that
+    -- window raises itself), and the beam must stay in the sliver between that
+    -- window's children and the popout so the notch still covers its root.
+    self:_SyncChromeLevel()
     local c = self:GetAccent()
     -- Both endpoints are UIParent-centre; a line's offsets are read in the units
     -- of the frame it belongs to, so they go back through that frame's ratio.
@@ -1406,7 +1604,7 @@ function UI:CreatePopout(opts)
     }, popoutMeta)
 
     local f = CreateFrame("Frame", nil, opts.parent or UIParent, "BackdropTemplate")
-    f:SetFrameStrata("DIALOG")
+    f:SetFrameStrata(BASE_STRATA)
     f:SetClampedToScreen(true)
     f:SetWidth(po.width + PAD * 2)
     f:EnableMouse(true)                       -- a panel must not leak clicks through
