@@ -126,8 +126,9 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- map the engine flag misses for the current character, or nil when there is
 -- no gap -- consumed by the overlay's by-me slot plan (Features/Dispel.lua)
 -- and the debuff row's by-me records (below), each of which pairs it with a
--- "|!RAID_PLAYER_DISPELLABLE" negation so the repair never double-renders
--- what the flag already catches.
+-- "|!RAID" negation (the player-dispellable token — see the dispelToken note
+-- below for why it is RAID and not the raid-scoped RAID_PLAYER_DISPELLABLE)
+-- so the repair never double-renders what the flag already catches.
 --
 -- ★ THIS WORKS IN COMBAT, and the reason is worth stating because I twice
 -- claimed the opposite. ADDON Lua genuinely cannot read aura data in combat
@@ -836,7 +837,19 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- CC needs its Blizzard token; skip the group entirely if unavailable
     local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
     local raidOn = db.debuffFilterRaid
-    local dispelToken = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
+    -- ☠ By-me rides "RAID" — "harmful auras the player can dispel" per Blizzard's own
+    -- token table. It shipped on RaidPlayerDispellable, which despite our "observed
+    -- player-scoped" note is documented AND field-confirmed raid-scoped: a priest in a
+    -- raid with poison-dispellers had poison lit as dispellable-by-me (2026-08-27, the
+    -- overlay's twin of this record — see Features/Dispel.lua for the full account).
+    -- The solo observations that justified the old token are the one setting where the
+    -- two tokens are indistinguishable.
+    -- ⚠ This makes the by-me dispel record and the "raid" category record (both
+    -- HARMFUL|RAID) the SAME SET by construction. That is not new overlap: player-
+    -- dispellable was already a subset of raid-dispellable, so the raid record was
+    -- already emptied by its dispel negation whenever both were on. neg() below just
+    -- avoids emitting the now-identical component twice.
+    local dispelToken = AuraFilters.Raid or "RAID"
     local maxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0 and (db.debuffMaxDurationMinutes or 0) * 60 or nil
     local keepImportant = db.debuffMaxDurationKeepImportant
 
@@ -853,14 +866,20 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- here is the dedup working, not a leak.
     local function neg(excludeDispel, excludeCC, excludeRaid)
         local s = ""
+        -- Tracks whether the dispel negation already emitted "!RAID" — since by-me's
+        -- token IS "RAID" now, emitting it again for excludeRaid would duplicate the
+        -- component in the filter string.
+        local negatedRaid = false
         if excludeDispel then
-            if playerMode then s = s .. "|!" .. dispelToken
+            if playerMode then
+                s = s .. "|!" .. dispelToken
+                negatedRaid = (dispelToken == "RAID")
             elseif dispelTypeToken then s = s .. "|!" .. dispelTypeToken end
         end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
         -- "RAID" is negatable (only INCLUDE_NAME_PLATE_ONLY and MAW are not —
         -- AuraUtil.AuraFilters / IsValidFilterString).
-        if excludeRaid and raidOn then s = s .. "|!RAID" end
+        if excludeRaid and raidOn and not negatedRaid then s = s .. "|!RAID" end
         return s
     end
     -- candidateFilters for one record. Hands each record its OWN table (extra
@@ -960,7 +979,10 @@ local function BuildDirectDebuffFilters(db, claimed)
             -- excludes these types while a gap is active), so the include here
             -- and the exclude there are exact complements.
             if dispelGap then
-                filters[#filters + 1] = { filter = "HARMFUL|!" .. dispelToken .. neg(false, true, true),
+                -- excludeRaid dropped from the neg() call: the record's own base already
+                -- negates the token, and the token IS "RAID" now — the raid-precedence
+                -- exclusion the old excludeRaid=true bought is the base negation itself.
+                filters[#filters + 1] = { filter = "HARMFUL|!" .. dispelToken .. neg(false, true, false),
                                           key = "dispelgap",
                                           candidateFilters = cfFor(false, notImportant({ includeDispelTypes = dispelGap })) }
             end
