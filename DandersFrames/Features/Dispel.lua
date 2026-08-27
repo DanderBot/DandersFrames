@@ -1373,7 +1373,7 @@ end
 --   "custom" = one slot per dispel type (includeDispelTypes); type known at declare
 --     time, so the FULL art styles statically from the DF pickers (borders, EDGE
 --     gradients, intensity, type icons). Rare dual-type overlap accepted.
--- Me/all: "HARMFUL|RAID_PLAYER_DISPELLABLE" vs "HARMFUL" + candidateFilters
+-- Me/all: "HARMFUL|RAID" (player-dispellable) vs "HARMFUL" + candidateFilters
 -- includeDispelTypes (the shared DF.DispelTypeMap). ☠ The old route here used a
 -- ProcessAura policy + processedAuraType=Dispel and was described as "the native
 -- all-dispellable classification" — it is NOT. That branch is gated on aura.isRaid
@@ -1455,7 +1455,21 @@ local function dispelSlotPlan(db, selfOnly)
 
     local baseFilter, baseCF
     if byMe then
-        baseFilter = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+        -- ☠☠ "RAID", NOT "RAID_PLAYER_DISPELLABLE" — the names point the WRONG way and
+        -- this mode shipped on the wrong one. Blizzard's own token table
+        -- (Blizzard_FrameXMLUtil/AuraUtil.lua) is explicit:
+        --   RAID                    = "harmful auras the player can dispel"
+        --   RAID_PLAYER_DISPELLABLE = "auras SOMEONE IN THE PLAYER'S RAID can dispel"
+        -- We adopted the raid-scoped token on the strength of "observed player-scoped in
+        -- practice" — an observation made solo and in tiny test groups, where the two
+        -- sets are IDENTICAL. In a real raid they diverge exactly per the docs.
+        -- Field-caught (Krathe, 2026-08-27): a priest with By Me on saw the POISON
+        -- overlay lit raid-wide — because the raid had poison-dispellers. Nothing to do
+        -- with race, range, or the shaman gap; DISPEL-channel log showed e=none (empty
+        -- exclude, correct for a priest) and racialSelf=false on every build.
+        -- ⚠ Test any future change to this line IN A MIXED RAID: solo, the wrong token
+        -- is indistinguishable from the right one.
+        baseFilter = "HARMFUL|RAID"
         -- ☠ THE ENGINE'S FLAG OVER-REPORTS TALENT-GATED DISPELS, so subtract what this
         -- character demonstrably cannot cleanse. Field-reported: "dispellable by me always
         -- shows that a priest can remove disease despite it again being a talent choice".
@@ -1520,7 +1534,7 @@ local function dispelSlotPlan(db, selfOnly)
     slots.mode = byMe and "byme" or "alltypes"
     slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF, roles = roles }
     -- ★ ENGINE-FLAG GAP REPAIR (Shaman poison via totem): a second slot for the
-    -- dispel types RAID_PLAYER_DISPELLABLE misses -- the whole story, the peer
+    -- dispel types the engine's player-dispel flag (RAID) misses -- the whole story, the peer
     -- survey and the honest secrecy limit live on DF:GetEngineDispelFlagGaps
     -- (Features/Auras.lua). The token is NEGATED here so this slot can only fill
     -- with an aura the main slot cannot, which keeps the two from double-lighting
@@ -1533,7 +1547,13 @@ local function dispelSlotPlan(db, selfOnly)
         -- class-wide Poison half applies on every frame, because a totem cleanses the group.
         local gap = DF:GetEngineDispelFlagGaps(selfOnly)
         if gap then
-            slots[#slots + 1] = { key = "gap", filter = "HARMFUL|!RAID_PLAYER_DISPELLABLE",
+            -- ☠ "!RAID" to match the main slot's token (see the comment there). The old
+            -- "!RAID_PLAYER_DISPELLABLE" negation had its own raid-scope hole: with any
+            -- raid-mate able to dispel a gap type (an Evoker covers bleeds), the aura
+            -- passed the raid-scoped token, failed the negation, and this slot went dark
+            -- — a dwarf would silently lose the self-bleed marker exactly when the raid
+            -- composition changed. The player-scoped complement cannot be stolen that way.
+            slots[#slots + 1] = { key = "gap", filter = "HARMFUL|!RAID",
                                   candidateFilters = { includeDispelTypes = gap }, roles = roles }
         end
     end
