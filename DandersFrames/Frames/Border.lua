@@ -1004,6 +1004,13 @@ end
 -- on a hidden texture is a harmless SetAlpha — same as the prior UIParent driver).
 local animRegistry = {}   -- [border] = { fn = fn, elapsed = number }
 local sharedAnimDriver
+-- ☠ FORWARD DECLARATION, not a stray local. The driver's OnUpdate below drops a border
+-- that refuses its tick, and unregisterAnimTick is defined AFTER it -- without this the
+-- closure would capture a nil GLOBAL and fail only at the moment it is needed. Same trap
+-- this file has been bitten by twice; see the header notes.
+local unregisterAnimTick
+-- One-time latch: a refused tick logs once, not once per frame per border.
+local warnedTickRefused = false
 local function ensureSharedAnimDriver()
     if sharedAnimDriver then return sharedAnimDriver end
     sharedAnimDriver = CreateFrame("Frame", nil, UIParent)
@@ -1015,7 +1022,37 @@ local function ensureSharedAnimDriver()
         for border, e in pairs(animRegistry) do
             if border._secretRect or border:IsShown() then
                 e.elapsed = e.elapsed + dt
-                e.fn(border, e.elapsed, dt)
+                if border._secretRect then
+                    -- ☠ A secretRect border's edge textures are DESCENDANTS of a Blizzard
+                    -- aura button, which refuses tainted writes while auras are secret
+                    -- (DenyTaintedAccessWhenAurasAreSecret, descendants included since
+                    -- 12.1.0.69382). A tick that writes into a refused subtree throws
+                    -- EVERY FRAME, in exactly the content these borders exist for -- which
+                    -- is why container animation was retired wholesale rather than guarded.
+                    --
+                    -- Guard rather than forbid: probe under pcall and DROP the border on the
+                    -- first refusal, so the cost of being wrong is one error and a stopped
+                    -- effect instead of a per-frame flood. Nothing re-arms it here; the next
+                    -- Apply does, via StartAnimation's dead-driver recovery (a DRIVER_ANIMS
+                    -- type whose registry entry has gone re-registers even though the spec
+                    -- hash is unchanged). So leaving an instance and restyling restores it.
+                    --
+                    -- ⚠ Deliberately NOT gated on CanBeAccessedInContext(): that answers for
+                    -- the object it is called on, and what we need to know is whether a WRITE
+                    -- to this border's own regions lands. Only the write answers that.
+                    if not pcall(e.fn, border, e.elapsed, dt) then
+                        unregisterAnimTick(border)
+                        if not warnedTickRefused then
+                            warnedTickRefused = true
+                            if DF.DebugWarn then
+                                DF:DebugWarn("AURACONTAINER",
+                                    "border animation tick refused on a restricted subtree - effect dropped until the next restyle")
+                            end
+                        end
+                    end
+                else
+                    e.fn(border, e.elapsed, dt)
+                end
             end
         end
     end)
@@ -1030,7 +1067,7 @@ local function registerAnimTick(border, fn, initialElapsed)
     e.fn = fn
     e.elapsed = initialElapsed or 0
 end
-local function unregisterAnimTick(border)
+function unregisterAnimTick(border)
     animRegistry[border] = nil
     -- ☠ Hide the driver once the last animated border goes. An OnUpdate on a
     -- shown frame runs every frame forever; emptying the registry alone left
@@ -1201,7 +1238,24 @@ local ORBIT_LAYER_SIZES = { 7, 6, 5, 4 }   -- four layers, outer→inner (LCG pa
 -- small aura icon and a large AD border.
 local ORBIT_BASE_PERIOD = 8
 
+-- Stop the declarative orbit groups (see "DF_ORBIT, DECLARATIVE" below). Guarded per
+-- group: these live on textures under a container button, and teardown runs at the
+-- moment those go restricted -- an unguarded throw here would unwind out of
+-- StopAnimation and skip the rest of its teardown, which is exactly the shape of bug
+-- #1079. Declared above hideOrbitParticles on purpose: a local referenced before its
+-- definition would be captured as a nil GLOBAL.
+local function stopOrbitAnims(border)
+    local groups = border._orbitAnims
+    if not groups then return end
+    for i = 1, #groups do
+        local ag = groups[i]
+        if ag then pcall(ag.Stop, ag) end
+    end
+    border._orbitAnims = nil
+end
+
 local function hideOrbitParticles(border)
+    stopOrbitAnims(border)
     if not border.orbitTex then return end
     for _, t in ipairs(border.orbitTex) do t:Hide() end
 end
@@ -1294,6 +1348,127 @@ local function orbitTick(border, anim, dt)
             end
         end
     end
+end
+
+-- ===== DF_ORBIT, DECLARATIVE (the same motion, driven C-side) =====
+--
+-- ☠ WHY THE SAME EFFECT EXISTS TWICE. orbitTick above walks the sparkles by SetPoint
+-- from Lua on every frame. On a CONTAINER-hosted border those textures are descendants
+-- of a Blizzard aura button, which refuses tainted writes while auras are secret -- so
+-- the tick is refused in exactly the content the effect exists for. That is not a
+-- theory: bug #1079 was a single SetAlpha on an edge texture throwing ~197 times on
+-- entering an instance. An OnUpdate driver cannot win there.
+--
+-- A declarative AnimationGroup is not a script and is never touched after creation, so
+-- it runs through the restriction untouched. Built and :Play()ed on the border's FIRST
+-- Apply -- which for a container border is inside initializeFrame, the secure context.
+--
+-- ★ IT IS THE SAME WALK, deliberately. Leg order and start corner match orbitTick
+-- exactly (up the left edge from BOTTOMLEFT, right along the top, down the right edge,
+-- left along the bottom), so a sparkle at perimeter position `pos` lands where the tick
+-- would put it, and layer k orbits in period*k seconds for the same shimmer stagger.
+-- Keep the two in step if either is edited.
+--
+-- ⚠ CREATION-FROZEN. Nothing here can be retuned afterwards without a tainted write
+-- into the button subtree, so for a container border every animation key is STRUCTURAL:
+-- the AD factory folds them into the border's struct signature and a change rebuilds the
+-- slot. Same contract as the pandemic FLASH.
+--
+-- ⚠ Geometry comes from _knownW/_knownH (plain config numbers fed by the caller), never
+-- from measuring the host -- a container button's rect is secret. No geometry, no
+-- declarative build: the caller falls back to the tick rather than guessing.
+
+-- Perimeter leg directions, in walk order: up, right, down, left.
+local ORBIT_LEG_DIRS = { { 0, 1 }, { 1, 0 }, { 0, -1 }, { -1, 0 } }
+local ORBIT_EPS = 0.0001
+
+-- Anchor a sparkle at perimeter position `pos` -- the exact branch orbitTick uses.
+local function orbitAnchor(t, host, pos, w, h)
+    local rightlim, bottomlim = h + w, h * 2 + w
+    t:ClearAllPoints()
+    if pos > bottomlim then
+        t:SetPoint("CENTER", host, "BOTTOMRIGHT", -pos + bottomlim, 0)
+    elseif pos > rightlim then
+        t:SetPoint("CENTER", host, "TOPRIGHT", 0, -pos + rightlim)
+    elseif pos > h then
+        t:SetPoint("CENTER", host, "TOPLEFT", pos - h, 0)
+    else
+        t:SetPoint("CENTER", host, "BOTTOMLEFT", 0, pos)
+    end
+end
+
+-- One full loop of ordered Translations starting from `pos`. The offsets sum to zero, so
+-- a REPEAT group returns the sparkle to its anchor each cycle and never drifts -- which
+-- is what makes the loop seamless without any Lua re-seeding it.
+local function buildOrbitLoop(ag, pos, w, h, period)
+    local perimeter = 2 * (w + h)
+    local legLen = { h, w, h, w }
+    -- Which leg `pos` sits in, and how far into it.
+    local leg, into = 1, pos % perimeter
+    for i = 1, 4 do
+        if into < legLen[i] then leg = i; break end
+        into = into - legLen[i]
+    end
+    local remaining, idx, skip, order = perimeter, leg, into, 0
+    while remaining > ORBIT_EPS do
+        -- skip is non-zero only on the first (partial) leg; every later leg is whole.
+        -- legLen entries are > 0 (the caller rejects a degenerate rect), so d is always
+        -- positive and the walk terminates.
+        local d = legLen[idx] - skip
+        skip = 0
+        if d > remaining then d = remaining end
+        if d > ORBIT_EPS then
+            order = order + 1
+            local dir = ORBIT_LEG_DIRS[idx]
+            local tr = ag:CreateAnimation("Translation")
+            tr:SetOffset(dir[1] * d, dir[2] * d)
+            tr:SetDuration(period * d / perimeter)
+            tr:SetOrder(order)
+            tr:SetSmoothing("NONE")   -- constant speed; easing would pulse at each corner
+        end
+        remaining = remaining - d
+        idx = idx % 4 + 1
+    end
+    return order
+end
+
+-- Returns true when the declarative orbit was built and started. False means "no usable
+-- geometry" and the caller should fall back to the OnUpdate tick.
+local function buildOrbitAnims(border, anim)
+    local host, tex = border._orbitHost, border.orbitTex
+    if not (host and tex) then return false end
+    local w, h = border._knownW, border._knownH
+    if not (w and h) then return false end
+    -- Same inset adjustment orbitTick applies: _knownW/H are the BORDER's raw size, and
+    -- the particles anchor to the animRect, which ensureAnimRect has already inset.
+    w = w - 2 * (anim.inset or 0)
+    h = h - 2 * (anim.inset or 0)
+    if w <= 0 or h <= 0 then return false end
+    local perimeter = 2 * (w + h)
+    local N = border._orbitN or 4
+    local space = perimeter / N
+    local basePeriod = border._orbitPeriod or ORBIT_BASE_PERIOD
+    local groups, idx = {}, 0
+    for k = 1, 4 do
+        -- Layer k takes period*k for one orbit -- the tick's dt/(period*k).
+        local period = basePeriod * k
+        for i = 1, N do
+            idx = idx + 1
+            local t = tex[idx]
+            if t then
+                local pos = (space * i) % perimeter
+                orbitAnchor(t, host, pos, w, h)
+                local ag = t:CreateAnimationGroup()
+                ag:SetLooping("REPEAT")
+                buildOrbitLoop(ag, pos, w, h, period)
+                ag:Play()
+                groups[#groups + 1] = ag
+            end
+        end
+    end
+    if #groups == 0 then return false end
+    border._orbitAnims = groups
+    return true
 end
 
 -- ===== DF_DASH (dashed / marching-ants border) =====
@@ -2067,8 +2242,12 @@ function Border:StartAnimation(border, spec)
     -- animation frozen until a real spec change forces a restart (the "move the
     -- frequency slider off 1 and back" symptom). When the driver is dead, fall
     -- through and restart instead of no-opping.
+    -- ⚠ A DECLARATIVE orbit counts as live too. It has no animRegistry entry by design
+    -- (nothing ticks it), so without _orbitAnims here the "driver is dead, restart" arm
+    -- would fire on EVERY re-apply and rebuild its animation groups from scratch — on a
+    -- container border that is also a tainted write into the button subtree.
     if border._animHash == newHash then
-        if not DRIVER_ANIMS[border.activeAnimation] or animRegistry[border] then
+        if not DRIVER_ANIMS[border.activeAnimation] or animRegistry[border] or border._orbitAnims then
             return
         end
     end
@@ -2119,6 +2298,17 @@ function Border:StartAnimation(border, spec)
     -- secret-rect reads).
     if anim.type == "DF_ORBIT" then
         setupOrbitParticles(border, anim)
+        -- ★ CONTAINER-HOSTED BORDERS TAKE THE DECLARATIVE PATH. Their textures sit under
+        -- a Blizzard aura button, so a per-frame Lua walk is refused the moment auras go
+        -- secret; C-side Translation groups are not. Everything else (unit-frame border,
+        -- targeted-spell highlight, missing-buff badge, the AD editor canvas) keeps the
+        -- tick, which retunes live while a slider is dragged.
+        -- ⚠ A false return means no usable geometry, not a failure to build — fall through
+        -- to the tick, which is what this border did before either way.
+        if border._secretRect and buildOrbitAnims(border, anim) then
+            border.activeAnimation = anim.type
+            return
+        end
         registerAnimTick(border, function(b, el, dt)
             orbitTick(b, anim, dt)
         end)

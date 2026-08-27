@@ -54,12 +54,21 @@ local addonName, DF = ...
 --      forwards the curve without the required `property`, and DurationTextBinding is private).
 --      Colour-by-time = discrete BUCKETS via the duration formatter (|c escapes) — P2.
 --      Stacks formatters are FORBIDDEN outright (secret trap — see bindNative).
---   6. Animation drivers do NOT run inside the button subtree: onUpdateMode=disabled
---      propagates, so an OnUpdate/AnimationGroup on a descendant is installed but never
---      ticks (verified in-game — SetScript/Play merely don't error). Host the driver
---      OUTSIDE the subtree (e.g. UIParent) and drive our own textures by reference — see
---      DF.Border ensureDriver (secretRect -> UIParent). Expiry-TRIGGERED anim is separately
---      dead (needs the sealed timer).
+--   6. ☠ CORRECTED 2026-08-27 — this said "an OnUpdate/AnimationGroup on a descendant is
+--      installed but never ticks", and the AnimationGroup half is FALSE. It is what kept
+--      animation retired here for six weeks, so read the split carefully:
+--        * SCRIPTS do not run in the button subtree. onUpdateMode=disabled, and
+--          ForbiddenAspect.UntrustedScriptExecution is documented as propagating to
+--          children. So host an OnUpdate driver OUTSIDE the subtree (e.g. UIParent) and
+--          drive our own textures by reference — DF.Border ensureDriver (secretRect).
+--        * A DECLARATIVE AnimationGroup is not a script and DOES run. Built and :Play()ed
+--          inside initializeFrame and never touched again, it animates C-side with zero Lua
+--          per frame — our own pandemic FLASH does exactly this, on a slot child.
+--      What the OUTSIDE-hosted driver still cannot do is WRITE into the subtree while auras
+--      are secret; that is the real constraint, and it is now guarded rather than assumed
+--      (Border.lua's driver drops a border whose tick is refused).
+--      Expiry-TRIGGERED anim remains separately dead (needs the sealed timer) — though an
+--      always-playing effect revealed by the duration-band formatter is not the same thing.
 --   7. Cannot read IsShown / spellId / expirationTime / dispelName / presence — all secret.
 --      Never branch on them. Filtering is Blizzard-side (filterString + candidateFilters).
 --   8. Group topology is add-only: no RemoveAuraGroup/Slot; a filterString change = recreate
@@ -1445,19 +1454,39 @@ local function styleButton_regions(slot, config)
                     if spec then spec.knownWidth, spec.knownHeight = sx, sy end
                 end
                 -- ANIMATION FILTER (single chokepoint for every container border).
-                -- 12.1 PTR-5 made AuraButtons blanket-forbidden while auras are secret
-                -- (combat / M+ / encounters / PvP): once forbidden, ANY API call on the
-                -- button OR its children errors from our tainted code — including the
-                -- render setters our OnUpdate border driver uses (SetVertexColor / Hide /
-                -- SetPoint). Every animated border here lives on a container-button child,
-                -- so any animation spams a per-frame forbidden error in exactly the content
-                -- these indicators are for. Animation is therefore stripped on ALL
-                -- container borders unconditionally (the recovery that once let AD placed /
-                -- overlay borders animate via config.adBorderAnim is gone). DF-owned frames
-                -- OFF the container — unit-frame border, missing-buff badge, targeted-spell
-                -- highlight — are not forbidden and keep animating through their own paths.
+                -- 12.1 PTR-5 made AuraButtons forbidden to tainted code while auras are
+                -- secret (combat / M+ / encounters / PvP), descendants included since
+                -- 12.1.0.69382 — and our border animations are an OnUpdate driver writing
+                -- SetVertexColor / Hide / SetPoint into those descendants every frame. That
+                -- is what made animation unsafe here, and it was stripped unconditionally.
+                --
+                -- ★ NARROWED 2026-08-27, and it is the DRIVER that was the problem, not
+                -- animation as such: a declarative AnimationGroup on a button child runs
+                -- fine (our own pandemic flash does, and two peer addons animate borders and
+                -- glows on container buttons the same way). The OnUpdate driver now DROPS a
+                -- border whose tick is refused instead of erroring every frame
+                -- (Border.lua's sharedAnimDriver), so the failure mode is a stopped effect,
+                -- not a log flood — which is what makes this safe to reopen at all.
+                --
+                -- Reopened for OVERLAY mode only, and only when the container opted in:
+                --   * overlay = the whole-frame presence box (the Aura Designer's frame-level
+                --     border). One ring per frame, so the per-frame cost is bounded.
+                --   * ROW mode always strips. A row holds many icons and every group
+                --     allocates its buttons up front, so a looping effect would run on
+                --     buttons no aura is even using.
+                --   * config.adBorderAnim is the opt-in. The AD factory sets it on several
+                --     ROW containers too; those stay inert because of the isRow test above,
+                --     deliberately — widening to them is a separate, measured decision.
+                -- SAFE_OVERLAY_ANIM still filters the TYPE, so a stale profile naming an
+                -- effect we no longer own renders static rather than erroring.
+                -- DF-owned frames OFF the container — unit-frame border, missing-buff badge,
+                -- targeted-spell highlight — were never affected and keep animating.
                 if spec then
-                    spec.animation = nil
+                    local animType = spec.animation and spec.animation.type
+                    if isRow or not config.adBorderAnim
+                        or not (animType and SAFE_OVERLAY_ANIM[animType]) then
+                        spec.animation = nil
+                    end
                     -- pp: the border renders inside the container's SetScale(scale)
                     -- subtree — Apply must snap thickness in that space, not
                     -- UIParent's (spec.renderScale, Border:SnapThickness). Factory
