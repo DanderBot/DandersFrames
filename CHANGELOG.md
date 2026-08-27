@@ -1,5 +1,12 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* (Dispel) "Only Dispellable by You" now follows your talents everywhere, live. A Shaman's poison dispel appears and disappears with Poison Cleansing Totem, a Priest without Improved Purify no longer sees diseases they cannot cure, and talent changes apply to the overlay and the debuff row without a reload. (by Krathe)
+* (Dispel) Fix a Dwarf's bleed dispel lighting up on other players' frames after roster changes — Stoneform only cleanses yourself, so bleeds now show as dispellable only on your own frame. (by Krathe)
+
 ## [5.3.1]
 
 ### New Features
