@@ -2248,6 +2248,21 @@ local function setupFlashGlow(border, anim)
     -- other colour desaturates first so the tint reads clean.
     local r, g, b, a = readColor(anim.color or ANIM_WHITE)
     local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
+    -- ☠ THE STOCK GOLD DEFAULT MUST RENDER THE NATIVE ART, NOT A TINT OF IT. The default
+    -- Border Animation colour (0.95, 0.95, 0.32) exists so the QUAD effects — Dash,
+    -- Chase, Pixel, which draw plain white rectangles — come out gold. Flash's art is
+    -- ALREADY that gold, with real structure (white-hot core falling off to a golden
+    -- fringe); desaturating it and painting it uniformly gold flattens the halo into the
+    -- thick blob field-reported on targeted spells ("study it against the LCG version").
+    -- LCG never processed the art at all, which is the look this effect is a stand-in
+    -- for. So the stock default is treated as "native", exactly like white — the audit
+    -- found every OTHER property (UVs, sizes, layers, alphas, blend) already identical
+    -- to LCG, making this the one divergence. A deliberately-picked custom colour still
+    -- desaturates and tints as before.
+    if desat and math.abs(r - 0.95) < 0.005 and math.abs(g - 0.95) < 0.005
+        and math.abs(b - 0.32) < 0.005 then
+        desat, r, g, b = false, 1, 1, 1
+    end
     local spark     = flashSheetTexture(border, "flashSpark",     "BACKGROUND", 0, FLASH_UV_SPARK)
     local inner     = flashSheetTexture(border, "flashInner",     "ARTWORK",    0, FLASH_UV_GLOW)
     local innerOver = flashSheetTexture(border, "flashInnerOver", "ARTWORK",    1, FLASH_UV_GLOWOVER)
