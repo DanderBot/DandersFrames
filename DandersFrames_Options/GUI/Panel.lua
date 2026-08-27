@@ -2059,7 +2059,13 @@ function DF:CreateGUI()
     tabScroll:SetPoint("TOPLEFT", navPad, tabScrollStartY)
     tabScroll:SetPoint("BOTTOMRIGHT", navRight, navPad)
 
-    StyleScrollBar(tabScroll)
+    -- OVERLAY, like the pages' bars: the nav and the page are the two panes the
+    -- user is looking at while they work, they are pinned into gutters of exactly
+    -- the same width, and a hairline on one beside a full bar on the other would
+    -- read as a mistake. Every OTHER scroll pane in the addon (dialogs, pickers,
+    -- the changelog) keeps the plain bar -- those are places you arrive at to
+    -- scroll, where the bar being obvious is the point.
+    StyleScrollBar(tabScroll, { overlay = true })
     -- Custom positioning for tab scrollbar
     if tabScroll.ScrollBar then
         tabScroll.ScrollBar:ClearAllPoints()
@@ -2824,7 +2830,10 @@ function DF:CreateGUI()
         page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
         page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
 
-        StyleScrollBar(page)
+        -- OVERLAY (see the nav's bar for why these two and nothing else). The
+        -- gutter it is pinned into is unchanged: the WIDE state still fills
+        -- bar+pad exactly, and the idle state leaves part of it as air.
+        StyleScrollBar(page, { overlay = true })
         -- Against `content`, not against the page: the bar hugs the CONTENT
         -- BOX's inner right edge, which is the window's own margin away from the
         -- window edge. Left on ScrollFrameTemplate's own anchors it floated

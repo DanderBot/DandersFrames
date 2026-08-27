@@ -184,7 +184,8 @@ its commit stays on OK/Apply.
 | `UI:ApplySettingsFont()`, `UI:SetSettingsFont(fs, size, outline)`, `UI:RefreshSettingsFont()` | Drive the `DFFont*` objects from your font hooks |
 | `UI:RefreshAllOverrideIndicators()` | A method, not a bare function. The widget registry it sweeps is pack-wide, not per host; `onIndicatorsRefreshed` fires on whichever host you call it on |
 | `UI:RegisterMenu(frame)`, `UI:CloseAllMenus()` | The open-menu registry. Call `CloseAllMenus` on any context switch |
-| `UI:ApplyPixelBorder(frame, color, weight)`, `UI:HidePixelBorder(frame)`, `UI.StyleScrollBar(scrollFrame)` | Chrome |
+| `UI:ApplyPixelBorder(frame, color, weight)`, `UI:HidePixelBorder(frame)`, `UI.StyleScrollBar(scrollFrame[, opts])` | Chrome. `opts.overlay` gives the hairline-until-it-matters bar: it rests at `UI.Scroll.overlayIdle` and low alpha, widens to `UI.Scroll.bar` at full alpha while hovered or scrolling, and shrinks back after `UI.Scroll.overlayHold`. The gutter a consumer reserves is unchanged either way |
+| `UI:CreateSelectionMarker(parent, opts)` | One accent bar for a whole group of tabs or rows, which GLIDES between them. `opts.axis` `"x"` (an underline along the member's bottom edge) or `"y"` (a rail down its left). `marker:SetTo(target, color, instant)` / `:Clear()` / `:ClearIf(target)` / `:GetOwner()`. Pair with `StyleButton{ tab = true, tabStripe = false }` so members draw no stripe of their own |
 | `UI.Colors`, `UI.DialogColors`, `UI.RowGap`, `UI.RowHeight`, `UI.Space`, `UI.MEDIA` | Palette and metrics. Never hardcode a colour. `UI.Colors` carries the neutrals (`background`, `panel`, `element`, `border`, `hover`, `text`, `textDim`), the two accent poles (`accent`, `raid`), the note tones (`warning`, `notice`) and the mover-overlay roles `anchorRoot` (green: a mover that other movers are anchored to) and `anchored` (purple: a mover anchored to another mover), plus `danger` (red: a blocked or occupied surface) |
 | `UI.SnapLen(frame, v)`, `UI.SnapLenUp(frame, v)`, `UI.SnapHeightEven(frame, v)`, `UI:CursorPos(frame)` | Pixel-grid maths |
 
@@ -406,7 +407,9 @@ regions alike; per-target animation groups are cached on the target itself.
 | `Fx.PopOut(target, dur, ox, oy, toScale, origin, onDone)` | The mirror of `PopIn`: fade + slide + scale down to `toScale` about `origin`, then `onDone`. Pass `PopIn`'s own offsets and origin and the exit retraces the entrance. A cancelled pop-out skips `onDone` |
 | `Fx.FadeOut(target, dur, onDone)` | Fade out, then call `onDone` (which usually hides). A cancelled fade skips `onDone` |
 | `Fx.FadeTo(target, alpha, dur)` | Fade to a resting alpha and stay there (restore with `FadeTo(target, 1)`) |
-| `Fx.Cancel(target)` | Stop any running fade and restore alpha 1 — for paths that must be instant |
+| `Fx.ScaleTo(target, scale, dur)` | Scale to a resting scale and stay there. Frames only — a region has no `SetScale`. ⚠ A scaled frame moves whatever is anchored TO it; anchor neighbours to the row, not to the thing that lifts |
+| `Fx.MoveTo(target, place, dur)` | Re-anchor and glide in from where it was. `place(target)` does the `ClearAllPoints`/`SetPoint` and is called immediately, so the anchors are correct before anything animates. Frames only. A target with unresolved anchors, or one that did not move, simply lands |
+| `Fx.Cancel(target)` | Stop any running fade and restore alpha 1 — for paths that must be instant. The resting scale and position are the caller's and are left alone |
 
 ## Conventions
 

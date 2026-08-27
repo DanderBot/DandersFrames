@@ -433,6 +433,17 @@ do
     check(src:find("btn.accent", 1, true) == nil,
           "panel: and no nav row builds a left accent bar of its own any more")
 
+    -- ---- the two OVERLAY scroll panes --------------------------------
+    -- The variant's own behaviour is tested against the real Theme.lua in
+    -- test_overlay_scrollbar.lua. Source can only say which panes opted in --
+    -- and the point of pinning it is that it is exactly TWO: the nav and the
+    -- page, the panes you look at while you work. Everything else in the addon
+    -- (dialogs, pickers, the changelog on this very file) keeps the plain bar.
+    has("StyleScrollBar(tabScroll, { overlay = true })", "the nav's bar is an overlay")
+    has("StyleScrollBar(page, { overlay = true })", "...and so is every settings page's")
+    eq(countOf("overlay = true"), 2, "panel: and nothing else in the window opted in")
+    has("StyleScrollBar(clScroll)", "the changelog pane keeps the plain bar")
+
     -- ---- the window's own two edges ---------------------------------
     local onShowAt = src:find('frame:HookScript("OnShow"', 1, true)
     local onHideAt = src:find('frame:SetScript("OnHide"', 1, true)

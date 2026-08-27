@@ -245,6 +245,26 @@ UI.Scroll = {
     -- 4 since it was built (navPad) and reads correctly, so this is the value
     -- the look was already tuned against -- not a fresh guess.
     pad = 4,
+
+    -- ---- THE OVERLAY VARIANT (StyleScrollBar's `overlay` opt) ----------
+    -- A bar that is a hairline until it matters. It rests at `overlayIdle` and
+    -- low alpha, goes to the full `bar` width and full alpha while the pointer is
+    -- on it or the pane is being scrolled, and shrinks back `overlayHold` seconds
+    -- after the last of either.
+    --
+    -- ⚠ IT DOES NOT CHANGE WHAT A CONSUMER RESERVES. The gutter is still bar+pad,
+    -- because the WIDE state has to fit in it -- the idle state simply leaves
+    -- part of that gutter empty, which reads as air rather than as a missing bar.
+    -- Nothing downstream needs retuning to opt a pane in.
+    overlayIdle  = 4,
+    -- What the bar is worth to the MOUSE, at either size. A 4px grab target is a
+    -- pixel hunt; the hit rect makes up the difference invisibly, so the bar can
+    -- look like a hairline and still be caught the way a 12px one would be. It is
+    -- never wider than the gutter it lives in, so it cannot steal a click from
+    -- the pane beside it.
+    overlayHit   = 12,
+    overlayHold  = 0.6,
+    overlayAlpha = 0.35,
 }
 -- Derived, so the two can never be set to numbers that disagree -- the same
 -- rule UI.PopoutTitleHeight and UI.PopoutRow.slot follow.
@@ -1001,7 +1021,88 @@ P.CreatePanelBackdrop   = CreatePanelBackdrop
 -- offsets you allow, and quantising only changed which ones. The border being
 -- two device pixels wide is what made the question stop mattering -- it draws
 -- the same amount of ink wherever it lands. Do not add it back.
-local function StyleScrollBar(scrollFrame)
+-- The overlay bar's state machine (StyleScrollBar's `overlay` opt). Two states
+-- and one timer, kept here rather than at the call sites so every overlay pane
+-- in the addon shrinks and grows on the same clock.
+--
+-- ☠ THE IDLE TIMER RUNS ON A FRAME OF OUR OWN, not on an OnUpdate hung off the
+-- scrollbar. The scrollbar is Blizzard's template and its OnUpdate is the
+-- template's to own -- SetScript would replace it (which is what drives a thumb
+-- drag) and HookScript would leave a per-frame handler that can never be taken
+-- off again. A hidden frame's OnUpdate does not run, so Show/Hide IS the timer's
+-- on/off switch and it costs nothing between gestures.
+local function ApplyOverlayScrollBar(scrollFrame, sb)
+    -- Idempotent: a consumer may re-style the same pane (a rebuild, a theme
+    -- pass), and installing the hooks twice would double every wake.
+    if sb.dfOverlay then return end
+
+    local ticker = CreateFrame("Frame", nil, sb)
+    ticker:Hide()
+
+    local function SetWide(wide)
+        if sb.dfOverlayWide == wide then return end
+        sb.dfOverlayWide = wide
+        local w = wide and UI.Scroll.bar or UI.Scroll.overlayIdle
+        sb:SetWidth(w)
+        sb:SetAlpha(wide and 1 or UI.Scroll.overlayAlpha)
+        -- The grab area stays the same size at either width: what the bar gives
+        -- up visually it takes back invisibly.
+        local grow = math.max(0, (UI.Scroll.overlayHit - w) / 2)
+        if sb.SetHitRectInsets then sb:SetHitRectInsets(-grow, -grow, 0, 0) end
+        if sb.Thumb and sb.Thumb.SetHitRectInsets then
+            sb.Thumb:SetHitRectInsets(-grow, -grow, 0, 0)
+        end
+    end
+
+    -- The pointer being ON it, and the thumb being HELD, are both "still in use"
+    -- -- a drag that pauses must not shrink out from under the cursor. Only when
+    -- neither holds does the clock start.
+    ticker:SetScript("OnUpdate", function(self, elapsed)
+        if sb.dfOverlayHover or sb.dfOverlayHeld then sb.dfOverlayIdle = 0 return end
+        sb.dfOverlayIdle = (sb.dfOverlayIdle or 0) + (elapsed or 0)
+        if sb.dfOverlayIdle >= UI.Scroll.overlayHold then
+            self:Hide()
+            SetWide(false)
+        end
+    end)
+
+    local function Wake()
+        sb.dfOverlayIdle = 0
+        SetWide(true)
+        ticker:Show()
+    end
+    -- Published so a consumer that owns its own wheel path can say "this counts
+    -- as scrolling" without reaching into the state.
+    sb.dfOverlayWake = Wake
+    sb.dfOverlayTicker = ticker
+    sb.dfOverlay = true
+
+    local function Enter() sb.dfOverlayHover = true; Wake() end
+    local function Leave() sb.dfOverlayHover = false; sb.dfOverlayIdle = 0 end
+    sb:HookScript("OnEnter", Enter)
+    sb:HookScript("OnLeave", Leave)
+    if sb.Thumb and sb.Thumb.HookScript then
+        sb.Thumb:HookScript("OnEnter", Enter)
+        sb.Thumb:HookScript("OnLeave", Leave)
+        sb.Thumb:HookScript("OnMouseDown", function() sb.dfOverlayHeld = true; Wake() end)
+        sb.Thumb:HookScript("OnMouseUp", function() sb.dfOverlayHeld = false; sb.dfOverlayIdle = 0 end)
+    end
+    -- OnVerticalScroll covers the wheel, a thumb drag and a programmatic jump in
+    -- one; OnMouseWheel is hooked as well so a wheel that moves NOTHING (already
+    -- at an end) still says the pane is being used.
+    if scrollFrame.HookScript then
+        scrollFrame:HookScript("OnVerticalScroll", Wake)
+        scrollFrame:HookScript("OnMouseWheel", Wake)
+    end
+
+    SetWide(false)
+end
+
+-- opts.overlay: the hairline-until-it-matters variant. See UI.Scroll's overlay
+-- block and ApplyOverlayScrollBar above. Everything else about the bar -- the
+-- stripped track, the pill thumb, the hidden nav buttons -- is the same either
+-- way, which is the point: overlay is a SIZE behaviour, not a second look.
+local function StyleScrollBar(scrollFrame, opts)
     local sb = scrollFrame.ScrollBar
     if not sb then return end
 
@@ -1029,6 +1130,13 @@ local function StyleScrollBar(scrollFrame)
     -- Hide navigation buttons
     if sb.Back then sb.Back:Hide() sb.Back:SetSize(1, 1) end
     if sb.Forward then sb.Forward:Hide() sb.Forward:SetSize(1, 1) end
+
+    if opts and opts.overlay then
+        -- The overlay variant owns the width from here on -- it swaps between
+        -- UI.Scroll.overlayIdle and UI.Scroll.bar -- so do not also set it below.
+        ApplyOverlayScrollBar(scrollFrame, sb)
+        return
+    end
 
     -- Slim width. UI.Scroll.bar, not a literal: the gutter every consumer
     -- reserves beside its pane is bar + pad, and a bar that is retuned here
