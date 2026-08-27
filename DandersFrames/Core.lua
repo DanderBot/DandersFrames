@@ -7050,6 +7050,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
                     DF.AuraContainer.DebugDumpIdentityGate()
                 end
+            elseif msg == "dispelcap" then
+                -- What can this character ACTUALLY cleanse, talents included, and which
+                -- spell said so. The engine's flag is class/spec shaped and wrong in both
+                -- directions on talent-gated dispels; this is the table that is meant to
+                -- replace it, printed for validation before anything is wired to it.
+                if DF.DebugDispelCapability then DF:DebugDispelCapability() end
             elseif msg == "adgate" then
                 -- The AD half of the same question: idgate sees a placement's handle but
                 -- not its chain, its parent-driven links or its badge — so an indicator

@@ -1456,6 +1456,19 @@ local function dispelSlotPlan(db, selfOnly)
     local baseFilter, baseCF
     if byMe then
         baseFilter = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+        -- ☠ THE ENGINE'S FLAG OVER-REPORTS TALENT-GATED DISPELS, so subtract what this
+        -- character demonstrably cannot cleanse. Field-reported: "dispellable by me always
+        -- shows that a priest can remove disease despite it again being a talent choice".
+        -- ⚠ SUBTRACT, never replace — see DF:GetDispelTypesToExclude for why, and for the
+        -- precondition that makes a bad spell ID fail toward over-showing rather than
+        -- silently hiding a type the player CAN cure.
+        -- ✅ excludeDispelTypes is a candidate filter, so it sits OUTSIDE the identity gate
+        -- and is applied by the secure-environment matcher — it works in combat, which is
+        -- the only time this matters. (Same evidence chain as includeDispelTypes.)
+        local exclude = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+        if exclude then
+            baseCF = { excludeDispelTypes = exclude }
+        end
     elseif allToken then
         baseFilter = "HARMFUL|" .. allToken
     else
@@ -1587,7 +1600,18 @@ local function dispelFactoryPlanAndSig(db, selfOnly)
         -- TUNING, not structural: SetAuraSlotCandidateFilters is a live mutator, so this
         -- re-pushes in place with no teardown (and no stranded buttons — AddAuraSlot is
         -- add-only).
+        -- ⚠ BOTH MAPS, not just the include. The exclude side carries the talent-aware
+        -- correction, and it moves for exactly the same reasons — a talent edit changes it
+        -- while the key set and the filter string stay put, which is the staleness this
+        -- serialisation exists to catch.
         local scf = slots[i].candidateFilters
+        local edt = scf and scf.excludeDispelTypes
+        if edt then
+            local types = {}
+            for k in pairs(edt) do types[#types + 1] = tostring(k) end
+            table.sort(types)
+            tu[#tu + 1] = slots[i].key .. ":edt=" .. table.concat(types, ",")
+        end
         local idt = scf and scf.includeDispelTypes
         if idt then
             -- Sorted, so the same set always serialises identically — an unordered pairs()
