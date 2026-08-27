@@ -1382,7 +1382,11 @@ local function CollectAllEffects()
                     tinsert(effects, {
                         source      = "frame",
                         auraName    = auraName,
-                        displayName = displayName,
+                        -- An effect may carry its OWN label. Without this every effect built
+                        -- on one filter reads identically in the list -- distinguishable only
+                        -- by its type badge, which says what it draws and not what it means.
+                        -- Optional and nil everywhere else, so existing effects are unchanged.
+                        displayName = auraCfg[typeKey].label or displayName,
                         typeKey     = typeKey,
                         config      = auraCfg[typeKey],
                     })

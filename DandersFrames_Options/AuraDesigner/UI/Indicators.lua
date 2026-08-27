@@ -118,7 +118,18 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- host to hang the next gate on. So it is greyed rather than left live over a render
     -- path that silently ignores it.
     local function GateSWM(cb)
-        if not (cb and auraName and P.GetEffectConditionGroups) then return end
+        if not cb then return end
+        -- ☠ NEVER ON A HELPER SIGNAL. Show-when-missing reroutes the effect down the
+        -- missing-mode build, which the Power Infusion Helper's cooldown gate cannot reach
+        -- (applyGroupTuning refuses mode == "missing") -- ticking it here would silently
+        -- exempt the effect from "hide while Power Infusion is on cooldown", with nothing on
+        -- screen to say so. Greyed with the reason, per the house rule.
+        if proxy and proxy.pihSignal then
+            cb:SetEnabled(false)
+            cb.tooltip = L["Not available on a Power Infusion Helper signal."]
+            return
+        end
+        if not (auraName and P.GetEffectConditionGroups) then return end
         local groups = P.GetEffectConditionGroups(auraName, typeKey)
         if groups and #groups > 1 then
             cb:SetEnabled(false)

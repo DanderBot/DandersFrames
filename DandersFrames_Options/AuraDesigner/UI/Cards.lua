@@ -22,6 +22,7 @@ local C_NOTICE = GUI.Colors.notice
 local OPTS = P.OPTS
 local GetAuraDesignerDB = P.GetAuraDesignerDB
 local GetThemeColor = P.GetThemeColor
+
 local ApplyBackdrop = P.ApplyBackdrop
 local CreateCardShell = P.CreateCardShell
 local ShowBuffCoexistPopup = P.ShowBuffCoexistPopup
@@ -71,6 +72,1243 @@ local dragState = P.dragState
 local RefreshPlacedIndicators = P.RefreshPlacedIndicators
 local RefreshPreviewEffects = P.RefreshPreviewEffects
 local BuildTypeContent = P.BuildTypeContent
+
+-- ============================================================
+-- POWER INFUSION HELPER -- THE RECIPE (slice 3a)
+-- ============================================================
+-- One click adds the helper with ONE signal running -- the burst window. The other two are
+-- ticked on afterwards if the user wants them. One click removes the lot.
+--
+-- ☠ THE EFFECTS ARE THE RECORD. There is no second copy of "which signals are on" kept in
+-- settings and reconciled against what is on screen. Each effect carries a mark saying which
+-- signal it is, and every question is answered by looking for the mark: is a helper added, is
+-- strong window on, which surface is burst using. One truth, so nothing can drift out of step
+-- with it -- and deleting a helper row by hand from Active Indicators simply unticks that
+-- signal, because nothing is left holding a contrary opinion.
+--
+-- ⚠ WHICH IS WHY REMOVING FORGETS THE COLOURS, and that is the house rule rather than a gap.
+-- The Aura Designer keeps a record's settings when its last effect is deleted ONLY for a spell
+-- the user picked into the pool themselves; records the addon built for them -- ad-hoc ones,
+-- and anything driven by a spell list, which is what the helper uses -- are pruned on the spot.
+-- S.CleanupAdHocAura says why: an entry holding nothing is cruft in the profile. Remembering
+-- would be an exception carved out of a rule written for exactly this category.
+-- Behaviour settings (never-mark, the amplifiers, the gate) are NOT effects, live where every
+-- other setting in the addon lives, and persist as they always did. Appearance dies with the
+-- effect it belongs to. That line is drawn once and holds in both directions.
+--
+-- It writes nothing new in kind: ordinary custom filters, ordinary frame-level effects with
+-- ordinary condition groups -- the shapes the From a Filter picker produces by hand.
+--
+-- ☠ THE MARK IS NOT OPTIONAL. `cfg.pihSignal` on each effect is what reaches the
+-- engine as `config.dfGate` and makes the effect OURS to the gate -- without it, nothing the
+-- recipe creates is gated. (This used to be a synthetic spell id seeded into the filter; see
+-- pihEnsureFilter for why that was replaced.)
+-- ============================================================
+
+local PIH_FILTERS = {
+    cooldowns  = "Power Infusion Helper",
+    amplifiers = "Power Infusion Helper (amplifiers)",
+    infused    = "Power Infusion Helper (infused)",
+}
+
+local PIH_PI_SPELL_ID = 10060   -- Power Infusion, for the "already infused" mark
+
+-- Seeded from the curated sets, confirmed present in SpellDB:
+--   offensiveCooldowns (45)  racials (13)  consumables (6, the potions)  trinketsItems (41)
+-- ☠ FOUR RACIALS BY NAME, NOT THE WHOLE CATEGORY. The plan seeded all thirteen with the note
+-- "Fireblood et al are ordinary burst". That was wrong: `racials` is not "offensive racials", it
+-- is every racial ability, and nine of the thirteen are nothing of the kind -- Shadowmeld,
+-- Darkflight, Spatial Rift, Stoneform, Gift of the Naaru, Regeneratin', Bull Rush, Thorn Bloom
+-- and Hyper Organic Light Originator. The helper would have lit up when someone stealthed or ran
+-- away, which is the opposite of worth infusing.
+--
+-- ⚠ AND THE DATA CANNOT TELL THEM APART. Every racial record carries `cats = { racials = true }`
+-- and nothing else -- checked, not assumed -- so there is no category to intersect with and an
+-- explicit list is the only honest option. The cost is maintenance: a new racial in a future
+-- patch will not appear here on its own. Accepted, because the failure mode of the alternative
+-- is a helper that fires on Shadowmeld and the failure mode of this one is a helper that misses
+-- a racial nobody has had time to notice yet.
+-- Not a class token, and it cannot collide with one: class files are uppercase letters only.
+local PIH_RACIAL_TOKEN = "@racials"
+local PIH_RACIAL_IDS = {
+    273104,  -- Fireblood       (Dark Iron Dwarf) -- primary stat
+    274739,  -- Ancestral Call  (Mag'har Orc)     -- secondary stat
+    20572,   -- Blood Fury      (Orc)             -- attack / spell power
+    26297,   -- Berserking      (Troll)           -- haste
+}
+
+local PIH_SEED = {
+    cooldowns  = { "offensiveCooldowns" },
+    amplifiers = { potions = "consumables", trinkets = "trinketsItems" },
+}
+
+-- ☠ OUR CURATION, NOT THE DATABASE'S. The category is Danders' and serves his buff bar and his
+-- defensive icon too, so a spell that is wrong FOR US gets dropped here rather than recategorised
+-- there. Anything in this list is a judgement about the Power Infusion helper only.
+-- ⚠ Two of these are arguably miscategorised at source as well. That is a separate, low-priority
+-- report to him and NOT a reason to edit shared data.
+local PIH_EXCLUDE = {
+    -- Augmentation's raid cooldown. It buffs ALLIES rather than the Evoker, so it is not a
+    -- "this player is bursting" signal at all -- the Evoker casting it is enabling everyone
+    -- else. Belongs with the power externals. (User's call, 2026-08-24.)
+    [442204] = true,   -- Breath of Eons
+    -- Brewmaster only. A reasonable entry in a general offensive list and a poor Power Infusion
+    -- trigger: a tank pressing it is not who you are looking for.
+    [325153] = true,   -- Exploding Keg
+    -- Leaves no visible buff on the paladin -- it shows in logs and nowhere the game can match.
+    -- Replaced below by Avenging Wrath, which does.
+    [1234189] = true,  -- Execution Sentence
+
+    -- ⚠ THE TEST FOR ALL THREE BELOW: does the spell leave a buff ON THE CASTER? The helper
+    -- matches auras on a unit, so a beam aimed at the ground and an ability that only damages
+    -- the target have nothing for it to find -- they would sit in the list doing nothing for as
+    -- long as it exists. Same reason Execution Sentence went.
+    -- ⚠ Cut deliberately narrowly. Leaving a spell that never fires costs nothing but clutter;
+    -- cutting one that WOULD have fired costs a real infusion window, silently. So only the
+    -- clear cases go, and four newer entries nobody could speak to with confidence stayed in.
+    [202770] = true,   -- Fury of Elune  (Balance druid, a beam on the target area)
+    [357210] = true,   -- Deep Breath    (Evoker movement plus damage, not a burst window)
+    [204066] = true,   -- Lunar Beam     (Guardian druid -- the tank spec -- and a ground effect)
+}
+
+-- ⚠ SPELLS THE CATEGORY MISSES. Avenging Wrath is filed under raidDefensives, which is fair for
+-- Protection and wrong for Retribution -- it is that spec's burst window and the paladin entry
+-- the helper actually wants. Added by id so the shared categorisation stays untouched.
+local PIH_EXTRA_IDS = {
+    31884,   -- Avenging Wrath (alts 454351 ride along with the record)
+}
+
+-- ⭐ ONE DEFINITION OF WHAT THE HELPER WATCHES. The seeder, the class list and the class ticks
+-- all read this. Four places used to walk the category independently, which is three chances for
+-- a curation change to land in some of them and not the others -- and the class tick reading a
+-- different set from the seeder is exactly the kind of drift nobody notices until a tick stops
+-- clearing itself.
+local function pihSeedRecords()
+    local R = DF.FilterRegistry
+    local out, seen = {}, {}
+    for _, catKey in ipairs(PIH_SEED.cooldowns) do
+        for _, rec in ipairs((R and R.ByCategory and R.ByCategory[catKey]) or {}) do
+            if rec.id and not PIH_EXCLUDE[rec.id] and not seen[rec.id] then
+                seen[rec.id] = true
+                out[#out + 1] = rec
+            end
+        end
+    end
+    for _, id in ipairs(PIH_EXTRA_IDS) do
+        local rec = R and R.ByID and R.ByID[id]
+        if rec and rec.id and not seen[rec.id] then
+            seen[rec.id] = true
+            out[#out + 1] = rec
+        end
+    end
+    return out
+end
+
+-- The same set as flat ids, plus the racials, which is what the seeder wants.
+local function pihSeedIDs()
+    local out = {}
+    for _, rec in ipairs(pihSeedRecords()) do out[#out + 1] = rec.id end
+    for _, id in ipairs(PIH_RACIAL_IDS) do out[#out + 1] = id end
+    return out
+end
+
+-- The three signals, in the order they read on the panel.
+--
+-- ⚠ `surface` is the DEFAULT ONLY. The surface a signal actually occupies is wherever its
+-- mark is found, so moving one (3b's dropdowns) needs no stored field and no conversion of
+-- anyone's saved settings -- the effect moves and the mark moves with it.
+--
+-- ☠ BURST AND STRONG SHARE ONE RECORD, because they share one spell list on purpose: trimming
+-- a spell should trim it for both. A record holds one effect per surface, so those two cannot
+-- merely CLASH on a surface -- the second would overwrite the first and a signal would vanish.
+-- pihCreateSignal refuses that rather than letting it happen quietly, and the surface
+-- dropdown resolves it by SWAPPING the two signals (see P.PIH_SetSurface).
+local PIH_SIGNALS = {
+    burst   = { surface = "border",     color = { 1.00, 0.82, 0.25 }, list = "cooldowns" },
+    strong  = { surface = "healthbar",  color = { 1.00, 0.35, 0.20 }, list = "cooldowns" },
+    infused = { surface = "background", color = { 0.55, 0.35, 0.95 }, list = "infused"   },
+}
+
+-- ☠ THE BORDER KEEPS ITS COLOUR UNDER A DIFFERENT NAME. DF.Border:BuildSpec reads
+-- `BorderColor`; every other frame-level surface reads plain `color`. Writing `color` on a
+-- border is neither an error nor a warning -- the field sits there unread while the ring paints
+-- the white it was created with. The first pass of this recipe did exactly that and shipped a
+-- burst window that was white instead of gold; found by reading BuildSpec, not by looking at
+-- it, because a white border still looks like a border that works.
+-- ⚠ Derived from the SURFACE rather than stored per signal, so moving a signal to another
+-- surface carries its colour across instead of leaving it behind under a name nothing reads.
+local function pihColorKey(surface)
+    return (surface == "border") and "BorderColor" or "color"
+end
+
+-- Localised at call time, not at file scope: the same locale-timing rule the effect-label
+-- tables in Groups.lua follow.
+local function pihLabel(key)
+    if key == "burst"   then return L["PI Helper — Big cooldown"]    end
+    if key == "strong"  then return L["PI Helper — Big cooldown with a trinket or potion"]   end
+    if key == "infused" then return L["PI Helper — Already has active Power Infusion"] end
+end
+
+local function pihFilterIdByName(name)
+    local R = DF.FilterRegistry
+    if not (R and R.ReadStore) then return nil end
+    local store = R:ReadStore()
+    for id, f in pairs((store and store.customFilters) or {}) do
+        if f and f.name == name then return id end
+    end
+    return nil
+end
+
+-- Create-or-find, then seed. Idempotent: AddSpellToCustom answers "exists" for a duplicate,
+-- so re-running the recipe repairs rather than doubles.
+-- `wipeFirst` empties the list before re-seeding, which is how the amplifier list is rewritten
+-- in place -- see pihSyncAmplifierFilter for why it must keep its id.
+-- Ownership is NOT in this list. It used to be -- a synthetic id seeded alongside the real
+-- spells, which the gate read back out of the resolved map. That worked and was still wrong: a
+-- fake id in real data travels with an exported profile and is unexplainable a year later. The
+-- mark now lives on the effect (`cfg.pihSignal`) and reaches the engine as `config.dfGate`.
+local function pihEnsureFilter(name, presetKeys, extraIDs, wipeFirst)
+    local R = DF.FilterRegistry
+    if not (R and R.CreateCustomFilter) then return nil end
+    local existing = pihFilterIdByName(name)
+    local id = existing or R:CreateCustomFilter(name)
+    if not id then return nil end
+    if wipeFirst then
+        local f = R:GetCustomFilter(id)
+        if f then f.spells, f.rawIDs = {}, {} end
+    end
+    -- ☠ SEED ONLY WHAT WE JUST BUILT. Re-seeding an existing list on every create would undo
+    -- both kinds of trimming the user is entitled to: the class ticks, and any hand edit made
+    -- on the Filters page. A list that quietly refills itself is not a list anyone can own.
+    -- (The amplifier list passes wipeFirst and so is always rebuilt -- correctly, because its
+    -- contents ARE the two amplifier ticks and nothing else.)
+    if (not existing) or wipeFirst then
+        for _, catKey in ipairs(presetKeys or {}) do
+            local recs = R.ByCategory and R.ByCategory[catKey]
+            for _, rec in ipairs(recs or {}) do R:AddSpellToCustom(id, rec.id) end
+        end
+        for _, sid in ipairs(extraIDs or {}) do R:AddSpellToCustom(id, sid) end
+    end
+    return id
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- WHAT EXISTS -- read off the marks, never off a stored list
+-- ─────────────────────────────────────────────────────────────
+-- Scans the WHOLE pool rather than the helper's own records. If a spell list is renamed or
+-- deleted underneath us, our effects must still be findable -- otherwise they become orphans
+-- ☠☠ THE HELPER LIVES IN THE *OTHER BUFFS* POOL, ALWAYS, AND THE POOL IS NOT A PREFERENCE.
+-- It decides the caster filter before anything else gets a say -- poolFilter returns
+-- "HELPFUL|PLAYER" for a My Buffs record and never reaches the othersOnly branch at all. So a
+-- helper built there asks for "cooldowns cast by ME", and a group member's own cooldown is cast
+-- by THEM. It can never match. The Others Only flag we set on every signal was being overruled
+-- by the pool it happened to be created in.
+--
+-- ⚠ FIELD-FOUND 2026-08-24, AND NOTHING SOLO COULD HAVE CAUGHT IT: with only your own frame on
+-- screen, your own casts DO satisfy "cast by me", and the editor preview draws from config
+-- without applying a pool filter at all -- which is why the border looked right in every solo
+-- pass. It took a Demon Hunter pressing Metamorphosis: sound fired (it registers per unit and
+-- spell, with no pool and no caster filter) while nothing drew.
+--
+-- ⚠ READS take adDB.otherAuras directly and never GetOtherAuras, which CREATES the table --
+-- merely looking at a panel must not write to the profile. WRITES go through the accessor,
+-- which is where lazy creation belongs.
+local function pihOtherPoolRead()
+    local adDB = GetAuraDesignerDB()
+    local pool = adDB and adDB.otherAuras
+    return (type(pool) == "table") and pool or nil
+end
+
+local function pihOtherPoolWrite()
+    return P.GetOtherAuras and P.GetOtherAuras() or nil
+end
+
+local function pihFound()
+    local out = {}
+    local pool = pihOtherPoolRead()
+    if type(pool) ~= "table" then return out end
+    local keys = P.FRAME_LEVEL_TYPE_KEYS or {}
+    for auraName, auraCfg in pairs(pool) do
+        if type(auraCfg) == "table" then
+            for _, typeKey in ipairs(keys) do
+                local cfg = auraCfg[typeKey]
+                if type(cfg) == "table" and cfg.pihSignal then
+                    out[cfg.pihSignal] = { auraName = auraName, typeKey = typeKey, cfg = cfg }
+                end
+            end
+            -- Placed instances carry the mark too (Icon / Square surfaces). The hit's
+            -- typeKey is the instance's type, and indicatorID is what tells every consumer
+            -- this representation is an instance rather than a frame effect.
+            for _, inst in ipairs(auraCfg.indicators or {}) do
+                if type(inst) == "table" and inst.pihSignal then
+                    out[inst.pihSignal] = { auraName = auraName, typeKey = inst.type,
+                                            cfg = inst, indicatorID = inst.id }
+                end
+            end
+        end
+    end
+    return out
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- THE COOLDOWN-ICON GROUP (a Filter Group carrying the burst signal)
+-- ─────────────────────────────────────────────────────────────
+-- ☠ A FOURTH WAY TO SHOW THE SAME SIGNAL, NOT A FOURTH SIGNAL. A placed icon pins
+-- max = 1 and shows ONE arbitrary cooldown; a Filter Group shows every matching cooldown the
+-- unit has running, one icon each -- the richer read of the burst window, and Danders'
+-- recommendation ("build it on merit, not as a fallback"). It is also the gate's native
+-- shape: the group builds through AuraContainer:Create with a config-wide candidate set, and
+-- buildFilterGroupConfig stamps dfGate from the group's own pihSignal mark -- no new gate
+-- code anywhere.
+--
+-- ⚠ BURST ONLY. Conditions are frame-level, so the strong window cannot ride a group,
+-- for the same reason it cannot be an Icon or a Square.
+--
+-- The group is ordinary Layout Groups data marked with pihSignal -- the same doctrine as the
+-- effects: the marks ARE the record. Hand-deleting it from the Layout Groups tab reads as
+-- the tick going off, and nothing is left holding a contrary opinion.
+-- Two groups, found by their mark: "burst" is the shared cooldowns/amplifiers row
+-- (others-only), "infused" is its own one-icon group -- SEPARATE because one container has
+-- ONE caster rule, and infused needs the opposite rule from everything else (own casts
+-- allowed; it IS an own cast). User's design, second group session.
+local function pihIconGroup(sig)
+    local groups = P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(false)
+    for _, g in ipairs(groups or {}) do
+        if type(g) == "table" and g.pihSignal == (sig or "burst") then return g end
+    end
+    return nil
+end
+
+local function pihAnyIconGroup()
+    local groups = P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(false)
+    for _, g in ipairs(groups or {}) do
+        if type(g) == "table" and g.pihSignal then return g end
+    end
+    return nil
+end
+
+-- The icon group counts as existing: without this, unticking all three signals while the
+-- icons stay on would flip the card back to "Add" and hide the panel -- stranding a running
+-- group with no control left that can reach it.
+function P.PIH_Exists()
+    return next(pihFound()) ~= nil or pihAnyIconGroup() ~= nil
+end
+
+-- "On" means "shows somewhere": a colour effect, the icon group, or both. This is what lets
+-- the master tick survive "None" -- an icons-only signal is still a signal.
+-- ⚠ Strong's icon representation is its AMPLIFIER HALF (icons cannot make the
+-- cooldown-AND-amplifier judgement), which is why its tick is labelled by what it shows.
+local PIH_ICON_OF = { burst = "cooldowns", strong = "amplifiers", infused = "infused" }
+function P.PIH_SignalOn(key)
+    if pihFound()[key] ~= nil then return true end
+    local which = PIH_ICON_OF[key]
+    return (which and P.PIH_IconsShow and P.PIH_IconsShow(which)) or false
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- SHARED SETTINGS
+-- ─────────────────────────────────────────────────────────────
+-- ☠ ONE COPY, ON THE HELPER, NOT ON EACH EFFECT. Stored on the Aura Designer config so it
+-- follows the preset, like everything else the helper writes. The engine already treats role
+-- exclusion and the gate as a single switch for the whole helper, so per-effect storage would
+-- have been a second source of truth that could disagree with the thing doing the work.
+function P.PIH_Settings()
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return {} end
+    -- ⚠ TANKS AND HEALERS EXCLUDED BY DEFAULT. You infuse damage dealers; marking the healer
+    -- is noise on every pull. The user can untick either.
+    -- gateEnabled: the whole point of the helper, so it defaults ON.
+    adDB.pihelper = adDB.pihelper or
+        { roles = { TANK = true, HEALER = true }, gateEnabled = true }
+    adDB.pihelper.roles = adDB.pihelper.roles or {}
+    return adDB.pihelper
+end
+
+-- Push the shared settings into the running engine. Config alone changes nothing: the gate
+-- reads its own state, so a saved setting that was never pushed is a setting that does not
+-- apply until something else happens to re-derive it.
+function P.PIH_Apply()
+    local s = P.PIH_Settings()
+    if DF.AuraContainer and DF.AuraContainer.SetHelperExcludedRoles then
+        local any = false
+        for _ in pairs(s.roles or {}) do any = true break end
+        DF.AuraContainer.SetHelperExcludedRoles(any and s.roles or nil)
+    end
+    -- Gate off means "never hide": force the gate open and leave it there.
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    if Engine and Engine.PIH_SetGateEnabled then Engine:PIH_SetGateEnabled(s.gateEnabled ~= false) end
+    -- After the gate, never before: the sound arms against the gate's current state, so doing
+    -- it first would arm against the state we are about to leave.
+    if P.PIH_ApplySound then P.PIH_ApplySound() end
+    -- The watcher's event registrations follow whether a helper exists at all.
+    if Engine and Engine.PIH_SyncWatcher then Engine:PIH_SyncWatcher() end
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- BUILDING AND UNBUILDING ONE SIGNAL
+-- ─────────────────────────────────────────────────────────────
+local function pihRefresh()
+    if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+    if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    if Engine and Engine.ForceRefreshAllFrames then Engine:ForceRefreshAllFrames() end
+    -- The editor's own surfaces, same pair the picker's paths always call: without these a
+    -- deleted square or layout group stays PAINTED on the preview canvas until a reload --
+    -- field-found as "changing surface doesn't remove the square", when the data was right
+    -- and only the picture was stale.
+    if RefreshPlacedIndicators then RefreshPlacedIndicators() end
+    if RefreshPreviewEffects then RefreshPreviewEffects() end
+end
+
+-- ☠ THE AMPLIFIER LIST KEEPS ITS ID ACROSS A CHANGE. Strong window's conditions name this
+-- list by reference, so deleting and re-creating it would leave those conditions pointing at a
+-- list that no longer exists -- a signal that quietly stops firing and reads as a bug in the
+-- gate. The contents are rewritten in place instead.
+local function pihSyncAmplifierFilter(s)
+    local presets = {}
+    if s.potions  then presets[#presets + 1] = PIH_SEED.amplifiers.potions  end
+    if s.trinkets then presets[#presets + 1] = PIH_SEED.amplifiers.trinkets end
+    if #presets == 0 then
+        -- ⚠ Wipe in place rather than just declining: the "As icons" ticks may still
+        -- point at this list, and an early return left it holding the previous ticks' spells
+        -- -- icons for amplifiers the user had switched off.
+        local R = DF.FilterRegistry
+        local id = pihFilterIdByName(PIH_FILTERS.amplifiers)
+        local f = id and R and R.GetCustomFilter and R:GetCustomFilter(id)
+        if f then f.spells, f.rawIDs = {}, {} end
+        return nil
+    end
+    return pihEnsureFilter(PIH_FILTERS.amplifiers, presets, nil, true)
+end
+
+local function pihCreateSignal(key, surfaceOverride)
+    local def = PIH_SIGNALS[key]
+    if not def then return false, "no such signal" end
+    if pihFound()[key] then return true, "already on" end
+    local tgt = surfaceOverride or def.surface
+
+    local s = P.PIH_Settings()
+
+    local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
+    if not cdId then return false, "could not build the cooldown list" end
+    -- ☠ RECORDED FOR THE RESIDENT HALF, WHICH CANNOT SEE THIS FILE. The sound registrations run
+    -- in the always-loaded addon and need this list; they used to find it by NAME and were
+    -- looking for the scaffolding filter, so they resolved nothing and no sound could ever play.
+    -- The id travels in the helper's own settings, which the resident half already reads.
+    -- ⚠ An ID rather than a name: a custom filter can be renamed in the Filter Designer.
+    s.cooldownFilterID = cdId
+    local cdRef = DF:MakeADFilterRef("custom", cdId)
+    if not cdRef then return false, "could not name the cooldown list" end
+
+    local ref = cdRef
+    if def.list == "infused" then
+        local infId = pihEnsureFilter(PIH_FILTERS.infused, nil, { PIH_PI_SPELL_ID })
+        if not infId then return false, "could not build the infused list" end
+        ref = DF:MakeADFilterRef("custom", infId)
+        if not ref then return false, "could not name the infused list" end
+    end
+
+    local conditions
+    if key == "strong" then
+        -- ☠ THE EMPTY-AMPLIFIER TRAP. resolveConditions SKIPS an empty group and then bails on
+        -- fewer than two groups -- at which point the effect falls back to a PLAIN UNION and
+        -- strong window silently becomes an exact duplicate of burst window: same trigger, same
+        -- behaviour, two effects contending for a surface over nothing.
+        -- So with no amplifier ticked, strong window is not created at all. That is the honest
+        -- state: the signal has nothing left to distinguish, so it should not exist.
+        local ampId = pihSyncAmplifierFilter(s)
+        if not ampId then return false, "this signal needs a potion or a trinket ticked" end
+        local ampRef = DF:MakeADFilterRef("custom", ampId)
+        if not ampRef then return false, "could not name the amplifier list" end
+        -- A cooldown AND (a potion OR a trinket). One group of each, combined ALL -- the union
+        -- inside a group is free: "one group is just a plain union" (Factory.lua:501).
+        conditions = { mode = "ALL", groups = { { triggers = { cdRef } }, { triggers = { ampRef } } } }
+    end
+
+    -- ☠ A PLACED TARGET MINTS AN INSTANCE, not a frame effect -- different store
+    -- (auraCfg.indicators), different creation call, and no sharing concerns: instances are
+    -- per-id, so two signals as icons coexist where two frame effects on one key cannot.
+    -- Strong never reaches here as placed -- its menu does not offer these (a placed
+    -- indicator cannot make the cooldown-AND-amplifier judgement) -- but refuse anyway:
+    -- a guard that relies on the menu is a guard that relies on every future menu.
+    if tgt == "icon" or tgt == "square" then
+        if key == "strong" then return false, "that signal cannot be an icon" end
+        local inst = CreateIndicatorInstance and CreateIndicatorInstance(ref, tgt)
+        if not inst then return false, "could not create the indicator" end
+        inst.pihSignal = key
+        -- ⚠ OTHERS ONLY IS PER INSTANCE on the placed path -- poolFilter reads it off
+        -- the indicator, not the record. Forgetting it is the My-Buffs-pool trap; but see
+        -- pihCreateSignal's frame branch for why INFUSED must be the exception -- with it,
+        -- that signal could never fire at all.
+        inst.othersOnly = (key ~= "infused") or nil
+        -- A square has a colour; an icon shows the aura's own artwork.
+        if tgt == "square" then
+            inst.color = { r = def.color[1], g = def.color[2], b = def.color[3], a = 1 }
+        end
+        return true
+    end
+
+    -- ⚠ REFUSE A SURFACE ANOTHER SIGNAL IS SITTING ON. Two effects cannot share one surface on
+    -- one record: the second simply replaces the first. Unreachable on the defaults; the guard
+    -- is here for 3b, where the user can move a signal.
+    local pool = pihOtherPoolRead()
+    local occupant = pool and pool[ref] and pool[ref][tgt]
+    if type(occupant) == "table" and occupant.pihSignal and occupant.pihSignal ~= key then
+        return false, "that surface is already taken by another signal"
+    end
+
+    local cfg = EnsureTypeConfig(ref, tgt, pihOtherPoolWrite())
+    if not cfg then return false, "could not create the effect" end
+    -- ☠ THE MARK. This one field is what makes every question above answerable.
+    cfg.pihSignal = key
+    -- Its own row label. Burst and strong share one spell list, so without this they read
+    -- identically in the effects list.
+    cfg.label = pihLabel(key)
+    cfg[pihColorKey(tgt)] = { r = def.color[1], g = def.color[2], b = def.color[3], a = 1 }
+    -- ☠ TINT, NOT REPLACE. A health-bar effect's generic default is Replace, which
+    -- repaints the whole bar and covers every other tint -- the exact collision the panel's
+    -- own note says cannot happen. Tint is the mode that stacks. Only healthbar has a mode.
+    if tgt == "healthbar" then cfg.mode = "Tint" end
+    -- ⚠ OTHERS ONLY -- EXCEPT FOR INFUSED, AND THE EXCEPTION IS THE SIGNAL. For the
+    -- cooldown signals, "cast by someone else" is what makes them about OTHER PLAYERS (and
+    -- keeps Twins of the Sun Priestess from lighting our own frame after every cast). But
+    -- Power Infusion on a teammate is ALWAYS the priest's own cast -- an others-only infused
+    -- mark filters out the one thing it exists to show. Field-found in the second group
+    -- session: the violet had never rendered anywhere, since the day it was built. Twins
+    -- copying PI onto the priest now lights their own frame violet, which is simply true.
+    cfg.othersOnly = (key ~= "infused") or nil
+    cfg.enabled = true
+    cfg.conditions = conditions   -- nil on purpose for the unchained signals: clears a stale chain
+    return true
+end
+
+local function pihDeleteSignal(key)
+    local hit = pihFound()[key]
+    if not hit then return false end
+    local pool = pihOtherPoolRead()
+    local auraCfg = pool and pool[hit.auraName]
+    if hit.indicatorID and auraCfg and type(auraCfg.indicators) == "table" then
+        -- A placed representation: remove the instance, not a frame key. Direct removal
+        -- rather than RemoveIndicatorInstance for the same reason the prune below bypasses
+        -- CleanupAdHocAura -- that helper resolves the pool off the OPEN TAB, and ours is
+        -- always the Other pool.
+        for i, inst in ipairs(auraCfg.indicators) do
+            if inst.id == hit.indicatorID then table.remove(auraCfg.indicators, i) break end
+        end
+    elseif auraCfg then
+        auraCfg[hit.typeKey] = nil
+    end
+    -- Drops the record once its last effect is gone -- the same prune the generic delete button
+    -- runs, so unticking here and deleting the row there leave the profile identical.
+    -- ⚠ NOT S.CleanupAdHocAura. It prunes an emptied record out of `CurrentAuraPool()` -- the
+    -- pool of whichever tab is open -- and ours are always in the Other Buffs pool, so it would
+    -- do nothing whenever the user happened to be on My Buffs. Same rule, same test
+    -- (AuraHoldsNoEffects, its own predicate), applied to the pool the record is actually in.
+    if pool and type(auraCfg) == "table" and P.AuraHoldsNoEffects
+        and P.AuraHoldsNoEffects(auraCfg) then
+        pool[hit.auraName] = nil
+    end
+    return true
+end
+
+
+-- ─────────────────────────────────────────────────────────────
+-- WHICH SURFACE A SIGNAL DRAWS ON
+-- ─────────────────────────────────────────────────────────────
+local PIH_SURFACE_ORDER = { "border", "healthbar", "background", "nametext", "healthtext" }
+
+-- ☠ ONLY THREE OF THE FIVE CONTEND, and the difference is watched in game, not read.
+-- Border, name text and health text resolve through `pickWinner`, which takes ONE winner per
+-- surface from config alone and tears every other candidate down. Health bar and background
+-- tints are MULTI -- `collectFrameTints` renders each on its own presence-gated container,
+-- because a static pick cannot ask what is actually on a unit when presence is secret.
+-- So a clash warning on those two would be a lie, and a warning that cannot be true is worse
+-- than no warning at all.
+local PIH_CONTENDED = { border = true, nametext = true, healthtext = true }
+
+-- The exact candidacy test each contended surface applies, copied from the call sites rather
+-- than approximated -- a warning that fires when the user has ALREADY applied the fix is worse
+-- than one that never fires.
+--   border     : ShowBorder ~= false and borderMode ~= "custom"   (Factory.lua:5682)
+--                ⭐ "Give this aura its own border" opts an effect OUT of the contest entirely
+--                (collectStackedBorders), so it must not count as a clash.
+--   name/health: c.color and not c.showWhenMissing                (the TEXT_MIRROR_TYPES pick)
+local function pihContends(surface, cfg)
+    if type(cfg) ~= "table" or cfg.enabled == false then return false end
+    if surface == "border" then
+        return cfg.ShowBorder ~= false and cfg.borderMode ~= "custom"
+    end
+    return cfg.color ~= nil and not cfg.showWhenMissing
+end
+
+-- Both aura pools, READ-ONLY.
+-- ☠ NEVER THROUGH GetOtherAuras: that accessor CREATES adDB.otherAuras, and merely looking at
+-- a settings panel must not write to the profile. The same rule CurrentAuraPool follows.
+local function pihPools()
+    local out = {}
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return out end
+    local spec = ResolveSpec and ResolveSpec()
+    local mine = spec and adDB.auras and adDB.auras[spec]
+    if type(mine) == "table" then out[#out + 1] = mine end
+    if type(adDB.otherAuras) == "table" then out[#out + 1] = adDB.otherAuras end
+    return out
+end
+
+-- What an effect calls itself, in the same order the effects list resolves it: its own label
+-- first (only helper effects carry one today), then the registry's name for a filter-owned
+-- record, then the pool key -- which for an ordinary record IS the aura's name.
+local function pihEffectName(auraName, cfg)
+    if type(cfg) == "table" and cfg.label then return cfg.label end
+    local named = DF.ADFilterRefDisplayName and DF:ADFilterRefDisplayName(auraName)
+    return named or auraName
+end
+
+-- How many of the USER'S OWN effects would fight this signal for the surface, and what the
+-- first one is called. Ours are skipped: two helper signals on one contended surface are
+-- prevented outright by the menu, so counting them here would report the same fact twice in
+-- two different voices.
+-- Scans BOTH pools, because pickWinner does -- a clash living on the other tab is still a clash.
+-- ⚠ NAMING THE OFFENDER IS THE POINT. "Something else colours the border" sends someone hunting
+-- through their own effects list; naming it turns the warning into an instruction. When several
+-- contend, the count says so rather than pretending the named one is the only problem.
+function P.PIH_ClashOn(surface)
+    if not PIH_CONTENDED[surface] then return 0, nil end
+    local n, name = 0, nil
+    for _, pool in ipairs(pihPools()) do
+        for auraName, auraCfg in pairs(pool) do
+            if type(auraCfg) == "table" then
+                local cfg = auraCfg[surface]
+                if type(cfg) == "table" and not cfg.pihSignal and pihContends(surface, cfg) then
+                    n = n + 1
+                    if not name then name = pihEffectName(auraName, cfg) end
+                end
+            end
+        end
+    end
+    return n, name
+end
+
+-- Which OTHER helper signal is sitting on this surface, if any.
+-- ⚠ ONLY A SIGNAL ON THE *SAME RECORD* BLOCKS A SURFACE, and the first version of this got
+-- that wrong -- it refused ANY signal sharing a surface, which quietly forbade a configuration
+-- that works perfectly.
+--
+-- Burst and strong window live on ONE record, because they share one spell list on purpose. A
+-- record holds one effect per surface, so those two on the same surface is an overwrite: the
+-- second replaces the first and a signal disappears. Genuinely impossible.
+--
+-- ☠ "Already infused" is a DIFFERENT record, and there the answer flips. Two effects on
+-- different records CAN share a health bar or a background -- watched in game 2026-08-23, two
+-- tints on one unit rendered both colours mixed, because collectFrameTints is multi. Blocking
+-- that was us inventing a limit the engine does not have. On border or either text it is a real
+-- contest rather than an impossibility, and a contest is what the clash warning is for.
+local function pihSurfaceTakenBy(surface, exceptKey)
+    local mine = PIH_SIGNALS[exceptKey]
+    if not mine then return nil end
+    for key, hit in pairs(pihFound()) do
+        local other = PIH_SIGNALS[key]
+        if key ~= exceptKey and hit.typeKey == surface and other and other.list == mine.list then
+            return key
+        end
+    end
+    return nil
+end
+
+-- The same question for the CLASH WARNING, which cares about contention rather than
+-- impossibility: another of our signals, on a different record, on a surface that takes a
+-- single winner. PIH_ClashOn deliberately skips our own effects when counting the user's --
+-- this is what puts the ones that genuinely contend back in.
+local function pihSiblingContends(surface, exceptKey)
+    if not PIH_CONTENDED[surface] then return nil end
+    local mine = PIH_SIGNALS[exceptKey]
+    if not mine then return nil end
+    for key, hit in pairs(pihFound()) do
+        local other = PIH_SIGNALS[key]
+        -- Through the real candidacy test: a sibling that opted OUT of the contest
+        -- (custom-mode border, disabled) is not a clash, and warning about it would survive
+        -- the very fix the warning names.
+        if key ~= exceptKey and hit.typeKey == surface and other and other.list ~= mine.list
+            and pihContends(surface, hit.cfg) then
+            return key
+        end
+    end
+    return nil
+end
+P.PIH_SiblingContends = pihSiblingContends
+
+-- Does OUR OWN signal actually enter the contest on this surface? The warning has to vanish
+-- when the named fix is applied to our effect itself -- a warning that survives its own
+-- remedy teaches people to ignore warnings.
+function P.PIH_SelfContends(surface, key)
+    if not PIH_CONTENDED[surface] then return false end
+    local hit = pihFound()[key]
+    return (hit and pihContends(surface, hit.cfg)) and true or false
+end
+
+function P.PIH_SurfaceOf(key)
+    local hit = pihFound()[key]
+    if hit then return hit.typeKey end
+    -- Icons-only: the signal is on with no colour, and the dropdown says so.
+    local which = PIH_ICON_OF[key]
+    if which and P.PIH_IconsShow and P.PIH_IconsShow(which) then return "none" end
+    return nil
+end
+
+-- The dropdown's option set, rebuilt per signal because what is available depends on where the
+-- other two are sitting.
+-- ⭐ EVERY SURFACE IS LISTED, AND AN OCCUPIED ONE SAYS WHAT PICKING IT DOES.
+function P.PIH_SurfaceOptions(key)
+    local labels = S.FRAME_LEVEL_LABELS or {}
+    local opts = { _order = {} }
+    for _, surface in ipairs(PIH_SURFACE_ORDER) do
+        -- Naming the swap is what makes a taken row honest. Two earlier answers were worse and
+        -- are worth knowing about before anyone changes this back:
+        --
+        -- ☠ GREYING IT IS NOT AVAILABLE. The dropdown has no disabled-row concept. `header = true`
+        -- is the only thing that stops a row being clickable, and it is the GROUP LABEL treatment,
+        -- not a disabled state: it uppercases the text, shrinks it to 0.85, draws a separator, and
+        -- sets a flag that INDENTS EVERY ROW BELOW IT -- so one unavailable entry turned the rest
+        -- of the menu into its children. Asked for as a real `disabled` row; until it exists,
+        -- greying here is a misuse of somebody else's mechanism.
+        --
+        -- ⚠ HIDING IT WAS THE OTHER ANSWER, and the user rejected it for the right reason: a
+        -- missing row reads as "that was never possible", when it is possible and simply taken.
+        local label   = labels[surface] or surface
+        local takenBy = pihSurfaceTakenBy(surface, key)
+        opts[surface] = takenBy and format(L["%s (swap with %s)"], label, pihLabel(takenBy)) or label
+        opts._order[#opts._order + 1] = surface
+    end
+    -- "None" makes colour VISIBLY optional -- it is the entry that lets one row enumerate
+    -- colour-only / icons-only / both. First in the list (user's call): an opt-out reads as
+    -- the baseline you depart from, not a footnote you discover. On every signal, strong
+    -- included -- an icons-and-sound-only setup is first-class, and strong's icon half
+    -- (the amplifiers) is reachable without forcing a colour. L["None"] is the addon's
+    -- existing key, reused.
+    opts.none = L["None"]
+    table.insert(opts._order, 1, "none")
+    -- Placed surfaces, after the colours: one Icon at a spot you choose (the aura's own
+    -- artwork), or a Square (a flat colour block -- the quietest signal there is). Gated
+    -- and role-excluded like everything else since the slot lane landed. Not on strong: a
+    -- placed indicator cannot make its cooldown-AND-amplifier judgement.
+    if key ~= "strong" then
+        opts.icon   = L["Icon"]
+        opts.square = L["Square"]
+        opts._order[#opts._order + 1] = "icon"
+        opts._order[#opts._order + 1] = "square"
+    end
+    return opts
+end
+
+-- ☠ THE COLOUR TRAVELS; NOTHING ELSE DOES. Decided 2026-08-23 with the user. The five surfaces
+-- do not share a settings vocabulary -- a border has a style, a thickness and an inset, a health
+-- bar has Replace-vs-Tint and a blend -- so carrying settings across would mean inventing
+-- equivalences that do not exist. The colour is the one thing every surface genuinely has, and
+-- it is read from the OLD surface's key and written to the NEW one, because a border keeps its
+-- colour under a different name (see pihColorKey).
+-- What travels when a signal moves: its colour and its condition chain, nothing else. Captured
+-- BEFORE anything is deleted, because a swap deletes both effects before rebuilding either.
+local function pihCapture(hit)
+    return {
+        colour     = hit.cfg[pihColorKey(hit.typeKey)],
+        conditions = hit.cfg.conditions,
+    }
+end
+
+local function pihPlace(key, auraName, surface, carried)
+    if surface == "icon" or surface == "square" then
+        if key == "strong" then return false end
+        local inst = CreateIndicatorInstance and CreateIndicatorInstance(auraName, surface)
+        if not inst then return false end
+        inst.pihSignal  = key
+        inst.othersOnly = (key ~= "infused") or nil   -- infused = own cast; see pihCreateSignal
+        if surface == "square" then
+            -- Colourless carry falls back to the signal's default, same as the frame branch
+            -- below -- the store's default square is white.
+            local c = carried and carried.colour
+            if not c then
+                local d = PIH_SIGNALS[key] and PIH_SIGNALS[key].color
+                c = d and { r = d[1], g = d[2], b = d[3], a = 1 } or nil
+            end
+            if c then inst.color = { r = c.r, g = c.g, b = c.b, a = c.a or 1 } end
+        end
+        return true
+    end
+    local cfg = EnsureTypeConfig(auraName, surface, pihOtherPoolWrite())
+    if not cfg then return false end
+    cfg.pihSignal  = key
+    cfg.label      = pihLabel(key)
+    cfg.othersOnly = (key ~= "infused") or nil   -- infused = own cast; see pihCreateSignal
+    cfg.enabled    = true
+    cfg.conditions = carried and carried.conditions or nil
+    -- No colour to carry (an Icon has none) falls back to the signal's OWN default, exactly
+    -- like fresh creation -- the alternative was the store's default, which is WHITE:
+    -- field-found as "the border didn't appear", because a thin white ring on a path where
+    -- every border had been gold is a border nobody can see.
+    local c = carried and carried.colour
+    if not c then
+        local d = PIH_SIGNALS[key] and PIH_SIGNALS[key].color
+        c = d and { r = d[1], g = d[2], b = d[3], a = 1 } or nil
+    end
+    if c then cfg[pihColorKey(surface)] = { r = c.r, g = c.g, b = c.b, a = c.a or 1 } end
+    if surface == "healthbar" then cfg.mode = "Tint" end   -- same reason as pihCreateSignal
+    return true
+end
+
+-- ☠ PICKING AN OCCUPIED SURFACE SWAPS THE TWO SIGNALS. Decided with the user 2026-08-24, after
+-- the alternatives were tried and rejected in turn: greying the row misuses the dropdown's group
+-- heading and mangles the menu; hiding it makes a possible thing look impossible and reads as
+-- "you could never have had that"; refusing on click is a control that looks like it works.
+-- Swapping is the only version where every row in the list is a real option and none of them
+-- lies -- and it is almost certainly what someone meant, since they wanted that surface for the
+-- other signal in the first place.
+--
+-- Only ever fires between signals on the SAME record, which is the only case that cannot simply
+-- coexist; see pihSurfaceTakenBy.
+function P.PIH_SetSurface(key, surface)
+    if not PIH_SIGNALS[key] then return false, "no such signal" end
+    local found = pihFound()
+    local hit = found[key]
+
+    -- "No colour": drop the effect and nothing else. With icons on, the signal lives on as
+    -- icons-only; with icons off there is nothing left and the signal honestly reads off.
+    if surface == "none" then
+        if hit then pihDeleteSignal(key); pihRefresh() end
+        return true
+    end
+    -- Coming FROM icons-only: no effect exists to move, so create one where asked. Fresh
+    -- default colour -- there was no colour to carry.
+    if not hit then
+        local ok, why = pihCreateSignal(key, surface)
+        pihRefresh()
+        return ok, why
+    end
+    if hit.typeKey == surface then return true end
+
+    -- ☠ A MOVE TOUCHING A PLACED REPRESENTATION takes the simple route: capture,
+    -- delete, recreate on the same record. No swap machinery -- instances are per-id and
+    -- never contend -- and the frame-swap path below would try to nil a frame key the
+    -- instance does not live under.
+    if hit.indicatorID or surface == "icon" or surface == "square" then
+        local carried = pihCapture(hit)
+        pihDeleteSignal(key)
+        if not pihPlace(key, hit.auraName, surface, carried) then
+            return false, "could not create the effect"
+        end
+        pihRefresh()
+        return true
+    end
+
+    local pool = pihOtherPoolRead()
+    local auraCfg = pool and pool[hit.auraName]
+    if not auraCfg then return false, "the record went missing" end
+
+    local swapKey = pihSurfaceTakenBy(surface, key)
+    local swapHit = swapKey and found[swapKey] or nil
+
+    -- Anything else sitting there is not ours to move. Cannot happen on a record identified by a
+    -- helper spell list, but refusing beats overwriting something we never read.
+    if auraCfg[surface] ~= nil and not swapHit then return false, "that surface is occupied" end
+
+    local mine, theirs = pihCapture(hit), swapHit and pihCapture(swapHit) or nil
+    local vacated = hit.typeKey
+
+    auraCfg[vacated] = nil
+    if swapHit then auraCfg[swapHit.typeKey] = nil end
+
+    if not pihPlace(key, hit.auraName, surface, mine) then
+        return false, "could not create the effect"
+    end
+    if swapHit then pihPlace(swapKey, swapHit.auraName, vacated, theirs) end
+
+    pihRefresh()
+    return true
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- SOUND
+-- ─────────────────────────────────────────────────────────────
+-- ☠ THE HELPER OWNS THIS ENTRY END TO END. The generic effects list refuses to show `sound` on
+-- a filter-owned record -- the native path registers per spell ID, so one big filter would mean
+-- one registration per spell in it -- which means it offers no row and no delete button for it
+-- either. So the control lives here, and PIH_Remove clears it, because nothing else can.
+-- ⚠ Two settings, not one: the key remembers WHICH sound, the switch remembers WHETHER. Turning
+-- it off and on again should not make someone hunt for their sound a second time.
+function P.PIH_ApplySound()
+    local s = P.PIH_Settings()
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    if Engine and Engine.PIH_SetSound then
+        Engine:PIH_SetSound(s.soundOn and s.soundLSMKey or nil)
+    end
+end
+
+function P.PIH_SetSoundOn(on)
+    P.PIH_Settings().soundOn = on and true or nil
+    P.PIH_ApplySound()
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- ONLY WATCH -- whose cooldowns count
+-- ─────────────────────────────────────────────────────────────
+-- ⚠ CLASSES, NOT SPECS, AND THAT IS THE DATA RATHER THAN A CHOICE. Every record in the spell
+-- database carries a class and nothing finer -- there is no spec field in it anywhere. Offering
+-- "only watch Fire Mages" would mean hand-authoring which spec each of forty-five cooldowns
+-- belongs to and re-authoring it every patch: a dataset to maintain, not a control to build.
+-- ⚠ RACIALS ARE TAGGED "ALL" and belong to everyone, so no class tick ever removes one.
+local function pihClassList()
+    local R = DF.FilterRegistry
+    local present = {}
+    for _, rec in ipairs(pihSeedRecords()) do
+        if rec.class and rec.class ~= "ALL" then present[rec.class] = true end
+    end
+    local out = {}
+    -- The registry's own canonical order, read at call time because SpellPicker.lua loads AFTER
+    -- this file. Borrowed rather than restated so the helper's list reads in the same order as
+    -- the spell picker's instead of in a second order of our own invention.
+    for _, token in ipairs((R and R.PickerClassOrder) or {}) do
+        if present[token] then out[#out + 1] = token end
+    end
+    -- ⚠ RACIALS RIDE LAST, AS A PSEUDO-CLASS. They belong to no class -- every racial record is
+    -- tagged "ALL" -- so the loop above can never surface them, and without a row of their own
+    -- they would be the one part of the list nothing in this panel could switch off. Last
+    -- because it is not a class, and the registry's own spell lists group "All Classes" last too.
+    out[#out + 1] = PIH_RACIAL_TOKEN
+    return out
+end
+P.PIH_ClassList = pihClassList
+
+-- ☠ READ OFF THE LIST, NOT OFF A SETTING. A tick is on when the list still holds at least one
+-- of that class's cooldowns -- so the box and the Filter Designer are two views of one thing
+-- rather than two records that can disagree. Remove Avatar and the rest by hand over there and
+-- Warrior unticks itself here; add one back and it re-ticks. The same reason the signals
+-- themselves are read off the effects: a second copy of the truth only ever drifts.
+function P.PIH_ClassOn(classFile)
+    local R = DF.FilterRegistry
+    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local f = id and R and R.GetCustomFilter and R:GetCustomFilter(id)
+    -- No list yet means nothing has been taken away yet.
+    if not f then return true end
+    if classFile == PIH_RACIAL_TOKEN then
+        for _, sid in ipairs(PIH_RACIAL_IDS) do
+            if f.spells[sid] or f.rawIDs[sid] then return true end
+        end
+        return false
+    end
+    for _, rec in ipairs(pihSeedRecords()) do
+        if rec.class == classFile and (f.spells[rec.id] or f.rawIDs[rec.id]) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Adds or removes exactly one class's cooldowns from the helper's list. Surgical on purpose:
+-- a wipe-and-refill would also undo every hand edit made on the Filters page, and hand editing
+-- is the finer control this one deliberately does not try to replace.
+local function pihApplyClass(classFile, on)
+    local R = DF.FilterRegistry
+    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    if not (id and R) then return end
+    if classFile == PIH_RACIAL_TOKEN then
+        -- The same four the list was seeded from, so ticking it back restores exactly what was
+        -- taken away rather than the whole racial category.
+        for _, sid in ipairs(PIH_RACIAL_IDS) do
+            if on then R:AddSpellToCustom(id, sid) else R:RemoveSpellFromCustom(id, sid) end
+        end
+        return
+    end
+    for _, rec in ipairs(pihSeedRecords()) do
+        if rec.class == classFile then
+            if on then R:AddSpellToCustom(id, rec.id)
+            else R:RemoveSpellFromCustom(id, rec.id) end
+        end
+    end
+end
+
+-- ⚠ NOTHING IS STORED. An earlier pass kept an "excluded classes" table beside the list and
+-- re-applied it whenever the list was rebuilt. That was a second copy of the truth, and it went
+-- out of step the moment anyone edited the list in the Filter Designer: the box would still
+-- show Warrior unticked while the spells were back, or the reverse. The tick reads the list, the
+-- click edits the list, and there is nothing in between for the two to disagree about.
+function P.PIH_SetClassOn(classFile, on)
+    pihApplyClass(classFile, on)
+    pihRefresh()
+end
+
+-- ─────────────────────────────────────────────────────────────
+-- ADD / REMOVE / TICK
+-- ─────────────────────────────────────────────────────────────
+-- ⚠ ADDING TURNS ON ONE SIGNAL. Not everything it could build: a click that produces three
+-- indicators the user did not choose is a click that has decided for them, and two of the three
+-- are situational. Burst window is the one that is always worth having.
+-- The Layout Groups names are stored data, like the three filter names -- raw, never L[].
+local PIH_ICON_GROUP_NAME = "PI Helper — Cooldown icons"
+local PIH_INFUSED_GROUP_NAME = "PI Helper — Infused icon"
+
+-- The three lists the icons box can show. State is READ OFF THE GROUP'S OWN SELECTION --
+-- one tick per list, no stored copy -- so editing the group by hand on the Layout Groups tab
+-- and using these ticks can never disagree.
+local PIH_ICON_LIST_NAMES = {
+    cooldowns  = PIH_FILTERS.cooldowns,
+    amplifiers = PIH_FILTERS.amplifiers,
+    infused    = PIH_FILTERS.infused,
+}
+
+function P.PIH_IconsShow(which)
+    if which == "infused" then return pihIconGroup("infused") ~= nil end
+    local g = pihIconGroup("burst")
+    if not (g and g.filterSelection and g.filterSelection.customs) then return false end
+    local id = pihFilterIdByName(PIH_ICON_LIST_NAMES[which])
+    return (id and g.filterSelection.customs[id]) and true or false
+end
+
+function P.PIH_SetIconsShow(which, on)
+    if not PIH_ICON_LIST_NAMES[which] then return false, "no such list" end
+
+    -- ☠ INFUSED IS ITS OWN GROUP -- one icon, own position, and the OPPOSITE caster
+    -- rule from the shared row (own casts allowed: it IS an own cast). Existence is the
+    -- state; the last thing to derive is nothing.
+    if which == "infused" then
+        local ig = pihIconGroup("infused")
+        if not on then
+            if ig and P.DeleteLayoutGroup then P.DeleteLayoutGroup(ig.id) end
+            pihRefresh()
+            return true
+        end
+        if ig then return true end
+        local id = pihEnsureFilter(PIH_FILTERS.infused, nil, { PIH_PI_SPELL_ID })
+        if not (id and P.CreateLayoutGroup) then return false, "could not build the list" end
+        ig = P.CreateLayoutGroup(PIH_INFUSED_GROUP_NAME, "filter")
+        if not ig then return false, "could not create the group" end
+        ig.pihSignal = "infused"
+        -- NO othersOnly here, on purpose -- the whole reason this group exists apart.
+        ig.maxIcons = 1
+        ig.iconsPerRow = 1
+        -- The other corner, so the two icon groups never overlap at their defaults.
+        ig.anchor = "TOPRIGHT"
+        ig.filterSelection.customs[id] = true
+        pihRefresh()
+        return true
+    end
+
+    local g = pihIconGroup("burst")
+
+    if not on then
+        if not g then return true end
+        local id = pihFilterIdByName(PIH_ICON_LIST_NAMES[which])
+        if id and g.filterSelection and g.filterSelection.customs then
+            g.filterSelection.customs[id] = nil
+        end
+        -- The last list going deletes the group: the marks are the record, and a group
+        -- showing nothing is a record of nothing. Through the shared delete, which also
+        -- sweeps the expanded-card key -- its tab-routed store is safe here because this
+        -- panel only exists on the Other Buffs tab.
+        if g.filterSelection and not next(g.filterSelection.customs or {}) then
+            if P.DeleteLayoutGroup then P.DeleteLayoutGroup(g.id) end
+        end
+        pihRefresh()
+        return true
+    end
+
+    -- ☠ EACH TICK BUILDS ITS OWN LIST IF IT MUST. The box cannot depend on What to
+    -- Show -- icons-only is a legitimate setup -- so a list no signal ever created is created
+    -- here, the same way the signals create theirs.
+    local id
+    if which == "cooldowns" then
+        local st = P.PIH_Settings()
+        id = st and st.cooldownFilterID
+        if not id then
+            id = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
+            -- Recording the id is what makes the helper EXIST to the resident half (the
+            -- gate's watcher keys on it), so an icons-only setup still gets the gate.
+            if id and st then st.cooldownFilterID = id end
+        end
+    elseif which == "amplifiers" then
+        local st = P.PIH_Settings()
+        -- Same first-click rule as the strong signal: with neither amplifier ticked there is
+        -- nothing to show, so the first tick turns both on rather than appearing inert.
+        if not (st.potions or st.trinkets) then st.potions, st.trinkets = true, true end
+        id = pihSyncAmplifierFilter(st)
+    elseif which == "infused" then
+        id = pihEnsureFilter(PIH_FILTERS.infused, nil, { PIH_PI_SPELL_ID })
+    end
+    if not id then return false, "could not build the list" end
+
+    if not g then
+        if not P.CreateLayoutGroup then return false, "layout groups unavailable" end
+        g = P.CreateLayoutGroup(PIH_ICON_GROUP_NAME, "filter")
+        if not g then return false, "could not create the group" end
+        -- ☠ THE MARK is ownership, not content: whichever lists are ticked, this is
+        -- the one field that puts the icons under "hide while Power Infusion is on cooldown"
+        -- and the role exclusions (buildFilterGroupConfig reads it and stamps dfGate).
+        g.pihSignal = "burst"
+        -- ☠ OTHERS ONLY IS NOT INHERITED FROM ANYTHING. poolFilter reads it off THIS
+        -- group; without it the filter is plain HELPFUL -- anyone's casts, including the
+        -- priest's own cooldowns lighting icons on their own frame. The exact trap the first
+        -- group test found on the effects, closed here at create time.
+        g.othersOnly = true
+    end
+    g.filterSelection.customs[id] = true
+    pihRefresh()
+    return true
+end
+
+function P.PIH_Create()
+    local ok, why = pihCreateSignal("burst")
+    if ok then
+        -- ☠ PUSH THE DEFAULTS NOW. Creating writes the settings table (tanks and
+        -- healers excluded, gate on) but writing is not applying -- without this push the
+        -- engine ran on its own defaults until a reload or the first tick of any control,
+        -- so a freshly added helper marked the tank while the panel said it would not.
+        P.PIH_Apply()
+        pihRefresh()
+    end
+    return ok, why
+end
+
+function P.PIH_Remove()
+    local pool = pihOtherPoolRead()
+    local found = pihFound()
+    local names, n = {}, 0
+    for _, hit in pairs(found) do names[hit.auraName] = true; n = n + 1 end
+
+    -- ☠ THE WHOLE RECORD GOES, not only the marked surfaces. A helper record can carry a
+    -- `sound` entry that the generic effects list refuses to show on a filter-owned record
+    -- (Groups.lua) -- so it offers no delete button for it, and anything left behind there is
+    -- unreachable. Safe to take wholesale: a record here is identified BY a helper spell list,
+    -- so nothing of the user's own can be sitting on it.
+    if pool then
+        for name in pairs(names) do pool[name] = nil end
+    end
+
+    -- The lists go too. They exist only to feed these effects, and three "Power Infusion
+    -- Helper" entries left in the filter list after the helper is gone are cruft only their
+    -- author could explain.
+    -- ☠ BUT THE LISTS ARE ACCOUNT-WIDE AND THE HELPER IS PER-PRESET. Deleting them
+    -- while another preset still carries helper effects leaves that helper referencing lists
+    -- that no longer exist -- signals that silently render nothing, with no missing row to
+    -- explain it. So they only go when no helper mark remains in either mode of this profile.
+    -- ⚠ Another PROFILE's helper is not scanned: profiles are separate saved-variable
+    -- branches with their own preset resolution, and walking them all from here is machinery
+    -- out of proportion to the case. A cross-profile remove leaving orphaned references is
+    -- accepted and recorded.
+    local marksElsewhere = false
+    if DF.GetModeBaseAuraDesigner then
+        for _, mode in ipairs({ "party", "raid" }) do
+            local adDB = DF:GetModeBaseAuraDesigner(mode)
+            for _, auraCfg in pairs((adDB and adDB.otherAuras) or {}) do
+                if type(auraCfg) == "table" then
+                    for _, tCfg in pairs(auraCfg) do
+                        if type(tCfg) == "table" and tCfg.pihSignal then
+                            marksElsewhere = true
+                            break
+                        end
+                    end
+                end
+                if marksElsewhere then break end
+            end
+            -- Icon groups reference the cooldown list by id, so they hold it alive too.
+            for _, g in ipairs((adDB and adDB.otherLayoutGroups) or {}) do
+                if type(g) == "table" and g.pihSignal then marksElsewhere = true break end
+            end
+            if marksElsewhere then break end
+        end
+    end
+    if not marksElsewhere then
+        local R = DF.FilterRegistry
+        for _, name in pairs(PIH_FILTERS) do
+            local id = pihFilterIdByName(name)
+            if id and R and R.DeleteCustomFilter then R:DeleteCustomFilter(id) end
+        end
+    end
+
+    -- The icon groups go with the signals: they are the signals in another shape, and a
+    -- helper that no longer exists must not leave icons running.
+    local ig = pihAnyIconGroup()
+    while ig and P.DeleteLayoutGroup do
+        P.DeleteLayoutGroup(ig.id)
+        ig = pihAnyIconGroup()
+    end
+
+    -- ☠ SOUND IS NOT A CONTAINER, so nothing above reaches it. Removing the helper has to
+    -- silence it explicitly or the announcements outlive the feature that made them.
+    -- The SETTING is left alone: it is behaviour, and behaviour survives a remove.
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    if Engine and Engine.PIH_SetSound then Engine:PIH_SetSound(nil) end
+
+    -- The recorded list id goes with the list. Leaving it would point the resident half at a
+    -- filter that no longer exists -- harmless today, and exactly the kind of stale pointer that
+    -- reads as a bug the next time someone adds a helper and it resolves the wrong thing.
+    local st = P.PIH_Settings()
+    if st then st.cooldownFilterID = nil end
+
+    -- Re-derive the engine from whatever helper remains (another preset's, or none). This
+    -- resets roles and the gate, and releases the watcher's registrations when nothing is
+    -- left to drive.
+    if Engine and Engine.PIH_ApplySaved then Engine:PIH_ApplySaved() end
+
+    pihRefresh()
+    return true, ("removed %d signal(s) and their spell lists"):format(n)
+end
+
+function P.PIH_SetSignal(key, on)
+    local s = P.PIH_Settings()
+    if on then
+        -- ☠ STRONG WINDOW BRINGS ITS AMPLIFIERS WITH IT. It means "a cooldown AND something
+        -- extra"; with no amplifier ticked there is no extra, and the signal would be created
+        -- as a duplicate of burst or not at all. Ticking it with neither on turns both on, so
+        -- the tick does what it says on the first click rather than appearing to do nothing.
+        if key == "strong" and not (s.potions or s.trinkets) then
+            s.potions, s.trinkets = true, true
+        end
+        pihCreateSignal(key)
+        P.PIH_Apply()   -- see PIH_Create: writing settings is not applying them
+    else
+        pihDeleteSignal(key)
+        -- Off means off everywhere: the signal's own icon list goes with it, or the master
+        -- tick would re-read as on from the icons it left behind.
+        if PIH_ICON_OF[key] then P.PIH_SetIconsShow(PIH_ICON_OF[key], false) end
+    end
+    pihRefresh()
+end
+
+function P.PIH_SetRole(role, on)
+    local s = P.PIH_Settings()
+    -- PIH_Settings hands back a bare table when there is no Aura Designer config to write to,
+    -- and indexing a field that table does not have is an error rather than a no-op.
+    s.roles = s.roles or {}
+    s.roles[role] = on and true or nil
+    P.PIH_Apply()
+end
+
+-- ☠ UNTICKING THE LAST AMPLIFIER TAKES STRONG WINDOW WITH IT -- see the empty-amplifier trap in
+-- pihCreateSignal. This is not a value change; it is the difference between a signal existing
+-- and not existing.
+function P.PIH_SetAmplifier(which, on)
+    local s = P.PIH_Settings()
+    s[which] = on and true or false
+    if not (s.potions or s.trinkets) then
+        -- Both off: the judgement loses its second half AND the icon list empties, so both
+        -- representations go -- or the strong row would read "on" while showing nothing.
+        pihDeleteSignal("strong")
+        P.PIH_SetIconsShow("amplifiers", false)
+        pihRefresh()
+    elseif P.PIH_SignalOn("strong") then
+        pihSyncAmplifierFilter(s)   -- rewritten in place, so the effect keeps pointing at it
+        pihRefresh()
+    end
+end
+
+function P.PIH_SetGateEnabled(on)
+    P.PIH_Settings().gateEnabled = on and true or false
+    P.PIH_Apply()
+end
+
+-- The cooldown list's registry id, for deep-linking straight to it in the Filter Designer.
+-- nil before the helper exists, which is also when the button that uses it must be dead.
+function P.PIH_CooldownFilterID()
+    return pihFilterIdByName(PIH_FILTERS.cooldowns)
+end
 
 -- ============================================================
 -- GLOBAL VIEW (used by Global tab)
@@ -2614,6 +3852,475 @@ S.BuildEffectsTab = function()
     addBlock:SetPoint("TOPLEFT", 8, yPos)
     addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
     yPos = yPos - (addBlock.layoutHeight + 10)
+
+    -- ── POWER INFUSION HELPER (priest only) ──
+    -- ⚠ A SEPARATE BLOCK, not a fourth card in the one above. Those three answer "what shape
+    -- of indicator do you want" and then ask which spell; this one asks nothing and builds a
+    -- whole configured feature. Putting it beside them would imply it belongs to the same
+    -- question, and a card that behaves differently from its neighbours is a lying control.
+    --
+    -- ☠ The card becomes REMOVE once a helper exists on this preset, so there is one place to
+    -- look for both. Create and remove are the same feature seen from either side.
+    --
+    -- ☠ OTHER BUFFS ONLY, AND THAT IS NOT TIDINESS -- IT IS THE ONLY TAB WHERE IT WORKS.
+    -- The pool a record lives in decides its caster filter before anything else: My Buffs means
+    -- "auras I cast", and poolFilter returns that before it ever consults othersOnly. The helper
+    -- watches OTHER people's cooldowns, so My Buffs is the one place it is guaranteed to match
+    -- nothing. It was addable there and silently did nothing, which is a lying control.
+    --
+    -- ⚠ The recipe already writes into the Other Buffs pool wherever it is invoked from, so this
+    -- is no longer about correctness -- it is about not offering a button whose result lives
+    -- somewhere the user was not looking. Its indicators appear in that tab's list; the card
+    -- should be in the same place as the thing it creates.
+    -- ⭐ And a side benefit the user named: My Buffs is where most people work, and the helper's
+    -- rows would be clutter there for everyone who never uses it.
+    if select(2, UnitClass("player")) == "PRIEST" and S.activeBuffTab == "other" then
+        local exists = P.PIH_Exists()
+        local pihBlock = GUI:CreateChoiceCardGroup(parent, {
+            title    = L["POWER INFUSION HELPER"],
+            accent   = tc,
+            onToggle = function() S.SwitchTab("effects") end,
+            cards = {
+                {
+                    title = exists and L["Remove the helper"] or L["Add the helper"],
+                    desc  = exists
+                        and L["Deletes its indicators and its spell lists. Nothing else is touched."]
+                        or  L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."],
+                    art   = { kind = "border", color = { 1.00, 0.82, 0.25 } },
+                    onClick = function()
+                        if P.PIH_Exists() then P.PIH_Remove() else P.PIH_Create() end
+                        S.SwitchTab("effects")
+                    end,
+                },
+            },
+        })
+        pihBlock:SetPoint("TOPLEFT", 8, yPos)
+        pihBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        yPos = yPos - (pihBlock.layoutHeight + GUI.Space.section)
+
+        -- ── THE SETTINGS, FOLDED WITH THE CARD ──
+        -- ☠ GATED ON pihBlock.expanded, NOT ONLY ON THE HELPER EXISTING. The card group carries
+        -- its own collapsing header and publishes whether it is open; without asking, folding
+        -- the header away would hide the card and leave its settings stranded below a closed
+        -- section, attached to nothing visible. One header, the whole helper.
+        --
+        -- ☠ SHARED BEHAVIOUR LIVES HERE, NOT ON EACH EFFECT ROW. The mockup put "Never mark",
+        -- "Only watch" and the gating cooldown on every effect. It was drawn before the engine
+        -- existed, and the engine made them ONE switch for the whole helper. Three copies of
+        -- "never on tanks" that can disagree is not flexibility -- it is four states where one
+        -- is meaningful and three are bug reports.
+        -- Appearance (colour, border style, which surface) stays on the effect rows, because
+        -- that genuinely differs per signal and is where the AD already puts appearance.
+        if exists and pihBlock.expanded then
+            -- ☠ INDENTED, AND THAT IS THE WHOLE POINT OF THE CHANGE. These boxes used to start at
+            -- the same left edge as "Add an indicator" and "Active indicators", so a column of
+            -- five same-level boxes read as five sections rather than as one section and the
+            -- four boxes belonging to it. Nothing said which header owned them. Ten pixels of
+            -- indent is what says it -- the hierarchy was always there, it just was not drawn.
+            -- ⚠ 20 IS THE ADDON'S INDENT STEP, not a number picked here: the page layout engine
+            -- reads `widget.indent` and multiplies by 20 per level. That flag cannot be used
+            -- directly -- this column lays itself out by hand rather than going through the page
+            -- engine -- so the step is borrowed instead of the mechanism, which at least keeps
+            -- one indent width in the addon rather than two.
+            local PIH_INDENT = 20
+            local function pihGroup(header, buildFn, opts)
+                local group = GUI:CreateSettingsGroup(parent,
+                    (parent:GetWidth() or 320) - (PIH_INDENT + 18), opts)
+                group.padding = 10
+                group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
+                buildFn(group)
+                local h = group:LayoutChildren()
+                group:SetPoint("TOPLEFT", PIH_INDENT, yPos)
+                group:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+                -- The named scale, not a number that looks about right. GUI.Space carries a note
+                -- about an audit that found 58 spacers using 9 different values for two intents,
+                -- and three files each inventing their own for the same one.
+                yPos = yPos - (h + GUI.Space.section)
+            end
+
+            -- ☠☠ EVERY NOTE IN THIS COLUMN TAKES AN EXPLICIT HEIGHT, which inverts CreateLabel's
+            -- usual advice on purpose -- and getting that inversion wrong cost three rounds of
+            -- the user's time, so here is the whole mechanism.
+            --
+            -- A label builds itself 380px wide, measures, and gets a ONE-LINE answer. The group
+            -- then narrows it to the real width and the text wraps to three or four lines. The
+            -- label notices and fires a correction -- but only when the call site left the height
+            -- alone, and that correction re-flows the GROUP, then asks the COLUMN, which stacks
+            -- its children at fixed offsets and does nothing. So the group keeps the one-line
+            -- height, the label spills out of its bottom edge, and the next box is drawn on top
+            -- of it. That is how the note went "missing" and the boxes overlapped in the same
+            -- breath: the same fault, seen from two ends.
+            --
+            -- ⭐ CreateLabel's own comment names the escape hatch without calling it one: labels
+            -- "with a call-site height are exactly the ones nothing else ever touches again". A
+            -- pinned height is the ONLY safe kind of note here, because pinning is what stops the
+            -- converge that this column cannot absorb.
+            --
+            -- ⚠ AND MEASURING INSTEAD IS NOT AVAILABLE. CreateLabel's own note records the
+            -- attempt: "Do NOT try to Reflow()+Remeasure() synchronously here to get a correct
+            -- height at creation. Tried 2026-08-05 and it does not work: nothing has been drawn
+            -- yet at card build time, so GetStringHeight still returns 0". So the height has to
+            -- be predicted, and the only question is how well.
+            --
+            -- ⚠ DERIVED FROM THE REAL WIDTH, not a constant. The first version used a flat 38
+            -- characters per line "to be safe"; the truth at this panel's width is nearer 68, so
+            -- every note claimed twice the lines it needed and left visible gaps above the first
+            -- tick and below the last note -- field-reported with a screenshot 2026-08-24.
+            -- The per-character width is deliberately a shade wider than the font renders, so the
+            -- count errs toward MORE lines, which is the safe direction; and because it reads the
+            -- panel width it stays right when the panel is resized, not only at one size. The
+            -- measured figure and why it is rounded up are on the constant below.
+            -- The byte count makes an em dash worth three, which errs the same way.
+            -- Delete all of this the day the column publishes a `dfAD_ReflowWidgets` seam.
+            local PIH_NOTE_LINE = 13
+            local PIH_NOTE_W = (parent:GetWidth() or 320) - (PIH_INDENT + 18) - 24
+            -- ⭐ 6 PIXELS PER CHARACTER, AND THAT NUMBER WAS MEASURED, NOT PICKED.
+            -- It was 8, which is where seven rounds of gaps came from: at a note width of 400 the
+            -- panel fits ~74 characters on a line, so 400/74 is about 5.4 -- and reserving for 50
+            -- meant every long note claimed half again as many lines as it needed. The big one
+            -- asked for 8 lines to hold 5.
+            -- ⚠ 6 rather than 5.4 on purpose: it still errs long, by roughly a line on a
+            -- paragraph, and that line is the margin a longer translation gets to grow into.
+            -- ☠ Do NOT try to verify this from the widget. A probe that dumped every note's
+            -- measured height reported 30 for all of them whatever the text, because a pinned
+            -- label's frame never grows -- the FontString simply draws past it. The slot IS the
+            -- layout here; the frame height is not evidence of anything.
+            local function pihLines(text)
+                local cpl = math.max(20, math.floor(PIH_NOTE_W / 6))
+                -- ⚠ Colour escapes are not characters anyone can see. Counting them would add
+                -- twelve bytes per highlighted word and inflate the box by a line or two of pure
+                -- whitespace, which is the fault this estimator exists to avoid.
+                local plain = tostring(text):gsub("||r", "")
+                return math.max(1, math.ceil(#plain / cpl))
+            end
+            -- ⭐ GUI:CreateNote, not a hand-coloured CreateLabel. It IS the toned-note widget --
+            -- a label with the tone's own accent baked in through ToneHex, so a caution note here
+            -- is the same yellow as every caution note in the addon rather than three numbers
+            -- typed at this call site. `tone` names come from INFO_BANNER_TONES: info, caution,
+            -- danger, success. (The tone adds a colour escape to the string, which the byte count
+            -- below then treats as a dozen characters -- harmless, and it errs long.)
+            local function pihNote(g, text, tone)
+                if not text or text == "" then return end
+                local w = tone and GUI:CreateNote(parent, text, { tone = tone })
+                    or GUI:CreateLabel(parent, text)
+                g:AddWidget(w, pihLines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
+            end
+
+            -- ☠☠ NOT A BANNER, AND THE REASON IS A RACE RATHER THAN A SIZE.
+            -- Six shapes were tried and the symptom alternated between an overlap and a large
+            -- gap FROM THE SAME BUILD -- "half the time it's overlap, the other half it's a huge
+            -- gap". That is not a wrong constant; a wrong constant is wrong the same way every
+            -- time. It is a timing race, and no number can win one.
+            --
+            -- ⭐ Verified, and the asymmetry is the whole story: AddWidget stamps
+            -- `_slotHeightExplicit` when a call site pins a height (Sections.lua:125).
+            -- CreateLabel CHECKS it (Sections.lua:479) and skips its re-measure entirely, so a
+            -- pinned label is fixed at build and never corrects itself. CreateInfoBanner never
+            -- checks it -- its DoRecomputeHeight and TriggerHostRelayout run whatever you passed.
+            -- So the box's final height depends on when the panel happened to be built relative
+            -- to the banner's TWO measure passes: before it settles, the column reserved too
+            -- little and the next group is overlapped; after, the group shrinks under a
+            -- reservation already spent and the space becomes a gap.
+            --
+            -- ⚠ A box therefore cannot be made deterministic from this side. Getting one back
+            -- means CreateInfoBanner honouring `_slotHeightExplicit` the way CreateLabel does --
+            -- Danders' file, a real request with a checked premise, and NOT the reflow seam we
+            -- nearly asked for and withdrew.
+
+            -- Each tick creates or deletes one ordinary effect, which is why the rows below
+            -- also appear in Active Indicators: they ARE indicators, and hiding them there
+            -- would mean a row you can see the colour of but cannot find.
+            local function signalRow(g, key, label)
+                g:AddWidget(GUI:CreateCheckbox(parent, label, nil, nil, nil,
+                    function() return P.PIH_SignalOn(key) end,
+                    function(v)
+                        P.PIH_SetSignal(key, v)
+                        S.SwitchTab("effects")   -- the dependent groups appear and vanish with it
+                    end))
+
+                -- The surface picker, and it only exists while the signal does: "where does
+                -- this draw" is not a question about a signal that draws nothing.
+                local surface = P.PIH_SurfaceOf(key)
+                if not surface then return end
+
+                -- Inline, so the checkbox above is its label. A second heading saying
+                -- "Surface" over every row would triple the words for no added meaning.
+                g:AddWidget(GUI:CreateDropdown(parent, label, P.PIH_SurfaceOptions(key),
+                    nil, nil, nil,
+                    -- ⚠ NEVER nil: this widget survives a profile switch for one frame,
+                    -- and the shared dropdown's display refresh treats a nil answer as "try
+                    -- the saved-variable fallback", which was never given -- a Lua error on
+                    -- every profile switch away from the helper. "none" is a value the menu
+                    -- owns, so a dying row reads honestly until it is rebuilt away.
+                    function() return P.PIH_SurfaceOf(key) or "none" end,
+                    function(v)
+                        P.PIH_SetSurface(key, v)
+                        S.SwitchTab("effects")   -- the other rows' menus re-grey around it
+                    end,
+                    -- ⚠ An INLINE dropdown does not own its slot: CreateDropdown only stamps
+                    -- fixedRowHeight on the standalone form, so this literal is authoritative and
+                    -- a hand-guessed one gets read. Content is 24 tall; the tight gap is right
+                    -- because hiding the label makes it a compact row -- its control sits beside
+                    -- its name (the checkbox above) rather than under it.
+                    { inline = true }), 24 + GUI.RowGapTight)
+
+                -- ⚠ THE CLASH WARNING, AND IT IS SCOPED ON PURPOSE. pickWinner decides from
+                -- config alone and never asks what is on the unit, so a clash is fully knowable
+                -- while someone is setting it up -- no guessing, no "this might happen".
+                -- It appears only on the three surfaces that actually take a single winner, and
+                -- it names the fix that exists rather than describing the problem.
+                -- ⚠ Only while OUR effect is actually in the contest: the named fix
+                -- can be applied to our own signal too (custom-mode border), and the warning
+                -- must go when it is.
+                local selfIn = P.PIH_SelfContends(surface, key)
+                local clashes, who = 0, nil
+                if selfIn then clashes, who = P.PIH_ClashOn(surface) end
+                -- ⚠ OUR OWN SIBLING COUNTS TOO, on a contended surface across records.
+                -- PIH_ClashOn skips anything carrying a helper mark, because two signals on one
+                -- record are prevented outright rather than warned about. "Already infused" is
+                -- on its own record though, so it can genuinely lose a border or a text to one
+                -- of the other two -- a real contest that would otherwise go unwarned precisely
+                -- because it was ours.
+                local sibling = selfIn and P.PIH_SiblingContends
+                    and P.PIH_SiblingContends(surface, key) or nil
+                if sibling then
+                    clashes = clashes + 1
+                    who = who or pihLabel(sibling)
+                end
+                if clashes > 0 then
+                    who = who or L["Another effect"]
+                    -- More than one contender: naming only the first would read as "fix this
+                    -- one and you are done", which would not be true.
+                    if clashes > 1 then who = format(L["%s and %d more"], who, clashes - 1) end
+                    -- A CAUTION BOX, the addon's own construct for a warning panel -- the same
+                    -- one the click-casting dialog and the profiler use. It briefly became gold
+                    -- text on the belief that the box was what broke the layout; it was not, and
+                    -- a warning that looks like every other warning is worth the box.
+                    -- The checkbox's own label key rides as a placeholder so a translator
+                    -- renders it ONCE -- hardcoding the words here let the sentence and the
+                    -- control it points at drift apart in any other language.
+                    pihNote(g, (surface == "border")
+                        and format(L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."], who, L["Give this aura its own border"])
+                        or  format(L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."], who),
+                        "caution")
+                end
+
+                -- Icons sit BESIDE the colour dropdown, equal weight: with "None" in the
+                -- menu, one row enumerates colour-only / icons-only / both. Every row has
+                -- the same flow -- tick, dropdown, icons -- which is what three earlier
+                -- shapes kept breaking by parking the trinkets control under the wrong
+                -- signal. ⚠ Strong's tick is labelled by what it SHOWS -- its
+                -- amplifier half -- because icons cannot make its cooldown-AND-amplifier
+                -- judgement; a bare "As icons" there would over-promise. The colour tint
+                -- stays the only display that judges.
+                local which = PIH_ICON_OF[key]
+                local iconLabel = (key == "strong")
+                    and L["Their trinkets and potions as icons"] or L["As icons"]
+                g:AddWidget(GUI:CreateCheckbox(parent, iconLabel, nil, nil, nil,
+                    function() return P.PIH_IconsShow(which) end,
+                    function(v)
+                        P.PIH_SetIconsShow(which, v)
+                        S.SwitchTab("effects")
+                    end))
+            end
+
+            pihGroup(L["What to Show"], function(g)
+                -- ☠ A LABEL IN THE FIRST BOX, NOT A FREE-FLOATING INFO BANNER. The banner was
+                -- built and removed the same day: it measures its own height a frame after it is
+                -- drawn, and this column stacks its children at fixed offsets with no reflow
+                -- seam -- so the banner grew from its 34px placeholder and landed on top of the
+                -- box below it. That failure is documented in GUI:RelayoutHost, which names the
+                -- same symptom on the indicator cards ("the Duration Bar header overlapping the
+                -- Pandemic section's collapse bar") and fixes it through `dfAD_ReflowWidgets`,
+                -- a seam the indicator cards publish and this column does not.
+                -- ⚠ Inside a group, a measured label re-flows its host and settles. Outside one
+                -- it has nothing to tell. Same converge, different owner.
+                pihNote(g,
+                    L["Tick what makes someone worth infusing. It shows on your group frames."])
+
+                signalRow(g, "burst", L["Big cooldown"])
+                signalRow(g, "strong", L["Big cooldown with a trinket or potion"])
+                signalRow(g, "infused", L["Already has active Power Infusion"])
+
+
+                -- ☠ A LABEL, NOT AN INFO BANNER, AND THIS IS THE SECOND TIME THE SAME TRAP HAS
+                -- CAUGHT US. A banner starts life 34px tall and measures its real height a frame
+                -- after it draws, then asks its host to re-flow. Inside a settings group the
+                -- GROUP does re-flow -- which is why putting it in one looked like the fix -- but
+                -- the group then asks the COLUMN, and this column publishes no
+                -- `dfAD_ReflowWidgets` seam, so every box below it stays where the old height
+                -- put it. Four lines of prose starting from a 34px estimate is a big enough jump
+                -- to land on the next box: "Trinkets and Potions is being overlapped by What to
+                -- Show", field-reported 2026-08-24.
+                --
+                -- ⚠ THE DIFFERENCE IS THE SIZE OF THE LIE, not the widget. CreateLabel measures
+                -- itself too, but it starts at 40px, which already covers the two-line notes
+                -- these boxes use -- so its correction is small or zero and nothing visibly
+                -- moves. A banner's is not. Until the column grows a reflow seam (raised with
+                -- Danders), prose here has to be short enough that its first guess is right.
+                --
+                -- ⚠ AND THE TEXT SHRANK FOR THE SAME REASON IT COULD AFFORD TO: two of the three
+                -- facts it carried are already on screen where they matter. The swap is written
+                -- into the dropdown entry itself ("Health Bar (swap with Big cooldown)"), and
+                -- the single-winner warning appears, naming the offender, exactly when it
+                -- applies. Only the stacking rule had nowhere else to live.
+                -- ☠ A TOGGLE, NOT A SPELL PICKER. An earlier pass let the user choose which
+                -- cooldown gates the helper. The machinery is not priest-specific so it was
+                -- easy -- but nobody asked for it, and "which spell hides this" is a question
+                -- about plumbing rather than about the feature. The helper exists to say who is
+                -- worth infusing; it hides when you cannot infuse. One idea, one switch.
+                -- (The capability stays underneath for testing.)
+                --
+                -- ⚠ IT SITS HERE RATHER THAN IN A BOX OF ITS OWN. A whole titled group around a
+                -- single checkbox is more chrome than the setting is worth, and this label says
+                -- what it does without a header to lean on -- which is the test for whether a
+                -- control can live under a heading that does not quite describe it.
+                g:AddWidget(GUI:CreateCheckbox(parent,
+                    L["Hide the helper while Power Infusion is on cooldown"], nil, nil, nil,
+                    function() return P.PIH_Settings().gateEnabled ~= false end,
+                    function(v) P.PIH_SetGateEnabled(v) end))
+
+
+                -- ☠☠ TWO ONE-LINE NOTES, AND THE LENGTH IS THE WHOLE POINT.
+                -- Seven attempts went into sizing one long paragraph here, and the readout that
+                -- finally produced evidence said this: notes of 38-53 characters reserved their
+                -- space to within 2px, while the 359-character one was out by 93. Short notes are
+                -- exact; long ones drift, whatever constant is used. So the fix is not a better
+                -- estimate, it is text that fits on one line -- where ceil() has nothing to round
+                -- up and the estimate cannot be wrong.
+                --
+                -- ⚠ WHAT WAS CUT, AND WHY THESE TWO SURVIVED. The paragraph had four sentences.
+                -- The swap rule is already written into the dropdown entry itself ("Health Bar
+                -- (swap with Big cooldown)"), and it appears at the moment it matters rather than
+                -- in advance. That "Already has active Power Infusion" can share follows from the
+                -- two lines below. These two are the only facts nothing else on the panel ever
+                -- states, so they are the two that had to stay.
+                --
+                -- ⚠ No inline highlighting left either: these name display types, not
+                -- indicators, and the display-type names are short and already capitalised.
+                pihNote(g, L["Health Bar and Background can show several indicators at once."])
+                pihNote(g, L["Border and Text colours show only one at a time."])
+                -- The one navigational fact text is genuinely needed for. Only while the
+                -- icon group exists: position is not a question about icons that are not there.
+                if pihAnyIconGroup() then
+                    pihNote(g, L["Move and size the icons under Layout Groups."])
+                end
+            end)
+
+            -- ☠ ONLY WHILE STRONG WINDOW IS ON. These two are what the signal MEANS, so on
+            -- their own they are a question about nothing. Shown rather than greyed, because a
+            -- greyed pair would invite the reading that strong window works without them.
+            if P.PIH_SignalOn("strong") then
+                pihGroup(L["Trinkets and Potions"], function(g)
+                    -- ☠ UNTICKING BOTH TAKES THE SIGNAL WITH IT. Strong window is "a cooldown
+                    -- AND (a potion OR a trinket)". With neither ticked the amplifier group is
+                    -- empty, resolveConditions skips it, bails on fewer than two groups, and the
+                    -- effect silently degrades into a duplicate of the burst signal. So the
+                    -- recipe deletes it instead, and ticking one back brings it into existence.
+                    g:AddWidget(GUI:CreateCheckbox(parent, L["Combat potions"], nil, nil, nil,
+                        function() return P.PIH_Settings().potions == true end,
+                        function(v) P.PIH_SetAmplifier("potions", v); S.SwitchTab("effects") end))
+                    g:AddWidget(GUI:CreateCheckbox(parent, L["On-use trinkets"], nil, nil, nil,
+                        function() return P.PIH_Settings().trinkets == true end,
+                        function(v) P.PIH_SetAmplifier("trinkets", v); S.SwitchTab("effects") end))
+                end)
+            end
+
+            pihGroup(L["Never Show On"], function(g)
+                -- ⚠ FAILS OPEN. A group with no assigned roles reads as "no role" for everyone
+                -- and nothing is excluded. Marking a tank you did not want is a smaller failure
+                -- than silently hiding the signal on the damage dealers you did.
+                g:AddWidget(GUI:CreateCheckbox(parent, L["Tanks"], nil, nil, nil,
+                    function() return (P.PIH_Settings().roles or {}).TANK == true end,
+                    function(v) P.PIH_SetRole("TANK", v) end))
+                g:AddWidget(GUI:CreateCheckbox(parent, L["Healers"], nil, nil, nil,
+                    function() return (P.PIH_Settings().roles or {}).HEALER == true end,
+                    function(v) P.PIH_SetRole("HEALER", v) end))
+                pihNote(g,
+                    L["Only applies when the group has roles."])
+            end)
+
+            -- ☠ COLLAPSIBLE, AND THIRTEEN ROWS IS WHY. Everything else in this panel is two or
+            -- three ticks; a class list is as long as the game has classes, and most people
+            -- will never open it. The summary on the header carries the state while it is
+            -- folded, so the box does not have to be open to be honest.
+            pihGroup(L["Classes to Watch"], function(g)
+                -- ☠ ABOVE THE TICKS, NOT BELOW THEM. Fourteen rows is far enough that a line
+                -- underneath is a line nobody reads -- it arrives after the reader has already
+                -- decided what the box does. The one sentence that explains the box goes where
+                -- the reader still needs it.
+                pihNote(g, L["Untick a class to ignore its cooldowns."])
+
+                -- ☠ ABOVE THE LIST, NOT UNDER IT. Fourteen ticks is far enough that a button at
+                -- the bottom is a button nobody scrolls to -- and this is the escape hatch for
+                -- the thing the list cannot do (single spells), so it has to be visible while
+                -- someone is still deciding the list is not enough.
+                --
+                -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
+                -- scrolls to this filter, selects it and pulses it. Its own comment records why:
+                -- the hand-written version "landed you on the page with nothing indicated, which
+                -- is indistinguishable from a broken link" -- which is exactly what was here.
+                pihNote(g,
+                    L["To add or remove single spells, open the list itself."])
+                local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+                local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
+                    GUI:OpenFilterInDesigner("custom", cfID)
+                    -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
+                    -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
+                    -- that range is still 0 -- so the clamp pins the scroll at the top and the
+                    -- row it selected and pulsed is somewhere below the fold. The second call
+                    -- runs after layout, when the range is real. The proper fix is a deferred
+                    -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
+                    -- list for him rather than edited from here.
+                    if C_Timer and C_Timer.After then
+                        C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
+                    end
+                end)
+                if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
+                    fdBtn:Disable()
+                    fdBtn.Text:SetTextColor(0.4, 0.4, 0.4)
+                end
+                g:AddWidget(fdBtn, 28)
+
+                for _, token in ipairs(P.PIH_ClassList()) do
+                    local classFile = token
+                    -- Read at call time: SpellPicker.lua loads after this file, so the display
+                    -- helper does not exist yet at file scope.
+                    local name = (classFile == "@racials") and L["Racials"]
+                        or ((DF.FilterRegistry and DF.FilterRegistry.ClassDisplayName
+                            and DF.FilterRegistry.ClassDisplayName(classFile)) or classFile)
+                    g:AddWidget(GUI:CreateCheckbox(parent, name, nil, nil, nil,
+                        function() return P.PIH_ClassOn(classFile) end,
+                        function(v) P.PIH_SetClassOn(classFile, v) end))
+                end
+            -- ⚠ NO showSummary. The collapsed summary concatenates every child label, which for
+            -- thirteen classes and a two-line note is a wall of text rather than a summary. The
+            -- header alone says what is folded away, which is what a summary was for.
+            end, { collapsible = true, collapseKey = "pihelper:onlywatch" })
+
+            pihGroup(L["Sound Alert"], function(g)
+                -- ☠ TWO SETTINGS, NOT ONE. The key remembers WHICH sound, the switch remembers
+                -- WHETHER -- so turning it off and back on does not make anyone hunt for their
+                -- sound a second time. Silent until chosen, either way: a cue nobody asked for
+                -- is the fastest route to the whole feature being switched off.
+                g:AddWidget(GUI:CreateCheckbox(parent, L["Play a sound when someone becomes worth infusing"],
+                    nil, nil, nil,
+                    function() return P.PIH_Settings().soundOn == true end,
+                    function(v) P.PIH_SetSoundOn(v); S.SwitchTab("effects") end))
+                if P.PIH_Settings().soundOn then
+                    g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"],
+                        P.PIH_Settings(), "soundLSMKey",
+                        function() P.PIH_ApplySound() end), GUI.RowHeight.dropdown)
+                    -- ⚠ Stated rather than discovered in a fight: sound rides the same gate as
+                    -- the visuals, and it announces new windows only -- a window already open
+                    -- when the gate re-opens stays silent, because the visuals already carry it.
+                    pihNote(g,
+                        L["Only plays while the helper is showing."])
+                end
+            end)
+
+        end
+    end
 
     -- ── ACTIVE INDICATORS heading ──
     local activeHeader = parent:CreateFontString(nil, "OVERLAY")
