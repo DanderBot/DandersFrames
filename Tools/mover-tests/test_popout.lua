@@ -2347,4 +2347,252 @@ UIParent._scale = UP_SAVE.scale
 eq(UIParent:GetEffectiveScale(), 1, "uiscale: the shim's UIParent is restored")
 eq(select(1, UIParent:GetCenter()), CX, "uiscale: ...centre and all")
 
+
+-- ============================================================
+-- THE SURFACE STYLE -- opts.surface
+--
+-- A popout wears one of two shapes, and the two have to be each other's exact
+-- opposite: switching a live panel between them must leave nothing of the other
+-- behind. Square leaves rounded TEXTURES on the frame (they are ours; nothing
+-- else takes them down) and rounded leaves a square BACKDROP under it -- and a
+-- backdrop's bgFile sits ABOVE every layer the rounded surface draws in, so a
+-- panel that kept it would render the square in front of a curve that is drawing
+-- perfectly. Each arm therefore takes the other down before it paints.
+--
+-- ☠ THE SQUARE PATH IS THE ONE THAT MATTERS MOST HERE. DandersMover shares this
+-- exact file and never declares a style, so every assertion below about "no
+-- surface, panel backdrop, strip texture shown, cross at the shell's own offset"
+-- is really an assertion that the mover's popout did not change.
+-- ============================================================
+
+-- The rounded chrome, or nil. Written once so a test reads as a claim about the
+-- SHAPE rather than about where the handle happens to be kept.
+local function chromeOf(p) return UI:GetRoundedSurface(p.frame) end
+local function stripOf(p) return UI:GetRoundedSurface(p.frame, UI.RoundStripSublevel) end
+
+-- The style the settings shell ships, built here rather than taken from
+-- UI.SurfaceStyle so a retune of the token cannot quietly rewrite what these
+-- tests are asserting.
+local R8 = { style = "rounded", radius = 8, borderWidth = 2, rowBorderWidth = 1 }
+
+print("-- Popout: no style declared is the square panel, unchanged")
+do
+    local p = popout({ key = "sq" })
+    check(p.surface == nil, "square: the popout carries no style")
+    check(p.frame._panelOpts ~= nil, "square: the panel backdrop was issued")
+    eq(p.frame._panelOpts.borderColor, ACCENT, "square: with the accent as its border")
+    check(chromeOf(p) == nil, "square: and no rounded surface was ever created")
+    check(p.titleFill:IsShown(), "square: the flat title strip is the one on screen")
+    check(stripOf(p) == nil, "square: no rounded strip either")
+    -- The cross stays exactly where the shell put it: the inset for a nil radius
+    -- is 0, so the clearance pass is a no-op rather than a special case.
+    local x = p.closeBtn._points[#p.closeBtn._points][4]
+    eq(x, -6, "square: the cross sits at the shell's own HDR_EDGE")
+    p:Close()
+end
+
+print("-- Popout: a rounded style paints the ring, the strip and the clearance")
+do
+    local p = popout({ key = "rnd", surface = R8 })
+    check(p.surface ~= nil, "rounded: the popout carries the style")
+    local rs = chromeOf(p)
+    check(rs ~= nil and rs:IsShown(), "rounded: the panel wears a rounded surface")
+    local r, w = rs:GetRadius()
+    eq(r, 8, "rounded: at the style's radius")
+    -- The PANEL weight, which is the heavier of the two the token carries: the
+    -- popout's ring IS the accent, and the accent is the shared-edge story.
+    eq(w, 2, "rounded: and the style's panel border width")
+    eq(rs.borderR, ACCENT.r, "rounded: the ring is the accent")
+    eq(rs.borderG, ACCENT.g, "rounded: ...on every channel")
+    check(rawget(p.frame, "_pxHidden") == true, "rounded: the square pixel border came down")
+
+    -- ☠ THE SQUARE TITLE STRIP WOULD PAINT OVER THE TWO UPPER ARCS. It is a flat
+    -- ARTWORK texture and ARTWORK is above the whole of BACKGROUND, where the
+    -- rounded surface lives -- and rounded mode has no pixel border to win the
+    -- edges back. So it is swapped for a top-corners surface.
+    check(not p.titleFill:IsShown(), "rounded: the flat strip is hidden")
+    local strip = stripOf(p)
+    check(strip ~= nil and strip:IsShown(), "rounded: ...and a rounded strip stands in for it")
+    eq(strip:GetShape(), "top", "rounded: with only its top corners round")
+    eq(strip.anchorTo, p.titleBar, "rounded: stretched over the title bar's rect")
+
+    local x = p.closeBtn._points[#p.closeBtn._points][4]
+    eq(x, -6 - 4, "rounded: the cross is nudged clear of the arc by half the radius")
+    p:Close()
+end
+
+print("-- Popout: the two shapes undo each other exactly")
+do
+    -- ☠ THE LIVE SWITCH IS WHERE A HALF-DONE ARM SHOWS UP. Everything below is
+    -- one instance walking between the two, which is what the chrome workbench's
+    -- Corners button does on every press.
+    local p = popout({ key = "swap", surface = R8 })
+    local rs = chromeOf(p)
+    check(rs:IsShown(), "start: rounded")
+
+    p:SetSurface(false)
+    check(p.surface == nil, "square: the style is cleared")
+    check(not rs:IsShown(), "square: the rounded textures are hidden, not left drawing")
+    check(not stripOf(p):IsShown(), "square: and so is the rounded strip")
+    check(p.titleFill:IsShown(), "square: the flat strip comes back")
+    check(p.frame._panelOpts ~= nil, "square: the panel backdrop is re-issued")
+    eq(p.closeBtn._points[#p.closeBtn._points][4], -6, "square: the cross returns to its own offset")
+
+    p:SetSurface(R8)
+    check(chromeOf(p) == rs, "rounded again: the SAME surface, not a second pair of textures")
+    check(rs:IsShown(), "rounded again: and it is up")
+    check(not p.titleFill:IsShown(), "rounded again: the flat strip goes back down")
+    eq(p.closeBtn._points[#p.closeBtn._points][4], -6 - 4,
+       "rounded again: shifted from the ORIGINAL offset, not compounded")
+    p:Close()
+end
+
+print("-- Popout: the style survives the pool")
+do
+    -- ☠ RE-RESOLVED ON EVERY ADOPT. A pooled popout is handed to whichever caller
+    -- asks for its key next, and a style resolved once at build would be the
+    -- FIRST caller's -- so a rounded consumer reopening a panel first opened from
+    -- somewhere square would get the square one back with nothing to explain it.
+    local a = popout({ key = "pooled", surface = R8 })
+    check(a.surface ~= nil, "first open: rounded")
+    local b = popout({ key = "pooled", surface = false })
+    check(a == b, "the pool handed back the same instance")
+    check(b.surface == nil, "...re-adopted SQUARE, because that is what the caller asked for")
+    check(not chromeOf(b):IsShown(), "...and its rounded textures went down with the change")
+    local c = popout({ key = "pooled", surface = R8 })
+    check(c.surface ~= nil and chromeOf(c):IsShown(), "...and back again on the next adopt")
+    c:Close()
+end
+
+print("-- Popout: the host's declaration is the default, and false overrides it")
+do
+    host:SetSurfaceStyle(R8)
+    local p = popout({ key = "hostdefault" })
+    check(p.surface ~= nil, "an absent opt takes the host's style")
+    eq(chromeOf(p):GetRadius(), 8, "...at the host's radius")
+    p:Close()
+
+    -- The one thing a consumer needs in order to be square on a round host: the
+    -- chrome workbench holding its Square baseline is the only caller that does.
+    local q = popout({ key = "hostoverride", surface = false })
+    check(q.surface == nil, "false is square even on a host that declared a style")
+    check(q.frame._panelOpts ~= nil, "...with the panel backdrop, as before")
+    q:Close()
+    host:SetSurfaceStyle(nil)
+
+    local r = popout({ key = "hostcleared" })
+    check(r.surface == nil, "and with the declaration withdrawn, square again")
+    r:Close()
+end
+
+-- ============================================================
+-- THE SOURCE OUTLINE FOLLOWS THE **SOURCE'S** SHAPE
+--
+-- The outline is the shell's half of "this panel and that thing share an edge",
+-- and it used to be a pixel border and nothing else -- square by construction.
+-- Laid over a rounded plate that reads as a second corner around a selected
+-- object, which is the complaint the in-game trial actually produced.
+--
+-- ☠ THE DECIDING FACT IS THE SOURCE'S, NOT THE PANEL'S. A source declares its
+-- curve on the tether contract (`region.popoutRadius`, beside the popoutInset it
+-- already declares); a rounded panel tracing a source that declares one draws a
+-- ring at THAT radius, and everything else keeps the pixel border. The trial's
+-- own answer -- suppress the outline entirely while rounded -- worked only
+-- because the source happened to be a row with an accent ring of its own.
+-- ============================================================
+
+local function outlineRing(p)
+    local o = rawget(p, "srcOutline")
+    if not o then return nil end
+    local rs = UI:GetRoundedSurface(o)
+    if rs and rs:IsShown() then return rs end
+    return nil
+end
+
+-- A source that declares a curve, the way a rounded popout row does.
+local function roundSource(radius)
+    local s = source(80, 40)
+    s.popoutRadius = radius
+    return s
+end
+
+print("-- Popout: a square panel keeps the pixel border, whatever the source says")
+do
+    local p = popout({ key = "outsq" })
+    p:Follow(roundSource(8))
+    check(p.srcOutline:IsShown(), "square: the outline is up")
+    check(outlineRing(p) == nil, "square: and it is the pixel border")
+    check(p.srcOutline._pxColor ~= nil, "square: ...painted in the accent")
+    p:Close()
+end
+
+print("-- Popout: a rounded panel over a SQUARE source also keeps it")
+do
+    -- The outline is a statement about the SOURCE'S edge. A rounded panel docked
+    -- beside a square thing must not trace a curve round it.
+    local p = popout({ key = "outsqsrc", surface = R8 })
+    p:Follow(source(80, 40))
+    check(p.srcOutline:IsShown(), "rounded panel, square source: the outline is up")
+    check(outlineRing(p) == nil, "...and it is still the pixel border")
+    p:Close()
+end
+
+print("-- Popout: a rounded panel over a rounded source draws a ring")
+do
+    local src = roundSource(8)
+    local p = popout({ key = "outrnd", surface = R8 })
+    p:Follow(src)
+    local ring = outlineRing(p)
+    check(ring ~= nil, "the outline is a rounded ring")
+    local r, w = ring:GetRadius()
+    eq(r, 8, "at the SOURCE's declared radius")
+    -- The ROW weight, not the panel's: this ring has to land exactly on the
+    -- source's own edge, and a source in this pack is a row plate.
+    eq(w, 1, "...and the style's ROW border width, so it lands on the plate's own edge")
+    -- RING ONLY. The outline lies on top of the thing it outlines, so a fill of
+    -- any alpha would be a pane of glass over the row.
+    eq(ring.hasFill, false, "and it draws no interior")
+    eq(ring.borderR, ACCENT.r, "painted in the accent, like the panel's own ring")
+
+    -- An accent change repaints EVERY piece of chrome that carries the colour,
+    -- and it must repaint the ring rather than reinstating the pixel border under
+    -- it -- which is what an _ApplyAccent that only knew the square path would do.
+    p:SetAccent({ r = 1, g = 0.5, b = 0, a = 1 })
+    local after = outlineRing(p)
+    check(after ~= nil, "an accent change leaves it a ring")
+    eq(after.borderR, 1, "...repainted in the new accent")
+    p:Close()
+end
+
+print("-- Popout: a retarget re-decides the shape from the new source")
+do
+    -- ☠ THE SHAPE IS DECIDED WHERE THE OUTLINE ANCHORS, because that is the one
+    -- call that has the region in hand. A shape committed once at open would
+    -- survive a retarget onto a source of the other kind -- and one popout is
+    -- retargeted down a whole column of rows.
+    local rounded, square = roundSource(8), source(80, 40)
+    local p = popout({ key = "outswap", surface = R8 })
+    p:Follow(rounded)
+    check(outlineRing(p) ~= nil, "on a rounded source: a ring")
+    p:Follow(square)
+    check(outlineRing(p) == nil, "retargeted onto a square source: back to the pixel border")
+    check(p.srcOutline:IsShown(), "...and still drawn")
+    p:Follow(rounded)
+    check(outlineRing(p) ~= nil, "and back to a ring on the way home")
+    p:Close()
+end
+
+print("-- Popout: SetSurface re-decides the outline too")
+do
+    local p = popout({ key = "outstyle", surface = R8 })
+    p:Follow(roundSource(8))
+    check(outlineRing(p) ~= nil, "rounded: a ring")
+    p:SetSurface(false)
+    check(outlineRing(p) == nil, "square: the ring goes and the pixel border returns")
+    check(p.srcOutline:IsShown(), "square: the outline is not suppressed -- it changed paint")
+    p:SetSurface(R8)
+    check(outlineRing(p) ~= nil, "rounded again: and back")
+    p:Close()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

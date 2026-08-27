@@ -241,6 +241,29 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
 })
 DF.GUI = GUI
 
+-- ============================================================
+-- THE SURFACE STYLE -- this consumer's settings surfaces are ROUND.
+--
+-- ONE line, and it is the whole of "DandersFrames goes rounded". Every shell in
+-- the pack that can wear either shape -- the popout, the feature row's plate,
+-- the settings group box -- asks the HOST what shape this consumer is, and this
+-- is where the answer is given. The window's own chrome reads it back through
+-- GUI:GetSurfaceStyle (DandersFrames_Options/GUI/Panel.lua).
+--
+-- ☠ DECLARED ON THE HOST, NEVER IN THE LIBRARY. UI.SurfaceStyle is a definition
+-- and rounds nothing on its own; a consumer that never makes this call keeps the
+-- square backdrop it has always had. DandersMover never makes it, which is why
+-- the mover editor and its own popout are still square while this window is not
+-- -- and it is why the two addons can share one copy of the kit and still look
+-- like two different things on purpose.
+--
+-- ⚠ RESIDENT, NOT IN THE COMPANION, even though only the companion draws
+-- settings UI. A host is created once, here, and the style is a property OF that
+-- host -- putting it behind the load-on-demand boundary would mean the shape of
+-- the shell depended on load order, which is the kind of thing that produces a
+-- square group box in a round window exactly once and then never reproduces.
+GUI:SetSurfaceStyle(GUI.SurfaceStyle)
+
 
 
 

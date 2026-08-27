@@ -578,9 +578,18 @@ end
 --              leaving the window
 --   popoutKey  override the shared pool key (default: one per host)
 --   title      popout header title (default: label)
+--   surface    the SURFACE STYLE this row wears (Theme.lua's UI.SurfaceStyle).
+--              A table rounds the PLATE at that radius and the style's
+--              rowBorderWidth, declares the radius on the tether contract
+--              (row.popoutRadius) so the panel's source outline traces the plate
+--              with a matching ring, and is FORWARDED to the panel the row opens
+--              so the pair cannot disagree. `false` forces square on a host that
+--              has opted in; OMIT and the row takes the host's own declaration,
+--              which is nothing unless the consumer called host:SetSurfaceStyle
 --
 -- Returns the row frame with .Refresh() / .refreshContent(db), :SetEnabled(bool),
--- :SetAccent(c), :OpenPopout(), :ClosePopout(reason) and .popout.
+-- :SetAccent(c), :SetSurface(style) / :GetSurface(), :OpenPopout(),
+-- :ClosePopout(reason) and .popout.
 function UI:CreatePopoutRow(parent, opts)
     local host = self
     opts = opts or {}
@@ -632,11 +641,65 @@ function UI:CreatePopoutRow(parent, opts)
     plate:SetPoint("TOPLEFT", 0, 0)
     plate:SetPoint("TOPRIGHT", 0, 0)
     plate:SetHeight(PLATE_H)
-    host:CreateElementBackdrop(plate, {
-        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, M.restFill },
-        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder },
-    })
     row.plate = plate
+
+    -- ---- the plate's SHAPE, and the one paint path both shapes share ----
+    --
+    -- ☠ THE STATE PAINT MUST NOT KNOW WHICH SHAPE IT IS PAINTING. Rest, hover
+    -- and the active accent wash are three colour pairs the row computes from
+    -- its own state, and there are already several ways in (a hover, a retarget,
+    -- a toggle, an accent change). The trial routed them by SWAPPING the plate's
+    -- SetBackdropColor / SetBackdropBorderColor methods for shims -- a shadow,
+    -- which works and is exactly the kind of thing that has to stop being true
+    -- when a look ships: two sets of methods on one frame, restorable only by
+    -- remembering the originals, and invisible to anyone reading paintState.
+    --
+    -- So the shape lives in ONE function that the state paint calls with four
+    -- numbers twice, and the rounded and square arms are siblings rather than
+    -- one wearing the other's clothes.
+    local plateSurface          -- the rounded handle, nil while square
+
+    local function applyPlateShape()
+        local s = row._surface
+        if not s then
+            plateSurface = nil
+            UI:RemoveRoundedChrome(plate)
+            -- The ORIGINAL call. CreateElementBackdrop re-issues the backdrop AND
+            -- re-shows the pixel border, so square is restored rather than
+            -- approximated.
+            host:CreateElementBackdrop(plate, {
+                bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, M.restFill },
+                borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder },
+            })
+            -- The tether contract's shape half, cleared with the shape: the
+            -- popout's source outline reads this to decide whether to trace this
+            -- plate with a ring or with a square pixel border.
+            row.popoutRadius = nil
+            return
+        end
+        plateSurface = UI:ApplyRoundedChrome(plate, {
+            radius      = s.radius,
+            -- The ROW weight, not the panel's -- see UI.SurfaceStyle on why the
+            -- one token carries both.
+            borderWidth = s.rowBorderWidth or s.borderWidth,
+            fill        = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, M.restFill },
+            border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder },
+        })
+        row.popoutRadius = s.radius
+    end
+
+    local function paintPlate(fr, fg, fb, fa, br, bg, bb, ba)
+        if plateSurface then
+            plateSurface:SetFillColor(fr, fg, fb, fa)
+            plateSurface:SetBorderColor(br, bg, bb, ba)
+        else
+            plate:SetBackdropColor(fr, fg, fb, fa)
+            plate:SetBackdropBorderColor(br, bg, bb, ba)
+        end
+    end
+
+    row._surface = UI.ResolveSurfaceStyle(host, opts.surface)
+    applyPlateShape()
 
     -- The toggle. A bare CheckButton put through the shared styler, so this tick
     -- and the tick on a CreateCheckbox are one control at two sizes.
@@ -744,14 +807,14 @@ function UI:CreatePopoutRow(parent, opts)
         local active = row._active
         local accent = row._accent or host:GetAccent()
         if active then
-            plate:SetBackdropColor(accent.r, accent.g, accent.b,
-                                   row._hovered and M.activeHover or M.activeFill)
-            plate:SetBackdropBorderColor(accent.r, accent.g, accent.b, M.activeBorder)
+            paintPlate(accent.r, accent.g, accent.b,
+                       row._hovered and M.activeHover or M.activeFill,
+                       accent.r, accent.g, accent.b, M.activeBorder)
         else
             local f = row._hovered and C_HOVER or C_ELEMENT
-            plate:SetBackdropColor(f.r, f.g, f.b,
-                                   row._hovered and M.hoverFill or M.restFill)
-            plate:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder)
+            paintPlate(f.r, f.g, f.b,
+                       row._hovered and M.hoverFill or M.restFill,
+                       C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder)
         end
         -- OFF outranks ACTIVE on the label. A row with its feature switched off
         -- has nothing to be the subject of, open panel or not -- and an accent
@@ -908,6 +971,19 @@ function UI:CreatePopoutRow(parent, opts)
             title   = row._title,
             width   = UI.PopoutContentWidth,
             accent  = row._accent,
+            -- ☠ FORWARDED, NOT LEFT TO THE HOST. The panel and the plate it
+            -- comes out of are one object as far as the eye is concerned -- they
+            -- share an accent, a beam and, now, an outline traced on the plate at
+            -- the plate's own radius. A row that was handed an explicit style
+            -- (the chrome workbench holding its Square baseline against a rounded
+            -- host is the case that forces this) and a panel that resolved its
+            -- own from the host would disagree about the shape of the thing they
+            -- are both drawing.
+            --
+            -- `false` survives the trip intact: row._surface is nil for a square
+            -- row, and nil would mean "ask the host" to the popout -- so it is
+            -- spelled as an explicit false.
+            surface = row._surface or false,
             tetherSource = row,
             build   = mountBare,
             headerControls = function(p, bar) return buildHeaderControls(host, p, bar) end,
@@ -960,6 +1036,35 @@ function UI:CreatePopoutRow(parent, opts)
         end
         return row
     end
+
+    -- Change the row's SHAPE, and take everything it is bound to with it. Same
+    -- structure as SetAccent above and for the same reason: the row and the panel
+    -- it opened are one object as far as the eye is concerned, so a change to
+    -- either has to reach both while they are up.
+    --
+    -- The plate re-issues its chrome, the state paint REPLAYS through the new
+    -- shape (applyPlateShape only writes the rest colours, so a hovered or ACTIVE
+    -- plate would otherwise come back in the wrong one), the declared curve
+    -- follows, and every bound panel -- a pinned one included, which is why the
+    -- bound set is walked rather than just row.popout -- is re-shaped to match.
+    --
+    -- `false` forces square on a host that has opted in; nil hands the row back
+    -- to whatever the host declares.
+    function row:SetSurface(style)
+        row._surface = UI.ResolveSurfaceStyle(host, style)
+        applyPlateShape()
+        row.Refresh()
+        for po in pairs(row._bound) do
+            if po and not po.closed and po.SetSurface then
+                -- Spelled false, not nil: nil means "ask the host" to the popout,
+                -- and the host may be the one this row is overriding.
+                po:SetSurface(row._surface or false)
+            end
+        end
+        return row
+    end
+
+    function row:GetSurface() return row._surface end
 
     -- ---- interaction ----------------------------------------------
     row:SetScript("OnEnter", function() row._hovered = true;  paintState() end)

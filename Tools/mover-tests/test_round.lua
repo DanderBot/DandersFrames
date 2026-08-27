@@ -567,3 +567,218 @@ do
     eq(UI.Round.shapes[1], "all", "all four round")
     eq(UI.Round.shapes[2], "top", "...and top-only")
 end
+
+-- ============================================================
+-- RING ONLY -- opts.fill = false
+--
+-- A surface laid OVER something that has to stay visible (the popout shell's
+-- source outline, traced round a row plate that is already painted) must draw no
+-- interior at all. "A fill at alpha zero" looks the same and is not the same: it
+-- is still a texture in the stack, and one SetFillColor from a caller repainting
+-- every state's colours in one sweep away from covering the thing it outlines.
+-- ============================================================
+print("-- Round: a ring-only surface draws no interior")
+do
+    local f = surfaceFrame()
+    local s = UI:CreateRoundedSurface(f, { radius = 8, fill = false,
+                                           border = { 1, 0, 0, 1 } })
+    eq(s.hasFill, false, "the surface is flagged fill-less")
+    eq(s.fill:IsShown(), false, "the fill texture is down")
+    eq(s.ring:IsShown(), true, "...and the ring is up, which is the whole point")
+
+    -- The colour path still works, it is just not DRAWN -- so a caller that
+    -- repaints every state's colours in one sweep cannot resurrect the fill.
+    s:SetFillColor(1, 1, 1, 1)
+    eq(s.fill:IsShown(), false, "SetFillColor does not bring it back")
+
+    -- ...and a Hide/Show round trip must not either, for the same reason a
+    -- fill-only surface's ring must stay down through one.
+    s:Hide(); s:Show()
+    eq(s.fill:IsShown(), false, "a hide/show round trip does not bring it back")
+    eq(s.ring:IsShown(), true, "and the ring survives it")
+
+    s:SetFillShown(true)
+    eq(s.fill:IsShown(), true, "SetFillShown is the one thing that does")
+end
+
+print("-- Round: a fill-only and a ring-only surface are mirror images")
+do
+    local fillOnly = UI:CreateRoundedSurface(surfaceFrame(), { radius = 8, border = false })
+    eq(fillOnly.hasFill, true, "fill-only: interior drawn")
+    eq(fillOnly.ring:IsShown(), false, "fill-only: no ring")
+    local ringOnly = UI:CreateRoundedSurface(surfaceFrame(), { radius = 8, fill = false })
+    eq(ringOnly.hasBorder, true, "ring-only: ring drawn")
+    eq(ringOnly.fill:IsShown(), false, "ring-only: no interior")
+end
+
+-- ============================================================
+-- THE CHROME MOVES
+--
+-- Three helpers that exist because each of the three reads as a one-liner and
+-- was got wrong at least once during the in-game trial: the square backdrop that
+-- does not come down on its own, the title strip that paints over the corners it
+-- is supposed to follow, and the cross standing in the corner box.
+-- ============================================================
+print("-- Round: ApplyRoundedChrome takes the square backdrop down first")
+do
+    local f = surfaceFrame()
+    local cleared = false
+    f.SetBackdrop = function(_, v) cleared = (v == nil) end
+    local s = UI:ApplyRoundedChrome(f, { radius = 8, borderWidth = 2 })
+    check(s ~= nil, "a surface comes back")
+    -- ☠ THIS IS THE TRAP THE HELPER EXISTS FOR: the rounded fill sits at a
+    -- NEGATIVE BACKGROUND sublevel, UNDER a backdrop's bgFile at 0, so a frame
+    -- that keeps its backdrop renders the SQUARE in front of a rounded surface
+    -- that is drawing perfectly.
+    check(cleared, "the backdrop was cleared")
+    check(rawget(f, "_pxHidden") == true, "...and the pixel border taken down with it")
+    eq(s:GetRadius(), 8, "at the radius asked for")
+
+    UI:RemoveRoundedChrome(f)
+    eq(s:IsShown(), false, "RemoveRoundedChrome hides it")
+    -- HIDDEN, not discarded: the textures are ours and nothing else takes them
+    -- down, so the same handle comes back on the next apply.
+    local again = UI:ApplyRoundedChrome(f, { radius = 8, borderWidth = 2 })
+    check(again == s, "...and the next apply re-uses the same surface")
+end
+
+print("-- Round: RemoveRoundedChrome on a frame that never had one is a no-op")
+do
+    local f = surfaceFrame()
+    UI:RemoveRoundedChrome(f)
+    UI:RemoveRoundedStrip(f)
+    check(UI:GetRoundedSurface(f) == nil, "nothing was created by asking it to go away")
+end
+
+print("-- Round: the title strip is a top-corners surface at its own sublevel")
+do
+    local f = surfaceFrame()
+    local bar = FakeUIFrame(200, 26, 0, 0)
+    UI:ApplyRoundedChrome(f, { radius = 8, borderWidth = 2 })
+    local strip = UI:ApplyRoundedStrip(f, bar, 8, { 0.12, 0.12, 0.12, 0.9 })
+    check(strip ~= nil, "a strip comes back")
+    eq(strip:GetShape(), "top", "with only its top corners round")
+    eq(strip.hasBorder, false, "and no ring of its own -- it is a fill, not an outlined thing")
+    -- ☠ IT HAS TO INTERLEAVE. Panel fill at -4, strip at -3, panel ring at -2:
+    -- above the fill so it reads as a raised band, BELOW the ring or it eats the
+    -- border along the top exactly the way a square texture did.
+    eq(strip.sublevel, UI.RoundStripSublevel, "at the strip sublevel")
+    check(strip.sublevel > UI:GetRoundedSurface(f).sublevel,
+          "...which is ABOVE the panel's fill")
+    check(strip ~= UI:GetRoundedSurface(f), "so the two are different surfaces on one frame")
+    -- WHOSE TEXTURES and WHOSE RECT are two questions: the textures are the
+    -- panel's (only there can they land under its ring) and the rect is the bar's.
+    eq(strip.anchorTo, bar, "stretched over the BAR, while living on the panel")
+
+    UI:RemoveRoundedStrip(f)
+    eq(strip:IsShown(), false, "RemoveRoundedStrip takes it down")
+    check(UI:GetRoundedSurface(f):IsShown(), "...and leaves the panel alone")
+end
+
+print("-- Round: the corner inset is half the radius, rounded")
+do
+    eq(UI.SurfaceEdgeInset(nil), 0, "no radius, no inset")
+    eq(UI.SurfaceEdgeInset(4), 2, "r4 -> 2")
+    eq(UI.SurfaceEdgeInset(6), 3, "r6 -> 3")
+    eq(UI.SurfaceEdgeInset(8), 4, "r8 -> 4")
+end
+
+print("-- Round: InsetTitleButton remembers the ORIGINAL offset, once")
+do
+    local parent = FakeUIFrame(200, 26, 0, 0)
+    local btn = FakeUIFrame(18, 18)
+    -- Underscore fields must read nil on this one: the helper tests
+    -- `_dfSquareX == nil` to decide whether it has already remembered.
+    setmetatable(btn, { __index = function(_, k)
+        if type(k) == "string" and k:byte(1) == 95 then return nil end
+        return function() end
+    end })
+    btn:SetPoint("RIGHT", parent, "RIGHT", -6, 0)
+
+    local function anchorX()
+        local pt = btn._points[#btn._points]
+        return pt and pt[4]
+    end
+
+    UI:InsetTitleButton(btn, 4)
+    eq(anchorX(), -6 - 2, "r4: inboard by half the radius")
+    -- ☠ SHIFTED FROM THE ORIGINAL EACH TIME, NEVER COMPOUNDED. A second radius
+    -- measured from the last shift walks the button across the bar -- slowly
+    -- enough that three presses look fine and ten do not.
+    UI:InsetTitleButton(btn, 8)
+    eq(anchorX(), -6 - 4, "r8: still measured from the original")
+    UI:InsetTitleButton(btn, nil)
+    eq(anchorX(), -6, "square: exactly the offset it started on")
+    eq(btn:GetNumPoints(), 1, "...and one anchor, not a stack of them")
+end
+
+print("-- Round: InsetTitleButton refuses a button it cannot read back")
+do
+    -- GetPoint always answers the 5-value shape in-game, so this is really a
+    -- guard against being handed something anchored another way -- and refusing
+    -- is right, because re-issuing a point from values that do not mean what this
+    -- thinks they mean would MOVE the button somewhere arbitrary.
+    local unanchored = FakeUIFrame(18, 18)
+    UI:InsetTitleButton(unanchored, 8)      -- must not error
+    check(true, "an unanchored button is left alone rather than moved")
+    UI:InsetTitleButton(nil, 8)
+    UI:InsetTitleButton("not a frame", 8)
+    check(true, "...and a non-frame is refused rather than indexed")
+end
+
+-- ============================================================
+-- THE SURFACE STYLE -- Theme.lua's token and its host opt-in.
+--
+-- ☠ THE TOKEN ROUNDS NOTHING ON ITS OWN, and that is the whole design: two
+-- addons share one copy of this kit and only one of them is round. Declaring the
+-- style is a HOST act, and a host that never declares one is square -- which is
+-- what keeps DandersMover square while the settings shell is not.
+-- ============================================================
+print("-- Round: the surface-style token")
+do
+    local TOKEN = UI.SurfaceStyle
+    check(TOKEN ~= nil, "Theme.lua publishes one")
+    eq(TOKEN.style, "rounded", "the shell's style is rounded")
+    eq(TOKEN.radius, 8, "at R8 -- what the in-game trial settled on")
+    -- TWO WIDTHS, ONE TOKEN. The popout takes borderWidth and the row takes
+    -- rowBorderWidth, so a consumer hands the same table to every shell and each
+    -- picks its own -- rather than two near-identical tables at the call sites.
+    eq(TOKEN.borderWidth, 2, "panels take two units")
+    eq(TOKEN.rowBorderWidth, 1, "row plates take one")
+    -- Both have to be art that exists, or the surface is invisible.
+    local hasR, hasW = false, false
+    for _, r in ipairs(UI.Round.radii) do if r == TOKEN.radius then hasR = true end end
+    for _, w in ipairs(UI.Round.widths) do if w == TOKEN.borderWidth then hasW = true end end
+    check(hasR, "the radius is one the generator baked")
+    check(hasW, "...and so is the border width")
+end
+
+print("-- Round: the host opt-in, and what it means to decline it")
+do
+    local host = setmetatable({}, { __index = UI })
+    check(host:GetSurfaceStyle() == nil, "a fresh host has declared nothing")
+    -- ☠ AND THAT MUST NOT FALL THROUGH TO THE TOKEN. The host's __index IS the
+    -- library, so a plain field read would find UI.SurfaceStyle and round every
+    -- consumer in the game; the opt-in is stored under a private name the library
+    -- itself never sets, and read with rawget.
+    check(UI.ResolveSurfaceStyle(host, nil) == nil,
+          "so it resolves to SQUARE, which is what DandersMover gets")
+
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    eq(host:GetSurfaceStyle(), UI.SurfaceStyle, "after opting in it declares the token")
+    eq(UI.ResolveSurfaceStyle(host, nil), UI.SurfaceStyle, "and an absent opt takes it")
+
+    -- false is the OVERRIDE, and it is the only way to be square on a round host
+    -- -- which is exactly what the chrome workbench needs to hold its baseline.
+    check(UI.ResolveSurfaceStyle(host, false) == nil, "false forces square")
+    local own = { style = "rounded", radius = 4, borderWidth = 1 }
+    eq(UI.ResolveSurfaceStyle(host, own), own, "an explicit table wins over the host's")
+
+    -- The `style` field is there so a second style can be added without every
+    -- reader growing a branch. Until then anything that is not "rounded" is square.
+    check(UI.ResolveSurfaceStyle(host, { style = "square", radius = 8 }) == nil,
+          "an unknown style is square rather than a guess")
+
+    host:SetSurfaceStyle(nil)
+    check(host:GetSurfaceStyle() == nil, "and it can be taken back off")
+end

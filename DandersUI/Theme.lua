@@ -6,6 +6,7 @@ local S = UI._state
 local P = UI._priv
 
 local math, ipairs, pairs, setmetatable = math, ipairs, pairs, setmetatable
+local type, rawget, rawset = type, rawget, rawset
 local CreateFrame, UIParent, Mixin = CreateFrame, UIParent, Mixin
 local GetCursorPosition, GetPhysicalScreenSize = GetCursorPosition, GetPhysicalScreenSize
 local BackdropTemplateMixin = BackdropTemplateMixin
@@ -339,6 +340,81 @@ UI.PopoutTitle = {
 -- Derived, so the two can never be set to numbers that disagree -- the same rule
 -- UI.PopoutRow.slot follows. This is the number a consumer sizes against.
 UI.PopoutTitleHeight = UI.PopoutTitle.topPad + UI.PopoutTitle.row
+
+-- ============================================================
+-- THE SURFACE STYLE
+--
+-- ONE token for the whole question "are this consumer's settings surfaces square
+-- or round, and how round". Every shell that can wear either -- the popout, the
+-- popout row, the settings group -- reads its radius and its border weight from
+-- here, so a consumer's window, its panels, its rows and its group boxes cannot
+-- drift onto three different curves.
+--
+-- ☠ THIS TABLE IS A DEFINITION, NOT AN APPLICATION. Declaring it here rounds
+-- NOTHING. A consumer opts its host in with host:SetSurfaceStyle(UI.SurfaceStyle)
+-- and a consumer that never calls it keeps the square backdrop it has always had
+-- -- which is exactly what DandersMover does, and why the mover's editor is still
+-- square while the settings shell is not. The opt-in lives on the HOST and is
+-- read with rawget for that reason: a plain field read would fall through the
+-- host metatable to this table and round every consumer in the game.
+--
+--   radius          the curve, in UI units. 8 is what the in-game trial settled
+--                   on: 4 and 6 read as a rounded-off square at the sizes a
+--                   settings window is drawn at, and 8 is the largest the
+--                   generator bakes.
+--   borderWidth     the ring on a PANEL -- the window, a popout. Two units,
+--                   because the popout's ring is also the accent, and the accent
+--                   is the "this panel and that row share an edge" story.
+--   rowBorderWidth  the ring on a ROW PLATE. One unit: a column of forty plates
+--                   at two would read as a grid of boxes rather than as a list.
+--
+-- ⚠ TWO WIDTHS, ONE TOKEN, AND EACH SITE PICKS ITS OWN. A consumer hands this
+-- SAME table to every shell; the popout takes borderWidth and the row takes
+-- rowBorderWidth. That is what keeps it one token -- the alternative was two
+-- near-identical tables at the call sites, which is where a retuned radius gets
+-- applied to one of them and not the other.
+UI.SurfaceStyle = {
+    style          = "rounded",
+    radius         = 8,
+    borderWidth    = 2,
+    rowBorderWidth = 1,
+}
+
+-- The host opt-in. `nil` / `false` clears it and the consumer is square again.
+--
+-- rawset/rawget, not a plain field: a host's __index IS this library, so a plain
+-- write would be fine but a plain READ on a host that never opted in would find
+-- whatever the library happens to hold under that key. Under a private name that
+-- the library itself never sets, an un-opted host reads nil and means it.
+function UI:SetSurfaceStyle(style)
+    rawset(self, "_surfaceStyle", (type(style) == "table") and style or nil)
+    return self
+end
+
+function UI:GetSurfaceStyle()
+    return rawget(self, "_surfaceStyle")
+end
+
+-- What a shell actually resolves an `opts.surface` against, in one place so the
+-- three shells cannot disagree about what `false` means.
+--
+--   a table   that style, whatever the host says
+--   false     SQUARE, explicitly, overriding a host that has opted in. The
+--             chrome workbench needs this to hold its Square baseline while the
+--             rest of the consumer is round
+--   nil       fall back to the host's opt-in, i.e. "whatever this consumer is"
+--
+-- A style whose `style` field is not "rounded" answers nil too: the field is
+-- there so a future second style can be added without every reader growing a
+-- second branch, and until then anything else is square.
+function UI.ResolveSurfaceStyle(host, opt)
+    if opt == false then return nil end
+    local s = (type(opt) == "table") and opt
+              or (opt == nil and type(host) == "table" and rawget(host, "_surfaceStyle"))
+              or nil
+    if not s or s.style ~= "rounded" then return nil end
+    return s
+end
 -- The outer inset around the content, and the gap UNDER the title bar too --
 -- see Popout.lua's _Resize, where the content used to be anchored flush against
 -- the bar while carrying 2 x this much slack below it.
