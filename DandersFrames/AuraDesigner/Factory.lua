@@ -1041,6 +1041,10 @@ local function buildBorderConfig(unit, map, spec, filter, drawAbove, pandemicSpe
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = (drawAbove ~= false) and 11 or 9,
+        -- Opt this container into the DF-owned border animations. The AuraContainer
+        -- ANIMATION FILTER honours the flag for OVERLAY mode only, which is what keeps
+        -- the reopening bounded to one ring per frame — see the comment there.
+        adBorderAnim = true,
         style = { border = { spec = spec, pandemicSpec = pandemicSpec } },
     }
 end
@@ -1070,9 +1074,10 @@ end
 -- live aura), mirroring the legacy Indicators:ApplyBorderToOverlay (module removed): canonical keys via BuildSpec (the
 -- border-key fold ran in SyncFrame), black default colour. Returns nil when the border
 -- resolves disabled (ShowBorder=false) — the caller then renders no container. Animations
--- are NO LONGER dropped here: the AuraContainer allowlist (SAFE_OVERLAY_ANIM) is the single
--- filter, keeping the DF-owned overlay animations and stripping the taint-prone LCG glows.
--- The GUI restricts the AD dropdown to the recoverable types, so only safe types reach here.
+-- are not dropped here: the AuraContainer ANIMATION FILTER is the single gate, and it keeps
+-- an overlay-mode animation whose type is in SAFE_OVERLAY_ANIM. Every type the GUI currently
+-- offers is in that set (the LCG glows it used to exclude no longer exist), so the allowlist
+-- now only defends against a stale or imported profile naming an effect we do not own.
 local function buildBorderSpec(frame, borderCfg)
     if not DF.Border then return nil end
     local spec = DF.Border:BuildSpec(borderCfg, "")
@@ -1179,6 +1184,22 @@ local function borderSpecSig(spec)
         end
     end
     return tconcat(parts, "|")
+end
+
+-- ☠ ANIMATION IS STRUCTURAL ON A CONTAINER BORDER, not cosmetic.
+-- The frame-level ring renders on an overlay-mode container slot, and its animation is a
+-- declarative AnimationGroup built inside the slot's SECURE init and never touched again
+-- (Frames/Border.lua, "DF_ORBIT, DECLARATIVE") — because a per-frame Lua driver is refused
+-- on a button subtree once auras are secret. Creation-frozen means a retune is impossible,
+-- so changing the effect, its speed, particle count, colour or inset has to hand over a
+-- FRESH button: this token rides the STRUCT signature, where a change forces a Rebuild.
+-- Same contract as the pandemic FLASH.
+-- ⚠ It also stays inside borderSpecSig (the cosmetic sig), which is harmless — a change
+-- moves both and the structural branch wins.
+local function borderAnimStructToken(spec)
+    local a = spec and spec.animation
+    if not a or not a.type or a.type == "NONE" then return "off" end
+    return subSig(a)
 end
 
 -- Pick the single highest-priority configured indicator of `typeKey` across all configured
@@ -4813,6 +4834,7 @@ local function syncBorderEntry(bd, frame, key, cfg, map, mine)
     -- The pandemic ring's PRESENCE joins the struct sig: its holder is created in the
     -- secure init, so enabling it must hand over a fresh button.
     local structSig = "da=" .. tostring(drawAbove) .. (pdSpec and "|pd" or "")
+        .. "|an=" .. borderAnimStructToken(spec)
     local tuningSig = placedTuningSig(map, filt)
     local coSig = borderSpecSig(spec) .. (pdSpec and ("|pd=" .. colSig(cfg.pandemicColor)) or "")
 
@@ -5626,7 +5648,8 @@ function Factory:SyncFrame(frame)
             -- relative to `frame` (the flat path's parent) at any chain length.
             local pdChain = pandemicBorderSpec(bestSpec, bestCfg)
             return syncConditionChain(bd, bestName, frame, frame.unit, chainLinks, filt,
-                "da=" .. tostring(drawAboveBD) .. (pdChain and "|pd" or ""),
+                "da=" .. tostring(drawAboveBD) .. (pdChain and "|pd" or "")
+                    .. "|an=" .. borderAnimStructToken(bestSpec),
                 borderSpecSig(bestSpec) .. (pdChain and ("|pd=" .. colSig(bestCfg.pandemicColor)) or ""),
                 function(map, f) return buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD, pdChain) end,
                 function(h) h:ApplyStyle({ border = { spec = bestSpec, pandemicSpec = pdChain } }) end,

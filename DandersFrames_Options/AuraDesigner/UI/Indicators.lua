@@ -1056,6 +1056,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
+                    -- RESTORED 2026-08-27 (removed in the 12.1 retirement, 961d1e13).
+                    -- This border is the whole-frame presence ring, drawn on an
+                    -- OVERLAY-mode container — the one surface the AuraContainer
+                    -- ANIMATION FILTER reopens, because it is a single ring per frame.
+                    -- Every type the dropdown offers is in SAFE_OVERLAY_ANIM, so no
+                    -- animExcludeTypes filter is needed here.
+                    -- ⚠ The legacy style migration DEPENDS on this control existing:
+                    -- the old Dashed/Animated styles map onto Thickness 0 + DF Dash, and
+                    -- Corners onto Thickness 0 + Corners Only (see the note above) — with
+                    -- animation gone those profiles resolved to a border that drew nothing.
+                    animate = true,
                 },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
