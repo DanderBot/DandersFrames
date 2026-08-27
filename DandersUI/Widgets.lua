@@ -1812,6 +1812,10 @@ function UI:CreateSlider(parent, opts)
     -- panel resize), so the bubble rides it rather than being poked from four
     -- call sites. Assigned further down, once FormatValue exists -- the guard
     -- covers the initial UpdateValue that runs before then.
+    --
+    -- Takes (pct, usable) so the caller that already has them does not make it
+    -- measure the track a second time; both are optional and it measures for
+    -- itself when they are absent (ShowBubble's opening repaint).
     local RefreshBubble
 
     local function UpdateFill()
@@ -1823,7 +1827,10 @@ function UI:CreateSlider(parent, opts)
         local usable = (track:GetWidth() or 0) - 2
         if usable < 1 then usable = 1 end
         fill:SetWidth(math.max(1, pct * usable))
-        if RefreshBubble then RefreshBubble() end
+        -- HANDED the two numbers it would otherwise measure for itself. The
+        -- bubble's clamp asks exactly the question this just answered, and a
+        -- second `track:GetWidth()` per drag tick is the same arithmetic twice.
+        if RefreshBubble then RefreshBubble(pct, usable) end
     end
     -- The track's width is only known once the page layout has resolved its
     -- anchors, and changes again if the panel is resized -- so repaint the fill
@@ -1909,7 +1916,13 @@ function UI:CreateSlider(parent, opts)
     -- fitted its text would breathe in and out on every tick -- far more
     -- distracting than the number it is showing. A fixed box with centred text is
     -- the achievable half of tabular numbers.
-    local bubble
+    --
+    -- `lastText` is the string the font string is currently holding, kept in step
+    -- with it from the moment it is first written, and compared before every
+    -- write: SetText re-measures and re-lays a font string whether or not the
+    -- characters changed, and a slow drag on a wide bar spends most of its ticks
+    -- on the same snapped value.
+    local bubble, lastText
     local function EnsureBubble()
         if bubble then return bubble end
         bubble = CreateFrame("Frame", nil, container, "BackdropTemplate")
@@ -1926,41 +1939,95 @@ function UI:CreateSlider(parent, opts)
         if #FormatValue(minVal) > #sample then sample = FormatValue(minVal) end
         if step < 1 then sample = sample .. ".00" end
         bubble.Text:SetText(sample)
+        lastText = sample          -- the cache starts out TRUE, not merely unset
         bubble:SetSize(math.max(28, math.ceil(bubble.Text:GetStringWidth() or 0) + 10), 16)
         bubble:Hide()
         container.dragBubble = bubble     -- exposed for the tests and for a consumer
         return bubble
     end
 
-    -- Where it sits: centred on the fill's leading edge -- the same arithmetic
-    -- UpdateFill uses, so the bubble and the bar cannot drift -- and then CLAMPED
-    -- inside the container. Without the clamp a bar at either end pushes half the
+    -- Where it sits: ANCHORED TO THE THUMB, once, and then LEFT ALONE. WoW moves
+    -- the thumb itself as the value changes and the layout engine carries
+    -- anything anchored to it along for free -- so the common case, a bar being
+    -- dragged through the middle of its range, costs ZERO anchor calls per tick.
+    --
+    -- ☠ THIS IS THE JITTER FIX, AND RE-ANCHORING PER TICK IS WHAT IT REPLACES.
+    -- The first cut of this recomputed an x off the fill arithmetic and issued
+    -- ClearAllPoints + SetPoint on EVERY drag tick. Two costs, both real:
+    --   * the bubble is a backdrop frame with a pixel border, so it carries six
+    --     anchored regions -- a fill, four border strips and the font string --
+    --     and dirtying its rect made the layout engine re-solve all six, inside
+    --     the same frame that was already writing the fill and the value box;
+    --   * that x was a FLOAT, so the box landed on a fresh sub-pixel offset every
+    --     tick and shimmered against the bar it was sitting on top of.
+    -- Riding the thumb's own (already snapped, already solved) position removes
+    -- both at once, and it is robust to the pixel snapping on the track offsets
+    -- in a way a hardcoded -12 could never be.
+    --
+    -- The CLAMP is all that is left to decide, and it is a three-state machine
+    -- rather than a per-tick number: free (on the thumb), or pinned half a box
+    -- inside one container edge. Without it a bar at either end pushes half the
     -- box outside the settings group, where the page's scroll frame clips it.
+    -- Anchors are only re-issued when the state CHANGES -- twice in a drag that
+    -- sweeps the whole bar, never in one that does not reach an end.
     --
     -- Track-left IS container-left (the track is anchored TOPLEFT 0), which is
-    -- what lets one x serve both.
-    local function PlaceBubble()
+    -- what lets one x answer "would it overhang".
+    local bubbleAnchor, bubbleClampX
+
+    local function PlaceBubble(pct, usable)
         if not bubble then return end
         local span = maxVal - minVal
-        local pct = span > 0 and ((slider:GetValue() - minVal) / span) or 0
-        local usable = (track:GetWidth() or 0) - 2
-        if usable < 1 then usable = 1 end
+        if span <= 0 then
+            pct = 0
+        elseif not pct then
+            pct = (slider:GetValue() - minVal) / span
+        end
+        if not usable then
+            usable = (track:GetWidth() or 0) - 2
+            if usable < 1 then usable = 1 end
+        end
         local half = (bubble:GetWidth() or 0) / 2
         local cw = container:GetWidth() or 0
         local x = 1 + pct * usable
+        local want, wx = "thumb", nil
         if cw > half * 2 then
-            x = math.max(half, math.min(cw - half, x))
+            if x < half then want, wx = "left", half
+            elseif x > cw - half then want, wx = "right", cw - half end
         end
+        -- ⚠ THE CLAMP COORDINATE IS PART OF THE STATE, not just the state name.
+        -- A panel resized while the bubble is pinned to an edge moves that edge,
+        -- and a comparison on the name alone would leave the box behind.
+        if want == bubbleAnchor and wx == bubbleClampX then return end
+        bubbleAnchor, bubbleClampX = want, wx
         bubble:ClearAllPoints()
-        -- Bottom edge 12 below the container's top, i.e. just clear of the 16px
-        -- thumb that straddles the track at -18.
-        bubble:SetPoint("BOTTOM", container, "TOPLEFT", x, -12)
+        if want == "thumb" then
+            bubble:SetPoint("BOTTOM", thumb, "TOP", 0, 2)
+        else
+            -- The SAME height the thumb path resolves to, DERIVED rather than
+            -- written down: the 16px thumb centres on the slider's (pixel-
+            -- snapped) height, so its top sits (16 - h) / 2 above the slider's,
+            -- and the bubble rides 2 above that. The hardcoded -12 this replaces
+            -- was only right while SnapLen left the track on exactly -18/8, and
+            -- being right by coincidence is how a box develops a half-pixel hop
+            -- the moment it clamps.
+            --
+            -- Anchored off the SLIDER, not the container, for the same reason --
+            -- but the x still reads as a container offset, because the slider is
+            -- pinned to the container's TOPLEFT and the two left edges are one.
+            local h = slider:GetHeight() or 8
+            bubble:SetPoint("BOTTOM", slider, "TOPLEFT", wx, (16 - h) / 2 + 2)
+        end
     end
 
-    RefreshBubble = function()
+    RefreshBubble = function(pct, usable)
         if not (bubble and bubble:IsShown()) then return end
-        bubble.Text:SetText(FormatValue(slider:GetValue()))
-        PlaceBubble()
+        local s = FormatValue(slider:GetValue())
+        if s ~= lastText then
+            lastText = s
+            bubble.Text:SetText(s)
+        end
+        PlaceBubble(pct, usable)
     end
 
     local function ShowBubble()
