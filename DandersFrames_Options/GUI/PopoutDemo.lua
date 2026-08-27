@@ -393,8 +393,12 @@ end
 -- parallel primitive to the kit's square CreateElementBackdrop; no real settings
 -- page touches it, and this button is the only thing in the addon that does. The
 -- question it exists to answer is whether the corners read CRISP at the scale
--- Danders actually plays at -- see the shimmer caveat in Round.lua's header --
--- so cycle it with the Scale button and look at the curve, not at the colours.
+-- Danders actually plays at -- see the SLICE CONTRACT note in Round.lua's header
+-- -- so cycle it with the Scale button and look at the curve, not at the colours.
+-- The OTHER thing to drive is the popout's open/close animation: the surface is a
+-- single nine-sliced texture per layer precisely so no joint can flicker open
+-- while Fx runs the frame's scale through fractional values, and repeating that
+-- at R6 is the test that shape change was made to pass.
 --
 -- Two widths on screen at once, deliberately: the row plates and this window take
 -- a 1px ring and the popout's accent border takes 2px, which is the pair worth

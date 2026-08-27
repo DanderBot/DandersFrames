@@ -3,7 +3,7 @@ local UI = NS.__DandersUI
 if not UI then return end
 
 -- ============================================================
--- ROUNDED SURFACE -- a rounded-corner backdrop, assembled from parts.
+-- ROUNDED SURFACE -- a rounded-corner backdrop, from TWO nine-sliced textures.
 --
 -- ⚠ PROTOTYPE. This is a PARALLEL primitive to CreateElementBackdrop /
 -- CreatePanelBackdrop, not a replacement for either, and no real settings page
@@ -12,112 +12,125 @@ if not UI then return end
 -- decides whether the GUI wants it. The library names no consumer; see Core.lua.
 --
 -- ------------------------------------------------------------
--- WHY IT IS BUILT THIS WAY
+-- ☠ WHY THIS IS NOT FIFTEEN TEXTURES ANY MORE -- read this first.
 --
--- WoW gives a frame no rounded rectangle. The options are:
+-- It used to be. A surface was four quarter-disc corners, four quarter-arc
+-- corners and seven flat SetColorTexture strips, each one anchored to butt
+-- exactly against its neighbours at a whole-number offset from the frame. The
+-- arithmetic was right. The joints still opened up:
 --
---   * a 9-slice / edgeFile backdrop -- one authored texture stretched over the
---     whole surface. The corner radius is then a fraction of the ART, so it
---     grows and shrinks with the frame: a 400px panel and a 26px row plate
---     drawn from the same file do not share a radius, which is the one thing a
---     corner treatment has to get right to read as a system.
---   * ONE texture per surface, regenerated at its size. Off the table -- the
---     art would have to be produced at runtime.
---   * corners as art, everything else as flat colour. That is this.
+--     "I can see gaps when the popout animates in and out"
 --
--- So a surface is 15 textures: 4 corner quarter-discs, 3 flat rectangles that
--- tile the interior between them, 4 corner quarter-arcs, and 4 flat strips that
--- join the arcs into a ring. The radius is then in UI UNITS and identical on
--- every surface that asks for the same number, whatever size it is.
+-- A butt joint between two quads is seamless only when both quads land on the
+-- same DEVICE-pixel grid. Fx drives the popout's scale through a continuum of
+-- fractional values, every quad is rasterised independently at each one, and two
+-- neighbours whose shared edge falls near x.5 can round APART for a frame. Fifteen
+-- quads is fourteen chances per frame to flicker a hairline of the world through
+-- the middle of a panel. Nothing anchor-side fixes that, because nothing
+-- anchor-side was wrong.
 --
--- THE 3-RECT TILING, and why it is these three. The interior splits as a
--- full-width CENTRE band inset by `radius` top and bottom, plus a TOP and a
--- BOTTOM strip that run between the corner boxes:
+-- THE ENGINE HAS THE PRIMITIVE. Texture:SetTextureSliceMargins(l, t, r, b) plus
+-- SetTextureSliceMode(Enum.UITextureSliceMode.Stretched) cuts ONE texture into a
+-- 3 x 3: the four corner cells are held at their baked pixel size and only the
+-- edge and centre cells stretch. One texture, one quad, one draw call -- there is
+-- no joint to open, by construction, at any scale.
 --
---       +--r--+---------------+--r--+
---       | TL  |      top      |  TR |   r
---       +-----+---------------+-----+
---       |          centre           |   h - 2r
---       +-----+---------------+-----+
---       | BL  |     bottom    |  BR |   r
---       +--r--+---------------+--r--+
+-- So a surface is now TWO textures:
 --
--- Every edge in that diagram is an ANCHOR to the frame at a whole-number offset
--- of `radius`, never a width computed from the frame's size -- so there is
--- nothing to round badly and no seam or overlap at a fractional width or
--- height. (The alternative tiling -- a full-height centre column with side
--- strips -- is equally seamless; this one is picked because a settings surface
--- is usually much wider than it is tall, which makes the centre band the one
--- big rectangle rather than one of three tall ones.)
+--     fill   rect_rN.tga      the whole rounded rectangle
+--     ring   ring_rN_wW.tga   the matching border, stroke W inside the same
+--                             outline, on the sublevel above
 --
--- NOT EVERY CORNER HAS TO BE ROUND. `opts.corners` turns each of the four on or
--- off independently, and a surface that is round at the top and square at the
--- bottom is the shape a TITLE STRIP wants -- it sits against the top of a rounded
--- panel, so its upper corners have to follow that curve while its lower edge is a
--- straight join into the body. A footer strip is the same thing upside down.
---
--- A square corner is not a different texture, it is the ABSENCE of one: the arc
--- and its quarter-disc are hidden, and the flat parts that used to stop `radius`
--- short of them run all the way to the edge instead. So the corner is drawn by
--- the same strips that draw the edges, and the count of textures on screen falls
--- rather than rises:
---
---       tl round, tr square
---       ,-----+-----------------+
---      /  TL  |       top       |   <- the top strip now reaches the right edge
---     +-------+-----------------+
---
--- ☠ WHERE THE TWO RING RUNS MEET AT A SQUARE CORNER, one of them has to give
--- way. The horizontal run takes the corner (it extends to the very edge) and the
--- vertical one stops `borderWidth` short of it. A BUTT JOINT, not an overlap --
--- two translucent strips crossing would double-blend into a darker bw x bw square
--- at exactly the corner the eye is drawn to, which is a worse artefact than the
--- seam it was trying to avoid.
---
--- ONE ORIENTATION OF ART, four corners. The baked file is the TOP-LEFT corner;
--- the other three are mirrored with SetTexCoord's 8-argument form. Safe for
--- THESE textures specifically -- they are static, never tiled or wrapped, and
--- both shapes are symmetric about the diagonal so a mirror and a quarter turn
--- are the same picture. It would NOT be safe for a repeating tile.
+-- and that is the entire object. The gaps are gone because the things that could
+-- gap are gone.
 --
 -- ------------------------------------------------------------
--- ☠ THE SHIMMER CAVEAT -- read this before judging the look.
+-- THE SLICE CONTRACT -- margins are TEXTURE PIXELS, radius is UI UNITS.
 --
--- A corner box is `radius` UI units square, and UI units are only whole device
--- pixels when the frame's effective scale puts them there. At the scales people
--- actually play at (a UI scale slider times the settings window's OWN scale
--- slider) it usually does not, so the arc is resampled onto a fractional grid
--- and the corner reads slightly SOFT -- and, worse, it re-lands on a different
--- fraction every time a scrolling parent moves it, which the eye picks up as a
--- faint shimmer along the curve.
+-- SetTextureSliceMargins is measured in the texture's own pixels. The art is
+-- baked at ONE TEXEL PER UI UNIT -- a radius-6 shape has a 6px corner band -- so
+-- passing `radius` as all four margins is what is INTENDED to make `radius = 6`
+-- mean "6 UI units of curve" at the far end.
 --
--- This is the same problem the pixel border was built to escape (see
--- ApplyPixelBorder in Theme.lua) and the escape route there does not transfer:
--- that one works by drawing a line THICK enough that where it lands stops
--- mattering, and a curve has no equivalent -- thickening it changes the shape.
+-- That density is a contract between this file and Tools/generate_rounded.py, not
+-- a quality setting: rebake at 2 texels per unit and every consumer's radius
+-- changes meaning with nothing here to notice it. The generator's CANVAS note is
+-- the other half of it, and test_round.lua pins the margins.
 --
--- ☠ AND THE FIRST ANSWER MADE IT WORSE. The art used to be baked at ~4x the
--- drawn size "to give the resampler something to work with". There is no
--- resampler: WoW builds no mip chain for these files, so a 32px arc drawn into a
--- 6-unit box that lands on 3-8 device pixels was a 4:1 to 8:1 POINT-SAMPLED
--- minification of a diagonal edge -- which is the recipe for exactly the
--- pixelation and crawl it was supposed to prevent. Oversampling only helps
--- something that averages, and nothing downstream of the bake does.
+-- ☠ WHETHER THE ENGINE HONOURS THAT 1:1 IS NOT VERIFIED, AND THERE IS EVIDENCE
+-- AGAINST IT. This has to be checked in the demo before the trial is judged.
 --
--- So the art is now baked NEAR THE DRAWN SIZE -- one baked pixel per radius unit
--- -- with the averaging done at BAKE time by the generator's 8x8 sub-sampling,
--- where it is kept. See generate_rounded.py's SIZE note; the consequence for
--- this file is the texcoord crop under RETEXTURE below.
+-- BuzzardFrames -- which ships sliced rounded borders and has clearly fought this
+-- -- states the opposite rule from live observation:
 --
--- What is left is still a judgement call about whether the curve reads
--- acceptably at the scale the user actually runs, which is exactly what the demo
--- exists to answer. Snapping is turned OFF on every texture below for the pixel
--- border's reason: rounding a quad's edges independently changes its SIZE, and a
--- corner whose box is 5px on one side of the panel and 6px on the other is worse
--- than a soft one.
+--     "THE ENGINE'S SLICING RULE (fit-short): a nine-sliced texture renders its
+--      texels scaled by regionShort/artSize -- corners are NOT drawn at a fixed
+--      art scale."
+--                      (_retail_/Interface/AddOns/BuzzardFrames/UnitFrames/
+--                       oUF_Shared.lua, the v90.8 header ~line 135, with four
+--                       corroborating observations; and again at ~4267, "sliced
+--                       masks scaled their corner with the region")
+--
+-- Under that rule the corner is `margin * regionShortInPhysicalPixels / artSize`,
+-- so a 300-unit panel and a 26-unit row plate asked for the same radius would NOT
+-- get the same curve -- which is the exact failure the old 15-piece assembly was
+-- built to avoid, and which its header called out as the reason not to nine-slice.
+-- Their fix is to host the texture on a frame scaled so one texel is one physical
+-- pixel; that is a bigger change than this one and is not made here.
+--
+-- ⚠ THE SAME FILE ALSO SAYS THE OPPOSITE ("Slicing keeps thickness/radius
+-- constant at any frame size", Indicators/Container.lua ~line 35), so the two
+-- readings cannot both be right and neither can be settled from source comments.
+--
+-- HOW TO SETTLE IT, in one look: the demo puts a whole WINDOW, a POPOUT and
+-- several small ROW PLATES on screen at one radius. If every corner reads the
+-- same size, the 1:1 contract holds and this note can be cut down to its first
+-- paragraph. If the window's corner is a great sweep while a row plate's is a
+-- nick, fit-short is real and the surface needs the pixel-host treatment before
+-- it can be a system.
+--
+-- A second, sharper tell if it IS fit-short: r4 and r6 are baked on a 16px canvas
+-- and r8 on a 32px one, so under that rule R8 would render a SMALLER corner than
+-- R6. Cycling the radii out of order is the giveaway, and the fix for it alone
+-- would be to bake every radius on one canvas size.
+--
+-- ------------------------------------------------------------
+-- WHICH CORNERS ARE ROUND -- and why the answer is a SHAPE, not four flags.
+--
+-- The old assembly could round any subset of the four, because a square corner
+-- was simply an arc it did not draw. A single sliced texture cannot: the shape is
+-- baked in, so every combination anyone wants is a FILE.
+--
+-- v1 bakes the two the trial actually uses:
+--
+--     all four round     panels, popouts, row plates
+--     tl + tr only       a TITLE STRIP -- it sits against the top of a rounded
+--                        panel, so its upper corners follow that curve while its
+--                        lower edge is a straight join into the body
+--
+-- `opts.corners` keeps its old shape and its old reading (see normCorners), and
+-- anything that is not one of those two is REFUSED with a message naming the
+-- generator, rather than silently drawing the nearest thing. Adding a combination
+-- means adding it to that script's SHAPES table and to SHAPE_OF below -- both, or
+-- the module asks for a file that does not exist and the surface is invisible.
+--
+-- ------------------------------------------------------------
+-- ⚠ NO SLICE SUPPORT, NO CURVE. SetTextureSliceMargins arrived around 10.0. If it
+-- is missing -- an ancient client, or the headless harness -- the surface falls
+-- back to a plain SetColorTexture rectangle with NO ring and flags itself
+-- (`s.sliced == false`). Deliberately visibly square rather than clever: a
+-- degraded surface that still looks rounded would hide the fact that the art is
+-- not drawing at all.
+--
+-- ------------------------------------------------------------
+-- Snapping is turned OFF on both textures for the pixel border's reason
+-- (Theme.lua): vertex snapping rounds a quad's edges independently, so a snapped
+-- surface changes SIZE by a pixel depending where it lands -- and during the very
+-- animation this file exists to fix, that is a corner that visibly breathes.
 -- ============================================================
 
-local rawget, type, ipairs, setmetatable = rawget, type, ipairs, setmetatable
+local rawget, type, ipairs = rawget, type, ipairs
+local setmetatable, format = setmetatable, string.format
 local abs = math.abs
 
 -- Resolved at file scope like every other media path in the pack (see
@@ -126,7 +139,7 @@ local ROUND_PATH = (UI.MEDIA or "") .. "Round\\"
 
 -- What the generator actually produced. A radius or width outside these snaps
 -- to the nearest one that exists rather than asking for a texture that does
--- not -- a missing file is an invisible corner, and the caller would have no
+-- not -- a missing file is an invisible surface, and the caller would have no
 -- way to tell that apart from the surface simply not working.
 local RADII  = { 4, 6, 8 }
 local WIDTHS = { 1, 2 }
@@ -134,82 +147,26 @@ local WIDTHS = { 1, 2 }
 local DEFAULT_RADIUS = 6
 local DEFAULT_WIDTH  = 1
 
+-- The baked shapes, as the filename infix each one carries. Keep in step with
+-- Tools/generate_rounded.py's SHAPES.
+local SHAPE_TAG = { all = "", top = "top_" }
+
 -- Published so a consumer (the demo's Corners button) can cycle exactly the set
 -- that has art, rather than carrying its own copy of the list.
 UI.Round = {
     radii  = RADII,
     widths = WIDTHS,
+    shapes = { "all", "top" },
     defaultRadius = DEFAULT_RADIUS,
     defaultWidth  = DEFAULT_WIDTH,
 }
 
--- ---- the canvas the art is baked on --------------------------------
---
--- ⚠ THIS RULE IS A COPY OF Tools/generate_rounded.py's canvas_for(). It has to
--- be: the baked file is bigger than the shape inside it, so drawing the shape
--- means knowing where in the file it sits, and this module cannot read a Python
--- script. The two are pinned together by test_round.lua, which asserts the
--- texcoords this rule produces -- change one side and that test goes red.
---
--- A radius-N corner is N px of ink on a canvas of next_pot(N + PAD_MIN), with
--- the shape flush into the canvas's BOTTOM-RIGHT and the slack transparent on
--- the top-left. Bottom-right because the box's right and bottom edges are the
--- two that butt against the flat strips and so must land on the texture's own
--- edge; the top-left is the outside of the curve, where the padding gives the
--- filter transparent texels to blend towards instead of clamping a half-covered
--- edge texel out into the gap beside the corner box.
-local PAD_MIN = 2
-
-local function canvasFor(r)
-    local want, size = r + PAD_MIN, 1
-    while size < want do size = size * 2 end
-    return size
-end
-
--- ---- the four corner orientations, as texcoords -------------------
---
--- SetTexCoord's 8-argument form assigns a texture coordinate to each of the
--- quad's four SCREEN corners, in the order (UL, LL, UR, LR). The baked art is
--- the top-left corner, so:
---
---   tl  identity          tr  mirrored in x
---   bl  mirrored in y     br  mirrored in both
---
--- ...and every coordinate that used to be 0 -- the art's top-left -- is now the
--- CROP, `pad / canvas`, because that is where the shape starts. Everything else
--- is unchanged: the crop is a rectangular sub-image, so the mirrors are the same
--- eight slots with the same values in them.
---
--- ☠ CROP THE TEXCOORDS, DO NOT GROW THE QUAD. The other way to draw a padded
--- canvas is to make the quad `canvas` units instead of `radius` and hang the
--- padding outside the frame's corner. It renders the same picture and it is
--- worse: the corner box would stop being the r x r box every anchor in layout()
--- is stated against, so the strips would either overlap the quad or leave a gap
--- at exactly the join this whole file is built to keep flush -- and the answer
--- would change per radius, since the padding does. Cropping leaves the quad
--- exactly the corner box, so NOTHING in layout() moves and the strips stay flush
--- at every radius by construction.
---
--- Built at load rather than written out, because there is now one set per
--- radius: three tables of eight numbers is still allocated once, and the flip is
--- easier to trust as a rule ("every 0 becomes the crop") than as twelve rows of
--- hand-copied constants.
-local TEXCOORD = {}
-for _, r in ipairs(RADII) do
-    local size = canvasFor(r)
-    local c = (size - r) / size
-    TEXCOORD[r] = {
-        --      ULx ULy  LLx LLy  URx URy  LRx LRy
-        tl = {   c,  c,   c,  1,   1,  c,   1,  1 },
-        tr = {   1,  c,   1,  1,   c,  c,   c,  1 },
-        bl = {   c,  1,   c,  c,   1,  1,   1,  c },
-        br = {   1,  1,   1,  c,   c,  1,   c,  c },
-    }
-end
-
--- Corner box anchors: which point of the frame each r x r box hangs off.
-local CORNER_POINT = { tl = "TOPLEFT", tr = "TOPRIGHT", bl = "BOTTOMLEFT", br = "BOTTOMRIGHT" }
-local CORNER_ORDER = { "tl", "tr", "bl", "br" }
+-- Stretch, not tile: the edge bands are a constant run of colour, so stretching
+-- them is exact and costs one quad, while tiling would repeat a 4px band across
+-- 400 units for no visible difference. Resolved defensively because Enum is a
+-- client global and the headless harness has to be able to stand one up; 0 is
+-- Stretched's value, so the fallback is the same choice rather than a guess.
+local SLICE_STRETCHED = (Enum and Enum.UITextureSliceMode and Enum.UITextureSliceMode.Stretched) or 0
 
 -- ---- which corners are round --------------------------------------
 --
@@ -236,6 +193,31 @@ local function normCorners(c, existing)
     t.bl = c.bl and true or false
     t.br = c.br and true or false
     return t
+end
+
+-- Which baked file a corner set asks for, or nil if nothing was baked for it.
+local function shapeOf(c)
+    if c.tl and c.tr and c.bl and c.br then return "all" end
+    if c.tl and c.tr and not c.bl and not c.br then return "top" end
+    return nil
+end
+
+-- ☠ REFUSED, NOT APPROXIMATED. A combination with no file would draw nothing at
+-- all, and an invisible surface is indistinguishable from a surface that was
+-- never created -- so this says exactly which combinations exist and where to add
+-- another, then falls back to the fully rounded shape so the caller gets a
+-- surface rather than a hole.
+local function resolveShape(c)
+    local shape = shapeOf(c)
+    if shape then return shape end
+    UI:Error(format(
+        "DandersUI: CreateRoundedSurface has no art for corners tl=%s tr=%s bl=%s br=%s"
+        .. " -- v1 bakes ALL FOUR round, or tl+tr only (a title strip)."
+        .. " Add the combination to Tools/generate_rounded.py's SHAPES and to"
+        .. " Round.lua's SHAPE_TAG, or ask for one of the two. Falling back to all four.",
+        tostring(c.tl), tostring(c.tr), tostring(c.bl), tostring(c.br)))
+    c.tl, c.tr, c.bl, c.br = true, true, true, true
+    return "all"
 end
 
 -- ---- colour normalising -------------------------------------------
@@ -276,7 +258,7 @@ end
 
 -- ---- texture construction -----------------------------------------
 --
--- Sublevels, and why they are negative. The fills sit at BACKGROUND -4 and the
+-- Sublevels, and why they are negative. The fill sits at BACKGROUND -4 and the
 -- ring at BACKGROUND -2: below one another in the order they have to paint, and
 -- both below BACKGROUND 0, which is where a stock backdrop's bgFile lands. So a
 -- surface that still has a square backdrop on it renders the SQUARE -- visibly
@@ -306,175 +288,89 @@ local BORDER_OFFSET   = 2
 
 local function newTexture(frame, sublevel)
     local t = frame:CreateTexture(nil, "BACKGROUND", nil, sublevel)
-    -- OFF, for the pixel border's reason (Theme.lua): vertex snapping rounds a
-    -- quad's two edges independently, so a snapped r x r corner box can come out
-    -- r-1 or r+1 px depending on where it lands -- and four corners of a surface
-    -- disagreeing about the radius is a far worse artefact than a soft curve.
     if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false) end
     if t.SetTexelSnappingBias then t:SetTexelSnappingBias(0) end
     return t
 end
 
+-- Said ONCE per session, not once per surface: a client without slice support has
+-- every surface fall back, and one line is the useful signal while two hundred is
+-- noise that buries whatever else went wrong.
+local warnedNoSlice = false
+
+local function canSlice(t)
+    return type(t.SetTextureSliceMargins) == "function"
+       and type(t.SetTextureSliceMode) == "function"
+end
+
 -- ---- layout --------------------------------------------------------
--- Everything is anchored to the FRAME at a constant offset. Nothing here reads
--- the frame's width or height, so the surface tracks a resize on its own and
--- there is no size to round badly. See THE 3-RECT TILING above.
+-- Both textures ARE the rect. Nothing is computed from the frame's size, so the
+-- surface tracks a resize for free and there is no arithmetic to round badly --
+-- which was the whole of the old assembly's job and is now the engine's.
 local function layout(s)
     -- WHOSE TEXTURES and WHOSE RECT are two questions. Normally one frame answers
     -- both. A title strip separates them: its textures have to be on the PANEL's
     -- frame (that is the only way to land between the panel's fill and its ring --
     -- a child frame's textures draw above every layer of its parent, so a strip
     -- parented to the title bar would paint straight over the ring it is supposed
-    -- to sit under), while its rect is the BAR's. So `anchorTo` is what everything
-    -- below is measured against, and `s.frame` stays the owner of the textures.
-    local f, r, bw, co = s.anchorTo or s.frame, s.radius, s.borderWidth, s.corners
-
-    -- How far in from each corner the flat parts stop. A ROUND corner keeps its
-    -- r x r box for the arc, so everything stops `r` short of it. A SQUARE one has
-    -- no box, so the fills run to the very edge (0) -- and of the ring's two runs
-    -- the HORIZONTAL one takes the corner while the VERTICAL one stops `bw` short,
-    -- which is the butt joint the header argues for.
-    local ftl = co.tl and r or 0
-    local ftr = co.tr and r or 0
-    local fbl = co.bl and r or 0
-    local fbr = co.br and r or 0
-    local vtl = co.tl and r or bw
-    local vtr = co.tr and r or bw
-    local vbl = co.bl and r or bw
-    local vbr = co.br and r or bw
-
-    for _, k in ipairs(CORNER_ORDER) do
-        local pt = CORNER_POINT[k]
-        local fillTex, edgeTex = s.cornerFill[k], s.cornerEdge[k]
-        fillTex:ClearAllPoints()
-        fillTex:SetPoint(pt, f, pt, 0, 0)
-        fillTex:SetSize(r, r)
-        edgeTex:ClearAllPoints()
-        edgeTex:SetPoint(pt, f, pt, 0, 0)
-        edgeTex:SetSize(r, r)
-    end
-
-    -- interior: top strip, centre band, bottom strip
-    local top = s.fillTop
-    top:ClearAllPoints()
-    top:SetPoint("TOPLEFT", f, "TOPLEFT", ftl, 0)
-    top:SetPoint("TOPRIGHT", f, "TOPRIGHT", -ftr, 0)
-    top:SetHeight(r)
-
-    -- The centre band is the one part no corner can move: it is inset by `r` top
-    -- and bottom because that is where the top and bottom STRIPS stop, and those
-    -- are `r` tall whether the corners beside them are round or square.
-    local mid = s.fillMid
-    mid:ClearAllPoints()
-    mid:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -r)
-    mid:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, r)
-
-    local bot = s.fillBottom
-    bot:ClearAllPoints()
-    bot:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", fbl, 0)
-    bot:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -fbr, 0)
-    bot:SetHeight(r)
-
-    -- ring: the four straight runs between the arcs. Each one starts and ends
-    -- exactly where its two arcs stop being `bw` thick (see the generator's
-    -- note on why the shapes line up), so the join is flush at every radius.
-    local bt = s.borderTop
-    bt:ClearAllPoints()
-    bt:SetPoint("TOPLEFT", f, "TOPLEFT", ftl, 0)
-    bt:SetPoint("TOPRIGHT", f, "TOPRIGHT", -ftr, 0)
-    bt:SetHeight(bw)
-
-    local bb = s.borderBottom
-    bb:ClearAllPoints()
-    bb:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", fbl, 0)
-    bb:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -fbr, 0)
-    bb:SetHeight(bw)
-
-    local bl = s.borderLeft
-    bl:ClearAllPoints()
-    bl:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -vtl)
-    bl:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, vbl)
-    bl:SetWidth(bw)
-
-    local br = s.borderRight
-    br:ClearAllPoints()
-    br:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, -vtr)
-    br:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, vbr)
-    br:SetWidth(bw)
+    -- to sit under), while its rect is the BAR's. So `anchorTo` is what both
+    -- textures are stretched over, and `s.frame` stays their owner.
+    local f = s.anchorTo or s.frame
+    s.fill:ClearAllPoints()
+    s.fill:SetAllPoints(f)
+    s.ring:ClearAllPoints()
+    s.ring:SetAllPoints(f)
 end
 
 -- ---- what is on screen ---------------------------------------------
--- THE ONE PLACE that decides whether each of the 15 is drawn, from the three
--- things that can suppress it: the whole surface being hidden, the ring being
--- switched off, and a corner being square. Three independent switches over one
--- set of textures is exactly the shape that grows contradictory call sites if
--- each setter does its own hiding -- SetBorderShown(true) on a surface with two
--- square corners must not light their arcs -- so every setter writes its flag and
--- calls this.
+-- THE ONE PLACE that decides whether each texture is drawn, from the things that
+-- can suppress it: the whole surface being hidden, the ring being switched off,
+-- and the client having no slice support at all. Two independent switches over
+-- one pair of textures is exactly the shape that grows contradictory call sites
+-- if each setter does its own hiding, so every setter writes its flag and calls
+-- this.
 local function updateShown(s)
-    local drawn, ring, co = not s.hidden, s.hasBorder, s.corners
-    for _, k in ipairs(CORNER_ORDER) do
-        local round = drawn and co[k]
-        s.cornerFill[k]:SetShown(round and true or false)
-        s.cornerEdge[k]:SetShown((round and ring) and true or false)
-    end
-    s.fillTop:SetShown(drawn)
-    s.fillMid:SetShown(drawn)
-    s.fillBottom:SetShown(drawn)
-    local runs = (drawn and ring) and true or false
-    s.borderTop:SetShown(runs)
-    s.borderBottom:SetShown(runs)
-    s.borderLeft:SetShown(runs)
-    s.borderRight:SetShown(runs)
+    local drawn = not s.hidden
+    s.fill:SetShown(drawn and true or false)
+    s.ring:SetShown((drawn and s.hasBorder and s.sliced) and true or false)
 end
 
 -- ---- RETEXTURE ------------------------------------------------------
--- Point the eight corner textures at the art for the current radius/width, and
--- turn each one to face its corner.
---
--- The texcoord set is per RADIUS now, not one shared table: the art is baked on
--- a power-of-two canvas that is bigger than the shape on it, so which part of
--- the file to draw depends on how much padding that radius's canvas carries.
--- See the TEXCOORD block above.
+-- Point both textures at the art for the current shape/radius/width and re-state
+-- the slice margins, which are per RADIUS -- see THE SLICE CONTRACT above. Both
+-- halves have to move together: re-pointing the file without re-stating the
+-- margins draws the new art through the old radius's cut, which is the one way
+-- this can be wrong that still puts a curve on screen.
 local function retexture(s)
-    local fillFile = ROUND_PATH .. "corner_fill_r" .. s.radius
-    local edgeFile = ROUND_PATH .. "corner_edge_r" .. s.radius .. "_w" .. s.borderWidth
-    local coords = TEXCOORD[s.radius]
-    for _, k in ipairs(CORNER_ORDER) do
-        local tc = coords[k]
-        local ft = s.cornerFill[k]
-        ft:SetTexture(fillFile)
-        ft:SetTexCoord(tc[1], tc[2], tc[3], tc[4], tc[5], tc[6], tc[7], tc[8])
-        local et = s.cornerEdge[k]
-        et:SetTexture(edgeFile)
-        et:SetTexCoord(tc[1], tc[2], tc[3], tc[4], tc[5], tc[6], tc[7], tc[8])
-    end
+    local tag = SHAPE_TAG[s.shape]
+    s.fillFile = ROUND_PATH .. "rect_" .. tag .. "r" .. s.radius
+    s.ringFile = ROUND_PATH .. "ring_" .. tag .. "r" .. s.radius .. "_w" .. s.borderWidth
+    if not s.sliced then return end
+    local r = s.radius
+    s.fill:SetTexture(s.fillFile)
+    s.fill:SetTextureSliceMargins(r, r, r, r)
+    s.fill:SetTextureSliceMode(SLICE_STRETCHED)
+    s.ring:SetTexture(s.ringFile)
+    s.ring:SetTextureSliceMargins(r, r, r, r)
+    s.ring:SetTextureSliceMode(SLICE_STRETCHED)
 end
 
 -- ---- paint ----------------------------------------------------------
--- The corner art is flat white with the shape in its alpha, so SetVertexColor
--- tints it; the flat parts are SetColorTexture. Two different calls for the same
--- colour, which is why repainting goes through one function rather than being
--- open-coded at the two call sites that drive hover and active states.
+-- The art is flat white with the shape in its alpha, so SetVertexColor tints it.
+-- On the fallback path there is no art, so the fill becomes a flat colour quad --
+-- which is why painting goes through one function rather than being open-coded at
+-- the two call sites that drive hover and active states.
 local function paintFill(s)
     local r, g, b, a = s.fillR, s.fillG, s.fillB, s.fillA
-    s.fillTop:SetColorTexture(r, g, b, a)
-    s.fillMid:SetColorTexture(r, g, b, a)
-    s.fillBottom:SetColorTexture(r, g, b, a)
-    for _, k in ipairs(CORNER_ORDER) do
-        s.cornerFill[k]:SetVertexColor(r, g, b, a)
+    if s.sliced then
+        s.fill:SetVertexColor(r, g, b, a)
+    else
+        s.fill:SetColorTexture(r, g, b, a)
     end
 end
 
 local function paintBorder(s)
-    local r, g, b, a = s.borderR, s.borderG, s.borderB, s.borderA
-    s.borderTop:SetColorTexture(r, g, b, a)
-    s.borderBottom:SetColorTexture(r, g, b, a)
-    s.borderLeft:SetColorTexture(r, g, b, a)
-    s.borderRight:SetColorTexture(r, g, b, a)
-    for _, k in ipairs(CORNER_ORDER) do
-        s.cornerEdge[k]:SetVertexColor(r, g, b, a)
-    end
+    s.ring:SetVertexColor(s.borderR, s.borderG, s.borderB, s.borderA)
 end
 
 -- ---- the handle -----------------------------------------------------
@@ -484,7 +380,7 @@ local surfaceMeta = { __index = Surface }
 
 -- Repaint the interior. This is the hover/active path -- a plate that lights up
 -- under the cursor drives it on every OnEnter and OnLeave -- so it does the
--- minimum: seven writes, no allocation, no relayout.
+-- minimum: four writes, no allocation, no relayout.
 function Surface:SetFillColor(r, g, b, a)
     if type(r) == "table" then r, g, b, a = unpackColor(r) end
     self.fillR, self.fillG, self.fillB, self.fillA = r or 1, g or 1, b or 1, a or 1
@@ -502,37 +398,40 @@ end
 function Surface:GetFillColor() return self.fillR, self.fillG, self.fillB, self.fillA end
 function Surface:GetBorderColor() return self.borderR, self.borderG, self.borderB, self.borderA end
 
--- A different radius is a different set of art AND a different set of anchors,
--- so this is a rebuild -- but of the SAME 15 textures. Nothing is created or
--- discarded, which is what makes it cheap enough for a demo's cycle button to
--- drive on every click.
+-- A different radius is different art AND different margins, but the SAME two
+-- textures -- nothing is created or discarded, which is what makes it cheap
+-- enough for a demo's cycle button to drive on every click.
 function Surface:SetRadius(radius, borderWidth)
     local r = nearest(RADII, radius or self.radius)
     local w = nearest(WIDTHS, borderWidth or self.borderWidth)
     if r == self.radius and w == self.borderWidth then return self end
     self.radius, self.borderWidth = r, w
-    layout(self)
     retexture(self)
     return self
 end
 
 function Surface:GetRadius() return self.radius, self.borderWidth end
 
--- Which of the four are round. A COPY, not the surface's own table: the layout
--- reads that table on every rebuild, so handing it out would let a caller who
--- pokes a field change the shape without a relayout and get a surface whose
--- anchors and whose visible textures disagree.
+-- Which of the four are round. A COPY, not the surface's own table: the shape is
+-- resolved from that table, so handing it out would let a caller who pokes a
+-- field believe they had changed the surface when nothing re-textured.
 function Surface:GetCorners()
     local c = self.corners
     return { tl = c.tl, tr = c.tr, bl = c.bl, br = c.br }
 end
 
--- Re-shape, which is a relayout (the strips move) plus a re-show (the arcs at
--- the corners that changed appear or go). Same 15 textures, like SetRadius.
+-- Which baked shape is on screen: "all" or "top". Published because the corner
+-- table no longer tells the whole story -- an unsupported combination is refused
+-- and falls back, and this is where that is observable.
+function Surface:GetShape() return self.shape end
+
+-- Re-shape, which is now purely a different FILE -- no relayout (the textures
+-- already are the rect) and no re-show (both are still drawn). Same two textures,
+-- like SetRadius.
 function Surface:SetCorners(corners)
     normCorners(corners, self.corners)
-    layout(self)
-    updateShown(self)
+    self.shape = resolveShape(self.corners)
+    retexture(self)
     return self
 end
 
@@ -540,9 +439,8 @@ end
 -- square backdrop uses -- the textures are ours and nothing else will take them
 -- down, exactly like the pixel border's own HidePixelBorder.
 --
--- Both go through updateShown rather than sweeping `textures` themselves: a
--- surface with square corners has arcs that must STAY down through a Hide/Show
--- round trip, the same way a fill-only surface's ring does.
+-- Both go through updateShown rather than touching the textures themselves: a
+-- fill-only surface's ring must STAY down through a Hide/Show round trip.
 function Surface:Hide()
     self.hidden = true
     updateShown(self)
@@ -569,14 +467,16 @@ end
 -- ============================================================
 -- THE FACTORY
 --
--- frame  any Frame. The surface parents its textures to it and anchors
---        everything to its edges, so it tracks size and position for free.
+-- frame  any Frame. The surface parents its textures to it and stretches them
+--        over its rect, so it tracks size and position for free.
 -- opts   radius       4 | 6 | 8       (default 6; anything else snaps to the
 --                                      nearest that has art)
 --        corners      {tl=,tr=,bl=,br=}  which of the four are round. OMIT for all
 --                                      four; pass a table and an ABSENT key means
 --                                      SQUARE, so {tl=true,tr=true} is a
---                                      top-corners-only strip. See normCorners.
+--                                      top-corners-only strip. Those TWO shapes
+--                                      are what v1 bakes -- anything else is
+--                                      refused with a message. See resolveShape.
 --        fill         {r,g,b,a}       (default UI.Colors.element)
 --        border       {r,g,b,a}       (default UI.Colors.border)
 --                     false           no ring at all
@@ -585,12 +485,12 @@ end
 --                                      surface's identity on the frame -- see the
 --                                      sublevel note above. The ring lands 2 higher.
 --        anchorTo     Frame/Region    (default `frame`) the rect the surface is
---                                      measured against, when that is not the frame
+--                                      stretched over, when that is not the frame
 --                                      its textures live on -- see layout().
 --
 -- Returns the handle. Idempotent per (frame, sublevel): a second call at the same
--- sublevel re-uses the surface already there rather than stacking a second set of
--- 15 textures on it. A DIFFERENT sublevel is a different surface, which is how a
+-- sublevel re-uses the surface already there rather than stacking a second pair
+-- of textures on it. A DIFFERENT sublevel is a different surface, which is how a
 -- panel and its title strip share one frame.
 -- ============================================================
 function UI:CreateRoundedSurface(frame, opts)
@@ -614,35 +514,26 @@ function UI:CreateRoundedSurface(frame, opts)
     local s = store[fillSub]
     if not s then
         s = setmetatable({ frame = frame, sublevel = fillSub }, surfaceMeta)
-        s.cornerFill, s.cornerEdge = {}, {}
-        s.textures, s.borderTextures = {}, {}
-
-        local function keep(t, isBorder)
-            s.textures[#s.textures + 1] = t
-            if isBorder then s.borderTextures[#s.borderTextures + 1] = t end
-            return t
+        s.fill = newTexture(frame, fillSub)
+        s.ring = newTexture(frame, edgeSub)
+        -- Kept for the same reason the 15-texture version kept them: a consumer
+        -- that wants to sweep everything the surface owns should not have to know
+        -- how many pieces that currently is.
+        s.textures = { s.fill, s.ring }
+        s.borderTextures = { s.ring }
+        s.sliced = canSlice(s.fill)
+        if not s.sliced and not warnedNoSlice then
+            warnedNoSlice = true
+            UI:Error("DandersUI: this client has no SetTextureSliceMargins --"
+                     .. " rounded surfaces fall back to plain square fills with no border.")
         end
-
-        for _, k in ipairs(CORNER_ORDER) do
-            s.cornerFill[k] = keep(newTexture(frame, fillSub))
-        end
-        s.fillTop    = keep(newTexture(frame, fillSub))
-        s.fillMid    = keep(newTexture(frame, fillSub))
-        s.fillBottom = keep(newTexture(frame, fillSub))
-        for _, k in ipairs(CORNER_ORDER) do
-            s.cornerEdge[k] = keep(newTexture(frame, edgeSub), true)
-        end
-        s.borderTop    = keep(newTexture(frame, edgeSub), true)
-        s.borderBottom = keep(newTexture(frame, edgeSub), true)
-        s.borderLeft   = keep(newTexture(frame, edgeSub), true)
-        s.borderRight  = keep(newTexture(frame, edgeSub), true)
-
         store[fillSub] = s
     end
 
     s.radius      = nearest(RADII, opts.radius or s.radius or DEFAULT_RADIUS)
     s.borderWidth = nearest(WIDTHS, opts.borderWidth or s.borderWidth or DEFAULT_WIDTH)
     s.corners     = normCorners(opts.corners, s.corners)
+    s.shape       = resolveShape(s.corners)
     s.anchorTo    = opts.anchorTo or s.anchorTo
 
     local Colors = UI.Colors or {}

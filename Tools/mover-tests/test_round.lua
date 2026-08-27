@@ -3,22 +3,32 @@ local NS = ...
 -- ============================================================
 -- ROUNDED SURFACE -- DandersUI/Round.lua
 -- ------------------------------------------------------------
--- A rounded surface is 15 textures pretending to be one shape, and every way it
--- can be wrong is invisible from inside the game until you look at it:
+-- ☠ REWRITTEN with the module. This file used to assert a FIFTEEN-TEXTURE
+-- assembly: four corner quarter-discs, four quarter-arcs, seven flat strips, and
+-- the eight-argument texcoords that turned one baked orientation into four
+-- corners. All of that is gone -- the assembly's butt joints flickered open
+-- during the popout's scale animation ("I can see gaps when the popout animates
+-- in and out"), which no amount of correct anchor arithmetic fixes, because two
+-- independently-rasterised quads sharing an edge at a fractional scale can round
+-- apart. The surface is now ONE nine-sliced texture per layer.
 --
---   * an arc pointing the wrong way (one baked orientation serves four corners,
---     turned with SetTexCoord's 8-argument form -- so three of the four are only
---     as right as eight numbers in a table)
+-- So the ways it can be wrong have changed completely, and they are:
+--
+--   * the SLICE MARGINS not matching the radius -- the corner then renders at
+--     some other size, or the art is cut in the wrong place and the curve is
+--     squashed into a band
+--   * the wrong SHAPE FILE -- a title strip drawn from the all-four art rounds
+--     its bottom corners off the panel it is supposed to join
+--   * a tint landing on the wrong texture, or on only one of the two
 --   * a ring drawn UNDER its own fill (both live on BACKGROUND sublevels)
---   * a strip anchored so it overlaps or falls short of the corner box it butts
---     against, which is a seam at some frame widths and not at others
---   * a repaint that misses some of the 7 fill or 8 border textures, so a hover
---     leaves part of the plate in the previous colour
+--   * the surface not being its own rect -- SetAllPoints against the wrong region
+--   * an unsupported corner combination silently drawing something, instead of
+--     saying it has no art for it
 --
--- All four are questions about recorded calls, which is what this file asserts.
--- What it CANNOT answer is the only question the prototype exists for -- whether
--- the curve reads crisp at a real UI scale -- so nothing here is a substitute
--- for opening the demo.
+-- All are questions about recorded calls, which is what this file asserts. What
+-- it CANNOT answer is the only question the prototype exists for -- whether the
+-- curve reads crisp at a real UI scale, and whether the gaps are actually gone
+-- during the animation -- so nothing here is a substitute for opening the demo.
 --
 -- ☠ ONE RUNTIME, SHARED LIBRARY TABLE. run.py loads every test_*.lua into the
 -- same LuaRuntime in alphabetical order, so the popout suites have normally
@@ -34,12 +44,14 @@ UI.Colors = UI.Colors or {}
 UI.Colors.element = UI.Colors.element or { r = 0.18, g = 0.18, b = 0.18, a = 1 }
 UI.Colors.border  = UI.Colors.border  or { r = 0.25, g = 0.25, b = 0.25, a = 1 }
 -- Core.lua is never loaded headless, so the library's error funnel is not there.
--- Recorded rather than silenced: the factory's "that is not a frame" guard is
--- asserted below and has to be observable.
+-- Recorded rather than silenced: the factory's "that is not a frame" guard and
+-- the "no art for those corners" refusal are both asserted below and both have to
+-- be observable.
 local errors = {}
 if not UI.Error then
     function UI:Error(msg) errors[#errors + 1] = tostring(msg) end
 end
+local function lastError() return errors[#errors] or "" end
 
 -- A path with something in it, so an assertion reads as a whole filename rather
 -- than as a bare basename that would also match an empty prefix.
@@ -53,37 +65,37 @@ local ROUND = "MEDIA\\Round\\"
 -- ---- helpers -------------------------------------------------------
 local function surfaceFrame()
     -- 200 x 40: a plausible row plate, and wider than it is tall so a swapped
-    -- axis in the layout shows up as an obviously wrong anchor rather than as a
-    -- square that happens to still look square.
+    -- axis shows up as an obviously wrong anchor rather than as a square that
+    -- happens to still look square.
     return FakeUIFrame(200, 40, 0, 0)
 end
 
--- The first SetPoint recorded for a texture, as point/relPoint/x/y. Every
--- texture in the surface is ClearAllPoints'd then re-pointed, so #_points is
--- also an assertion: 1 for a sized corner, 2 for a stretched strip.
-local function pt(tex, i)
-    local p = tex._points[i]
-    if not p then return nil end
-    return p[1], p[3], p[4], p[5]
-end
+local ALL   = { tl = true, tr = true, bl = true, br = true }
+local TOP   = { tl = true, tr = true }
 
-print("-- Round: assembly")
+print("-- Round: the surface is two textures")
 do
     local f = surfaceFrame()
     local s = UI:CreateRoundedSurface(f, { radius = 6 })
     check(s ~= nil, "factory returns a handle")
-    eq(#f._textures, 15, "15 textures: 4 corner fills + 3 fill rects + 4 arcs + 4 strips")
-    eq(#s.textures, 15, "the handle knows all 15")
-    eq(#s.borderTextures, 8, "8 of them are the ring")
+    -- THE HEADLINE. Fifteen quads was fourteen joints that could flicker apart
+    -- mid-animation; two textures have none, and neither of them touches the
+    -- other. If this number ever climbs back up, the gaps come with it.
+    eq(#f._textures, 2, "two textures: one fill, one ring -- no joints to open")
+    eq(#s.textures, 2, "the handle knows both")
+    eq(#s.borderTextures, 1, "one of them is the ring")
+    eq(s.textures[1], s.fill, "...and the fill is first")
+    eq(s.borderTextures[1], s.ring, "...the ring is the border one")
     eq(s:GetRadius(), 6, "radius as asked")
     local _, w = s:GetRadius()
     eq(w, 1, "border width defaults to 1")
+    check(s.sliced, "the harness client supports SetTextureSliceMargins")
 
     -- The surface is idempotent per frame: a second call re-uses rather than
-    -- stacking a second set of 15 on top, which would double every colour's
-    -- alpha and look like a tinting bug.
+    -- stacking a second pair on top, which would double every colour's alpha and
+    -- look like a tinting bug.
     UI:CreateRoundedSurface(f, { radius = 8 })
-    eq(#f._textures, 15, "a second call on the same frame creates nothing new")
+    eq(#f._textures, 2, "a second call on the same frame creates nothing new")
     eq(UI:GetRoundedSurface(f), s, "...and hands back the same handle")
     eq(s:GetRadius(), 8, "...re-issued with the new radius")
 end
@@ -92,132 +104,94 @@ print("-- Round: draw order")
 do
     local f = surfaceFrame()
     local s = UI:CreateRoundedSurface(f, { radius = 6 })
-    local fills, rings = 0, 0
-    for _, t in ipairs(s.textures) do
-        eq(t._layer, "BACKGROUND", "every texture is on BACKGROUND")
-    end
-    for i = 1, 7 do
-        if s.textures[i]._sublevel == -4 then fills = fills + 1 end
-    end
-    for i = 8, 15 do
-        if s.textures[i]._sublevel == -2 then rings = rings + 1 end
-    end
-    eq(fills, 7, "the 7 fill textures sit at sublevel -4")
-    eq(rings, 8, "the 8 ring textures sit at sublevel -2, ABOVE the fills")
+    eq(s.fill._layer, "BACKGROUND", "the fill is on BACKGROUND")
+    eq(s.ring._layer, "BACKGROUND", "so is the ring")
+    eq(s.fill._sublevel, -4, "the fill sits at sublevel -4")
+    eq(s.ring._sublevel, -2, "the ring sits at -2, ABOVE it")
     -- Both negative, so a square backdrop left on the frame (bgFile lands at
     -- sublevel 0) would paint over the whole surface. That is deliberate: it
     -- makes a forgotten SetBackdrop(nil) look like nothing happened rather than
     -- like the corners half-working.
-    check(s.textures[1]._sublevel < 0 and s.textures[15]._sublevel < 0,
+    check(s.fill._sublevel < 0 and s.ring._sublevel < 0,
           "both sublevels are below a backdrop's bgFile")
 end
 
 -- ============================================================
--- THE TEXCOORD CROP -- the module's half of the generator contract.
+-- THE SLICE CONTRACT -- the module's half of the generator's bargain.
 --
--- The art is NOT baked edge to edge. Tools/generate_rounded.py puts a radius-N
--- shape on a next_pot(N + 2) canvas, flush into its BOTTOM-RIGHT, with the slack
--- transparent on the top-left -- so the module draws a SUB-RECTANGLE of the file
--- and every texcoord that used to be 0 is now `pad / canvas`.
+-- SetTextureSliceMargins takes TEXTURE PIXELS. The engine holds each corner cell
+-- at that many pixels of art mapped to the same count of UI units, so passing
+-- `radius` as all four margins only means "radius UI units of curve" because
+-- Tools/generate_rounded.py bakes at ONE TEXEL PER UI UNIT.
 --
--- That rule lives in two places (a Python script and a Lua module) and nothing
--- at runtime can compare them, so this is where they are pinned. The numbers
--- below are worked from the generator's rule by hand:
---
---     r4  -> next_pot(6)  = 8,   pad 4,  crop 0.5
---     r6  -> next_pot(8)  = 8,   pad 2,  crop 0.25
---     r8  -> next_pot(10) = 16,  pad 8,  crop 0.5
---
--- If the generator's canvas rule changes and this file is not updated, the art
--- and the crop disagree -- which in-game is a corner drawn from the wrong part
--- of its file: a chunk of transparency where the arc should be, or the arc
--- squeezed into part of the box. Neither errors, both just look broken.
+-- That density lives in two places (a Python script and a Lua module) and nothing
+-- at runtime can compare them, so this is where they are pinned. Change the bake
+-- density and every consumer's radius silently changes meaning with nothing to
+-- notice it -- these assertions are the notice.
 -- ============================================================
-local CROP = { [4] = 0.5, [6] = 0.25, [8] = 0.5 }
-
--- The four turns, with `c` standing in for the crop. tl is the identity (the
--- baked file IS the top-left corner) and the other three are mirrors of it: the
--- crop is a rectangular sub-image, so mirroring it is the same eight slots.
-local function wantCoords(c)
-    return {
-        tl = { c, c, c, 1, 1, c, 1, 1 },
-        tr = { 1, c, 1, 1, c, c, c, 1 },
-        bl = { c, 1, c, c, 1, 1, 1, c },
-        br = { 1, 1, 1, c, c, 1, c, c },
-    }
-end
-
-print("-- Round: corner orientation and the texcoord crop")
+print("-- Round: slice margins are the radius, on both textures")
 do
     for _, R in ipairs({ 4, 6, 8 }) do
-        local c = CROP[R]
-        local want = wantCoords(c)
         local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = R })
-        for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
-            for _, set in ipairs({ s.cornerFill, s.cornerEdge }) do
-                local tc = set[k]._texCoord
-                eq(tc and #tc, 8, "r" .. R .. " " .. k .. ": the 8-argument SetTexCoord form was used")
-                local ok = true
-                for i = 1, 8 do if tc[i] ~= want[k][i] then ok = false end end
-                check(ok, "r" .. R .. " " .. k .. ": texcoords face the right corner, cropped to the shape")
-            end
-        end
-
-        -- Every corner is a DISTINCT turn. A copy-paste that left two corners
-        -- sharing one mapping would still pass the per-corner check above if the
-        -- table were wrong in the same way twice.
-        local seen = {}
-        for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
-            local key = table.concat(s.cornerFill[k]._texCoord, ",")
-            check(not seen[key], "r" .. R .. " " .. k .. ": its turn is unique")
-            seen[key] = true
+        for _, pair in ipairs({ { s.fill, "fill" }, { s.ring, "ring" } }) do
+            local t, name = pair[1], pair[2]
+            local m = t._sliceMargins
+            eq(m and #m, 4, "r" .. R .. " " .. name .. ": all four margins were set")
+            eq(m[1], R, "r" .. R .. " " .. name .. ": left margin is the radius")
+            eq(m[2], R, "r" .. R .. " " .. name .. ": top margin is the radius")
+            eq(m[3], R, "r" .. R .. " " .. name .. ": right margin is the radius")
+            eq(m[4], R, "r" .. R .. " " .. name .. ": bottom margin is the radius")
+            -- Stretched, not Tiled: the edge bands are a constant run of colour,
+            -- so stretching is exact and tiling would repeat a 4px band across
+            -- 400 units for no visible difference.
+            eq(t._sliceMode, Enum.UITextureSliceMode.Stretched,
+               "r" .. R .. " " .. name .. ": stretched, not tiled")
         end
     end
 
-    -- r6 and r8 must NOT share a crop even though both are "half a canvas or a
-    -- quarter of one" -- they are different files with different padding, and a
-    -- single shared texcoord table (which is what this file used to assert) is
-    -- exactly the regression this guards.
-    check(CROP[6] ~= CROP[8], "r6 and r8 crop differently -- the set is per radius")
-    local s6 = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6 })
-    local s8 = UI:CreateRoundedSurface(surfaceFrame(), { radius = 8 })
-    check(s6.cornerFill.tl._texCoord[1] ~= s8.cornerFill.tl._texCoord[1],
-          "...and two surfaces at those radii really are handed different numbers")
-
-    -- SetRadius has to re-point the CROP as well as the file. Re-pointing only
-    -- the texture would draw the new art through the old radius's crop, which is
-    -- the one way this can be wrong that still puts a curve on screen.
+    -- SetRadius has to re-state the MARGINS as well as the file. Re-pointing only
+    -- the texture would cut the new art at the old radius, which is the one way
+    -- this can be wrong that still puts a curve on screen.
     local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6 })
-    eq(s.cornerFill.tl._texCoord[1], CROP[6], "the surface starts on r6's crop")
+    eq(s.fill._sliceMargins[1], 6, "the surface starts on r6's margins")
     s:SetRadius(8)
-    eq(s.cornerFill.tl._texCoord[1], CROP[8], "SetRadius re-crops as well as re-texturing")
-    eq(s.cornerEdge.br._texCoord[1], 1, "...on the arcs too (br's first coord is the far edge)")
-    eq(s.cornerEdge.br._texCoord[8], CROP[8], "...whose crop lands in the mirrored slot")
+    eq(s.fill._sliceMargins[1], 8, "SetRadius re-cuts the fill")
+    eq(s.ring._sliceMargins[4], 8, "...and the ring")
 end
 
-print("-- Round: art per radius and width")
+print("-- Round: the surface IS its rect")
+do
+    -- A sliced texture has no internal geometry to get wrong -- it is stretched
+    -- over the whole rect and the engine holds the corners. So "where is it" is
+    -- one question per texture.
+    local f = surfaceFrame()
+    local s = UI:CreateRoundedSurface(f, { radius = 6 })
+    eq(s.fill._allPoints, f, "the fill covers the frame")
+    eq(s.ring._allPoints, f, "so does the ring")
+    eq(#s.fill._points, 0, "...with no per-edge anchors of its own")
+end
+
+print("-- Round: art per shape, radius and width")
 do
     for _, r in ipairs({ 4, 6, 8 }) do
         for _, w in ipairs({ 1, 2 }) do
             local f = surfaceFrame()
             local s = UI:CreateRoundedSurface(f, { radius = r, borderWidth = w })
-            eq(s.cornerFill.tl._texture, ROUND .. "corner_fill_r" .. r,
-               "r" .. r .. ": fill art")
-            eq(s.cornerEdge.br._texture, ROUND .. "corner_edge_r" .. r .. "_w" .. w,
-               "r" .. r .. " w" .. w .. ": arc art")
-            eq(#f._textures, 15, "r" .. r .. ": the count does not move with the radius")
+            eq(s.fill._texture, ROUND .. "rect_r" .. r, "r" .. r .. ": fill art")
+            eq(s.ring._texture, ROUND .. "ring_r" .. r .. "_w" .. w,
+               "r" .. r .. " w" .. w .. ": ring art")
+            eq(#f._textures, 2, "r" .. r .. ": the count does not move with the radius")
         end
     end
 
-    -- SetRadius is a REBUILD of the same textures, never a new set -- that is
-    -- what makes a demo's cycle button cheap enough to drive on every click.
+    -- SetRadius is a RE-POINT of the same two textures, never a new pair -- that
+    -- is what makes a demo's cycle button cheap enough to drive on every click.
     local f = surfaceFrame()
     local s = UI:CreateRoundedSurface(f, { radius = 4, borderWidth = 1 })
     s:SetRadius(8, 2)
-    eq(#f._textures, 15, "SetRadius creates nothing")
-    eq(s.cornerFill.tl._texture, ROUND .. "corner_fill_r8", "SetRadius re-points the fill art")
-    eq(s.cornerEdge.tl._texture, ROUND .. "corner_edge_r8_w2", "SetRadius re-points the arc art")
-    eq(s.cornerFill.tl._w, 8, "...and re-sizes the corner box")
+    eq(#f._textures, 2, "SetRadius creates nothing")
+    eq(s.fill._texture, ROUND .. "rect_r8", "SetRadius re-points the fill art")
+    eq(s.ring._texture, ROUND .. "ring_r8_w2", "SetRadius re-points the ring art")
 end
 
 print("-- Round: unsupported radius snaps to the nearest that has art")
@@ -225,7 +199,7 @@ do
     local f = surfaceFrame()
     -- Not a clamp: 5 is nearer 4 than 6, so it must land on 4 rather than on the
     -- bottom of the range or on the default. A radius with no file is an
-    -- INVISIBLE corner, which is why this cannot be left to the caller.
+    -- INVISIBLE surface, which is why this cannot be left to the caller.
     eq(UI:CreateRoundedSurface(f, { radius = 5 }):GetRadius(), 4, "5 -> 4")
     eq(UI:CreateRoundedSurface(surfaceFrame(), { radius = 7.5 }):GetRadius(), 8, "7.5 -> 8")
     -- 7 is exactly between 6 and 8. Pinned rather than left to chance: the scan
@@ -239,63 +213,6 @@ do
     eq(UI:CreateRoundedSurface(surfaceFrame()):GetRadius(), 6, "no radius -> the default 6")
 end
 
-print("-- Round: geometry")
-do
-    local f = surfaceFrame()
-    local R, BW = 6, 2
-    local s = UI:CreateRoundedSurface(f, { radius = R, borderWidth = BW })
-
-    -- Corner boxes: R x R, one anchor each, hung off the matching frame corner.
-    local corners = { tl = "TOPLEFT", tr = "TOPRIGHT", bl = "BOTTOMLEFT", br = "BOTTOMRIGHT" }
-    for k, point in pairs(corners) do
-        for _, set in ipairs({ s.cornerFill, s.cornerEdge }) do
-            local t = set[k]
-            eq(#t._points, 1, k .. ": one anchor")
-            local p, rel, x, y = pt(t, 1)
-            eq(p, point, k .. ": anchored by its own " .. point)
-            eq(rel, point, k .. ": ...to the frame's " .. point)
-            eq(x, 0, k .. ": flush in x")
-            eq(y, 0, k .. ": flush in y")
-            eq(t._w, R, k .. ": R wide")
-            eq(t._h, R, k .. ": R tall")
-        end
-    end
-
-    -- THE TILING. Top strip and bottom strip run BETWEEN the corner boxes; the
-    -- centre band runs the full width, inset R top and bottom. Every number is a
-    -- constant offset from the frame, so nothing here can round badly.
-    local _, _, tx = pt(s.fillTop, 1)
-    eq(tx, R, "top strip starts R in from the left")
-    local _, _, tx2 = pt(s.fillTop, 2)
-    eq(tx2, -R, "top strip stops R short of the right")
-    eq(s.fillTop._h, R, "top strip is R tall -- exactly the corner box")
-
-    local p1, r1, x1, y1 = pt(s.fillMid, 1)
-    eq(p1, "TOPLEFT", "centre band hangs off TOPLEFT")
-    eq(x1, 0, "centre band runs the FULL width...")
-    eq(y1, -R, "...and starts where the corner boxes stop")
-    local p2, r2, x2, y2 = pt(s.fillMid, 2)
-    eq(p2, "BOTTOMRIGHT", "centre band stretches to BOTTOMRIGHT")
-    eq(x2, 0, "centre band: full width at the bottom too")
-    eq(y2, R, "centre band stops R above the bottom")
-
-    local bp, br_, bx, by = pt(s.fillBottom, 1)
-    eq(bp, "BOTTOMLEFT", "bottom strip hangs off BOTTOMLEFT")
-    eq(bx, R, "bottom strip starts R in")
-    eq(s.fillBottom._h, R, "bottom strip is R tall")
-
-    -- The ring's straight runs: same spans, thickness BW. A strip that ran the
-    -- full width would double up over the arc and read as a heavier corner.
-    eq(s.borderTop._h, BW, "top border is BW thick")
-    eq(s.borderBottom._h, BW, "bottom border is BW thick")
-    eq(s.borderLeft._w, BW, "left border is BW thick")
-    eq(s.borderRight._w, BW, "right border is BW thick")
-    local _, _, btx = pt(s.borderTop, 1)
-    eq(btx, R, "top border starts where the top-left arc stops")
-    local _, _, _, bly = pt(s.borderLeft, 1)
-    eq(bly, -R, "left border starts where the top-left arc stops")
-end
-
 print("-- Round: repaint")
 do
     local f = surfaceFrame()
@@ -304,42 +221,32 @@ do
         border = { r = 0.5, g = 0.6, b = 0.7, a = 0.8 },
     })
 
-    -- Both colour shapes the rest of the kit accepts -- {r,g,b,a} and the array
-    -- form -- have to land the same way, because the two are used side by side
-    -- across the consumers.
+    -- The art is flat white with the shape in its alpha, so BOTH layers tint with
+    -- SetVertexColor -- and both colour shapes the rest of the kit accepts
+    -- ({r,g,b,a} and the array form) have to land the same way, because the two
+    -- are used side by side across the consumers.
     local function fillIs(r, g, b, a, why)
-        for _, t in ipairs({ s.fillTop, s.fillMid, s.fillBottom }) do
-            local c = t._color
-            check(c and c.r == r and c.g == g and c.b == b and c.a == a, why .. " (flat)")
-        end
-        for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
-            local v = s.cornerFill[k]._vertex
-            check(v and v.r == r and v.g == g and v.b == b and v.a == a, why .. " (" .. k .. ")")
-        end
+        local v = s.fill._vertex
+        check(v and v.r == r and v.g == g and v.b == b and v.a == a, why)
     end
     local function borderIs(r, g, b, a, why)
-        for _, t in ipairs({ s.borderTop, s.borderBottom, s.borderLeft, s.borderRight }) do
-            local c = t._color
-            check(c and c.r == r and c.g == g and c.b == b and c.a == a, why .. " (flat)")
-        end
-        for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
-            local v = s.cornerEdge[k]._vertex
-            check(v and v.r == r and v.g == g and v.b == b and v.a == a, why .. " (" .. k .. ")")
-        end
+        local v = s.ring._vertex
+        check(v and v.r == r and v.g == g and v.b == b and v.a == a, why)
     end
 
-    fillIs(0.1, 0.2, 0.3, 0.4, "array-form fill reaches all 7")
-    borderIs(0.5, 0.6, 0.7, 0.8, "table-form border reaches all 8")
+    fillIs(0.1, 0.2, 0.3, 0.4, "array-form fill tints the fill texture")
+    borderIs(0.5, 0.6, 0.7, 0.8, "table-form border tints the ring")
 
     -- THE HOVER PATH. A plate lighting up under the cursor drives SetFillColor on
-    -- every OnEnter and OnLeave; anything it misses is a corner stuck in the
-    -- previous colour while the middle of the plate has moved on.
+    -- every OnEnter and OnLeave. The failure to guard against is the two tints
+    -- crossing: a fill repaint that also wrote the ring would drag the border
+    -- colour along with every hover.
     s:SetFillColor(1, 0, 0, 0.5)
-    fillIs(1, 0, 0, 0.5, "SetFillColor repaints every fill texture")
+    fillIs(1, 0, 0, 0.5, "SetFillColor repaints the fill")
     borderIs(0.5, 0.6, 0.7, 0.8, "...and leaves the ring alone")
 
     s:SetBorderColor(0, 1, 0, 1)
-    borderIs(0, 1, 0, 1, "SetBorderColor repaints every ring texture")
+    borderIs(0, 1, 0, 1, "SetBorderColor repaints the ring")
     fillIs(1, 0, 0, 0.5, "...and leaves the fill alone")
 
     -- The accent path takes a colour TABLE (that is what GetAccent hands back),
@@ -350,53 +257,51 @@ do
     local fr, fg, fb, fa = s:GetFillColor()
     eq(fr, 1, "GetFillColor reads back r")
     eq(fa, 0.5, "GetFillColor reads back a")
+    local brr, _, _, bra = s:GetBorderColor()
+    eq(brr, 0.45, "GetBorderColor reads back r")
+    eq(bra, 1, "GetBorderColor reads back a")
 end
 
 print("-- Round: defaults come from the kit palette")
 do
     local f = surfaceFrame()
     local s = UI:CreateRoundedSurface(f)
-    local c = s.fillMid._color
-    eq(c.r, UI.Colors.element.r, "fill defaults to Colors.element")
-    local b = s.borderTop._color
-    eq(b.r, UI.Colors.border.r, "border defaults to Colors.border")
+    eq(s.fill._vertex.r, UI.Colors.element.r, "fill defaults to Colors.element")
+    eq(s.ring._vertex.r, UI.Colors.border.r, "border defaults to Colors.border")
 end
 
 print("-- Round: show, hide and the ring's own switch")
 do
     local f = surfaceFrame()
     local s = UI:CreateRoundedSurface(f, { border = false })
-    local shownFills, shownRing = 0, 0
-    for i = 1, 7 do if s.textures[i]:IsShown() then shownFills = shownFills + 1 end end
-    for i = 8, 15 do if s.textures[i]:IsShown() then shownRing = shownRing + 1 end end
-    eq(shownFills, 7, "border=false still draws the fill")
-    eq(shownRing, 0, "border=false draws no ring at all")
+    eq(s.fill:IsShown(), true, "border=false still draws the fill")
+    eq(s.ring:IsShown(), false, "border=false draws no ring at all")
 
     -- ⚠ A repaint must NOT resurrect a ring the caller said it did not want: a
     -- consumer sweeping every state's colours in one pass would otherwise give a
     -- fill-only surface an edge it never asked for.
     s:SetBorderColor(1, 1, 1, 1)
-    eq(s.borderTop:IsShown(), false, "SetBorderColor does not bring the ring back")
+    eq(s.ring:IsShown(), false, "SetBorderColor does not bring the ring back")
     s:SetBorderShown(true)
-    eq(s.borderTop:IsShown(), true, "SetBorderShown(true) is the way back")
+    eq(s.ring:IsShown(), true, "SetBorderShown(true) is the way back")
 
     -- Hide/Show is the whole surface. This is the path a caller switching BACK to
     -- a square backdrop takes -- the textures are ours, so nothing else would
     -- take them down.
     s:Hide()
     eq(s:IsShown(), false, "Hide takes the surface down")
-    eq(s.fillMid:IsShown(), false, "...including the fill")
-    eq(s.borderTop:IsShown(), false, "...and the ring")
+    eq(s.fill:IsShown(), false, "...including the fill")
+    eq(s.ring:IsShown(), false, "...and the ring")
     s:Show()
-    eq(s.fillMid:IsShown(), true, "Show brings the fill back")
-    eq(s.borderTop:IsShown(), true, "...and the ring it had when it went down")
+    eq(s.fill:IsShown(), true, "Show brings the fill back")
+    eq(s.ring:IsShown(), true, "...and the ring it had when it went down")
 
     -- ...but a fill-only surface stays fill-only across a Hide/Show round trip.
     local s2 = UI:CreateRoundedSurface(surfaceFrame(), { border = false })
     s2:Hide()
     s2:Show()
-    eq(s2.borderTop:IsShown(), false, "a fill-only surface does not sprout a ring when re-shown")
-    eq(s2.fillMid:IsShown(), true, "...and its fill still comes back")
+    eq(s2.ring:IsShown(), false, "a fill-only surface does not sprout a ring when re-shown")
+    eq(s2.fill:IsShown(), true, "...and its fill still comes back")
 end
 
 print("-- Round: the not-a-frame guard")
@@ -410,45 +315,34 @@ do
 end
 
 -- ============================================================
--- PER-CORNER ROUNDING
+-- THE TWO BAKED SHAPES
 --
--- A square corner is the ABSENCE of an arc plus a strip that runs further, so
--- every assertion below is one of two kinds: what is DRAWN (the arc count falls)
--- and where the flat parts STOP (the insets change from `radius` to 0, or to
--- `borderWidth` for the vertical ring runs, which is the butt joint).
+-- The old assembly could round any subset of the four corners, because a square
+-- corner was simply an arc it did not draw. One sliced texture cannot: the shape
+-- is baked in, so every combination is a FILE, and v1 bakes two -- all four
+-- round, and tl+tr for a title strip.
 --
--- Neither is visible from in-game until you look at the thing, and both are the
--- ways a title strip can be subtly wrong: an arc left showing at a corner that
--- should be square is a notch, and a strip that still stops `radius` short of a
--- square corner is a bite out of the fill with nothing behind it.
+-- The corner TABLE keeps its old reading (an absent key is square, a wholly
+-- absent table is all four), because that is what every consumer already writes.
+-- What is new is that a combination with no art is REFUSED and says so, rather
+-- than drawing whatever happened to be nearest.
 -- ============================================================
-
--- How many of the eight corner textures are actually on screen.
-local function shownCorners(s)
-    local fills, arcs = 0, 0
-    for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
-        if s.cornerFill[k]:IsShown() then fills = fills + 1 end
-        if s.cornerEdge[k]:IsShown() then arcs = arcs + 1 end
-    end
-    return fills, arcs
-end
 
 print("-- Round: corners default to all four")
 do
     local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6 })
-    local fills, arcs = shownCorners(s)
-    eq(fills, 4, "no opts.corners -> four quarter-discs")
-    eq(arcs, 4, "...and four arcs")
+    eq(s:GetShape(), "all", "no opts.corners -> the all-four shape")
+    eq(s.fill._texture, ROUND .. "rect_r6", "...drawn from the all-four fill art")
+    eq(s.ring._texture, ROUND .. "ring_r6_w1", "...and its ring")
     local c = s:GetCorners()
     check(c.tl and c.tr and c.bl and c.br, "GetCorners agrees")
     -- The getter must hand back a COPY: poking the returned table would otherwise
-    -- change the shape without a relayout, leaving the anchors and the visible
-    -- textures disagreeing about where the corner is.
+    -- look like a re-shape while nothing re-textured.
     c.tl = false
     check(s:GetCorners().tl, "GetCorners hands back a copy, not the live table")
 end
 
-print("-- Round: an absent key means SQUARE")
+print("-- Round: an absent key means SQUARE, and tl+tr is the strip shape")
 do
     -- The one surprising rule in the file, and the one a title strip depends on:
     -- {tl=true, tr=true} has to mean TOP CORNERS ONLY. If an absent key read as
@@ -457,123 +351,94 @@ do
     local c = s:GetCorners()
     check(c.tl and c.tr, "the two named corners are round")
     check(not c.bl and not c.br, "...and the two that were not named are square")
-    local fills, arcs = shownCorners(s)
-    eq(fills, 2, "two quarter-discs are drawn")
-    eq(arcs, 2, "...and two arcs -- FEWER textures on screen, not more")
-    -- Nothing is created or destroyed: a square corner is a hidden texture, so a
-    -- strip that flips shape costs no allocation.
-    eq(#s.textures, 15, "the surface is still 15 textures")
+    eq(s:GetShape(), "top", "...which is the top-only shape")
+    -- THE POINT OF THE WHOLE SHAPE SPLIT. A strip drawn from the all-four art
+    -- would round its lower corners off the panel it is joining.
+    eq(s.fill._texture, ROUND .. "rect_top_r6", "...drawn from the top-only fill art")
+    eq(s.ring._texture, ROUND .. "ring_top_r6_w1", "...and the top-only ring art")
+    eq(#s.textures, 2, "the surface is still two textures")
+    -- Margins do not change with the shape: the square bottom is BAKED into the
+    -- bottom band of the file, so the bottom margin still has to be the radius or
+    -- that band never gets drawn at 1:1.
+    eq(s.fill._sliceMargins[4], 6, "the bottom margin is still the radius")
 end
 
-print("-- Round: a square corner extends the strips that reach it")
+print("-- Round: every radius and width has a top-only file too")
 do
-    local R, BW = 6, 2
-    -- tl round, the other three square: every inset in the surface differs from
-    -- its neighbour, so a copy-paste that used one corner's flag for another's
-    -- edge cannot pass.
-    local s = UI:CreateRoundedSurface(surfaceFrame(), {
-        radius = R, borderWidth = BW, corners = { tl = true },
-    })
-
-    -- FILLS. A round corner keeps its R x R box, so the strip stops R short; a
-    -- square one has no box, so the strip runs to the very edge.
-    local _, _, tx1 = pt(s.fillTop, 1)
-    eq(tx1, R, "top fill still stops R short of the ROUND top-left")
-    local _, _, tx2 = pt(s.fillTop, 2)
-    eq(tx2, 0, "...and runs to the edge at the SQUARE top-right")
-    local _, _, bx1 = pt(s.fillBottom, 1)
-    eq(bx1, 0, "bottom fill runs to the edge at both square corners (left)")
-    local _, _, bx2 = pt(s.fillBottom, 2)
-    eq(bx2, 0, "...and right")
-    eq(s.fillTop._h, R, "the strips are still R tall -- the band does not move")
-
-    -- The centre band is the one part no corner can touch: the strips above and
-    -- below it are R tall whatever shape their corners are.
-    local _, _, _, my = pt(s.fillMid, 1)
-    eq(my, -R, "the centre band is still inset R at the top")
-
-    -- THE RING, and the butt joint. The horizontal run takes a square corner out
-    -- to the edge; the vertical one stops BW short of it, so the two meet without
-    -- overlapping -- an overlap would double-blend a translucent border into a
-    -- darker BW x BW square at the corner.
-    local _, _, rtx1 = pt(s.borderTop, 1)
-    eq(rtx1, R, "top border still starts where the top-left arc stops")
-    local _, _, rtx2 = pt(s.borderTop, 2)
-    eq(rtx2, 0, "top border takes the square top-right corner")
-    local _, _, _, rly = pt(s.borderLeft, 1)
-    eq(rly, -R, "left border still starts R down, under the round corner")
-    local _, _, _, rly2 = pt(s.borderLeft, 2)
-    eq(rly2, BW, "left border stops BW short of the square bottom-left -- a butt joint")
-    local _, _, _, rry = pt(s.borderRight, 1)
-    eq(rry, -BW, "right border stops BW short of the square top-right too")
-    local _, _, _, rry2 = pt(s.borderRight, 2)
-    eq(rry2, BW, "...and of the square bottom-right")
+    for _, r in ipairs({ 4, 6, 8 }) do
+        for _, w in ipairs({ 1, 2 }) do
+            local s = UI:CreateRoundedSurface(surfaceFrame(),
+                                              { radius = r, borderWidth = w, corners = TOP })
+            eq(s.fill._texture, ROUND .. "rect_top_r" .. r, "top r" .. r .. ": fill art")
+            eq(s.ring._texture, ROUND .. "ring_top_r" .. r .. "_w" .. w,
+               "top r" .. r .. " w" .. w .. ": ring art")
+        end
+    end
 end
 
-print("-- Round: all four square is a plain rectangle")
+print("-- Round: a combination with no art is refused, loudly")
 do
-    local R, BW = 8, 1
-    local s = UI:CreateRoundedSurface(surfaceFrame(), {
-        radius = R, borderWidth = BW, corners = {},
-    })
-    local fills, arcs = shownCorners(s)
-    eq(fills, 0, "no quarter-discs")
-    eq(arcs, 0, "no arcs")
-    -- ...and the seven flat parts still tile the whole rect, so the surface is a
-    -- square-cornered box rather than a box with four holes in it.
-    local _, _, tx = pt(s.fillTop, 1)
-    eq(tx, 0, "top fill runs corner to corner (left)")
-    local _, _, tx2 = pt(s.fillTop, 2)
-    eq(tx2, 0, "...and right")
-    local _, _, _, ly = pt(s.borderLeft, 1)
-    eq(ly, -BW, "the left ring run butts under the top one")
+    -- ☠ THE REGRESSION THIS EXISTS FOR. The old module could draw any subset, so
+    -- a consumer written against it may still ask for one -- and the honest answer
+    -- is a message naming the generator, not a surface that quietly rounds the
+    -- wrong corners or draws nothing at all.
+    local combos = {
+        { {},                              "all four square" },
+        { { tl = true },                   "one corner" },
+        { { bl = true, br = true },        "bottom only" },
+        { { tl = true, bl = true },        "left only" },
+        { { tl = true, tr = true, bl = true }, "three of four" },
+    }
+    for _, pair in ipairs(combos) do
+        local before = #errors
+        local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6, corners = pair[1] })
+        check(#errors > before, pair[2] .. ": refused with a message")
+        check(lastError():find("generate_rounded", 1, true) ~= nil,
+              pair[2] .. ": ...and the message says where to add the shape")
+        -- Refused, but still a usable surface: an addon that returned nil here
+        -- would turn a cosmetic miss into a nil-index error at the call site.
+        check(s ~= nil, pair[2] .. ": a handle still comes back")
+        eq(s:GetShape(), "all", pair[2] .. ": ...falling back to all four")
+        local c = s:GetCorners()
+        check(c.tl and c.tr and c.bl and c.br,
+              pair[2] .. ": ...and GetCorners reports what it actually drew")
+    end
 end
 
 print("-- Round: SetCorners re-shapes in place")
 do
-    local R = 6
-    local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = R })
-    s:SetCorners({ tl = true, tr = true })
-    local fills, arcs = shownCorners(s)
-    eq(fills, 2, "SetCorners takes the two bottom quarter-discs down")
-    eq(arcs, 2, "...and their arcs")
-    eq(#s.textures, 15, "SetCorners creates nothing")
-    local _, _, bx = pt(s.fillBottom, 1)
-    eq(bx, 0, "...and re-lays the bottom strip out to the edge")
+    local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6 })
+    s:SetCorners(TOP)
+    eq(s:GetShape(), "top", "SetCorners swaps to the strip shape")
+    eq(s.fill._texture, ROUND .. "rect_top_r6", "...and re-points the fill art")
+    eq(s.ring._texture, ROUND .. "ring_top_r6_w1", "...and the ring art")
+    eq(#s.textures, 2, "SetCorners creates nothing")
 
     -- ...and back. A strip whose corners could only be turned OFF would trap the
     -- demo's Square restore.
-    s:SetCorners({ tl = true, tr = true, bl = true, br = true })
-    local fills2, arcs2 = shownCorners(s)
-    eq(fills2, 4, "and back to four quarter-discs")
-    eq(arcs2, 4, "...and four arcs")
-    local _, _, bx2 = pt(s.fillBottom, 1)
-    eq(bx2, R, "...with the bottom strip stopping R short again")
+    s:SetCorners(ALL)
+    eq(s:GetShape(), "all", "and back to all four")
+    eq(s.fill._texture, ROUND .. "rect_r6", "...with the all-four art again")
+
+    -- SetCorners takes the same refusal path as the factory.
+    local before = #errors
+    s:SetCorners({ br = true })
+    check(#errors > before, "SetCorners refuses an unbaked combination too")
+    eq(s:GetShape(), "all", "...and leaves a drawable shape behind")
 end
 
-print("-- Round: square corners survive a hide/show round trip")
+print("-- Round: the shape survives a hide/show round trip")
 do
     -- The demo cycles Square -> R4 -> R6 -> R8 by HIDING the surface and re-showing
-    -- it, so a Show that lit every texture would sprout arcs at the two corners a
-    -- title strip deliberately leaves square. Same failure mode as a fill-only
-    -- surface re-growing its ring.
-    local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6, corners = { tl = true, tr = true } })
+    -- it, so a Show that re-derived the shape from scratch could bring a title
+    -- strip back fully rounded.
+    local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6, corners = TOP })
     s:Hide()
-    local fills, arcs = shownCorners(s)
-    eq(fills, 0, "Hide takes the round corners down too")
-    eq(arcs, 0, "...arcs included")
+    eq(s.fill:IsShown(), false, "Hide takes the strip down")
     s:Show()
-    local fills2, arcs2 = shownCorners(s)
-    eq(fills2, 2, "Show brings back only the corners that are round")
-    eq(arcs2, 2, "...and only their arcs")
-    check(s.cornerFill.bl:IsShown() == false, "the square bottom-left stays down")
-
-    -- SetBorderShown is the other way a caller can light the whole ring at once.
-    s:SetBorderShown(false)
-    eq(select(2, shownCorners(s)), 0, "SetBorderShown(false) takes both arcs down")
-    s:SetBorderShown(true)
-    eq(select(2, shownCorners(s)), 2, "...and true brings back only the two round ones")
-    eq(s.borderBottom:IsShown(), true, "the flat runs come back regardless of corner shape")
+    eq(s.fill:IsShown(), true, "Show brings it back")
+    eq(s:GetShape(), "top", "...still the top-only shape")
+    eq(s.fill._texture, ROUND .. "rect_top_r6", "...and still the top-only art")
 end
 
 -- ============================================================
@@ -593,58 +458,112 @@ do
     local panel = UI:CreateRoundedSurface(f, { radius = 6 })
     local strip = UI:CreateRoundedSurface(f, {
         radius = 6, sublevel = -3, border = false,
-        corners = { tl = true, tr = true }, anchorTo = bar,
+        corners = TOP, anchorTo = bar,
     })
     check(panel ~= strip, "a different sublevel is a different surface")
-    eq(#f._textures, 30, "...with its own 15 textures")
+    eq(#f._textures, 4, "...with its own pair of textures")
     eq(UI:GetRoundedSurface(f), panel, "the default lookup still finds the panel")
     eq(UI:GetRoundedSurface(f, -3), strip, "...and the sublevel names the strip")
 
     -- THE STACK, which is the whole reason the option exists.
-    eq(strip.fillMid._sublevel, -3, "the strip's fill sits above the panel's -4...")
-    eq(panel.borderTop._sublevel, -2, "...and below the panel's ring at -2")
-    check(panel.fillMid._sublevel < strip.fillMid._sublevel,
+    eq(strip.fill._sublevel, -3, "the strip's fill sits above the panel's -4...")
+    eq(panel.ring._sublevel, -2, "...and below the panel's ring at -2")
+    check(panel.fill._sublevel < strip.fill._sublevel,
           "panel fill, then strip fill, then ring")
-    check(strip.fillMid._sublevel < panel.borderTop._sublevel,
+    check(strip.fill._sublevel < panel.ring._sublevel,
           "the strip cannot cover the ring")
 
     -- Re-issuing at the same sublevel is still idempotent -- the demo's cycle
     -- button re-calls the factory on every click.
     UI:CreateRoundedSurface(f, { radius = 8, sublevel = -3, anchorTo = bar })
-    eq(#f._textures, 30, "re-issuing the strip creates nothing")
+    eq(#f._textures, 4, "re-issuing the strip creates nothing")
     eq(strip:GetRadius(), 8, "...and takes the new radius")
-    local c = strip:GetCorners()
-    check(c.tl and c.tr and not c.bl, "...while keeping the corners it already had")
+    eq(strip:GetShape(), "top", "...while keeping the shape it already had")
+    eq(strip.fill._texture, ROUND .. "rect_top_r8", "...at the new radius's art")
 end
 
-print("-- Round: anchorTo measures against another rect")
+print("-- Round: anchorTo stretches over another rect")
 do
     -- The strip's textures belong to the panel FRAME but its geometry belongs to
-    -- the title BAR. A surface that anchored to its own frame would cover the
-    -- whole panel in strip colour.
+    -- the title BAR. A surface stretched over its own frame would cover the whole
+    -- panel in strip colour.
     local f = surfaceFrame()
     local bar = FakeUIFrame(200, 20, 0, 0)
-    local s = UI:CreateRoundedSurface(f, { radius = 6, anchorTo = bar })
+    local s = UI:CreateRoundedSurface(f, { radius = 6, corners = TOP, anchorTo = bar })
     eq(s.frame, f, "the textures still live on the frame")
-    for _, t in ipairs(s.textures) do
-        -- every point is relative to the BAR
-        for _, p in ipairs(t._points) do
-            eq(p[2], bar, "anchored to the bar, not the frame")
-        end
+    eq(s.fill._allPoints, bar, "the fill covers the BAR, not the frame")
+    eq(s.ring._allPoints, bar, "...and so does the ring")
+end
+
+-- ============================================================
+-- NO SLICE SUPPORT -- the degrade path.
+--
+-- SetTextureSliceMargins arrived around 10.0. On anything older -- and in any
+-- harness whose texture stub does not carry it -- there is no way to draw the
+-- art, so the surface becomes a plain SetColorTexture rectangle with NO ring and
+-- flags itself. Visibly square on purpose: a degraded surface that still LOOKED
+-- rounded would hide the fact that the art is not drawing at all.
+--
+-- ⚠ Reaching this headlessly needs the method taken AWAY, and the frame stub's
+-- __index answers any unset key with a truthy no-op function -- so the only way
+-- to make the probe see "absent" is to rawset a non-function over it, which is
+-- exactly what this stub does.
+-- ============================================================
+print("-- Round: a client with no nine-slice degrades to a square fill")
+do
+    local f = surfaceFrame()
+    local realCreate = f.CreateTexture
+    f.CreateTexture = function(self, name, layer, template, sublevel)
+        local t = realCreate(self, name, layer, template, sublevel)
+        rawset(t, "SetTextureSliceMargins", false)
+        rawset(t, "SetTextureSliceMode", false)
+        return t
     end
-    -- Nothing else changes: the insets are the same numbers against the new rect.
-    local _, _, tx = pt(s.fillTop, 1)
-    eq(tx, 6, "the tiling is unchanged -- only what it is measured against")
+
+    local before = #errors
+    local s = UI:CreateRoundedSurface(f, { radius = 6, fill = { 0.1, 0.2, 0.3, 0.4 } })
+    check(s ~= nil, "a handle still comes back")
+    eq(s.sliced, false, "...flagged as unsliced")
+    -- Said once per session, not once per surface: a client without slice support
+    -- has EVERY surface fall back, and two hundred identical lines would bury
+    -- whatever else went wrong.
+    check(#errors > before, "...and the library says so, once")
+    local after = #errors
+    UI:CreateRoundedSurface(surfaceFrame(), { radius = 6 })
+    eq(#errors, after, "a later surface does not repeat the warning")
+
+    -- No art, so no tint -- the fill becomes a flat colour quad instead.
+    -- rawget, for the __index reason above: an unset `_texture` answers a truthy
+    -- no-op function, so a plain `== nil` here would pass whatever happened.
+    check(rawget(s.fill, "_texture") == nil, "no fill art is pointed at")
+    local c = s.fill._color
+    check(c and c.r == 0.1 and c.a == 0.4, "the fill is a plain colour texture")
+    check(rawget(s.fill, "_sliceMargins") == nil, "no margins were attempted")
+    eq(s.ring:IsShown(), false, "and there is no ring at all")
+
+    -- The handle still works: a consumer's hover path must not error just because
+    -- the client is old.
+    s:SetFillColor(1, 0, 0, 1)
+    eq(s.fill._color.r, 1, "SetFillColor still repaints the flat fill")
+    s:SetBorderShown(true)
+    eq(s.ring:IsShown(), false, "SetBorderShown cannot conjure a ring it cannot draw")
+    s:Hide()
+    eq(s.fill:IsShown(), false, "Hide still works")
+    s:Show()
+    eq(s.fill:IsShown(), true, "...and Show")
 end
 
 print("-- Round: the published constants match the art on disk")
 do
     -- The demo cycles UI.Round.radii rather than carrying its own copy, so a
-    -- radius listed here with no generated file would be an invisible corner in
+    -- radius listed here with no generated file would be an invisible surface in
     -- the workbench with nothing to explain it.
     eq(#UI.Round.radii, 3, "three radii are published")
     eq(UI.Round.radii[1], 4, "4")
     eq(UI.Round.radii[3], 8, "8")
     eq(UI.Round.defaultRadius, 6, "the default is one of them")
     eq(#UI.Round.widths, 2, "two border widths")
+    eq(#UI.Round.shapes, 2, "two baked shapes")
+    eq(UI.Round.shapes[1], "all", "all four round")
+    eq(UI.Round.shapes[2], "top", "...and top-only")
 end

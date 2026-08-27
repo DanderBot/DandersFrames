@@ -25,6 +25,15 @@ end
 IN_COMBAT = false
 InCombatLockdown = InCombatLockdown or function() return IN_COMBAT and true or false end
 wipe = wipe or function(t) for k in pairs(t) do t[k] = nil end return t end
+-- The client's UITextureSliceMode, for Round.lua's nine-slice call. Values are
+-- the real ones, not convenient ones.
+--
+-- ⚠ Stretched IS 0, and Round.lua's defensive fallback for a missing Enum is also
+-- 0, so an assertion on the recorded mode proves the surface asked for Stretched
+-- rather than Tiled -- it does NOT prove Enum was consulted. Faking a different
+-- number here to make it prove that would be testing the harness, not the client.
+Enum = Enum or {}
+Enum.UITextureSliceMode = Enum.UITextureSliceMode or { Stretched = 0, Tiled = 1 }
 strsplit = strsplit or function(sep, s) local out = {} for piece in string.gmatch(s, "([^" .. sep .. "]+)") do out[#out + 1] = piece end return unpack(out) end
 
 -- Fake frames: enough for Registry:GetRect.
@@ -95,6 +104,7 @@ function FakeUIFrame(w, h, cx, cy)
     local f = { _shown = false, _alpha = 1, _scale = 1, _w = w or 0, _h = h or 0,
                 _cx = cx or 0, _cy = cy or 0, _points = {}, _scripts = {},
                 _lines = {}, _textures = {}, _text = "", _flags = {},
+                _allPoints = false,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false,
                 fxTo = false, fxScale = false }
     function f:Show() self._shown = true end
@@ -142,7 +152,7 @@ function FakeUIFrame(w, h, cx, cy)
     function f:GetRight() return self._cx + self._w / 2 end
     function f:GetBottom() return self._cy - self._h / 2 end
     function f:GetTop() return self._cy + self._h / 2 end
-    function f:ClearAllPoints() wipe(self._points) end
+    function f:ClearAllPoints() wipe(self._points); self._allPoints = false end
     function f:SetPoint(...) self._points[#self._points + 1] = { ... } end
     function f:GetNumPoints() return #self._points end
     -- ☠ A REAL GETTER, not the __index no-op, and the two are NOT the same thing
@@ -185,6 +195,31 @@ function FakeUIFrame(w, h, cx, cy)
     -- (left, right, top, bottom) and the 8-argument one (UL, LL, UR, LR) are
     -- both readable, and a test can tell which was used from #_texCoord.
     function f:SetTexCoord(...) self._texCoord = { ... } end
+    -- ☠ NINE-SLICE, RECORDED. A rounded surface is now ONE texture cut into 3 x 3
+    -- by these margins (DandersUI/Round.lua) -- so "does a radius-6 panel actually
+    -- get 6 units of curve" is a question about these four numbers and nothing
+    -- else, exactly the way the old assembly's corner orientation was a question
+    -- about eight texcoords. Margins are TEXTURE PIXELS; the art is baked at one
+    -- texel per UI unit, which is what makes them read as UI units at the far end.
+    --
+    -- ⚠ These two exist HERE, as real methods, precisely so a test can take them
+    -- AWAY: the __index fallback answers any unset key with a truthy no-op, so a
+    -- module's "does this client support slicing" probe can only ever see a
+    -- function unless a test rawsets one of them to false on a texture. That is
+    -- how the fallback path is reached headlessly.
+    function f:SetTextureSliceMargins(l, t, r, b)
+        self._sliceMargins = { l, t, r, b }
+    end
+    function f:SetTextureSliceMode(mode) self._sliceMode = mode end
+    -- Recorded rather than swallowed: a sliced surface IS its rect, so which
+    -- region it was stretched over is the whole of its geometry. Stores the
+    -- target, or `false` when called bare (which means the texture's own parent).
+    --
+    -- ⚠ It does NOT push onto `_points`, and `_allPoints` starts as a plain false
+    -- rather than absent. Both for the __index fallback: several suites assert
+    -- exact `#_points` counts on frames that also SetAllPoints, and an unset key
+    -- would answer a truthy no-op FUNCTION to `t._allPoints`.
+    function f:SetAllPoints(rel) self._allPoints = rel or false end
     function f:SetText(t) self._text = t or "" end
     function f:GetText() return self._text end
     function f:GetStringWidth() return 7 * #self._text end
