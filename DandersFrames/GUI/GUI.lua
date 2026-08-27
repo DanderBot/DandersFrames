@@ -513,6 +513,13 @@ GUI.AlwaysAccessiblePages = {
     ["general_settings"]             = true,  -- the toggles themselves
     ["profiles_manage"]              = true,
     ["profiles_importexport"]        = true,
+    -- The changed-settings ledger. A REPORT about the stored profile, not a
+    -- page of controls, so it says the same true thing whether or not the mode
+    -- it describes is currently switched on -- and a user with a mode disabled
+    -- is exactly the one being asked to paste it into a support thread.
+    -- Literal rather than DF.ChangedSettings.PAGE_ID: that lives in the
+    -- load-on-demand companion, which is not loaded when this file runs.
+    ["profiles_changed"]             = true,
     ["debug_console"]                = true,
     ["indicators_targetedlist"]      = true,
     ["indicators_personal_targeted"] = true,
