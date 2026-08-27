@@ -7078,6 +7078,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- rather than by asking them anything.
                 local unit = msg:match("^adalpha%s+(%S+)$")
                 if DF.DebugADAlphaHosts then DF:DebugADAlphaHosts(unit) end
+            elseif msg == "flashgeom" then
+                -- Live quad sizes of the DF Flash/Proc layers on the personal targeted
+                -- icons — outer glow, ants, host, and the ants/outer ratio (LCG holds
+                -- 0.85). Written for the "ants orbit outside the halo" report; the fix
+                -- landed from art measurement instead, so this is the receipts command
+                -- if a geometry question ever comes back. LOCAL ONLY.
+                if DF.DebugFlashGeometry then DF:DebugFlashGeometry() end
             elseif msg == "adgate" then
                 -- The AD half of the same question: idgate sees a placement's handle but
                 -- not its chain, its parent-driven links or its badge — so an indicator

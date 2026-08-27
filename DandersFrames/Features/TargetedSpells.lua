@@ -5264,6 +5264,74 @@ function DF:ToggleTargetedList(enabled)
 end
 
 -- ============================================================
+-- DEBUG — /df debug flashgeom (LOCAL ONLY, hold back from PRs)
+-- ============================================================
+-- Live geometry of the DF Flash / DF Proc layers on the personal targeted icons,
+-- for the "ants ring orbits outside the halo" report. The paper model says the
+-- ants are 0.85 of the glow quad, same as LCG — this prints what is ACTUALLY on
+-- screen so a disagreement names the quad that is wrong instead of the theory
+-- that is loudest. Lives in this file because personalIcons is a file-local.
+local function fmtSize(region)
+    if not region then return "-" end
+    local ok, w, h = pcall(region.GetSize, region)
+    if not ok or not w then return "?" end
+    local okA, alpha = pcall(region.GetAlpha, region)
+    return string.format("%.1fx%.1f a=%.2f", w, h, (okA and alpha) or -1)
+end
+
+local function dumpBorderAnim(o, label, border)
+    if not border then return end
+    if not border.activeAnimation then
+        o:Line(label .. ": no animation running")
+        return
+    end
+    o:Line(label .. ": anim=" .. tostring(border.activeAnimation)
+        .. "  border=" .. fmtSize(border)
+        .. "  knownW/H=" .. tostring(border._knownW) .. "/" .. tostring(border._knownH))
+    local host = border._flashHost or border._procHost or border._orbitHost
+    o:Line("  host: " .. fmtSize(host)
+        .. "  Fw/Fh=" .. tostring(border._flashFw) .. "/" .. tostring(border._flashFh))
+    if border.flashOuter then
+        o:Line("  outer: " .. fmtSize(border.flashOuter)
+            .. "  inner: " .. fmtSize(border.flashInner)
+            .. "  spark: " .. fmtSize(border.flashSpark))
+        o:Line("  ants:  " .. fmtSize(border.flashAnts))
+        local okO, ow = pcall(border.flashOuter.GetWidth, border.flashOuter)
+        local okA, aw = border.flashAnts and pcall(border.flashAnts.GetWidth, border.flashAnts)
+        if okO and okA and ow and aw and ow > 0 then
+            -- The number the whole report hangs on: LCG holds this at 0.85.
+            o:Line(string.format("  ants/outer ratio = %.3f  (LCG = 0.850)", aw / ow),
+                math.abs(aw / ow - 0.85) > 0.02 and "WARN" or nil)
+        end
+    end
+    if border.procTex then
+        o:Line("  procLoop: " .. fmtSize(border.procTex)
+            .. "  procStart: " .. fmtSize(border.procStartTex))
+    end
+end
+
+function DF:DebugFlashGeometry()
+    local o = DF:Out("Flash Geometry", "personal targeted icons")
+    local any = false
+    for i, icon in ipairs(personalIcons) do
+        local shown = icon.iconFrame and select(2, pcall(icon.iconFrame.IsShown, icon.iconFrame))
+        if shown then
+            any = true
+            o:Section("icon " .. i)
+            o:Line("iconFrame: " .. fmtSize(icon.iconFrame)
+                .. "  highlightFrame: " .. fmtSize(icon.highlightFrame))
+            dumpBorderAnim(o, "base border", icon.border)
+            dumpBorderAnim(o, "highlight border", icon.highlightBorder)
+        end
+    end
+    if not any then
+        -- Out prints as it goes — no flush step exists, a title with this one
+        -- warning under it is the complete output.
+        o:Line("No personal targeted icon is currently shown — get a mob casting at you first.", "WARN")
+    end
+end
+
+-- ============================================================
 -- INITIALIZATION
 -- ============================================================
 
