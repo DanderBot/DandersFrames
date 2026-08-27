@@ -5,6 +5,7 @@
 	<Script file="Theme.lua"/>
 	<Script file="Round.lua"/>
 	<Script file="Fx.lua"/>
+	<Script file="Toast.lua"/>
 	<Script file="Popout.lua"/>
 	<Script file="Fonts.lua"/>
 	<Script file="Widgets.lua"/>
