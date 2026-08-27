@@ -32,6 +32,12 @@ local UI = {
     -- run-tightening has its own coverage and would only add noise to the
     -- arithmetic these tests are about.
     RowGap = 14, RowGapTight = 6, RowCompact = {},
+    -- The settings column's box model, which CreateSettingsGroup now takes its
+    -- `width or` and `padding or` defaults from rather than repeating them as
+    -- literals. Stated at the REAL values (DandersUI/Theme.lua) so the default
+    -- tests below still assert the shipped numbers.
+    SettingsBox = { group = 280, pad = 10, colMargin = 5, minCol = 285, colGutter = 20 },
+    PopoutContentWidth = 260,
     _state = {},
     _priv = {
         INFO_BANNER_TONES = {},
