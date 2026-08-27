@@ -106,7 +106,30 @@ function FakeUIFrame(w, h, cx, cy)
     function f:GetAlpha() return self._alpha end
     function f:SetScale(v) self._scale = v end
     function f:GetScale() return self._scale end
-    function f:GetEffectiveScale() return self._scale end
+    -- ☠ EFFECTIVE scale is INHERITED -- that is the whole difference between it and
+    -- GetScale, and a stub that answered its own scale for both could not model a
+    -- SCALED UIPARENT at all. Every frame parented to UIParent would claim 1.0
+    -- while the thing it is measured against claimed 0.9, so the conversion layer
+    -- in Popout.lua would be handed ratios no real client ever produces -- and the
+    -- one scenario in which a "convert through UIParent's centre" bug could hide
+    -- (a UI scale slider that is not 1) would be untestable by construction.
+    --
+    -- `_parent` is the convention the richer per-file stubs already use
+    -- (test_popout_row, test_sections_group, test_widgets_slider, test_ui_options
+    -- all set it). With no parent this is exactly the old answer, which is why
+    -- every existing test is untouched.
+    --
+    -- ⚠ rawget, for the reason every other read of a private field here uses it:
+    -- the __index fallback answers an UNSET key with a no-op FUNCTION, so a plain
+    -- `self._parent` is truthy on every frame that has never been given one and
+    -- the line below would index a function.
+    function f:SetFakeParent(p) self._parent = p end
+    function f:GetParent() return rawget(self, "_parent") end
+    function f:GetEffectiveScale()
+        local p = rawget(self, "_parent")
+        local pe = type(p) == "table" and p.GetEffectiveScale and p:GetEffectiveScale() or 1
+        return pe * self._scale
+    end
     function f:SetSize(w2, h2) self._w, self._h = w2, h2 end
     function f:SetWidth(w2) self._w = w2 end
     function f:SetHeight(h2) self._h = h2 end
