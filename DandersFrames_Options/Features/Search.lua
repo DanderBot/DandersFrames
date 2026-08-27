@@ -28,38 +28,44 @@ local C_RAID       = {r = 1.0, g = 0.4, b = 0.2, a = 1}
 -- comes from the widget's preferredHeight (GUI.RowHeight owns that slot). These
 -- are only the card's own chrome: the breadcrumb strip above the control, and
 -- the padding around it.
-local CARD_PAD_X     = 10
+-- ★ READ, NOT COPIED. Every number in this block used to be a literal justified by a
+-- comment that said where the original lived ("280 is what GUI:CreateSettingsGroup
+-- builds", "copied from the page layout rather than invented"). A comment is not a link:
+-- it goes on claiming to mirror the page after the page has moved. They now come off
+-- GUI.SettingsBox, which is the ONE declaration the page layout and CreateSettingsGroup
+-- read too.
+local SETTINGS_BOX = DF.GUI.SettingsBox
+
+local CARD_PAD_X     = SETTINGS_BOX.pad
 local CARD_CONTENT_Y = 28   -- top of the control, below the breadcrumb button
 local CARD_CHROME    = 38   -- breadcrumb strip + top and bottom padding
 
--- ★ A RESULT CARD IS A SETTINGS BOX, so it is exactly as wide as one. 280 is what
--- GUI:CreateSettingsGroup builds (`group:SetSize(width or 280, 10)`, Sections.lua) and
--- CARD_PAD_X below is that group's own `padding or 10` -- so the control inside a card
--- lands on 280 - 2*10 = 260, which is precisely GUI:GroupInnerWidth. A search hit is
--- therefore the same size as the thing it takes you to, by construction rather than by a
--- second number that has to be kept in step.
+-- ★ A RESULT CARD IS A SETTINGS BOX, so it is exactly as wide as one -- the same
+-- SettingsBox.group that CreateSettingsGroup builds, with the same SettingsBox.pad
+-- inset, so the control inside a card lands on exactly GUI:GroupInnerWidth. A search hit
+-- is therefore the same size as the thing it takes you to, by construction.
 --
 -- The results panel spans the whole content area (about two of these side by side), and
 -- letting a card have all of it was the problem: a slider stretched across the full width
 -- reads as a different control from the same slider on its page.
-local CARD_MAX_W = 280
+local CARD_MAX_W = SETTINGS_BOX.group
 
--- ★ COLUMN GEOMETRY, COPIED FROM THE PAGE LAYOUT RATHER THAN INVENTED.
--- GUI/Panel.lua's page layout does exactly this: column 1 at x=5, column 2 pinned to
--- floor(width / 2), and it drops to one column below `MIN_COL_W * 2 + 20`.
+-- ★ COLUMN GEOMETRY. GUI/Panel.lua's page layout does exactly this: column 1 at
+-- x = colMargin, column 2 pinned to floor(width / 2), and it drops to one column below
+-- `minCol * 2 + colGutter`.
 --
 -- ☠ THE COLUMNS DO NOT STRETCH -- THE GAP DOES. That is the part worth stating, because
--- it is the opposite of the obvious guess. A settings group keeps its own 280 width (the
--- page only ever calls SetWidth on INDENTED widgets, via defaultColWidth), so pinning
--- column 2 to the halfway mark means the gutter is floor(width/2) - 285 and therefore
--- WIDENS as the window widens. A fixed gutter with stretching cards looks wrong next to
--- every real page, which is what the first attempt here did.
+-- it is the opposite of the obvious guess. A settings group keeps its constructed width
+-- (the page only ever calls SetWidth on INDENTED widgets, via defaultColWidth), so
+-- pinning column 2 to the halfway mark means the gutter is floor(width/2) - minCol and
+-- therefore WIDENS as the window widens. A fixed gutter with stretching cards looks wrong
+-- next to every real page, which is what the first attempt here did.
 --
--- MIN_COL_W deliberately exceeds the 280 card width so the layout collapses to one column
--- BEFORE the columns touch, leaving a ~10px gutter at the cutover instead of overlapping
--- for the last few pixels -- the same reasoning, and the same number, as Panel.lua:1770.
-local COL_LEFT  = 5
-local MIN_COL_W = 285
+-- minCol deliberately exceeds the card width so the layout collapses to one column BEFORE
+-- the columns touch, leaving a small gutter at the cutover instead of overlapping for the
+-- last few pixels.
+local COL_LEFT  = SETTINGS_BOX.colMargin
+local MIN_COL_W = SETTINGS_BOX.minCol
 
 -- Debounce before a keystroke turns into a rebuild. Every result is a real settings
 -- widget, so an un-debounced OnTextChanged built the whole result set once PER LETTER --
@@ -1217,10 +1223,16 @@ function Search:CreateResultsPanel(parent)
     noResults:Hide()
     panel.noResults = noResults
     
+    -- The results panel FILLS the content box, so its right edge is the same
+    -- corridor a page's is -- and it gets the same treatment: the viewport stops
+    -- at the scrollbar gutter, and the bar is pinned into it against the panel
+    -- rather than left wherever ScrollFrameTemplate puts it. It used to reserve
+    -- a flat 30 here, twice the gutter, and the bar was not in most of it.
     local scroll = CreateFrame("ScrollFrame", nil, panel, "ScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 10, -45)
-    scroll:SetPoint("BOTTOMRIGHT", -30, 10)
+    scroll:SetPoint("BOTTOMRIGHT", -DF.GUI.Scroll.gutter, 10)
     DF.GUI.StyleScrollBar(scroll)
+    DF.GUI.PinScrollBar(scroll, panel, -45, 10)
 
     local scrollChild = CreateFrame("Frame", nil, scroll)
     scrollChild:SetSize(scroll:GetWidth(), 1)
@@ -1292,10 +1304,10 @@ function Search:LayoutResults()
     scrollChild:SetWidth(viewW)
 
     -- Same rule, same numbers, as the page layout in GUI/Panel.lua: two columns once
-    -- there is room for two minimum columns plus padding, column 2 pinned to the halfway
-    -- mark. Pinning column 2 rather than spacing it is what makes the gutter widen with
-    -- the window, because the cards themselves keep their 280.
-    local cols  = (viewW >= MIN_COL_W * 2 + 20) and 2 or 1
+    -- there is room for two minimum columns plus the gutter, column 2 pinned to the
+    -- halfway mark. Pinning column 2 rather than spacing it is what makes the gutter
+    -- widen with the window, because the cards themselves keep their constructed width.
+    local cols  = (viewW >= MIN_COL_W * 2 + SETTINGS_BOX.colGutter) and 2 or 1
     local col2X = math.floor(viewW / 2)
     local avail = viewW - COL_LEFT
     local cardW = math.min(avail, CARD_MAX_W)

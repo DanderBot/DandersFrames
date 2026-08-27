@@ -1553,7 +1553,10 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     S.page.RefreshStates = function(self)
         local pageH = self:GetHeight()
         self.child:SetHeight(pageH)
-        local newW = GUI.contentFrame and (GUI.contentFrame:GetWidth() - 30) or nil
+        -- GUI.PageChildWidth, not a fourth copy of the arithmetic: this page's
+        -- child is a page child like any other, and the `- 30` it carried was one
+        -- of the copies that had to be found by grep when the corridor moved.
+        local newW = GUI.contentFrame and GUI.PageChildWidth(GUI.contentFrame:GetWidth()) or nil
         if self.child and newW then
             self.child:SetWidth(newW)
         end
@@ -1826,7 +1829,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- Pre-compute initial width from parent geometry so S.SwitchTab() has
     -- accurate dimensions before the first layout pass fires OnSizeChanged.
     local earlyW = parent:GetWidth()
-    if earlyW < 100 then earlyW = (GUI.contentFrame and GUI.contentFrame:GetWidth() or 600) - 30 end
+    if earlyW < 100 then
+        earlyW = GUI.PageChildWidth(GUI.contentFrame and GUI.contentFrame:GetWidth() or 600)
+    end
     S.tabContentFrame:SetWidth(max(1, (earlyW / 2) - 2 - 22))
     S.tabContentFrame:SetHeight(800)
     S.tabScrollFrame:SetScrollChild(S.tabContentFrame)

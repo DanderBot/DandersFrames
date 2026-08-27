@@ -52,7 +52,15 @@ DF.RaidDefaults = {
     hideBlizzardRaidFrames = true,
 }
 function DF:DebugWarn() end
-DF.GUI = { SelectedMode = "party", Pages = {} }
+-- ⚠ SettingsBox mirrors UI.SettingsBox (DandersUI/Theme.lua). This file does not
+-- load the kit, so it cannot read the real one -- test_page_parking DOES, and it
+-- drives Search.lua against the genuine table, so drift is caught there rather
+-- than here. These values only have to exist for Search.lua's file scope to load.
+DF.GUI = {
+    SelectedMode = "party",
+    Pages = {},
+    SettingsBox = { group = 280, pad = 10, colMargin = 5, minCol = 285, colGutter = 20 },
+}
 DandersFrames = DF
 
 load_options_file_into("Features/Search.lua", NS)

@@ -183,6 +183,11 @@ do
         SelectedMode = "party",
         CurrentPageName = "general_frame",
         Pages = {},
+        -- THE REAL TABLE, off the kit loaded in section 1. Search.lua reads its
+        -- card and column geometry off the host at file scope now instead of
+        -- carrying literals justified by a comment, so this is also the check
+        -- that the keys it reads are the keys the kit actually publishes.
+        SettingsBox = UILIB.SettingsBox,
     }
     function GUI:ParkPage(page)  parked[#parked + 1] = page.tabName end
     function GUI:AdoptPage(page) adopted[#adopted + 1] = page.tabName end
@@ -281,9 +286,78 @@ do
     -- page has to keep measuring at full size, because search builds it there.
     eq(countOf('page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)'), 2,
        "panel: the top-left anchor names content in both CreateSubTab and AdoptPage")
-    eq(countOf('page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -inset, inset)'), 2,
-       "panel: ...and so does the bottom-right one")
+    -- The RIGHT offset is the scrollbar GUTTER, not the inset -- see THE CONTENT
+    -- CORRIDOR in Panel.lua. Both offsets have to survive the park/adopt trip, so
+    -- both are stashed on the page and both are re-asserted.
+    eq(countOf('page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)'), 2,
+       "panel: ...and so does the bottom-right one, at the gutter rather than the inset")
     has("page._contentInset = inset", "the inset is kept on the page for AdoptPage to reuse")
+    has("page._contentGutter = gutter", "...and so is the gutter")
+
+    -- ---- THE CONTENT CORRIDOR, ACCOUNTED ----------------------------
+    -- The strip between the right edge of a widget on a page and the right edge
+    -- of the settings window. It is not decoration: a feature row's popout docks
+    -- OUTSIDE the window and runs a beam back across this strip, so its total is
+    -- the length of that beam, and it used to be five literals spread over four
+    -- functions with no one place that added them up.
+    --
+    -- The window-chrome half is pinned as SOURCE (Panel.lua does not load
+    -- headlessly) and the widget half comes off the REAL kit, so the sum below
+    -- breaks if either side moves without the other being reconsidered.
+    has("windowPad = 12,", "the window margin is declared in PageBox, not inline")
+    has("navGap    = 8,", "...and so is the gap to the nav pane")
+    has("inset     = 8,", "...and the content box's inset")
+    has("gutter    = GUI.Scroll.gutter,", "...and the right edge is the KIT's scrollbar gutter")
+
+    -- The child is the viewport, DERIVED, at both sites that size it -- the build
+    -- and every relayout. Each used to carry its own `- 30`.
+    eq(countOf("GUI.PageChildWidth("), 4,
+       "panel: one helper defines the child width, and all three consumers call it")
+    has("self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))",
+        "the relayout sizes the child through the helper, not a copy of its arithmetic")
+    has("SnapLen(page, GUI.PageChildWidth(content:GetWidth() or 0))",
+        "...and so does the build")
+    -- The usable width is the CHILD less the page's two margins, so it cannot
+    -- drift from the child the way a second literal did.
+    has("local childWidth = GUI.PageChildWidth(contentWidth)",
+        "the column maths measures against the CHILD, not the content box outside it")
+    has("local usableWidth = childWidth - 2 * SettingsBox.colMargin",
+        "the usable width is derived from the child, not declared beside it")
+    -- Rule 2 of the two-column test: column 2 has to fit the rect the ScrollFrame
+    -- clips to, or its box loses its right border at the cutover.
+    has("and (math.floor(contentWidth / 2) + SettingsBox.group) <= childWidth",
+        "two columns require column 2 to fit the viewport, not just to clear column 1")
+    -- The bar is PINNED into the gutter. Left on ScrollFrameTemplate's own
+    -- anchors it floats outside the viewport, which is how the corridor came to
+    -- reserve the gutter twice and show it once.
+    has("GUI.PinScrollBar(page, content, -inset, inset)",
+        "the page's scrollbar is pinned into the gutter against the content box")
+
+    do
+        local PAGE_WINDOW_PAD, PAGE_INSET = 12, 8
+        local box, scroll = UILIB.SettingsBox, UILIB.Scroll
+        eq(scroll.gutter, scroll.bar + scroll.pad,
+           "corridor: the gutter is the bar plus its air, derived not declared")
+        eq(UILIB.PopoutContentWidth, box.group - 2 * box.pad,
+           "corridor: a popout's content width IS a settings group's inner width")
+        check(box.minCol > box.group,
+              "corridor: the two-column minimum exceeds a group's width, so columns never touch")
+
+        -- Widget edge -> window edge, in order outwards.
+        local corridor = box.pad          -- inside the group box
+                       + box.colMargin    -- group box -> scroll child
+                       + scroll.gutter    -- child -> content box (the bar lives here)
+                       + PAGE_WINDOW_PAD  -- content box -> window
+        eq(corridor, 41, "corridor: a full-width widget's right edge sits 41px inside the window")
+        -- What is BLANK in that 41: the bar occupies its own gutter and the group
+        -- padding is the box reading as a box, so only these two are dead air.
+        eq(corridor - scroll.gutter - box.pad, 17,
+           "corridor: ...of which 17px is blank (was 39 when the gutter was paid for twice)")
+        -- The page viewport is inset by the gutter on the right, NOT by `inset`,
+        -- and the child then fills it -- the change that returned 8px to the page.
+        eq(scroll.gutter - PAGE_INSET, 6,
+           "corridor: the right edge gives up 6px to the bar and takes back 14 from the child")
+    end
 
     -- ---- SelectTab: park the outgoing, adopt the incoming ------------
     has("if k ~= name then GUI:ParkPage(page) end",
