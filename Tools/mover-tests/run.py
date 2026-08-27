@@ -115,6 +115,31 @@ lua.globals().ui_file_source = lambda name: (HERE.parents[1] / "DandersUI" / nam
 # letting the two drift.
 lua.globals().options_file_source = lambda name: (HERE.parents[1] / "DandersFrames_Options" / name).read_text(encoding="utf-8")
 
+# ============================================================
+# STATIC BAN: lib files never call bare shadowed factory names.
+# DF's host shadows CreateSlider/CreateDropdown/CreateAnchorGrid/CreateCheckbox/
+# CreateEditBox/CreateButton/CreateLabel with POSITIONAL shims, so lib code
+# calling `self:CreateButton(parent, opts)` mis-parses every argument under the
+# DF host. Lib code must use the *Native aliases. This has shipped twice
+# (the popout title label 2026-08-26, the footer buttons 2026-08-27); the grep
+# makes a third time a red suite instead of an in-game error.
+# ============================================================
+import re as _re
+_SHADOWED = "Label|Button|Checkbox|EditBox|Slider|Dropdown|AnchorGrid"
+_ban = _re.compile(r"(?:self|host|po\.host|row\.host|UI)\s*:\s*Create(?:%s)\s*\(" % _SHADOWED)
+_defn = _re.compile(r"function\s+UI\s*:\s*Create(?:%s)\s*\(" % _SHADOWED)
+_viol = []
+for _f in sorted((HERE.parent.parent / "DandersUI").glob("*.lua")):
+    for _n, _line in enumerate(_f.read_text(encoding="utf-8").splitlines(), 1):
+        _c = _line.split("--", 1)[0]
+        if _ban.search(_c) and not _defn.search(_c) and "Native" not in _c:
+            _viol.append(f"{_f.name}:{_n}: {_line.strip()}")
+if _viol:
+    print("SHIM-SHADOW BAN: lib code must call the *Native factory aliases:")
+    for _v in _viol:
+        print("  " + _v)
+    sys.exit(1)
+
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
 for test in sorted(HERE.glob("test_*.lua")):
     if flt and flt not in test.name:
