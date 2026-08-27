@@ -325,4 +325,61 @@ do
     check(ok, "unknown table: ...and so is a hold with nothing in it")
 end
 
+-- ============================================================
+-- 7. THE RESET'S APPLY REACHES THE UNDO ENGINE
+-- ------------------------------------------------------------
+-- ☠ THE ASYMMETRY THIS EXISTS FOR. Nothing in this file applies anything: the
+-- caller (the popout footer's Reset button) writes through here and then runs
+-- the group's apply ONCE. An UNDO of that reset has no button press behind it to
+-- do the same -- so the apply is handed to BeginGroup with the label, and the
+-- collapsed entry carries it. Without it an undo of a thirteen-key reset puts
+-- thirteen values back and refreshes nothing the caller's own apply refreshes,
+-- which reads as "undo did nothing".
+--
+-- The engine itself is tested in test_settings_undo.lua; what is pinned here is
+-- that this file HANDS IT OVER, and that it hands over the same reference it was
+-- given rather than a wrapper the engine would have to keep alive.
+-- ============================================================
+do
+    local savedSU = DF.SettingsUndo
+    local log = { begun = {}, ended = 0 }
+    DF.SettingsUndo = {
+        BeginGroup = function(_, label, applyFn)
+            log.begun[#log.begun + 1] = { label = label, apply = applyFn }
+        end,
+        EndGroup = function() log.ended = log.ended + 1 end,
+        Suspend  = function() end,
+        Resume   = function() end,
+    }
+
+    local party = freshProfile()
+    local defSize = DF.Defaults:GetDefault("party", "frameBorderSize")
+    party.frameBorderSize = defSize + 5
+    local host = fakeHost()
+
+    local applied = 0
+    local applyFn = function() applied = applied + 1 end
+    GA:ResetKeys(host, party, { "frameBorderSize" }, "party", "Border", applyFn)
+
+    eq(#log.begun, 1, "reset apply: the group was opened once")
+    eq(log.begun[1].label, "Border", "reset apply: ...named by the row, as before")
+    check(log.begun[1].apply == applyFn,
+        "reset apply: ☠ ...and carrying the caller's apply, BY REFERENCE")
+    eq(log.ended, 1, "reset apply: and closed again")
+    eq(applied, 0,
+        "reset apply: ☠ handing it over is not running it -- the caller still applies for itself")
+    eq(party.frameBorderSize, defSize, "reset apply: (the reset itself did what it always did)")
+
+    -- Optional, at both ends: a caller with nothing to apply opens an unnamed,
+    -- apply-less group exactly as it did before the argument existed.
+    log.begun, log.ended = {}, 0
+    party.frameBorderSize = defSize + 5
+    GA:ResetKeys(host, party, { "frameBorderSize" }, "party")
+    eq(#log.begun, 1, "reset apply: a caller that passes neither still opens a group")
+    check(log.begun[1].label == nil and log.begun[1].apply == nil,
+        "reset apply: ...with nothing in either slot")
+
+    DF.SettingsUndo = savedSU
+end
+
 DandersFrames = savedDandersFrames

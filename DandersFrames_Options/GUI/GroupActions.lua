@@ -135,7 +135,15 @@ end
 -- passed by the caller for the same reason `mode` is: the page knows it and the
 -- engine would have to guess. Optional; without one the group entry is unnamed
 -- and a consumer falls back to its own wording.
-function GroupActions:ResetKeys(host, db, keys, mode, label)
+--
+-- `applyFn` is what the caller runs ONCE after this returns to make the reset
+-- visible, handed over so the undo of the reset can run the same thing. Nothing
+-- here calls it -- a reset still applies because the caller applies -- but an
+-- undo has no caller to do that for it, and a group whose apply was only the
+-- generic sweep would move thirteen values and repaint none of the work the
+-- caller's own apply does. Optional; without one the entry falls back to the
+-- sweep, exactly as it did before this argument existed.
+function GroupActions:ResetKeys(host, db, keys, mode, label, applyFn)
     local changes = {}
     if type(db) ~= "table" or type(keys) ~= "table" then return changes end
 
@@ -145,7 +153,7 @@ function GroupActions:ResetKeys(host, db, keys, mode, label)
     -- be modified: the lib drops an empty group, so the cost of a reset that
     -- changed nothing is a push that never happens.
     local SU = DF.SettingsUndo
-    if SU then SU:BeginGroup(label) end
+    if SU then SU:BeginGroup(label, applyFn) end
     for _, key in ipairs(keys) do
         local def = DefaultFor(mode, key)
         if def ~= nil then

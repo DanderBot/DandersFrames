@@ -1690,8 +1690,9 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
 
         -- The other half: records the layout override while a profile is being
         -- edited (what the removed SetProfileSetting call did) and commits the
-        -- undo entry.
-        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, val, label)
+        -- undo entry -- carrying `callback`, this checkbox's own commit, so the
+        -- undo replays the apply and not only the write.
+        GUI:Call("onSettingWritten", dbTable, effectiveOverrideKey, val, label, callback)
 
         -- Update override indicators
         if container.UpdateOverrideIndicators then
@@ -2069,7 +2070,9 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
                 return
             end
             dbTable[dbKey] = val
-            GUI:Call("onSettingWritten", dbTable, dbKey, val, label)
+            -- ...carrying this box's own commit callback, for the same reason
+            -- the checkbox above does: an undo has to replay the apply too.
+            GUI:Call("onSettingWritten", dbTable, dbKey, val, label, callback)
             if frame.UpdateOverrideIndicators then
                 frame:UpdateOverrideIndicators(val)
             end
@@ -2484,7 +2487,12 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 -- ...and the commit, AFTER the auto-profile half -- the same
                 -- order GUI.lua's onSettingWritten runs the two in. Merged into
                 -- the open gesture, so this is a tick, not an entry.
-                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label) end
+                --
+                -- `callback` is this picker's COMMIT -- what the non-lightweight
+                -- branch below runs, and what the OK watcher runs at the end of a
+                -- lightweight session -- so the entry can replay the apply and not
+                -- just put the colour back.
+                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label, callback) end
 
                 UpdateSwatch()
                 -- Use lightweight callback during dragging if available
@@ -2505,7 +2513,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                         -- is a drag over the same stored table.
                         if SU then SU:OnInterceptWrite(dbTable, dbKey, nil) end
                         dbTable[dbKey].a = a
-                        if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label) end
+                        if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label, callback) end
                         UpdateSwatch()
                         -- Use lightweight callback during dragging if available
                         if useLightweight and lightweightCallback then
@@ -2529,7 +2537,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
                 dbTable[dbKey].g = originalColor.g
                 dbTable[dbKey].b = originalColor.b
                 dbTable[dbKey].a = originalColor.a
-                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label) end
+                if SU then SU:OnSettingWritten(dbTable, dbKey, dbTable[dbKey], label, callback) end
                 -- ⚠ Closed HERE, not left to the OnHide hook. The client is free
                 -- to run cancelFunc from inside its own OnHide, which is BEFORE
                 -- our hook -- but it is equally free to run it from the button and

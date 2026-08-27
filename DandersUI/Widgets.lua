@@ -2488,7 +2488,13 @@ function UI:CreateSlider(parent, opts)
         -- If editing a profile, also set the override. The label rides along for
         -- a host that wants to NAME the change (an undo toast); a host that does
         -- not care simply ignores the fourth argument.
-        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, value, label) end
+        --
+        -- ...and the FIFTH is this widget's own commit callback, by reference --
+        -- the exact function ReleaseDrag and the typed-entry path below run. A
+        -- host that can replay an edit (an undo stack) needs the apply as well
+        -- as the value: writing the number back is only half of what the user's
+        -- edit did. Optional at both ends -- a host with no use for it ignores it.
+        if dbKey then host:Call("onSettingWritten", dbTable, dbKey, value, label, callback) end
 
         if not input:HasFocus() then
             input:SetText(FormatValue(value))
@@ -2544,8 +2550,9 @@ function UI:CreateSlider(parent, opts)
             self:SetText(FormatValue(val))
             UpdateFill()
 
-            -- If editing a profile, also set the override (labelled, as above)
-            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val, label) end
+            -- If editing a profile, also set the override (labelled, and
+            -- carrying the commit callback, as above)
+            if dbKey then host:Call("onSettingWritten", dbTable, dbKey, val, label, callback) end
 
             -- Update override indicators
             if container.UpdateOverrideIndicators then
@@ -2876,8 +2883,10 @@ function UI:CreateAnchorGrid(parent, opts)
         end
         if key == keyH then setH(value) else setV(value) end
         -- The grid's own label names BOTH keys: they are two halves of one
-        -- control, and "Anchor" is what the user sees above them.
-        if dbTable then host:Call("onSettingWritten", dbTable, key, value, label) end
+        -- control, and "Anchor" is what the user sees above them. The commit
+        -- callback rides along too, for a host replaying the edit later -- the
+        -- same `callback` the cells run after a successful write.
+        if dbTable then host:Call("onSettingWritten", dbTable, key, value, label, callback) end
         return true
     end
 
@@ -3269,8 +3278,9 @@ function UI:CreateDropdown(parent, opts)
                     -- If editing a profile, also set the override. ⚠ The
                     -- DROPDOWN's label, not the chosen option's text: the label
                     -- names the setting that moved, which is what stays true
-                    -- whichever option was picked.
-                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey, label) end
+                    -- whichever option was picked. The commit callback is the
+                    -- fifth argument, for a host replaying the edit later.
+                    if dbKey then host:Call("onSettingWritten", dbTable, dbKey, customGet and customGet() or optKey, label, callback) end
 
                     UpdateText()
                     menuFrame:Hide()
