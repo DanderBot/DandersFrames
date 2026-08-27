@@ -414,6 +414,25 @@ do
     check(adoptAt and showAt and adoptAt < showAt,
           "panel: ...and adopts it BEFORE showing it, never while detached")
 
+    -- ---- the shell's TWO shared selection markers --------------------
+    -- The behaviour is UI:CreateSelectionMarker's and is tested against the real
+    -- factory in test_selection_marker.lua. What only the source can say is that
+    -- the shell actually WIRED it -- and, the part that would silently draw two
+    -- bars at once, that no member still carries a stripe of its own.
+    has('GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })',
+        "the mode tabs share one underline, parented to deck 2")
+    has('GUI:CreateSelectionMarker(tabContainer, { axis = "y", thickness = 3 })',
+        "...and the nav shares one rail, parented to the scroll child so it scrolls")
+    has("modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())",
+        "the underline follows the active mode, instant while the window is hidden")
+    has("navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())",
+        "...and the rail follows the selected page, by the same rule")
+    -- Three tabs, three opt-outs -- plus the one in the comment that explains it.
+    eq(countOf("tabStripe = false"), 4,
+       "panel: all three mode tabs decline StyleButton's own stripe")
+    check(src:find("btn.accent", 1, true) == nil,
+          "panel: and no nav row builds a left accent bar of its own any more")
+
     -- ---- the window's own two edges ---------------------------------
     local onShowAt = src:find('frame:HookScript("OnShow"', 1, true)
     local onHideAt = src:find('frame:SetScript("OnHide"', 1, true)

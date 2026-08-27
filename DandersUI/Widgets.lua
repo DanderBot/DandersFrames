@@ -320,6 +320,13 @@ function UI:StyleButton(btn, opts)
     -- (dim label when inactive). Driven by SetActive, like a toggle. Distinct from
     -- the legacy `isTab` filled-sidebar branch in restBackdrop.
     local isTabStyle = opts.tab
+    -- opts.tabStripe = false: an underline tab in every other respect -- the
+    -- transparent cell, the accent label, the same SetActive -- but with NO stripe
+    -- of its own. For a group whose selection is carried by ONE shared bar that
+    -- GLIDES between members (UI:CreateSelectionMarker) rather than N stripes
+    -- switching off here and on there. Everything downstream already guards on
+    -- `btn.dfTabStripe`, so a button without one is a no-op at every site.
+    local wantStripe = isTabStyle and opts.tabStripe ~= false
     -- Ghost action (opts.ghost): transparent like a tab but with no underline — an
     -- accent label + faint hover wash. For quiet inline actions (e.g. "+ Add").
     local ghost = opts.ghost
@@ -346,7 +353,7 @@ function UI:StyleButton(btn, opts)
     hl:SetAllPoints(btn)
     btn.Highlight = hl
 
-    if isTabStyle then
+    if wantStripe then
         local stripe = btn:CreateTexture(nil, "OVERLAY")
         stripe:SetTexture("Interface\\Buttons\\WHITE8x8")
         stripe:SetHeight(3)
@@ -632,6 +639,140 @@ function UI:StyleButton(btn, opts)
     return btn
 end
 
+-- ============================================================
+-- A GROUP'S SELECTION MARKER
+-- ------------------------------------------------------------
+-- ONE accent bar for a whole group of tabs or nav rows, which GLIDES from the
+-- member that was selected to the one that now is -- in place of a per-member
+-- stripe that blinks off here and on there.
+--
+-- Why a shared bar and not N stripes, beyond the motion: two textures switching
+-- in the same frame is a pair that has to be synchronised, and Lua cannot
+-- observe which of the two changes the client lands first. That is the same
+-- argument the settings nav's single hover PLATE was built on. A bar that only
+-- ever moves has no pair, so no frame can show two markers or none.
+--
+-- opts:
+--   axis       "x" -- an UNDERLINE spanning the member's bottom edge (a row of
+--              mode tabs), or "y" -- a RAIL down its left edge (a list of nav
+--              rows). Default "x".
+--   thickness  the bar's short dimension. Default 3, matching the tab stripe
+--              StyleButton draws when a group does NOT share one of these.
+--   duration   the glide, in seconds. Default 0.12.
+--   color      the resting colour; SetTo's own colour argument wins per call.
+--
+-- Parented to the group's CONTAINER, never to a member: it has to be able to sit
+-- BETWEEN two members mid-glide, and it has to outlive any one of them being
+-- re-anchored by a relayout.
+--
+-- marker:SetTo(target, color, instant)   glide onto `target`; nil clears it
+-- marker:Clear()                         hide it (the next SetTo is instant)
+-- marker:ClearIf(target)                 hide it only if it marks `target`
+-- marker:GetOwner()                      the member it currently marks, or nil
+--
+-- ⚠ INSTANT UNLESS BOTH ENDS ARE VISIBLE. A marker with no previous member, one
+-- whose previous member has since been hidden (a collapsed nav category), or one
+-- that is not itself on screen, has nowhere to glide FROM -- it would sweep in
+-- from a stale position, which reads worse than the blink it replaces. Passing
+-- `instant` forces the same, and that is what a window that is not shown yet
+-- should pass.
+function UI:CreateSelectionMarker(parent, opts)
+    opts = opts or {}
+    local host = self
+    local axis = opts.axis == "y" and "y" or "x"
+    local thickness = opts.thickness or 3
+    local dur = opts.duration or 0.12
+
+    local marker = CreateFrame("Frame", nil, parent)
+    -- Above the members it marks: a member's own backdrop is drawn at the
+    -- container's level, and the bar rides its edge.
+    marker:SetFrameLevel((parent:GetFrameLevel() or 1) + 5)
+    marker:EnableMouse(false)      -- must never take a click off the tab it marks
+    if axis == "x" then marker:SetHeight(thickness) else marker:SetWidth(thickness) end
+    local tex = marker:CreateTexture(nil, "OVERLAY")
+    tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+    tex:SetAllPoints(marker)
+    marker.Texture = tex
+    marker:Hide()
+
+    -- The two anchors the axis implies. The bar takes the member's full length
+    -- on the long axis, so it grows and shrinks with a translated label without
+    -- anyone measuring anything.
+    local function Place(target)
+        marker:ClearAllPoints()
+        if axis == "x" then
+            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", 0, 0)
+            marker:SetPoint("BOTTOMRIGHT", target, "BOTTOMRIGHT", 0, 0)
+        else
+            marker:SetPoint("TOPLEFT", target, "TOPLEFT", 0, 0)
+            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", 0, 0)
+        end
+    end
+
+    -- ⚠ THE MARKER IS NOT A CHILD OF WHAT IT MARKS, so hiding that member no
+    -- longer takes the bar down with it -- a per-member stripe got that for free.
+    -- Collapsing the nav category the selected page lives in would otherwise
+    -- leave the rail floating beside whichever row moved up into its place.
+    -- Hooked once per member; the hooks only ever act while that member is still
+    -- the one being marked.
+    --
+    -- ☠ THE OWNER IS AN UPVALUE, NOT A FIELD ON THE MARKER. Reading it back off
+    -- the frame would be one more place where "has this been set" is asked of a
+    -- frame -- and every consumer of this kit that runs headless answers an unset
+    -- field with a truthy no-op function, so `local prev = self.owner` would hand
+    -- the glide test a function to call IsShown on. Private state stays private;
+    -- GetOwner is the read.
+    local owner
+    local hooked = {}
+    local function Follow(target)
+        if hooked[target] then return end
+        hooked[target] = true
+        target:HookScript("OnHide", function(s) if owner == s then marker:Hide() end end)
+        target:HookScript("OnShow", function(s) if owner == s then marker:Show() end end)
+    end
+
+    function marker:SetTo(target, color, instant)
+        if not target then return self:Clear() end
+        local c = color or opts.color or host:GetAccent()
+        -- The colour swaps at the START of the glide, so the bar leaves the old
+        -- member already wearing the new one's accent. A party -> raid switch
+        -- then reads as one movement rather than as a colour event and a
+        -- position event that happen to overlap.
+        if c then tex:SetColorTexture(c.r, c.g, c.b, c.a or 1) end
+        local prev = owner
+        owner = target
+        Follow(target)
+        local canGlide = not instant and prev and prev ~= target and self:IsShown()
+            and prev.IsShown and prev:IsShown()
+        if canGlide and UI.Fx and UI.Fx.MoveTo then
+            UI.Fx.MoveTo(self, function() Place(target) end, dur)
+        else
+            Place(target)
+        end
+        self:Show()
+        return self
+    end
+
+    function marker:Clear()
+        if UI.Fx and UI.Fx.Cancel then UI.Fx.Cancel(self) end
+        owner = nil
+        self:Hide()
+        return self
+    end
+
+    -- "Stop marking this one, if it is the one you are marking." For a member
+    -- that is being taken out of play (a nav row disabled while an auto profile
+    -- is being edited) without the group having decided what is selected instead.
+    function marker:ClearIf(target)
+        if target and owner == target then self:Clear() end
+        return self
+    end
+
+    function marker:GetOwner() return owner end
+
+    return marker
+end
+UI.CreateSelectionMarkerNative = UI.CreateSelectionMarker
 
 
 function UI:CreateCloseButton(parent, opts)

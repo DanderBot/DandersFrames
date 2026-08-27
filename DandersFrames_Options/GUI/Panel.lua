@@ -16,6 +16,11 @@ local C_PANEL, C_ELEMENT, C_BORDER, C_ACCENT, C_RAID, C_HOVER, C_TEXT, C_TEXT_DI
 -- The window's own ground. Only the window is drawn in it -- every panel inside
 -- is C_PANEL over it -- which is why it has not been needed in this file before.
 local C_BACKGROUND = GUI.Colors.background
+-- The BINDS tab's own accent. Not in GUI.Colors because it is not a MODE colour
+-- the theme tracks (party purple / raid orange are); it is one tab's identity.
+-- Hoisted out of its StyleButton call because the shared underline needs to wear
+-- it too, and the two must not be able to disagree.
+local C_CLICKS = { r = 0.2, g = 0.8, b = 0.4 }
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -1347,20 +1352,30 @@ function DF:CreateGUI()
     -- centre onto the exact row the old absolute -32 put it on, so nothing in
     -- the header moves by a pixel.
     btnParty:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnParty, 12), 1)
-    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives it.
-    GUI:StyleButton(btnParty, { tab = true, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
+    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives the
+    -- label colour and the cell. `tabStripe = false` on all three: the three
+    -- underlines are ONE bar that glides between them (modeUnderline below), not
+    -- three stripes switching off here and on there.
+    GUI:StyleButton(btnParty, { tab = true, tabStripe = false, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
 
     local btnRaid = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
-    GUI:StyleButton(btnRaid, { tab = true, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI:StyleButton(btnRaid, { tab = true, tabStripe = false, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.RaidButton = btnRaid  -- Store for external access
 
     -- Click Casting tab button
     local btnClicks = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
-    GUI:StyleButton(btnClicks, { tab = true, text = L["BINDS"], accent = { r = 0.2, g = 0.8, b = 0.4 }, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI:StyleButton(btnClicks, { tab = true, tabStripe = false, text = L["BINDS"], accent = C_CLICKS, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
+
+    -- ONE underline for the three mode tabs, which GLIDES from the tab that was
+    -- active to the one that now is (UI:CreateSelectionMarker). Parented to deck
+    -- 2 rather than to a tab, so it can sit BETWEEN two of them mid-glide.
+    -- UpdateThemeColors drives it, right where the three SetActive calls are.
+    local modeUnderline = GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })
+    GUI.ModeUnderline = modeUnderline
 
     -- =========================================================================
     -- DECK 2 RIGHT CLUSTER: undo / redo / Test / Unlock / override marker
@@ -1701,10 +1716,24 @@ function DF:CreateGUI()
     
     local function UpdateThemeColors()
         -- Mode buttons use the shared underline-tab style; SetActive drives the
-        -- underline + accent label (each button's per-mode accent set at creation).
+        -- accent label + the cell (each button's per-mode accent set at creation).
         btnParty:SetActive(GUI.SelectedMode == "party")
         btnRaid:SetActive(GUI.SelectedMode == "raid")
         btnClicks:SetActive(GUI.SelectedMode == "clicks")
+        -- ...and the UNDERLINE is the one shared bar, glided onto whichever of
+        -- the three is active and wearing that tab's own accent from the moment
+        -- it sets off.
+        --
+        -- ⚠ INSTANT WHILE THE WINDOW IS HIDDEN. This runs on every OnShow (see
+        -- the note below the function), and a glide nobody can see would only
+        -- leave the bar mid-flight for the next visible one to start from.
+        local activeMode = (GUI.SelectedMode == "raid" and btnRaid)
+            or (GUI.SelectedMode == "clicks" and btnClicks)
+            or btnParty
+        local activeModeAccent = (activeMode == btnRaid and C_RAID)
+            or (activeMode == btnClicks and C_CLICKS)
+            or C_ACCENT
+        modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())
 
         -- Test button look via the shared toggle styling (matches how the Lock
         -- button is refreshed below). The old inline version painted a stray
@@ -1742,15 +1771,23 @@ function DF:CreateGUI()
 
         -- Update active tab
         local nc = GetThemeColor()
+        -- ⚠ GUI.navMarker, not the local: the nav is built ~400 lines BELOW this
+        -- function, so the upvalue does not exist yet at this point in the file
+        -- and a bare `navMarker` here would resolve as a global. (modeUnderline
+        -- above is fine -- deck 2 is built first.) Guarded for the same reason:
+        -- this can run before the nav exists.
+        local rail = GUI.navMarker
         for name, btn in pairs(GUI.Tabs) do
             if btn.isActive and not btn.disabled then
-                btn.accent:SetColorTexture(nc.r, nc.g, nc.b, 1)
+                -- The rail is already ON this row (SelectTab put it there); a mode
+                -- switch only has to repaint it, which must NOT move it.
+                if rail then rail:SetTo(btn, nc, true) end
                 btn.Text:SetTextColor(nc.r, nc.g, nc.b)
                 btn.Text:SetAlpha(1)
             elseif btn.disabled then
                 btn.Text:SetTextColor(0.4, 0.4, 0.4)
                 btn.Text:SetAlpha(1)
-                if btn.accent then btn.accent:Hide() end
+                if rail then rail:ClearIf(btn) end
             end
         end
         
@@ -2087,6 +2124,18 @@ function DF:CreateGUI()
         navHover:Hide()
         navHover.owner = nil
     end
+
+    -- ...and ONE selection rail for the whole nav, by the same argument as the
+    -- plate above it: the left accent bar used to be a texture on every row,
+    -- switched off on the row being left and on on the row being entered, and two
+    -- textures changing in one frame is a pair nothing can synchronise. This one
+    -- bar GLIDES vertically between rows instead (UI:CreateSelectionMarker).
+    --
+    -- Parented to tabContainer, the SCROLL CHILD, so it scrolls with the rows it
+    -- marks -- and hides with whichever row it is on when a category collapses,
+    -- which the marker arranges for itself.
+    local navMarker = GUI:CreateSelectionMarker(tabContainer, { axis = "y", thickness = 3 })
+    GUI.navMarker = navMarker
 
 
     -- Content area (right side) - no BackdropTemplate in CreateFrame
@@ -2452,8 +2501,10 @@ function DF:CreateGUI()
             page:Hide()
             if k ~= name then GUI:ParkPage(page) end
         end
+        -- The rail is not cleared here: it is about to be GLIDED onto the new row
+        -- further down, and taking it off screen first is exactly the blink the
+        -- shared marker exists to remove.
         for k, btn in pairs(GUI.Tabs) do
-            if btn.accent then btn.accent:Hide() end
             -- Check if tab is disabled (e.g., during Auto Profile editing)
             if btn.disabled then
                 btn.Text:SetTextColor(0.4, 0.4, 0.4)
@@ -2520,10 +2571,10 @@ function DF:CreateGUI()
         end
         local nc = GetThemeColor()
         if GUI.Tabs[name] then
-            if GUI.Tabs[name].accent then
-                GUI.Tabs[name].accent:Show()
-                GUI.Tabs[name].accent:SetColorTexture(nc.r, nc.g, nc.b, 1)
-            end
+            -- The rail glides down (or up) from the row being left. Instant while
+            -- the window is hidden -- the first SelectTab of a session runs before
+            -- it is ever shown, and a glide out of a stale row is worse than none.
+            navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())
             GUI.Tabs[name].Text:SetTextColor(nc.r, nc.g, nc.b)
             GUI.Tabs[name].isActive = true
             -- Mark "New" badge as seen
@@ -2694,13 +2745,11 @@ function DF:CreateGUI()
         btn.tabName = name
         btn.categoryName = categoryName
         
-        -- Left accent bar
-        btn.accent = btn:CreateTexture(nil, "OVERLAY")
-        btn.accent:SetPoint("TOPLEFT", 0, 0)
-        btn.accent:SetPoint("BOTTOMLEFT", 0, 0)
-        btn.accent:SetWidth(3)
-        btn.accent:Hide()
-        
+        -- ★ NO LEFT ACCENT BAR OF ITS OWN. The selected row's 3px rail is the
+        -- nav's ONE shared marker (navMarker), glided onto this row when it is
+        -- selected -- see the note beside it. A row that carried its own would
+        -- put two bars on screen during the glide.
+
         btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         btn.Text:SetPoint("LEFT", 24, 0)
         btn.Text:SetText(label)
