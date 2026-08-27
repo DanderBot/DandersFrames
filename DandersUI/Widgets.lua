@@ -1764,7 +1764,21 @@ function UI:CreateSlider(parent, opts)
     slider:SetOrientation("HORIZONTAL")
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
-    slider:SetObeyStepOnDrag(true)
+    -- ☠ OFF, DELIBERATELY -- AND THE STEP IS NOT GONE, IT MOVED (see Quantize).
+    -- SetObeyStepOnDrag(true) makes the ENGINE snap the thumb itself while the
+    -- bar is held, so the handle can only ever be parked on a step. On a bar
+    -- whose step is worth several pixels of track -- a 0..10 slider across 200px
+    -- is twenty pixels a step -- that is a handle that jumps in chunks under a
+    -- mouse that is moving smoothly, which reads as the widget stuttering rather
+    -- than as it being precise.
+    --
+    -- With it off the thumb follows the cursor pixel for pixel and the STEP is
+    -- applied on the way out instead: every number this widget hands to anyone
+    -- -- the db, the value box, the bubble, the preview guard, the commit -- goes
+    -- through Quantize first. The raw GetValue is a screen position and nothing
+    -- more, and the only two things allowed to read it are the fill and the
+    -- bubble's placement, both of which are drawing that position.
+    slider:SetObeyStepOnDrag(false)
     slider:SetHitRectInsets(-4, -4, -8, -8)
     container.slider = slider  -- Store reference for reset
     
@@ -1782,6 +1796,16 @@ function UI:CreateSlider(parent, opts)
 
     -- The snapped value written this tick, and the one the last preview ran for.
     local pendingValue, lastPreviewed = nil, nil
+
+    -- The stepped value OnValueChanged last acted on, and the whole of what its
+    -- mid-drag guard compares against (see there). Drag state, so it is CLEARED
+    -- AT DRAG START: it goes stale the moment the value moves down a path that
+    -- does not run that handler -- a typed entry and every programmatic
+    -- UpdateValue are suppressed, and none of them touch it -- and a stale one
+    -- would make the first tick of the next drag look like a repeat and skip the
+    -- write. Starting every gesture disarmed costs at most one redundant write
+    -- per drag, on a press that lands on the value the bar already holds.
+    local lastQuantized
 
     -- Store preview mode flag for this slider (deprecated -- see the opts block)
     local sliderUsePreviewMode = usePreviewMode or false
@@ -1879,7 +1903,66 @@ function UI:CreateSlider(parent, opts)
     table.insert(parent.ThemeListeners, container)
     
     local suppressCallback = false
-    
+
+    -- ============================================================
+    -- QUANTIZE -- THE SEAM BETWEEN THE THUMB AND THE VALUE
+    -- ------------------------------------------------------------
+    -- The bar no longer obeys its step while it is dragged (see the
+    -- construction above), so slider:GetValue() mid-drag is wherever the mouse
+    -- is, to the pixel. This is the ONE function that turns that back into a
+    -- value, and every read-out of the bar goes through it: the db write, the
+    -- value box, the drag bubble's text, the preview pump's changed-check, and
+    -- the settle on release.
+    --
+    -- Two roundings, and the second is not decoration:
+    --   * to the nearest step, measured FROM min -- a bar that starts at 40 has
+    --     its grid at 40, 41, 42..., not at 0, 1, 2..., and a 0.5-min bar with a
+    --     step of 1 must stay on halves;
+    --   * then to the number of decimals the step itself carries. No binary
+    --     float holds 0.05, so min + 3 * 0.05 is 0.15000000000000002, and that
+    --     is the number that would go into the settings file, come back out on
+    --     the next login, and compare unequal to the 0.15 a default table or an
+    --     export written by hand holds. FormatValue would still print "0.15",
+    --     so the drift is invisible right up until something compares.
+    --
+    -- ⚠ THE DECIMAL COUNT COMES FROM min AS WELL AS step. container.SetRange can
+    -- re-scale a bar at runtime (a dial that flips a slider from seconds to
+    -- percent) onto a min with more decimals than the step has, and rounding to
+    -- the step's precision alone would then round the min itself away.
+    local stepFactor = 1
+    local function DecimalsOf(n)
+        local d, s = 0, math.abs(n or 0)
+        while d < 6 and math.abs(s - math.floor(s + 0.5)) > 1e-9 do
+            s = s * 10
+            d = d + 1
+        end
+        return d
+    end
+    local function RecomputeStepFactor()
+        local d = DecimalsOf(step)
+        local dm = DecimalsOf(minVal)
+        if dm > d then d = dm end
+        stepFactor = 10 ^ d
+    end
+    RecomputeStepFactor()
+
+    -- The 1e-9 is only ever felt on a TIE. (v - min) / step is exact arithmetic
+    -- on paper and not in binary, so a position that sits exactly half a step
+    -- along lands a hair either side of .5 depending on which literals are
+    -- involved, and rounds up or down accordingly -- the same drag giving
+    -- different answers on different bars. Nudging past the tie makes half-up
+    -- the rule everywhere; it is far too small to move any position that is not
+    -- already on the fence.
+    local function Quantize(v)
+        if v == nil then return nil end
+        if step and step > 0 then
+            v = minVal + math.floor((v - minVal) / step + 0.5 + 1e-9) * step
+            v = math.floor(v * stepFactor + 0.5) / stepFactor
+        end
+        if v < minVal then v = minVal elseif v > maxVal then v = maxVal end
+        return v
+    end
+
     -- Smart format: show whole numbers as integers, decimals with minimum precision needed
     local function FormatValue(val)
         if val == math.floor(val) then
@@ -2022,7 +2105,10 @@ function UI:CreateSlider(parent, opts)
 
     RefreshBubble = function(pct, usable)
         if not (bubble and bubble:IsShown()) then return end
-        local s = FormatValue(slider:GetValue())
+        -- The bubble RIDES the thumb (it glides), but the NUMBER in it is the
+        -- stepped one -- the same string the value box holds. PlaceBubble below
+        -- takes the raw position; only the text is quantized.
+        local s = FormatValue(Quantize(slider:GetValue()))
         if s ~= lastText then
             lastText = s
             bubble.Text:SetText(s)
@@ -2091,8 +2177,35 @@ function UI:CreateSlider(parent, opts)
         if newMin ~= minVal or newMax ~= maxVal then
             minVal, maxVal = newMin, newMax
             slider:SetMinMaxValues(minVal, maxVal)
+            -- The grid Quantize snaps to is measured from min, and its precision
+            -- is the wider of min's and step's -- so a new min moves both.
+            RecomputeStepFactor()
         end
         self:RefreshValue()
+    end
+
+    -- The thumb has been following the mouse, so when the button comes up it is
+    -- sitting somewhere INSIDE a step rather than on one. Snap it to the value
+    -- that was actually written, so the bar the user is left looking at agrees
+    -- with the number beside it.
+    --
+    -- ⚠ SUPPRESSED, and that is the re-entrancy guard: slider:SetValue re-enters
+    -- OnValueChanged, and this runs on the release path -- a second pass down
+    -- there would re-write the db and, on a legacy host that commits per change,
+    -- fire a SECOND onChanged for one gesture. suppressCallback is the same door
+    -- UpdateValue and the typed box already use. The one readout it skips is the
+    -- fill, repainted by hand here; the value box and the bubble were written
+    -- with the quantized number on every tick already, so they are current.
+    local function SettleThumb()
+        local raw = slider:GetValue()
+        local q = Quantize(raw)
+        if q ~= nil and q ~= raw then
+            suppressCallback = true
+            slider:SetValue(q)
+            suppressCallback = false
+            UpdateFill()
+        end
+        return q
     end
 
     -- The end of a drag, from either door: the real OnMouseUp, or the OnUpdate
@@ -2110,6 +2223,9 @@ function UI:CreateSlider(parent, opts)
         isDragging = false
         slider:SetScript("OnUpdate", nil)
         pendingValue, lastPreviewed = nil, nil
+        -- Settle the handle BEFORE the bubble goes down, so the readout fades out
+        -- from the position it is leaving the bar on rather than a step away.
+        local settled = SettleThumb()
         HideBubble()
 
         host:Call("onDragStop")
@@ -2118,7 +2234,7 @@ function UI:CreateSlider(parent, opts)
 
         -- Update override indicators after drag ends
         if container.UpdateOverrideIndicators then
-            container:UpdateOverrideIndicators(slider:GetValue())
+            container:UpdateOverrideIndicators(settled)
         end
     end
 
@@ -2149,6 +2265,12 @@ function UI:CreateSlider(parent, opts)
     slider:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDragging = true
+            -- Disarm the mid-drag repeat guard for the new gesture -- see where
+            -- lastQuantized is declared for why it cannot be trusted across one.
+            -- Correct whichever order the client fires this and the press's own
+            -- OnValueChanged in: either the value change ran first and re-primes
+            -- it below, or it runs next and finds the guard already open.
+            lastQuantized = nil
             -- Up before anything else in the gesture: the bar has already jumped
             -- to where it was pressed, so the readout should be there with it.
             -- Kit-wide, so every consumer's sliders get it (the mover's included).
@@ -2175,11 +2297,15 @@ function UI:CreateSlider(parent, opts)
         -- to do here but the bookkeeping and the indicators.
         if isDragging then
             isDragging = false
+            -- ...with the one addition the glide forces: the handle still has to
+            -- come to rest ON its value. Suppressed, so it adds no commit to a
+            -- host that has already committed every step of the way.
+            local settled = SettleThumb()
             HideBubble()
             host:Call("onDragStop")
             -- Update override indicators after drag ends
             if container.UpdateOverrideIndicators then
-                container:UpdateOverrideIndicators(slider:GetValue())
+                container:UpdateOverrideIndicators(settled)
             end
         end
     end)
@@ -2221,11 +2347,24 @@ function UI:CreateSlider(parent, opts)
     slider:SetScript("OnValueChanged", function(self, value)
         if suppressCallback then return end
         if not (dbTable or customSet) then return end
-        if step >= 1 then
-            value = math.floor(value + 0.5)
-        else
-            value = math.floor(value / step + 0.5) * step
+        value = Quantize(value)
+
+        -- ☠ THE OTHER HALF OF THE GLIDE. With the engine no longer stepping the
+        -- thumb, this fires for every PIXEL the handle travels -- twenty ticks
+        -- per step on a 0..10 bar. The fill and the bubble want all of them:
+        -- they draw the handle's POSITION, which is the thing now moving
+        -- smoothly. Nothing below this guard does, so none of it runs until the
+        -- stepped value actually moves.
+        --
+        -- Not just a saving: without it a legacy host (no drag hooks, commits on
+        -- every value change) would fire onChanged and a full refresh on every
+        -- mouse-move frame instead of once per step crossed. Obeying the step on
+        -- drag used to buy that for free; the guard buys it back.
+        if isDragging and value == lastQuantized then
+            UpdateFill()
+            return
         end
+        lastQuantized = value
 
         -- Runtime override protection: redirect to baseline, skip refresh
         if dbKey and host:Call("interceptWrite", dbTable, dbKey, value) then

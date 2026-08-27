@@ -824,6 +824,281 @@ do
     eq(log.count, 0, "picker: the pump noticed the button was up and released")
 end
 
+-- ============================================================
+-- 7. THE GLIDE -- A THUMB THAT MOVES BETWEEN STEPS, A VALUE THAT DOES NOT
+-- ------------------------------------------------------------
+-- SetObeyStepOnDrag used to have the ENGINE snap the handle to a step while the
+-- bar was held, which on any bar whose step is worth several pixels of track is
+-- a handle that jumps in chunks under a mouse that is moving smoothly. It is off
+-- now, and the step is applied on the way OUT of the widget instead.
+--
+-- So there are two numbers where there used to be one, and every assertion below
+-- is about keeping them apart:
+--
+--   slider:GetValue()  the THUMB. A screen position, to the pixel. Read by the
+--                      fill and by the bubble's placement, and by nothing else.
+--   Quantize(...)      the VALUE. What the db, the value box, the bubble's text,
+--                      the preview guard and the commit all see.
+--
+-- ⚠ The stub's SetValue stores exactly what it is handed and fires
+-- OnValueChanged with it -- which is what the real widget does with the step no
+-- longer obeyed, so a fractional SetValue here IS a sub-step drag tick.
+-- ============================================================
+do
+    local host, log = newHost(true)
+    local value, light, commit = 3, 0, 0
+    local s = host:CreateSlider(pane(), {
+        label = "Group Spacing", min = 0, max = 10, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+        lightweight = function() light = light + 1 end,
+        onChanged   = function() commit = commit + 1 end,
+    })
+    local sl, input = s.slider, inputOf(s)
+
+    fire(sl, "OnMouseDown", "LeftButton")
+    -- Land on a step and let the pump see it, so everything below is measured
+    -- from a bar already sitting on 3 rather than from a bar arriving there.
+    sl:SetValue(3); fire(sl, "OnUpdate")
+    local basePreviews = light
+    eq(value, 3, "glide: the bar starts on its step")
+
+    -- (a) THREE TICKS INSIDE ONE STEP. The thumb follows the mouse the whole way
+    -- and NOTHING else moves -- not the db, not the box, not the bubble.
+    sl:SetValue(3.2)
+    eq(sl:GetValue(), 3.2, "glide: the THUMB holds the raw position it was dragged to")
+    eq(value, 3, "glide: ...while the value written is still the step")
+    sl:SetValue(3.4); sl:SetValue(3.49)
+    eq(sl:GetValue(), 3.49, "glide: the thumb keeps following the mouse, pixel by pixel")
+    eq(value, 3, "glide: ...and three sub-step ticks wrote nothing new")
+    eq(input:GetText(), "3", "glide: the value box shows the step, never the raw position")
+    eq(s.dragBubble.Text:GetText(), "3", "glide: and the bubble agrees with it")
+
+    fire(sl, "OnUpdate"); fire(sl, "OnUpdate"); fire(sl, "OnUpdate")
+    eq(light - basePreviews, 0, "glide: three rendered frames inside one step previewed NOTHING")
+
+    -- (b) CROSSING A STEP is the only thing the preview pump reacts to.
+    sl:SetValue(3.6)
+    eq(value, 4, "glide: past the half-step the value rounds on to the next one")
+    fire(sl, "OnUpdate")
+    eq(light - basePreviews, 1, "glide: crossing a step previews exactly once")
+    fire(sl, "OnUpdate")
+    eq(light - basePreviews, 1, "glide: ...and not again while the thumb sits inside it")
+    eq(commit, 0, "glide: and nothing committed mid-drag")
+
+    -- (c) RELEASE commits the quantized value once and SETTLES the handle on to
+    -- it -- the bar the user is left looking at has to agree with the number.
+    sl:SetValue(6.8)
+    eq(sl:GetValue(), 6.8, "glide: held between two steps at the moment of release")
+    fire(sl, "OnMouseUp", "LeftButton")
+    eq(commit, 1, "release: exactly one commit")
+    eq(value, 7, "release: of the QUANTIZED value, not the raw thumb position")
+    eq(sl:GetValue(), 7, "release: and the thumb settled on to it")
+    eq(input:GetText(), "7", "release: box and thumb tell the same story")
+    eq(log.refreshNow, 1, "release: one full sweep, exactly as before the glide")
+    eq(log.count, 0, "release: start and stop still balance 1:1")
+end
+
+-- ---- the legacy host keeps its contract across the glide -------------
+-- A host with no drag hooks commits on EVERY value change. With the engine no
+-- longer stepping, "every value change" would be every pixel of thumb travel --
+-- dozens of full settings applies per second on the same number. The guard in
+-- OnValueChanged is what keeps that at one per step CROSSED, which is what
+-- obeying the step on drag used to buy it for free.
+do
+    local host, log = newHost(false)
+    local value, commit = 3, 0
+    local s = host:CreateSlider(pane(), {
+        label = "Group Spacing", min = 0, max = 10, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+        onChanged = function() commit = commit + 1 end,
+    })
+    local sl = s.slider
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(3)
+    eq(commit, 1, "legacy glide: landing on a step commits, exactly as it always did")
+    eq(log.refresh, 1, "legacy glide: with its refresh")
+
+    sl:SetValue(3.2); sl:SetValue(3.4); sl:SetValue(3.49)
+    eq(commit, 1, "legacy glide: three ticks INSIDE that step add no commits")
+    eq(log.refresh, 1, "legacy glide: ...and no refreshes either")
+    eq(value, 3, "legacy glide: the db still holds the step")
+
+    sl:SetValue(3.6)
+    eq(commit, 2, "legacy glide: crossing into the next step commits once")
+    eq(value, 4, "legacy glide: ...with the quantized value")
+
+    sl:SetValue(4.4)
+    fire(sl, "OnMouseUp", "LeftButton")
+    eq(commit, 2, "legacy glide: release adds no commit of its own")
+    eq(log.refreshNow, 0, "legacy glide: nor a sweep it never asked for")
+    eq(sl:GetValue(), 4, "legacy glide: but the thumb still settles on to its value")
+    eq(value, 4, "legacy glide: which is the one in the db")
+end
+
+-- ---- the repeat guard cannot go stale across a gesture ---------------
+-- ☠ THE GUARD IS DRAG STATE, AND EVERY OTHER PATH TO THE VALUE BYPASSES IT: a
+-- typed entry and every programmatic UpdateValue set the bar with the callback
+-- suppressed, so OnValueChanged never runs and never learns the new number. Left
+-- holding the value from the LAST drag, the guard would read the first tick of
+-- the NEXT one as a repeat and skip the write -- leaving the db on the typed
+-- value while the thumb sat somewhere else. Cleared at drag start instead.
+do
+    local host = newHost(true)
+    local value = 7
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl, input = s.slider, inputOf(s)
+
+    -- A drag that leaves the guard holding 7.
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(7)
+    fire(sl, "OnMouseUp", "LeftButton")
+
+    -- A typed value goes in behind OnValueChanged's back.
+    input:SetText("7.3")
+    fire(input, "OnEnterPressed")
+    check(value == 7.3, "stale guard: the typed value landed, unseen by the value handler")
+
+    -- ...and the next drag must still write, even though it lands on the 7 the
+    -- guard is holding.
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(7.1)
+    check(value == 7, "stale guard: the next drag wrote its step, guard or no guard")
+    eq(input:GetText(), "7", "stale guard: and the box came back into line with it")
+    fire(sl, "OnMouseUp", "LeftButton")
+end
+
+-- ---- a programmatic SetValue is NOT deduplicated ---------------------
+-- The drag guard is gated on isDragging for a reason. A slider bound through
+-- customGet to whichever key a dial currently selects gets SetValue'd to the
+-- same NUMBER when that dial moves, and the write must still happen: what
+-- changed is the thing being written into, not the value.
+do
+    local host = newHost(false)
+    local writes = 0
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return 20 end,
+        set = function() writes = writes + 1 end,
+    })
+    local sl = s.slider
+    sl:SetValue(20); sl:SetValue(20); sl:SetValue(20)
+    eq(writes, 3, "programmatic: three SetValues to the same number all wrote")
+end
+
+-- ============================================================
+-- 7b. A FLOAT STEP DOES NOT DRIFT
+-- The number that made this block exist: three 0.05 steps is 0.15, and 3 * 0.05
+-- in binary floating point is 0.15000000000000002. Both print as "0.15", so a
+-- settings file holding the second one looks right for as long as nobody
+-- COMPARES it -- against a default table, an export written by hand, or the
+-- other half of a "did this actually change" check.
+-- ============================================================
+do
+    local host = newHost(true)
+    local value = 0
+    local s = host:CreateSlider(pane(), {
+        label = "Alpha", min = 0, max = 1, step = 0.05,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl, input = s.slider, inputOf(s)
+    fire(sl, "OnMouseDown", "LeftButton")
+
+    sl:SetValue(0.153)
+    check(value == 0.15, "float step: a raw 0.153 is written as EXACTLY 0.15, the literal")
+    eq(input:GetText(), "0.15", "float step: and the box shows two clean decimals")
+    eq(s.dragBubble.Text:GetText(), "0.15", "float step: as does the bubble")
+
+    -- Every step of the series, not just the one that bites.
+    for i = 0, 20 do
+        local want = i / 20                    -- 0, 0.05, 0.10 ... 1
+        sl:SetValue(want + 0.013)              -- somewhere inside that step
+        check(value == want, "float step: step " .. i .. " landed on its exact value")
+    end
+
+    -- ⚠ EXACTLY HALF A STEP ALONG, which is where the rule has to be WRITTEN
+    -- DOWN rather than inherited from whatever the arithmetic happens to do.
+    -- 0.075 is dead centre between 0.05 and 0.10 on paper; in binary
+    -- 0.075 / 0.05 is 1.4999999999999998, so a bare round lands it on 0.05 --
+    -- a bar that rounds up at every other midpoint and down at this one. Half-up
+    -- everywhere is the rule, and the epsilon in Quantize is what enforces it.
+    sl:SetValue(0.075)
+    check(value == 0.1, "float step: a position exactly half a step along rounds UP")
+    sl:SetValue(0.5); sl:SetValue(0.525)
+    check(value == 0.55, "float step: ...at every midpoint, not just the exact ones")
+
+    sl:SetValue(0.62)
+    fire(sl, "OnMouseUp", "LeftButton")
+    check(value == 0.6, "float step: release commits the quantized value")
+    check(sl:GetValue() == 0.6, "float step: and settles the thumb on it")
+end
+
+-- ============================================================
+-- 7c. THE GRID IS min + k * step -- BOTH HALVES OF THAT
+-- Which was the engine's job while it obeyed the step, and is Quantize's now.
+-- The rounding it replaced was `math.floor(value + 0.5)` for any step >= 1 --
+-- correct only for a step of exactly 1, on a bar starting at a whole number.
+-- ============================================================
+do
+    local host = newHost(true)
+    local value = 10
+    local s = host:CreateSlider(pane(), {
+        label = "Columns", min = 10, max = 50, step = 5,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(22)
+    eq(value, 20, "wide step: a step of 5 snaps to multiples of 5, not to whole numbers")
+    sl:SetValue(23)
+    eq(value, 25, "wide step: ...rounding to the NEAREST of them")
+    fire(sl, "OnMouseUp", "LeftButton")
+    eq(sl:GetValue(), 25, "wide step: and the thumb settles on the multiple")
+end
+
+-- ...and the grid starts where min does, at min's own precision.
+do
+    local host = newHost(true)
+    local value = 0.5
+    local s = host:CreateSlider(pane(), {
+        label = "Delay", min = 0.5, max = 5.5, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl, input = s.slider, inputOf(s)
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(2.4)
+    check(value == 2.5, "offset grid: a 0.5-min bar stepping by 1 stays on halves")
+    eq(input:GetText(), "2.5", "offset grid: and the box shows the half")
+    fire(sl, "OnMouseUp", "LeftButton")
+    check(sl:GetValue() == 2.5, "offset grid: the thumb settles on it, not on the whole number")
+end
+
+-- SetRange re-scales the grid AND the precision it is rounded to: a bar flipped
+-- on to a range that starts on a half has to round on to halves from then on.
+do
+    local host = newHost(true)
+    local value = 2
+    local s = host:CreateSlider(pane(), {
+        label = "Delay", min = 1, max = 10, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    s:SetRange(0.5, 5.5)
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(3.4)
+    check(value == 3.5, "SetRange: the new min moved the grid, and its precision with it")
+    fire(sl, "OnMouseUp", "LeftButton")
+end
+
 -- ---- restore the globals -------------------------------------------
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 CreateColor, GetCursorPosition = prevCreateColor, prevCursor
