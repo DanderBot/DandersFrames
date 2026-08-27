@@ -14,7 +14,6 @@ Libs\DandersUI\DandersUI.xml
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 
 Locales\enUS.lua
-Undo.lua
 Solver.lua
 Registry.lua
 Core.lua

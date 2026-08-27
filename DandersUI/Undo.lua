@@ -2,12 +2,15 @@ local addonName, NS = ...
 
 -- ============================================================
 -- DANDERSUNDO-1.0
--- Generic undo/redo stacks. No knowledge of movers. Entries are closures.
+-- Generic undo/redo stacks. Host-agnostic; entries are closures.
+-- Lives in DandersUI so every host gets it from the shared kit.
+-- CallbackHandler is resolved lazily (first Undo:New), so hosts are free
+-- to list this manifest before or after CallbackHandler-1.0.
 -- ============================================================
-local MAJOR, MINOR = "DandersUndo-1.0", 1
+local MAJOR, MINOR = "DandersUndo-1.0", 2
 local Undo = LibStub:NewLibrary(MAJOR, MINOR)
 if not Undo then return end
-local CallbackHandler = LibStub("CallbackHandler-1.0")
+local CallbackHandler
 
 local tremove, tinsert = table.remove, table.insert
 local pcall, geterrorhandler = pcall, geterrorhandler
@@ -16,6 +19,7 @@ local Stack = {}
 Stack.__index = Stack
 
 function Undo:New(opts)
+    CallbackHandler = CallbackHandler or LibStub("CallbackHandler-1.0")
     local s = setmetatable({
         limit = (opts and opts.limit) or 100,
         entries = {},     -- undo stack, top at end
