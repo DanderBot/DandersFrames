@@ -26,8 +26,11 @@
 -- panel exactly beside it.
 --
 -- THE CORNERS BUTTON, the rounded-corner trial. Cycles Square (what we ship) ->
--- R4 -> R6 -> R8, swapping the row plates and, with a popout open, the panel's
--- own chrome -- its accent border becomes a rounded ring in the accent colour.
+-- R4 -> R6 -> R8, swapping FOUR surfaces at once: the row plates, this window
+-- itself, this window's title strip, and -- with a popout open -- the panel's own
+-- chrome and ITS title strip. The popout's accent border becomes a rounded ring
+-- in the accent colour; both title strips become top-corners-only surfaces so
+-- they follow the curve of the panel under them instead of squaring it off.
 -- PROTOTYPE: it drives UI:CreateRoundedSurface (DandersUI/Round.lua), which no
 -- real settings page touches, and Square restores the shipping look exactly.
 -- What it is FOR is judging whether the curve stays crisp at a real UI scale, so
@@ -386,8 +389,12 @@ end
 -- Danders actually plays at -- see the shimmer caveat in Round.lua's header --
 -- so cycle it with the Scale button and look at the curve, not at the colours.
 --
--- Two widths on screen at once, deliberately: the row plates take a 1px ring and
--- the popout's accent border takes 2px, which is the pair worth comparing. Note
+-- Two widths on screen at once, deliberately: the row plates and this window take
+-- a 1px ring and the popout's accent border takes 2px, which is the pair worth
+-- comparing. The two title strips carry NO ring at all -- they are a fill that has
+-- to follow the curve of the panel beneath them, not an outlined thing of their
+-- own, and giving them an edge would draw a second line where the separator
+-- already is. Note
 -- that neither is quite the square version's weight -- the kit's pixel border is
 -- 2 DEVICE pixels at 0.7 alpha, while these are 1 and 2 UI UNITS at full alpha
 -- -- so a rounded edge reads a little lighter at 1px and a little heavier at
@@ -453,15 +460,72 @@ local function squarePlate(plate)
     })
 end
 
+-- ---- the title strip ------------------------------------------------
+--
+-- ☠ THE SQUARE STRIP WAS PAINTING OVER THE ROUNDED CORNERS, and that is the whole
+-- of what "the title bar isn't rounded" turned out to be. `titleFill` is a flat
+-- texture on the popout's FRAME at ARTWORK sublevel 1, and ARTWORK is above the
+-- whole of BACKGROUND -- where the rounded surface lives. In SQUARE mode that is
+-- harmless, because the pixel border sits higher again (ARTWORK 7) and wins the
+-- edges. In rounded mode there is no pixel border to win them: the strip simply
+-- covered the two upper arcs with a square block of C_PANEL, which against the
+-- world behind the panel reads as an unmistakably square corner.
+--
+-- So in rounded mode the strip stops being that texture and becomes a SURFACE
+-- with tl/tr round and bl/br square, at the same radius as the panel, so its
+-- curve lies exactly on the panel fill's.
+--
+-- WHERE IT SITS, and why it needs Round's `sublevel` and `anchorTo` at all:
+--
+--     BACKGROUND -4   the panel's fill
+--     BACKGROUND -3   THIS -- the strip, over the fill...
+--     BACKGROUND -2   the panel's accent ring, over the strip
+--
+-- It has to be UNDER the ring or it eats the border along the top exactly the way
+-- the square texture did, and a texture is only under the ring if it is on the
+-- same frame (a child frame's regions draw above all of its parent's layers). So
+-- the surface goes on the popout FRAME at a sublevel of its own, measured against
+-- the title BAR's rect.
+local STRIP_SUBLEVEL = -3
+
+-- Fill tokens verbatim from Popout.lua's own titleFill: C_PANEL at PopoutTitle's
+-- alpha. Deliberately not "something that shows up better" -- the trial is about
+-- the SHAPE, and a strip that changed colour when it changed corners would make
+-- the two modes incomparable.
+local function roundStrip(frame, bar, radius)
+    return UI:CreateRoundedSurface(frame, {
+        radius   = radius,
+        corners  = { tl = true, tr = true },
+        border   = false,
+        fill     = { C.panel.r, C.panel.g, C.panel.b, UI.PopoutTitle.fill },
+        sublevel = STRIP_SUBLEVEL,
+        anchorTo = bar,
+    })
+end
+
+local function squareStrip(frame, titleFill)
+    local s = UI:GetRoundedSurface(frame, STRIP_SUBLEVEL)
+    if s then s:Hide() end
+    if titleFill then titleFill:Show() end
+end
+
 -- ---- the popout's own chrome ---------------------------------------
--- The panel backdrop and the accent border, which in rounded mode becomes the
--- rounded RING in the accent colour. The notch and the beam are left alone --
--- they are pointers, not chrome, and rounding them is a separate question.
+-- The panel backdrop, the accent border -- which in rounded mode becomes the
+-- rounded RING in the accent colour -- and the title strip above. The notch and
+-- the beam are left alone: they are pointers, not chrome, and rounding them is a
+-- separate question.
+--
+-- The SEPARATOR is left exactly as the library built it, full width and square.
+-- Note what that costs in rounded mode: it is at ARTWORK 2 and the ring is at
+-- BACKGROUND -2, so unlike the square mode's pixel border the ring does not win
+-- the edges, and the hairline runs the last two pixels ACROSS the accent border
+-- at both ends. Worth a look when judging the shape.
 local function paintPopoutChrome(po)
     local f, radius = po.frame, cornerRadius()
     if not radius then
         local rs = UI:GetRoundedSurface(f)
         if rs then rs:Hide() end
+        squareStrip(f, po.titleFill)
         return
     end
     -- The square backdrop has just been re-issued by the base _ApplyAccent (see
@@ -477,6 +541,10 @@ local function paintPopoutChrome(po)
         fill        = { C.panel.r, C.panel.g, C.panel.b, 1 },
         border      = { c.r, c.g, c.b, c.a or 1 },
     })
+    if po.titleFill and po.titleBar then
+        po.titleFill:Hide()
+        roundStrip(f, po.titleBar, radius)
+    end
 end
 
 -- Popout instances are POOLED per key and all four rows share one, so this runs
@@ -504,7 +572,45 @@ local function eachOpenPopout(fn)
     end
 end
 
-local function applyCorners(btn)
+-- ---- the demo window's own chrome ----------------------------------
+-- The window was the one surface the trial did not reach: its rows and its
+-- popouts rounded while the box they all sat in stayed hard-cornered, which made
+-- the shape impossible to judge as a whole -- a rounded panel standing against a
+-- square one reads as a mistake rather than as a look.
+--
+-- The same two moves as the popout, against the window's own tokens rather than
+-- an accent: CreatePanelBackdrop's C_PANEL fill and C_BORDER edge. ONE unit of
+-- ring, not the popout's two -- the popout's is heavier on purpose (it is the
+-- accent, and it is the shared-edge story), and a neutral window border matching
+-- the row plates keeps the demo showing both weights at once.
+local function paintWindowChrome(f)
+    local radius = cornerRadius()
+    if not radius then
+        local rs = UI:GetRoundedSurface(f)
+        if rs then rs:Hide() end
+        squareStrip(f, f.titleFill)
+        -- The ORIGINAL call, verbatim from buildWindow. Re-issues the backdrop and
+        -- re-shows the pixel border, the same way squarePlate restores a row.
+        GUI:CreatePanelBackdrop(f)
+        return
+    end
+    f:SetBackdrop(nil)
+    UI:HidePixelBorder(f)
+    UI:CreateRoundedSurface(f, {
+        radius      = radius,
+        borderWidth = 1,
+        fill        = { C.panel.r, C.panel.g, C.panel.b, C.panel.a or 1 },
+        border      = { C.border.r, C.border.g, C.border.b, 1 },
+    })
+    if f.titleFill and f.titleBar then
+        f.titleFill:Hide()
+        roundStrip(f, f.titleBar, radius)
+    end
+end
+
+-- The FRAME is passed in rather than read off the file-local `win`, for applyScale's
+-- reason: this runs once during buildWindow, before the toggle has assigned it.
+local function applyCorners(f, btn)
     local radius = cornerRadius()
     for _, r in pairs(rows) do
         if radius then roundPlate(r.plate, radius) else squarePlate(r.plate) end
@@ -513,6 +619,7 @@ local function applyCorners(btn)
         -- the rest colours the factory call above just wrote.
         r.Refresh()
     end
+    if f then paintWindowChrome(f) end
     -- _ApplyAccent is hooked, so this repaints the chrome in EITHER direction:
     -- rounded mode paints the ring, square mode reissues the panel backdrop and
     -- the hook then hides the rounded textures.
@@ -542,6 +649,31 @@ local function buildWindow()
     bar:RegisterForDrag("LeftButton")
     bar:SetScript("OnDragStart", function() f:StartMoving() end)
     bar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+    f.titleBar = bar
+
+    -- ⚠ ADDED FOR THE CORNER TRIAL, and it changes the SQUARE look too. The window
+    -- had no title strip at all -- no raised fill, no hairline -- so "round the
+    -- window's title bar the way the popout's is rounded" had nothing to round.
+    -- Giving it the strip in BOTH modes is what keeps the comparison honest: a
+    -- strip that only existed in rounded mode would make the two modes differ by
+    -- more than their corners, which is the one thing this button must not do.
+    --
+    -- Drawn exactly the way Popout.lua draws its own -- on the FRAME, not on the
+    -- bar, at ARTWORK 1 and 2, off the same PopoutTitle tokens. Same construction,
+    -- same result, and the demo window now stands in for a real settings window
+    -- instead of for a bare box.
+    local titleFill = f:CreateTexture(nil, "ARTWORK", nil, 1)
+    titleFill:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    titleFill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+    titleFill:SetColorTexture(C.panel.r, C.panel.g, C.panel.b, UI.PopoutTitle.fill)
+    f.titleFill = titleFill
+
+    local titleSep = f:CreateTexture(nil, "ARTWORK", nil, 2)
+    titleSep:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+    titleSep:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+    titleSep:SetHeight(1)
+    titleSep:SetColorTexture(C.border.r, C.border.g, C.border.b, UI.PopoutTitle.sepAlpha)
+    f.titleSep = titleSep
 
     local title = GUI:CreateLabelNative(bar, { text = "Popout Row Demo", size = 13, color = C.text })
     title:SetPoint("LEFT", PAD, 0)
@@ -589,14 +721,16 @@ local function buildWindow()
         tooltip = { title = "Corner Radius", lines = {
             "Cycle the demo between the square look we ship and rounded corners",
             "at radius 4, 6 and 8. PROTOTYPE -- nothing outside this window changes.",
-            "Swaps the row plates AND, with a popout open, the panel's own chrome:",
-            "its accent border becomes a rounded ring in the accent colour.",
+            "Swaps the row plates, this window and its title strip, and -- with a",
+            "popout open -- the panel's chrome and its title strip too: the accent",
+            "border becomes a rounded ring, and neither title bar squares off the",
+            "corners under it any more.",
             "THE question: are the corners crisp at your UI scale? Cycle the Scale",
             "button underneath each radius and watch the curve, not the colour.",
         } },
         onClick = function(self)
             cornerIndex = (cornerIndex % #CORNER_MODES) + 1
-            applyCorners(self)
+            applyCorners(f, self)
         end,
     })
     cornerBtn:SetPoint("RIGHT", scaleBtn, "LEFT", -6, 0)
@@ -699,7 +833,7 @@ local function buildWindow()
     -- Square on build, which is a no-op paint -- but it runs the same path the
     -- button does, so a broken restore shows up on the FIRST open rather than
     -- only after a full cycle back round to Square.
-    applyCorners(cornerBtn)
+    applyCorners(f, cornerBtn)
     -- Built hidden, so the first /df popoutdemo SHOWS it rather than toggling a
     -- window nobody has seen yet straight back off.
     f:Hide()
