@@ -90,6 +90,7 @@ local DATA_KEYS = {
     appliedColor = true, skipOnChange = true, defaultColor = true,
     hasAlpha = true, RefreshSavedSwatches = true, AddToRecent = true,
     defaultBtn = true, RegisterScaledSurface = true, CreateSegmentToggle = true,
+    dragBubble = true,
 }
 local function dataAwareMeta(_, k)
     if DATA_KEYS[k] then return nil end
@@ -394,6 +395,190 @@ do
     fire(sl, "OnMouseUp", "LeftButton")
     eq(commit, 3, "legacy: release adds no extra commit")
     eq(log.refreshNow, 0, "legacy: and asks for no extra sweep")
+end
+
+-- ============================================================
+-- 5b. THE DRAG BUBBLE
+-- A readout that floats over the thumb while the bar is HELD, so reading a drag
+-- does not mean looking away to the value box at the far right of the row.
+--
+-- What is under test is its LIFECYCLE and the number in it -- built on the first
+-- drag and not before, up for the whole gesture, gone after it, and always
+-- formatted by the same function the value box uses. Where it lands on screen is
+-- arithmetic the stub cannot check (it resolves no anchors), so the clamp is
+-- pinned by the ONE thing the stub does record: the offset handed to SetPoint.
+-- ============================================================
+do
+    local host = newHost(true)
+    local value = 10
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    eq(s.dragBubble, nil, "bubble: a slider that has never been dragged has not built one")
+
+    fire(sl, "OnMouseDown", "LeftButton")
+    local b = s.dragBubble
+    check(b ~= nil, "bubble: pressing the bar builds it")
+    check(b:IsShown(), "bubble: ...and puts it up at once, with the bar already jumped")
+    eq(b._flags.mouse, false, "bubble: it never takes the mouse off the gesture that summoned it")
+    eq(b:GetHeight(), 16, "bubble: one row's worth of readout")
+    eq(b.Text:GetText(), "10", "bubble: showing the value the bar is on")
+
+    -- The bar moves: the number tracks every tick, through UpdateFill -- the one
+    -- path every value change already goes down.
+    sl:SetValue(37)
+    eq(b.Text:GetText(), "37", "bubble: the number tracks the drag")
+    sl:SetValue(38)
+    eq(b.Text:GetText(), "38", "bubble: ...on every tick")
+
+    -- A fixed box, sized once. Digits are not equal width in any WoW font object,
+    -- so a box that fitted its text would breathe on every tick.
+    local w = b:GetWidth()
+    sl:SetValue(100)
+    eq(b:GetWidth(), w, "bubble: the box does not resize as the number gets longer")
+
+    fire(sl, "OnMouseUp", "LeftButton")
+    check(not b:IsShown(), "bubble: the release takes it down")
+
+    -- A second drag reuses the SAME bubble rather than building another.
+    fire(sl, "OnMouseDown", "LeftButton")
+    eq(s.dragBubble, b, "bubble: a second drag reuses the one it built")
+    check(b:IsShown(), "bubble: ...and puts it back up")
+    eq(b:GetAlpha(), 1, "bubble: at full alpha, whatever a cancelled fade-out left behind")
+    fire(sl, "OnMouseUp", "LeftButton")
+end
+
+-- The FORMAT is the value box's, not a second opinion. A sub-1 step is where the
+-- two would diverge if the bubble had its own idea of precision.
+do
+    local host = newHost(true)
+    local value = 0.5
+    local s = host:CreateSlider(pane(), {
+        label = "Alpha", min = 0, max = 1, step = 0.05,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl, input = s.slider, inputOf(s)
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(0.65)
+    eq(s.dragBubble.Text:GetText(), input:GetText(),
+       "bubble: the bubble and the value box always show the same string")
+    eq(s.dragBubble.Text:GetText(), "0.65", "bubble: ...at the step's own precision")
+    fire(sl, "OnMouseUp", "LeftButton")
+end
+
+-- ---- clamped inside the row ----------------------------------------
+-- At either end the bubble's centre would sit on the container's edge, putting
+-- half the box outside the settings group -- where the page's scroll frame clips
+-- it. The stub resolves no anchors, but it records the OFFSET, and that is the
+-- number the clamp produces.
+do
+    local host = newHost(true)
+    local value = 50
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    -- Give the stub a real row and track to measure against.
+    s:SetWidth(260)
+    -- The track is anchored TOPLEFT 0 and RIGHT to the value box, so its left IS
+    -- the container's left -- which is what lets one x serve both.
+    local track
+    for _, child in ipairs(s._children) do
+        if child._kind == "Frame" and child ~= s.dragBubble then track = child break end
+    end
+    check(track ~= nil, "bubble: found the track the arithmetic is measured off")
+    track:SetWidth(200)
+
+    fire(sl, "OnMouseDown", "LeftButton")
+    local b = s.dragBubble
+    local half = b:GetWidth() / 2
+
+    local function bubbleX()
+        local p, _, _, x = b:GetPoint(1)
+        eq(p, "BOTTOM", "bubble: it hangs by its bottom edge, above the thumb")
+        return x
+    end
+
+    sl:SetValue(50)
+    eq(bubbleX(), 1 + 0.5 * 198, "bubble: mid-bar it sits on the fill's leading edge")
+
+    sl:SetValue(0)
+    eq(bubbleX(), half, "bubble: at the LEFT end it is clamped inside the row")
+
+    -- The RIGHT end of a real row does not need the clamp -- the track stops at
+    -- the value box, well inside the container -- so the bubble stays on the
+    -- fill's edge there. The clamp is not a no-op though: widen the track to the
+    -- whole row (which is what a bar with no value box beside it would be) and
+    -- the far end starts to overhang.
+    sl:SetValue(100)
+    eq(bubbleX(), 199, "bubble: at the right end of a normal row it is NOT clamped")
+    track:SetWidth(260)
+    sl:SetValue(99); sl:SetValue(100)      -- re-run the placement at the new width
+    eq(bubbleX(), 260 - half, "bubble: ...but a full-width track is clamped inside the other edge")
+    fire(sl, "OnMouseUp", "LeftButton")
+end
+
+-- ---- a drag hidden mid-gesture ---------------------------------------
+-- The bubble comes down INSTANTLY here, not on a fade: the deferred Hide at the
+-- end of one would land on a page that has already been rebuilt, which is how a
+-- readout gets stranded over a row with no slider under it.
+do
+    local host = newHost(true)
+    local value = 10
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    fire(sl, "OnMouseDown", "LeftButton")
+    check(s.dragBubble:IsShown(), "bubble: up, mid-drag")
+    fire(sl, "OnHide")
+    check(not s.dragBubble:IsShown(), "bubble: a page torn down under a held bar takes it with it")
+end
+
+-- ---- the stolen mouseup takes it down too ----------------------------
+do
+    local host = newHost(true)
+    local value = 10
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    fire(sl, "OnMouseDown", "LeftButton")
+    IsMouseButtonDown = function() return false end
+    fire(sl, "OnUpdate")
+    IsMouseButtonDown = nil
+    check(not s.dragBubble:IsShown(), "bubble: a mouseup that went elsewhere still takes it down")
+end
+
+-- ---- and a LEGACY host (no drag hooks) gets one as well --------------
+-- Kit-wide by design: a consumer that does not take part in the preview/commit
+-- split still drags sliders, and the readout is about the gesture, not the
+-- commit strategy.
+do
+    local host = newHost(false)
+    local value = 10
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    fire(sl, "OnMouseDown", "LeftButton")
+    check(s.dragBubble and s.dragBubble:IsShown(), "bubble: a legacy host's slider shows one too")
+    sl:SetValue(44)
+    eq(s.dragBubble.Text:GetText(), "44", "bubble: ...and it tracks")
+    fire(sl, "OnMouseUp", "LeftButton")
+    check(not s.dragBubble:IsShown(), "bubble: ...and comes down on release")
 end
 
 -- ============================================================

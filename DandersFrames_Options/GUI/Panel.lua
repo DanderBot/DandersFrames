@@ -16,6 +16,11 @@ local C_PANEL, C_ELEMENT, C_BORDER, C_ACCENT, C_RAID, C_HOVER, C_TEXT, C_TEXT_DI
 -- The window's own ground. Only the window is drawn in it -- every panel inside
 -- is C_PANEL over it -- which is why it has not been needed in this file before.
 local C_BACKGROUND = GUI.Colors.background
+-- The BINDS tab's own accent. Not in GUI.Colors because it is not a MODE colour
+-- the theme tracks (party purple / raid orange are); it is one tab's identity.
+-- Hoisted out of its StyleButton call because the shared underline needs to wear
+-- it too, and the two must not be able to disagree.
+local C_CLICKS = { r = 0.2, g = 0.8, b = 0.4 }
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -554,6 +559,17 @@ function DF:CreateGUI()
         -- visible with a single SetParent and needs no state of its own.
         if GUI.ParkPage and GUI.Pages and GUI.CurrentPageName then
             GUI:ParkPage(GUI.Pages[GUI.CurrentPageName])
+        end
+        -- ...and the page that was cross-fading OUT, if the window was closed
+        -- inside the ~90ms of a tab switch (see THE PAGE CROSSFADE). Its own fade
+        -- can no longer finish -- hiding the window stops the animation -- so the
+        -- callback that would have parked it never runs, and it would sit
+        -- parented and shown until the next tab change. It IS hidden here, unlike
+        -- the current page above: nothing is coming back to it.
+        if GUI.ParkPage and GUI._fadingPage then
+            GUI._fadingPage:Hide()
+            GUI:ParkPage(GUI._fadingPage)
+            GUI._fadingPage = nil
         end
     end)
     
@@ -1347,20 +1363,30 @@ function DF:CreateGUI()
     -- centre onto the exact row the old absolute -32 put it on, so nothing in
     -- the header moves by a pixel.
     btnParty:SetPoint("LEFT", deck2, "LEFT", SnapLen(btnParty, 12), 1)
-    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives it.
-    GUI:StyleButton(btnParty, { tab = true, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
+    -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives the
+    -- label colour and the cell. `tabStripe = false` on all three: the three
+    -- underlines are ONE bar that glides between them (modeUnderline below), not
+    -- three stripes switching off here and on there.
+    GUI:StyleButton(btnParty, { tab = true, tabStripe = false, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
 
     local btnRaid = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
-    GUI:StyleButton(btnRaid, { tab = true, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI:StyleButton(btnRaid, { tab = true, tabStripe = false, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.RaidButton = btnRaid  -- Store for external access
 
     -- Click Casting tab button
     local btnClicks = CreateFrame("Button", nil, deck2, "BackdropTemplate")
     btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
-    GUI:StyleButton(btnClicks, { tab = true, text = L["BINDS"], accent = { r = 0.2, g = 0.8, b = 0.4 }, width = 70, height = 24, font = "DFFontHighlight" })
+    GUI:StyleButton(btnClicks, { tab = true, tabStripe = false, text = L["BINDS"], accent = C_CLICKS, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
+
+    -- ONE underline for the three mode tabs, which GLIDES from the tab that was
+    -- active to the one that now is (UI:CreateSelectionMarker). Parented to deck
+    -- 2 rather than to a tab, so it can sit BETWEEN two of them mid-glide.
+    -- UpdateThemeColors drives it, right where the three SetActive calls are.
+    local modeUnderline = GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })
+    GUI.ModeUnderline = modeUnderline
 
     -- =========================================================================
     -- DECK 2 RIGHT CLUSTER: undo / redo / Test / Unlock / override marker
@@ -1701,10 +1727,24 @@ function DF:CreateGUI()
     
     local function UpdateThemeColors()
         -- Mode buttons use the shared underline-tab style; SetActive drives the
-        -- underline + accent label (each button's per-mode accent set at creation).
+        -- accent label + the cell (each button's per-mode accent set at creation).
         btnParty:SetActive(GUI.SelectedMode == "party")
         btnRaid:SetActive(GUI.SelectedMode == "raid")
         btnClicks:SetActive(GUI.SelectedMode == "clicks")
+        -- ...and the UNDERLINE is the one shared bar, glided onto whichever of
+        -- the three is active and wearing that tab's own accent from the moment
+        -- it sets off.
+        --
+        -- ⚠ INSTANT WHILE THE WINDOW IS HIDDEN. This runs on every OnShow (see
+        -- the note below the function), and a glide nobody can see would only
+        -- leave the bar mid-flight for the next visible one to start from.
+        local activeMode = (GUI.SelectedMode == "raid" and btnRaid)
+            or (GUI.SelectedMode == "clicks" and btnClicks)
+            or btnParty
+        local activeModeAccent = (activeMode == btnRaid and C_RAID)
+            or (activeMode == btnClicks and C_CLICKS)
+            or C_ACCENT
+        modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())
 
         -- Test button look via the shared toggle styling (matches how the Lock
         -- button is refreshed below). The old inline version painted a stray
@@ -1742,15 +1782,23 @@ function DF:CreateGUI()
 
         -- Update active tab
         local nc = GetThemeColor()
+        -- ⚠ GUI.navMarker, not the local: the nav is built ~400 lines BELOW this
+        -- function, so the upvalue does not exist yet at this point in the file
+        -- and a bare `navMarker` here would resolve as a global. (modeUnderline
+        -- above is fine -- deck 2 is built first.) Guarded for the same reason:
+        -- this can run before the nav exists.
+        local rail = GUI.navMarker
         for name, btn in pairs(GUI.Tabs) do
             if btn.isActive and not btn.disabled then
-                btn.accent:SetColorTexture(nc.r, nc.g, nc.b, 1)
+                -- The rail is already ON this row (SelectTab put it there); a mode
+                -- switch only has to repaint it, which must NOT move it.
+                if rail then rail:SetTo(btn, nc, true) end
                 btn.Text:SetTextColor(nc.r, nc.g, nc.b)
                 btn.Text:SetAlpha(1)
             elseif btn.disabled then
                 btn.Text:SetTextColor(0.4, 0.4, 0.4)
                 btn.Text:SetAlpha(1)
-                if btn.accent then btn.accent:Hide() end
+                if rail then rail:ClearIf(btn) end
             end
         end
         
@@ -2022,7 +2070,13 @@ function DF:CreateGUI()
     tabScroll:SetPoint("TOPLEFT", navPad, tabScrollStartY)
     tabScroll:SetPoint("BOTTOMRIGHT", navRight, navPad)
 
-    StyleScrollBar(tabScroll)
+    -- OVERLAY, like the pages' bars: the nav and the page are the two panes the
+    -- user is looking at while they work, they are pinned into gutters of exactly
+    -- the same width, and a hairline on one beside a full bar on the other would
+    -- read as a mistake. Every OTHER scroll pane in the addon (dialogs, pickers,
+    -- the changelog) keeps the plain bar -- those are places you arrive at to
+    -- scroll, where the bar being obvious is the point.
+    StyleScrollBar(tabScroll, { overlay = true })
     -- Custom positioning for tab scrollbar
     if tabScroll.ScrollBar then
         tabScroll.ScrollBar:ClearAllPoints()
@@ -2088,6 +2142,18 @@ function DF:CreateGUI()
         navHover.owner = nil
     end
 
+    -- ...and ONE selection rail for the whole nav, by the same argument as the
+    -- plate above it: the left accent bar used to be a texture on every row,
+    -- switched off on the row being left and on on the row being entered, and two
+    -- textures changing in one frame is a pair nothing can synchronise. This one
+    -- bar GLIDES vertically between rows instead (UI:CreateSelectionMarker).
+    --
+    -- Parented to tabContainer, the SCROLL CHILD, so it scrolls with the rows it
+    -- marks -- and hides with whichever row it is on when a category collapses,
+    -- which the marker arranges for itself.
+    local navMarker = GUI:CreateSelectionMarker(tabContainer, { axis = "y", thickness = 3 })
+    GUI.navMarker = navMarker
+
 
     -- Content area (right side) - no BackdropTemplate in CreateFrame
     -- ★ THE content panel, and therefore the ancestor of every page viewport --
@@ -2146,8 +2212,17 @@ function DF:CreateGUI()
 
     -- Move a page out of the window's frame tree. Idempotent and cheap; the page
     -- is expected to be hidden already (every caller hides first).
+    --
+    -- ★ A PARKED PAGE IS ALWAYS AT ALPHA 1, and this is the one place that can
+    -- guarantee it. Pages cross-fade on a tab switch (see THE PAGE CROSSFADE), so
+    -- a page can be part-way through a fade when something ELSE decides to put it
+    -- away -- a second tab click, the window closing, search's index pass sweeping
+    -- all 34 of them. Fx.Cancel stops whatever was running and restores the
+    -- resting alpha, so no path can leave a page in the dock at 0.3 to come back
+    -- translucent later. Free when nothing is animating.
     function GUI:ParkPage(page)
         if not page or page._parked then return end
+        if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end
         page:SetParent(GUI._pageDock)
         page._parked = true
     end
@@ -2444,16 +2519,42 @@ function DF:CreateGUI()
         -- verbs. Guarded for an older embedded copy of the pack.
         if GUI.CloseUnpinnedPopoutRows then GUI:CloseUnpinnedPopoutRows("pageSwitch") end
 
+        -- ★ THE PAGE CROSSFADE.
+        -- ------------------------------------------------------------
+        -- The page being left fades out while the page arriving fades in, over
+        -- each other. Every page is anchored to the SAME two corners of `content`,
+        -- so the two occupy the identical rect and there is no layout to jump --
+        -- which is what makes a crossfade the right shape here rather than a
+        -- fade-out followed by a fade-in. Sequencing them would put ~90ms of
+        -- nothing-happening in front of every tab click, and a tab click that does
+        -- not respond for a tenth of a second reads as lag, not as polish.
+        --
+        -- ⚠ ONLY WHEN THERE IS SOMETHING TO CROSS-FADE FROM: a visible outgoing
+        -- page, a different one arriving, and a window already on screen. The
+        -- FIRST page of a window-open gets nothing -- the window itself is fading
+        -- in around it, and a second fade inside that one only reads as slow.
+        local fading = frame:IsShown()
+            and leavingTab and leavingTab ~= name
+            and GUI.Pages[leavingTab] or nil
+        if fading and not fading:IsShown() then fading = nil end
+
         -- Hide every page, and PARK the ones we are not about to show. Hiding
         -- alone is what the eight-second window open was made of: a hidden page
         -- still parented under the window is a subtree the engine walks on every
         -- Show and Hide of it. See THE PAGE DOCK.
+        --
+        -- ...except the one that is fading: it stays shown, and parks itself at
+        -- the end of its own fade. Everything else here is unchanged.
         for k, page in pairs(GUI.Pages) do
-            page:Hide()
-            if k ~= name then GUI:ParkPage(page) end
+            if page ~= fading then
+                page:Hide()
+                if k ~= name then GUI:ParkPage(page) end
+            end
         end
+        -- The rail is not cleared here: it is about to be GLIDED onto the new row
+        -- further down, and taking it off screen first is exactly the blink the
+        -- shared marker exists to remove.
         for k, btn in pairs(GUI.Tabs) do
-            if btn.accent then btn.accent:Hide() end
             -- Check if tab is disabled (e.g., during Auto Profile editing)
             if btn.disabled then
                 btn.Text:SetTextColor(0.4, 0.4, 0.4)
@@ -2518,12 +2619,36 @@ function DF:CreateGUI()
             GUI.Pages[name]:RefreshCached()
             if GUI.Pages[name].RefreshStates then GUI.Pages[name]:RefreshStates() end
         end
+
+        -- The crossfade itself, AFTER the incoming page has been adopted, shown,
+        -- rebuilt and re-stated. Everything expensive about a tab switch happens
+        -- between those lines, and a fade started before it would simply stall on
+        -- the build -- and would show a frame of half-laid-out page while it did.
+        -- Nothing renders between the Show above and the FadeIn here: it is all
+        -- one frame.
+        if fading then
+            -- Tracked so the window's OnHide can finish the job if it is closed
+            -- inside the fade -- a stopped animation never calls its onDone.
+            GUI._fadingPage = fading
+            GUI.Fx.FadeOut(fading, 0.09, function()
+                if GUI._fadingPage == fading then GUI._fadingPage = nil end
+                -- ⚠ ASK AGAIN BEFORE HIDING. Fx already skips a cancelled fade's
+                -- onDone, and hiding a frame cancels its animations -- but "hide
+                -- and park this page" is exactly the deferred callback you do not
+                -- want landing on a page the user has clicked straight back to.
+                -- Spamming two tabs must not be able to park the one on screen.
+                if GUI.Pages[GUI.CurrentPageName] == fading then return end
+                fading:Hide()
+                GUI:ParkPage(fading)
+            end)
+            if GUI.Pages[name] then GUI.Fx.FadeIn(GUI.Pages[name], 0.12) end
+        end
         local nc = GetThemeColor()
         if GUI.Tabs[name] then
-            if GUI.Tabs[name].accent then
-                GUI.Tabs[name].accent:Show()
-                GUI.Tabs[name].accent:SetColorTexture(nc.r, nc.g, nc.b, 1)
-            end
+            -- The rail glides down (or up) from the row being left. Instant while
+            -- the window is hidden -- the first SelectTab of a session runs before
+            -- it is ever shown, and a glide out of a stale row is worse than none.
+            navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())
             GUI.Tabs[name].Text:SetTextColor(nc.r, nc.g, nc.b)
             GUI.Tabs[name].isActive = true
             -- Mark "New" badge as seen
@@ -2694,13 +2819,11 @@ function DF:CreateGUI()
         btn.tabName = name
         btn.categoryName = categoryName
         
-        -- Left accent bar
-        btn.accent = btn:CreateTexture(nil, "OVERLAY")
-        btn.accent:SetPoint("TOPLEFT", 0, 0)
-        btn.accent:SetPoint("BOTTOMLEFT", 0, 0)
-        btn.accent:SetWidth(3)
-        btn.accent:Hide()
-        
+        -- ★ NO LEFT ACCENT BAR OF ITS OWN. The selected row's 3px rail is the
+        -- nav's ONE shared marker (navMarker), glided onto this row when it is
+        -- selected -- see the note beside it. A row that carried its own would
+        -- put two bars on screen during the glide.
+
         btn.Text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         btn.Text:SetPoint("LEFT", 24, 0)
         btn.Text:SetText(label)
@@ -2775,7 +2898,10 @@ function DF:CreateGUI()
         page:SetPoint("TOPLEFT", content, "TOPLEFT", inset, -inset)
         page:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -gutter, inset)
 
-        StyleScrollBar(page)
+        -- OVERLAY (see the nav's bar for why these two and nothing else). The
+        -- gutter it is pinned into is unchanged: the WIDE state still fills
+        -- bar+pad exactly, and the idle state leaves part of it as air.
+        StyleScrollBar(page, { overlay = true })
         -- Against `content`, not against the page: the bar hugs the CONTENT
         -- BOX's inner right edge, which is the window's own margin away from the
         -- window edge. Left on ScrollFrameTemplate's own anchors it floated

@@ -414,6 +414,74 @@ do
     check(adoptAt and showAt and adoptAt < showAt,
           "panel: ...and adopts it BEFORE showing it, never while detached")
 
+    -- ---- THE PAGE CROSSFADE, and its four safety rails ---------------
+    -- Pages cross-fade on a tab switch: they occupy the identical rect, so both
+    -- can be visible for ~90ms with no layout to jump. That puts a page in a
+    -- state the parking work was built to prevent -- shown, parented, and NOT the
+    -- current one -- so every way out of it is pinned here.
+    --
+    -- 1. It only happens when there is something to cross-fade FROM: a visible
+    --    outgoing page, a different one arriving, and a window already on screen.
+    --    The first page of a window-open gets none of it.
+    has("local fading = frame:IsShown()", "the crossfade needs a window already on screen")
+    has("and leavingTab and leavingTab ~= name", "...a DIFFERENT page to arrive at")
+    has("if fading and not fading:IsShown() then fading = nil end",
+        "...and an outgoing page that is actually visible")
+    -- 2. The fading page is the ONE page the hide/park loop skips.
+    has("if page ~= fading then", "the loop leaves the fading page shown, and only that one")
+    -- 3. The fades start AFTER the incoming page is adopted, shown and rebuilt --
+    --    the expensive part of a tab switch -- so nothing stalls mid-animation and
+    --    no half-laid-out page is ever rendered.
+    local buildAt = src:find("GUI.Pages[name]:RefreshCached()", 1, true)
+    local fadeAt  = src:find("GUI.Fx.FadeOut(fading, 0.09", 1, true)
+    local fadeInAt = src:find("GUI.Fx.FadeIn(GUI.Pages[name], 0.12)", 1, true)
+    check(buildAt and fadeAt and buildAt < fadeAt,
+          "panel: the crossfade starts after the incoming page is built, not before")
+    check(fadeInAt and fadeAt < fadeInAt, "panel: out and in are started together")
+    -- 4. Three ways the fade can be interrupted, and none of them may strand a
+    --    page: the deferred park asks again before firing, the window's close
+    --    finishes the job the stopped animation cannot, and PARKING ITSELF
+    --    cancels -- which is what makes "a parked page is at alpha 1" true for
+    --    every caller, search's index pass included.
+    has("if GUI.Pages[GUI.CurrentPageName] == fading then return end",
+        "the deferred park re-checks, so spamming two tabs cannot park the visible one")
+    has("if GUI.ParkPage and GUI._fadingPage then",
+        "closing the window inside a fade still parks the page that was leaving")
+    local parkAt = src:find("function GUI:ParkPage(page)", 1, true)
+    local cancelAt = src:find("if GUI.Fx and GUI.Fx.Cancel then GUI.Fx.Cancel(page) end", 1, true)
+    check(parkAt and cancelAt and cancelAt > parkAt and cancelAt - parkAt < 400,
+          "panel: ParkPage cancels any running fade, so a parked page is never left translucent")
+
+    -- ---- the shell's TWO shared selection markers --------------------
+    -- The behaviour is UI:CreateSelectionMarker's and is tested against the real
+    -- factory in test_selection_marker.lua. What only the source can say is that
+    -- the shell actually WIRED it -- and, the part that would silently draw two
+    -- bars at once, that no member still carries a stripe of its own.
+    has('GUI:CreateSelectionMarker(deck2, { axis = "x", thickness = 3 })',
+        "the mode tabs share one underline, parented to deck 2")
+    has('GUI:CreateSelectionMarker(tabContainer, { axis = "y", thickness = 3 })',
+        "...and the nav shares one rail, parented to the scroll child so it scrolls")
+    has("modeUnderline:SetTo(activeMode, activeModeAccent, not frame:IsShown())",
+        "the underline follows the active mode, instant while the window is hidden")
+    has("navMarker:SetTo(GUI.Tabs[name], nc, not frame:IsShown())",
+        "...and the rail follows the selected page, by the same rule")
+    -- Three tabs, three opt-outs -- plus the one in the comment that explains it.
+    eq(countOf("tabStripe = false"), 4,
+       "panel: all three mode tabs decline StyleButton's own stripe")
+    check(src:find("btn.accent", 1, true) == nil,
+          "panel: and no nav row builds a left accent bar of its own any more")
+
+    -- ---- the two OVERLAY scroll panes --------------------------------
+    -- The variant's own behaviour is tested against the real Theme.lua in
+    -- test_overlay_scrollbar.lua. Source can only say which panes opted in --
+    -- and the point of pinning it is that it is exactly TWO: the nav and the
+    -- page, the panes you look at while you work. Everything else in the addon
+    -- (dialogs, pickers, the changelog on this very file) keeps the plain bar.
+    has("StyleScrollBar(tabScroll, { overlay = true })", "the nav's bar is an overlay")
+    has("StyleScrollBar(page, { overlay = true })", "...and so is every settings page's")
+    eq(countOf("overlay = true"), 2, "panel: and nothing else in the window opted in")
+    has("StyleScrollBar(clScroll)", "the changelog pane keeps the plain bar")
+
     -- ---- the window's own two edges ---------------------------------
     local onShowAt = src:find('frame:HookScript("OnShow"', 1, true)
     local onHideAt = src:find('frame:SetScript("OnHide"', 1, true)

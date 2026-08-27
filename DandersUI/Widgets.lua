@@ -320,6 +320,13 @@ function UI:StyleButton(btn, opts)
     -- (dim label when inactive). Driven by SetActive, like a toggle. Distinct from
     -- the legacy `isTab` filled-sidebar branch in restBackdrop.
     local isTabStyle = opts.tab
+    -- opts.tabStripe = false: an underline tab in every other respect -- the
+    -- transparent cell, the accent label, the same SetActive -- but with NO stripe
+    -- of its own. For a group whose selection is carried by ONE shared bar that
+    -- GLIDES between members (UI:CreateSelectionMarker) rather than N stripes
+    -- switching off here and on there. Everything downstream already guards on
+    -- `btn.dfTabStripe`, so a button without one is a no-op at every site.
+    local wantStripe = isTabStyle and opts.tabStripe ~= false
     -- Ghost action (opts.ghost): transparent like a tab but with no underline — an
     -- accent label + faint hover wash. For quiet inline actions (e.g. "+ Add").
     local ghost = opts.ghost
@@ -346,7 +353,7 @@ function UI:StyleButton(btn, opts)
     hl:SetAllPoints(btn)
     btn.Highlight = hl
 
-    if isTabStyle then
+    if wantStripe then
         local stripe = btn:CreateTexture(nil, "OVERLAY")
         stripe:SetTexture("Interface\\Buttons\\WHITE8x8")
         stripe:SetHeight(3)
@@ -632,6 +639,140 @@ function UI:StyleButton(btn, opts)
     return btn
 end
 
+-- ============================================================
+-- A GROUP'S SELECTION MARKER
+-- ------------------------------------------------------------
+-- ONE accent bar for a whole group of tabs or nav rows, which GLIDES from the
+-- member that was selected to the one that now is -- in place of a per-member
+-- stripe that blinks off here and on there.
+--
+-- Why a shared bar and not N stripes, beyond the motion: two textures switching
+-- in the same frame is a pair that has to be synchronised, and Lua cannot
+-- observe which of the two changes the client lands first. That is the same
+-- argument the settings nav's single hover PLATE was built on. A bar that only
+-- ever moves has no pair, so no frame can show two markers or none.
+--
+-- opts:
+--   axis       "x" -- an UNDERLINE spanning the member's bottom edge (a row of
+--              mode tabs), or "y" -- a RAIL down its left edge (a list of nav
+--              rows). Default "x".
+--   thickness  the bar's short dimension. Default 3, matching the tab stripe
+--              StyleButton draws when a group does NOT share one of these.
+--   duration   the glide, in seconds. Default 0.12.
+--   color      the resting colour; SetTo's own colour argument wins per call.
+--
+-- Parented to the group's CONTAINER, never to a member: it has to be able to sit
+-- BETWEEN two members mid-glide, and it has to outlive any one of them being
+-- re-anchored by a relayout.
+--
+-- marker:SetTo(target, color, instant)   glide onto `target`; nil clears it
+-- marker:Clear()                         hide it (the next SetTo is instant)
+-- marker:ClearIf(target)                 hide it only if it marks `target`
+-- marker:GetOwner()                      the member it currently marks, or nil
+--
+-- ⚠ INSTANT UNLESS BOTH ENDS ARE VISIBLE. A marker with no previous member, one
+-- whose previous member has since been hidden (a collapsed nav category), or one
+-- that is not itself on screen, has nowhere to glide FROM -- it would sweep in
+-- from a stale position, which reads worse than the blink it replaces. Passing
+-- `instant` forces the same, and that is what a window that is not shown yet
+-- should pass.
+function UI:CreateSelectionMarker(parent, opts)
+    opts = opts or {}
+    local host = self
+    local axis = opts.axis == "y" and "y" or "x"
+    local thickness = opts.thickness or 3
+    local dur = opts.duration or 0.12
+
+    local marker = CreateFrame("Frame", nil, parent)
+    -- Above the members it marks: a member's own backdrop is drawn at the
+    -- container's level, and the bar rides its edge.
+    marker:SetFrameLevel((parent:GetFrameLevel() or 1) + 5)
+    marker:EnableMouse(false)      -- must never take a click off the tab it marks
+    if axis == "x" then marker:SetHeight(thickness) else marker:SetWidth(thickness) end
+    local tex = marker:CreateTexture(nil, "OVERLAY")
+    tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+    tex:SetAllPoints(marker)
+    marker.Texture = tex
+    marker:Hide()
+
+    -- The two anchors the axis implies. The bar takes the member's full length
+    -- on the long axis, so it grows and shrinks with a translated label without
+    -- anyone measuring anything.
+    local function Place(target)
+        marker:ClearAllPoints()
+        if axis == "x" then
+            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", 0, 0)
+            marker:SetPoint("BOTTOMRIGHT", target, "BOTTOMRIGHT", 0, 0)
+        else
+            marker:SetPoint("TOPLEFT", target, "TOPLEFT", 0, 0)
+            marker:SetPoint("BOTTOMLEFT", target, "BOTTOMLEFT", 0, 0)
+        end
+    end
+
+    -- ⚠ THE MARKER IS NOT A CHILD OF WHAT IT MARKS, so hiding that member no
+    -- longer takes the bar down with it -- a per-member stripe got that for free.
+    -- Collapsing the nav category the selected page lives in would otherwise
+    -- leave the rail floating beside whichever row moved up into its place.
+    -- Hooked once per member; the hooks only ever act while that member is still
+    -- the one being marked.
+    --
+    -- ☠ THE OWNER IS AN UPVALUE, NOT A FIELD ON THE MARKER. Reading it back off
+    -- the frame would be one more place where "has this been set" is asked of a
+    -- frame -- and every consumer of this kit that runs headless answers an unset
+    -- field with a truthy no-op function, so `local prev = self.owner` would hand
+    -- the glide test a function to call IsShown on. Private state stays private;
+    -- GetOwner is the read.
+    local owner
+    local hooked = {}
+    local function Follow(target)
+        if hooked[target] then return end
+        hooked[target] = true
+        target:HookScript("OnHide", function(s) if owner == s then marker:Hide() end end)
+        target:HookScript("OnShow", function(s) if owner == s then marker:Show() end end)
+    end
+
+    function marker:SetTo(target, color, instant)
+        if not target then return self:Clear() end
+        local c = color or opts.color or host:GetAccent()
+        -- The colour swaps at the START of the glide, so the bar leaves the old
+        -- member already wearing the new one's accent. A party -> raid switch
+        -- then reads as one movement rather than as a colour event and a
+        -- position event that happen to overlap.
+        if c then tex:SetColorTexture(c.r, c.g, c.b, c.a or 1) end
+        local prev = owner
+        owner = target
+        Follow(target)
+        local canGlide = not instant and prev and prev ~= target and self:IsShown()
+            and prev.IsShown and prev:IsShown()
+        if canGlide and UI.Fx and UI.Fx.MoveTo then
+            UI.Fx.MoveTo(self, function() Place(target) end, dur)
+        else
+            Place(target)
+        end
+        self:Show()
+        return self
+    end
+
+    function marker:Clear()
+        if UI.Fx and UI.Fx.Cancel then UI.Fx.Cancel(self) end
+        owner = nil
+        self:Hide()
+        return self
+    end
+
+    -- "Stop marking this one, if it is the one you are marking." For a member
+    -- that is being taken out of play (a nav row disabled while an auto profile
+    -- is being edited) without the group having decided what is selected instead.
+    function marker:ClearIf(target)
+        if target and owner == target then self:Clear() end
+        return self
+    end
+
+    function marker:GetOwner() return owner end
+
+    return marker
+end
+UI.CreateSelectionMarkerNative = UI.CreateSelectionMarker
 
 
 function UI:CreateCloseButton(parent, opts)
@@ -1666,6 +1807,13 @@ function UI:CreateSlider(parent, opts)
     input:SetAutoFocus(false)
     input:SetTextInsets(2, 2, 0, 0)
     
+    -- The drag bubble's repaint, forward-declared: UpdateFill is the one place
+    -- every path that moves the bar goes through (a drag tick, a typed value, a
+    -- panel resize), so the bubble rides it rather than being poked from four
+    -- call sites. Assigned further down, once FormatValue exists -- the guard
+    -- covers the initial UpdateValue that runs before then.
+    local RefreshBubble
+
     local function UpdateFill()
         local val = slider:GetValue()
         local pct = (val - minVal) / (maxVal - minVal)
@@ -1675,6 +1823,7 @@ function UI:CreateSlider(parent, opts)
         local usable = (track:GetWidth() or 0) - 2
         if usable < 1 then usable = 1 end
         fill:SetWidth(math.max(1, pct * usable))
+        if RefreshBubble then RefreshBubble() end
     end
     -- The track's width is only known once the page layout has resolved its
     -- anchors, and changes again if the panel is resized -- so repaint the fill
@@ -1735,6 +1884,106 @@ function UI:CreateSlider(parent, opts)
         end
     end
     
+    -- ============================================================
+    -- THE DRAG BUBBLE
+    -- ------------------------------------------------------------
+    -- While the bar is HELD, a small readout floats over the thumb and moves with
+    -- it. The number in it is the same number the value box shows -- FormatValue,
+    -- the one function -- so the two can never disagree about how many decimals a
+    -- 0.05-step bar has.
+    --
+    -- Why it is worth having when the box already shows the value: the box is at
+    -- the far RIGHT of the row and the thumb can be anywhere along it, so reading
+    -- a drag means looking away from what you are doing. The bubble puts the
+    -- number where the eye already is.
+    --
+    -- ⚠ BUILT ON THE FIRST DRAG, not at construction. A settings page is hundreds
+    -- of rows and almost none of them are ever dragged; a bubble per slider up
+    -- front is a frame and a font string each for nothing.
+    --
+    -- ⚠ NEVER TAKES THE MOUSE. It sits directly over the bar being dragged, so
+    -- mouse input on it would be input stolen from the gesture that summoned it.
+    --
+    -- ⚠ FIXED WIDTH, sized once to the widest value the bar can show. WoW has no
+    -- tabular-figure font object, so digits are NOT equal width and a box that
+    -- fitted its text would breathe in and out on every tick -- far more
+    -- distracting than the number it is showing. A fixed box with centred text is
+    -- the achievable half of tabular numbers.
+    local bubble
+    local function EnsureBubble()
+        if bubble then return bubble end
+        bubble = CreateFrame("Frame", nil, container, "BackdropTemplate")
+        bubble:EnableMouse(false)
+        bubble:SetFrameLevel((container:GetFrameLevel() or 0) + 10)
+        CreateElementBackdrop(bubble)     -- the kit's own element fill + border
+        bubble.Text = bubble:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        bubble.Text:SetPoint("CENTER", 0, 0)
+        bubble.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        -- The widest thing it will ever have to hold: the longer of the two ends,
+        -- plus the decimals a sub-1 step introduces between them (a 0..1 bar at
+        -- step 0.05 formats its ENDS as "0" and "1" and its middle as "0.65").
+        local sample = FormatValue(maxVal)
+        if #FormatValue(minVal) > #sample then sample = FormatValue(minVal) end
+        if step < 1 then sample = sample .. ".00" end
+        bubble.Text:SetText(sample)
+        bubble:SetSize(math.max(28, math.ceil(bubble.Text:GetStringWidth() or 0) + 10), 16)
+        bubble:Hide()
+        container.dragBubble = bubble     -- exposed for the tests and for a consumer
+        return bubble
+    end
+
+    -- Where it sits: centred on the fill's leading edge -- the same arithmetic
+    -- UpdateFill uses, so the bubble and the bar cannot drift -- and then CLAMPED
+    -- inside the container. Without the clamp a bar at either end pushes half the
+    -- box outside the settings group, where the page's scroll frame clips it.
+    --
+    -- Track-left IS container-left (the track is anchored TOPLEFT 0), which is
+    -- what lets one x serve both.
+    local function PlaceBubble()
+        if not bubble then return end
+        local span = maxVal - minVal
+        local pct = span > 0 and ((slider:GetValue() - minVal) / span) or 0
+        local usable = (track:GetWidth() or 0) - 2
+        if usable < 1 then usable = 1 end
+        local half = (bubble:GetWidth() or 0) / 2
+        local cw = container:GetWidth() or 0
+        local x = 1 + pct * usable
+        if cw > half * 2 then
+            x = math.max(half, math.min(cw - half, x))
+        end
+        bubble:ClearAllPoints()
+        -- Bottom edge 12 below the container's top, i.e. just clear of the 16px
+        -- thumb that straddles the track at -18.
+        bubble:SetPoint("BOTTOM", container, "TOPLEFT", x, -12)
+    end
+
+    RefreshBubble = function()
+        if not (bubble and bubble:IsShown()) then return end
+        bubble.Text:SetText(FormatValue(slider:GetValue()))
+        PlaceBubble()
+    end
+
+    local function ShowBubble()
+        local b = EnsureBubble()
+        if UI.Fx and UI.Fx.Cancel then UI.Fx.Cancel(b) end   -- a fade-out still running
+        b:Show()
+        b:SetAlpha(1)
+        RefreshBubble()
+    end
+
+    -- Fades rather than blinking out: the release is the end of a gesture, and a
+    -- readout that vanishes on the same frame as the mouseup reads as a glitch.
+    -- Via Fx so a second drag started inside the fade cancels it (ShowBubble
+    -- above) instead of racing the deferred Hide.
+    local function HideBubble()
+        if not (bubble and bubble:IsShown()) then return end
+        if UI.Fx and UI.Fx.FadeOut then
+            UI.Fx.FadeOut(bubble, 0.15, function() bubble:Hide() end)
+        else
+            bubble:Hide()
+        end
+    end
+
     -- Wrapper for both pathways: customGet/Set when provided, dbTable[dbKey]
     -- otherwise. Centralising this avoids a sprinkling of `if customGet then`
     -- across every place the slider touches its value.
@@ -1794,6 +2043,7 @@ function UI:CreateSlider(parent, opts)
         isDragging = false
         slider:SetScript("OnUpdate", nil)
         pendingValue, lastPreviewed = nil, nil
+        HideBubble()
 
         host:Call("onDragStop")
         if callback then callback() end
@@ -1832,6 +2082,10 @@ function UI:CreateSlider(parent, opts)
     slider:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" then
             isDragging = true
+            -- Up before anything else in the gesture: the bar has already jumped
+            -- to where it was pressed, so the readout should be there with it.
+            -- Kit-wide, so every consumer's sliders get it (the mover's included).
+            ShowBubble()
             local funcName = lightweightUpdate and ((dbKey or label or "slider") .. " lightweight") or nil
             host:Call("onDragStart", lightweightUpdate, funcName, sliderUsePreviewMode)
             if hasDragHooks then
@@ -1854,6 +2108,7 @@ function UI:CreateSlider(parent, opts)
         -- to do here but the bookkeeping and the indicators.
         if isDragging then
             isDragging = false
+            HideBubble()
             host:Call("onDragStop")
             -- Update override indicators after drag ends
             if container.UpdateOverrideIndicators then
@@ -1879,6 +2134,15 @@ function UI:CreateSlider(parent, opts)
             slider:SetScript("OnUpdate", nil)
             pendingValue, lastPreviewed = nil, nil
             host:Call("onDragStop")
+        end
+        -- ...and the bubble goes down INSTANTLY, outside the isDragging guard.
+        -- A fade is an animation on a frame whose ancestor is being torn down, and
+        -- the deferred Hide at the end of it would land on a page that has already
+        -- been rebuilt -- which is how a readout gets stranded over a row that no
+        -- longer has a slider under it.
+        if bubble and bubble:IsShown() then
+            if UI.Fx and UI.Fx.Cancel then UI.Fx.Cancel(bubble) end
+            bubble:Hide()
         end
     end)
 

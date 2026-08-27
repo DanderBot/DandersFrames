@@ -1761,7 +1761,10 @@ function AutoProfilesUI:RefreshEditingUI()
                 tab:EnableMouse(false)
                 tab.Text:SetTextColor(0.2, 0.2, 0.2)  -- Very dark grey
                 tab.Text:SetAlpha(0.8)  -- Also reduce alpha
-                if tab.accent then tab.accent:Hide() end
+                -- The selected row's rail is the nav's ONE shared marker now,
+                -- not a texture on the row -- so a row being taken out of play
+                -- asks the marker to let go of IT, rather than hiding its own.
+                if GUI.navMarker then GUI.navMarker:ClearIf(tab) end
                 tab.isActive = false
                 tab:SetBackdropColor(0, 0, 0, 0)
             else
@@ -1946,7 +1949,10 @@ function AutoProfilesUI:SetupEditingBanner()
                     tab:EnableMouse(false)
                     tab.Text:SetTextColor(0.2, 0.2, 0.2)  -- Very dark grey
                     tab.Text:SetAlpha(0.8)  -- Also reduce alpha
-                    if tab.accent then tab.accent:Hide() end
+                    -- The selected row's rail is the nav's ONE shared marker now,
+                    -- not a texture on the row -- so a row being taken out of play
+                    -- asks the marker to let go of IT, rather than hiding its own.
+                    if GUI.navMarker then GUI.navMarker:ClearIf(tab) end
                     tab.isActive = false
                     tab:SetBackdropColor(0, 0, 0, 0)
                 end

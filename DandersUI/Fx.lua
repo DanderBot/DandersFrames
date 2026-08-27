@@ -238,10 +238,57 @@ function Fx.ScaleTo(target, scale, dur)
     g:Play()
 end
 
+-- Move the target to a new RESTING position and leave it there -- the position
+-- sibling of FadeTo and ScaleTo, and like them it rests wherever it is put
+-- rather than always coming home to one value.
+--
+-- `place` is a function that RE-ANCHORS the target (ClearAllPoints + SetPoint);
+-- it is handed the target and is called IMMEDIATELY, so a stub or a client that
+-- cannot animate still lands on the right anchors and the animation only
+-- decorates the trip. The rendered position is measured either side of that
+-- call and a Translation runs the target from where it WAS back to zero, so the
+-- glide is purely visual: the anchors are already correct the moment place()
+-- returns, and a Refresh mid-glide stays correct. Same reversed-group trick as
+-- FadeIn -- forward the group is a drift AWAY by the delta, played in REVERSE it
+-- is the arrival -- so the animation state reverts on finish and the target
+-- rests at its true point. Forward smoothing is IN, which reversed is the
+-- wanted ease-out.
+--
+-- ⚠ FRAMES ONLY, by the same rule ScaleTo states: a region has no frame level to
+-- lift it over the members it marks, and every caller so far is a frame. It does
+-- not error on a region -- it simply has not been designed against one.
+--
+-- ⚠ NEEDS RESOLVED ANCHORS AT BOTH ENDS. A target whose parent has never laid
+-- out answers nil to GetLeft, and then it simply lands instantly. That is the
+-- right answer, not a failure: there is no visible "from" to glide out of.
+function Fx.MoveTo(target, place, dur)
+    if not target or not place then return end
+    local fromX, fromY = target:GetLeft(), target:GetBottom()
+    place(target)
+    local g = target.fxMove
+    if g and g:IsPlaying() then g:Stop() end
+    if not (fromX and fromY) then return end
+    local toX, toY = target:GetLeft(), target:GetBottom()
+    if not (toX and toY) then return end
+    local dx, dy = fromX - toX, fromY - toY
+    if dx == 0 and dy == 0 then return end
+    if not g then
+        g = target:CreateAnimationGroup()
+        if not g then return end                    -- headless stub: anchored, done
+        g.move = g:CreateAnimation("Translation")
+        target.fxMove = g
+    end
+    g.move:SetOffset(dx, dy)
+    g.move:SetDuration(dur or 0.12)
+    g.move:SetSmoothing("IN")
+    g:Play(true)
+end
+
 -- Stop any running fade and restore the resting alpha. For paths that must be
--- instant (combat suspend, teardown). The resting SCALE is left alone: unlike
--- alpha, it is the caller's state (ScaleTo rests where it is put), so a Cancel
--- that forced it to 1 would silently undo a deliberate size.
+-- instant (combat suspend, teardown). The resting SCALE and POSITION are left
+-- alone: unlike alpha, both are the caller's state (ScaleTo and MoveTo rest
+-- where they are put), so a Cancel that forced them back would silently undo a
+-- deliberate size or a deliberate anchor.
 function Fx.Cancel(target)
     if not target then return end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
@@ -250,5 +297,6 @@ function Fx.Cancel(target)
     if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     if target.fxTo and target.fxTo:IsPlaying() then target.fxTo:Stop() end
     if target.fxScale and target.fxScale:IsPlaying() then target.fxScale:Stop() end
+    if target.fxMove and target.fxMove:IsPlaying() then target.fxMove:Stop() end
     target:SetAlpha(1)
 end
