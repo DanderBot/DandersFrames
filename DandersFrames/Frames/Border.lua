@@ -1971,6 +1971,29 @@ local PROC_BURST_SCALE    = 150 / 42 -- intro burst size ×icon, centered — Bl
                                      -- contract exactly onto the 1.4× loop ring
 local PROC_LOOP_SPILL     = 0.2      -- loop glow spills this fraction of the icon beyond each
                                      -- edge (button+20%) — a border glow, not icon-fill
+-- Burst size expressed against the LOOP rect rather than the host, so the two stay in
+-- the relationship the art needs (the start flipbook contracts onto the loop by its
+-- final frame) however the loop is sized. 150/42 over 1.4 — the same numbers, re-based.
+local PROC_BURST_OVER_LOOP = PROC_BURST_SCALE / (1 + 2 * PROC_LOOP_SPILL)
+
+-- ★ ONE PADDING FOR ALL FOUR SIDES, not a fraction of each axis.
+--
+-- A glow effect is a SQUARE texture stretched over the host, and its bright band sits
+-- at a fixed fraction of that texture — so scaling each axis by its own dimension puts
+-- the band 20% of the WIDTH out at the sides and 20% of the HEIGHT out at the top. On a
+-- 5:1 unit frame that is 20px against 4px, and the band reads as sitting on the border
+-- at the sides while hiding inside it top and bottom. That is why DF Proc and DF Flash
+-- wanted an Inset of about -6 on a frame where every other effect was right at 0: the
+-- others anchor to the rect's EDGES, these two are centred and scaled.
+--
+-- Deriving one padding from the MEAN dimension gives a glow band of even thickness the
+-- whole way round, so Inset 0 means the same thing here as it does everywhere else.
+-- ☠ IDENTICAL TO THE OLD MATHS ON A SQUARE HOST — mean(w, w) is w — so every aura icon,
+-- badge and targeted-spell glow renders exactly as before. Verify that before touching
+-- this: those surfaces are where the effect was calibrated.
+local function glowPadding(w, h, fraction)
+    return fraction * (w + h) * 0.5
+end
 
 -- Advance a 6×5 = 30-frame flipbook atlas to the frame for `phase` in [0,1) via
 -- SetTexCoord (both proc atlases share the grid).
@@ -2086,19 +2109,16 @@ local function procTick(border, anim, dt)
     if host and w and w > 0 and h and h > 0
         and (border._procGeomW ~= w or border._procGeomH ~= h) then
         border._procGeomW, border._procGeomH = w, h
-        -- ☠ SPILL AND BURST ARE PER-AXIS, and both used to come from WIDTH alone.
-        -- That is invisible on a square aura icon — where this effect grew up — and
-        -- wrong on anything else: on a wide unit-frame border a width-derived vertical
-        -- spill made the glow several times the frame's height, and a square burst
-        -- ignored the frame's shape completely. Deriving each axis from its own
-        -- dimension keeps the glow the same shape as the thing it is glowing around,
-        -- and is a no-op wherever w == h.
-        local offX = floor(w * PROC_LOOP_SPILL + 0.5)
-        local offY = floor(h * PROC_LOOP_SPILL + 0.5)
+        -- Even padding on every side — see glowPadding for why a per-axis fraction put
+        -- the band on the border at the sides and inside it top and bottom.
+        local pad = floor(glowPadding(w, h, PROC_LOOP_SPILL) + 0.5)
         t:ClearAllPoints()
-        t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -offX,  offY)
-        t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  offX, -offY)
-        if s then s:SetSize(w * PROC_BURST_SCALE, h * PROC_BURST_SCALE) end
+        t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -pad,  pad)
+        t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  pad, -pad)
+        if s then
+            s:SetSize((w + 2 * pad) * PROC_BURST_OVER_LOOP,
+                      (h + 2 * pad) * PROC_BURST_OVER_LOOP)
+        end
     end
     local period = border._procPeriod or 1
     border._procTimer = (border._procTimer + dt / period) % 1
@@ -2138,19 +2158,18 @@ local function buildProcAnims(border, anim)
     if w <= 0 or h <= 0 then return false end
     if not border._procAtlas then return false end
     -- Geometry is applied once here instead of per tick: every number is plain config.
-    -- Per-axis, for the reason spelled out in procTick — a width-derived spill turns a
-    -- wide frame's glow into a tall blob.
+    -- Even padding on all four sides, exactly as procTick does it — see glowPadding.
     t:SetAtlas(PROC_ATLAS)
-    local offX = floor(w * PROC_LOOP_SPILL + 0.5)
-    local offY = floor(h * PROC_LOOP_SPILL + 0.5)
+    local pad = floor(glowPadding(w, h, PROC_LOOP_SPILL) + 0.5)
     t:ClearAllPoints()
-    t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -offX,  offY)
-    t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  offX, -offY)
+    t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -pad,  pad)
+    t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  pad, -pad)
     local groups = border._declAnims or {}
     local showIntro = (not anim.procStart) and s and border._procStartAtlas
     if showIntro then
         s:SetAtlas(PROC_START_ATLAS)
-        s:SetSize(w * PROC_BURST_SCALE, h * PROC_BURST_SCALE)
+        s:SetSize((w + 2 * pad) * PROC_BURST_OVER_LOOP,
+                  (h + 2 * pad) * PROC_BURST_OVER_LOOP)
         s:SetAlpha(1)
         local ag = s:CreateAnimationGroup()
         ag:SetToFinalAlpha(true)
@@ -2283,17 +2302,19 @@ local function flashTick(border, anim, dt)
     -- Inset entirely on container icons. (The non-secret fallback host:GetWidth()
     -- is already inset-adjusted.)
     if w and border._knownW then w = w - 2 * (anim.inset or 0) end
-    -- ☠ PER-AXIS, same correction as DF Proc: F used to be a single width-derived
-    -- number and every layer was sized (F, F), so on a wide unit-frame border the glow
-    -- was a big square that ignored the frame's shape. No-op wherever w == h, which is
-    -- every aura icon — the surface this effect was built for.
+    -- ☠ SAME CORRECTION AS DF PROC. F used to be a single width-derived number with
+    -- every layer sized (F, F), so on a wide unit-frame border the glow was a big square
+    -- that ignored the frame's shape; and a per-axis fraction then put the band on the
+    -- border at the sides but inside it top and bottom. One even padding fixes both.
+    -- No-op wherever w == h, which is every aura icon — where this was calibrated.
     local h = border._knownH or (host and host:GetHeight())
     if h and border._knownH then h = h - 2 * (anim.inset or 0) end
     local Fw, Fh = border._flashFw, border._flashFh
     if host and w and w > 0 and h and h > 0
         and (border._flashGeomW ~= w or border._flashGeomH ~= h) then
         border._flashGeomW, border._flashGeomH = w, h
-        Fw, Fh = w * FLASH_FRAME_SCALE, h * FLASH_FRAME_SCALE
+        local pad = glowPadding(w, h, (FLASH_FRAME_SCALE - 1) * 0.5)
+        Fw, Fh = w + 2 * pad, h + 2 * pad
         border._flashFw, border._flashFh = Fw, Fh
         border._flashSettled = nil   -- re-park the steady glow at the new F
         if ants then ants:SetSize(Fw * 0.85, Fh * 0.85) end
@@ -2412,9 +2433,9 @@ local function buildFlashAnims(border, anim)
     w = w - 2 * (anim.inset or 0)
     h = h - 2 * (anim.inset or 0)
     if w <= 0 or h <= 0 then return false end
-    -- Per-axis, matching flashTick — a single width-derived F made the glow a square
-    -- that ignored a wide frame's shape.
-    local Fw, Fh = w * FLASH_FRAME_SCALE, h * FLASH_FRAME_SCALE
+    -- Even padding on all sides, exactly as flashTick does it — see glowPadding.
+    local pad = glowPadding(w, h, (FLASH_FRAME_SCALE - 1) * 0.5)
+    local Fw, Fh = w + 2 * pad, h + 2 * pad
     border._flashFw, border._flashFh = Fw, Fh
     border._flashGeomW, border._flashGeomH = w, h
     border._flashSettled = true
