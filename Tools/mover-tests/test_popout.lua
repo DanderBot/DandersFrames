@@ -1499,9 +1499,19 @@ end
 -- ============================================================
 local S = 0.85                       -- the settings window's scale slider
 -- own units -> UIParent units, and back. The window and everything in it is
--- laid out in DESIGN pixels (its own space); the popout and the beam are not.
+-- laid out in DESIGN pixels (its own space); the beam is not.
 local function up(v) return v * S end
 local function own(v) return v / S end
+
+-- ⚠ THE POPOUT IS ONE OF THE SCALED THINGS TOO. In outsideOf mode it takes the
+-- window's scale as its own, so a slider inside it matches the identical slider
+-- on the page it was opened from (Danders, in-game: "popouts should also scale by
+-- the UI scale value too"). Its FRAME is still FRAME_W x FRAME_H -- that is a box
+-- in its own units and the scale does not change it -- but the rect it occupies
+-- on screen, which is what every number in this file is stated in, is that box
+-- times S. Both spellings are needed below: the anchor it records is read in its
+-- own units, everything else in UIParent's.
+local PFW, PFH = up(FRAME_W), up(FRAME_H)
 
 do
     -- ---- the window ------------------------------------------------
@@ -1532,25 +1542,32 @@ do
     row:SetScale(S)
     row.popoutInset = { 0, 0, 0, GAP_OWN }
 
-    -- Where the dock is about to put it. Said UP FRONT because the stub resolves
-    -- no anchors: the beam's NEAR end is read off the frame's own rect, so a
-    -- frame left at the origin would draw the beam from off-screen and the far
-    -- end would clamp onto the wrong face of the row. Every live dock test above
-    -- seeds it the same way.
-    local DOCK_X = WIN_RIGHT + DOCK_GAP + FRAME_W / 2
-    local DOCK_Y = PLATE_CY - FRAME_H / 6
+    -- Where the dock is about to put it, ON SCREEN. Said UP FRONT because the stub
+    -- resolves no anchors: the beam's NEAR end is read off the frame's own rect,
+    -- so a frame left at the origin would draw the beam from off-screen and the
+    -- far end would clamp onto the wrong face of the row. Every live dock test
+    -- above seeds it the same way -- in the frame's OWN units, which for a popout
+    -- wearing the window's scale is the screen position divided by it.
+    local DOCK_X = WIN_RIGHT + DOCK_GAP + PFW / 2
+    local DOCK_Y = PLATE_CY - PFH / 6
 
     local p = popout({ key = "scaled" })
-    p.frame:SetFakeCenter(CX + DOCK_X, CY + DOCK_Y)
+    p.frame:SetFakeCenter(own(CX + DOCK_X), own(CY + DOCK_Y))
     p:Follow(row, { outsideOf = win })
 
+    -- ---- the scale -------------------------------------------------
+    -- The panel and the page it was opened from are ONE surface, so they are one
+    -- size. Left at 1.0 the popout's sliders came up visibly bigger than the
+    -- identical sliders on the page behind them.
+    eq(p.frame:GetScale(), S, "scaled: the popout wears the window's scale")
+
     -- ---- the dock --------------------------------------------------
-    -- The popout is a child of UIParent, so its own space IS UIParent's and the
-    -- anchor it records is read straight off.
+    -- The SetPoint offset is read in the popout frame's own units, so the screen
+    -- position it resolves to comes back through that scale.
     eq(p.side, "right", "scaled: it still docks outside the window's right edge")
-    eq(p.frame._points[1][4], DOCK_X,
+    eq(p.frame._points[1][4], own(DOCK_X),
         "scaled: a gap clear of the window's edge ON SCREEN, not of its unscaled rect")
-    eq(p.frame._points[1][5], DOCK_Y,
+    eq(p.frame._points[1][5], own(DOCK_Y),
         "scaled: and a third down from the PLATE's screen height")
 
     -- ---- the beam --------------------------------------------------
@@ -1589,7 +1606,7 @@ do
     row.popoutInset = { PAD_OWN, PAD_OWN, 0, 0 }
 
     local p = popout({ key = "scaledinset" })
-    p.frame:SetFakeCenter(CX + WIN_RIGHT + DOCK_GAP + FRAME_W / 2, CY - FRAME_H / 6)
+    p.frame:SetFakeCenter(own(CX + WIN_RIGHT + DOCK_GAP + PFW / 2), own(CY - PFH / 6))
     p:Follow(row, { outsideOf = win })
     eq(p.beam.core._end.x, SLOT_RIGHT - up(PAD_OWN),
         "inset: the beam lands on the INK's edge, a scaled pad inside the slot's")
@@ -1623,7 +1640,7 @@ do
     setmetatable(tex, { __index = function() return function() end end })
 
     local p = popout({ key = "scaledtex", tetherSource = tex })
-    p.frame:SetFakeCenter(CX + WIN_RIGHT + DOCK_GAP + FRAME_W / 2, CY - FRAME_H / 6)
+    p.frame:SetFakeCenter(own(CX + WIN_RIGHT + DOCK_GAP + PFW / 2), own(CY - PFH / 6))
     p:Follow(row, { outsideOf = win })
     eq(p.beam.core._end.x, TEX_RIGHT,
         "texregion: the beam lands on the texture's edge, measured at its PARENT's scale")
@@ -1653,6 +1670,263 @@ do
     row:SetFakeCenter(own(CX + 100), own(CY - 40) + 340)
     p:_UpdateBeam()
     check(not p.beam:IsShown(), "scaledclip: scrolled out of the viewport takes it away again")
+    p:Close()
+end
+
+-- ============================================================
+-- 14. THE FRAME STACK -- where the connected chrome is DRAWN
+-- ------------------------------------------------------------
+-- ☠ THE BEAM'S CROSSING SEGMENT IS DRAWN OVER THE WINDOW'S BODY. In outsideOf
+-- mode the popout stands outside the window's edge and the beam runs from it, in
+-- over that edge, across the window's padding and its page, to a row. Every pixel
+-- of that after the dock gap is over something the window owns -- so if the beam
+-- is not ABOVE the window's whole subtree, the only part of it that is ever drawn
+-- is the short stretch in the gap. Which is precisely what "the beam stops short
+-- of the row" looks like, and it is what Danders was still seeing in-game on
+-- 2026-08-27 with the window at 100% scale (i.e. with the scale conversion of
+-- section 13 already in and ruled out).
+--
+-- Clearing the WINDOW is not enough, and that was the bug: the old margin was the
+-- window's level + 10, while the row itself is already the window's level plus
+-- four or five (window -> content -> page -> scroll child -> row -> plate) and a
+-- settings window's own widgets bump their level off their container by +10 for a
+-- control that must draw over its neighbours and by +50 for a disabled overlay
+-- laid across a group. WINDOW_CLEARANCE is the margin that beats all of them.
+-- ============================================================
+-- Mirrors Popout.lua's own constant, for the reason the theme metrics at the top
+-- of this file are mirrored: a retune of the margin should fail HERE, out loud,
+-- rather than quietly re-baseline itself.
+local CLEARANCE = 60
+
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "stack" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+
+    local WL = win:GetFrameLevel()
+    eq(p.frame:GetFrameLevel(), WL + CLEARANCE,
+        "stack: the popout stands a full clearance above the window, not +10")
+    eq(p.beam:GetFrameLevel(), WL + CLEARANCE - 1,
+        "stack: the beam is in the sliver just under it -- over the body, under the notch")
+    eq(p.srcOutline:GetFrameLevel(), WL + CLEARANCE - 1,
+        "stack: and so is the source outline, which lies ON a row inside the window")
+
+    -- One strata for the three, and it is the WINDOW's: a level only orders frames
+    -- within a strata, so a beam one strata below what it crosses is under it
+    -- whatever its level says.
+    eq(p.frame._flags.strata, "DIALOG", "stack: the popout is on the window's strata")
+    eq(p.beam._flags.strata, "DIALOG", "stack: the beam with it")
+    eq(p.srcOutline._flags.strata, "DIALOG", "stack: the outline too -- the three are one object")
+    p:Close()
+end
+
+-- A window that is NOT where the last one was in the stack: the popout is placed
+-- against whatever it is actually handed, strata and level both.
+do
+    local win, row = outsideWindow(), outsideRow()
+    win:SetFrameStrata("FULLSCREEN_DIALOG")
+    win:SetFrameLevel(90)
+    local p = popout({ key = "stackhigh" })
+    p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    p:Follow(row, { outsideOf = win })
+    eq(p.frame:GetFrameLevel(), 90 + CLEARANCE, "stack: measured off THIS window's level")
+    eq(p.frame._flags.strata, "FULLSCREEN_DIALOG", "stack: ...and it follows its strata up")
+    eq(p.beam._flags.strata, "FULLSCREEN_DIALOG", "stack: the beam does not get left behind on DIALOG")
+    eq(p.srcOutline._flags.strata, "FULLSCREEN_DIALOG", "stack: nor the outline")
+
+    -- ⚠ AND IT IS RE-DERIVED, not taken once. DandersFrames' settings window is
+    -- SetToplevel(true): it raises itself above everything in its strata the
+    -- moment it is clicked, WITHOUT MOVING A PIXEL -- so the two-rect compare the
+    -- ticker already does cannot see it, and a level taken once at Follow is stale
+    -- from the first click onwards. That is a beam that was fine when the panel
+    -- opened and sank under the window a moment later.
+    win:SetFrameLevel(400)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(p.frame:GetFrameLevel(), 400 + CLEARANCE, "stack: a window RAISE is caught on the next tick")
+    eq(p.beam:GetFrameLevel(), 400 + CLEARANCE - 1, "stack: the beam comes up with it")
+    eq(p.srcOutline:GetFrameLevel(), 400 + CLEARANCE - 1, "stack: and so does the outline")
+
+    -- EXACTLY the clearance, never "at least" it: settling on one answer is what
+    -- stops a raise from ratcheting the pair ten levels higher every time, and it
+    -- lets a popout re-pointed at a lower window come back down.
+    win:SetFrameLevel(20)
+    p.frame:GetScript("OnUpdate")(p.frame)
+    eq(p.frame:GetFrameLevel(), 20 + CLEARANCE, "stack: it settles back down again rather than ratcheting")
+
+    -- Leaving the mode puts everything back on the base strata. A POOLED popout is
+    -- re-used for whatever the next consumer asks of it, and one that inherited a
+    -- window's strata must not carry it into a placement that has no window.
+    p:Follow(row)
+    eq(p.frame._flags.strata, "DIALOG", "stack: a plain Follow hands the popout back to DIALOG")
+    eq(p.beam._flags.strata, "DIALOG", "stack: the beam with it")
+    eq(p.srcOutline._flags.strata, "DIALOG", "stack: and the outline")
+    p:Close()
+end
+
+-- THE MOVER'S CONTEXT, which has no window at all: the popout hangs off an unlock
+-- overlay and its own level is the only thing the beam and outline can be placed
+-- against. That relative sync is the fallback, and it must survive untouched.
+do
+    local p = popout({ key = "stackfree" })
+    local src = source(40, 40, CX - 200, CY)
+    p:Follow(src)
+    -- The outline is built as a SIBLING of the proxy slab it outlines -- both hang
+    -- off the unlock overlay -- and the level it is built with is the one that
+    -- puts it over that slab. Stand in for it with a level of its own and watch it
+    -- survive: dropping it to popout-1 out here would put it a level BELOW the
+    -- slab and the outline would stop being visible at all.
+    p.srcOutline:SetFrameLevel(77)
+    p.frame:SetFrameLevel(40)          -- as a popout parented to an overlay would be
+    p:_UpdateBeam()
+    p:_UpdateSourceOutline()
+    eq(p.beam:GetFrameLevel(), 39, "movercase: the beam still sits just under the popout")
+    eq(p.srcOutline:GetFrameLevel(), 77, "movercase: the outline is left where its parent put it")
+    eq(p.frame._flags.strata, "DIALOG", "movercase: no window, so nothing moved off the base strata")
+    p:Close()
+end
+
+-- ============================================================
+-- 15. THE POPOUT WEARS THE WINDOW'S SCALE
+-- ------------------------------------------------------------
+-- "Popouts should also scale by the UI scale value too" (Danders, 2026-08-27).
+-- The settings window has a user scale slider; a popout parented to UIParent
+-- renders at 1.0 whatever that slider says, so the sliders inside the panel came
+-- up bigger than the identical sliders on the page it was opened from and the two
+-- stopped reading as one surface.
+--
+-- The whole change is one SetScale. Everything downstream survives it because
+-- every rect in Popout.lua is in UIParent units and every one of them already
+-- converts through the frame's own ratio -- so this section is the proof of that
+-- claim rather than of the SetScale: dock, beam, connection point and glide
+-- landing, all at 80%, all still agreeing with each other.
+-- ============================================================
+local S2 = 0.8
+local function up2(v) return v * S2 end
+local function own2(v) return v / S2 end
+
+do
+    -- The window: 1000 x 600 design px at 80% -> 800 x 480 on screen.
+    local win = source(1000, 600, own2(CX), own2(CY))
+    win:SetScale(S2)
+    local WIN_RIGHT = up2(1000) / 2                    -- +400
+
+    -- The row: a 50-tall slot whose bottom 6 is the gap, plate 100 screen px
+    -- inside the window's right edge.
+    local SLOT_OWN, GAP_OWN, ROW_W_OWN = 50, 6, 260
+    local PLATE_RIGHT, PLATE_CY = WIN_RIGHT - 100, 60
+    local row = source(ROW_W_OWN, SLOT_OWN,
+                       own2(CX + PLATE_RIGHT - up2(ROW_W_OWN) / 2),
+                       own2(CY + PLATE_CY - up2(GAP_OWN) / 2))
+    row:SetScale(S2)
+    row.popoutInset = { 0, 0, 0, GAP_OWN }
+
+    -- The popout's SCREEN size, which is its own box times the window's scale.
+    local PW, PH = up2(FRAME_W), up2(FRAME_H)
+    local DOCK_X = WIN_RIGHT + DOCK_GAP + PW / 2
+    local DOCK_Y = PLATE_CY - PH / 6
+
+    local p = popout({ key = "scale80" })
+    p.frame:SetFakeCenter(own2(CX + DOCK_X), own2(CY + DOCK_Y))
+    p:Follow(row, { outsideOf = win })
+
+    eq(p.frame:GetScale(), S2, "scale80: the popout took the window's scale")
+
+    -- ---- the dock ---------------------------------------------------
+    eq(p.frame._points[1][4], own2(DOCK_X), "scale80: docked a gap clear of the window's edge on SCREEN")
+    eq(p.frame._points[1][5], own2(DOCK_Y), "scale80: with the row a third down its SCALED height")
+
+    -- ---- the beam ---------------------------------------------------
+    -- The endpoints are UIParent-centre and the beam frame is unscaled, so they
+    -- are read straight off -- which is the point: the popout shrank and the two
+    -- ends still meet.
+    eq(p.beam.core._start.x, WIN_RIGHT + DOCK_GAP, "scale80: the beam leaves the popout's left face")
+    eq(p.beam.core._end.x, PLATE_RIGHT, "scale80: and TOUCHES the plate's right edge")
+    eq(p.beam.core._start.y, PLATE_CY, "scale80: dead level with the plate")
+    eq(p.beam.core._end.y, PLATE_CY, "scale80: ...at both ends, so it runs flat")
+
+    -- ---- the connection point ---------------------------------------
+    -- It slides along the popout's left edge to meet the row. The slide is a
+    -- UIParent-unit difference and the offset is read in the popout's own units,
+    -- so it comes back through the scale it is now wearing -- get that wrong and
+    -- the diamond drifts off the end of the beam.
+    local np = p.notch._points[#p.notch._points]
+    eq(np[3], "LEFT", "scale80: the point is on the popout's left edge")
+    eq(np[4], 0, "scale80: no horizontal slide on a left/right dock")
+    eq(np[5], own2(PLATE_CY - DOCK_Y), "scale80: slid to the row, measured back in the popout's own units")
+
+    -- ---- the glide --------------------------------------------------
+    -- Retarget to a row 120 screen px lower. The destination is PopoutOutsidePos
+    -- of that row at the SCALED popout size, and the landing has to be exact.
+    local rowB = source(ROW_W_OWN, SLOT_OWN,
+                        own2(CX + PLATE_RIGHT - up2(ROW_W_OWN) / 2),
+                        own2(CY + PLATE_CY - 120 - up2(GAP_OWN) / 2))
+    rowB:SetScale(S2)
+    rowB.popoutInset = { 0, 0, 0, GAP_OWN }
+    local _, GX, GY = UI.PopoutOutsidePos({ x = 0, y = 0, w = up2(1000), h = up2(600) },
+                                          { x = PLATE_RIGHT - up2(ROW_W_OWN) / 2, y = PLATE_CY - 120,
+                                            w = up2(ROW_W_OWN), h = up2(SLOT_OWN - GAP_OWN) },
+                                          PW, PH, DOCK_GAP, 1920, 1080)
+
+    local moves = {}
+    local realSetPoint = p.frame.SetPoint
+    p.frame.SetPoint = function(s, ...) moves[#moves + 1] = { ... } return realSetPoint(s, ...) end
+
+    p:Follow(rowB, { outsideOf = win })
+    check(p.gliding, "scale80: retargeting glides rather than teleporting")
+    p.frame:GetScript("OnUpdate")(p.frame, 1)
+    check(not p.gliding, "scale80: and it finishes")
+    local landed = moves[#moves]
+    eq(landed[4], own2(GX), "scale80: it lands exactly on the new row's dock x")
+    eq(landed[5], own2(GY), "scale80: ...and its y, both in the popout's own units")
+    p.frame.SetPoint = realSetPoint
+    p:Close()
+end
+
+-- Leaving the mode gives the scale back. A pooled popout is re-used for whatever
+-- comes next, and one still wearing a window's 80% would hand a PlaceFree
+-- consumer a panel two sizes too small for the numbers it is about to be given.
+do
+    local win, row = outsideWindow(), outsideRow()
+    win:SetScale(0.7)
+    local p = popout({ key = "scaleclear" })
+    p:Follow(row, { outsideOf = win })
+    eq(p.frame:GetScale(), 0.7, "scaleclear: docked outside a 70% window, it is at 70%")
+    p:PlaceFree(0, 0)
+    eq(p.frame:GetScale(), 1, "scaleclear: PlaceFree hands it back to 1.0")
+    p:Close()
+
+    local q = popout({ key = "scaleclear2" })
+    q:Follow(row, { outsideOf = win })
+    q:Follow(row)
+    eq(q.frame:GetScale(), 1, "scaleclear: and so does a plain Follow")
+    q:Close()
+end
+
+-- PINNING KEEPS IT. Pinning detaches the panel from the window by hand; snapping
+-- it back to 1.0 under the user's cursor would read as the panel jumping, which
+-- is the one thing the pin gesture must not do.
+do
+    local win, row = outsideWindow(), outsideRow()
+    win:SetScale(0.75)
+    local p = popout({ key = "scalepin" })
+    p:Follow(row, { outsideOf = win })
+    p:Pin()
+    eq(p.frame:GetScale(), 0.75, "scalepin: a pinned popout keeps the scale it was wearing")
+    -- ...and re-pointing a pinned popout's SOURCE (which the beam still needs)
+    -- does not take it away either.
+    p:Follow(outsideRow(-80))
+    eq(p.frame:GetScale(), 0.75, "scalepin: re-pointing its source does not resize it")
+    p:Close()
+end
+
+-- A window with no scale is the case every test above this section is: the ratio
+-- comes out 1 and nothing is touched, which is why none of them had to change.
+do
+    local win, row = outsideWindow(), outsideRow()
+    local p = popout({ key = "scaleone" })
+    p:Follow(row, { outsideOf = win })
+    eq(p.frame:GetScale(), 1, "scaleone: an unscaled window leaves the popout at 1.0")
     p:Close()
 end
 

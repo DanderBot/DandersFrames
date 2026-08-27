@@ -18,6 +18,13 @@
 -- Highlights is the counter-case: Border switched off greys the ROW, but its own
 -- toggle is still on, so its popout's controls stay live.
 --
+-- THE SCALE BUTTON, where to see the other half. The real settings window has a
+-- user scale slider and this one had nothing, so every scale bug the popout has
+-- ever had was invisible here and had to be found in-game. Cycle the title bar's
+-- Scale button with a popout open: the panel should take the same scale, the beam
+-- should stay touching the row's plate, and clicking another row should land the
+-- panel exactly beside it.
+--
 -- Dev-facing on purpose: every string is a plain literal and NOTHING here is
 -- localised. Same rule as the rest of /df debug -- these words are for whoever
 -- is working on the chrome, not for players.
@@ -334,6 +341,32 @@ local function applyAccent(btn)
 end
 
 -- ============================================================
+-- SCALE SWITCHER
+-- ☠ THE ONE THING THIS WORKBENCH COULD NOT SHOW. The real settings window carries
+-- a user scale slider and this one carried nothing, so an unscaled window was the
+-- only case the demo ever rendered -- which is exactly the case where a popout at
+-- UIParent scale and a window at its own scale happen to agree. Every scale bug
+-- the popout has had (the beam's far end landing out in the gutter, and then the
+-- panel's controls coming up bigger than the page's) was invisible here for that
+-- reason and had to be found in-game.
+--
+-- Dev-facing, so a button that cycles a handful of values rather than a slider:
+-- the point is to be able to LOOK at 80% in one click, next to the accent toggle
+-- it is modelled on. Cycling stops at 70% because below that the row list stops
+-- being readable and nothing about the chrome is learned from it.
+-- ============================================================
+local SCALES = { 1.0, 0.9, 0.8, 0.7 }
+local scaleIndex = 1
+
+-- The FRAME is passed in rather than read off the file-local `win`: this runs once
+-- during buildWindow, before the toggle has assigned it.
+local function applyScale(f, btn)
+    local v = SCALES[scaleIndex] or 1
+    if f then f:SetScale(v) end
+    if btn then btn:SetText(format("Scale: %d%%", floor(v * 100 + 0.5))) end
+end
+
+-- ============================================================
 -- THE WINDOW
 -- ============================================================
 local function buildWindow()
@@ -377,6 +410,24 @@ local function buildWindow()
     })
     accentBtn:SetPoint("RIGHT", closeBtn, "LEFT", -6, 0)
     f.accentBtn = accentBtn
+
+    local scaleBtn = GUI:CreateButtonNative(bar, {
+        text = "Scale: 100%", width = 90, height = 18, style = "ghost",
+        fitText = false,
+        tooltip = { title = "Window Scale", lines = {
+            "Cycle this window through 100/90/80/70%, the way the real settings",
+            "window's scale slider does.",
+            "Open a popout first: it should take the same scale, keep its beam",
+            "touching the row's plate, and land exactly on the next row when you",
+            "click another one.",
+        } },
+        onClick = function(self)
+            scaleIndex = (scaleIndex % #SCALES) + 1
+            applyScale(f, self)
+        end,
+    })
+    scaleBtn:SetPoint("RIGHT", accentBtn, "LEFT", -6, 0)
+    f.scaleBtn = scaleBtn
 
     -- ---- intro -----------------------------------------------------
     local intro = GUI:CreateLabelNative(f, {
@@ -453,6 +504,7 @@ local function buildWindow()
     f:SetScript("OnHide", function() GUI:CloseAllPopoutRows("api") end)
 
     applyAccent(accentBtn)
+    applyScale(f, scaleBtn)
     -- Built hidden, so the first /df popoutdemo SHOWS it rather than toggling a
     -- window nobody has seen yet straight back off.
     f:Hide()

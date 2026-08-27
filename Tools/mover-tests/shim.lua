@@ -159,6 +159,13 @@ function FakeUIFrame(w, h, cx, cy)
     function f:StopMovingOrSizing() self._flags.moving = false end
     function f:SetClampedToScreen(v) self._flags.clamped = v and true or false end
     function f:SetFrameStrata(v) self._flags.strata = v end
+    -- ⚠ A REAL getter, not the __index no-op. The popout's connected chrome takes
+    -- the strata of the window it docks outside of (Popout.lua's _SyncWindowLevel)
+    -- and asks the window for it -- a stub that answered nil would silently take
+    -- the "this surface has no strata" branch and the assertions would pass
+    -- against nothing. Defaults to DIALOG, which is what a UI frame in this kit is
+    -- built at, so a stub nobody set one on still answers honestly.
+    function f:GetFrameStrata() return self._flags.strata or "DIALOG" end
     function f:SetFrameLevel(v) self._flags.level = v end
     function f:GetFrameLevel() return self._flags.level or 1 end
     return setmetatable(f, { __index = function() return function() end end })
