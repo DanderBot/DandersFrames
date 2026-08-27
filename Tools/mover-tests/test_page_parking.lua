@@ -214,6 +214,14 @@ do
         fakePage("text_designer", false),
     }
 
+    -- ☠ THE OPT-OUT. The changed-settings ledger BUILDS ITSELF from this
+    -- registry, so refreshing it from here calls back into the half-built thing
+    -- -- unbounded recursion, and wrong even one level deep (a nested Refresh
+    -- resets a page's children and strands what the outer pass already placed).
+    -- Any page may set `skipSearchIndex`; this one is the reason the flag exists.
+    local optedOut = fakePage("profiles_changed", false)
+    optedOut.skipSearchIndex = true
+
     DandersFrames = DF
     load_options_file_into("Features/Search.lua", NS)
     local Search = DF.Search
@@ -248,6 +256,13 @@ do
         check(not p:IsShown(), "index: the pages it built are left hidden (" .. p.tabName .. ")")
     end
     check(Search.RegistryBuilt, "index: the registry is marked built")
+
+    -- The opted-out page is not touched AT ALL: not built, not shown, not
+    -- hidden, and not parked (nothing adopted it, so there is nothing to park).
+    eq(optedOut.builds, 0, "index: a skipSearchIndex page is never refreshed")
+    eq(optedOut.shows, 0, "index: ...never shown")
+    eq(optedOut.hides, 0, "index: ...never hidden")
+    eq(parkedSet["profiles_changed"], nil, "index: ...and never parked")
 end
 
 -- ============================================================

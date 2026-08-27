@@ -239,10 +239,21 @@ function Search:RefreshIfActive()
     end
 end
 
-function Search:EnsureRegistry()
+-- Would EnsureRegistry actually build? True when the registry was never built,
+-- is empty, or was built for the other mode.
+--
+-- ★ SPLIT OUT SO IT IS ASKED IN ONE PLACE. A caller that wants to know whether
+-- a build is about to happen -- the changed-settings ledger, which refuses to
+-- trigger one in combat -- would otherwise have to restate this condition, and
+-- a restated condition is one that goes stale silently: it would keep answering
+-- "cheap" after a fourth staleness rule was added here.
+function Search:RegistryIsStale()
     local currentMode = DF.GUI and DF.GUI.SelectedMode or "party"
-    -- Rebuild registry if it wasn't built yet, is empty, or was built for a different mode
-    if not self.RegistryBuilt or #self.Registry == 0 or self.BuiltForMode ~= currentMode then
+    return (not self.RegistryBuilt) or #self.Registry == 0 or self.BuiltForMode ~= currentMode
+end
+
+function Search:EnsureRegistry()
+    if self:RegistryIsStale() then
         self:BuildFullRegistry()
     end
 end
@@ -261,9 +272,19 @@ function Search:BuildFullRegistry()
     self.BuiltForMode = DF.GUI.SelectedMode
     
     for tabName, page in pairs(DF.GUI.Pages) do
+      -- ☠ A PAGE MAY OPT OUT, and one has to. The changed-settings ledger
+      -- (GUI/Pages/Modules.lua) BUILDS ITSELF FROM THIS REGISTRY, so refreshing
+      -- it from here is a call back into the thing that is half-built:
+      -- unbounded recursion at best, and at one level deep still wrong, because
+      -- a nested Refresh on a page resets its children list and strands the
+      -- widgets the outer Refresh already placed. Skipping it entirely also
+      -- keeps its rows out of the index, which is correct on its own terms -- a
+      -- report of settings is not itself a setting.
+      -- Deliberately page-agnostic: any page may set `skipSearchIndex`.
+      if not page.skipSearchIndex then
         self:SetCurrentTab(tabName, page.tabLabel or tabName)
         self.CurrentSection = nil
-        
+
         local wasShown = page:IsShown()
         
         if page.Refresh then
@@ -284,6 +305,7 @@ function Search:BuildFullRegistry()
             -- dock (which, after the first tab switch, every page but one is).
             if DF.GUI.ParkPage then DF.GUI:ParkPage(page) end
         end
+      end
     end
 
     if originalTab and DF.GUI.Pages[originalTab] then

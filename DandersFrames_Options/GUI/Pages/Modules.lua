@@ -1914,7 +1914,174 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
             {pageId = "profiles_manage", label = L["Manage Profiles"]},
+            {pageId = DF.ChangedSettings.PAGE_ID, label = L["Changed Settings"]},
         }), 30, "both")
+    end)
+
+    -- Profiles > Changed Settings
+    --
+    -- A GENERATED page: every setting in the current mode whose stored value
+    -- differs from the shipped default, grouped by the page that owns it, one
+    -- click from the setting itself. The diff walk, the grouping and the value
+    -- formatting all live in Features/ChangedSettings.lua so they can be
+    -- asserted headlessly; everything here is the drawing.
+    local pageChangedSettings = CreateSubTab("profiles", DF.ChangedSettings.PAGE_ID, L["Changed Settings"])
+    -- ☠ NOT INDEXED BY SEARCH, and this flag is the mechanism (read in
+    -- Search:BuildFullRegistry). Building the registry re-runs every page's
+    -- builder and this builder ASKS for the registry, so without the skip the
+    -- two call each other forever; and even one level deep is wrong, because a
+    -- nested Refresh on this page retires the widgets the outer Refresh already
+    -- placed. See the header of Features/ChangedSettings.lua.
+    if pageChangedSettings then pageChangedSettings.skipSearchIndex = true end
+    BuildPage(pageChangedSettings, function(self, db, Add, AddSpace, AddSyncPoint)
+        local CS = DF.ChangedSettings
+        -- ⚠ FIRST, BEFORE ANY WIDGET IS ADDED. BuildReport may build the search
+        -- registry, which re-runs every other page's builder and ends by calling
+        -- RefreshStates on whatever page is on screen -- this one. With nothing
+        -- added yet that pass runs over an empty children list and is a no-op;
+        -- move this below the first Add() and it re-lays a half-built page.
+        local report, reason = CS:BuildReport(GUI)
+        local modeLabel = (GUI.SelectedMode == "raid") and L["Raid"] or L["Party"]
+
+        -- Dim hex for the "-> default" half of a value cell. Built from the
+        -- palette rather than typed, so the ledger follows a theme change like
+        -- everything else; floor because %02x on a fractional number is an error
+        -- in some Lua builds.
+        local cd = GUI.Colors.textDim
+        local dimHex = format("%02x%02x%02x",
+            math.floor(cd.r * 255), math.floor(cd.g * 255), math.floor(cd.b * 255))
+
+        -- ===== THE KNOWN GAP, STATED =====
+        -- Not hidden, and shown on the EMPTY page too -- that is the reading it
+        -- most has to survive, because "Everything is at its defaults" with no
+        -- caveat under it is the one screen a user could take as a guarantee.
+        -- The registry only carries keys the shared factories BOUND; a control
+        -- wired through a closure get/set (Border Alpha) and an ordered list
+        -- have no key for it to carry.
+        local function AddFootnote()
+            AddSpace(GUI.Space.block, "both")
+            Add(GUI:CreateLabel(self.child,
+                L["Not everything is listed: a few controls and ordered lists are not tracked here."]),
+                nil, "both")
+        end
+
+        -- ===== HEADER BOX =====
+        local headerGroup = GUI:CreateSettingsGroup(self.child, 280)
+        headerGroup:AddWidget(GUI:CreateHeader(self.child, L["Changed Settings"]), 40)
+
+        if not report then
+            -- ⚠ SAY WHICH. "Nothing changed" and "could not be measured" look
+            -- identical on screen and mean opposite things, so the page never
+            -- falls back to the empty state here -- it names the reason.
+            headerGroup:AddWidget(GUI:CreateLabel(self.child,
+                (reason == "combat") and L["This list can't be built during combat."]
+                or L["Building the list of settings..."]), nil)
+            -- No footnote here: "not everything is listed" under a page that
+            -- listed nothing at all is noise. It belongs on the EMPTY state,
+            -- where it is the caveat on a real claim.
+            Add(headerGroup, nil, "both")
+            return
+        end
+
+        headerGroup:AddWidget(GUI:CreateLabel(self.child,
+            format(L["Showing %s settings in the current profile. Click a row to jump to the setting."],
+                modeLabel)), nil)
+
+        if report.count == 0 then
+            headerGroup:AddWidget(GUI:CreateLabel(self.child, L["Everything is at its defaults."]), nil)
+            Add(headerGroup, nil, "both")
+            AddFootnote()
+            return
+        end
+
+        headerGroup:AddWidget(GUI:CreateLabel(self.child,
+            format(L["%d settings differ from defaults"], report.count)), nil)
+
+        headerGroup:AddWidget(GUI:CreateIconButton(self.child, "content_copy", L["Copy as Text"], 240, 26, function()
+            -- The same read-only multi-line popup the profile export and the
+            -- debug-log export use -- a singleton, so no frame is leaked per
+            -- click. Rebuilt on the click rather than captured at page build:
+            -- the user may have changed something since.
+            local fresh = CS:BuildReport(GUI)
+            DF:ShowPopupInput({
+                title       = L["Changed Settings"],
+                message     = L["Press Ctrl+A to select all, then Ctrl+C to copy"],
+                text        = CS.BuildText(fresh, { modeLabel = modeLabel }),
+                multiline   = true,
+                readOnly    = true,
+                cancelLabel = L["Close"],
+            })
+        end), 32)
+
+        Add(headerGroup, nil, "both")
+
+        -- ===== ONE BOX PER SOURCE PAGE =====
+        for _, group in ipairs(report.groups) do
+            local box = GUI:CreateSettingsGroup(self.child, 280)
+            box:AddWidget(GUI:CreateHeader(self.child, group.label), 40)
+
+            for _, row in ipairs(group.rows) do
+                -- A plain kit button with NO opts.text: StyleButton grows a
+                -- labelled button to fit its string (FitToLabel), which on a
+                -- full-width report row would push the box wider than the page.
+                -- The two strings are ours, anchored to the row's own edges, so
+                -- the row takes whatever width the group hands it.
+                local rowBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
+                rowBtn:SetSize(260, 22)
+                GUI:StyleButton(rowBtn, { height = 22, align = "left" })
+
+                local value = rowBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                value:SetPoint("RIGHT", rowBtn, "RIGHT", -8, 0)
+                value:SetJustifyH("RIGHT")
+                value:SetWordWrap(false)
+                value:SetText(format("%s |cff%s\226\134\146 %s|r",
+                    CS.FormatValue(row.current), dimHex, CS.FormatValue(row.default)))
+                -- The CURRENT half at full text weight, the "-> default" half
+                -- dimmed by the escape above. The current value is what the user
+                -- came to read; the default is context.
+                value:SetTextColor(GUI.Colors.text.r, GUI.Colors.text.g, GUI.Colors.text.b)
+
+                local name = rowBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                name:SetPoint("LEFT", rowBtn, "LEFT", 8, 0)
+                name:SetPoint("RIGHT", value, "LEFT", -10, 0)
+                name:SetJustifyH("LEFT")
+                name:SetWordWrap(false)
+                name:SetText(row.label)
+                local ct = GUI.Colors.text
+                name:SetTextColor(ct.r, ct.g, ct.b)
+
+                -- The section is not on the row (it would double the width for a
+                -- line that is already two columns), so it goes in the tooltip,
+                -- where it answers "which of the three Offset X sliders is this".
+                local where = group.label
+                if row.section and row.section ~= "" then
+                    where = where .. "  >  " .. row.section
+                end
+                rowBtn:HookScript("OnEnter", function(s)
+                    GUI:ShowTooltip(s, { title = L["Show me"], lines = { where } })
+                end)
+                rowBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+
+                -- ☠ THE SEARCH JUMP, not a hand-rolled one. NavigateToTab is the
+                -- exact machinery a search result's breadcrumb uses: it selects
+                -- the tab, scrolls to the section, flashes it, AND opens the
+                -- popout row that owns the key when the control lives inside one
+                -- (Border Alpha's box, the aura popouts). A local Tabs:Click()
+                -- would land on the page with the control still behind a closed
+                -- row.
+                local tab, section, key = group.tab, row.section, row.key
+                rowBtn:SetScript("OnClick", function()
+                    DF.Search:NavigateToTab(tab, section, key)
+                    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+                end)
+
+                box:AddWidget(rowBtn, 24)
+            end
+
+            Add(box, nil, "both")
+        end
+
+        AddFootnote()
     end)
 
     -- ========================================

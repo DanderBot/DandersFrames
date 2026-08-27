@@ -2828,6 +2828,19 @@ L["Marker Offset Y"] = true
 L["Marker Color"] = true
 L["Marker Symbol Color"] = true
 
+-- Changed-settings ledger (Profiles > Changed Settings). Alphabetical within the
+-- block. ⚠ "Off" is NOT here -- it already exists above and the ledger reuses it;
+-- "On" had no entry, which is why only half the pair is new.
+L["%d settings differ from defaults"] = true
+L["Building the list of settings..."] = true
+L["Changed Settings"] = true
+L["Copy as Text"] = true
+L["Everything is at its defaults."] = true
+L["Not everything is listed: a few controls and ordered lists are not tracked here."] = true
+L["On"] = true
+L["Showing %s settings in the current profile. Click a row to jump to the setting."] = true
+L["This list can't be built during combat."] = true
+
 -- Runtime user-visible strings that were hardcoded to English (2026-08-03 pass).
 -- These are seen in normal play, not in the settings panel.
 -- Resurrection icon tooltip (Frames/StatusIcons.lua):
