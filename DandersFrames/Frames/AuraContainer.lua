@@ -665,8 +665,70 @@ local function anyLiveContainers()
     return next(AuraContainer._slotHandles or {}) ~= nil
 end
 
+-- FROZEN-COUNT DETECTOR. Presence is secret, so staleness cannot be READ — but it has
+-- an observable signature: `GetAuraGroupFrameCount` is a plain number (the AURAROW
+-- watch reads it per second, combat included), and a stale container's counts FREEZE
+-- non-zero while UNIT_AURA traffic keeps flowing for its unit. A healthy container's
+-- counts move as auras come and go; a bounced-and-healed one moves on the next sample;
+-- one that stays frozen through sweeps that bounced it is bounce-immune — the bricked
+-- class, which only a rebuild can cure, and exactly the thing worth a loud log line.
+--
+-- ⚠ A HEURISTIC, BY DESIGN, and phrased as one in the log: a genuinely long-lived
+-- tracked aura also freezes its count. That is why this WARNS once per handle (with
+-- the streak length and the unit's traffic) and logs the clear — a breadcrumb for
+-- reading the log after a raid, not an alarm. Runs only while the AURACONTAINER
+-- channel is on (DebugActive), the same contract as the AURAROW watch, so it costs
+-- normal users nothing. Groups only: the dispel overlay and placed indicators declare
+-- SLOTS, which have no count API.
+local staleWatch = setmetatable({}, { __mode = "k" })
+local STALE_STREAK = 6   -- consecutive unchanged 30s samples (~3 min) before the WARN
+local function sampleFrozenCounts()
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    for h in pairs(AuraContainer._handles or {}) do
+        local keys = not h._destroyed and not h._testFrame
+            and h.backend and h.backend.groupKeys
+        local c = keys and #keys > 0 and h.backend.container
+        if c and c.GetAuraGroupFrameCount then
+            local w = staleWatch[h]
+            if not w then w = { counts = {} }; staleWatch[h] = w end
+            local total, changed = 0, false
+            for i = 1, #keys do
+                local ok, n = pcall(c.GetAuraGroupFrameCount, c, keys[i])
+                n = (ok and type(n) == "number") and n or 0
+                if w.counts[keys[i]] ~= n then changed = true end
+                w.counts[keys[i]] = n
+                total = total + n
+            end
+            local unit = h.config and h.config.unit
+            local traffic = unit and flowCounts[unit] or 0
+            if changed or total == 0 then
+                if w.warned then
+                    DF:Debug(DBG, "frozen-count CLEARED unit=%s after %d samples (counts moved)",
+                        tostring(unit), w.streak or 0)
+                end
+                w.streak, w.warned = 0, nil
+            else
+                w.streak = (w.streak or 0) + 1
+                -- Traffic required AT the trip: frozen with no aura events is just a
+                -- quiet unit; frozen while events flow is the stale signature.
+                if w.streak >= STALE_STREAK and traffic >= 3 and not w.warned then
+                    w.warned = true
+                    DF:DebugWarn(DBG,
+                        "POSSIBLY STALE (or a long-lived aura): unit=%s total=%d frozen for %d samples"
+                        .. " (~%ds) despite %d UNIT_AURA events this window — if a sweep bounced it"
+                        .. " and this persists, it is bounce-immune (rebuild-only class)",
+                        tostring(unit), total, w.streak, w.streak * SWEEP_INTERVAL, traffic)
+                end
+            end
+        end
+    end
+end
+
 C_Timer.NewTicker(SWEEP_INTERVAL, function()
     syncFlowWatch()
+    -- Detector samples BEFORE the flow window is wiped, so "traffic while frozen"
+    -- reads the same 30s the counts were compared across.
+    sampleFrozenCounts()
     flushFlowLog()
     if AuraContainer._testMode then return end
     if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
