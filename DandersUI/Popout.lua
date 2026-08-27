@@ -45,6 +45,7 @@ local Fx = UI.Fx
 local PAD        = UI.PopoutPad          -- outer inset around the content
 local TITLE_H    = UI.PopoutTitleHeight  -- the title bar strip, top pad included
 local TITLE      = UI.PopoutTitle        -- topPad / row / fill / sepAlpha
+local FOOTER     = UI.PopoutFooter       -- height / btnHeight / gap / sepAlpha
 -- The strip is TALLER than the row it holds: the top pad is margin, not part of
 -- the row. Everything in the row therefore hangs half a top-pad BELOW the bar's
 -- own centre, which is what puts it centred in the region under that margin.
@@ -521,6 +522,18 @@ local function safeCall(fn, ...)
     xpcall(function() return fn(a, b) end, geterrorhandler())
 end
 
+-- ...and the same guard for a predicate, whose ANSWER is the point. A consumer's
+-- `enabled` may read the client (combat lockdown, an addon that is not loaded),
+-- so it must not be able to take the repaint down with it -- and a predicate that
+-- errored is taken as ENABLED, because greying a button on the strength of a bug
+-- would leave the user with no way in and nothing on screen to explain it.
+local function safeEval(fn)
+    if type(fn) ~= "function" then return nil end
+    local ok, a, b = xpcall(fn, geterrorhandler())
+    if not ok then return nil end
+    return a, b
+end
+
 -- ============================================================
 -- PER-HOST STORE
 -- The pool and the family registry are HOST state, not library state: two
@@ -859,12 +872,297 @@ function Popout:_Present(side)
 end
 
 -- Height follows the content the consumer mounted; width was fixed at build.
+--
+-- The footer is the one thing added to that sum, and ONLY when there is one: a
+-- popout whose consumer declared no actions never builds the strip, `_footerOn`
+-- is nil, and the arithmetic is the number it has always been. That is the whole
+-- of the "existing consumers are untouched" promise, stated once, here.
 function Popout:_Resize()
     local h = self.content:GetHeight() or 0
-    self.frame:SetHeight(TITLE_H + PAD + h + PAD)
+    self.frame:SetHeight(TITLE_H + PAD + h + PAD + (self._footerOn and FOOTER.height or 0))
     return self
 end
 Popout.Resize = Popout._Resize      -- public: call after changing content height
+
+-- ============================================================
+-- THE FOOTER
+-- A strip along the bottom carrying the consumer's `actions` -- verbs about the
+-- panel AS A WHOLE, which is why they are not in the content: a control in the
+-- column reads as one more setting, and "reset every setting behind this row" is
+-- not one of them.
+--
+-- ☠ THE CONTENT IS PER-ADOPT, NOT PER-BUILD, and that is forced by the pool. One
+-- popout instance serves EVERY row on its host (PopoutRow's swapTo re-targets the
+-- same object), so the actions belong to whichever row currently has the panel --
+-- exactly like the title, the accent and the header toggle. Rendered once at
+-- build, row two would be looking at row one's buttons and pressing them would
+-- reset row one's settings. So the render runs on every adopt and on every bind,
+-- and the BUTTONS are pooled on the instance so re-rendering costs no frames.
+--
+-- The strip is TRANSPARENT: a 1px rule at its top and nothing else. The rounded
+-- surface paints the panel's bottom corners on the FRAME, and a filled strip laid
+-- over them -- a child's textures draw above every layer of its parent -- would
+-- square them off. A transparent one cannot.
+--
+-- GREYING. The footer joins the row's OFF GATE (PopoutRow.lua): a row whose
+-- toggle is off greys its whole pane, and the footer greys with it. The
+-- alternative was to leave it live, and that reads as "this button still does
+-- something to a feature that is switched off" -- the same lie the gate exists to
+-- stop the pane telling. The popout's own header toggle, pin and cross stay live
+-- either way; the footer is body, not chrome.
+-- ============================================================
+
+-- One press's worth of state lives on the POPOUT, not on the button, because
+-- every way a press can END is something that happens to the panel: it closes,
+-- it is swept by its family, its source goes away. See _CancelHold.
+local function footerButton(po, i)
+    local pool = po._footerBtns
+    local btn = pool[i]
+    if btn then return btn end
+
+    btn = po.host:CreateButton(po._footer, {
+        -- fitText = false, and the width comes from the SHARE below. Two rows
+        -- share this instance and their labels differ, so a button that grew to
+        -- its first label would be the wrong width for its second -- and the
+        -- factory's fit is grow-only, so it could never shrink back. Equal
+        -- widths are the point here anyway, which is the case fitText = false
+        -- documents itself for.
+        text = "", height = FOOTER.btnHeight, fitText = false,
+        onClick = function(self)
+            -- The CURRENT descriptor, read at press time off the button. A
+            -- closure over the descriptor this button was BUILT for would fire
+            -- the previous row's action after a swap.
+            local act = self._dfAct
+            -- A hold button's press is not a click: the down and the up are the
+            -- gesture, and the click that follows the up must not run it again.
+            if act and not act.hold then safeCall(act.onClick, po) end
+        end,
+    })
+    -- ---- the press-and-hold contract ------------------------------
+    -- ☠ onHoldEnd FIRES EXACTLY ONCE PER onHoldStart, and never without one.
+    -- It is the RESTORE half of a preview: miss it and the user is left looking
+    -- at defaults with their own settings gone; run it twice and the second
+    -- restore replays a snapshot that was already spent. So the three scripts
+    -- below and the panel's own Close all funnel into ONE door, _CancelHold,
+    -- and the flag it clears is what makes the second caller a no-op.
+    btn:SetScript("OnMouseDown", function(self)
+        if self.dfDisabled then return end
+        local act = self._dfAct
+        if not (act and act.hold) then return end
+        po:_CancelHold("restart")           -- a hold already up cannot outlive this one
+        po._holdBtn = self
+        safeCall(act.onHoldStart, po)
+    end)
+    -- The client delivers OnMouseUp to the button that was PRESSED even when the
+    -- cursor has since left it, which is the case that matters: a user who holds
+    -- and drifts off the button still expects their settings back.
+    btn:SetScript("OnMouseUp", function(self)
+        if po._holdBtn == self then po:_CancelHold("mouseup") end
+    end)
+    -- The strip going down under a live press -- the footer re-rendered with
+    -- fewer buttons, the panel hidden by hand. In game a hidden parent fires
+    -- OnHide on its children, so this catches the panel too; Close catches it
+    -- again, and the flag makes the pair one call.
+    btn:SetScript("OnHide", function(self)
+        if po._holdBtn == self then po:_CancelHold("hide") end
+    end)
+    -- The tooltip is REBUILT on every refresh (the disabled reason is part of
+    -- it), so the script reads a spec off the button rather than closing over
+    -- one. ShowTooltip is optional on a host -- DandersMover has no tooltips --
+    -- and an absent one is silence.
+    btn:SetScript("OnEnter", function(self)
+        local spec = self._dfTooltip
+        if spec and po.host.ShowTooltip then po.host:ShowTooltip(self, spec) end
+    end)
+    btn:SetScript("OnLeave", function()
+        if po.host.HideTooltip then po.host:HideTooltip() end
+    end)
+
+    pool[i] = btn
+    return btn
+end
+
+-- The strip itself, built on FIRST USE and kept. A consumer that never declares
+-- actions never reaches this, which is what keeps its popout byte-for-byte the
+-- one it had before this existed.
+function Popout:_EnsureFooter()
+    if self._footer then return self._footer end
+    local f = self.frame
+
+    local bar = CreateFrame("Frame", nil, f)
+    bar:SetPoint("BOTTOMLEFT", 0, 0)
+    bar:SetPoint("BOTTOMRIGHT", 0, 0)
+    bar:SetHeight(FOOTER.height)
+    self._footer = bar
+
+    -- ...and the rule above it, drawn on the FRAME rather than on the strip, for
+    -- the reason the title bar's separator is: a child's textures draw above
+    -- every layer of its parent, so a line on the strip would cross the panel's
+    -- accent border at both ends. On the frame under the border (ARTWORK 7) the
+    -- border wins the edges and the line runs the full width beneath it.
+    local sep = f:CreateTexture(nil, "ARTWORK", nil, 2)
+    sep:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    sep:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
+    sep:SetHeight(1)
+    local c = UI.Colors and UI.Colors.border
+    if c then sep:SetColorTexture(c.r, c.g, c.b, FOOTER.sepAlpha) end
+    self._footerSep = sep
+
+    self._footerBtns = {}
+    return bar
+end
+
+-- Fire the RESTORE half of a live hold, at most once. Every ending goes through
+-- here; the nil flag is what makes the second caller free.
+function Popout:_CancelHold(reason)
+    local btn = self._holdBtn
+    if not btn then return self end
+    self._holdBtn = nil                     -- cleared FIRST: onHoldEnd may close us
+    local act = btn._dfAct
+    if act and act.hold then safeCall(act.onHoldEnd, self) end
+    return self
+end
+
+-- Re-evaluate what each button is allowed to do, and rebuild its tooltip. Cheap
+-- and idempotent by design: it runs on every adopt, every row bind and every
+-- pass of the row's own refresh, because "can this be pressed" is answered by
+-- things the panel is never told about (combat, an auto layout going live).
+function Popout:_RefreshFooter()
+    local btns = self._footerBtns
+    if not (self._footerOn and btns) then return self end
+    local gated = self._footerShut and true or false
+
+    for i = 1, #btns do
+        local btn = btns[i]
+        local act = btn._dfAct
+        if act then
+            local allowed, reason = true, nil
+            local e = act.enabled
+            if type(e) == "function" then
+                local ok, why = safeEval(e)
+                -- nil = the predicate errored (safeEval swallowed it); allowed.
+                if ok ~= nil then allowed = ok and true or false end
+                if not allowed then reason = why end
+            elseif e ~= nil then
+                allowed = e and true or false
+            end
+            -- The row's gate is the last word, and it carries no reason of its
+            -- own: the row's OWN tick is right there saying the feature is off.
+            if gated then allowed = false end
+
+            local lines
+            if act.tooltipDesc or reason then
+                lines = {}
+                if act.tooltipDesc then lines[#lines + 1] = act.tooltipDesc end
+                if reason then
+                    if #lines > 0 then lines[#lines + 1] = " " end
+                    lines[#lines + 1] = { text = reason, hint = true }
+                end
+            end
+            btn._dfTooltip = { title = act.tooltip or act.text, lines = lines }
+
+            -- SetDisabled, NOT SetEnabled: a disabled button here still has to
+            -- take the mouse, because the tooltip is the only thing that says
+            -- WHY it cannot be pressed. That is exactly the bargain SetDisabled
+            -- documents (it stays natively clickable and relies on the owner's
+            -- dfDisabled early-out, which CreateButton's OnClick and the
+            -- OnMouseDown above both make).
+            if btn.SetDisabled then btn:SetDisabled(not allowed) end
+            -- ...and a press that was live when the answer changed ends now
+            -- rather than hanging on a button nobody can release.
+            if not allowed and self._holdBtn == btn then self:_CancelHold("disabled") end
+        end
+    end
+    return self
+end
+
+-- Put `self.actions` on screen. The whole of the per-adopt story: N descriptors
+-- in, N pooled buttons shown with their labels and widths, the surplus hidden,
+-- and the panel re-measured only when the STRIP's presence changed.
+function Popout:_RenderFooter()
+    local list = self.actions
+    local n = (type(list) == "table") and #list or 0
+
+    if n == 0 then
+        -- Withdrawn (or never declared). A pooled instance re-adopted by a
+        -- consumer that passes none must lose the strip entirely, not keep an
+        -- empty one holding 26px of the panel open.
+        if self._footer then
+            self:_CancelHold("actions")
+            for _, btn in ipairs(self._footerBtns) do btn:Hide(); btn._dfAct = nil end
+            self._footer:Hide()
+            if self._footerSep then self._footerSep:Hide() end
+            if self._footerOn then
+                self._footerOn = false
+                self:_Resize()
+            end
+        end
+        return self
+    end
+
+    local bar = self:_EnsureFooter()
+    -- ☠ Any button whose descriptor is about to change must not still be held.
+    -- Cheaper than working out whether THIS button's action survived the swap,
+    -- and a hold that spans two different actions is not a thing that can mean
+    -- anything.
+    self:_CancelHold("render")
+
+    -- Equal shares of the content width. Deterministic (the same two buttons are
+    -- the same size on every row that opens this panel) and localisation-safe by
+    -- construction: a longer translation eats its own share instead of shoving
+    -- its neighbour off the strip.
+    local avail = self.width or 0
+    local share = (avail - FOOTER.gap * (n - 1)) / n
+    if share < 1 then share = 1 end
+
+    local btns = self._footerBtns
+    for i = 1, n do
+        local act = list[i]
+        local btn = footerButton(self, i)
+        btn._dfAct = act
+        btn:SetWidth(share)
+        btn:SetHeight(FOOTER.btnHeight)
+        if btn.SetText then btn:SetText(act.text or "") end
+        btn:ClearAllPoints()
+        if i == 1 then
+            btn:SetPoint("LEFT", bar, "LEFT", PAD, 0)
+        else
+            btn:SetPoint("LEFT", btns[i - 1], "RIGHT", FOOTER.gap, 0)
+        end
+        btn:Show()
+    end
+    for i = n + 1, #btns do
+        btns[i]:Hide()
+        btns[i]._dfAct = nil
+    end
+
+    bar:Show()
+    if self._footerSep then self._footerSep:Show() end
+    if not self._footerOn then
+        self._footerOn = true
+        self:_Resize()
+    end
+    self:_RefreshFooter()
+    return self
+end
+
+-- Declare (or withdraw) the footer's actions on a LIVE panel. The public door:
+-- a consumer that only learns its actions after the popout is up (a group reset
+-- whose key set is derived by walking the pane it just built) has nothing to
+-- hand CreatePopout at the moment it calls it.
+function Popout:SetActions(list)
+    self.actions = (type(list) == "table") and list or nil
+    self:_RenderFooter()
+    return self
+end
+
+-- Grey the footer WITH the pane. Called by whatever owns the pane's gate --
+-- PopoutRow's toggle is the only one today -- and idempotent, so the gate can
+-- state it on every refresh without checking.
+function Popout:SetFooterGated(shut)
+    self._footerShut = (shut and true) or nil
+    return self:_RefreshFooter()
+end
 
 -- ---- the retarget glide ------------------------------------------
 
@@ -1681,6 +1979,11 @@ function Popout:GetTitle() return self.headerTitle end
 function Popout:Close(reason)
     if self.closed then return self end
     self.closed = true
+    -- ☠ FIRST, and before onClose. A hold whose panel is closing (the cross, a
+    -- family sweep, the source going away) still owes its consumer the restore,
+    -- and the consumer's onClose may be the thing that tears down what the
+    -- restore writes into.
+    self:_CancelHold("close")
     self.following = false
     self.gliding = false
     self:_StopTick()
@@ -1740,12 +2043,18 @@ local function adopt(po, opts)
     po.onUnpin     = opts.onUnpin          -- accepted; v1 never unpins
     po.canAutoPin  = opts.canAutoPin
     po.tetherSource = opts.tetherSource
-    -- Reserved. Accepted and ignored so the call sites that will want a header
-    -- action row or a count badge can be written before the shell grows them.
-    po.actions     = opts.actions
+    -- Reserved. Accepted and ignored so the call sites that will want a count
+    -- badge can be written before the shell grows one.
     po.badge       = opts.badge
     po:SetHeader(opts.title, opts.icon)
     po:_ApplyAccent()
+    -- ☠ ON EVERY ADOPT, not at build, and that is what makes the pool safe. The
+    -- footer's CONTENT belongs to whoever has the panel now -- see THE FOOTER.
+    -- The gate is cleared with it: the previous row's toggle has no say over the
+    -- next row's buttons, and the row that takes the panel re-states its own.
+    po._footerShut = nil
+    po.actions     = (type(opts.actions) == "table") and opts.actions or nil
+    po:_RenderFooter()
 end
 
 -- Opening a popout in a family closes every OTHER popout in that family --
@@ -1790,7 +2099,28 @@ end
 --                 consumer called host:SetSurfaceStyle -- so an existing caller
 --                 that says nothing keeps the square panel it has always had,
 --                 and DandersMover is untouched
---   actions / badge          reserved, accepted and ignored
+--   actions       an ARRAY of verbs about the panel as a whole, rendered as a
+--                 strip along its bottom. Absent = no footer and the height the
+--                 popout has always had. Re-read on EVERY adopt (the pool hands
+--                 one instance to many consumers), and settable live with
+--                 popout:SetActions(list). Each descriptor:
+--                   text          the button's label (a display string; the
+--                                 consumer localises it)
+--                   tooltip       tooltip title (defaults to `text`)
+--                   tooltipDesc   an optional line under it
+--                   onClick(popout)             a plain action, OR
+--                   hold = true with onHoldStart(popout) / onHoldEnd(popout)
+--                                 press-and-hold. ☠ onHoldEnd fires EXACTLY
+--                                 ONCE per onHoldStart and never without one --
+--                                 on the release, on the panel closing or
+--                                 hiding mid-press, and on the button being
+--                                 disabled under the press
+--                   enabled       boolean, or fn() -> enabled, reasonText.
+--                                 Re-evaluated on every adopt, every bind and
+--                                 every pass of the owner's refresh; false
+--                                 greys the button and puts reasonText in its
+--                                 tooltip
+--   badge         reserved, accepted and ignored
 function UI:CreatePopout(opts)
     local host = self
     if type(opts) ~= "table" or type(opts.key) ~= "string" or opts.key == "" then
@@ -1829,8 +2159,17 @@ function UI:CreatePopout(opts)
     -- Hiding the frame by hand (a consumer's combat suspend, or the tail of the
     -- exit) must take the beam and the source outline with it: they are not
     -- children of this frame, so nothing else would.
+    --
+    -- ...and it must end a live footer hold, for the same reason Close does: the
+    -- panel leaving the screen under a press is a press that is over. ONE hook
+    -- doing both jobs rather than two -- a second HookScript on the same handler
+    -- is a hook the headless stub cannot model (its HookScript REPLACES), and the
+    -- two things this frame owes on hide are not worth two of them.
     if f.HookScript then
-        f:HookScript("OnHide", function() po:HideChrome() end)
+        f:HookScript("OnHide", function()
+            po:HideChrome()
+            po:_CancelHold("hide")
+        end)
     end
 
     -- The connection point. OVERLAY, so it draws over the pixel border it

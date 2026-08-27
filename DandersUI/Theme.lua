@@ -361,6 +361,30 @@ UI.PopoutTitle = {
 -- UI.PopoutRow.slot follows. This is the number a consumer sizes against.
 UI.PopoutTitleHeight = UI.PopoutTitle.topPad + UI.PopoutTitle.row
 
+-- ...and the strip at the BOTTOM, which a popout only grows when its consumer
+-- declares `actions`. Here for the same reason the title's numbers are: the
+-- shell's height is titleHeight + pad + content + pad + THIS, and a consumer
+-- sizing a fixed panel has to be able to add it up without reading Popout.lua.
+--
+-- A popout with no actions never builds one and its height is unchanged, so
+-- every existing consumer is untouched by this table existing.
+UI.PopoutFooter = {
+    -- The strip. 18px button plus 4 above and below -- the same "control plus a
+    -- little air" the title row is built from, at the smaller control size a
+    -- quiet action bar wants.
+    height    = 26,
+    -- The buttons in it. Smaller than the 22 a settings button stands at: this
+    -- is a footnote to the panel, not one of its controls.
+    btnHeight = 18,
+    -- Between two buttons. The kit's tight gap; these are one group, and air
+    -- between them at the settings-row spacing would read as two.
+    gap       = 6,
+    -- The hairline ABOVE the strip, as an alpha of C_BORDER -- the same value
+    -- and the same idiom as the title bar's separator, so the panel's two rules
+    -- are one line drawn twice rather than two decisions.
+    sepAlpha  = UI.PopoutTitle.sepAlpha,
+}
+
 -- ============================================================
 -- THE SURFACE STYLE
 --

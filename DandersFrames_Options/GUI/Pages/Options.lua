@@ -2221,6 +2221,120 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 end)
             end
 
+            -- ---- the footer's two verbs ---------------------------------
+            -- What a write to any of these keys costs, in one place, so the two
+            -- buttons and every future one apply the SAME work. Deliberately the
+            -- bodies the widgets themselves drive: OnBorderToggle's first two
+            -- lines are the group's real apply, ReflowMounted repaints the
+            -- controls the user is looking at (RefreshChildStates walks the
+            -- group calling refreshContent on every child), and the row's own
+            -- Refresh re-reads the summary and the modified tick.
+            --
+            -- ApplyScheduler coalesces UpdateFrames + LightweightUpdateBorder,
+            -- so a reset of thirteen keys is one apply, not thirteen.
+            local function RefreshAfterGroupWrite()
+                UpdateFrames()
+                DF:LightweightUpdateBorder()
+                ReflowMounted()
+                if GUI.RefreshAllOverrideIndicators then
+                    GUI.RefreshAllOverrideIndicators()
+                end
+                self:RefreshStates()
+            end
+
+            -- Can these buttons be pressed at all, and if not, why.
+            --
+            -- COMBAT greys both. Every key behind these two rows reaches a
+            -- secure frame, and the addon's standing rule is that those writes
+            -- are deferred in combat -- the footer does not fight that, it just
+            -- says so.
+            local function CombatReason()
+                if InCombatLockdown() then return false, L["Cannot use this action in combat."] end
+                return true
+            end
+
+            -- ...and HOLD alone is additionally off while the raid auto-layout
+            -- machinery is live. Two different reasons, one gate:
+            --
+            --   EDITING a layout: `onSettingWritten` records every write as an
+            --   override edit for that layout. A hold writes twice -- defaults
+            --   in, the user's values back out -- so a preview nobody committed
+            --   to would land in the layout as two deliberate edits.
+            --   A LAYOUT RUNNING: `interceptWrite` redirects writes to the
+            --   stored baseline instead of the live table, so the preview would
+            --   change nothing on screen. A press-and-hold that shows the user
+            --   nothing is worse than one they cannot press.
+            --
+            -- RESET stays available in BOTH states, and that is not an
+            -- oversight. While editing, recording the defaults as this layout's
+            -- override edits is exactly what the user asked for; while a layout
+            -- is running, the redirect writes the defaults into the stored
+            -- baseline -- which is the table the modified dots and the row tick
+            -- are reporting on, so the reset does what they say it will.
+            local function HoldReason()
+                local ok, why = CombatReason()
+                if not ok then return false, why end
+                local AP = DF.AutoProfilesUI
+                if GUI.SelectedMode == "raid" and AP then
+                    local editing = AP.IsEditing and AP:IsEditing()
+                    local running = AP.IsLayoutActive and AP:IsLayoutActive()
+                    if editing or running then
+                        return false, L["Unavailable while an auto layout is active or being edited."]
+                    end
+                end
+                return true
+            end
+
+            -- The two verbs, wired onto a row whose keys have just been claimed.
+            -- Both close over row._claimedKeys by REFERENCE rather than reading
+            -- it now: ClaimKeys fills that table after the row is built, and a
+            -- copy taken here would be the empty one.
+            local function WireFooter(row)
+                if not (row and row.SetActions) then return end
+                local held                    -- the hold's snapshot, between the two halves
+                row:SetActions({
+                    {
+                        text        = L["Reset Group"],
+                        tooltipDesc = L["Reset every setting in this group to its default value."],
+                        enabled     = CombatReason,
+                        onClick     = function()
+                            local GA = DF.GroupActions
+                            if not GA then return end
+                            GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                            RefreshAfterGroupWrite()
+                            row.Refresh()
+                        end,
+                    },
+                    {
+                        text        = L["Hold: Defaults"],
+                        hold        = true,
+                        tooltipDesc = L["Press and hold to preview this group at its default values. Release to restore your settings."],
+                        enabled     = HoldReason,
+                        onHoldStart = function()
+                            local GA = DF.GroupActions
+                            if not GA then return end
+                            held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                            RefreshAfterGroupWrite()
+                            row.Refresh()
+                        end,
+                        onHoldEnd   = function()
+                            local GA = DF.GroupActions
+                            if not (GA and held) then return end
+                            GA:EndHold(GUI, RowDB(), row._claimedKeys or {}, held)
+                            held = nil
+                            -- The UNTHROTTLED apply on the way back, unlike the
+                            -- coalescing one used going in: a release is the
+                            -- moment the user is watching for their settings to
+                            -- come back, and a frame of defaults left on screen
+                            -- after they let go reads as the restore failing.
+                            GUI:Call("refreshNow")
+                            RefreshAfterGroupWrite()
+                            row.Refresh()
+                        end,
+                    },
+                })
+            end
+
             -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
             -- map: the tick is ON the row, so the section jump already lands on
             -- the control the user searched for and opening the panel on top of
@@ -2267,6 +2381,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }))
             ClaimKeys(borderRow, borderContent)
             WireModifiedTick(borderRow)
+            WireFooter(borderRow)
             RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder")
 
             local shadowMount, shadowContent = PopoutContent(function(group, holder, reflow)
@@ -2294,6 +2409,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }))
             ClaimKeys(shadowRow, shadowContent)
             WireModifiedTick(shadowRow)
+            WireFooter(shadowRow)
             RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled")
             -- The dependent grey, in the page's own idiom: the group's
             -- RefreshChildStates drives row:SetEnabled off this, and the row's

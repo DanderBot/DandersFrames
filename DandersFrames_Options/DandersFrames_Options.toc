@@ -68,6 +68,10 @@ GUI\Sections.lua
 GUI\Controls.lua
 GUI\Panel.lua
 GUI\ColorPicker.lua
+# The write half of the popout footer's group verbs (Reset Group / Hold:
+# Defaults). Before the pages, which call it; it reads DF.Defaults at call time
+# only, so nothing else about its position is load-bearing.
+GUI\GroupActions.lua
 
 # Settings pages -- Options.lua heads the chain, the rest follow in order
 GUI\Pages\Options.lua

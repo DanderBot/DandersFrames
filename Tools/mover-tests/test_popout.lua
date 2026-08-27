@@ -39,6 +39,7 @@ UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5
 UI.PopoutTitle = UI.PopoutTitle or { topPad = 6, row = 28, fill = 0.9, sepAlpha = 0.8 }
 UI.PopoutTitleHeight = UI.PopoutTitleHeight or (UI.PopoutTitle.topPad + UI.PopoutTitle.row)
 UI.PopoutPad = UI.PopoutPad or 10
+UI.PopoutFooter = UI.PopoutFooter or { height = 26, btnHeight = 18, gap = 6, sepAlpha = UI.PopoutTitle.sepAlpha }
 
 local ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
 function UI:GetAccent() return ACCENT end

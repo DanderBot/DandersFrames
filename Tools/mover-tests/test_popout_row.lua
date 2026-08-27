@@ -109,6 +109,7 @@ UI.PopoutContentWidth = UI.PopoutContentWidth or 260
 UI.PopoutTitle = UI.PopoutTitle or { topPad = 6, row = 28, fill = 0.9, sepAlpha = 0.8 }
 UI.PopoutTitleHeight = UI.PopoutTitleHeight or (UI.PopoutTitle.topPad + UI.PopoutTitle.row)
 UI.PopoutPad = UI.PopoutPad or 10
+UI.PopoutFooter = UI.PopoutFooter or { height = 26, btnHeight = 18, gap = 6, sepAlpha = UI.PopoutTitle.sepAlpha }
 UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true end
 -- The row's own box model (Theme.lua's UI.PopoutRow). Mirrored whole, and the
 -- slot derived the same way the real one is, so the two cannot drift into

@@ -34,6 +34,10 @@ KIT.RowHeight = { groupTitle = 26, checkbox = 35 }
 KIT.PopoutTitle = { topPad = 6, row = 28, fill = 0.9, sepAlpha = 0.8 }
 KIT.PopoutTitleHeight = KIT.PopoutTitle.topPad + KIT.PopoutTitle.row
 KIT.PopoutPad = 10
+-- The footer strip's own numbers. The panel declares no actions, so no footer is
+-- ever built -- but Popout.lua reads this table at FILE SCOPE like the title's,
+-- and this file is the FIRST in the suite to load the shell.
+KIT.PopoutFooter = { height = 26, btnHeight = 18, gap = 6, sepAlpha = KIT.PopoutTitle.sepAlpha }
 
 function KIT:GetAccent() return COLORS.accent end
 function KIT:CreatePanelBackdrop() end
