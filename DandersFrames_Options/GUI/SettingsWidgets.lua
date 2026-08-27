@@ -2585,8 +2585,14 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- Inset / Offset apply to every non-NONE effect EXCEPT DF_PULSATE (which
     -- modulates the border's own edges and has no separate animRect).
     local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
-    -- Scale slider = sparkle size (DF Chase).
-    local hasScale     = { DF_ORBIT=1 }
+    -- Scale slider = how big the effect draws. Sparkle size on DF Chase; on DF Proc and
+    -- DF Flash it multiplies how far the glow reaches past the border. That reach cannot
+    -- be a constant: both are a square glow texture stretched over the host, its bright
+    -- band is a soft gradient baked into the art (no line to pin), and frames come in
+    -- every shape — the value that hugs a 125x60 frame is wrong on a tall one. The
+    -- per-axis geometry puts the band's midline on the frame edge; Scale is the one knob
+    -- that moves the band in or out from there.
+    local hasScale     = { DF_ORBIT=1, DF_PROC=1, DF_FLASH=1 }
     -- Length slider = bar length (DF Pixel's chasing bars).
     local hasLength    = { DF_PIXEL=1 }
     local cornersOnly  = { CORNERS_ONLY=1 }
@@ -2699,6 +2705,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         0.5, 3, 0.05, dbTable, aKey("Scale"),
         fullUpdate, lightUpdate, true), 55)
     w.animationScale.hideOn = hideUnless(hasScale)
+    w.animationScale.tooltip = L["How large the effect draws. On DF Chase, the size of each sparkle; on DF Proc and DF Flash, how far the glow reaches beyond the border."]
 
     w.animationInset = group:AddWidget(GUI:CreateSlider(parent, L["Animation Inset"],
         -50, 50, 1, dbTable, aKey("Inset"),

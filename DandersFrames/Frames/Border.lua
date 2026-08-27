@@ -2093,12 +2093,24 @@ local function procTick(border, anim, dt)
         -- ignored the frame's shape completely. Deriving each axis from its own
         -- dimension keeps the glow the same shape as the thing it is glowing around,
         -- and is a no-op wherever w == h.
-        local offX = floor(w * PROC_LOOP_SPILL + 0.5)
-        local offY = floor(h * PROC_LOOP_SPILL + 0.5)
+        -- ★ SCALE multiplies the reach. The band's midline lands on the frame edge at
+        -- scale 1; there is no exact "on the border" beyond that, because the bright
+        -- band is a soft gradient baked into the art — so the residual is a knob, not a
+        -- constant. At scale 1 the loop rect is identical to the pre-slider render; the
+        -- burst is within 2px of it (it now sizes off the ROUNDED loop, which lands the
+        -- contract-onto-loop hand-off on our actual rect rather than the ideal one).
+        local sc = anim.scale or 1
+        local offX = floor(w * PROC_LOOP_SPILL * sc + 0.5)
+        local offY = floor(h * PROC_LOOP_SPILL * sc + 0.5)
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -offX,  offY)
         t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  offX, -offY)
-        if s then s:SetSize(w * PROC_BURST_SCALE, h * PROC_BURST_SCALE) end
+        -- Burst sized off the LOOP rect so the intro still contracts exactly onto it
+        -- at any scale (the art's hand-off is loop-relative, not host-relative).
+        if s then
+            local k = PROC_BURST_SCALE / (1 + 2 * PROC_LOOP_SPILL)
+            s:SetSize((w + 2 * offX) * k, (h + 2 * offY) * k)
+        end
     end
     local period = border._procPeriod or 1
     border._procTimer = (border._procTimer + dt / period) % 1
@@ -2141,8 +2153,10 @@ local function buildProcAnims(border, anim)
     -- Per-axis, for the reason spelled out in procTick — a width-derived spill turns a
     -- wide frame's glow into a tall blob.
     t:SetAtlas(PROC_ATLAS)
-    local offX = floor(w * PROC_LOOP_SPILL + 0.5)
-    local offY = floor(h * PROC_LOOP_SPILL + 0.5)
+    -- Scale multiplies the reach, exactly as procTick does — see the note there.
+    local sc = anim.scale or 1
+    local offX = floor(w * PROC_LOOP_SPILL * sc + 0.5)
+    local offY = floor(h * PROC_LOOP_SPILL * sc + 0.5)
     t:ClearAllPoints()
     t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -offX,  offY)
     t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  offX, -offY)
@@ -2150,7 +2164,8 @@ local function buildProcAnims(border, anim)
     local showIntro = (not anim.procStart) and s and border._procStartAtlas
     if showIntro then
         s:SetAtlas(PROC_START_ATLAS)
-        s:SetSize(w * PROC_BURST_SCALE, h * PROC_BURST_SCALE)
+        local k = PROC_BURST_SCALE / (1 + 2 * PROC_LOOP_SPILL)
+        s:SetSize((w + 2 * offX) * k, (h + 2 * offY) * k)
         s:SetAlpha(1)
         local ag = s:CreateAnimationGroup()
         ag:SetToFinalAlpha(true)
@@ -2293,7 +2308,12 @@ local function flashTick(border, anim, dt)
     if host and w and w > 0 and h and h > 0
         and (border._flashGeomW ~= w or border._flashGeomH ~= h) then
         border._flashGeomW, border._flashGeomH = w, h
-        Fw, Fh = w * FLASH_FRAME_SCALE, h * FLASH_FRAME_SCALE
+        -- Scale multiplies the reach past the edge (the FLASH_FRAME_SCALE - 1 part),
+        -- not the whole frame — so scale 1 is byte-identical to the pre-slider render
+        -- and 0.5 halves the overhang rather than shrinking the glow inside the frame.
+        local sc = anim.scale or 1
+        local k = 1 + (FLASH_FRAME_SCALE - 1) * sc
+        Fw, Fh = w * k, h * k
         border._flashFw, border._flashFh = Fw, Fh
         border._flashSettled = nil   -- re-park the steady glow at the new F
         if ants then ants:SetSize(Fw * 0.85, Fh * 0.85) end
@@ -2412,9 +2432,10 @@ local function buildFlashAnims(border, anim)
     w = w - 2 * (anim.inset or 0)
     h = h - 2 * (anim.inset or 0)
     if w <= 0 or h <= 0 then return false end
-    -- Per-axis, matching flashTick — a single width-derived F made the glow a square
-    -- that ignored a wide frame's shape.
-    local Fw, Fh = w * FLASH_FRAME_SCALE, h * FLASH_FRAME_SCALE
+    -- Per-axis with the Scale knob on the overhang, exactly as flashTick does it.
+    local sc = anim.scale or 1
+    local k = 1 + (FLASH_FRAME_SCALE - 1) * sc
+    local Fw, Fh = w * k, h * k
     border._flashFw, border._flashFh = Fw, Fh
     border._flashGeomW, border._flashGeomH = w, h
     border._flashSettled = true
