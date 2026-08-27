@@ -35,10 +35,13 @@ MARGIN = 3.0
 FAR = W - MARGIN            # 29: the far edge on both axes
 HEAD = 11.0                 # leg length -- the same fill weight as close.tga
 
-# Shaft: a stroke along the "/" diagonal, ending where each hypotenuse does so
-# the three pieces read as one stroke rather than three shapes that touch.
-SHAFT_A = (MARGIN + HEAD - 2.0, FAR - HEAD + 2.0)     # bottom-left end
-SHAFT_B = (FAR - HEAD + 2.0, MARGIN + HEAD - 2.0)     # top-right end
+# Shaft: a stroke along the "/" diagonal. Each end sits PAST the head's
+# hypotenuse, at the triangle's midline -- the stroke buries ~2 units into the
+# head, so the three pieces genuinely overlap instead of stopping short (the
+# first version ended the shaft ~5 units shy of each hypotenuse and the arrows
+# read as detached -- Danders, 2026-08-27).
+SHAFT_A = (MARGIN + HEAD / 2 - 1.0, FAR - HEAD / 2 + 1.0)   # bottom-left end
+SHAFT_B = (FAR - HEAD / 2 + 1.0, MARGIN + HEAD / 2 - 1.0)   # top-right end
 SHAFT_HW = 1.5                                        # half-width -> 3px stroke
 
 
