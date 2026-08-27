@@ -536,7 +536,7 @@ end
 --     generation token also lets that newer kick supersede a stale pending one).
 local KICK_CHUNK = 10   -- containers bounced per frame
 
-function AuraContainer._kickLiveParse()
+function AuraContainer._kickLiveParse(reason)
     -- Snapshot the work list synchronously — the registries can churn while the
     -- chunks run, and pairs() over a mutating table is undefined.
     local handles, containers = {}, {}
@@ -585,8 +585,9 @@ function AuraContainer._kickLiveParse()
         if i < nh + ns then
             C_Timer.After(0, step)
         else
-            DF:Debug(DBG, "test exit: re-parsed %d live handles, %d slot owners over %d frames", nh, ns, frames)
-            if t0 then DF:Debug("PERF", "_kickLiveParse done %.1fms after exit (%d handles, %d slot owners, %d frames)", debugprofilestop() - t0, nh, ns, frames) end
+            DF:Debug(DBG, "%s: re-parsed %d live handles, %d slot owners over %d frames",
+                reason or "test exit", nh, ns, frames)
+            if t0 then DF:Debug("PERF", "_kickLiveParse done %.1fms (%s: %d handles, %d slot owners, %d frames)", debugprofilestop() - t0, reason or "test exit", nh, ns, frames) end
         end
     end
     -- First chunk on the NEXT frame, not this one: the exit frame already carries the
@@ -594,6 +595,96 @@ function AuraContainer._kickLiveParse()
     -- rebuild) — adding parse bounces to it is exactly the hitch this exists to fix.
     C_Timer.After(0, step)
 end
+
+-- ============================================================
+-- STALE-PARSE SAFETY NET (field: stuck AD icon on raid15, 2026-08-27)
+-- ============================================================
+-- A container can stop re-parsing while staying correctly bound: the field case showed
+-- a group indicator frozen with a stale aura and a frozen ENGINE-written count, clean
+-- bindings (adgate), no gate involvement, no Lua error. Presence is SECRET, so no code
+-- of ours can DETECT "this slot is stale" — the honest move is to make the state
+-- self-heal instead, the same doctrine as the shipped hide-conditions recheck.
+--
+-- The cure is the bounce, not the mark: UpdateAllAuras sets dirty flags that wait for
+-- the next UNIT_AURA on that unit — a DEAF container (dropped event registrations, the
+-- prime suspect for the field case) never hears one, so mark-only heals nothing there.
+-- The Hide/Show bounce crosses the partition, re-registers events AND re-arms a real
+-- parse — and it is OOC-only, which is why the schedule is:
+--   * a full kick shortly after EVERY combat end (the first legal moment a container
+--     that stuck mid-fight can actually be cured — this replaces "reload after the
+--     boss"), delayed a beat so the regen-flush machinery and event burst go first;
+--   * a slow out-of-combat sweep as the background net for stuck-while-idle cases;
+--   * nothing in combat: mark-only there mostly re-marks containers the dense combat
+--     traffic is already driving, and the deaf case it cannot reach anyway.
+-- Cost: one test-exit-sized chunked kick per combat drop / per interval — the
+-- mover-hitch fix already proved that invisible.
+local SWEEP_INTERVAL = 30
+
+-- UNIT_AURA FLOW LOG (channel-gated): the question this incident could not answer was
+-- "did aura traffic exist for raid15 while its container sat frozen?" — OUR hearing the
+-- event proves the traffic; the container staying stale then proves deafness. Counts
+-- per unit, flushed as ONE compact line per sweep interval, and registered only while
+-- the AURACONTAINER debug channel is on so normal users pay nothing.
+local flowCounts, flowTotal = {}, 0
+local flowFrame = CreateFrame("Frame")
+flowFrame:SetScript("OnEvent", function(_, _, unit)
+    if unit then
+        flowTotal = flowTotal + 1
+        flowCounts[unit] = (flowCounts[unit] or 0) + 1
+    end
+end)
+local flowArmed = false
+local function syncFlowWatch()
+    local want = (DF.DebugActive and DF:DebugActive(DBG)) and true or false
+    if want == flowArmed then return end
+    flowArmed = want
+    if want then flowFrame:RegisterEvent("UNIT_AURA")
+    else flowFrame:UnregisterEvent("UNIT_AURA") end
+end
+local function flushFlowLog()
+    if not flowArmed then return end
+    -- Group units with ZERO events this window: legitimate for out-of-range members,
+    -- but the post-mortem correlation is exactly what was missing this incident.
+    local zeroed, n = {}, GetNumGroupMembers()
+    if n and n > 0 then
+        local prefix = IsInRaid() and "raid" or "party"
+        for i = 1, n do
+            local u = prefix .. i
+            if not flowCounts[u] and #zeroed < 10 then zeroed[#zeroed + 1] = u end
+        end
+    end
+    DF:Debug(DBG, "auraflow %ds: events=%d units=%d zeroflow=%s",
+        SWEEP_INTERVAL, flowTotal,
+        (function() local c = 0; for _ in pairs(flowCounts) do c = c + 1 end; return c end)(),
+        (#zeroed > 0) and table.concat(zeroed, ",") or "-")
+    wipe(flowCounts); flowTotal = 0
+end
+
+local function anyLiveContainers()
+    if next(AuraContainer._handles or {}) then return true end
+    return next(AuraContainer._slotHandles or {}) ~= nil
+end
+
+C_Timer.NewTicker(SWEEP_INTERVAL, function()
+    syncFlowWatch()
+    flushFlowLog()
+    if AuraContainer._testMode then return end
+    if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
+    if not anyLiveContainers() then return end
+    AuraContainer._kickLiveParse("safety sweep")
+end)
+
+local regenFrame = CreateFrame("Frame")
+regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+regenFrame:SetScript("OnEvent", function()
+    -- 2s: after the regen flush (deferred rebuilds/tunings) and the combat-end event
+    -- burst, so the kick re-parses the settled state rather than racing it.
+    C_Timer.After(2, function()
+        if InCombatLockdown() or AuraContainer._testMode then return end
+        if not anyLiveContainers() then return end
+        AuraContainer._kickLiveParse("post-combat heal")
+    end)
+end)
 
 -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
 -- rebuild makes a fresh slot host and re-fires onHost, which recreates everything below
