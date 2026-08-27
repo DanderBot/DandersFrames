@@ -36,6 +36,13 @@
 -- What it is FOR is judging whether the curve stays crisp at a real UI scale, so
 -- cycle the Scale button underneath each radius rather than looking at 100% only.
 --
+-- ...and rounded mode also takes TWO PIECES OF SQUARE CHROME out of the way,
+-- both of them things that read as a second corner beside a rounded one: the
+-- popout's source outline (the accent box the shell lays over the active row --
+-- see hookPopout) and the title bars' cross, which is nudged inboard of the arc
+-- (see insetTitleButton). Both are per-instance and both come straight back on
+-- Square.
+--
 -- Dev-facing on purpose: every string is a plain literal and NOTHING here is
 -- localised. Same rule as the rest of /df debug -- these words are for whoever
 -- is working on the chrome, not for players.
@@ -411,6 +418,50 @@ local cornerIndex  = 1
 
 local function cornerRadius() return CORNER_MODES[cornerIndex] end
 
+-- ---- the title bar's cross, and the corner it was standing in --------
+--
+-- The other half of the same report: the cross's square hover box poked past the
+-- panel's rounded top-right corner. It is a StyleButton -- a filled, 1px-outlined
+-- rectangle -- parked HDR_EDGE in from the bar's right edge, which was chosen
+-- against a square panel where "in from the edge" is the same distance whatever
+-- height you read it at. Against an arc it is not: the last few units of the top
+-- band belong to the curve, and a square box sitting in them reads as a corner
+-- laid over a corner.
+--
+-- The fix is clearance, not a second rounded surface. A tr-only rounded backdrop
+-- on the button would only be right if the button were flush INTO the panel's
+-- corner, which it is not (it is inset on both axes and it is a different size
+-- from the corner box), so it would put a curve of the wrong radius near a curve
+-- of the right one -- which is the same complaint again. Moving it inboard by
+-- half the radius takes it out of the corner box entirely at every radius the
+-- trial offers, and costs one anchor.
+--
+-- ⚠ THE ORIGINAL OFFSET IS REMEMBERED, not recomputed. HDR_EDGE and the title
+-- row's vertical nudge are Popout.lua file-locals; reading the anchor back and
+-- shifting it means this stays correct if either is ever retuned, and means the
+-- Square restore is the ORIGINAL number rather than an equal-looking literal
+-- copied over here. Stored on the first shift so a second radius shifts from the
+-- original rather than from the last shift -- the same rule roundPlate follows
+-- for the backdrop methods it swaps.
+local function edgeInset(radius)
+    return radius and floor(radius / 2 + 0.5) or 0
+end
+
+local function insetTitleButton(btn, radius)
+    if type(btn) ~= "table" or type(btn.GetPoint) ~= "function" then return end
+    local point, rel, relPoint, x, y = btn:GetPoint(1)
+    -- The 5-value shape or nothing. GetPoint always answers that in-game, so this
+    -- is really a guard against being handed a button anchored some other way --
+    -- and refusing is the right answer there, because re-issuing a point from
+    -- values that do not mean what this thinks they mean would MOVE the button
+    -- somewhere arbitrary rather than leave it where it was.
+    if not point or type(rel) ~= "table" then return end
+    if btn._demoSquareX == nil then btn._demoSquareX = x or 0 end
+    btn:ClearAllPoints()
+    -- Inboard is NEGATIVE x here: every one of these hangs off a RIGHT anchor.
+    btn:SetPoint(point, rel, relPoint, btn._demoSquareX - edgeInset(radius), y or 0)
+end
+
 -- ---- the row plates ------------------------------------------------
 -- The plate's hover/active repaint lives in a closure inside PopoutRow.lua and
 -- drives plate:SetBackdropColor / :SetBackdropBorderColor. Rather than reach in
@@ -522,6 +573,10 @@ end
 -- at both ends. Worth a look when judging the shape.
 local function paintPopoutChrome(po)
     local f, radius = po.frame, cornerRadius()
+    -- Both modes, first: the cross has to come back to its own offset on Square
+    -- as reliably as it moves off it on R4, and putting the call before the
+    -- branch is what makes that one statement instead of two.
+    insetTitleButton(po.closeBtn, radius)
     if not radius then
         local rs = UI:GetRoundedSurface(f)
         if rs then rs:Hide() end
@@ -551,6 +606,27 @@ end
 -- at most once per instance. Shadowing the method on the INSTANCE (its metatable
 -- __index is the Popout class) leaves every other popout in the game untouched,
 -- which is the whole point of doing it here rather than in the library.
+--
+-- ☠ "A SECOND CORNER AROUND A SELECTED OBJECT" -- the second shadow below.
+-- The active row wore its rounded accent plate AND a square accent rectangle
+-- around it, and the outer one is not the row's at all. It is the popout shell's
+-- SOURCE OUTLINE: a 1px accent box the pack lays over whatever the panel is
+-- tethered to, so the popout and the thing it is about share an edge
+-- (Popout.lua, _UpdateSourceOutline). It goes on with ApplyPixelBorder, which is
+-- square by construction and has no rounded sibling, so in rounded mode it
+-- traced a hard rectangle round a plate that had just been given a curve.
+--
+-- In the trial the ROW'S OWN active ring already does that job -- same accent,
+-- same rect, and round -- so the shell's outline is redundant here rather than
+-- merely ugly, and it is suppressed rather than restyled.
+--
+-- The shadow READS THE MODE ON EVERY CALL instead of being installed and
+-- removed. That is what makes Square exact: there is nothing to uninstall, the
+-- call simply falls through to the real method again. _HideSourceOutline rather
+-- than a bare Hide, because it also forgets which region the outline was
+-- anchored to -- so the restore re-anchors instead of coming back on a stale
+-- target, which matters here precisely because the demo's popout is pooled and
+-- retargeted from row to row.
 local function hookPopout(po)
     if po._demoCornerHooked then return end
     po._demoCornerHooked = true
@@ -558,6 +634,14 @@ local function hookPopout(po)
     po._ApplyAccent = function(self)
         base(self)
         paintPopoutChrome(self)
+    end
+    local baseOutline = po._UpdateSourceOutline
+    po._UpdateSourceOutline = function(self)
+        if cornerRadius() then
+            self:_HideSourceOutline()
+            return
+        end
+        baseOutline(self)
     end
 end
 
@@ -585,6 +669,10 @@ end
 -- the row plates keeps the demo showing both weights at once.
 local function paintWindowChrome(f)
     local radius = cornerRadius()
+    -- The window's cross sits in its top-right corner box too -- and closer than
+    -- the popout's does, because this title bar is the shorter of the two. Its
+    -- three sibling buttons chain off its LEFT, so moving it moves the cluster.
+    insetTitleButton(f.closeBtn, radius)
     if not radius then
         local rs = UI:GetRoundedSurface(f)
         if rs then rs:Hide() end
@@ -623,7 +711,17 @@ local function applyCorners(f, btn)
     -- _ApplyAccent is hooked, so this repaints the chrome in EITHER direction:
     -- rounded mode paints the ring, square mode reissues the panel backdrop and
     -- the hook then hides the rounded textures.
-    eachOpenPopout(function(po) po:_ApplyAccent() end)
+    --
+    -- ...and the source outline is driven SEPARATELY, because _ApplyAccent does
+    -- not touch whether it is SHOWN -- it only repaints one that already is (see
+    -- Popout.lua). Without this the outline would keep whatever state it had when
+    -- the button was pressed: still square-outlining the active row after a
+    -- switch INTO a radius, and still missing after a switch back to Square,
+    -- until something else happened to re-dock the panel.
+    eachOpenPopout(function(po)
+        po:_ApplyAccent()
+        po:_UpdateSourceOutline()
+    end)
     if btn then btn:SetText(radius and format("Corners: R%d", radius) or "Corners: Square") end
 end
 
@@ -683,7 +781,15 @@ local function buildWindow()
         tooltip = "Close",
         onClick = function() f:Hide() end,
     })
-    closeBtn:SetPoint("RIGHT", -6, 0)
+    -- ⚠ THE 5-ARGUMENT FORM, where this was `SetPoint("RIGHT", -6, 0)`. Same
+    -- anchor -- the implicit relative frame IS the parent -- but written out, so
+    -- insetTitleButton can read it back and re-issue it. Popout.lua's own cross
+    -- is anchored the long way for no reason but house style; here it is load
+    -- bearing.
+    closeBtn:SetPoint("RIGHT", bar, "RIGHT", -6, 0)
+    -- Kept, because the corner trial moves it: insetTitleButton needs a handle on
+    -- the cross, and the three buttons below chain off it so they come along.
+    f.closeBtn = closeBtn
 
     local accentBtn = GUI:CreateButtonNative(bar, {
         text = "Accent: Party", width = 100, height = 18, style = "ghost",
@@ -725,6 +831,8 @@ local function buildWindow()
             "popout open -- the panel's chrome and its title strip too: the accent",
             "border becomes a rounded ring, and neither title bar squares off the",
             "corners under it any more.",
+            "Rounded mode also drops the square accent outline the panel lays over",
+            "the active row, and nudges both crosses clear of the arc.",
             "THE question: are the corners crisp at your UI scale? Cycle the Scale",
             "button underneath each radius and watch the curve, not the colour.",
         } },
@@ -800,6 +908,14 @@ local function buildWindow()
                 -- Fires the hook once for a panel that was already open in
                 -- square mode and has just been retargeted to this row.
                 po:_ApplyAccent()
+                -- ...and again for the outline, which the open we just wrapped
+                -- has ALREADY shown: OpenPopout runs the pack's placement, which
+                -- ends in _Present -> _UpdateSourceOutline, and on the very first
+                -- click that happens before hookPopout above has installed the
+                -- shadow. So the first panel of the session would come up in
+                -- rounded mode still wearing the square outline. Re-running it
+                -- now goes through the shadow and takes it straight back down.
+                po:_UpdateSourceOutline()
             end
             return ret
         end

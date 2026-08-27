@@ -96,13 +96,25 @@ if not UI then return end
 -- that one works by drawing a line THICK enough that where it lands stops
 -- mattering, and a curve has no equivalent -- thickening it changes the shape.
 --
--- The art is baked at ~4x the drawn size to give the resampler something to
--- work with, which is as far as the generator can help. What is left is a
--- judgement call about whether it reads acceptably at the scale the user
--- actually runs, which is exactly what the demo exists to answer. Snapping is
--- turned OFF on every texture below for the pixel border's reason: rounding a
--- quad's edges independently changes its SIZE, and a corner whose box is 5px on
--- one side of the panel and 6px on the other is worse than a soft one.
+-- ☠ AND THE FIRST ANSWER MADE IT WORSE. The art used to be baked at ~4x the
+-- drawn size "to give the resampler something to work with". There is no
+-- resampler: WoW builds no mip chain for these files, so a 32px arc drawn into a
+-- 6-unit box that lands on 3-8 device pixels was a 4:1 to 8:1 POINT-SAMPLED
+-- minification of a diagonal edge -- which is the recipe for exactly the
+-- pixelation and crawl it was supposed to prevent. Oversampling only helps
+-- something that averages, and nothing downstream of the bake does.
+--
+-- So the art is now baked NEAR THE DRAWN SIZE -- one baked pixel per radius unit
+-- -- with the averaging done at BAKE time by the generator's 8x8 sub-sampling,
+-- where it is kept. See generate_rounded.py's SIZE note; the consequence for
+-- this file is the texcoord crop under RETEXTURE below.
+--
+-- What is left is still a judgement call about whether the curve reads
+-- acceptably at the scale the user actually runs, which is exactly what the demo
+-- exists to answer. Snapping is turned OFF on every texture below for the pixel
+-- border's reason: rounding a quad's edges independently changes its SIZE, and a
+-- corner whose box is 5px on one side of the panel and 6px on the other is worse
+-- than a soft one.
 -- ============================================================
 
 local rawget, type, ipairs, setmetatable = rawget, type, ipairs, setmetatable
@@ -131,6 +143,29 @@ UI.Round = {
     defaultWidth  = DEFAULT_WIDTH,
 }
 
+-- ---- the canvas the art is baked on --------------------------------
+--
+-- ⚠ THIS RULE IS A COPY OF Tools/generate_rounded.py's canvas_for(). It has to
+-- be: the baked file is bigger than the shape inside it, so drawing the shape
+-- means knowing where in the file it sits, and this module cannot read a Python
+-- script. The two are pinned together by test_round.lua, which asserts the
+-- texcoords this rule produces -- change one side and that test goes red.
+--
+-- A radius-N corner is N px of ink on a canvas of next_pot(N + PAD_MIN), with
+-- the shape flush into the canvas's BOTTOM-RIGHT and the slack transparent on
+-- the top-left. Bottom-right because the box's right and bottom edges are the
+-- two that butt against the flat strips and so must land on the texture's own
+-- edge; the top-left is the outside of the curve, where the padding gives the
+-- filter transparent texels to blend towards instead of clamping a half-covered
+-- edge texel out into the gap beside the corner box.
+local PAD_MIN = 2
+
+local function canvasFor(r)
+    local want, size = r + PAD_MIN, 1
+    while size < want do size = size * 2 end
+    return size
+end
+
 -- ---- the four corner orientations, as texcoords -------------------
 --
 -- SetTexCoord's 8-argument form assigns a texture coordinate to each of the
@@ -140,16 +175,37 @@ UI.Round = {
 --   tl  identity          tr  mirrored in x
 --   bl  mirrored in y     br  mirrored in both
 --
--- Written out rather than computed: four constant tables allocated once at load
--- beat eight arithmetic expressions per texture per rebuild, and the values are
--- easier to check by eye than the flip that would produce them.
-local TEXCOORD = {
-    --      ULx ULy  LLx LLy  URx URy  LRx LRy
-    tl = {   0,  0,   0,  1,   1,  0,   1,  1 },
-    tr = {   1,  0,   1,  1,   0,  0,   0,  1 },
-    bl = {   0,  1,   0,  0,   1,  1,   1,  0 },
-    br = {   1,  1,   1,  0,   0,  1,   0,  0 },
-}
+-- ...and every coordinate that used to be 0 -- the art's top-left -- is now the
+-- CROP, `pad / canvas`, because that is where the shape starts. Everything else
+-- is unchanged: the crop is a rectangular sub-image, so the mirrors are the same
+-- eight slots with the same values in them.
+--
+-- ☠ CROP THE TEXCOORDS, DO NOT GROW THE QUAD. The other way to draw a padded
+-- canvas is to make the quad `canvas` units instead of `radius` and hang the
+-- padding outside the frame's corner. It renders the same picture and it is
+-- worse: the corner box would stop being the r x r box every anchor in layout()
+-- is stated against, so the strips would either overlap the quad or leave a gap
+-- at exactly the join this whole file is built to keep flush -- and the answer
+-- would change per radius, since the padding does. Cropping leaves the quad
+-- exactly the corner box, so NOTHING in layout() moves and the strips stay flush
+-- at every radius by construction.
+--
+-- Built at load rather than written out, because there is now one set per
+-- radius: three tables of eight numbers is still allocated once, and the flip is
+-- easier to trust as a rule ("every 0 becomes the crop") than as twelve rows of
+-- hand-copied constants.
+local TEXCOORD = {}
+for _, r in ipairs(RADII) do
+    local size = canvasFor(r)
+    local c = (size - r) / size
+    TEXCOORD[r] = {
+        --      ULx ULy  LLx LLy  URx URy  LRx LRy
+        tl = {   c,  c,   c,  1,   1,  c,   1,  1 },
+        tr = {   1,  c,   1,  1,   c,  c,   c,  1 },
+        bl = {   c,  1,   c,  c,   1,  1,   1,  c },
+        br = {   1,  1,   1,  c,   c,  1,   c,  c },
+    }
+end
 
 -- Corner box anchors: which point of the frame each r x r box hangs off.
 local CORNER_POINT = { tl = "TOPLEFT", tr = "TOPRIGHT", bl = "BOTTOMLEFT", br = "BOTTOMRIGHT" }
@@ -372,13 +428,20 @@ local function updateShown(s)
     s.borderRight:SetShown(runs)
 end
 
+-- ---- RETEXTURE ------------------------------------------------------
 -- Point the eight corner textures at the art for the current radius/width, and
 -- turn each one to face its corner.
+--
+-- The texcoord set is per RADIUS now, not one shared table: the art is baked on
+-- a power-of-two canvas that is bigger than the shape on it, so which part of
+-- the file to draw depends on how much padding that radius's canvas carries.
+-- See the TEXCOORD block above.
 local function retexture(s)
     local fillFile = ROUND_PATH .. "corner_fill_r" .. s.radius
     local edgeFile = ROUND_PATH .. "corner_edge_r" .. s.radius .. "_w" .. s.borderWidth
+    local coords = TEXCOORD[s.radius]
     for _, k in ipairs(CORNER_ORDER) do
-        local tc = TEXCOORD[k]
+        local tc = coords[k]
         local ft = s.cornerFill[k]
         ft:SetTexture(fillFile)
         ft:SetTexCoord(tc[1], tc[2], tc[3], tc[4], tc[5], tc[6], tc[7], tc[8])
