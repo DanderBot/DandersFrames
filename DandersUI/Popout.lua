@@ -139,14 +139,16 @@ local STRATA_ORDER = {
 local STRATA_RANK = {}
 for i = 1, #STRATA_ORDER do STRATA_RANK[STRATA_ORDER[i]] = i end
 
--- ⚠ IN THE LADDER, NEVER LANDED ON. FULLSCREEN sits between DIALOG and
--- FULLSCREEN_DIALOG and a window COULD be on it, so it has to be ranked -- but it
--- is the client's strata for full-screen effects, not a place to park a piece of
--- settings chrome, and the idiom for "must draw over a dialog" is
--- FULLSCREEN_DIALOG. Stepping over it is also what makes the shipped case come
--- out at the answer the design calls for: the settings window is DIALOG, and its
--- popout chrome belongs on FULLSCREEN_DIALOG.
-local NEVER_LAND = { FULLSCREEN = true }
+-- A LITERAL single step, FULLSCREEN included (decided 2026-08-27). Landing the
+-- DIALOG window's chrome on FULLSCREEN rather than FULLSCREEN_DIALOG is what
+-- keeps the ordering sane around MENUS: the kit's dropdown menus live on
+-- FULLSCREEN_DIALOG, so with the chrome one strata BELOW them, a menu opened on
+-- the settings page can never land underneath a docked popout, and a menu
+-- opened inside the popout beats it by strata alone (RaiseMenuOverOpener then
+-- only matters for windows already on FULLSCREEN_DIALOG or above). "FULLSCREEN
+-- is for full-screen effects" is idiom, not law -- nothing in the client
+-- misbehaves for a small frame parked there, and the safety it buys is real.
+local NEVER_LAND = {}
 
 -- The next strata UP that we are willing to stand on, CAPPED at the top: a window
 -- already on TOOLTIP has nothing above it, and answering nil there would send the

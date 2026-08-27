@@ -1741,9 +1741,9 @@ do
     -- FULLSCREEN: that one is the client's full-screen-effects strata and is
     -- stepped over deliberately (see NEVER_LAND in Popout.lua).
     eq(win:GetFrameStrata(), "DIALOG", "stack: (the window under test is a DIALOG one, as the real one is)")
-    eq(p.frame._flags.strata, "FULLSCREEN_DIALOG", "stack: the popout is one strata ABOVE the window")
-    eq(p.beam._flags.strata, "FULLSCREEN_DIALOG", "stack: the beam with it")
-    eq(p.srcOutline._flags.strata, "FULLSCREEN_DIALOG", "stack: the outline too -- the three are one object")
+    eq(p.frame._flags.strata, "FULLSCREEN", "stack: the popout is one strata ABOVE the window -- a literal step, FULLSCREEN included")
+    eq(p.beam._flags.strata, "FULLSCREEN", "stack: the beam with it")
+    eq(p.srcOutline._flags.strata, "FULLSCREEN", "stack: the outline too -- the three are one object")
     p:Close()
 end
 
@@ -1831,7 +1831,7 @@ do
     p.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
     p:Follow(row, { outsideOf = win })
     p:Pin(true)
-    eq(p.frame._flags.strata, "FULLSCREEN_DIALOG", "stack: a pinned popout keeps the raised strata")
+    eq(p.frame._flags.strata, "FULLSCREEN", "stack: a pinned popout keeps the raised strata")
     eq(p.frame:GetFrameLevel(), OUT_LEVEL, "stack: ...and the constant level with it")
     check(not p.beam:IsShown(), "stack: but the beam is gone, because pinning is visually detached")
     p:Close()
