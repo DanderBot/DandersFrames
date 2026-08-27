@@ -63,9 +63,13 @@ local function fakeHost(redirect)
             SU:OnInterceptWrite(db, key, value)
             return redirect and redirect[key] and true or false
         end,
-        onSettingWritten = function(db, key, value, label)
-            h.written[#h.written + 1] = { db = db, key = key, value = value, label = label }
-            SU:OnSettingWritten(db, key, value, label)
+        -- FIVE arguments, as GUI.lua's hook takes them: the kit forwards the
+        -- widget's own commit callback after the label, and the host passes it
+        -- straight through.
+        onSettingWritten = function(db, key, value, label, applyFn)
+            h.written[#h.written + 1] =
+                { db = db, key = key, value = value, label = label, apply = applyFn }
+            SU:OnSettingWritten(db, key, value, label, applyFn)
         end,
     }
     function h:Call(name, ...)
@@ -78,10 +82,13 @@ local function fakeHost(redirect)
 end
 
 -- The kit's bracket, spelled once: this is what every db-bound widget does.
-local function widgetWrite(db, key, value, label)
+-- `applyFn` is the widget's own commit callback -- what CreateSlider passes as
+-- `callback`, what the popout row passes as `opts.onToggle`. Optional here for
+-- the same reason it is optional there.
+local function widgetWrite(db, key, value, label, applyFn)
     if host:Call("interceptWrite", db, key, value) then return false end
     db[key] = value
-    host:Call("onSettingWritten", db, key, value, label)
+    host:Call("onSettingWritten", db, key, value, label, applyFn)
     return true
 end
 
@@ -326,6 +333,84 @@ do
 end
 
 -- ============================================================
+-- 5b. ONE APPLY FOR THE WHOLE GROUP
+-- ------------------------------------------------------------
+-- The writes inside a group come from GroupActions, which applies nothing of
+-- its own: the popout footer's Reset button writes N keys and then runs the
+-- group's apply ONCE. An undo of that reset has no button press behind it to do
+-- the same, so the apply is handed to BeginGroup and the collapsed entry
+-- carries it -- one for the group, not one per key.
+-- ============================================================
+do
+    reset()
+    local order = {}
+    -- Reads the live table, so WHEN it ran is visible in what it saw.
+    local groupApply = function() order[#order + 1] = party.frameWidth end
+
+    SU:BeginGroup("Border", groupApply)
+    widgetWrite(party, "frameWidth", 150, "Frame Width")
+    widgetWrite(party, "frameShowBorder", true, "Show Border")
+    SU:EndGroup()
+
+    eq(depth(), 1, "group apply: still one collapsed entry")
+    local e = stack():PeekEntry()
+    eq(e.label, "Border", "group apply: ...still labelled with the group's name")
+    check(e.apply == groupApply, "group apply: ...and carrying the group's apply, by reference")
+    eq(#order, 0, "group apply: opening and closing a group does not run it")
+
+    SU:Undo()
+    eq(#order, 1, "group apply: ☠ one press, ONE apply -- not one per key")
+    eq(order[1], 100, "group apply: ☠ ...and it ran AFTER the keys were restored, not between them")
+    eq(party.frameShowBorder, false, "group apply: (both keys did go back)")
+
+    SU:Redo()
+    eq(#order, 2, "group apply: redo runs it again")
+    eq(order[2], 150, "group apply: ...after the keys went forward")
+
+    -- An EMPTY group is no entry, and its apply must not be left armed for
+    -- whatever group opens next.
+    reset()
+    SU:BeginGroup("Border", groupApply)
+    widgetWrite(party, "frameWidth", 100, "Frame Width")     -- zero delta
+    SU:EndGroup()
+    eq(depth(), 0, "group apply: a group that changed nothing is still no entry")
+
+    SU:BeginGroup("Other")
+    widgetWrite(party, "frameWidth", 150, "Frame Width")
+    SU:EndGroup()
+    eq(depth(), 1, "group apply: the next group pushed normally")
+    check(stack():PeekEntry().apply == nil,
+        "group apply: ☠ ...and the abandoned apply did not leak into it")
+
+    -- NESTED groups mirror the lib's refcount: only the outermost becomes an
+    -- entry, so only the outermost apply is the group's.
+    reset()
+    local outer = function() end
+    local inner = function() end
+    SU:BeginGroup("Outer", outer)
+    SU:BeginGroup("Inner", inner)
+    widgetWrite(party, "frameWidth", 150, "Frame Width")
+    SU:EndGroup()
+    eq(depth(), 0, "nested group apply: an inner close pushes nothing")
+    SU:EndGroup()
+    eq(depth(), 1, "nested group apply: the outer one does")
+    check(stack():PeekEntry().apply == outer,
+        "nested group apply: and the OUTER group's apply is the one that landed")
+
+    -- The fence goes through a half-open group too: a group left open across a
+    -- profile switch must not hand its apply to the next one.
+    reset()
+    SU:BeginGroup("Border", groupApply)
+    widgetWrite(party, "frameWidth", 150, "Frame Width")
+    SU:Clear()
+    SU:EndGroup()
+    eq(depth(), 0, "group apply: a group left open across the fence pushes nothing")
+    widgetWrite(party, "frameWidth", 180, "Frame Width")
+    eq(depth(), 1, "group apply: ...and the next plain write pushes immediately -- no group left open")
+    check(stack():PeekEntry().apply == nil, "group apply: ...carrying no apply of the abandoned group's")
+end
+
+-- ============================================================
 -- 6. SUSPENSION -- THE WRITES THAT ARE NOT EDITS
 -- A press-and-hold preview writes defaults out and the user's values back, both
 -- through the bracket. Neither leg is something to undo.
@@ -529,6 +614,136 @@ do
 end
 
 -- ============================================================
+-- 11b. THE ENTRY CARRIES THE APPLY
+-- ------------------------------------------------------------
+-- ☠ THE BUG THIS EXISTS FOR: "undo and redo update the values but do not
+-- refresh the frames." Restoring a value is not the same thing as reverting an
+-- edit. For a great many settings the work that makes the change VISIBLE lives
+-- in the WIDGET's commit callback -- a version bump the frames read, a targeted
+-- refresher the generic sweep does not cover (LightweightUpdateBorder is the
+-- only path that re-borders live RAID frames), a secure-header re-apply. The
+-- user's own edit runs that callback; an undo that only wrote the value did not,
+-- so the number moved and the frames did not.
+--
+-- So the kit forwards the callback as `onSettingWritten`'s fifth argument, the
+-- entry stores it, and the apply replays it. The rules below are the ones that
+-- make replaying it safe rather than a second way to break the undo stack.
+-- ============================================================
+do
+    -- ---- it is stored, by reference ---------------------------------
+    reset()
+    local applied, suspendedDuring = 0, nil
+    local applyFn = function()
+        applied = applied + 1
+        suspendedDuring = SU:IsSuspended()
+    end
+    widgetWrite(party, "frameBorderSize", 4, "Border Thickness", applyFn)
+
+    local e = stack():PeekEntry()
+    check(e.apply == applyFn, "apply: the entry carries the widget's commit callback, by reference")
+    eq(applied, 0, "apply: recording it did not run it -- the widget already did")
+
+    -- ---- undo replays it, once, suspended ---------------------------
+    local updatesBefore = updates
+    SU:Undo()
+    eq(applied, 1, "apply: ☠ the undo replayed it -- exactly once")
+    check(suspendedDuring == true,
+        "apply: ☠ ...with recording SUSPENDED, because the callback may write settings of its own")
+    check(SU:IsSuspended() == false, "apply: ...and the suspension was balanced on the way out")
+    check(updates == updatesBefore + 1,
+        "apply: ☠ the generic sweep STILL ran -- the apply is an addition to it, not a replacement")
+    eq(depth(), 0, "apply: and the replay recorded nothing of its own")
+
+    SU:Redo()
+    eq(applied, 2, "apply: redo replays the same callback -- an undo and a redo are the same apply")
+
+    -- ---- a write made BY the callback is part of the apply -----------
+    -- A linked-section sync writes the mirrored key from inside the commit.
+    -- Those writes are the apply finishing its job, not new edits, and an entry
+    -- for one would be an undo press that the user cannot account for.
+    reset()
+    local syncing = function() widgetWrite(party, "frameShowBorder", true, "Show Border") end
+    widgetWrite(party, "frameWidth", 140, "Frame Width", syncing)
+    eq(depth(), 1, "callback write: one edit, one entry")
+    SU:Undo()
+    eq(party.frameWidth, 100, "callback write: the undo restored the value")
+    check(party.frameShowBorder == true, "callback write: ...and the callback's own write landed")
+    eq(depth(), 0, "callback write: ☠ but it was NOT recorded -- the apply runs suspended")
+    check(SU:CanRedo(), "callback write: the entry went to the redo branch, as any other would")
+
+    -- ---- a DEAD callback must cost the undo nothing ------------------
+    -- The closure belongs to the PAGE that built the widget and may capture
+    -- objects the page has since torn down. pcall'd for that reason: an undo
+    -- that errored on a stale closure would leave the value restored, the frames
+    -- unrefreshed and the entry stranded.
+    reset()
+    local dead = function() error("the page that built this is gone") end
+    widgetWrite(party, "frameWidth", 140, "Frame Width", dead)
+    updatesBefore, host.refreshed = updates, 0
+    local ok = SU:Undo()
+    check(ok, "dead apply: the undo still reported success")
+    eq(party.frameWidth, 100, "dead apply: ...the value was still restored")
+    check(updates == updatesBefore + 1, "dead apply: ☠ ...and the fallback sweep still ran")
+    eq(host.refreshed, 1, "dead apply: ...and the page was still repainted")
+    check(SU:CanRedo() and not SU:CanUndo(), "dead apply: the entry moved to the redo branch as normal")
+    check(SU:IsSuspended() == false, "dead apply: ☠ and the suspension was balanced -- recording is back on")
+    SU:Redo()
+    eq(party.frameWidth, 140, "dead apply: redo still works over a callback that throws")
+
+    -- ---- a gesture merges to ONE apply ------------------------------
+    reset()
+    applied = 0
+    local drag = function() applied = applied + 1 end
+    SU:OnDragStart()
+    widgetWrite(party, "frameWidth", 110, "Frame Width", drag)
+    widgetWrite(party, "frameWidth", 120, "Frame Width", drag)
+    widgetWrite(party, "frameWidth", 130, "Frame Width", drag)
+    SU:OnDragStop()
+    eq(depth(), 1, "gesture apply: the drag is one entry, as ever")
+    check(stack():PeekEntry().apply == drag, "gesture apply: carrying the widget's commit callback")
+    SU:Undo()
+    eq(applied, 1, "gesture apply: ☠ one press, one apply -- not one per step crossed")
+
+    -- ---- a non-function in the slot is ignored ----------------------
+    reset()
+    widgetWrite(party, "frameWidth", 140, "Frame Width", "not a function")
+    check(stack():PeekEntry().apply == nil, "apply: a non-function fifth argument is discarded, not stored")
+    SU:Undo()
+    eq(party.frameWidth, 100, "apply: ...and the undo is the plain one it always was")
+end
+
+-- ============================================================
+-- 11c. A HOST THAT DOES NOT FORWARD ONE
+-- The argument is additive and optional at BOTH ends: DandersMover's host
+-- publishes a three-argument hook, and the kit calls every hook positionally.
+-- An entry with no apply is exactly the entry this engine pushed before the
+-- argument existed -- value plus the generic sweep.
+-- ============================================================
+do
+    reset()
+    -- The older hook shape, spelled out: three arguments, nothing forwarded.
+    host.hooks.onSettingWritten = function(db, key, value)
+        host.written[#host.written + 1] = { db = db, key = key, value = value }
+        SU:OnSettingWritten(db, key, value)
+    end
+
+    local applyFn = function() error("this must never run") end
+    widgetWrite(party, "frameWidth", 140, "Frame Width", applyFn)
+
+    eq(depth(), 1, "legacy host: the write was recorded")
+    local e = stack():PeekEntry()
+    check(e.apply == nil, "legacy host: with no apply, because the host never forwarded one")
+    eq(e.label, "Frame Width", "legacy host: ...and no label either, so the key was prettified")
+
+    local updatesBefore = updates
+    SU:Undo()
+    eq(party.frameWidth, 100, "legacy host: the undo restores the value")
+    check(updates == updatesBefore + 1, "legacy host: ...and the generic sweep is the whole apply")
+    SU:Redo()
+    eq(party.frameWidth, 140, "legacy host: redo likewise")
+end
+
+-- ============================================================
 -- 12. THE OLD COLOUR PICKER'S SESSION
 -- ------------------------------------------------------------
 -- DandersFrames_Options/GUI/SettingsWidgets.lua's CreateColorPicker drives
@@ -701,4 +916,28 @@ do
     local beginAt = widgets:find("SU:BeginGesture()", 1, true)
     check(setupAt ~= nil and beginAt ~= nil and beginAt > setupAt,
        "companion: ☠ the picking gesture opens AFTER the picker is set up, not before")
+
+    -- ---- ...and every one of them hands over its COMMIT ---------------
+    -- The fifth argument, at every announcing site in the panel. Behaviour is
+    -- pinned on the slider (test_widgets_slider.lua drives the real factory);
+    -- these files cannot be loaded, so the CALL SHAPE is what stands in. A site
+    -- that announces the write but not the callback is a control the user can
+    -- undo and see nothing happen -- which is the bug this argument exists for,
+    -- and it is invisible from every other angle.
+    --
+    -- Five in SettingsWidgets: the checkbox, the edit box, and the colour
+    -- picker's three mutation sites. Two in Controls: the texture and font
+    -- dropdowns.
+    eq(countOf(widgets, ", label, callback)"), 5,
+       "companion: every announcing site in SettingsWidgets hands over its commit callback")
+    eq(countOf(controls, ", label, callback)"), 2,
+       "companion: ...and both of Controls' media dropdowns do too")
+
+    -- ---- the kit's own four, and the popout row's ---------------------
+    local kit = ui_file_source("Widgets.lua")
+    eq(countOf(kit, ", label, callback)"), 4,
+       "kit: the slider (drag and typed), the align grid and the dropdown all forward their onChanged")
+    local prow = ui_file_source("PopoutRow.lua")
+    eq(countOf(prow, "row._title, opts.onToggle)"), 1,
+       "kit: ...and the popout row's tick forwards onToggle, which is ITS commit")
 end

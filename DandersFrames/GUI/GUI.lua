@@ -168,17 +168,23 @@ GUI = LibStub("DandersUI-1.0"):NewHost("DandersFrames", {
     -- `label` is the widget's display name, forwarded by the kit for anything
     -- that shows the user what changed. The auto-profile half ignores it.
     --
+    -- `applyFn` is the widget's own commit callback, by reference. The undo
+    -- engine stores it on the entry and replays it, because for a great many
+    -- settings that callback IS the apply -- the generic sweep alone moves the
+    -- number and leaves the frames where they were. The auto-profile half
+    -- ignores this one too.
+    --
     -- ⚠ AUTO-PROFILE FIRST, UNDO SECOND. The layout recorder is the SEMANTIC
     -- half of the write and its behaviour is unchanged by anything below it;
     -- the undo engine only observes. Reordering them would put a bookkeeping
     -- concern in front of the one that decides what the profile stores.
-    onSettingWritten = function(db, key, value, label)
+    onSettingWritten = function(db, key, value, label, applyFn)
         local AP = DF.AutoProfilesUI
         if AP and key and AP:IsEditing() then
             AP:SetProfileSetting(key, value)
         end
         local SU = DF.SettingsUndo
-        if SU then SU:OnSettingWritten(db, key, value, label) end
+        if SU then SU:OnSettingWritten(db, key, value, label, applyFn) end
     end,
 
     onIndicatorsRefreshed = function()

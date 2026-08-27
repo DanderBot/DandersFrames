@@ -85,7 +85,11 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   isModifiedDefault(db, key) -> bool  the STORED value differs from the value the
 --        consumer ships as its default; absent = no modified-dots are ever drawn
 --   interceptWrite(db, key, value) -> true when the write was redirected (skip refresh)
---   onSettingWritten(db, key, value)         after a plain write landed
+--   onSettingWritten(db, key, value, label, applyFn)   after a plain write landed
+--        label is the widget's display name; applyFn is the widget's own commit
+--        callback BY REFERENCE, so a host that replays edits (an undo stack) can
+--        run the apply and not just the write. Both trailing args are optional --
+--        a host that reads three is unaffected by a widget that passes five.
 --   refresh()                                throttled live refresh
 --   refreshNow()                             unthrottled live refresh
 --   onDragStart(lightFn, name, previewMode) / onDragStop() / isDragging() -> bool

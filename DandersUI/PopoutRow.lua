@@ -948,8 +948,12 @@ function UI:CreatePopoutRow(parent, opts)
                     tdb[t.key] = v
                     -- The row's title names the tick: the toggle has no label of
                     -- its own (it IS the row), so the row's own heading is the
-                    -- only thing a consumer could show for it.
-                    host:Call("onSettingWritten", tdb, t.key, v, row._title)
+                    -- only thing a consumer could show for it. `onToggle` is
+                    -- this row's COMMIT -- the exact function the line below
+                    -- runs -- and it rides along as the fifth argument so a host
+                    -- replaying the edit (an undo stack) can run the apply and
+                    -- not just the write.
+                    host:Call("onSettingWritten", tdb, t.key, v, row._title, opts.onToggle)
                 end
             end
         end

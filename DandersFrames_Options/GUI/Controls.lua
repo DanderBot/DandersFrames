@@ -1169,7 +1169,9 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                     return
                 end
                 dbTable[dbKey] = opt.key
-                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label)
+                -- ...carrying `callback`, this dropdown's own commit, so an undo
+                -- of the pick replays the apply and not only the write.
+                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label, callback)
                 if container.UpdateOverrideIndicators then
                     container:UpdateOverrideIndicators(opt.key)
                 end
@@ -1517,7 +1519,9 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 end
                 -- Store font NAME in database (not path)
                 dbTable[dbKey] = opt.key
-                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label)
+                -- ...and the commit callback rides along, same as the texture
+                -- dropdown above.
+                GUI:Call("onSettingWritten", dbTable, dbKey, opt.key, label, callback)
                 if container.UpdateOverrideIndicators then
                     container:UpdateOverrideIndicators(opt.key)
                 end

@@ -31,6 +31,15 @@ local addonName, DF = ...
 --   * Anything at all while SUSPENDED. Applying an undo is itself a bracketed
 --     write, and a press-and-hold preview is a write the user never made.
 --
+-- AN ENTRY CARRIES THE APPLY, NOT JUST THE VALUE
+-- ----------------------------------------------
+-- `onSettingWritten` takes a fifth argument: the widget's own commit callback,
+-- by reference. Restoring a value is not the same thing as reverting an edit --
+-- for a great many settings the work that makes the change VISIBLE lives in
+-- that callback, not in the generic sweep -- so the entry stores it and the
+-- apply replays it. See Apply() for what happens when the closure has outlived
+-- its page.
+--
 -- ONE GESTURE, ONE ENTRY
 -- ----------------------
 -- A slider fires `onSettingWritten` once per STEP CROSSED while it is dragged --
@@ -44,7 +53,7 @@ local addonName, DF = ...
 -- would offer to restore values against a profile that may no longer exist.
 -- ============================================================
 
-local type, pairs, ipairs, tostring = type, pairs, ipairs, tostring
+local type, pairs, ipairs, tostring, pcall = type, pairs, ipairs, tostring, pcall
 local setmetatable, wipe = setmetatable, wipe
 local upper, gsub, sub = string.upper, string.gsub, string.sub
 
@@ -73,6 +82,11 @@ local gestureOrder = {}
 local gestureByDB  = setmetatable({}, { __mode = "k" })
 
 local suspendDepth = 0
+
+-- The open GROUP, mirroring the lib's own refcount. Only the OUTERMOST group
+-- carries an apply, because only the outermost one becomes an entry.
+local groupDepth = 0
+local groupApply
 
 -- ============================================================
 -- HELPERS
@@ -150,8 +164,35 @@ end
 -- Value REPLACEMENT, not a field merge -- the same semantics
 -- GroupActions:ResetKeys already ships. The copy is what lands, so a later edit
 -- of the setting cannot reach back into the stored entry.
+--
+-- ☠ AND THE WRITE IS ONLY HALF OF WHAT THE USER'S EDIT DID. For a great many
+-- settings the REAL apply is not the generic sweep below -- it is the commit
+-- callback the widget runs after its own write: a version bump the frames read
+-- (InvalidateAuraLayout), a targeted refresher the sweep does not cover
+-- (LightweightUpdateBorder is the only path that re-borders live RAID frames),
+-- a secure-header re-apply. An undo that wrote the value and ran only the sweep
+-- moved the number and left the frames where they were, which is exactly what
+-- the user reported. So the entry carries `apply` -- the widget's own commit
+-- callback, by reference -- and replaying it is what makes an undo the mirror
+-- image of the edit rather than an approximation of it.
+--
+-- pcall'd, because that closure belongs to the PAGE that built the widget and
+-- may capture objects the page has since torn down (a row's Refresh, a mounted
+-- pane). A dead closure must cost the undo nothing: on failure this falls
+-- through silently and the fallback sweep below still runs.
 -- ============================================================
-local function Apply(db, key, value, mode)
+
+-- Replay a stored commit callback with recording SUSPENDED. Suspension is not
+-- optional: a callback may itself write settings (a linked-section sync writes
+-- the mirrored key), and those writes are part of the apply, not new edits.
+local function RunApply(applyFn)
+    if type(applyFn) ~= "function" then return end
+    SettingsUndo:Suspend()
+    pcall(applyFn)
+    SettingsUndo:Resume()
+end
+
+local function Apply(db, key, value, mode, applyFn)
     if type(db) ~= "table" or key == nil then return end
 
     SettingsUndo:Suspend()
@@ -164,8 +205,15 @@ local function Apply(db, key, value, mode)
         db[key] = copy
         if host and host.Call then host:Call("onSettingWritten", db, key, copy) end
     end
+    -- Inside the SAME suspension as the write it belongs to -- see RunApply.
+    if applyFn then pcall(applyFn) end
     SettingsUndo:Resume()
 
+    -- KEPT UNCONDITIONALLY, apply or no apply. A live widget commit is the same
+    -- pair: its callback AND the coalescing sweep the kit's refresh hooks arm.
+    -- Dropping the sweep when an apply is present would make an undo do LESS
+    -- than the edit it reverses, and UpdateAll is an arm-stub (ApplyScheduler),
+    -- so the two together are one drained pass, not two.
     if DF.UpdateAll then DF:UpdateAll() end
 
     -- The PAGE, and only when there is one to repaint. RefreshCurrentPage is
@@ -180,14 +228,15 @@ local function Apply(db, key, value, mode)
 end
 
 -- Turn committed data into the entry the lib stores. The data table IS the
--- entry: its meta fields (db/key/old/new/mode/label) ride along beside the two
--- closures so a toast can read what moved without unpacking a closure.
+-- entry: its meta fields (db/key/old/new/mode/label/apply) ride along beside the
+-- two closures so a toast can read what moved without unpacking a closure.
 local function PushEntry(data)
     local s = GetStack()
     if not s then return end
     local db, key, old, new, mode = data.db, data.key, data.old, data.new, data.mode
-    data.undo = function() Apply(db, key, old, mode) end
-    data.redo = function() Apply(db, key, new, mode) end
+    local applyFn = data.apply
+    data.undo = function() Apply(db, key, old, mode, applyFn) end
+    data.redo = function() Apply(db, key, new, mode, applyFn) end
     s:Push(data)
 end
 
@@ -221,7 +270,12 @@ end
 
 -- ...and the commit half, from the host's onSettingWritten hook. `label` is the
 -- widget's display name, forwarded by the kit; absent, the key is prettified.
-function SettingsUndo:OnSettingWritten(db, key, value, label)
+--
+-- `applyFn` is the widget's OWN commit callback, by reference -- the exact
+-- function it runs after this write. Optional, and optional at both ends: a
+-- surface that does not forward one records an entry that falls back to the
+-- generic sweep, which is what every entry did before this argument existed.
+function SettingsUndo:OnSettingWritten(db, key, value, label, applyFn)
     if suspendDepth > 0 then return end
     if type(db) ~= "table" or key == nil then return end
 
@@ -243,6 +297,7 @@ function SettingsUndo:OnSettingWritten(db, key, value, label)
         new   = DeepCopy(value),
         label = label or PrettifyKey(key),
         mode  = ResolveMode(db),
+        apply = type(applyFn) == "function" and applyFn or nil,
     }
 
     if gestureDepth > 0 then
@@ -253,6 +308,11 @@ function SettingsUndo:OnSettingWritten(db, key, value, label)
             -- Same key, same gesture: the FIRST old value is what the user had
             -- before they touched it, and the newest value is where they are now.
             open.new = data.new
+            -- ...and the apply travels with `new` rather than with `old`: it is
+            -- the callback the widget is running NOW. In practice every tick of
+            -- one gesture is the same widget and so the same reference; taking
+            -- the newest is what keeps that true if it ever is not.
+            if data.apply then open.apply = data.apply end
         else
             g[key] = data
             gestureOrder[#gestureOrder + 1] = data
@@ -292,16 +352,50 @@ SettingsUndo.EndGesture   = SettingsUndo.OnDragStop
 -- two calls into ONE entry carrying the group's label. Commits still run every
 -- rule above on the way in, so a group of writes that all changed nothing is an
 -- empty group -- and the lib drops those.
+--
+-- ONE APPLY FOR THE WHOLE GROUP, not one per key. The writes inside a group
+-- come from GroupActions, which does no applying of its own -- the caller (the
+-- popout footer's Reset button) runs the group's apply ONCE after the loop, and
+-- undoing a reset has to do the same. Passing it here rather than letting the
+-- N collapsed child entries each carry their own is the same decision the
+-- caller already made: thirteen keys is one apply, not thirteen.
 -- ============================================================
 
-function SettingsUndo:BeginGroup(label)
+function SettingsUndo:BeginGroup(label, applyFn)
+    groupDepth = groupDepth + 1
+    if groupDepth == 1 and type(applyFn) == "function" then groupApply = applyFn end
     local s = GetStack()
     if s then s:BeginGroup(label) end
 end
 
 function SettingsUndo:EndGroup()
+    if groupDepth > 0 then groupDepth = groupDepth - 1 end
     local s = GetStack()
-    if s then s:EndGroup() end
+    if not s then
+        if groupDepth == 0 then groupApply = nil end
+        return
+    end
+
+    -- Read BEFORE closing: the lib pushes the collapsed entry from inside
+    -- EndGroup, so "is the top of the stack a new entry" is the only way to tell
+    -- a group that collapsed to something from one the lib dropped as empty.
+    local before = s.PeekEntry and s:PeekEntry() or nil
+    s:EndGroup()
+    if groupDepth > 0 then return end          -- an inner group closed, not ours
+
+    local applyFn = groupApply
+    groupApply = nil
+    if not applyFn then return end
+    local entry = s.PeekEntry and s:PeekEntry() or nil
+    if not entry or entry == before then return end   -- empty group: nothing pushed
+
+    -- The lib's group closures walk the child entries; the apply runs once
+    -- AFTER them, in both directions, so the frames are told about the finished
+    -- state rather than about each key on the way through.
+    entry.apply = applyFn
+    local undo, redo = entry.undo, entry.redo
+    entry.undo = function() undo(); RunApply(applyFn) end
+    entry.redo = function() redo(); RunApply(applyFn) end
 end
 
 -- ============================================================
@@ -365,6 +459,8 @@ function SettingsUndo:Clear()
     gestureDepth = 0
     wipe(gestureOrder)
     wipe(gestureByDB)
+    groupDepth = 0
+    groupApply = nil
     if stack then stack:Clear() end
 end
 

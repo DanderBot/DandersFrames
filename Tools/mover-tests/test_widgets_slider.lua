@@ -1274,6 +1274,118 @@ do
     check(gp[#gp][2] == s.label, "global text: and back to the label the moment the dot goes")
 end
 
+-- ============================================================
+-- 9. THE COMMIT CALLBACK RIDES THE WRITE ANNOUNCEMENT
+-- ------------------------------------------------------------
+-- `onSettingWritten(db, key, value, label, applyFn)` -- the fifth argument is
+-- the widget's OWN commit callback, by reference.
+--
+-- Why the kit has to hand it over rather than let the host find it: the host
+-- only ever sees (db, key, value). For a great many settings the work that makes
+-- the change VISIBLE is not the host's generic sweep, it is exactly this
+-- callback -- so a host replaying an edit later (an undo stack) that has only
+-- the value writes the number and leaves the frames where they were. This is
+-- the door that fixes that, and it is the widget's job because the widget is the
+-- only thing that knows which function it runs as its commit.
+--
+-- BY REFERENCE, not wrapped: the host stores it on an entry that may outlive the
+-- gesture, and a fresh closure per tick would be a new object per step crossed.
+-- ============================================================
+do
+    local host, log = newHost(true)
+    log.written = {}
+    host.hooks.onSettingWritten = function(db, key, value, label, applyFn)
+        log.written[#log.written + 1] =
+            { db = db, key = key, value = value, label = label, apply = applyFn }
+    end
+
+    local db = { frameBorderSize = 3 }
+    local commit = 0
+    local onChanged = function() commit = commit + 1 end
+    local s = host:CreateSlider(pane(), {
+        label     = "Border Thickness",
+        min = 0, max = 10, step = 1,
+        get       = function() return db.frameBorderSize end,
+        set       = function(v) db.frameBorderSize = v end,
+        onChanged = onChanged,
+        dbRef     = { db = db, key = "frameBorderSize" },
+    })
+    local sl = s.slider
+
+    -- ---- a drag: every step crossed announces, and every announcement carries
+    -- the same reference. (The commit itself still runs once, on release --
+    -- forwarding it is not running it.)
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(5)
+    sl:SetValue(7)
+    check(#log.written == 2, "apply hand-off: a step crossed is an announcement")
+    check(log.written[1].apply == onChanged,
+        "apply hand-off: ☠ the fifth argument is the widget's own onChanged, BY REFERENCE")
+    check(log.written[2].apply == log.written[1].apply,
+        "apply hand-off: ...the same object every tick, not a fresh wrapper")
+    eq(log.written[2].label, "Border Thickness", "apply hand-off: and the label still rides in front of it")
+    eq(commit, 0, "apply hand-off: forwarding the commit is not running it")
+
+    fire(sl, "OnMouseUp", "LeftButton")
+    eq(commit, 1, "apply hand-off: the release is what runs it -- once, as before")
+
+    -- ---- a typed value: the other commit path, same fifth argument
+    local input = inputOf(s)
+    input:SetText("2")
+    fire(input, "OnEnterPressed")
+    local last = log.written[#log.written]
+    eq(last.value, 2, "apply hand-off: a typed value announces too")
+    check(last.apply == onChanged, "apply hand-off: ...carrying the same commit callback")
+end
+
+-- A slider with NO onChanged announces a nil apply rather than inventing one --
+-- the host then falls back to whatever it does for an unrecorded apply.
+do
+    local host, log = newHost(true)
+    log.written = {}
+    host.hooks.onSettingWritten = function(db, key, value, label, applyFn)
+        log.written[#log.written + 1] = { value = value, apply = applyFn }
+    end
+    local db = { frameWidth = 100 }
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 200, step = 1,
+        get   = function() return db.frameWidth end,
+        set   = function(v) db.frameWidth = v end,
+        dbRef = { db = db, key = "frameWidth" },
+    })
+    local input = inputOf(s)
+    input:SetText("140")
+    fire(input, "OnEnterPressed")
+    local last = log.written[#log.written]
+    eq(last.value, 140, "no onChanged: the write is still announced")
+    check(last.apply == nil, "no onChanged: ...with nothing in the apply slot")
+end
+
+-- ...and a host that only reads THREE arguments is unaffected. The hook is
+-- positional and the two trailing arguments are additive, so every consumer
+-- written before they existed keeps working -- which is the whole reason this
+-- was added to the end of the signature rather than to a table.
+do
+    local host, log = newHost(true)
+    log.seen = {}
+    host.hooks.onSettingWritten = function(db, key, value)
+        log.seen[#log.seen + 1] = value
+    end
+    local db = { frameWidth = 100 }
+    local s = host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 200, step = 1,
+        get   = function() return db.frameWidth end,
+        set   = function(v) db.frameWidth = v end,
+        onChanged = function() end,
+        dbRef = { db = db, key = "frameWidth" },
+    })
+    local input = inputOf(s)
+    input:SetText("160")
+    fire(input, "OnEnterPressed")
+    eq(log.seen[#log.seen], 160, "legacy host: a three-argument hook sees exactly what it always did")
+    eq(db.frameWidth, 160, "legacy host: ...and the write landed")
+end
+
 -- ---- restore the globals -------------------------------------------
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 CreateColor, GetCursorPosition = prevCreateColor, prevCursor

@@ -2292,6 +2292,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function WireFooter(row)
                 if not (row and row.SetActions) then return end
                 local held                    -- the hold's snapshot, between the two halves
+
+                -- THE GROUP'S APPLY, named once. Every verb below runs it after
+                -- it writes -- and Reset hands the same reference to the undo
+                -- engine, because an undo of a reset has no button press behind
+                -- it to run this for it. Restoring thirteen values and running
+                -- only the generic sweep is what "undo changed the numbers but
+                -- the frames did not move" looks like.
+                local function ApplyGroup()
+                    RefreshAfterGroupWrite()
+                    row.Refresh()
+                end
+
                 row:SetActions({
                     {
                         text        = L["Reset Group"],
@@ -2304,9 +2316,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                             -- entry: a reset is one thing the user did to THIS
                             -- group, and the group is what they will look for.
                             GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode,
-                                         row._title or row._label)
-                            RefreshAfterGroupWrite()
-                            row.Refresh()
+                                         row._title or row._label, ApplyGroup)
+                            ApplyGroup()
                         end,
                     },
                     {
@@ -2318,8 +2329,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                             local GA = DF.GroupActions
                             if not GA then return end
                             held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
-                            RefreshAfterGroupWrite()
-                            row.Refresh()
+                            ApplyGroup()
                         end,
                         onHoldEnd   = function()
                             local GA = DF.GroupActions
@@ -2332,8 +2342,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                             -- come back, and a frame of defaults left on screen
                             -- after they let go reads as the restore failing.
                             GUI:Call("refreshNow")
-                            RefreshAfterGroupWrite()
-                            row.Refresh()
+                            ApplyGroup()
                         end,
                     },
                 })
