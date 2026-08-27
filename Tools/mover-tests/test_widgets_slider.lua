@@ -165,6 +165,16 @@ local function inputOf(container)
     end
 end
 
+-- The thumb texture the drag bubble is anchored to. Found by its SIZE rather
+-- than by index: it is the only 12x16 region the bar builds, and an extra
+-- texture appearing on the slider (an override indicator, a future state
+-- overlay) must not silently hand the anchor assertions a different object.
+local function thumbOf(sl)
+    for _, t in ipairs(sl._textures) do
+        if t:GetWidth() == 12 and t:GetHeight() == 16 then return t end
+    end
+end
+
 -- A parent built by THIS file's CreateFrame, not the shim's bare FakeUIFrame:
 -- CreateSlider registers on `parent.ThemeListeners`, and the shim's catch-all
 -- __index answers a FUNCTION for that key, which table.insert cannot take.
@@ -470,11 +480,19 @@ do
     fire(sl, "OnMouseUp", "LeftButton")
 end
 
--- ---- clamped inside the row ----------------------------------------
--- At either end the bubble's centre would sit on the container's edge, putting
--- half the box outside the settings group -- where the page's scroll frame clips
--- it. The stub resolves no anchors, but it records the OFFSET, and that is the
--- number the clamp produces.
+-- ---- riding the thumb, clamped only at the edges ---------------------
+-- The bubble is ANCHORED TO THE THUMB and then left alone: WoW moves the thumb
+-- itself and the layout engine carries anything anchored to it along, so a bar
+-- dragged through the middle of its range costs NO anchor calls at all (5c
+-- below counts them).
+--
+-- The clamp is the only thing left to decide. At either end the bubble's centre
+-- would sit on the container's edge, putting half the box outside the settings
+-- group -- where the page's scroll frame clips it -- so there it comes OFF the
+-- thumb and pins to the container instead. Three states, swapped on a boundary
+-- crossing rather than a number recomputed every frame. The stub resolves no
+-- anchors, but it records what SetPoint was handed, and that is the whole of
+-- what the state machine produces.
 do
     local host = newHost(true)
     local value = 50
@@ -487,40 +505,154 @@ do
     -- Give the stub a real row and track to measure against.
     s:SetWidth(260)
     -- The track is anchored TOPLEFT 0 and RIGHT to the value box, so its left IS
-    -- the container's left -- which is what lets one x serve both.
+    -- the container's left -- which is what lets one x answer "would it overhang".
     local track
     for _, child in ipairs(s._children) do
         if child._kind == "Frame" and child ~= s.dragBubble then track = child break end
     end
     check(track ~= nil, "bubble: found the track the arithmetic is measured off")
     track:SetWidth(200)
+    local thumb = thumbOf(sl)
+    check(thumb ~= nil, "bubble: found the thumb it rides")
 
     fire(sl, "OnMouseDown", "LeftButton")
     local b = s.dragBubble
     local half = b:GetWidth() / 2
 
-    local function bubbleX()
-        local p, _, _, x = b:GetPoint(1)
+    -- (point, relativeTo, relativePoint, x) off the ONE anchor it ever has.
+    local function anchor()
+        local p, rel, relP, x = b:GetPoint(1)
         eq(p, "BOTTOM", "bubble: it hangs by its bottom edge, above the thumb")
-        return x
+        eq(b:GetNumPoints(), 1, "bubble: and by exactly one point, never a stack of them")
+        return rel, relP, x
     end
 
     sl:SetValue(50)
-    eq(bubbleX(), 1 + 0.5 * 198, "bubble: mid-bar it sits on the fill's leading edge")
+    local rel, relP, x = anchor()
+    eq(rel, thumb, "bubble: mid-bar it is anchored to the THUMB, not to a computed x")
+    eq(relP, "TOP", "bubble: ...sitting on top of it")
+    eq(x, 0, "bubble: with no offset -- nothing to recompute as the bar moves")
 
+    -- ⚠ THE CLAMPED ANCHOR IS THE SLIDER, NOT THE CONTAINER, and the two are
+    -- interchangeable for X on purpose: the bar is pinned to the container's
+    -- TOPLEFT, so their left edges are the same line. Y is what forces the
+    -- choice -- the height has to come from the bar the thumb centres on, or the
+    -- box hops half a pixel the moment it clamps.
     sl:SetValue(0)
-    eq(bubbleX(), half, "bubble: at the LEFT end it is clamped inside the row")
+    rel, relP, x = anchor()
+    eq(rel, sl, "bubble: at the LEFT end it comes off the thumb and pins to the bar")
+    eq(relP, "TOPLEFT", "bubble: ...measured from its top-left, which is the row's")
+    eq(x, half, "bubble: ...clamped half a box inside it")
 
     -- The RIGHT end of a real row does not need the clamp -- the track stops at
-    -- the value box, well inside the container -- so the bubble stays on the
-    -- fill's edge there. The clamp is not a no-op though: widen the track to the
-    -- whole row (which is what a bar with no value box beside it would be) and
-    -- the far end starts to overhang.
+    -- the value box, well inside the container -- so the bubble goes back on the
+    -- thumb there. The clamp is not a no-op though: widen the track to the whole
+    -- row (which is what a bar with no value box beside it would be) and the far
+    -- end starts to overhang.
     sl:SetValue(100)
-    eq(bubbleX(), 199, "bubble: at the right end of a normal row it is NOT clamped")
+    rel, _, x = anchor()
+    eq(rel, thumb, "bubble: at the right end of a normal row it is back on the thumb")
+    eq(x, 0, "bubble: ...unclamped")
     track:SetWidth(260)
     sl:SetValue(99); sl:SetValue(100)      -- re-run the placement at the new width
-    eq(bubbleX(), 260 - half, "bubble: ...but a full-width track is clamped inside the other edge")
+    rel, relP, x = anchor()
+    eq(rel, sl, "bubble: ...but a full-width track pins it to the other edge")
+    eq(x, 260 - half, "bubble: ...clamped half a box inside that one")
+
+    -- ⚠ THE CLAMP COORDINATE IS PART OF THE STATE, not just the state name. A
+    -- panel resized while the bubble is pinned to an edge moves that edge, and a
+    -- comparison on the name alone would leave the box behind.
+    s:SetWidth(300); track:SetWidth(300)
+    sl:SetValue(99); sl:SetValue(100)
+    _, _, x = anchor()
+    eq(x, 300 - half, "bubble: a row widened under a clamped bubble moves it to the new edge")
+    fire(sl, "OnMouseUp", "LeftButton")
+end
+
+-- ============================================================
+-- 5c. WHAT A HELD DRAG COSTS PER TICK
+-- The regression this pins down. The first cut of the bubble re-issued its text
+-- AND re-anchored itself (ClearAllPoints + SetPoint) on every single value
+-- change -- including the many ticks of a slow drag that land on the same
+-- snapped value. Two costs, both real in game:
+--
+--   * the bubble is a backdrop frame with a pixel border, so it carries six
+--     anchored regions -- a fill, four border strips and the font string -- and
+--     dirtying its rect made the layout engine re-solve all six, inside the same
+--     frame that was already writing the fill and the value box;
+--   * the offset it was re-anchored to was a FLOAT, so the box landed on a fresh
+--     sub-pixel position every tick and shimmered against the bar under it.
+--
+-- Counted rather than described: "it feels smoother" is not a test. The budget
+-- for a held drag is ONE fill write, AT MOST one SetText, and NO anchor calls.
+-- ============================================================
+do
+    local host = newHost(true)
+    local value = 100
+    -- A wide bar in a normal row: 40..400 over a 200px track is what "Frame
+    -- Width" actually is, and one step there is half a pixel of thumb travel --
+    -- the case where a per-tick re-anchor buys the least and costs the most.
+    local s = host:CreateSlider(pane(), {
+        label = "Frame Width", min = 40, max = 400, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+    })
+    local sl = s.slider
+    s:SetWidth(260)
+    local track
+    for _, child in ipairs(s._children) do
+        if child._kind == "Frame" and child ~= s.dragBubble then track = child break end
+    end
+    track:SetWidth(200)
+
+    fire(sl, "OnMouseDown", "LeftButton")
+    local b = s.dragBubble
+
+    -- Built, shown AND anchored by the press, before the gesture's first tick:
+    -- nothing in the drag itself pays for the first of any of them.
+    check(b ~= nil and b:IsShown(), "cost: the press built it and put it up")
+    eq(b:GetNumPoints(), 1, "cost: ...and anchored it, before the first tick")
+    eq(b.Text:GetText(), "100", "cost: ...showing the value the bar was pressed on")
+
+    -- Count from here, with the opening repaint already behind us.
+    local n = { text = 0, clear = 0, point = 0 }
+    local rawText, rawClear, rawPoint = b.Text.SetText, b.ClearAllPoints, b.SetPoint
+    b.Text.SetText   = function(self, t) n.text  = n.text  + 1 return rawText(self, t) end
+    b.ClearAllPoints = function(self)    n.clear = n.clear + 1 return rawClear(self) end
+    b.SetPoint       = function(self, ...) n.point = n.point + 1 return rawPoint(self, ...) end
+
+    -- (a) TEN TICKS THAT DO NOT MOVE THE VALUE. A drag whose mouse is moving less
+    -- than a step -- or not at all -- still ticks. None of them may repaint.
+    for _ = 1, 10 do sl:SetValue(200) end
+    eq(n.text, 1, "cost: ten ticks on the same value wrote the text ONCE")
+    eq(n.clear, 0, "cost: ...and never re-anchored")
+    eq(n.point, 0, "cost: ...at all")
+
+    -- (b) TEN TICKS THAT EACH MOVE THE BAR. The text has to follow -- that is the
+    -- whole point of the readout -- but the anchor still must not be touched: the
+    -- thumb moved, and the bubble is hung off the thumb.
+    n.text, n.clear, n.point = 0, 0, 0
+    for i = 1, 10 do sl:SetValue(200 + i) end
+    eq(n.text, 10, "cost: ten ticks that each changed the value wrote the text ten times")
+    eq(n.clear, 0, "cost: ...and STILL never re-anchored")
+    eq(n.point, 0, "cost: ...at all -- the thumb carries it")
+    eq(b.Text:GetText(), "210", "cost: ...while the number stayed correct throughout")
+
+    -- (c) A SWEEP INTO THE LEFT END crosses into the clamp, which is the one
+    -- thing that IS allowed to re-anchor -- once, on the crossing, and not again
+    -- for every tick spent inside it. (The RIGHT end of a normal row never
+    -- clamps: the track stops at the value box, well inside the row. See the
+    -- block above.)
+    --
+    -- The boundary is where the bubble's centre would reach half a box in from
+    -- the row's left edge: x = 1 + pct * 198 = 15.5, i.e. value ~66 on a 40..400
+    -- bar. Ten steps from 70 down to 61 cross it exactly once.
+    n.text, n.clear, n.point = 0, 0, 0
+    for i = 0, 9 do sl:SetValue(70 - i) end
+    eq(n.clear, 1, "cost: a sweep into the end clamp re-anchors exactly once")
+    eq(n.point, 1, "cost: ...on the crossing, not on every tick past it")
+
+    b.Text.SetText, b.ClearAllPoints, b.SetPoint = rawText, rawClear, rawPoint
     fire(sl, "OnMouseUp", "LeftButton")
 end
 
