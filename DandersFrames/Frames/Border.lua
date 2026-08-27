@@ -1238,24 +1238,25 @@ local ORBIT_LAYER_SIZES = { 7, 6, 5, 4 }   -- four layers, outer→inner (LCG pa
 -- small aura icon and a large AD border.
 local ORBIT_BASE_PERIOD = 8
 
--- Stop the declarative orbit groups (see "DF_ORBIT, DECLARATIVE" below). Guarded per
--- group: these live on textures under a container button, and teardown runs at the
--- moment those go restricted -- an unguarded throw here would unwind out of
--- StopAnimation and skip the rest of its teardown, which is exactly the shape of bug
--- #1079. Declared above hideOrbitParticles on purpose: a local referenced before its
--- definition would be captured as a nil GLOBAL.
-local function stopOrbitAnims(border)
-    local groups = border._orbitAnims
+-- Stop every DECLARATIVE animation group this border owns, whichever effect built
+-- them (see "DECLARATIVE EFFECTS" below). One list for all of them: only one effect
+-- runs at a time, because StopAnimation always clears before a start.
+--
+-- Guarded per group: these live on regions under a container button, and teardown
+-- runs at the very moment those go restricted -- an unguarded throw here would unwind
+-- out of StopAnimation and skip the rest of its teardown, which is exactly the shape
+-- of bug #1079.
+local function stopDeclAnims(border)
+    local groups = border._declAnims
     if not groups then return end
     for i = 1, #groups do
         local ag = groups[i]
         if ag then pcall(ag.Stop, ag) end
     end
-    border._orbitAnims = nil
+    border._declAnims = nil
 end
 
 local function hideOrbitParticles(border)
-    stopOrbitAnims(border)
     if not border.orbitTex then return end
     for _, t in ipairs(border.orbitTex) do t:Hide() end
 end
@@ -1467,8 +1468,138 @@ local function buildOrbitAnims(border, anim)
         end
     end
     if #groups == 0 then return false end
-    border._orbitAnims = groups
+    border._declAnims = groups
     return true
+end
+
+-- ===== DECLARATIVE EFFECTS — shared machinery =====
+--
+-- Everything below builds C-side AnimationGroups for an effect that normally runs on
+-- the shared OnUpdate driver, for the one case where that driver cannot run: a border
+-- whose regions are descendants of a Blizzard aura button. Same rules throughout:
+-- built on the border's FIRST Apply (inside initializeFrame), never touched again,
+-- geometry from _knownW/_knownH rather than measured, and every group pushed onto
+-- border._declAnims so StopAnimation can stop them.
+--
+-- ★ THE MARCHING TRICK, used by DF Dash and DF Pixel. A per-edge CLIP frame is pinned
+-- to the edge; a MOVER fills it; the quads hang off the mover at fixed positions, some
+-- of them deliberately outside the clip; one Translation slides the mover by exactly
+-- one spacing and loops. Because the quads are spaced by that same distance, the state
+-- after one loop is identical to the state before it, so the snap-back is invisible and
+-- nothing has to re-seed positions in Lua. The clip is what lets a quad leave the edge
+-- and another enter without either being repositioned.
+local function ensureMarchEdge(store, key, parent)
+    local e = store[key]
+    if not e then
+        e = { quads = {} }
+        e.clip = CreateFrame("Frame", nil, parent)
+        e.clip:SetClipsChildren(true)
+        e.mover = CreateFrame("Frame", nil, e.clip)
+        e.mover:SetAllPoints(e.clip)
+        store[key] = e
+    end
+    e.clip:Show()
+    return e
+end
+
+-- One quad on the mover, created on demand. Surplus quads from a previous (larger)
+-- configuration are hidden by the caller.
+local function marchQuad(e, i)
+    local q = e.quads[i]
+    if not q then
+        q = e.mover:CreateTexture(nil, "OVERLAY")
+        e.quads[i] = q
+    end
+    q:Show()
+    return q
+end
+
+-- Slide `e.mover` by (dx, dy) over `duration` seconds, forever.
+local function playMarch(e, dx, dy, duration, groups)
+    local ag = e.mover:CreateAnimationGroup()
+    ag:SetLooping("REPEAT")
+    local tr = ag:CreateAnimation("Translation")
+    tr:SetOffset(dx, dy)
+    tr:SetDuration(duration)
+    tr:SetSmoothing("NONE")
+    ag:Play()
+    groups[#groups + 1] = ag
+    return ag
+end
+
+-- Hold `region` at `from` then at `to`, forever — a hard on/off strobe rather than a
+-- fade. An Alpha animation whose from and to match simply holds that value for its
+-- duration, so two of them in order give a square wave with instant edges.
+local function playStrobe(region, from, to, halfPeriod, groups)
+    local ag = region:CreateAnimationGroup()
+    ag:SetLooping("REPEAT")
+    local on = ag:CreateAnimation("Alpha")
+    on:SetFromAlpha(from); on:SetToAlpha(from)
+    on:SetDuration(halfPeriod); on:SetOrder(1)
+    local off = ag:CreateAnimation("Alpha")
+    off:SetFromAlpha(to); off:SetToAlpha(to)
+    off:SetDuration(halfPeriod); off:SetOrder(2)
+    ag:Play()
+    groups[#groups + 1] = ag
+    return ag
+end
+
+-- Fade `region` from `lo` up to `hi` and back, forever. IN_OUT smoothing gives the
+-- zero-slope endpoints the cosine wave in the pulsate tick produces, so each cycle
+-- blends into the next with no seam at the loop point.
+local function playFade(region, lo, hi, halfPeriod, groups)
+    local ag = region:CreateAnimationGroup()
+    ag:SetLooping("REPEAT")
+    local down = ag:CreateAnimation("Alpha")
+    down:SetFromAlpha(hi); down:SetToAlpha(lo)
+    down:SetDuration(halfPeriod); down:SetOrder(1); down:SetSmoothing("IN_OUT")
+    local up = ag:CreateAnimation("Alpha")
+    up:SetFromAlpha(lo); up:SetToAlpha(hi)
+    up:SetDuration(halfPeriod); up:SetOrder(2); up:SetSmoothing("IN_OUT")
+    ag:Play()
+    groups[#groups + 1] = ag
+    return ag
+end
+
+-- A one-shot alpha ramp that STAYS where it lands (SetToFinalAlpha). Used to build the
+-- intro choreography of DF Proc / DF Flash out of pure alpha, with no Lua timeline.
+-- `hold` delays the ramp so several regions can hand off to each other in sequence.
+local function playAlphaOnce(region, from, to, hold, dur, groups)
+    local ag = region:CreateAnimationGroup()
+    ag:SetToFinalAlpha(true)
+    local order = 1
+    if hold and hold > 0 then
+        local wait = ag:CreateAnimation("Alpha")
+        wait:SetFromAlpha(from); wait:SetToAlpha(from)
+        wait:SetDuration(hold); wait:SetOrder(order)
+        order = order + 1
+    end
+    local ramp = ag:CreateAnimation("Alpha")
+    ramp:SetFromAlpha(from); ramp:SetToAlpha(to)
+    ramp:SetDuration(dur or 0.001); ramp:SetOrder(order)
+    ag:Play()
+    groups[#groups + 1] = ag
+    return ag
+end
+
+-- A looping flipbook over a grid, the native equivalent of the hand-stepped
+-- SetTexCoord walks in DF Proc and DF Flash. frameW/frameH of 0 means "derive from the
+-- texture's own rect", which is what makes it work on an ATLAS sub-rect — the recipe
+-- LibCustomGlow uses on these very same Blizzard sheets.
+local function playFlipBook(region, rows, cols, frames, frameW, frameH, duration, groups)
+    local ag = region:CreateAnimationGroup()
+    ag:SetLooping("REPEAT")
+    local fb = ag:CreateAnimation("FlipBook")
+    fb:SetDuration(duration)
+    fb:SetOrder(1)
+    fb:SetFlipBookRows(rows)
+    fb:SetFlipBookColumns(cols)
+    fb:SetFlipBookFrames(frames)
+    fb:SetFlipBookFrameWidth(frameW or 0)
+    fb:SetFlipBookFrameHeight(frameH or 0)
+    ag:Play()
+    groups[#groups + 1] = ag
+    return ag
 end
 
 -- ===== DF_DASH (dashed / marching-ants border) =====
@@ -1504,6 +1635,13 @@ local function ensureDashPool(border)
 end
 
 local function hideDashPool(border)
+    -- Declarative edges first: hiding the clip frame takes its mover and every dash
+    -- with it, so the quads need no individual pass.
+    if border._dashDecl then
+        for _, e in pairs(border._dashDecl) do
+            if e.clip then e.clip:Hide() end
+        end
+    end
     if not border.dashPool then return end
     for _, edge in pairs(border.dashPool) do
         for _, d in ipairs(edge) do d:Hide() end
@@ -1575,6 +1713,67 @@ local function drawDashes(border, offset, th, inset, r, g, b, a)
     drawDashEdgeV(border, pool.right,  true,  2 * width + height - offset, height, th, inset, r, g, b, a)
 end
 
+-- DF_DASH, DECLARATIVE. The tick above redraws every dash each frame by recomputing
+-- its clipped extent; here the clipping is done by a frame instead, and one Translation
+-- per edge slides a fixed set of dashes by exactly one pattern length.
+--
+-- ★ The seed phases reproduce the tick's cumulative perimeter offsets (bottom 0, left
+-- `width`, top `width+height`, right `2*width+height`), so the pattern stays continuous
+-- around the corners exactly as it does today. Direction matches too: clockwise on
+-- screen — up the left edge, right along the top, down the right, left along the bottom.
+--
+-- ⚠ Static dashes (frequency 0) are NOT built here: with nothing to march there is no
+-- animation to declare, and the tick path draws them once and stops. The caller checks.
+local function buildDashAnims(border, anim, th, inset, r, g, b, a, marchSpeed)
+    if not (marchSpeed and marchSpeed > 0) then return false end
+    local fw, fh = border._knownW, border._knownH
+    if not (fw and fh) then return false end
+    local width, height = fw - inset * 2, fh - inset * 2
+    if width <= 0 or height <= 0 then return false end
+    local P = DF_DASH_PATTERN
+    local dur = P / marchSpeed
+    border._dashDecl = border._dashDecl or {}
+    local store = border._dashDecl
+    local groups = border._declAnims or {}
+    -- key, edge length, seed offset, travel, and how the clip frame sits on the border.
+    local edges = {
+        { key = "bottom", len = width,  seed = 0,                    dx = -P, dy = 0,
+          horiz = true,  point = "BOTTOMLEFT",  ox = inset,  oy = inset },
+        { key = "left",   len = height, seed = width,                dx = 0,  dy = P,
+          horiz = false, point = "TOPLEFT",     ox = inset,  oy = -inset },
+        { key = "top",    len = width,  seed = width + height,       dx = P,  dy = 0,
+          horiz = true,  point = "TOPLEFT",     ox = inset,  oy = -inset },
+        { key = "right",  len = height, seed = 2 * width + height,   dx = 0,  dy = -P,
+          horiz = false, point = "TOPRIGHT",    ox = -inset, oy = -inset },
+    }
+    for _, ed in ipairs(edges) do
+        local e = ensureMarchEdge(store, ed.key, border)
+        e.clip:ClearAllPoints()
+        e.clip:SetPoint(ed.point, border, ed.point, ed.ox, ed.oy)
+        e.clip:SetSize(ed.horiz and ed.len or th, ed.horiz and th or ed.len)
+        local startPos = -(ed.seed % P)
+        local count = math.ceil(ed.len / P) + 2
+        for i = 1, count do
+            local dashStart = startPos + (i - 1) * P
+            local q = marchQuad(e, i)
+            q:SetColorTexture(r, g, b, a)
+            q:ClearAllPoints()
+            if ed.horiz then
+                q:SetSize(DF_DASH_LEN, th)
+                q:SetPoint("BOTTOMLEFT", e.mover, "BOTTOMLEFT", dashStart, 0)
+            else
+                q:SetSize(th, DF_DASH_LEN)
+                -- Vertical edges measure DOWNWARD from the top, matching drawDashEdgeV.
+                q:SetPoint("TOPLEFT", e.mover, "TOPLEFT", 0, -dashStart)
+            end
+        end
+        for i = count + 1, #e.quads do e.quads[i]:Hide() end
+        playMarch(e, ed.dx, ed.dy, dur, groups)
+    end
+    border._declAnims = groups
+    return true
+end
+
 -- ===== DF_PIXEL (chasing pixels — discrete bars) =====
 -- N plain rectangles chase around the perimeter with even gaps, each oriented
 -- along the edge it's on (a horizontal bar on top/bottom, a vertical bar on
@@ -1588,6 +1787,12 @@ local PIXEL_TEX = [[Interface\BUTTONS\WHITE8X8]]
 local PIXEL_BASE_PERIOD = 4
 
 local function hidePixelParticles(border)
+    -- Declarative edges first — see hideDashPool.
+    if border._pixelDecl then
+        for _, e in pairs(border._pixelDecl) do
+            if e.clip then e.clip:Hide() end
+        end
+    end
     if not border.pixelTex then return end
     for _, t in ipairs(border.pixelTex) do t:Hide() end
 end
@@ -1667,6 +1872,83 @@ local function pixelTick(border, anim, dt)
             end
         end
     end
+end
+
+-- DF_PIXEL, DECLARATIVE.
+--
+-- ☠ THIS IS NOT THE ORBIT WITH DIFFERENT ART, and that is the whole difficulty. A
+-- chasing pixel is a BAR that changes orientation at every corner — horizontal along
+-- the top and bottom, vertical up the sides — and a Translation cannot resize its
+-- target mid-flight. So the perimeter walk that carries DF Chase cannot carry this.
+--
+-- Instead each edge owns bars of its own fixed orientation, marching along it and
+-- clipped to it: a bar leaving one edge is clipped away while the next enters at the
+-- far end, which reads the same because every bar is identical. Spacing is seeded from
+-- the CUMULATIVE perimeter position, so bars stay evenly spaced across the corners and
+-- the lap time is unchanged.
+--
+-- ⚠ The one visible difference from the tick: the tick lets a bar overhang a corner
+-- (it is centre-anchored on the edge line), while a clipped bar is cut at the corner
+-- instead. On a bar the length of a pixel that is a couple of frames of travel.
+local function buildPixelAnims(border, anim)
+    local host = border._pixelHost
+    if not host then return false end
+    local w, h = border._knownW, border._knownH
+    if not (w and h) then return false end
+    w = w - 2 * (anim.inset or 0)
+    h = h - 2 * (anim.inset or 0)
+    if w <= 0 or h <= 0 then return false end
+    local N      = border._pixelN or 8
+    local len    = border._pixelLen or 6
+    local th     = border._pixelTh or 2
+    local period = border._pixelPeriod or PIXEL_BASE_PERIOD
+    local perimeter = 2 * (w + h)
+    local space = perimeter / N
+    if space <= 0 or period <= 0 then return false end
+    -- One spacing of travel per loop; a full lap therefore still takes `period`.
+    local dur = period / N
+    border._pixelDecl = border._pixelDecl or {}
+    local store = border._pixelDecl
+    local groups = border._declAnims or {}
+    local r, g, b, a = readColor(anim.color or ANIM_GOLD)
+    -- edgeStart = where this edge begins along the perimeter walk, so the bar spacing
+    -- carries across corners exactly as pixelTick's single modulo does.
+    local edges = {
+        { key = "left",   start = 0,         len = h, vert = true,  from = "BOTTOM", dx = 0,      dy = space,  sx = th,  sy = len, cp = "LEFT"   },
+        { key = "top",    start = h,         len = w, vert = false, from = "LEFT",   dx = space,  dy = 0,      sx = len, sy = th,  cp = "TOP"    },
+        { key = "right",  start = h + w,     len = h, vert = true,  from = "TOP",    dx = 0,      dy = -space, sx = th,  sy = len, cp = "RIGHT"  },
+        { key = "bottom", start = 2 * h + w, len = w, vert = false, from = "RIGHT",  dx = -space, dy = 0,      sx = len, sy = th,  cp = "BOTTOM" },
+    }
+    for _, ed in ipairs(edges) do
+        local e = ensureMarchEdge(store, ed.key, host)
+        e.clip:ClearAllPoints()
+        -- The clip straddles the edge LINE (bars are centre-anchored on it), and is
+        -- exactly one bar thick, so a bar on the line fits without being trimmed.
+        e.clip:SetSize(ed.vert and th or ed.len, ed.vert and ed.len or th)
+        e.clip:SetPoint("CENTER", host, ed.cp, 0, 0)
+        -- First bar at or before the edge start, then every `space` along it.
+        local first = ((-ed.start) % space) - space
+        local count = math.ceil(ed.len / space) + 2
+        for i = 1, count do
+            local at = first + (i - 1) * space
+            local q = marchQuad(e, i)
+            q:SetTexture(PIXEL_TEX)
+            q:SetVertexColor(r, g, b, a)
+            q:SetSize(ed.sx, ed.sy)
+            q:ClearAllPoints()
+            if ed.vert then
+                -- "left" measures UP from the bottom, "right" measures DOWN from the top.
+                q:SetPoint("CENTER", e.mover, ed.from, 0, (ed.from == "BOTTOM") and at or -at)
+            else
+                -- "top" measures RIGHT from the left, "bottom" measures LEFT from the right.
+                q:SetPoint("CENTER", e.mover, ed.from, (ed.from == "LEFT") and at or -at, 0)
+            end
+        end
+        for i = count + 1, #e.quads do e.quads[i]:Hide() end
+        playMarch(e, ed.dx, ed.dy, dur, groups)
+    end
+    border._declAnims = groups
+    return true
 end
 
 -- ===== DF_PROC (proc flare — DF-owned ProcGlow stand-in) =====
@@ -1820,6 +2102,62 @@ local function procTick(border, anim, dt)
     border._procStartElapsed = PROC_START_DURATION
     if s then s:SetAlpha(0) end
     t:SetAlpha(1)
+end
+
+-- DF_PROC, DECLARATIVE. The comment on stepProcFlipbook says the native FlipBook
+-- "won't tick inside a container-button subtree" — that was the same wrong reading that
+-- retired animation everywhere, and this is its replacement. A FlipBook animation is
+-- declarative, so it runs there; only the hand-stepping did not.
+--
+-- ★ SetAtlas, NOT SetTexture(info.file). A FlipBook with frame width/height 0 derives
+-- its grid from the region's own texture rect, which is what confines the walk to the
+-- atlas sub-rect instead of the whole sheet. This is LibCustomGlow's recipe on these
+-- exact Blizzard atlases, and it is why the manual texcoord maths is not needed here.
+--
+-- The intro burst is a second, NON-looping group: flipbook once, then alpha to 0, with
+-- SetToFinalAlpha so it stays gone. The loop's own fade-in is delayed by the intro
+-- length, which reproduces the tick's hand-off without a timeline in Lua.
+local function buildProcAnims(border, anim)
+    local t, s, host = border.procTex, border.procStartTex, border._procHost
+    if not (t and host) then return false end
+    local w = border._knownW
+    if not w then return false end
+    w = w - 2 * (anim.inset or 0)
+    if w <= 0 then return false end
+    if not border._procAtlas then return false end
+    -- Geometry is applied once here instead of per tick: every number is plain config.
+    t:SetAtlas(PROC_ATLAS)
+    local off = floor(w * PROC_LOOP_SPILL + 0.5)
+    t:ClearAllPoints()
+    t:SetPoint("TOPLEFT",     host, "TOPLEFT",     -off,  off)
+    t:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",  off, -off)
+    local groups = border._declAnims or {}
+    local showIntro = (not anim.procStart) and s and border._procStartAtlas
+    if showIntro then
+        s:SetAtlas(PROC_START_ATLAS)
+        s:SetSize(w * PROC_BURST_SCALE, w * PROC_BURST_SCALE)
+        s:SetAlpha(1)
+        local ag = s:CreateAnimationGroup()
+        ag:SetToFinalAlpha(true)
+        local fb = ag:CreateAnimation("FlipBook")
+        fb:SetDuration(PROC_START_DURATION); fb:SetOrder(1)
+        fb:SetFlipBookRows(PROC_ROWS); fb:SetFlipBookColumns(PROC_COLS)
+        fb:SetFlipBookFrames(PROC_FRAMES)
+        fb:SetFlipBookFrameWidth(0); fb:SetFlipBookFrameHeight(0)
+        local out = ag:CreateAnimation("Alpha")
+        out:SetFromAlpha(1); out:SetToAlpha(0)
+        out:SetDuration(0.001); out:SetOrder(2)
+        ag:Play()
+        groups[#groups + 1] = ag
+        t:SetAlpha(0)
+        playAlphaOnce(t, 0, 1, PROC_START_DURATION, 0.001, groups)
+    else
+        if s then s:SetAlpha(0) end
+        t:SetAlpha(1)
+    end
+    playFlipBook(t, PROC_ROWS, PROC_COLS, PROC_FRAMES, 0, 0, border._procPeriod or 1, groups)
+    border._declAnims = groups
+    return true
 end
 
 -- ===== DF_FLASH (button-glow flash — DF-owned ButtonGlow stand-in) =====
@@ -2008,6 +2346,96 @@ local function flashTick(border, anim, dt)
     end
 end
 
+-- 22 ants frames in a 5-column sheet -> 5 rows. 48px frames in a 256px sheet, which is
+-- the same 48/256 UV step the tick walks by hand.
+local FLASH_ANTS_ROWS = 5
+local FLASH_ANTS_PX   = 48
+
+-- A one-shot alpha rise then fall that ends where it started. Local to DF Flash: it is
+-- the only effect whose intro needs a peak rather than a ramp.
+local function playAlphaOnceInOut(region, peak, rise, fall, groups)
+    local ag = region:CreateAnimationGroup()
+    ag:SetToFinalAlpha(true)
+    local up = ag:CreateAnimation("Alpha")
+    up:SetFromAlpha(0); up:SetToAlpha(peak)
+    up:SetDuration(rise); up:SetOrder(1)
+    local down = ag:CreateAnimation("Alpha")
+    down:SetFromAlpha(peak); down:SetToAlpha(0)
+    down:SetDuration(fall); down:SetOrder(2)
+    ag:Play()
+    groups[#groups + 1] = ag
+    return ag
+end
+
+-- DF_FLASH, DECLARATIVE.
+--
+-- ☠ THE INTRO IS SIMPLIFIED HERE, DELIBERATELY, AND THIS IS THE ONE EFFECT THAT IS NOT
+-- A FAITHFUL PORT. The tick's intro is a SIZE choreography — the outer glow collapses
+-- 2F->F while the inner expands F/2->F under a spark that grows and shrinks. Expressing
+-- that declaratively needs Scale animations, and Scale was built and tried on a
+-- container button child in August and did NOTHING while Alpha worked (pandemic FLASH,
+-- 2026-08-05). Shipping a size timeline that might silently not run would leave the
+-- outer glow parked at 2F and read as broken, so the sizes are set to their STEADY
+-- values at build time and the intro is played in alpha alone: the glows fade up, the
+-- spark peaks and goes, the ants crawl in behind it. The steady state — an outer glow
+-- at F under marching ants — is identical to the tick's, and that is what is on screen
+-- for all but the first fraction of a second.
+-- ⚠ Re-test Scale on a later build; if it works, the size timeline can come back here.
+local function buildFlashAnims(border, anim)
+    local outer, ants, host = border.flashOuter, border.flashAnts, border._flashHost
+    if not (outer and ants and host) then return false end
+    local w = border._knownW
+    if not w then return false end
+    w = w - 2 * (anim.inset or 0)
+    if w <= 0 then return false end
+    local F = w * FLASH_FRAME_SCALE
+    border._flashF = F
+    border._flashGeomW = w
+    border._flashSettled = true
+    local maxA = border._flashMaxA or 1
+    local spark, inner = border.flashSpark, border.flashInner
+    local innerOver, outerOver = border.flashInnerOver, border.flashOuterOver
+    -- Steady sizes, set once.
+    outer:SetSize(F, F)
+    if outerOver then outerOver:ClearAllPoints(); outerOver:SetAllPoints(outer) end
+    if inner then inner:SetSize(F, F) end
+    if innerOver then innerOver:ClearAllPoints(); innerOver:SetAllPoints(inner) end
+    if spark then spark:SetSize(F * 1.5, F * 1.5) end
+    ants:SetSize(F * 0.85, F * 0.85)
+    local groups = border._declAnims or {}
+    playFlipBook(ants, FLASH_ANTS_ROWS, FLASH_ANTS_COLS, FLASH_ANTS_FRAMES,
+                 FLASH_ANTS_PX, FLASH_ANTS_PX, border._flashPeriod or 0.5, groups)
+    local showIntro = not anim.procStart
+    if showIntro then
+        local d = FLASH_INTRO_DUR
+        -- Same proportions as the tick's timeline: glows land at 60%, the spark peaks
+        -- at 40% and is gone by 80%, the ants take over across the last 40%.
+        outer:SetAlpha(0)
+        playAlphaOnce(outer, 0, maxA, 0, d * 0.6, groups)
+        if outerOver then outerOver:SetAlpha(0) end
+        if inner then
+            inner:SetAlpha(0)
+            playAlphaOnceInOut(inner, maxA, d * 0.6, d * 0.4, groups)
+        end
+        if innerOver then innerOver:SetAlpha(0) end
+        if spark then
+            spark:SetAlpha(0)
+            playAlphaOnceInOut(spark, maxA, d * 0.4, d * 0.4, groups)
+        end
+        ants:SetAlpha(0)
+        playAlphaOnce(ants, 0, maxA, d * 0.6, d * 0.4, groups)
+    else
+        outer:SetAlpha(maxA)
+        ants:SetAlpha(maxA)
+        if outerOver then outerOver:SetAlpha(0) end
+        if inner then inner:SetAlpha(0) end
+        if innerOver then innerOver:SetAlpha(0) end
+        if spark then spark:SetAlpha(0) end
+    end
+    border._declAnims = groups
+    return true
+end
+
 -- ===== CUSTOM ONUPDATE TICKS =====
 -- Each tick function receives (border, anim, elapsed) and modulates the 4
 -- edge SetAlpha values. Period defaults to anim.frequency-derived; a
@@ -2036,6 +2464,57 @@ customTicks.BLINK = function(border, anim, elapsed)
     if o.right  then o.right:SetAlpha(on)  end
     if o.bottom then o.bottom:SetAlpha(on) end
     if o.left   then o.left:SetAlpha(on)   end
+end
+
+-- BLINK, DECLARATIVE. Four square waves, one per overlay edge. They are separate groups
+-- rather than one, because an animation drives the object its group was created on and
+-- these are four independent textures; started in the same frame with identical
+-- durations, they stay in step C-side.
+local function buildBlinkAnims(border, anim)
+    local o = border.animOverlay
+    if not o then return false end
+    local period = tickPeriod(anim, 1)
+    if not period or period <= 0 then return false end
+    local groups = border._declAnims or {}
+    local half = period * 0.5
+    local n = 0
+    for _, e in ipairs({ o.top, o.right, o.bottom, o.left }) do
+        if e then playStrobe(e, 1, 0, half, groups); n = n + 1 end
+    end
+    if n == 0 then return false end
+    border._declAnims = groups
+    return true
+end
+
+-- DF_PULSATE, DECLARATIVE.
+--
+-- ☠ IT ANIMATES THE BORDER'S CONTENT, NOT THE BORDER FRAME — and that difference is
+-- load-bearing, not tidiness. The tick drives the WRAPPER's alpha, which is also the
+-- carrier for the out-of-range fade, so it has to fold the fade in itself on every
+-- frame (SetAlphaFromBoolean against a possibly-secret inRange). A declarative group
+-- has no way to fold in a value that changes at runtime: an Alpha animation on the
+-- wrapper would simply overwrite the range fade, and an out-of-range frame would pulse
+-- back to full. Animating the edges and pieces instead leaves the wrapper's alpha free
+-- for the range system, and the two multiply — so the pulse and the fade compose
+-- instead of fighting, which is strictly better than what the tick manages.
+local function buildPulsateAnims(border, anim)
+    local rawFreq = (anim.frequency and anim.frequency > 0) and anim.frequency or 1
+    -- period = 2/freq, then half of it per direction — the tick's mapping exactly.
+    local half = (2 / rawFreq) * 0.5
+    local groups = border._declAnims or {}
+    local n = 0
+    local function add(region)
+        if region then playFade(region, 0.05, 1, half, groups); n = n + 1 end
+    end
+    add(border.top); add(border.bottom); add(border.left); add(border.right)
+    -- TEXTURE style paints 8 pieces (or a backdrop child) instead of the four edges.
+    if border.texPieces then
+        for _, p in pairs(border.texPieces) do add(p) end
+    end
+    if border.bd then add(border.bd) end
+    if n == 0 then return false end
+    border._declAnims = groups
+    return true
 end
 
 -- ===== STATIC SHAPE MODES =====
@@ -2134,6 +2613,9 @@ function Border:StopAnimation(border)
         return
     end
     unregisterAnimTick(border)
+    -- Declarative groups next: they are the other half of "this border is animating",
+    -- and unlike the driver they keep running on their own until stopped.
+    stopDeclAnims(border)
     -- Hide all overlay sets from prior animation passes. The cornerExtras
     -- field is from a previous-rev CORNERS_ONLY implementation; we keep
     -- the Hide-loop for backward compat on profiles where the field was
@@ -2242,12 +2724,12 @@ function Border:StartAnimation(border, spec)
     -- animation frozen until a real spec change forces a restart (the "move the
     -- frequency slider off 1 and back" symptom). When the driver is dead, fall
     -- through and restart instead of no-opping.
-    -- ⚠ A DECLARATIVE orbit counts as live too. It has no animRegistry entry by design
-    -- (nothing ticks it), so without _orbitAnims here the "driver is dead, restart" arm
+    -- ⚠ A DECLARATIVE effect counts as live too. It has no animRegistry entry by design
+    -- (nothing ticks it), so without _declAnims here the "driver is dead, restart" arm
     -- would fire on EVERY re-apply and rebuild its animation groups from scratch — on a
     -- container border that is also a tainted write into the button subtree.
     if border._animHash == newHash then
-        if not DRIVER_ANIMS[border.activeAnimation] or animRegistry[border] or border._orbitAnims then
+        if not DRIVER_ANIMS[border.activeAnimation] or animRegistry[border] or border._declAnims then
             return
         end
     end
@@ -2263,8 +2745,15 @@ function Border:StartAnimation(border, spec)
     --     the period changes how fast the phase advances but never makes the
     --     phase value jump — the fade is never clipped or restarted mid-cycle.
     if anim.type == "DF_PULSATE" and border.activeAnimation == "DF_PULSATE" then
-        local rawFreq = (anim.frequency and anim.frequency > 0) and anim.frequency or 1
-        border._dfPulsatePeriod = 2 / rawFreq
+        -- ⚠ A DECLARATIVE pulse cannot be retuned in place: its groups are frozen at
+        -- creation and reaching back in would be a tainted write to a button child. A
+        -- genuine speed change arrives as a container Rebuild instead (the animation
+        -- keys ride the border's struct signature), so the right move here is to leave
+        -- the running pulse alone rather than tear it down and fail to rebuild it.
+        if not (border._secretRect and border._declAnims) then
+            local rawFreq = (anim.frequency and anim.frequency > 0) and anim.frequency or 1
+            border._dfPulsatePeriod = 2 / rawFreq
+        end
         border._animHash = newHash
         return
     end
@@ -2284,6 +2773,11 @@ function Border:StartAnimation(border, spec)
     local tick = customTicks[anim.type]
     if tick then
         setupAnimOverlay(border, anim)
+        -- BLINK is the only customTick effect, and it has a declarative twin.
+        if border._secretRect and anim.type == "BLINK" and buildBlinkAnims(border, anim) then
+            border.activeAnimation = anim.type
+            return
+        end
         registerAnimTick(border, function(b, el)
             tick(b, anim, el)
         end)
@@ -2326,6 +2820,15 @@ function Border:StartAnimation(border, spec)
         border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA = r, g, b, a
         local rawFreq = anim.frequency or 0
         local marchSpeed = (rawFreq and rawFreq > 0) and (rawFreq * DF_DASH_SPEED) or 0
+        -- Container-hosted and actually marching: clip-and-translate instead of
+        -- redrawing every dash each frame. A STATIC dashed border needs no declarative
+        -- path — it is drawn once below and never written again.
+        if border._secretRect and marchSpeed > 0
+            and buildDashAnims(border, anim, border._dfDashTh, border._dfDashInset,
+                               r, g, b, a, marchSpeed) then
+            border.activeAnimation = anim.type
+            return
+        end
         if marchSpeed > 0 then
             -- Marching: OnUpdate advances the offset, reading colour/size from the
             -- fields so a live recolour is picked up next tick. elapsed persists
@@ -2347,6 +2850,16 @@ function Border:StartAnimation(border, spec)
     -- DF Dash). Taint-safe perimeter walk on the shared driver.
     if anim.type == "DF_PIXEL" then
         setupPixelParticles(border, anim)
+        if border._secretRect and buildPixelAnims(border, anim) then
+            -- setupPixelParticles above built and SHOWED the perimeter-walk pool. The
+            -- declarative build owns its own per-edge quads instead, so park the pool or
+            -- its bars sit on top of the moving ones, frozen at their seed positions.
+            if border.pixelTex then
+                for _, t in ipairs(border.pixelTex) do t:Hide() end
+            end
+            border.activeAnimation = anim.type
+            return
+        end
         registerAnimTick(border, function(b, el, dt)
             pixelTick(b, anim, dt)
         end)
@@ -2358,6 +2871,10 @@ function Border:StartAnimation(border, spec)
     -- flipbook on the shared driver, taint-safe on aura buttons.
     if anim.type == "DF_PROC" then
         setupProcGlow(border, anim)
+        if border._secretRect and buildProcAnims(border, anim) then
+            border.activeAnimation = anim.type
+            return
+        end
         registerAnimTick(border, function(b, el, dt)
             procTick(b, anim, dt)
         end)
@@ -2369,6 +2886,10 @@ function Border:StartAnimation(border, spec)
     -- halo that flashes on the shared driver, taint-safe on aura buttons.
     if anim.type == "DF_FLASH" then
         setupFlashGlow(border, anim)
+        if border._secretRect and buildFlashAnims(border, anim) then
+            border.activeAnimation = anim.type
+            return
+        end
         registerAnimTick(border, function(b, el, dt)
             flashTick(b, anim, dt)
         end)
@@ -2402,6 +2923,10 @@ function Border:StartAnimation(border, spec)
         -- path at the top of StartAnimation can change the pulse speed on the
         -- already-running driver without re-SetScript'ing.
         border._dfPulsatePeriod = 2 / rawFreq
+        if border._secretRect and buildPulsateAnims(border, anim) then
+            border.activeAnimation = anim.type
+            return
+        end
         -- Advance a PHASE accumulator in [0,1) by dt/period each frame rather
         -- than deriving phase from absolute elapsed.  Two consequences:
         --   * Changing the period (frequency) only changes how fast the phase
