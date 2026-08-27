@@ -6,6 +6,11 @@ local S = UI._state
 local P = UI._priv
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
       UI.Colors.panel, UI.Colors.element, UI.Colors.border, UI.Colors.hover, UI.Colors.text, UI.Colors.textDim
+-- The amber notice token, and the ONLY colour the modified-default dot wears.
+-- Deliberately not UI.OVERRIDE_MARKER_COLOR (the auto-profile star's gold) and
+-- not the accent: three markers in one hue would be three things saying the
+-- same thing, and they do not mean the same thing. See AddModifiedDot.
+local C_NOTICE = UI.Colors.notice
 local SnapLen = UI.SnapLen
 local SnapHeightEven = UI.SnapHeightEven
 local CreateElementBackdrop = UI._priv.CreateElementBackdrop
@@ -1185,6 +1190,64 @@ function UI:CreateOverrideResetButton(parent, opts)
     return btn
 end
 
+-- ============================================================
+-- THE MODIFIED-DEFAULT DOT
+-- A SECOND indicator kind, and it answers a different question from the star
+-- above. The star compares the stored value against the auto-layout GLOBAL; the
+-- dot compares it against the value the addon SHIPS. Either can be up without
+-- the other, and on a raid control both can be up at once -- which is why they
+-- are drawn on opposite sides of the widget, at different sizes, in different
+-- colours.
+--
+-- WHERE IT GOES, AND WHY NOT BESIDE THE STAR. The star and the red reset button
+-- own the container's TOP-RIGHT and read as one cluster. A third glyph there
+-- would join that cluster visually while meaning something unrelated to it, and
+-- on a control with all three up nobody could say which was which. So the dot
+-- sits at the END OF THE LABEL'S VISIBLE TEXT: it belongs to the NAME of the
+-- setting the way a modified-mark belongs beside a filename. 6px against the
+-- star's 12, because it is information, not a control -- no tooltip, no click,
+-- no hit frame.
+--
+-- ⚠ RE-ANCHORED ON EVERY UPDATE, not once at build. The offset is the label's
+-- STRING WIDTH, which is not known until the text has been laid out and changes
+-- again whenever the settings font does; a build-time anchor would pin the dot
+-- to whatever the width happened to be on the frame the widget was created in.
+--
+-- ⚠ AND IT DISPLACES THE "(Global: x)" TEXT. That text anchors to the label's
+-- ANCHOR right edge. For a label pinned only on its left (a slider's, a
+-- dropdown's) that edge IS the end of the text -- exactly where the dot now
+-- sits -- so the two would overlap in the raid editing state. When the dot is up
+-- the global text starts after the DOT instead. A stretched label (a checkbox's,
+-- pinned to both container edges) never collided, and moving its global text in
+-- beside the dot rather than out at the container edge is an improvement, not a
+-- change of meaning.
+--
+-- Installs container.UpdateModifiedDot(self) -> shown. Returns the texture.
+local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
+    local dot = container:CreateTexture(nil, "OVERLAY")
+    dot:SetSize(6, 6)
+    dot:SetTexture(MEDIA .. "Icons\\dot")
+    dot:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
+    dot:Hide()
+    container.modifiedDot = dot
+
+    container.UpdateModifiedDot = function(self)
+        -- host:Call answers nil when the hook is absent, which is every consumer
+        -- that has not opted in: no dot, ever, and nothing to configure. The
+        -- engine behind the hook is the consumer's -- this library knows only
+        -- that some (db, key) pairs are "not the shipped value".
+        local on = host:Call("isModifiedDefault", dbTable, dbKey) and true or false
+        if on then
+            dot:ClearAllPoints()
+            dot:SetPoint("LEFT", lbl, "LEFT", (lbl:GetStringWidth() or 0) + 4, 0)
+        end
+        dot:SetShown(on)
+        return on
+    end
+    return dot
+end
+P.AddModifiedDot = AddModifiedDot
+
 local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verticalOffset, optionsMap, dbTable)
     local L = host.hooks.L
     -- Skip for proxy tables (e.g. a designer proxy) that do not support per-key override tracking
@@ -1223,9 +1286,28 @@ local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verti
     
     -- Store dbKey for reference
     container.overrideDbKey = dbKey
-    
+
+    -- The modified-default dot. See AddModifiedDot for the placement decision.
+    --
+    -- ⚠ IT READS `dbKey`, WHICH FOR A CHECKBOX IS ITS OVERRIDE KEY. The
+    -- consumer-side checkbox factory passes `overrideKey or dbKey` here, so a
+    -- caller that supplies a DIFFERING override key hands the diff engine the
+    -- wrong name. Today the one caller that does (the raid group-visibility
+    -- boxes, whose value lives in a sub-table) passes NO dbTable at all, so the
+    -- engine is handed nil and answers "not modified" -- the honest answer for a
+    -- value that is not a top-level setting. If a caller ever pairs a real
+    -- dbTable with a differing override key, split the two keys apart here.
+    AddModifiedDot(host, container, lbl, dbTable, dbKey)
+
     -- Function to update override indicators
     container.UpdateOverrideIndicators = function(self, currentValue)
+        -- ☠ THE DOT IS PAINTED FIRST, ABOVE EVERY EARLY RETURN BELOW. The
+        -- override state answers "none" for the whole of party mode by design
+        -- (the consumer's getOverrideState gates on raid), and returning there
+        -- without touching the dot would mean modified-marks appeared in raid
+        -- only -- half the panel, and the half nobody would think to check.
+        local modified = self.UpdateModifiedDot and self:UpdateModifiedDot() or false
+
         -- Debug mode shows all buttons
         if S.overrideDebugMode then
             self.overrideStar:Show()
@@ -1284,7 +1366,14 @@ local function AddOverrideIndicators(host, container, lbl, dbKey, onReset, verti
 
         self.overrideGlobalText:SetText(format(L["(Global: %s)"], globalDisplay))
         self.overrideGlobalText:ClearAllPoints()
-        self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
+        -- Start after the DOT when one is up -- on a left-anchored label the
+        -- label's right edge and the end of its text are the same point, which
+        -- is where the dot now sits. See AddModifiedDot.
+        if modified and self.modifiedDot then
+            self.overrideGlobalText:SetPoint("LEFT", self.modifiedDot, "RIGHT", 4, 0)
+        else
+            self.overrideGlobalText:SetPoint("LEFT", lbl, "RIGHT", 4, 0)
+        end
 
         -- The check icon marks "matches the global", which is only meaningful
         -- while editing: a runtime overlay is by definition a difference.

@@ -46,6 +46,9 @@ local UI = {
         accent  = { r = 0.45, g = 0.45, b = 0.95, a = 1 },
         text    = { r = 0.9,  g = 0.9,  b = 0.9 },
         textDim = { r = 0.5,  g = 0.5,  b = 0.5 },
+        -- The amber notice token, mirrored from Theme.lua's C_NOTICE. Widgets.lua
+        -- reads it at FILE SCOPE for the modified-default dot.
+        notice  = { r = 0.91, g = 0.66, b = 0.25, a = 1 },
     },
     -- The slot heights Theme.lua owns. CreateSlider stamps the slider one onto
     -- its container at build time, so it has to exist before the load.
@@ -1097,6 +1100,178 @@ do
     sl:SetValue(3.4)
     check(value == 3.5, "SetRange: the new min moved the grid, and its precision with it")
     fire(sl, "OnMouseUp", "LeftButton")
+end
+
+-- ============================================================
+-- 8. THE MODIFIED-DEFAULT DOT
+-- A SECOND indicator kind on the same widget, answering a different question
+-- from the override star: not "does this differ from the auto-layout global"
+-- but "does this differ from the value the addon SHIPS". It rides
+-- AddOverrideIndicators -- which every db-bound factory in the kit already goes
+-- through -- and reads ONE optional host hook, isModifiedDefault, so a consumer
+-- that does not publish it never draws one.
+--
+-- These build SLIDERS with a dbRef, which is what makes the factory call
+-- AddOverrideIndicators at all; the mechanism under test is the shared one, and
+-- the dropdown / checkbox / colour picker / edit box reach it by the same door.
+-- ============================================================
+local function dotHost(answer)
+    local host, log = newHost(false)
+    log.asked = {}
+    host.hooks.isModifiedDefault = function(db, key)
+        log.asked[#log.asked + 1] = { db = db, key = key }
+        return answer(db, key)
+    end
+    return host, log
+end
+
+local function boundSlider(host, db, key)
+    return host:CreateSlider(pane(), {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return db[key] end,
+        set = function(v) db[key] = v end,
+        dbRef = { db = db, key = key },
+    })
+end
+
+-- A host with NO hook draws nothing and errors on nothing -- which is every
+-- consumer that has not opted in, DandersMover included.
+do
+    local host = newHost(false)
+    local db = { frameBorderSize = 3 }
+    local s = boundSlider(host, db, "frameBorderSize")
+    check(s.modifiedDot ~= nil, "no hook: the dot is still BUILT (one hidden texture)")
+    check(not s.modifiedDot:IsShown(), "no hook: ...and never shown")
+    s:UpdateOverrideIndicators(3)
+    check(not s.modifiedDot:IsShown(), "no hook: an update does not conjure one")
+    fire(s.slider, "OnMouseDown", "LeftButton")
+    s.slider:SetValue(9)
+    fire(s.slider, "OnMouseUp", "LeftButton")
+    check(not s.modifiedDot:IsShown(), "no hook: nor does a whole drag")
+end
+
+-- The hook's answer IS the dot, both ways round, and nothing is cached.
+do
+    local modified = true
+    local host = dotHost(function() return modified end)
+    local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
+    check(s.modifiedDot:IsShown(), "hook true: the dot is up as soon as the widget is built")
+
+    modified = false
+    s:UpdateOverrideIndicators(3)
+    check(not s.modifiedDot:IsShown(), "hook false: and it comes down again")
+
+    modified = true
+    s:UpdateOverrideIndicators(3)
+    check(s.modifiedDot:IsShown(), "hook true: ...and back up on the next repaint")
+end
+
+-- What it is asked ABOUT: the (db, key) pair the factory was BOUND to, not the
+-- value it happens to be showing.
+do
+    local host, log = dotHost(function() return true end)
+    local db = { frameBorderSize = 3 }
+    boundSlider(host, db, "frameBorderSize")
+    check(#log.asked > 0, "hook args: the hook was asked")
+    check(log.asked[1].db == db, "hook args: ...about the bound TABLE")
+    eq(log.asked[1].key, "frameBorderSize", "hook args: ...and the bound key")
+end
+
+-- ☠ THE PARTY CASE, and the regression an early return would have caused.
+-- getOverrideState answers "none" for the whole of party mode by design, and
+-- the override half of UpdateOverrideIndicators returns immediately on that. The
+-- dot is painted ABOVE that return, or the modified marks would appear in raid
+-- only -- half the panel, and the half nobody would think to check.
+do
+    local host = dotHost(function() return true end)
+    host.hooks.getOverrideState = function() return "none" end
+    local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
+    check(s.modifiedDot:IsShown(), "party: the dot shows even though the override state is 'none'")
+    check(not s.overrideStar:IsShown(), "party: ...while the override star correctly does not")
+    check(not s.overrideResetBtn:IsShown(), "party: ...nor the reset button")
+    s:UpdateOverrideIndicators(3)
+    check(s.modifiedDot:IsShown(), "party: and a repaint through the same return keeps it")
+end
+
+-- The colour is the palette's amber NOTICE token -- not the star's gold
+-- (UI.OVERRIDE_MARKER_COLOR), not the accent, and not a literal.
+do
+    local host = dotHost(function() return true end)
+    local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
+    local v = s.modifiedDot._vertex
+    check(v ~= nil, "colour: the dot was tinted")
+    eq(v.r, UI.Colors.notice.r, "colour: from UI.Colors.notice -- red")
+    eq(v.g, UI.Colors.notice.g, "colour: ...green")
+    eq(v.b, UI.Colors.notice.b, "colour: ...blue")
+    check(v.r ~= UI.OVERRIDE_MARKER_COLOR[1] or v.g ~= UI.OVERRIDE_MARKER_COLOR[2],
+        "colour: and it is NOT the override star's gold")
+    eq(s.modifiedDot:GetWidth(), 6, "size: 6px against the star's 12 -- information, not a control")
+    check(s.modifiedDot:GetTexture():find("dot", 1, true) ~= nil, "art: the shared dot texture")
+end
+
+-- IT FOLLOWS THE WRITE PATH, through the factory's own setter. A drag settle is
+-- the case that matters: the value lands, the widget repaints, and the dot is
+-- re-answered from the db that was just written.
+do
+    local db = { frameBorderSize = 3 }
+    local DEFAULT = 3
+    local host = dotHost(function(t, k) return t[k] ~= DEFAULT end)
+    local s = boundSlider(host, db, "frameBorderSize")
+    check(not s.modifiedDot:IsShown(), "write path: at the shipped value, no dot")
+
+    fire(s.slider, "OnMouseDown", "LeftButton")
+    s.slider:SetValue(7)
+    fire(s.slider, "OnMouseUp", "LeftButton")
+    eq(db.frameBorderSize, 7, "write path: the drag landed")
+    check(s.modifiedDot:IsShown(), "write path: ...and the dot lit, with nothing invalidated by hand")
+
+    local input = inputOf(s)
+    input:SetText("3")
+    fire(input, "OnEnterPressed")
+    eq(db.frameBorderSize, 3, "write path: typed back to the default")
+    check(not s.modifiedDot:IsShown(), "write path: and the dot went out again")
+end
+
+-- WHERE IT SITS: at the END OF THE LABEL'S VISIBLE TEXT, re-anchored on every
+-- update because the string width is not knowable until the text is laid out
+-- and moves again whenever the settings font does.
+do
+    local host = dotHost(function() return true end)
+    local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
+    local pts = s.modifiedDot._points
+    local p = pts[#pts]
+    eq(p[1], "LEFT", "anchor: the dot's LEFT edge...")
+    check(p[2] == s.label, "anchor: ...against the LABEL")
+    eq(p[3], "LEFT", "anchor: ...measured from the label's own left")
+    eq(p[4], s.label:GetStringWidth() + 4, "anchor: by the text width -- where the words END, plus a gap")
+
+    -- The proof that it is RE-anchored rather than pinned: move the text and the
+    -- dot moves with it on the next repaint, with no rebuild in between. (A font
+    -- change is the real-world version of this; the stub's width is 7px a
+    -- character, so a longer label is the same lever.)
+    s.label:SetText("A Considerably Longer Label")
+    s:UpdateOverrideIndicators(3)
+    local moved = s.modifiedDot._points[#s.modifiedDot._points]
+    eq(moved[4], s.label:GetStringWidth() + 4, "anchor: re-measured on every update, not pinned at build")
+end
+
+-- ...and it DISPLACES the "(Global: x)" text rather than sitting under it. That
+-- text anchors to the label's ANCHOR right edge, which on a left-anchored label
+-- IS the end of the words -- exactly where the dot now is.
+do
+    local modified = true
+    local host = dotHost(function() return modified end)
+    host.hooks.getOverrideState = function() return "overridden", 5 end
+    local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
+    check(s.modifiedDot:IsShown() and s.overrideGlobalText:IsShown(),
+        "global text: both indicators are up at once")
+    local gp = s.overrideGlobalText._points
+    check(gp[#gp][2] == s.modifiedDot, "global text: it starts after the DOT while the dot is up")
+
+    modified = false
+    s:UpdateOverrideIndicators(3)
+    gp = s.overrideGlobalText._points
+    check(gp[#gp][2] == s.label, "global text: and back to the label the moment the dot goes")
 end
 
 -- ---- restore the globals -------------------------------------------

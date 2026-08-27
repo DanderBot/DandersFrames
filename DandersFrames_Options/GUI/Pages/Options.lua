@@ -2178,13 +2178,161 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- miss any spelled differently. Every shared factory stamps
             -- container.searchEntry, so a control added to either builder is
             -- covered without anyone having to remember this exists.
+            --
+            -- ...and the SAME walk answers a second question: which keys the
+            -- row's amber modified-tick is about. Collected onto the row as
+            -- row._claimedKeys so the tick can ask the diff engine "is any of
+            -- these not the shipped default", which is exactly "does the pane
+            -- behind this row contain a change".
+            --
+            -- ⚠ TWO SOURCES FOR THE KEY, and the second is not belt-and-braces.
+            -- searchEntry is stamped by the SEARCH registration, which is
+            -- guarded on DF.Search existing -- so on a build where search has
+            -- not registered, every key would be missed. container.overrideDbKey
+            -- is stamped by the toolkit's own AddOverrideIndicators, which every
+            -- db-bound control goes through regardless, and it covers the
+            -- colour pickers and checkboxes whose search entries are registered
+            -- by a different route.
             local function ClaimKeys(row, group)
                 if not (row and group and group.groupChildren) then return end
+                local claimed = row._claimedKeys or {}
+                row._claimedKeys = claimed
                 for _, e in ipairs(group.groupChildren) do
-                    local se = e.widget and e.widget.searchEntry
-                    local k  = se and (se.dbKey or se.searchKey)
-                    if type(k) == "string" then self._popoutRowForKey[k] = row end
+                    local w  = e.widget
+                    local se = w and w.searchEntry
+                    local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
+                    if type(k) == "string" then
+                        self._popoutRowForKey[k] = row
+                        claimed[#claimed + 1] = k
+                    end
                 end
+            end
+
+            -- The tick's answer, for a row that has just had its keys claimed.
+            -- Re-read on every refresh (the row calls this, not the other way
+            -- round), so a write inside the popout lights it without anything
+            -- having to be invalidated. DF.Defaults is guarded because this page
+            -- is in the load-on-demand companion and the engine is resident.
+            local function WireModifiedTick(row)
+                if not (row and row.SetModifiedCheck) then return end
+                row:SetModifiedCheck(function(d)
+                    local D = DF.Defaults
+                    return (D and D:Count(d, row._claimedKeys or {}) or 0) > 0
+                end)
+            end
+
+            -- ---- the footer's two verbs ---------------------------------
+            -- What a write to any of these keys costs, in one place, so the two
+            -- buttons and every future one apply the SAME work. Deliberately the
+            -- bodies the widgets themselves drive: OnBorderToggle's first two
+            -- lines are the group's real apply, ReflowMounted repaints the
+            -- controls the user is looking at (RefreshChildStates walks the
+            -- group calling refreshContent on every child), and the row's own
+            -- Refresh re-reads the summary and the modified tick.
+            --
+            -- ApplyScheduler coalesces UpdateFrames + LightweightUpdateBorder,
+            -- so a reset of thirteen keys is one apply, not thirteen.
+            local function RefreshAfterGroupWrite()
+                UpdateFrames()
+                DF:LightweightUpdateBorder()
+                ReflowMounted()
+                if GUI.RefreshAllOverrideIndicators then
+                    GUI.RefreshAllOverrideIndicators()
+                end
+                self:RefreshStates()
+            end
+
+            -- Can these buttons be pressed at all, and if not, why.
+            --
+            -- COMBAT greys both. Every key behind these two rows reaches a
+            -- secure frame, and the addon's standing rule is that those writes
+            -- are deferred in combat -- the footer does not fight that, it just
+            -- says so.
+            local function CombatReason()
+                if InCombatLockdown() then return false, L["Cannot use this action in combat."] end
+                return true
+            end
+
+            -- ...and HOLD alone is additionally off while the raid auto-layout
+            -- machinery is live. Two different reasons, one gate:
+            --
+            --   EDITING a layout: `onSettingWritten` records every write as an
+            --   override edit for that layout. A hold writes twice -- defaults
+            --   in, the user's values back out -- so a preview nobody committed
+            --   to would land in the layout as two deliberate edits.
+            --   A LAYOUT RUNNING: `interceptWrite` redirects writes to the
+            --   stored baseline instead of the live table, so the preview would
+            --   change nothing on screen. A press-and-hold that shows the user
+            --   nothing is worse than one they cannot press.
+            --
+            -- RESET stays available in BOTH states, and that is not an
+            -- oversight. While editing, recording the defaults as this layout's
+            -- override edits is exactly what the user asked for; while a layout
+            -- is running, the redirect writes the defaults into the stored
+            -- baseline -- which is the table the modified dots and the row tick
+            -- are reporting on, so the reset does what they say it will.
+            local function HoldReason()
+                local ok, why = CombatReason()
+                if not ok then return false, why end
+                local AP = DF.AutoProfilesUI
+                if GUI.SelectedMode == "raid" and AP then
+                    local editing = AP.IsEditing and AP:IsEditing()
+                    local running = AP.IsLayoutActive and AP:IsLayoutActive()
+                    if editing or running then
+                        return false, L["Unavailable while an auto layout is active or being edited."]
+                    end
+                end
+                return true
+            end
+
+            -- The two verbs, wired onto a row whose keys have just been claimed.
+            -- Both close over row._claimedKeys by REFERENCE rather than reading
+            -- it now: ClaimKeys fills that table after the row is built, and a
+            -- copy taken here would be the empty one.
+            local function WireFooter(row)
+                if not (row and row.SetActions) then return end
+                local held                    -- the hold's snapshot, between the two halves
+                row:SetActions({
+                    {
+                        text        = L["Reset Group"],
+                        tooltipDesc = L["Reset every setting in this group to its default value."],
+                        enabled     = CombatReason,
+                        onClick     = function()
+                            local GA = DF.GroupActions
+                            if not GA then return end
+                            GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                            RefreshAfterGroupWrite()
+                            row.Refresh()
+                        end,
+                    },
+                    {
+                        text        = L["Hold: Defaults"],
+                        hold        = true,
+                        tooltipDesc = L["Press and hold to preview this group at its default values. Release to restore your settings."],
+                        enabled     = HoldReason,
+                        onHoldStart = function()
+                            local GA = DF.GroupActions
+                            if not GA then return end
+                            held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                            RefreshAfterGroupWrite()
+                            row.Refresh()
+                        end,
+                        onHoldEnd   = function()
+                            local GA = DF.GroupActions
+                            if not (GA and held) then return end
+                            GA:EndHold(GUI, RowDB(), row._claimedKeys or {}, held)
+                            held = nil
+                            -- The UNTHROTTLED apply on the way back, unlike the
+                            -- coalescing one used going in: a release is the
+                            -- moment the user is watching for their settings to
+                            -- come back, and a frame of defaults left on screen
+                            -- after they let go reads as the restore failing.
+                            GUI:Call("refreshNow")
+                            RefreshAfterGroupWrite()
+                            row.Refresh()
+                        end,
+                    },
+                })
             end
 
             -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
@@ -2232,6 +2380,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 build    = borderMount,
             }))
             ClaimKeys(borderRow, borderContent)
+            WireModifiedTick(borderRow)
+            WireFooter(borderRow)
             RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder")
 
             local shadowMount, shadowContent = PopoutContent(function(group, holder, reflow)
@@ -2258,6 +2408,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 build    = shadowMount,
             }))
             ClaimKeys(shadowRow, shadowContent)
+            WireModifiedTick(shadowRow)
+            WireFooter(shadowRow)
             RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled")
             -- The dependent grey, in the page's own idiom: the group's
             -- RefreshChildStates drives row:SetEnabled off this, and the row's

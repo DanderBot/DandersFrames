@@ -48,6 +48,10 @@ local max = math.max
 local C_TEXT, C_TEXT_DIM = UI.Colors.text, UI.Colors.textDim
 local C_ELEMENT, C_BORDER = UI.Colors.element, UI.Colors.border
 local C_HOVER, C_BACKGROUND = UI.Colors.hover, UI.Colors.background
+-- The amber notice token. The per-control modified-dots inside the popout wear
+-- it too (Widgets.lua), so the row and the controls it opens say "not the
+-- shipped default" in one colour.
+local C_NOTICE = UI.Colors.notice
 local ICON_PATH = UI.MEDIA .. "Icons\\"
 
 -- EVERY metric this file draws with lives in Theme.lua (UI.PopoutRow), for the
@@ -317,7 +321,18 @@ end
 local function syncGate(po, row, rec)
     rec = rec or (po._rowPanes and po._rowPanes[row])
     if not rec then return end
-    gatePane(po, rec, not row._Read())
+    local shut = not row._Read()
+    gatePane(po, rec, shut)
+    -- THE FOOTER GOES WITH THE PANE. The shell's action strip is body, not
+    -- chrome (the header toggle, the pin and the cross stay live -- see THE OFF
+    -- GATE above), and a live "reset this group" under a feature that is
+    -- switched off is the same lie the gate exists to stop the pane telling.
+    -- Stated on every sync rather than only on the transition: the shell's own
+    -- call is idempotent, and this is also the pass that re-asks each action's
+    -- `enabled` -- which answers about things the panel is never told about
+    -- (combat, an auto layout going live), so it has to be re-asked whether the
+    -- toggle moved or not.
+    if po.SetFooterGated then po:SetFooterGated(shut) end
 end
 
 -- Build (or fetch) the pane holding `row`'s controls on this instance.
@@ -463,6 +478,11 @@ local function bindRow(po, row)
     row._bound[po] = true
     po:SetHeader(row._title)
     po:SetAccent(row._accent)      -- nil resets to the host accent
+    -- The footer belongs to the row that has the panel, exactly as the title and
+    -- the accent above it do. Re-stated on the BIND rather than only on the
+    -- adopt so a PINNED instance re-bound to another row (which never re-adopts)
+    -- gets that row's verbs rather than keeping the ones it was pinned with.
+    if po.SetActions then po:SetActions(row._actions) end
     syncHeader(row, po)
     if prev and prev ~= row then safeCall(prev._SyncActive) end
     safeCall(row._SyncActive)
@@ -562,6 +582,20 @@ end
 --              (instance, row), and it must size its pane. A pane that re-flows
 --              LATER (a hideOn inside it changed) tells the panel so with
 --              popout:SyncRowPaneHeight()
+--   modified   fn(db) -> bool. True paints a small amber tick on the count
+--              badge, meaning "at least one setting behind this row is not the
+--              shipped default". Absent = no tick is ever drawn, which is every
+--              consumer that has not opted in. Also settable AFTER creation with
+--              row:SetModifiedCheck(fn) -- a consumer that learns the group's
+--              key set by WALKING the pane it built cannot know it at this point
+--   actions    an array of verbs about the GROUP as a whole (reset it, preview
+--              it at its defaults), rendered as a strip along the foot of the
+--              panel. Forwarded straight to the shell -- see CreatePopout's
+--              `actions` for the descriptor shape and the hold contract. Absent
+--              = no footer, and the panel is the height it always was. Also
+--              settable after creation with row:SetActions(list), for the same
+--              reason SetModifiedCheck exists. The strip GREYS with the pane
+--              when the row's toggle is off
 --   accent     {r,g,b[,a]} per-row accent override (else the host accent)
 --   enabled    bool or fn(db) -> bool; false greys the WHOLE row, and the popout
 --              still opens -- the controls inside gate themselves. ⚠ A SEPARATE
@@ -588,8 +622,8 @@ end
 --              which is nothing unless the consumer called host:SetSurfaceStyle
 --
 -- Returns the row frame with .Refresh() / .refreshContent(db), :SetEnabled(bool),
--- :SetAccent(c), :SetSurface(style) / :GetSurface(), :OpenPopout(),
--- :ClosePopout(reason) and .popout.
+-- :SetModifiedCheck(fn), :SetActions(list), :SetAccent(c), :SetSurface(style) / :GetSurface(),
+-- :OpenPopout(), :ClosePopout(reason) and .popout.
 function UI:CreatePopoutRow(parent, opts)
     local host = self
     opts = opts or {}
@@ -614,6 +648,8 @@ function UI:CreatePopoutRow(parent, opts)
     row._label   = opts.label or ""
     row._title   = opts.title or row._label
     row._count   = opts.count
+    row._modified = (type(opts.modified) == "function") and opts.modified or nil
+    row._actions = (type(opts.actions) == "table") and opts.actions or nil
     row._build   = opts.build
     row._window  = opts.window
     row._clipTo  = opts.clipTo
@@ -754,6 +790,25 @@ function UI:CreatePopoutRow(parent, opts)
     if badge.SetJustifyH then badge:SetJustifyH("CENTER") end
     badge:SetText(row._count and tostring(row._count) or "")
     row.badge = badge
+
+    -- The MODIFIED TICK -- "something behind this row is not the shipped
+    -- default". Parented to the PILL rather than to the plate, deliberately: it
+    -- then inherits the pill's own "no count declared, no pill" hide below and
+    -- can never be left floating beside a column that is not drawn.
+    --
+    -- Notched on the pill's top-right CORNER (its CENTRE on the corner, so it
+    -- straddles the border rather than sitting inside the chip): the count is
+    -- already the thing that says "how much is in here", and a mark on that chip
+    -- is the smallest place on the row that is unambiguously about the group's
+    -- CONTENTS rather than about its name or its current value. Anywhere in the
+    -- text columns would read as part of the label or the summary.
+    local modTick = badgePill:CreateTexture(nil, "OVERLAY")
+    modTick:SetSize(M.modTick, M.modTick)
+    modTick:SetTexture(ICON_PATH .. "dot")
+    modTick:SetVertexColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
+    modTick:SetPoint("CENTER", badgePill, "TOPRIGHT", 0, 0)
+    modTick:Hide()
+    row.modifiedTick = modTick
 
     -- No count declared, no pill: an empty bordered box beside the chevron is a
     -- chip that says nothing. The COLUMN stays either way -- the gear is anchored
@@ -927,6 +982,17 @@ function UI:CreatePopoutRow(parent, opts)
         local text = on and (opts.summary and opts.summary(db) or "") or offText
         summary:SetText(text or "")
 
+        -- The modified tick rides the SUMMARY's cadence, which is the point: a
+        -- write inside the popout already repaints the row's summary, so the
+        -- tick is live for free and cannot drift from what the row is reporting.
+        -- Guarded on the CHECK, not on the texture -- a consumer that never
+        -- declared one leaves the tick hidden for the row's whole life.
+        --
+        -- Painted whatever the toggle says. A group that is switched off still
+        -- HOLDS non-default values, and hiding the mark there would say it had
+        -- been reset. The row's own dim carries "not currently doing anything".
+        if row._modified then modTick:SetShown(row._modified(db) and true or false) end
+
         -- Dependent-grey dims the WHOLE row, toggle included. Toggled-off dims
         -- only what the toggle governs -- so the tick you need to click to turn
         -- it back on never fades with everything it controls.
@@ -959,6 +1025,35 @@ function UI:CreatePopoutRow(parent, opts)
         return row
     end
 
+    -- Declare (or withdraw) the modified check AFTER creation. Every other opt
+    -- on this row is known at the call, and this one often is not: a consumer
+    -- that derives the group's key set by WALKING the pane it just built has
+    -- nothing to hand CreatePopoutRow at the moment it calls it. Repaints
+    -- immediately, so a caller does not also have to remember a Refresh.
+    function row:SetModifiedCheck(fn)
+        row._modified = (type(fn) == "function") and fn or nil
+        if not row._modified then modTick:Hide() end
+        row.Refresh()
+        return row
+    end
+
+    -- Declare (or withdraw) the popout's footer actions AFTER creation, for the
+    -- reason SetModifiedCheck exists: a consumer whose verbs close over the
+    -- group's key set has nothing to hand CreatePopoutRow at the moment it calls
+    -- it -- that set is derived by walking the pane, which does not exist yet.
+    -- Reaches every panel this row currently has open (a pinned one included,
+    -- which is why the bound set is walked rather than just row.popout), so a
+    -- late declaration lands on a panel that is already up.
+    function row:SetActions(list)
+        row._actions = (type(list) == "table") and list or nil
+        for po in pairs(row._bound) do
+            if po and not po.closed and po._boundRow == row and po.SetActions then
+                po:SetActions(row._actions)
+            end
+        end
+        return row
+    end
+
     -- ---- the popout -----------------------------------------------
 
     function row:OpenPopout()
@@ -984,6 +1079,11 @@ function UI:CreatePopoutRow(parent, opts)
             -- row, and nil would mean "ask the host" to the popout -- so it is
             -- spelled as an explicit false.
             surface = row._surface or false,
+            -- FORWARDED like `surface`, and for the same reason: the panel is
+            -- the row's, so the verbs at its foot are the row's. Re-read on
+            -- every adopt, so the shared instance shows whichever row's actions
+            -- last asked for it rather than the first row's forever.
+            actions = row._actions,
             tetherSource = row,
             build   = mountBare,
             headerControls = function(p, bar) return buildHeaderControls(host, p, bar) end,

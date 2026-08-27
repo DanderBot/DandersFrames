@@ -19,7 +19,7 @@ local addonName, NS = ...
 -- ☠ Bumping MINOR means bumping EXPECTED_MINOR in OptionsCore.lua in the SAME
 -- commit -- the options manifest compares the two for equality and goes inert on
 -- a mismatch. See the README's split-loading section.
-local MAJOR, MINOR = "DandersUI-1.0", 11
+local MAJOR, MINOR = "DandersUI-1.0", 12
 local UI = LibStub:NewLibrary(MAJOR, MINOR)
 if not UI then return end
 -- The handshake the other four files read. `NS` is the HOST addon's private
@@ -82,6 +82,8 @@ local DEFAULT_ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }   -- the party pu
 --   getOverrideState(db, key) -> state, globalValue
 --        state is "none" | "runtime" | "overridden" | "editing"; absent = no indicators
 --   resetOverride(db, key) -> globalValue    also writes db[key] back to global
+--   isModifiedDefault(db, key) -> bool  the STORED value differs from the value the
+--        consumer ships as its default; absent = no modified-dots are ever drawn
 --   interceptWrite(db, key, value) -> true when the write was redirected (skip refresh)
 --   onSettingWritten(db, key, value)         after a plain write landed
 --   refresh()                                throttled live refresh

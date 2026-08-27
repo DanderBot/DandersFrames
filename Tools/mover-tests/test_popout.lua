@@ -24,7 +24,10 @@ UI.MEDIA = ""
 -- panel/border are the title strip's two tokens: the raised fill over the body
 -- and the hairline under the bar.
 UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5, b = 0.5 },
-              panel = { r = 0.12, g = 0.12, b = 0.12 }, border = { r = 0.25, g = 0.25, b = 0.25 } }
+              panel = { r = 0.12, g = 0.12, b = 0.12 }, border = { r = 0.25, g = 0.25, b = 0.25 },
+              -- The amber notice token, mirrored from Theme.lua: PopoutRow.lua reads it
+              -- at FILE SCOPE for the modified tick, so a palette without it cannot load.
+              notice = { r = 0.91, g = 0.66, b = 0.25, a = 1 } }
 
 -- ---- Theme.lua metrics --------------------------------------------
 -- Mirrors of the real values, for the reason test_popout_row.lua spells out at
@@ -36,6 +39,7 @@ UI.Colors = { text = { r = 0.9, g = 0.9, b = 0.9 }, textDim = { r = 0.5, g = 0.5
 UI.PopoutTitle = UI.PopoutTitle or { topPad = 6, row = 28, fill = 0.9, sepAlpha = 0.8 }
 UI.PopoutTitleHeight = UI.PopoutTitleHeight or (UI.PopoutTitle.topPad + UI.PopoutTitle.row)
 UI.PopoutPad = UI.PopoutPad or 10
+UI.PopoutFooter = UI.PopoutFooter or { height = 26, btnHeight = 18, gap = 6, sepAlpha = UI.PopoutTitle.sepAlpha }
 
 local ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
 function UI:GetAccent() return ACCENT end

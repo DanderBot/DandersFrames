@@ -238,9 +238,9 @@ something to dock to.
 | `tetherSource` | region or `function(popout) -> region` — the far end of the beam and the source outline, for when the thing the popout is *about* is not the thing it docked to |
 | `accent` | `{r,g,b[,a]}` overriding the host accent for this popout's border, connection point, beam and source outline. Re-read on every open, so a pooled popout tracks a theme change |
 | `headerControls(popout, bar)` | returns `leftFrame, rightFrame` (either may be nil) — the consumer's own controls IN the title bar. Called ONCE per instance, like `build`, and for the same reason: a pooled popout re-targeted at something else re-BINDS them (the consumer's job) rather than rebuilding them. The shell anchors `left` where the title starts, `right` inboard of the pin/close cluster, and squeezes the title between them |
+| `actions` | an ARRAY of verbs about the panel AS A WHOLE, drawn as a strip along its bottom. Absent = no strip and the height the popout has always had. Re-read on EVERY adopt (the pool hands one instance to many consumers, so the footer belongs to whoever has it now), and settable live with `po:SetActions(list)`. Each descriptor: `text`, `tooltip` (defaults to `text`), `tooltipDesc`, and either `onClick(popout)` or `hold = true` with `onHoldStart(popout)` / `onHoldEnd(popout)`; `enabled` is a boolean or `fn() -> enabled, reasonText`, re-evaluated on every adopt, bind and refresh, and a false answer greys the button and puts `reasonText` in its tooltip. ☠ `onHoldEnd` fires EXACTLY ONCE per `onHoldStart` and never without one — on the release, on the panel closing or hiding mid-press, and on the button being disabled under the press |
 
-`onUnpin`, `actions` and `badge` are accepted and reserved: v1 never unpins and
-draws neither.
+`onUnpin` and `badge` are accepted and reserved: v1 never unpins and draws no badge.
 
 | Call | Purpose |
 |---|---|
@@ -351,7 +351,7 @@ declared count draws no pill while keeping the column.
 build mounted into that row's pane greys and stops taking input — `SetEnabled(false)`
 where the widget has one, a dim to the same 0.4 where it does not — so a switched-off
 feature never shows a panel of live controls that do nothing. The popout's own header
-toggle, pin and cross stay enabled: that tick is the way back on. The gate BORROWS the
+toggle, pin and cross stay enabled: that tick is the way back on. The FOOTER goes with the pane, not with the chrome — a live "reset this group" under a feature that is switched off is the same lie the gate exists to stop the pane telling. The gate BORROWS the
 enabled state rather than owning it — it records what each widget's own logic last
 asked for and replays exactly that on the way back out, so a control a page's
 `disableOn` had already disabled is not resurrected by switching the feature on. Gating
@@ -378,10 +378,11 @@ walks the pane's direct children and cannot reach past a wrapper that answers no
 | `window` | **required** to open: the frame the popout docks outside of |
 | `clipTo` | the region that actually clips this row — the scroll frame the list lives in. The popout's connected chrome hides while the row is scrolled out of it. Omitted, the shell falls back to `window`, which is too generous by that window's own title bar and padding |
 | `title` | popout header title (default: `label`) |
+| `actions` | verbs about the GROUP as a whole (reset it, preview it at its defaults), forwarded straight to the shell's footer — see `CreatePopout`'s `actions`. Also settable after creation with `row:SetActions(list)`, for the same reason `SetModifiedCheck` is: a consumer whose verbs close over the group's key set cannot know that set until it has walked the pane. The strip GREYS with the pane when the row's toggle is off |
 
 Returns the row frame with `.Refresh()` / `.refreshContent(db)` (the settings-group
 refresh path), `:SetEnabled(bool)` (an explicit call overrides `opts.enabled` from
-then on), `:SetAccent(c)` (re-tints the row and every panel it has open, pinned
+then on), `:SetActions(list)`, `:SetAccent(c)` (re-tints the row and every panel it has open, pinned
 included), `:OpenPopout()`, `:ClosePopout(reason)` and `.popout`. Its parts are
 `.plate` (the bordered surface everything else is anchored inside), `.checkButton`,
 `.label`, `.summary`, `.badgePill` / `.badge`, `.gear` and `.chevron`. Lay a column

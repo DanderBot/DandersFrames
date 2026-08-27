@@ -43,6 +43,11 @@ DandersFrames.xml
 
 # Core
 Core\Config.lua
+# The defaults-diff engine (DF.Defaults). Pure reads, no state -- it only ever
+# looks at DF.PartyDefaults / DF.RaidDefaults and DF.db, both at CALL time, so
+# it is safe this early. Listed right after Config.lua so the shipped-defaults
+# tables and the thing that compares against them stay together.
+Core\Defaults.lua
 Core\Changelog.lua
 Core\Profile.lua
 Core.lua

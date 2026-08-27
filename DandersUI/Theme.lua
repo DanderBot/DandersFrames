@@ -361,6 +361,30 @@ UI.PopoutTitle = {
 -- UI.PopoutRow.slot follows. This is the number a consumer sizes against.
 UI.PopoutTitleHeight = UI.PopoutTitle.topPad + UI.PopoutTitle.row
 
+-- ...and the strip at the BOTTOM, which a popout only grows when its consumer
+-- declares `actions`. Here for the same reason the title's numbers are: the
+-- shell's height is titleHeight + pad + content + pad + THIS, and a consumer
+-- sizing a fixed panel has to be able to add it up without reading Popout.lua.
+--
+-- A popout with no actions never builds one and its height is unchanged, so
+-- every existing consumer is untouched by this table existing.
+UI.PopoutFooter = {
+    -- The strip. 18px button plus 4 above and below -- the same "control plus a
+    -- little air" the title row is built from, at the smaller control size a
+    -- quiet action bar wants.
+    height    = 26,
+    -- The buttons in it. Smaller than the 22 a settings button stands at: this
+    -- is a footnote to the panel, not one of its controls.
+    btnHeight = 18,
+    -- Between two buttons. The kit's tight gap; these are one group, and air
+    -- between them at the settings-row spacing would read as two.
+    gap       = 6,
+    -- The hairline ABOVE the strip, as an alpha of C_BORDER -- the same value
+    -- and the same idiom as the title bar's separator, so the panel's two rules
+    -- are one line drawn twice rather than two decisions.
+    sepAlpha  = UI.PopoutTitle.sepAlpha,
+}
+
 -- ============================================================
 -- THE SURFACE STYLE
 --
@@ -489,6 +513,11 @@ UI.PopoutRow = {
     -- clipped badge.
     badgeW    = 22,
     badgeH    = 16,
+    -- The modified tick: a notch on the pill's top-right corner saying "something
+    -- behind this row is not the shipped default". 5px, and it wants to stay
+    -- small -- it is a mark on a chip, not a fourth column, and anything that
+    -- reads as a glyph in its own right would compete with the count inside it.
+    modTick   = 5,
 
     -- Type hierarchy. The label is the row's subject and the summary is its
     -- detail, so they are a size apart rather than both at the body size -- which

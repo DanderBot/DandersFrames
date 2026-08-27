@@ -34,6 +34,9 @@ UI.Colors.element    = UI.Colors.element    or { r = 0.18, g = 0.18, b = 0.18, a
 UI.Colors.border     = UI.Colors.border     or { r = 0.25, g = 0.25, b = 0.25, a = 1 }
 UI.Colors.hover      = UI.Colors.hover      or { r = 0.22, g = 0.22, b = 0.22, a = 1 }
 UI.Colors.background = UI.Colors.background or { r = 0.08, g = 0.08, b = 0.08, a = 0.95 }
+-- The amber notice token, mirrored from Theme.lua's C_NOTICE: the modified tick
+-- on the count pill reads it at FILE SCOPE.
+UI.Colors.notice     = UI.Colors.notice     or { r = 0.91, g = 0.66, b = 0.25, a = 1 }
 if not UI.GetAccent then
     local A = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
     function UI:GetAccent() return A end
@@ -106,6 +109,7 @@ UI.PopoutContentWidth = UI.PopoutContentWidth or 260
 UI.PopoutTitle = UI.PopoutTitle or { topPad = 6, row = 28, fill = 0.9, sepAlpha = 0.8 }
 UI.PopoutTitleHeight = UI.PopoutTitleHeight or (UI.PopoutTitle.topPad + UI.PopoutTitle.row)
 UI.PopoutPad = UI.PopoutPad or 10
+UI.PopoutFooter = UI.PopoutFooter or { height = 26, btnHeight = 18, gap = 6, sepAlpha = UI.PopoutTitle.sepAlpha }
 UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true end
 -- The row's own box model (Theme.lua's UI.PopoutRow). Mirrored whole, and the
 -- slot derived the same way the real one is, so the two cannot drift into
@@ -113,7 +117,7 @@ UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true
 UI.PopoutRow = UI.PopoutRow or {
     plate = 44, gap = 6, padX = 10, labelGap = 10, colGap = 6,
     check = 16, checkTick = 9, gear = 14, chevron = 10,
-    badgeW = 22, badgeH = 16,
+    badgeW = 22, badgeH = 16, modTick = 5,
     labelSize = 12, summarySize = 11, badgeSize = 10,
     restFill = 0.55, hoverFill = 0.75, restBorder = 0.5,
     activeFill = 0.14, activeHover = 0.20, activeBorder = 1,
@@ -1980,6 +1984,113 @@ do
     eq(rawget(row, "popoutRadius"), 8, "rounded again: and the curve is re-declared")
     check(po.surface ~= nil, "rounded again: the panel came along")
     host:CloseAllPopoutRows("test")
+end
+
+-- ============================================================
+-- THE MODIFIED TICK
+-- The row's half of the modified-default marks: an amber notch on the count
+-- pill saying "at least one setting behind this row is not the shipped
+-- default". Same colour token as the per-control dots inside the popout, so the
+-- row and the controls it opens say it in one colour.
+--
+-- The CHECK is the consumer's -- the kit knows nothing about defaults -- and it
+-- is optional, so every existing consumer keeps a row with no tick and no error.
+-- ============================================================
+do
+    local db = { on = true, size = 12 }
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Auras", db = db, toggle = { key = "on" },
+        summary = function(d) return "size " .. d.size end,
+        count = 4, build = counting("modtick", 60, 4), window = window(),
+    })
+    check(row.modifiedTick ~= nil, "tick: the texture is built whether or not a check was declared")
+    check(not row.modifiedTick:IsShown(), "tick: no check declared, no tick -- and no error")
+    row.Refresh()
+    check(not row.modifiedTick:IsShown(), "tick: a refresh cannot conjure one either")
+
+    -- It is a mark ON THE PILL, so it inherits the pill's own "no count, no
+    -- pill" hide and can never be left floating beside a column that is not
+    -- drawn. Notched on the corner: its CENTRE on the pill's top-right.
+    local p = row.modifiedTick._points[1]
+    eq(p[1], "CENTER", "tick: its CENTRE...")
+    check(p[2] == row.badgePill, "tick: ...on the count PILL")
+    eq(p[3], "TOPRIGHT", "tick: ...at the top-right corner, straddling the border")
+    eq(row.modifiedTick:GetWidth(), M.modTick, "tick: at the theme's own size")
+    eq(row.modifiedTick._vertex.r, UI.Colors.notice.r, "tick: in the amber notice token")
+    eq(row.modifiedTick._vertex.g, UI.Colors.notice.g, "tick: ...green")
+    eq(row.modifiedTick._vertex.b, UI.Colors.notice.b, "tick: ...blue")
+end
+
+-- Declared up front, and answered live off the db the row already re-resolves.
+do
+    local db = { on = true, size = 12 }
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Auras", db = db, toggle = { key = "on" },
+        summary = function(d) return "size " .. d.size end,
+        modified = function(d) return d.size ~= 12 end,
+        count = 4, build = counting("modtick_opt", 60, 4), window = window(),
+    })
+    check(not row.modifiedTick:IsShown(), "opts.modified: at the shipped value, no tick")
+    db.size = 30
+    row.Refresh()
+    check(row.modifiedTick:IsShown(), "opts.modified: a change lights it on the same refresh as the summary")
+    eq(row.summary:GetText(), "size 30", "opts.modified: ...which is the summary's own cadence")
+    db.size = 12
+    row.Refresh()
+    check(not row.modifiedTick:IsShown(), "opts.modified: and back to default puts it out")
+end
+
+-- SET AFTER CREATION, which is the case that forces the method to exist: a
+-- consumer that learns the group's key set by WALKING the pane it just built has
+-- nothing to hand CreatePopoutRow at the moment it calls it.
+do
+    local db = { on = true, size = 12 }
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Auras", db = db, toggle = { key = "on" },
+        count = 4, build = counting("modtick_late", 60, 4), window = window(),
+    })
+    check(not row.modifiedTick:IsShown(), "SetModifiedCheck: nothing before it is called")
+    local ret = row:SetModifiedCheck(function(d) return d.size ~= 12 end)
+    check(ret == row, "SetModifiedCheck: returns the row, like every other setter here")
+    check(not row.modifiedTick:IsShown(), "SetModifiedCheck: it repaints immediately -- still default")
+
+    db.size = 30
+    row.Refresh()
+    check(row.modifiedTick:IsShown(), "SetModifiedCheck: ...and is live from then on")
+
+    -- Withdrawing it takes the tick down rather than freezing it where it was.
+    row:SetModifiedCheck(nil)
+    check(not row.modifiedTick:IsShown(), "SetModifiedCheck: nil withdraws the check AND the tick")
+    row.Refresh()
+    check(not row.modifiedTick:IsShown(), "SetModifiedCheck: and a later refresh does not bring it back")
+end
+
+-- A row whose toggle is OFF still shows the tick. The group is switched off; the
+-- values it holds are still not the shipped ones, and hiding the mark there
+-- would say they had been reset. The row's own dim carries "not doing anything".
+do
+    local db = { on = false, size = 30 }
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Auras", db = db, toggle = { key = "on" },
+        summary = function(d) return "size " .. d.size end,
+        modified = function(d) return d.size ~= 12 end,
+        count = 4, build = counting("modtick_off", 60, 4), window = window(),
+    })
+    eq(row.summary:GetText(), "Off", "tick when off: the summary is replaced, as it always was")
+    check(row.modifiedTick:IsShown(), "tick when off: but the tick stays -- the values are still changed")
+end
+
+-- A non-function is not a check. Guarded here rather than at the call, so a
+-- consumer that passes the wrong thing gets no tick instead of an error a frame
+-- later inside Refresh.
+do
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Auras", db = {}, modified = true,
+        count = 2, build = counting("modtick_bad", 40, 2), window = window(),
+    })
+    check(not row.modifiedTick:IsShown(), "bad check: a non-function opt is ignored, not called")
+    row.Refresh()
+    check(not row.modifiedTick:IsShown(), "bad check: ...on every refresh")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
