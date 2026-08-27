@@ -671,10 +671,129 @@ local function deriveSort(config)
     return sortMethod, sortDirection
 end
 
+-- ============================================================
+-- HELPER GATE (Power Infusion helper) -- THE PUSH CHOKEPOINT
+-- ============================================================
+-- ☠ WHY THE GATE LIVES HERE AND NOWHERE ELSE.
+-- Every engine write of candidate filters funnels through ONE of TWO lanes:
+--   * group/overlay/row containers: recordCandidateFilters below, reached from `_build`
+--     (declaring groups) and `applyGroupTuning` (pushing the cfByKey map).
+--   * SLOT handles (placed icons/squares/bars): SlotHandle:_cf(), the slot lane's twin,
+--     which every slot-path push reads instead of the raw `_lastCandidateFilters` stash.
+-- Nothing reaches the engine except through one of the two. (The `cfOf` closure and the
+-- diagnostic dump are debug-only readers and never reach the engine.) The slot lane exists
+-- because AcquireSlot bypasses this funnel entirely -- without it the same placed indicator
+-- was gated when built out of combat (the Create fallback) and ungated when built in it.
+--
+-- Gating HERE rather than in stored config is the whole design:
+--   * Stored config always carries the LIVE map, so no signature ever lies and the Factory
+--     needs no knowledge of gate state.
+--   * A rebuild produces a fresh config that is EXACTLY AS GATED as the old one, because
+--     gating happens after config, on the way out.
+--   * There is therefore nothing to clobber and no race to keep winning. The first design
+--     (swap the live map, re-assert after every rebuild) was a race against every rebuild
+--     path anyone might add later; this removes the thing being clobbered instead.
+--
+-- ☠ AND IT DISSOLVES THE INTENT-VS-REALITY SPLIT. There is no second copy of the truth: the
+-- engine value is DERIVED from this switch by every pusher, on every push. Edge detection
+-- becomes an optimisation of WHEN to broadcast, never a record of what containers hold, so a
+-- spent edge cannot strand reality -- the next flush of any kind re-derives from the switch.
+--
+-- The dead map is a populated set matching nothing, never an empty table: an empty include
+-- set reads as "no selection", which the engine is free to treat as "everything passes".
+local HELPER_GATE_DEAD_CF = { includeSpellIDs = { [1] = true } }
+local helperGateDark = false
+
+-- ☠ OWNERSHIP: `config.dfGate`. The gate must only ever darken our own effects. The first cut
+-- asked "does this container watch the spell we care about", which also caught a USER'S
+-- effect on the same spell -- darkened by a feature they never enabled, for a reason nothing
+-- on screen explains. Harmless while the helper watched one throwaway buff; unacceptable once
+-- it watches sixty real cooldowns.
+--
+-- The mark is a plain flag on the container config, stamped by whoever built it. It says
+-- nothing about content, so it cannot be confused with a spell, and a user's effect cannot
+-- acquire it by accident.
+--
+-- ⛔ AN EARLIER CUT PUT A SYNTHETIC SPELL ID IN THE HELPER'S OWN FILTER DATA AND READ THAT.
+-- It worked, and it was wrong for three reasons that only surfaced once it was written down:
+--   * A fake id in real data TRAVELS. Profiles are exported, imported and decoded, and nobody
+--     reading one a year from now could explain what 1999000060 was.
+--   * It could not mark everything. buildDebuffGroupConfig carries no config-wide candidate
+--     filters at all, so a debuff group was unmarkable; and a filter group's resolved map is
+--     CACHED AND SHARED between every consumer of the same filter, so stamping an id into one
+--     would have leaked the mark into unrelated effects.
+--   * It rode into the sound path as if it were a spell, so helperSoundMapFor had to filter it
+--     back out -- a fake registration that could never fire, inflating the count while nothing
+--     real was listening.
+-- Danders ruled the field name and we chose the route (each caller stamps the returned config,
+-- rather than six builders taking a new parameter). See Factory.lua's `stampGate`.
+--
+-- ⚠ NO "ARMED" FLAG. There was one, and it only ever caused a bug: ownership is a property of
+-- the CONFIG, not of whether anything has flipped a switch yet. Gating is decided below by
+-- (gate shut OR role excluded), so with neither true nothing darkens regardless -- which is
+-- what the flag was for. Its only real effect was that role exclusion silently did nothing
+-- until an unrelated gate command happened to arm it first.
+
+-- ═══ ROLE EXCLUSION ═══
+-- Never mark someone you would not infuse. The cooldown gate is ONE switch for everyone; this
+-- is PER UNIT, and it works at the same chokepoint because the container config carries
+-- `unit` (buildBorderConfig et al, Factory.lua:1028).
+--
+-- ⚠ FAILS OPEN, DELIBERATELY. DF:GetUnitRole answers nil or "NONE" when a group has no
+-- assigned roles -- common in hand-made groups, never in queued content. Everyone then reads
+-- as "no role" and nothing is excluded. Marking a tank you did not want is a much smaller
+-- failure than silently hiding the signal on the damage dealers you did.
+--
+-- ⚠ AND IT CAN BE STALE. UnitGroupRolesAssigned is the ASSIGNED role, not the spec's role:
+-- switching spec mid-dungeon does not update it until the group re-forms (watched 2026-08-23).
+-- Unfixable for other players -- their spec is secret in 12.1.
+local helperExcludedRoles = nil   -- e.g. { TANK = true, HEALER = true }
+
+-- ⭐ THE PLAYER'S OWN ROLE COMES FROM THEIR SPEC, EVERYONE ELSE'S FROM THE GROUP.
+-- `UnitGroupRolesAssigned` reports the role the group was FORMED with, so it goes stale after a
+-- mid-run respec until the group re-forms -- a healer who switched to damage still reads HEALER
+-- and the helper would keep skipping them.
+--
+-- ☠ FIXED HERE, NOT IN DF:GetUnitRole. Danders' ruling, 2026-08-23: that function serves every
+-- consumer in the addon, and reordering its preference would change behaviour everywhere to fix
+-- a case that only bites the local player after a respec without a regroup. Wide blast radius,
+-- narrow win, and not this feature's change to make. So the helper prefers the better answer for
+-- the one unit it can get it for, and leaves the shared function alone. If the flip is ever
+-- right addon-wide it should be its own change with its own testing, not a passenger on ours.
+local function helperUnitRole(unit)
+    if UnitIsUnit and UnitIsUnit(unit, "player") and GetSpecialization and GetSpecializationRole then
+        local spec = GetSpecialization()
+        local role = spec and GetSpecializationRole(spec)
+        if role and role ~= "NONE" then return role end
+    end
+    return DF.GetUnitRole and DF:GetUnitRole(unit)
+end
+
+local function helperRoleExcluded(unit)
+    if not (helperExcludedRoles and unit) then return false end
+    local role = helperUnitRole(unit)
+    if not role or role == "NONE" then return false end   -- fail open
+    return helperExcludedRoles[role] == true
+end
+
+-- Shared with the SOUND path (Factory): sound registers per unit and never passes the
+-- container funnel, so role exclusion must be answerable from outside it -- or a cue plays
+-- for a unit nothing marks.
+function AuraContainer.IsHelperRoleExcluded(unit) return helperRoleExcluded(unit) end
+
 -- A record's candidateFilters REPLACES the config-wide set for that group/slot
 -- (the dispel overlay's per-type slots) — see normalizeFilters.
 local function recordCandidateFilters(rec, config)
-    return rec.candidateFilters or config.candidateFilters
+    local cf = rec.candidateFilters or config.candidateFilters
+    -- Two independent reasons to go dark: the cooldown switch (everyone at once) and this
+    -- unit's role (this frame only). Both resolve to the same dead map.
+    -- Ownership is read off the CONFIG, never off the map -- see `config.dfGate` above. That is
+    -- why a record carrying its own candidateFilters is still gated correctly: the mark and the
+    -- content are separate things now.
+    if config.dfGate and (helperGateDark or helperRoleExcluded(config.unit)) then
+        return HELPER_GATE_DEAD_CF
+    end
+    return cf
 end
 
 -- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17, widened 2026-07-18).
@@ -6015,6 +6134,81 @@ function Handle:ApplyTuning(tuning)
     end
 end
 
+-- ═══ HELPER GATE: BROADCAST AND BACKSTOP ═══
+-- Does this handle carry one of ours? Checked against STORED config, never the gated result,
+-- so it answers the same either side of an edge.
+-- One field, and no walk over the records: the mark lives on the config itself, so a group
+-- whose records carry their own candidate filters is recognised the same as any other.
+local function helperGateHandleIsOurs(h)
+    local cfg = h and h.config
+    return (cfg and cfg.dfGate) and true or false
+end
+
+-- Flip the switch and broadcast. Returns how many containers were re-pushed.
+-- ☠ The broadcast is an ALREADY-CLEARED in-combat operation: applyGroupTuning is what the
+-- consumers already call, and the probe cleared it. Only the table it carries changes. Note
+-- it pushes filter strings and max/sort alongside candidate filters, so a gate edge
+-- early-flushes any _pendingTuning a container queued mid-combat.
+--
+-- ☠ ONLY OUR CONTAINERS. applyGroupTuning runs an immediate UpdateAllAuras per group key and
+-- has no equality guard of its own, so broadcasting to every handle in the addon would cost a
+-- full aura re-parse on each one for a gate flip that concerns a handful.
+function AuraContainer.SetHelperGate(dark)
+    helperGateDark = dark and true or false
+    local n = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        local b = h and h.backend
+        if b and b.applyGroupTuning and not h._destroyed and helperGateHandleIsOurs(h) then
+            -- ⚠ pcall(fn, self) not pcall(function() ... end) -- this file's own rule, recorded
+            -- at applyGroupTuning's tail: the closure form allocates one per call for no gain,
+            -- and protection is identical. A gate edge walks every owned handle twice a Power
+            -- Infusion cycle, in combat, so this is exactly the path that rule was written for.
+            local ok = pcall(b.applyGroupTuning, b)
+            if ok then n = n + 1 end
+        end
+    end
+    -- ☠ SLOTS TOO, NARROWED TO OURS. SetAuraSlotCandidateFilters has no engine-side
+    -- equality guard -- every call clears and re-parses -- so an unnarrowed walk would
+    -- re-parse every placed indicator in the addon per gate flip. Read off the module table,
+    -- not a local: the registry is declared thousands of lines below this function, and a
+    -- later-declared local here would silently read as a nil global (this file has been
+    -- bitten by exactly that; see the note above GateAppliesTo).
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        if h.config and h.config.dfGate and h._applyHelperGate then
+            local ok, applied = pcall(h._applyHelperGate, h)
+            if ok and applied then n = n + 1 end
+        end
+    end
+    return n
+end
+
+function AuraContainer.GetHelperGate() return helperGateDark end
+
+function AuraContainer.SetHelperExcludedRoles(roles)
+    helperExcludedRoles = roles
+    return AuraContainer.SetHelperGate(helperGateDark)   -- re-push so it takes effect now
+end
+
+function AuraContainer.GetHelperExcludedRoles() return helperExcludedRoles end
+
+-- Backstop for pushes swallowed during lockdown by the pcall'd native setters. Idempotent,
+-- out of combat, and the same shape the identity gate already uses for its combat-exit
+-- re-verify.
+--
+-- ☠ ROLES ARE READ AT PUSH TIME, so a role that changes after the last push is not seen: set
+-- the exclusions, swap spec, and the container keeps the answer from before the swap. Re-push
+-- on anything that can move a role. (This makes us notice promptly when the game's answer
+-- CHANGES. It cannot make the game's answer FRESH -- see the staleness note above.)
+local helperGateRegen = CreateFrame("Frame")
+helperGateRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
+helperGateRegen:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+helperGateRegen:RegisterEvent("GROUP_ROSTER_UPDATE")
+helperGateRegen:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+helperGateRegen:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+helperGateRegen:SetScript("OnEvent", function()
+    AuraContainer.SetHelperGate(helperGateDark)
+end)
+
 -- Force a re-scan of the container. 68569: UpdateAllAuras() is an addon-callable
 -- dirty-mark (processed on the next OnUpdate while visible) — the real refresh. Use on
 -- a dynamic-unit consumer (target/focus/mouseover) when the underlying unit changes but
@@ -7152,8 +7346,12 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
         owner = owner, key = slotKey, liveFilter = filter, parked = false, config = config,
     }, SlotHandle)
 
+    -- Stashed BEFORE the declare so the declare can read through _cf(): a helper-owned
+    -- slot born while the gate is dark must be born gated, not corrected one push later.
+    handle._lastCandidateFilters = spec.candidateFilters
+
     local okS, btn = pcall(owner.container.AddAuraSlot, owner.container, slotKey, filter, {
-        candidateFilters = spec.candidateFilters,
+        candidateFilters = handle:_cf(),
         sortMethod       = spec.sortMethod,
         sortDirection    = spec.sortDirection,
         initializeFrame  = function(b)
@@ -7237,7 +7435,6 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     -- reach a first paint before then.
     handle._idGateVulnerable    = filterVulnerableToIdentityGate(filter, spec.candidateFilters)
     handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
-    handle._lastCandidateFilters = spec.candidateFilters
     handle:_applyIdentityGate()
     -- ☠ SEED THE LATCHES TOO — both are edge-driven, and a slot born AFTER the edge hears
     -- nothing. SetUnitDeathLatched / CineLatchAll loop the registries at the transition;
@@ -7506,7 +7703,7 @@ function SlotHandle:_setCineLatch(on, skipReparse)
     elseif wantReparse then
         local c = self.owner and self.owner.container
         if c then
-            pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+            pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
         end
     end
 end
@@ -7528,7 +7725,7 @@ function SlotHandle:_setDeathLatch(on)
     end
     if not on and self._lastCandidateFilters ~= nil then
         local c = self.owner and self.owner.container
-        if c then pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters) end
+        if c then pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf()) end
     end
 end
 
@@ -7565,7 +7762,7 @@ function SlotHandle:_noteGateRecovery(can)
         registerSlotRegen(self)
         return
     end
-    pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+    pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
     -- After the bounce, matching the Handle: the slot un-parks already re-parsed.
     -- skipReparse: the candidate re-push above IS that bounce.
     self:_setCineLatch(nil, true)
@@ -7700,7 +7897,7 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     -- only one of them leaves a slot flagged from its previous configuration. Pure stored
     -- state, so it is correct to do even in lockdown -- only the secure pushes defer.
     if filterChanged or candidatesChanged then
-        local cf = self._lastCandidateFilters
+        local cf = self._lastCandidateFilters   -- RAW on purpose -- see _cf()'s header
         self._idGateVulnerable    = filterVulnerableToIdentityGate(self.liveFilter, cf)
         self._idGateSourceRelative = filterSourceRelative(self.liveFilter, cf)
     end
@@ -7713,7 +7910,10 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
         return false
     end
     if candidatesChanged then
-        pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
+        -- Through _cf(): the argument is the LIVE map by definition, and a tuning pass on a
+        -- gated-dark slot must not un-gate it -- the same clobber the container lane's
+        -- chokepoint design exists to prevent.
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
     end
     -- Re-evaluate before pushing, so a slot that just became vulnerable is dark on the
     -- very first pass rather than showing one frame of the wrong player's auras.
@@ -7747,7 +7947,10 @@ function SlotHandle:_replayTuning()
     local c = self.owner and self.owner.container
     if not c then return end
     if self._lastCandidateFilters ~= nil then
-        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+        -- Through _cf(), not the raw stash: this replay is the combat-exit drain for every
+        -- deferred push, including the helper gate's own -- raw here meant a gated slot
+        -- came out of combat un-gated.
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
     end
     -- Verdict first (population order matches ApplyTuning): a slot that became
     -- vulnerable during combat must come out of it dark, not flash one frame open.
@@ -7757,6 +7960,50 @@ function SlotHandle:_replayTuning()
         pcall(c.SetAuraSlotSortMethod, c, self.key, self._lastSortMethod,
             self._lastSortDirection or 0)
     end
+end
+
+-- ═══ HELPER GATE: THE SLOT LANE ═══
+-- The slot-path twin of recordCandidateFilters: same test, same dead map, derived at READ
+-- time. The stash itself is never overwritten -- destroying the live map is the failure the
+-- container lane's design already rejected, and here it would also strand the recovery
+-- edge, which treats "no filter list" as "nothing to repair" and fires exactly once.
+--
+-- ⚠ NIL-FAITHFUL BY CONSTRUCTION: returns nil exactly when the stash is nil, never
+-- otherwise. Every nil test at the read sites keeps its meaning, and the recovery edge can
+-- never be burned by a gated slot that has a real selection.
+--
+-- ⚠ THE ONE READ THAT STAYS RAW is ApplyTuning's vulnerability recompute:
+-- _idGateVulnerable is a property of the user's REAL selection, and deriving it from the
+-- dead map would drop a gated-dark slot out of the cinematic-latch population -- it would
+-- come back from a cutscene fail-open.
+--
+-- ☠ CANDIDATE LANE ONLY. The identity gate's verdicts actuate through the shared
+-- owner anchor because gate/cine/death are UNIT-level facts (see _pushFilter). Ours is
+-- per-EFFECT -- one helper icon beside a user's own indicator on the same unit -- so it
+-- must never touch the anchor or the filter string.
+function SlotHandle:_cf()
+    local cf = self._lastCandidateFilters
+    if cf ~= nil and self.config and self.config.dfGate
+        and (helperGateDark or helperRoleExcluded(self.owner and self.owner.unit)) then
+        return HELPER_GATE_DEAD_CF
+    end
+    return cf
+end
+
+-- One gate edge, one slot: re-push the (now re-derived) candidates. The lockdown branch is
+-- the recovery path's own shape -- no native tuning setter runs in combat, and
+-- _replayTuning drains the deferral on the way out, itself reading through _cf().
+function SlotHandle:_applyHelperGate()
+    if self._lastCandidateFilters == nil then return false end
+    local c = self.owner and self.owner.container
+    if not c then return false end
+    if InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+        return true
+    end
+    pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
+    return true
 end
 
 -- In-place cosmetic restyle, mirroring Handle:ApplyStyle. Re-runs the engine's region
