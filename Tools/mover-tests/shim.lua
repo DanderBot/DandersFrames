@@ -145,6 +145,28 @@ function FakeUIFrame(w, h, cx, cy)
     function f:ClearAllPoints() wipe(self._points) end
     function f:SetPoint(...) self._points[#self._points + 1] = { ... } end
     function f:GetNumPoints() return #self._points end
+    -- ☠ A REAL GETTER, not the __index no-op, and the two are NOT the same thing
+    -- to a caller. Real code that re-anchors relative to where a frame already is
+    -- reads its anchor back first (PopoutDemo's insetTitleButton nudges the title
+    -- cross inboard of a rounded corner that way, rather than copying the
+    -- library's private edge constant); against the no-op it gets nothing back
+    -- and silently declines to move, which is a test that passes while the thing
+    -- it is testing does nothing.
+    --
+    -- Answers the 5-value WoW shape (point, relativeTo, relativePoint, x, y) from
+    -- what SetPoint recorded, and nil for an index nobody set -- so the "has this
+    -- been anchored at all" guard real callers write still works.
+    --
+    -- ⚠ The 3-argument SetPoint form ("RIGHT", -6, 0) is recorded VERBATIM, so
+    -- this hands back ("RIGHT", -6, 0, nil, nil) for it -- the stub does not
+    -- resolve an implicit parent, because it does not resolve anchors at all
+    -- (see the note at the head). A test of a re-anchor writes the 5-argument
+    -- form, which is what every caller in this codebase uses.
+    function f:GetPoint(i)
+        local p = self._points[i or 1]
+        if not p then return nil end
+        return p[1], p[2], p[3], p[4], p[5]
+    end
     function f:SetScript(name, fn) self._scripts[name] = fn end
     function f:HookScript(name, fn) self._scripts[name] = fn end
     function f:GetScript(name) return self._scripts[name] end

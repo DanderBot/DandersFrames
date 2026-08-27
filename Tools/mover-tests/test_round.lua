@@ -112,39 +112,87 @@ do
           "both sublevels are below a backdrop's bgFile")
 end
 
-print("-- Round: corner orientation")
-do
-    local f = surfaceFrame()
-    local s = UI:CreateRoundedSurface(f, { radius = 6 })
+-- ============================================================
+-- THE TEXCOORD CROP -- the module's half of the generator contract.
+--
+-- The art is NOT baked edge to edge. Tools/generate_rounded.py puts a radius-N
+-- shape on a next_pot(N + 2) canvas, flush into its BOTTOM-RIGHT, with the slack
+-- transparent on the top-left -- so the module draws a SUB-RECTANGLE of the file
+-- and every texcoord that used to be 0 is now `pad / canvas`.
+--
+-- That rule lives in two places (a Python script and a Lua module) and nothing
+-- at runtime can compare them, so this is where they are pinned. The numbers
+-- below are worked from the generator's rule by hand:
+--
+--     r4  -> next_pot(6)  = 8,   pad 4,  crop 0.5
+--     r6  -> next_pot(8)  = 8,   pad 2,  crop 0.25
+--     r8  -> next_pot(10) = 16,  pad 8,  crop 0.5
+--
+-- If the generator's canvas rule changes and this file is not updated, the art
+-- and the crop disagree -- which in-game is a corner drawn from the wrong part
+-- of its file: a chunk of transparency where the arc should be, or the arc
+-- squeezed into part of the box. Neither errors, both just look broken.
+-- ============================================================
+local CROP = { [4] = 0.5, [6] = 0.25, [8] = 0.5 }
 
-    -- The baked file is the TOP-LEFT corner, so tl is the identity mapping and
-    -- the other three are mirrors of it.
-    local want = {
-        tl = { 0, 0, 0, 1, 1, 0, 1, 1 },
-        tr = { 1, 0, 1, 1, 0, 0, 0, 1 },
-        bl = { 0, 1, 0, 0, 1, 1, 1, 0 },
-        br = { 1, 1, 1, 0, 0, 1, 0, 0 },
+-- The four turns, with `c` standing in for the crop. tl is the identity (the
+-- baked file IS the top-left corner) and the other three are mirrors of it: the
+-- crop is a rectangular sub-image, so mirroring it is the same eight slots.
+local function wantCoords(c)
+    return {
+        tl = { c, c, c, 1, 1, c, 1, 1 },
+        tr = { 1, c, 1, 1, c, c, c, 1 },
+        bl = { c, 1, c, c, 1, 1, 1, c },
+        br = { 1, 1, 1, c, c, 1, c, c },
     }
-    for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
-        for _, set in ipairs({ s.cornerFill, s.cornerEdge }) do
-            local tc = set[k]._texCoord
-            eq(tc and #tc, 8, k .. ": the 8-argument SetTexCoord form was used")
-            local ok = true
-            for i = 1, 8 do if tc[i] ~= want[k][i] then ok = false end end
-            check(ok, k .. ": texcoords face the right corner")
+end
+
+print("-- Round: corner orientation and the texcoord crop")
+do
+    for _, R in ipairs({ 4, 6, 8 }) do
+        local c = CROP[R]
+        local want = wantCoords(c)
+        local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = R })
+        for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
+            for _, set in ipairs({ s.cornerFill, s.cornerEdge }) do
+                local tc = set[k]._texCoord
+                eq(tc and #tc, 8, "r" .. R .. " " .. k .. ": the 8-argument SetTexCoord form was used")
+                local ok = true
+                for i = 1, 8 do if tc[i] ~= want[k][i] then ok = false end end
+                check(ok, "r" .. R .. " " .. k .. ": texcoords face the right corner, cropped to the shape")
+            end
+        end
+
+        -- Every corner is a DISTINCT turn. A copy-paste that left two corners
+        -- sharing one mapping would still pass the per-corner check above if the
+        -- table were wrong in the same way twice.
+        local seen = {}
+        for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
+            local key = table.concat(s.cornerFill[k]._texCoord, ",")
+            check(not seen[key], "r" .. R .. " " .. k .. ": its turn is unique")
+            seen[key] = true
         end
     end
 
-    -- Every corner is a DISTINCT turn. A copy-paste that left two corners sharing
-    -- one mapping would still pass the per-corner check above if the table were
-    -- wrong in the same way twice.
-    local seen = {}
-    for _, k in ipairs({ "tl", "tr", "bl", "br" }) do
-        local tc = s.cornerFill[k]._texCoord
-        local key = table.concat(tc, ",")
-        check(not seen[key], k .. ": its turn is unique")
-        seen[key] = true
-    end
+    -- r6 and r8 must NOT share a crop even though both are "half a canvas or a
+    -- quarter of one" -- they are different files with different padding, and a
+    -- single shared texcoord table (which is what this file used to assert) is
+    -- exactly the regression this guards.
+    check(CROP[6] ~= CROP[8], "r6 and r8 crop differently -- the set is per radius")
+    local s6 = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6 })
+    local s8 = UI:CreateRoundedSurface(surfaceFrame(), { radius = 8 })
+    check(s6.cornerFill.tl._texCoord[1] ~= s8.cornerFill.tl._texCoord[1],
+          "...and two surfaces at those radii really are handed different numbers")
+
+    -- SetRadius has to re-point the CROP as well as the file. Re-pointing only
+    -- the texture would draw the new art through the old radius's crop, which is
+    -- the one way this can be wrong that still puts a curve on screen.
+    local s = UI:CreateRoundedSurface(surfaceFrame(), { radius = 6 })
+    eq(s.cornerFill.tl._texCoord[1], CROP[6], "the surface starts on r6's crop")
+    s:SetRadius(8)
+    eq(s.cornerFill.tl._texCoord[1], CROP[8], "SetRadius re-crops as well as re-texturing")
+    eq(s.cornerEdge.br._texCoord[1], 1, "...on the arcs too (br's first coord is the far edge)")
+    eq(s.cornerEdge.br._texCoord[8], CROP[8], "...whose crop lands in the mirrored slot")
 end
 
 print("-- Round: art per radius and width")
