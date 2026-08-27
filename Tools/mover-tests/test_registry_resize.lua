@@ -340,6 +340,104 @@ do
     check(NS.lastRect[R.Id("RZ7", "child")] == nil, "UnregisterAddon drops the addon's cached rects")
 end
 
+-- ============================================================
+-- 7. THE PROXY FOLLOWS A LIVE RESIZE
+-- Everything above is about the RECORD. With the movers unlocked there is also
+-- a slab on screen standing in for each element, exactly as big as the frame it
+-- covers -- and the two go stale for different reasons. An ANCHORED element's
+-- slab is stale because its record moved; a FREE one's is stale even though its
+-- record did not change at all, because only its SIZE did.
+--
+-- ☠ THAT IS WHY THE SYNC IS NOT INSIDE THE ResolveElement BRANCH. Gating the
+-- visual on "did the re-solve move it" returns false for every free element, so
+-- the party container's slab kept the size it was built at while the frames
+-- under it grew. In game: "when unlocked and changing a frame size, the mover
+-- does not update its size".
+-- ============================================================
+do
+    local synced, panelRefreshes = {}, 0
+    local function wasSynced(id)
+        for _, batch in ipairs(synced) do
+            for _, got in ipairs(batch) do if got == id then return true end end
+        end
+        return false
+    end
+    -- Stub rather than the real module: what is under test here is the LIB
+    -- calling out on a resize at all. That the slab then takes the new size is
+    -- test_proxy's half (the "LIVE RESIZE" block there).
+    -- Remove/RemoveAddon are the teardown hooks Lib:Unregister* drives; they are
+    -- no-ops here, but they have to EXIST or the fixture cannot be taken down.
+    NS.Proxy = {
+        dragging = false,
+        Remove = function() end,
+        RemoveAddon = function() end,
+        SyncMany = function(_, ids)
+            local copy = {}
+            for i = 1, #ids do copy[i] = ids[i] end
+            synced[#synced + 1] = copy
+        end,
+        IsDragging = function(self) return self.dragging end,
+    }
+    NS.Panel = { Refresh = function() panelRefreshes = panelRefreshes + 1 end }
+    local sess = { active = true, suspended = false }
+    function sess:IsActive() return self.active end
+    function sess:IsSuspended() return self.suspended end
+    NS.Session = sess
+
+    local fx = newFixture("RZ8")
+    fx.sweep()                       -- settle: first sweep measures everything
+
+    -- THE BUG. The box is FREE (its record has no anchor block), so the re-solve
+    -- above reports nothing moved -- and its slab still has to re-measure.
+    synced, panelRefreshes = {}, 0
+    fx.box.w = 300
+    eq(fx.sweep(), 1, "the widened box is the one target that moved")
+    check(wasSynced("RZ8:box"), "the resized FREE element's slab is re-measured")
+    check(wasSynced("RZ8:child"), "...and so is the anchored descendant's")
+    check(panelRefreshes > 0, "an open panel is refreshed with the pass")
+
+    -- Nothing moved: the sweep returns before it touches anything at all.
+    synced, panelRefreshes = {}, 0
+    eq(fx.sweep(), 0, "a quiet tick still reports nothing")
+    eq(#synced, 0, "...and syncs no slabs")
+    eq(panelRefreshes, 0, "...and leaves the panel alone")
+
+    -- A DRAG IN FLIGHT. The slabs still re-measure (Proxy skips the one actually
+    -- under the cursor), but the PANEL must not come back: onDragStart hides the
+    -- following panel deliberately, and a refresh would plant it back under the
+    -- cursor mid-drag.
+    synced, panelRefreshes = {}, 0
+    NS.Proxy.dragging = true
+    fx.box.w = 340
+    fx.sweep()
+    check(#synced > 0, "mid-drag: the slabs are still re-measured")
+    eq(panelRefreshes, 0, "mid-drag: the panel is not re-shown")
+    NS.Proxy.dragging = false
+
+    -- Combat suspend hides the panels on purpose; Panel:Refresh re-shows pinned
+    -- ones, so the pass must not call it.
+    synced, panelRefreshes = {}, 0
+    sess.suspended = true
+    fx.box.w = 380
+    fx.sweep()
+    check(#synced > 0, "suspended: the slabs are still re-measured")
+    eq(panelRefreshes, 0, "suspended: the panel stays down")
+    sess.suspended = false
+
+    -- No session at all -- the ordinary case, with the movers locked.
+    synced, panelRefreshes = {}, 0
+    sess.active = false
+    fx.box.w = 420
+    fx.sweep()
+    check(#synced > 0, "locked: the sync is still made (it is a no-op with no proxies)")
+    eq(panelRefreshes, 0, "locked: there is no panel to refresh")
+
+    fx.done()
+    NS.Panel = nil
+    NS.Session = nil
+    NS.Proxy = nil
+end
+
 R.ready = wasReady
 NS.Proxy = savedProxy
 IN_COMBAT = false
