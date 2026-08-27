@@ -88,30 +88,79 @@ local BEAM_CORE_W, BEAM_CORE_A = 3, 0.55
 -- ---- where the connected chrome sits in the frame stack ----------
 
 -- The floor for the popout, the beam and the source outline: above the ordinary
--- UI, below the tooltip. The outsideOf placement raises all three onto the
--- WINDOW's own strata instead -- see _SyncWindowLevel.
+-- UI, below the tooltip. The outsideOf placement raises all three ONE STRATA
+-- ABOVE the window's instead -- see _SyncWindowLevel.
 local BASE_STRATA = "DIALOG"
 
--- ☠ HOW FAR ABOVE THE WINDOW, and why it is not a small number.
+-- ☠ ONE STRATA ABOVE THE WINDOW, NOT A HIGH LEVEL WITHIN IT.
 --
--- The beam does not have to clear the WINDOW. It has to clear everything the
--- window CONTAINS, because in outsideOf mode its crossing segment is drawn over
--- the window's body on the way to the row. A settings window's body is several
--- frames deep before a row is reached (window -> content -> page -> scroll child
--- -> row -> plate, so the row alone is already the window's level plus four or
--- five), and the widgets in it bump their own level off their container freely --
--- +10 for a control that has to draw over its neighbours, +50 for a disabled
--- overlay laid across a whole group.
+-- In outsideOf mode the beam's crossing segment is drawn over the window's body
+-- on the way to the row, so it has to outrank everything the window CONTAINS and
+-- not merely the window. Two attempts at that stayed inside the window's own
+-- strata, and both failed in-game:
 --
--- The old margin was +10 measured from the WINDOW, which is UNDER every one of
--- those. The beam then ran beneath the window's body and the only stretch of it
--- ever drawn was the short one in the outside gap -- which is exactly what "the
--- beam stops short of the row" looks like. Reported again in-game 2026-08-27 with
--- the window at 100% scale, i.e. with the scale conversion ruled out.
+--   window level + 10  under the ROW itself (window -> content -> page -> scroll
+--                      child -> row -> plate is already +5), and far under the
+--                      widgets, which bump their own level off their container
+--                      freely -- +10 for a control that has to draw over its
+--                      neighbours, +50 for a disabled overlay laid across a group.
+--   window level + 60  clears the deepest bump a window is known to make, with
+--                      room to spare -- and STILL did not draw. Reported in-game
+--                      2026-08-27 with the window at 100% scale, i.e. with the
+--                      scale conversion of _SyncWindowScale already ruled out.
 --
--- 60 clears the deepest bump a window is known to make with room to spare, and is
--- nowhere near the engine's frame-level ceiling.
-local WINDOW_CLEARANCE = 60
+-- Danders' decisive experiment settled it. With the geometry proven correct (see
+-- test_popout's section 16) and the level maths proven correct, the crossing
+-- segment never rendered at DIALOG at ANY level -- and beam:SetFrameStrata
+-- ("TOOLTIP") rendered it fully and correctly. The occluder was never identified;
+-- what is certain is that something within DIALOG outranks any level we can set,
+-- and so no arithmetic inside that strata can win. The chrome leaves the strata.
+--
+-- With the strata boundary doing the work the LEVEL carries none of it -- a
+-- boundary is absolute, so nothing in the window's subtree reaches us whatever
+-- its level -- and it goes back to being a small constant. Which it must be:
+--
+-- ⚠ THE WINDOW'S OWN TITLE BAR IS NOT IN THE WINDOW'S STRATA. DandersFrames'
+-- settings window is DIALOG, but its title bar sits at FULLSCREEN_DIALOG 200 and
+-- its close and info buttons at 210 -- in the very strata the chrome moves up to.
+-- The popout must not cover those if the two ever overlap, so the chrome's level
+-- has to stay well below 200. 10 leaves that whole gap spare, and still leaves the
+-- beam somewhere to sit one level under the popout.
+local OUTSIDE_LEVEL = 10
+
+-- The client's strata ladder, lowest first. File-local rather than published on
+-- UI: this file is loaded STANDALONE by the headless tests (see
+-- Tools/mover-tests/run.py, which never loads Core.lua or builds a host), so
+-- anything it needs at load time has to be its own.
+local STRATA_ORDER = {
+    "BACKGROUND", "LOW", "MEDIUM", "HIGH",
+    "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP",
+}
+local STRATA_RANK = {}
+for i = 1, #STRATA_ORDER do STRATA_RANK[STRATA_ORDER[i]] = i end
+
+-- ⚠ IN THE LADDER, NEVER LANDED ON. FULLSCREEN sits between DIALOG and
+-- FULLSCREEN_DIALOG and a window COULD be on it, so it has to be ranked -- but it
+-- is the client's strata for full-screen effects, not a place to park a piece of
+-- settings chrome, and the idiom for "must draw over a dialog" is
+-- FULLSCREEN_DIALOG. Stepping over it is also what makes the shipped case come
+-- out at the answer the design calls for: the settings window is DIALOG, and its
+-- popout chrome belongs on FULLSCREEN_DIALOG.
+local NEVER_LAND = { FULLSCREEN = true }
+
+-- The next strata UP that we are willing to stand on, CAPPED at the top: a window
+-- already on TOOLTIP has nothing above it, and answering nil there would send the
+-- chrome back to the base strata -- i.e. UNDER that window -- which is worse than
+-- sharing one with it. nil only for a name that is not a strata at all, so the
+-- caller can fall back.
+local function strataAbove(s)
+    local i = STRATA_RANK[s]
+    if not i then return nil end
+    for j = i + 1, #STRATA_ORDER do
+        if not NEVER_LAND[STRATA_ORDER[j]] then return STRATA_ORDER[j] end
+    end
+    return STRATA_ORDER[#STRATA_ORDER]
+end
 
 -- ============================================================
 -- PURE GEOMETRY
@@ -615,7 +664,8 @@ end
 -- Every piece of the connected chrome into one strata. The three are drawn as one
 -- object, so they cannot be split across two strata -- a level only orders frames
 -- WITHIN a strata, and a beam one strata below the window it crosses is under it
--- whatever its level says.
+-- whatever its level says. (The notch is a TEXTURE on the popout frame, so it
+-- comes along with it and is not named here.)
 function Popout:_SetChromeStrata(strata)
     local f = self.frame
     if f.SetFrameStrata then f:SetFrameStrata(strata) end
@@ -626,40 +676,47 @@ function Popout:_SetChromeStrata(strata)
 end
 
 -- Keep the popout -- and with it the beam and the outline -- clear of the WINDOW
--- it is docked outside of, in strata and in level. See WINDOW_CLEARANCE for why
--- the margin is what it is.
+-- it is docked outside of: ONE STRATA ABOVE it, at a modest constant level. See
+-- OUTSIDE_LEVEL for why it is a strata boundary and not a big number.
 --
--- ⚠ RE-RUN, NOT SET ONCE. DandersFrames' settings window is SetToplevel(true), so
--- it raises itself to the top of its strata the moment it is clicked -- a level
--- taken once at Follow is stale from the next click onwards, and the beam sinks
--- under the window's body for the rest of the panel's life. The follow ticker
--- re-runs this, which costs two getter calls on a tick that is already reading
--- two rects.
+-- ⚠ RE-RUN, NOT SET ONCE -- but no longer for the reason it used to be. The old
+-- level was measured off the WINDOW's, and DandersFrames' settings window is
+-- SetToplevel(true): it raises itself to the top of its strata the moment it is
+-- clicked, WITHOUT MOVING A PIXEL, so a level taken once at Follow went stale from
+-- the first click onwards. A constant level is immune to that. What the re-run
+-- still buys is a window that changes STRATA under a popout that is already up,
+-- and re-asserting both against anything else that moved them. It costs two getter
+-- calls on a tick that is already reading two rects, so it stays.
 --
 -- With no window it puts everything back on the base strata: a POOLED popout is
--- re-used for whatever the next consumer asks of it, and one that inherited a
--- window's strata must not carry it into a placement that has no window.
+-- re-used for whatever the next consumer asks of it, and one that was raised for a
+-- window must not carry that into a placement that has no window.
 function Popout:_SyncWindowLevel()
     local win, f = self.outsideOf, self.frame
     if not win then
-        if self._winStrata then
-            self._winStrata = nil
+        if self._chromeStrata then
+            self._chromeStrata = nil
             self:_SetChromeStrata(BASE_STRATA)
         end
         self:_SyncChromeLevel()
         return
     end
+    -- Only when the window can actually name a strata. A surface that cannot is
+    -- left alone rather than forced onto a guess.
     local ws = win.GetFrameStrata and win:GetFrameStrata()
-    if type(ws) == "string" and ws ~= "" and self._winStrata ~= ws then
-        self._winStrata = ws
-        self:_SetChromeStrata(ws)
+    if type(ws) == "string" and ws ~= "" then
+        local want = strataAbove(ws) or BASE_STRATA
+        if self._chromeStrata ~= want then
+            self._chromeStrata = want
+            self:_SetChromeStrata(want)
+        end
     end
-    if win.GetFrameLevel and f.SetFrameLevel then
-        -- EXACTLY the clearance, not "at least" it. Settling on one answer is what
-        -- keeps a window raise from ratcheting the pair up ten levels at a time,
-        -- and it lets a popout re-targeted at a lower window come back down.
-        local want = (win:GetFrameLevel() or 1) + WINDOW_CLEARANCE
-        if (f:GetFrameLevel() or 0) ~= want then f:SetFrameLevel(want) end
+    -- A CONSTANT, and exactly it: the strata boundary already puts the chrome over
+    -- the window's whole subtree, so there is nothing left for the level to clear.
+    -- Pinning it also stops the popout's level from moving under its own children,
+    -- which is what a dropdown menu opened inside the panel derives its level from.
+    if f.SetFrameLevel and (f:GetFrameLevel() or 0) ~= OUTSIDE_LEVEL then
+        f:SetFrameLevel(OUTSIDE_LEVEL)
     end
     self:_SyncChromeLevel()
 end
@@ -1096,7 +1153,7 @@ function Popout:_EnsureSourceOutline()
     -- outline is drawn OVER the window's body (it lies on a row inside it), so a
     -- frame left on the base strata with no level of its own would be under the
     -- very plate it is supposed to be outlining.
-    o:SetFrameStrata(self._winStrata or BASE_STRATA)
+    o:SetFrameStrata(self._chromeStrata or BASE_STRATA)
     o:Hide()
     self.srcOutline = o
     self:_SyncChromeLevel()
@@ -1285,14 +1342,14 @@ function Popout:_EnsureBeam()
     -- rect, so the lines still span the gap.
     local b = CreateFrame("Frame", nil, self.frame:GetParent() or UIParent)
     b:SetAllPoints(UIParent)
-    -- The popout's own strata, which in outsideOf mode is the WINDOW's: on
-    -- BACKGROUND the beam ran UNDER whatever window it crossed, so a settings
-    -- window's scrollbar cut the link in half, and one strata below the window is
-    -- the same thing said a different way. The LEVEL is synced to sit just under
-    -- the popout on every beam update (see _SyncChromeLevel) -- the "beam emerges
-    -- from under the notch" trick needs it beneath the popout, and the popout is
-    -- raised clear of the window it docks against.
-    b:SetFrameStrata(self._winStrata or BASE_STRATA)
+    -- The popout's own strata, which in outsideOf mode is one ABOVE the window's:
+    -- on BACKGROUND the beam ran UNDER whatever window it crossed, so a settings
+    -- window's scrollbar cut the link in half -- and sharing the window's strata
+    -- turned out to be the same thing said a different way (see OUTSIDE_LEVEL).
+    -- The LEVEL is synced to sit just under the popout on every beam update (see
+    -- _SyncChromeLevel) -- the "beam emerges from under the notch" trick needs it
+    -- beneath the popout, and both are clear of the window by the strata alone.
+    b:SetFrameStrata(self._chromeStrata or BASE_STRATA)
     b:Hide()
     -- Guarded, and cached as FALSE rather than nil so the guard is asked once:
     -- a headless stub (or any surface without Line objects) simply never gets a
