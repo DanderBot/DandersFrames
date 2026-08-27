@@ -158,6 +158,8 @@ function host:CreateButton(parent, opts)
     end
     return b
 end
+-- The lib calls the shim-proof alias; in the stub they are the same function.
+host.CreateButtonNative = host.CreateButton
 function host:ShowTooltip(_, spec) tooltipShown = spec end
 function host:HideTooltip() tooltipShown = nil end
 

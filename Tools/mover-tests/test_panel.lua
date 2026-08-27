@@ -76,6 +76,7 @@ function KIT:CreateButton(_, opts)
     builtButtons[#builtButtons + 1] = opts
     return stubButton(opts)
 end
+KIT.CreateButtonNative = KIT.CreateButton   -- lib calls the shim-proof alias
 function KIT:CreateGlyphButton(_, opts)
     local b = stubButton(opts, opts and (opts.width or opts.size), opts and (opts.height or opts.size))
     -- The kit's glyph texture, which the panel re-anchors to make room for the

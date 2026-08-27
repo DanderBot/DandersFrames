@@ -920,7 +920,10 @@ local function footerButton(po, i)
     local btn = pool[i]
     if btn then return btn end
 
-    btn = po.host:CreateButton(po._footer, {
+    -- ☠ CreateButtonNative: on the DandersFrames host the bare name is
+    -- shadowed by a POSITIONAL shim (the opts table would land in its `text`
+    -- argument and SetText a table). Same rule as the title label above.
+    btn = po.host:CreateButtonNative(po._footer, {
         -- fitText = false, and the width comes from the SHARE below. Two rows
         -- share this instance and their labels differ, so a button that grew to
         -- its first label would be the wrong width for its second -- and the
