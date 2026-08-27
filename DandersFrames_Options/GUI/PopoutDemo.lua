@@ -25,6 +25,14 @@
 -- should stay touching the row's plate, and clicking another row should land the
 -- panel exactly beside it.
 --
+-- THE CORNERS BUTTON, the rounded-corner trial. Cycles Square (what we ship) ->
+-- R4 -> R6 -> R8, swapping the row plates and, with a popout open, the panel's
+-- own chrome -- its accent border becomes a rounded ring in the accent colour.
+-- PROTOTYPE: it drives UI:CreateRoundedSurface (DandersUI/Round.lua), which no
+-- real settings page touches, and Square restores the shipping look exactly.
+-- What it is FOR is judging whether the curve stays crisp at a real UI scale, so
+-- cycle the Scale button underneath each radius rather than looking at 100% only.
+--
 -- Dev-facing on purpose: every string is a plain literal and NOTHING here is
 -- localised. Same rule as the rest of /df debug -- these words are for whoever
 -- is working on the chrome, not for players.
@@ -48,7 +56,9 @@ local max, floor = math.max, math.floor
 
 local C = UI.Colors
 
-local WIN_W, WIN_H = 420, 500
+-- Widened from 420 when the Corners button joined the title bar: four buttons
+-- plus the cross need 328px of the bar, and at 420 they ran into the title.
+local WIN_W, WIN_H = 480, 500
 local TITLE_H      = 26
 local PAD          = 12
 local FILLER_ROWS  = 20      -- enough below the rows that the list really scrolls
@@ -367,6 +377,150 @@ local function applyScale(f, btn)
 end
 
 -- ============================================================
+-- CORNER SWITCHER -- the rounded-corner trial.
+--
+-- ⚠ PROTOTYPE, AND ONLY HERE. UI:CreateRoundedSurface (DandersUI/Round.lua) is a
+-- parallel primitive to the kit's square CreateElementBackdrop; no real settings
+-- page touches it, and this button is the only thing in the addon that does. The
+-- question it exists to answer is whether the corners read CRISP at the scale
+-- Danders actually plays at -- see the shimmer caveat in Round.lua's header --
+-- so cycle it with the Scale button and look at the curve, not at the colours.
+--
+-- Two widths on screen at once, deliberately: the row plates take a 1px ring and
+-- the popout's accent border takes 2px, which is the pair worth comparing. Note
+-- that neither is quite the square version's weight -- the kit's pixel border is
+-- 2 DEVICE pixels at 0.7 alpha, while these are 1 and 2 UI UNITS at full alpha
+-- -- so a rounded edge reads a little lighter at 1px and a little heavier at
+-- 2px than the square one it replaced. That is a property of the trial, not a
+-- bug to squint at.
+--
+-- SQUARES RESTORE EXACTLY. Going back to Square hides the rounded textures (they
+-- are ours; nothing else takes them down) and re-issues the ORIGINAL factory
+-- call, so the demo returns to the shipping look rather than to an approximation
+-- of it.
+-- ============================================================
+local CORNER_MODES = { false, 4, 6, 8 }     -- false = the square look we ship
+local cornerIndex  = 1
+
+local function cornerRadius() return CORNER_MODES[cornerIndex] end
+
+-- ---- the row plates ------------------------------------------------
+-- The plate's hover/active repaint lives in a closure inside PopoutRow.lua and
+-- drives plate:SetBackdropColor / :SetBackdropBorderColor. Rather than reach in
+-- there, the two METHODS are swapped for ones that paint the rounded surface --
+-- the same trick ApplyPixelBorder uses to keep ~150 existing hover call sites
+-- working after their border stopped being a backdrop edge. So the row keeps
+-- calling exactly what it always called, and hover and the active accent wash
+-- both stay live on a rounded plate with no changes in the library.
+local function roundPlate(plate, radius)
+    plate:SetBackdrop(nil)
+    UI:HidePixelBorder(plate)
+
+    local M = UI.PopoutRow
+    local rs = UI:CreateRoundedSurface(plate, {
+        radius      = radius,
+        borderWidth = 1,
+        fill        = { C.element.r, C.element.g, C.element.b, M.restFill },
+        border      = { C.border.r, C.border.g, C.border.b, M.restBorder },
+    })
+
+    -- Saved ONCE. A second round at a different radius must not capture the
+    -- shims as though they were the originals -- that would make Square
+    -- unreachable, and the failure would look like the button not working.
+    if not plate._demoSquareFill then
+        plate._demoSquareFill   = plate.SetBackdropColor
+        plate._demoSquareBorder = plate.SetBackdropBorderColor
+    end
+    plate.SetBackdropColor       = function(_, r, g, b, a) rs:SetFillColor(r, g, b, a) end
+    plate.SetBackdropBorderColor = function(_, r, g, b, a) rs:SetBorderColor(r, g, b, a) end
+end
+
+local function squarePlate(plate)
+    local rs = UI:GetRoundedSurface(plate)
+    if rs then rs:Hide() end
+    if plate._demoSquareFill then
+        plate.SetBackdropColor       = plate._demoSquareFill
+        plate.SetBackdropBorderColor = plate._demoSquareBorder
+    end
+    -- The ORIGINAL call, verbatim from PopoutRow.lua's build. CreateElementBackdrop
+    -- re-issues the backdrop AND re-shows the pixel border, and it reinstalls the
+    -- border shim over the method just restored above -- which is correct: that
+    -- shim IS the shipping behaviour.
+    local M = UI.PopoutRow
+    GUI:CreateElementBackdrop(plate, {
+        bgColor     = { C.element.r, C.element.g, C.element.b, M.restFill },
+        borderColor = { C.border.r, C.border.g, C.border.b, M.restBorder },
+    })
+end
+
+-- ---- the popout's own chrome ---------------------------------------
+-- The panel backdrop and the accent border, which in rounded mode becomes the
+-- rounded RING in the accent colour. The notch and the beam are left alone --
+-- they are pointers, not chrome, and rounding them is a separate question.
+local function paintPopoutChrome(po)
+    local f, radius = po.frame, cornerRadius()
+    if not radius then
+        local rs = UI:GetRoundedSurface(f)
+        if rs then rs:Hide() end
+        return
+    end
+    -- The square backdrop has just been re-issued by the base _ApplyAccent (see
+    -- the hook below), so it is taken down again here rather than assumed gone:
+    -- the rounded fill sits at a NEGATIVE BACKGROUND sublevel, under a backdrop's
+    -- bgFile, so leaving it would simply render the square on top.
+    f:SetBackdrop(nil)
+    UI:HidePixelBorder(f)
+    local c = po:GetAccent()
+    UI:CreateRoundedSurface(f, {
+        radius      = radius,
+        borderWidth = 2,
+        fill        = { C.panel.r, C.panel.g, C.panel.b, 1 },
+        border      = { c.r, c.g, c.b, c.a or 1 },
+    })
+end
+
+-- Popout instances are POOLED per key and all four rows share one, so this runs
+-- at most once per instance. Shadowing the method on the INSTANCE (its metatable
+-- __index is the Popout class) leaves every other popout in the game untouched,
+-- which is the whole point of doing it here rather than in the library.
+local function hookPopout(po)
+    if po._demoCornerHooked then return end
+    po._demoCornerHooked = true
+    local base = po._ApplyAccent
+    po._ApplyAccent = function(self)
+        base(self)
+        paintPopoutChrome(self)
+    end
+end
+
+local function eachOpenPopout(fn)
+    local seen = {}
+    for _, r in pairs(rows) do
+        local po = r.popout
+        if po and not po.closed and not seen[po] then
+            seen[po] = true
+            fn(po)
+        end
+    end
+end
+
+local function applyCorners(btn)
+    local radius = cornerRadius()
+    for _, r in pairs(rows) do
+        if radius then roundPlate(r.plate, radius) else squarePlate(r.plate) end
+        -- Repaint through the row's own state machine, so a plate that is
+        -- hovered or ACTIVE comes back in the colour it should be rather than at
+        -- the rest colours the factory call above just wrote.
+        r.Refresh()
+    end
+    -- _ApplyAccent is hooked, so this repaints the chrome in EITHER direction:
+    -- rounded mode paints the ring, square mode reissues the panel backdrop and
+    -- the hook then hides the rounded textures.
+    eachOpenPopout(function(po) po:_ApplyAccent() end)
+    if btn then btn:SetText(radius and format("Corners: R%d", radius) or "Corners: Square") end
+end
+
+-- ============================================================
 -- THE WINDOW
 -- ============================================================
 local function buildWindow()
@@ -429,6 +583,25 @@ local function buildWindow()
     scaleBtn:SetPoint("RIGHT", accentBtn, "LEFT", -6, 0)
     f.scaleBtn = scaleBtn
 
+    local cornerBtn = GUI:CreateButtonNative(bar, {
+        text = "Corners: Square", width = 96, height = 18, style = "ghost",
+        fitText = false,
+        tooltip = { title = "Corner Radius", lines = {
+            "Cycle the demo between the square look we ship and rounded corners",
+            "at radius 4, 6 and 8. PROTOTYPE -- nothing outside this window changes.",
+            "Swaps the row plates AND, with a popout open, the panel's own chrome:",
+            "its accent border becomes a rounded ring in the accent colour.",
+            "THE question: are the corners crisp at your UI scale? Cycle the Scale",
+            "button underneath each radius and watch the curve, not the colour.",
+        } },
+        onClick = function(self)
+            cornerIndex = (cornerIndex % #CORNER_MODES) + 1
+            applyCorners(self)
+        end,
+    })
+    cornerBtn:SetPoint("RIGHT", scaleBtn, "LEFT", -6, 0)
+    f.cornerBtn = cornerBtn
+
     -- ---- intro -----------------------------------------------------
     local intro = GUI:CreateLabelNative(f, {
         text = "Gate-one demo -- rows open real popouts outside this window's edge.",
@@ -479,6 +652,24 @@ local function buildWindow()
         -- fallback is the same number from the same place, so a retune of the
         -- row's box model moves this list with it.
         y = y + (row.preferredHeight or UI.PopoutRow.slot)
+
+        -- The corner trial's one hook into the row. A popout is built lazily on
+        -- the first click and pooled thereafter, so there is no earlier moment at
+        -- which its frame exists to round -- and a plain "round it when the
+        -- button is pressed" would miss every panel opened afterwards.
+        local baseOpen = row.OpenPopout
+        row.OpenPopout = function(self, ...)
+            local ret = baseOpen(self, ...)
+            local po = self.popout
+            if po then
+                hookPopout(po)
+                -- Fires the hook once for a panel that was already open in
+                -- square mode and has just been retargeted to this row.
+                po:_ApplyAccent()
+            end
+            return ret
+        end
+
         rows[def.name] = row
     end
 
@@ -505,6 +696,10 @@ local function buildWindow()
 
     applyAccent(accentBtn)
     applyScale(f, scaleBtn)
+    -- Square on build, which is a no-op paint -- but it runs the same path the
+    -- button does, so a broken restore shows up on the FIRST open rather than
+    -- only after a full cycle back round to Square.
+    applyCorners(cornerBtn)
     -- Built hidden, so the first /df popoutdemo SHOWS it rather than toggling a
     -- window nobody has seen yet straight back off.
     f:Hide()

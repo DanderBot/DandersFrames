@@ -155,13 +155,26 @@ function FakeUIFrame(w, h, cx, cy)
     function f:SetColorTexture(r, g, b, a) self._color = { r = r, g = g, b = b, a = a } end
     function f:SetTexture(path) self._texture = path return true end
     function f:GetTexture() return self._texture end
+    -- ☠ RECORDED, not swallowed by the __index no-op. A quarter-circle corner is
+    -- only observable as the TEXCOORDS it was handed -- one baked orientation
+    -- serves all four corners of a rounded surface, so "is the bottom-right
+    -- corner facing the right way" is a question about these eight numbers and
+    -- nothing else. Stored as the raw vararg so the 4-argument form
+    -- (left, right, top, bottom) and the 8-argument one (UL, LL, UR, LR) are
+    -- both readable, and a test can tell which was used from #_texCoord.
+    function f:SetTexCoord(...) self._texCoord = { ... } end
     function f:SetText(t) self._text = t or "" end
     function f:GetText() return self._text end
     function f:GetStringWidth() return 7 * #self._text end
     function f:SetEnabled(v) self._enabled = v and true or false end
     function f:IsEnabled() return self._enabled ~= false end
-    function f:CreateTexture()
+    -- Layer and sublevel are RECORDED (additively -- every existing caller
+    -- ignores them). Draw order is the whole correctness question for a surface
+    -- assembled from stacked textures: a border ring that lands under its own
+    -- fill is invisible, and nothing else in a headless run can catch that.
+    function f:CreateTexture(name, layer, template, sublevel)
         local t = FakeUIFrame()
+        t._layer, t._sublevel = layer, sublevel
         self._textures[#self._textures + 1] = t
         return t
     end
