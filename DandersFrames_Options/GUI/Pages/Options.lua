@@ -1811,6 +1811,63 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- is Frame Size + Layout Direction against Appearance + Permanent
         -- Mover. Permanent Mover is also by far the biggest box here, which
         -- carries column 2 in raid.
+        --
+        -- ⚠ ...IN CLASSIC LAYOUT. In the popout layout Appearance is not a box in
+        -- column 2 at all: it is a FULL-WIDTH BAND of feature rows above the
+        -- columns. See the Appearance block below for the whole of why, and for
+        -- why its Add() has to happen up here rather than where it is built.
+        local classicLayout = DF:IsClassicSettingsLayout()
+
+        -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
+        -- Two different things depending on the layout, decided here because the
+        -- CONSTRUCTED WIDTH is part of the answer and a group cannot be widened
+        -- for free -- LayoutChildren sizes its children off the group's current
+        -- width, so a band built at 280 and stretched by the page's layout pass
+        -- would lay its rows out at 260 on the build and only correct them on the
+        -- next refresh.
+        --
+        --  * CLASSIC -- exactly what it has always been: a 280 box, in column 2,
+        --    added at its own place in the flow further down. Untouched.
+        --  * POPOUT  -- a CHROMELESS container the width of the page's content,
+        --    added HERE, before the first column box, so it lays out as a band
+        --    ACROSS the top rather than as a box beside one.
+        --
+        -- Why the band, and why full width: a feature row's popout docks outside
+        -- the WINDOW and runs a beam back to the row. A row that stops 280px in
+        -- leaves that beam crossing half the page, and the panel reads as
+        -- something floating beside the window rather than as this row's contents.
+        -- Full width puts the row's edge at the corridor -- the same right edge a
+        -- slider's value box lands on, since the container keeps the standard box
+        -- padding -- so the beam is the short hop it is meant to be.
+        --
+        -- Chromeless because the rows ARE the surface now. A faint bordered box
+        -- drawn round a full-width band reads as a second panel, and the section
+        -- keeps its identity from the "Appearance" header above the rows instead.
+        --
+        -- ☠ THE Add() FOR THE BAND IS HERE, NOT AT THE BOTTOM OF THE BLOCK.
+        -- Add() records page order, and layoutCol "both" is ALSO a sync point --
+        -- it takes the lower of the two columns and drops both to it. Added where
+        -- the classic box is added (after Frame Size) it would sync the columns
+        -- mid-page and leave a hole beside Frame Size at two-column widths. Added
+        -- first, both columns are still at the top, so the band costs nothing and
+        -- the column flow below it is exactly what it was.
+        local appearanceGroup
+        if classicLayout then
+            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+        else
+            -- The width the layout pass is about to give it, asked for rather
+            -- than guessed: GUI.PageUsableWidth is the same helper that pass
+            -- stretches "both" widgets to. Floored at a box's width so a page
+            -- built before the content frame has a size still gets a sane
+            -- container (the layout pass then stretches it as normal).
+            local bandW = math.max(
+                GUI.PageUsableWidth(GUI.PageChildWidth(
+                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+                GUI.SettingsBox.group)
+            appearanceGroup = GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })
+            Add(appearanceGroup, nil, "both")
+        end
+
         -- ===== FRAME SIZE GROUP (Column 1) =====
         local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Size"]), 40)
@@ -1822,8 +1879,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         frameSpacingSlider.hideOn = function() return GUI.SelectedMode == "raid" and not db.raidUseGroups end
         Add(sizeGroup, nil, 1)
         
-        -- ===== APPEARANCE GROUP (Column 2) =====
-        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+        -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
+        -- The container itself is built (and, for the band, added) above -- see
+        -- the note there. From here down the two layouts fill the SAME object.
         appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
         -- Canonical border controls via the unified helper. Replaces the
         -- previous hand-rolled Show / Color / Style / Texture / Size block.
@@ -1886,7 +1944,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- would point the settings-search jump at rows this build has retired.
         self._popoutRowForKey = nil
 
-        if DF:IsClassicSettingsLayout() then
+        if classicLayout then
             local borderTools = {
                 group  = appearanceGroup,
                 parent = self.child,
@@ -2208,7 +2266,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- disableOn on this page. The Border row has no dependency.
             shadowRow.disableOn = function(d) return (d or db).frameShowBorder == false end
         end
-        Add(appearanceGroup, nil, 2)
+        -- Classic only: the band was added at the top of the page (see the
+        -- container note above), and adding it twice would lay it out twice.
+        if classicLayout then Add(appearanceGroup, nil, 2) end
 
         -- ===== FRAME FADE GROUP (Column 2) =====
         -- Whole-frame base opacity, multiplied with the range / health fades
