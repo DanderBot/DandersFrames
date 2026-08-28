@@ -2011,305 +2011,1103 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local isGroupedMode = db.petGroupMode == "GROUPED"
         local isRaidMode = GUI.SelectedMode == "raid"
         
-        -- ===== GENERAL GROUP (col1) =====
-        -- Column width, not full width. A full-width box belongs to a page that
-        -- genuinely needs the room -- Pinned Frames, Nicknames -- and everything
-        -- below these two here is ordinary two-column controls, so stretching
-        -- them across the top reads as two different layouts stacked together.
-        local generalGroup = GUI:CreateSettingsGroup(self.child, 280)
-        generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
-        local petEnable = generalGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Pet Frames"], db, "petEnabled", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            self:RefreshStates()
-        end), 30)
-        petEnable.keepEnabled = true
-        generalGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        -- No slot height on the blurbs here or in the group below: at 250 they
-        -- wrap to more lines than they did at 530, and CreateLabel measures
-        -- itself whenever the call site does not pin it. Guessing a replacement
-        -- number by hand is what puts a blurb through the control beneath it.
-        generalGroup:AddWidget(GUI:CreateLabel(self.child, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 250))
-        Add(generalGroup, nil, 1)
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: ten 280 boxes in the two columns
+        -- and the same order -- General, Layout Mode, Group Settings (grouped
+        -- only), Size and Position (attached only) down column 1; Appearance,
+        -- Border, Health Bar, Name Text and Health Text down column 2.
+        --
+        -- POPOUT turns EIGHT of those ten into feature rows and keeps two inline.
+        -- The two that stay are the page's SHAPE controls rather than features:
+        --
+        --   PET FRAME SETTINGS is the page-wide enable and a paragraph of prose.
+        --   A row hoisting petEnabled would leave a pane holding NOTHING BUT THE
+        --   BLURB -- a click that buys a sentence, which is the Visibility page's
+        --   "a pane holding one checkbox is a click that buys nothing" one step
+        --   worse. And petEnabled is not this row's own on/off: it gates all
+        --   eight rows below, so hoisting it onto one of them would say it spoke
+        --   for that row alone. It stays a box, wearing the band skin.
+        --
+        --   LAYOUT MODE is one dropdown and the sentence that explains the choice
+        --   -- a single option, which the Sorting page's FrameSort and Self
+        --   Position boxes settle on its own. It also REBUILDS THE PAGE: picking
+        --   a mode changes which groups exist at all, so the dropdown's callback
+        --   is GUI:RefreshCurrentPage in both layouts. That is a poor pane
+        --   citizen (the helper's prologue closes every open panel on a rebuild,
+        --   which would slam the panel shut under the hand that opened it) and a
+        --   perfectly good inline one, because a page widget expects to be
+        --   retired by a rebuild. See the note on the dropdown itself.
+        --
+        -- ⚠ THE TWO INLINE BOXES SIT SIDE BY SIDE HERE, not stacked in column 1
+        -- as classic has them. `Add`'s "both" is a sync point, so a full-width
+        -- band under a lone column-1 stack would leave a two-box-tall hole beside
+        -- it (the Visibility page's note, which solved it by putting its band
+        -- first -- not an option here, where the page's own enable has to be the
+        -- first thing on it). Filling column 2 with the other shape box costs
+        -- nothing and is the only thing on the page that moves.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } plus, where it matters, `popout` and
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
+        -- it always built, which is what makes "classic is unchanged" structural
+        -- rather than a promise -- test_petframes_page_builders.lua pins the
+        -- inventory of each one against the census taken before the move, in BOTH
+        -- mode variants.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
 
-        -- ===== LAYOUT MODE GROUP (col1) =====
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
-        layoutGroup.disableChildrenOn = function(d) return not d.petEnabled end
+        -- ===== THE PAGE'S THREE BANDS =====================================
+        -- Full-width and chromeless, because a feature row's popout docks outside
+        -- the WINDOW and runs a beam back to the row, so a row that stopped 280px
+        -- in would leave that beam crossing half the page.
+        --
+        -- Three rather than one, because eight rows in a single stack is a list
+        -- rather than a page, and the three groupings are the ones the settings
+        -- themselves already make: WHERE the frames go and how big they are, what
+        -- the frame itself looks like, and the two blocks of text on it.
+        --
+        -- ⚠ NO HEADER REPEATS A ROW LABEL. "Appearance" is a row here (the
+        -- texture and the background colour), so the band that holds it is headed
+        -- L["Frame"] -- a header naming the section, not one of its rows. All
+        -- three words already ship in enUS; nothing is invented.
+        local petLayoutBand, petFrameBand, petTextBand
+        if tools then
+            petLayoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            petLayoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+            petFrameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            petFrameBand:AddWidget(GUI:CreateHeader(self.child, L["Frame"]), 40)
+            petTextBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            petTextBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
+        end
+
+        -- ☠ THE PAGE-WIDE GATE REACHES THE ROWS THEMSELVES, not only the panes.
+        -- Every group on this page carries `disableChildrenOn = not petEnabled`
+        -- and always has; those gates stay INSIDE the builders, so a pane greys
+        -- exactly as its box did. But in classic the whole page visibly dims when
+        -- pet frames are off, and eight bright rows over eight grey panes would
+        -- be the popout layout saying something classic does not. A dimmed row
+        -- still OPENS -- the kit's grey is alpha and a disabled toggle, not a
+        -- dead frame -- so the settings stay readable while they are switched
+        -- off, which is what the greyed boxes have always allowed.
+        local function PetsOffRow(d) return not (d or db).petEnabled end
+
+        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
+        -- DandersUI Sections' RefreshChildStates greys every child a
+        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
+        -- first child is always the header, and wrong for a popout pane, which has
+        -- no header at all (PopoutContent builds a chromeless, padding-free group
+        -- and the builder's first control lands at index 1).
+        --
+        -- Every other converted page got away with it because every one of its
+        -- gated panes carries a HOISTED TOGGLE, and a row's own off-gate greys the
+        -- whole pane from the outside. This page's gate is petEnabled -- a
+        -- PAGE-wide switch that no single row can hoist -- so seven of its eight
+        -- rows would have shown one bright control at the top of a grey pane.
+        --
+        -- Spelled onto the widget itself, composed with whatever predicate it
+        -- already carries, and applied at the MOUNT rather than inside the builder:
+        -- two of these groups change which control comes first with the layout
+        -- mode, and a builder should not have to know it is being read from the
+        -- top. Never runs in classic -- the box's own header is index 1 there, and
+        -- the gate reaches everything under it exactly as it always has.
+        local function GatePaneFirstChild(group)
+            local entry = group and group.groupChildren and group.groupChildren[1]
+            local w = entry and entry.widget
+            if not w then return end
+            local prev = w.disableOn
+            w.disableOn = function(d) return PetsOffRow(d) or (prev and prev(d)) or false end
+        end
+
+        -- ☠ WHAT A GATING CONTROL'S CALLBACK COSTS, AND WHY IT IS NOT THE SAME IN
+        -- BOTH LAYOUTS -- the Tooltips page's AnchorGateRefresh, same rule. Five
+        -- controls on this page (the two Match Owner ticks, the health colour
+        -- mode, Show Power Bar and the power colour mode) end in
+        -- GUI:RefreshCurrentPage today, and every one of them is buying the same
+        -- thing: the hideOn/disableOn passes over a sibling.
+        --
+        -- A pane must not pay for that with a rebuild. A rebuild retires every
+        -- widget on the page including the row the user is clicking through, and
+        -- the helper's own prologue closes every open panel on the way in. What
+        -- the pane's own refresh does instead is precisely the two passes:
+        -- ReflowPane re-runs the group's child states and re-sizes the panel
+        -- round it, then the page's RefreshStates runs. Classic keeps the
+        -- rebuild, unchanged.
+        local function GateRefresh(tools2)
+            if tools2.popout then
+                tools2.refreshStates()
+            else
+                GUI:RefreshCurrentPage()
+            end
+        end
+
+        -- ☠ SIX VALUE TABLES AND ONE APPLY MOVED UP TO PAGE SCOPE, ABOVE EVERY
+        -- BUILDER. They used to sit in the straight-line code beside the controls
+        -- that read them, which was fine while the page WAS straight-line code.
+        -- The builders are CLOSURES now, and a closure captures the upvalue that
+        -- exists when it is CREATED -- so a builder declared above one of these
+        -- would see nil rather than the table. The rows need them from outside
+        -- the builders as well: a summary prints the dropdown's own words, and a
+        -- footer's Reset Group has to push the same work the group's widgets do.
+        local textAnchorValues = {
+            TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
+            LEFT= L["Left"], CENTER= L["Center"], RIGHT= L["Right"],
+            BOTTOMLEFT= L["Bottom Left"], BOTTOM= L["Bottom"], BOTTOMRIGHT= L["Bottom Right"],
+        }
 
         local groupModeValues = {
             ATTACHED = L["Attached to Owner"],
             GROUPED = L["Separate Pet Group"],
         }
-        local petLayoutMode = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Layout Mode"], groupModeValues, db, "petGroupMode", function()
-            if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
-            if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
-            GUI:RefreshCurrentPage()
-        end), 55)
-        petLayoutMode.tooltip = L["Attached puts each pet beside its owner's frame, so you read them together. Separate Pet Group collects every pet into one block you can place anywhere. The rest of this page changes to match your choice."]
 
-        if not isGroupedMode then
-            layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Pet frames are positioned relative to their owner's frame."], 250))
-        else
-            layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Pet frames are grouped together in a separate container."], 250))
-        end
-        Add(layoutGroup, nil, 1)
+        -- Raid or party wording, exactly as the grouped block built it.
+        local groupAnchorValues = {
+            BOTTOM = isRaidMode and L["Below Raid"] or L["Below Party"],
+            TOP = isRaidMode and L["Above Raid"] or L["Above Party"],
+            LEFT = isRaidMode and L["Left of Raid"] or L["Left of Party"],
+            RIGHT = isRaidMode and L["Right of Raid"] or L["Right of Party"],
+        }
+        local growthValues = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
 
-        -- GROUPED MODE: Group Settings (col1)
-        if isGroupedMode then
-            local groupedSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-            groupedSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Settings"]), 40)
-            groupedSettingsGroup.disableChildrenOn = function(d) return not d.petEnabled end
-            
-            local groupAnchorValues = {
-                BOTTOM = isRaidMode and L["Below Raid"] or L["Below Party"],
-                TOP = isRaidMode and L["Above Raid"] or L["Above Party"],
-                LEFT = isRaidMode and L["Left of Raid"] or L["Left of Party"],
-                RIGHT = isRaidMode and L["Right of Raid"] or L["Right of Party"],
-            }
-            local updateFunc = isRaidMode 
-                and function() if DF.UpdateRaidPetGroupLayout then DF:UpdateRaidPetGroupLayout() end end
-                or function() if DF.UpdatePetGroupLayout then DF:UpdatePetGroupLayout() end end
-            
-            local petGroupPos = groupedSettingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Group Position"], groupAnchorValues, db, "petGroupAnchor", updateFunc), 55)
-            petGroupPos.tooltip = L["Which side of your party or raid frames the whole pet block sits on. Use the offsets below to nudge it from there."]
-            
-            local growthValues = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
-            groupedSettingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthValues, db, "petGroupGrowth", updateFunc), 55)
-            groupedSettingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], 0, 20, 1, db, "petGroupSpacing", updateFunc, updateFunc, true), 55)
-            groupedSettingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Group X Offset"], -100, 100, 1, db, "petGroupOffsetX", updateFunc, updateFunc, true), 55)
-            groupedSettingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Group Y Offset"], -100, 100, 1, db, "petGroupOffsetY", updateFunc, updateFunc, true), 55)
-            
-            if isRaidMode then
-                groupedSettingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Group Label"], db, "petGroupShowLabel", function()
-                    if DF.UpdateRaidPetGroupLayout then DF:UpdateRaidPetGroupLayout() end
-                end), 30)
-            end
-            
-            Add(groupedSettingsGroup, nil, 1)
-        end
-        
-        -- SIZE GROUP (col1)
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
-        sizeGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        
-        if not isGroupedMode then
-            local petMatchW = sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Match Owner Width"], db, "petMatchOwnerWidth", function()
-                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-                GUI:RefreshCurrentPage()
-            end), 30)
-            petMatchW.tooltip = L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Width slider below greys out while this is on."]
-            local petMatchH = sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Match Owner Height"], db, "petMatchOwnerHeight", function()
-                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-                GUI:RefreshCurrentPage()
-            end), 30)
-            petMatchH.tooltip = L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Height slider below greys out while this is on."]
-        end
-        
-        local widthSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Width"], 40, 150, 1, db, "petFrameWidth", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        if not isGroupedMode then
-            widthSlider.disableOn = function(d) return d.petMatchOwnerWidth end
-        end
-        
-        local heightSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 10, 40, 1, db, "petFrameHeight", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        if not isGroupedMode then
-            heightSlider.disableOn = function(d) return d.petMatchOwnerHeight end
-        end
-        
-        Add(sizeGroup, nil, 1)
-        
-        -- APPEARANCE GROUP (col2)
-        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-        appearanceGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        appearanceGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Health Bar Texture"], db, "petTexture", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        appearanceGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "petBackgroundColor", true, function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
-        Add(appearanceGroup, nil, 2)
+        local anchorValues = {
+            BOTTOM = L["Below Owner"],
+            TOP = L["Above Owner"],
+            LEFT = L["Left of Owner"],
+            RIGHT = L["Right of Owner"],
+        }
 
-        -- ===== BORDER GROUP (Stage 4.3) =====
-        -- include set tailored for a mini unit frame's border. Skipped:
-        -- animate (decoration, not alert), offset (Pet Frame has its own
-        -- Offset X / Y in the Position group in column 1), class / role colour
-        -- (UnitClass("pet") returns the pet family, not a class token),
-        -- colour-by-time / colour-by-type (no aura-state context).
-        local petBorderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        petBorderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        GUI:CreateBorderControls(petBorderGroup, db, "pet", {
-            parent       = self.child,
-            include      = { alpha = true, inset = true, blendMode = true,
-                             gradient = true, shadow = true },
-            fullUpdate   = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
-            lightUpdate  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
-            lightColors  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
-            refreshStates = function() self:RefreshStates() end,
-            sizeMin = 1, sizeMax = 6, sizeStep = 1,
-        })
-        Add(petBorderGroup, nil, 2)
-        
-        -- HEALTH BAR GROUP (col2)
-        local healthBarGroup = GUI:CreateSettingsGroup(self.child, 280)
-        healthBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Bar"]), 40)
-        healthBarGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        
         local healthColorValues = {
             GREEN = L["Always Green"],
             CLASS = L["Class Color"],
             HEALTH = L["Health Gradient"],
             CUSTOM = L["Custom Color"],
         }
-        healthBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Health Bar Color"], healthColorValues, db, "petHealthColorMode", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            GUI:RefreshCurrentPage()
-        end), 55)
-        
-        local customHealthColor = healthBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Custom Health Color"], db, "petHealthColor", false, function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
-        customHealthColor.hideOn = function(d) return d.petHealthColorMode ~= "CUSTOM" end
-        
-        healthBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Health Percentage"], db, "petShowHealthText", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end), 30)
-
-        healthBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Power Bar"], db, "petShowPowerBar", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            GUI:RefreshCurrentPage()
-        end), 30)
-
-        local petPowerHeight = healthBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Power Bar Height"], 1, 12, 1, db, "petPowerBarHeight", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        petPowerHeight.disableOn = function(d) return not d.petShowPowerBar end  -- grey when power bar off
-
         local powerColorValues = {
             POWER = L["By Power Type"],
             CUSTOM = L["Custom Color"],
         }
-        local petPowerColorMode = healthBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Power Bar Color"], powerColorValues, db, "petPowerColorMode", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            GUI:RefreshCurrentPage()
-        end), 55)
-        petPowerColorMode.disableOn = function(d) return not d.petShowPowerBar end  -- grey when power bar off
 
-        local customPowerColor = healthBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Custom Power Color"], db, "petPowerColor", false, function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
-        -- Grey when the power bar is off (boolean fold); HIDE only for the non-CUSTOM
-        -- colour mode (variant gating). The two compose: hidden in non-CUSTOM, greyed
-        -- in CUSTOM while the power bar is off.
-        customPowerColor.disableOn = function(d) return not d.petShowPowerBar end
-        customPowerColor.hideOn = function(d) return d.petPowerColorMode ~= "CUSTOM" end
+        -- The grouped block's `updateFunc`, under a name, at page scope: the five
+        -- controls in that group call it and so does the row's footer.
+        local ApplyPetGroupLayout = isRaidMode
+            and function() if DF.UpdateRaidPetGroupLayout then DF:UpdateRaidPetGroupLayout() end end
+            or function() if DF.UpdatePetGroupLayout then DF:UpdatePetGroupLayout() end end
 
-        Add(healthBarGroup, nil, 2)
-        
-        -- NAME TEXT GROUP (col2)
-        local textAnchorValues = {
-            TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
-            LEFT= L["Left"], CENTER= L["Center"], RIGHT= L["Right"],
-            BOTTOMLEFT= L["Bottom Left"], BOTTOM= L["Bottom"], BOTTOMRIGHT= L["Bottom Right"],
-        }
-        
-        local nameTextGroup = GUI:CreateSettingsGroup(self.child, 280)
-        nameTextGroup:AddWidget(GUI:CreateHeader(self.child, L["Name Text"]), 40)
-        nameTextGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        nameTextGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "petNameFont", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        nameTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 16, 1, db, "petNameFontSize", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        nameTextGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "petNameFontOutline", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        nameTextGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "petNameFontOutline", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 30)
-        nameTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Name Length"], 4, 20, 1, db, "petNameMaxLength", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end), 55)
-        nameTextGroup:AddWidget(GUI:CreateDropdown(self.child, L["Name Anchor"], textAnchorValues, db, "petNameAnchor", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        nameTextGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Name Text Color"], db, "petNameColor", false, function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
-        nameTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Name X Offset"], -30, 30, 1, db, "petNameX", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        nameTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Name Y Offset"], -15, 15, 1, db, "petNameY", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        Add(nameTextGroup, nil, 2)
-        
-        -- POSITION GROUP (col1, Attached mode only)
-        if not isGroupedMode then
-            local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-            positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-            positionGroup.disableChildrenOn = function(d) return not d.petEnabled end
+        -- ===== GENERAL GROUP (a 280 box in column 1 in classic, the stay-inline
+        -- box in column 1 in the popout layout) =====
+        -- Verbatim, taking the group and parent it should build into: same
+        -- factories, same L keys, same db keys, same callbacks, same slot heights.
+        --
+        -- ⚠ tools2.refreshStates, NOT self:RefreshStates. The enable gates every
+        -- other group on this page, so in the popout layout it has to re-grey the
+        -- eight ROWS and any pane standing open behind them. In classic the
+        -- tools2 hook IS self:RefreshStates, so nothing changed there.
+        local function BuildPetGeneralGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-            local anchorValues = {
-                BOTTOM = L["Below Owner"],
-                TOP = L["Above Owner"],
-                LEFT = L["Left of Owner"],
-                RIGHT = L["Right of Owner"],
-            }
+            local petEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Pet Frames"], db, "petEnabled", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+                tools2.refreshStates()
+            end), 30)
+            petEnable.keepEnabled = true
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+            -- No slot height on the blurbs here or in the group below: at 250 they
+            -- wrap to more lines than they did at 530, and CreateLabel measures
+            -- itself whenever the call site does not pin it. Guessing a replacement
+            -- number by hand is what puts a blurb through the control beneath it.
+            group:AddWidget(GUI:CreateLabel(parent, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 250))
+        end
+
+        -- ===== LAYOUT MODE GROUP (a 280 box in column 1 in classic, the
+        -- stay-inline box in column 2 in the popout layout) =====
+        local function BuildPetLayoutModeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
+            -- ☠ GUI:RefreshCurrentPage IN BOTH LAYOUTS, and it is the one callback
+            -- on this page that keeps it. The others rebuild to re-run a
+            -- hideOn/disableOn pass, which a pane's own refresh does better; this
+            -- one changes WHICH GROUPS EXIST -- Group Settings appears, Position
+            -- disappears, two Match Owner ticks come and go, and two sliders swap
+            -- their disableOn for nothing. No state pass produces widgets that
+            -- were never built, so the rebuild is the work rather than a shortcut
+            -- to it. The dropdown lives on the PAGE in both layouts, which is what
+            -- makes that legal: a page widget expects to be retired by a rebuild,
+            -- and the helper's prologue closing the open panels on the way in is
+            -- the intended behaviour on a structural change, not a casualty of it.
+            local petLayoutMode = group:AddWidget(GUI:CreateDropdown(parent, L["Layout Mode"], groupModeValues, db, "petGroupMode", function()
+                if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
+                if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+                GUI:RefreshCurrentPage()
+            end), 55)
+            petLayoutMode.tooltip = L["Attached puts each pet beside its owner's frame, so you read them together. Separate Pet Group collects every pet into one block you can place anywhere. The rest of this page changes to match your choice."]
+
+            if not isGroupedMode then
+                group:AddWidget(GUI:CreateLabel(parent, L["Pet frames are positioned relative to their owner's frame."], 250))
+            else
+                group:AddWidget(GUI:CreateLabel(parent, L["Pet frames are grouped together in a separate container."], 250))
+            end
+        end
+
+        if classicLayout then
+            -- ===== GENERAL GROUP (col1) =====
+            -- Column width, not full width. A full-width box belongs to a page that
+            -- genuinely needs the room -- Pinned Frames, Nicknames -- and everything
+            -- below these two here is ordinary two-column controls, so stretching
+            -- them across the top reads as two different layouts stacked together.
+            local generalGroup = GUI:CreateSettingsGroup(self.child, 280)
+            generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
+            BuildPetGeneralGroup({
+                group = generalGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(generalGroup, nil, 1)
+
+            -- ===== LAYOUT MODE GROUP (col1) =====
+            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
+            BuildPetLayoutModeGroup({
+                group = layoutGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(layoutGroup, nil, 1)
+        else
+            -- The two shape boxes, wearing the band skin so they do not read as a
+            -- second visual language beside the rows below them. The enable's
+            -- refresh carries the extra half the popout layout needs: the rows'
+            -- own grey, and any pane standing open behind one of them.
+            local generalGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)
+            generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
+            BuildPetGeneralGroup({
+                group = generalGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() tools.ReflowMounted() end,
+            })
+            Add(generalGroup, nil, 1)
+
+            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)
+            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
+            BuildPetLayoutModeGroup({
+                group = layoutGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(layoutGroup, nil, 2)
+        end
+
+        -- ===== GROUP SETTINGS (grouped mode only: a 280 box in column 1 in
+        -- classic, the Layout band's first row) =====
+        -- Built only in GROUPED mode, exactly as today. The page rebuilds when the
+        -- layout mode changes, so the row simply is not there in attached mode --
+        -- which is what the box did, and what keeps the two layouts agreeing about
+        -- what exists.
+        local function BuildPetGroupSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
+            local petGroupPos = group:AddWidget(GUI:CreateDropdown(parent, L["Group Position"], groupAnchorValues, db, "petGroupAnchor", ApplyPetGroupLayout), 55)
+            petGroupPos.tooltip = L["Which side of your party or raid frames the whole pet block sits on. Use the offsets below to nudge it from there."]
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growthValues, db, "petGroupGrowth", ApplyPetGroupLayout), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Spacing"], 0, 20, 1, db, "petGroupSpacing", ApplyPetGroupLayout, ApplyPetGroupLayout, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Group X Offset"], -100, 100, 1, db, "petGroupOffsetX", ApplyPetGroupLayout, ApplyPetGroupLayout, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Group Y Offset"], -100, 100, 1, db, "petGroupOffsetY", ApplyPetGroupLayout, ApplyPetGroupLayout, true), 55)
+
+            if isRaidMode then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Group Label"], db, "petGroupShowLabel", function()
+                    if DF.UpdateRaidPetGroupLayout then DF:UpdateRaidPetGroupLayout() end
+                end), 30)
+            end
+        end
+
+        if isGroupedMode then
+            if classicLayout then
+                -- GROUPED MODE: Group Settings (col1)
+                local groupedSettingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+                groupedSettingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Settings"]), 40)
+                BuildPetGroupSettingsGroup({
+                    group = groupedSettingsGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(groupedSettingsGroup, nil, 1)
+            else
+                -- The summary, per the sweep's convention: at most four items, a
+                -- fixed order, "\194\183" between them, WORDS localised and numbers
+                -- raw, and every read guarded because a profile mid-migration may
+                -- be missing any of these keys.
+                --
+                -- Where the block sits, which way it grows, and the nudge -- the
+                -- three facts that place it. Both words come out of the dropdowns'
+                -- own option tables, so the row cannot name a side the control does
+                -- not offer. The offsets are printed as a pair when either is set
+                -- (the Border Shadow row's convention) and they ship non-zero, so
+                -- on a default profile this row says all three.
+                --
+                -- ⚠ SPACING IS DELIBERATELY ABSENT. It is a bare number with no
+                -- word that fits beside two other bare numbers, and the offsets are
+                -- what people actually reach for when the block lands wrong.
+                local function PetGroupSummary(d)
+                    if not d then return "" end
+                    local parts = {}
+                    local pos = groupAnchorValues[d.petGroupAnchor]
+                    if pos then parts[#parts + 1] = pos end
+                    local growth = growthValues[d.petGroupGrowth]
+                    if growth then parts[#parts + 1] = growth end
+                    local ox = tonumber(d.petGroupOffsetX) or 0
+                    local oy = tonumber(d.petGroupOffsetY) or 0
+                    if ox ~= 0 or oy ~= 0 then
+                        parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
+                    end
+                    return table.concat(parts, " \194\183 ")
+                end
+
+                -- Five in party, six in raid -- the group label tick exists only
+                -- where there are groups to label. A count is a CLAIM about what is
+                -- behind the row, so it follows the mode the same way the builder
+                -- does rather than naming the larger of the two.
+                local PET_GROUP_COUNT = isRaidMode and 6 or 5
+
+                local groupMount, groupContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildPetGroupSettingsGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                    GatePaneFirstChild(group)
+                end)
+                local petGroupRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Group Settings"],
+                    db      = tools.RowDB,
+                    summary = PetGroupSummary,
+                    count   = PET_GROUP_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = groupMount,
+                }))
+                -- ⚠ A CONDITIONAL CLAIM, and it is the honest one. In party mode
+                -- the pane never mounts petGroupShowLabel, so the walk never sees
+                -- it and the row does not claim it -- which is exactly right: a
+                -- Reset Group that wrote a key with no control behind it would be
+                -- resetting something the user cannot see, and the amber tick would
+                -- light for it. The raid build claims six because it mounts six.
+                tools.ClaimKeys(petGroupRow, groupContent)
+                tools.WireModifiedTick(petGroupRow)
+                tools.WireFooter(petGroupRow, ApplyPetGroupLayout)
+                petGroupRow.disableOn = PetsOffRow
+            end
+        end
+
+        -- ===== SIZE (a 280 box in column 1 in classic, a row in the Layout band)
+        -- =====
+        local function BuildPetSizeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
+            if not isGroupedMode then
+                local petMatchW = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Owner Width"], db, "petMatchOwnerWidth", function()
+                    if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+                    GateRefresh(tools2)
+                end), 30)
+                petMatchW.tooltip = L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Width slider below greys out while this is on."]
+                local petMatchH = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Owner Height"], db, "petMatchOwnerHeight", function()
+                    if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+                    GateRefresh(tools2)
+                end), 30)
+                petMatchH.tooltip = L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Height slider below greys out while this is on."]
+            end
+
+            local widthSlider = group:AddWidget(GUI:CreateSlider(parent, L["Width"], 40, 150, 1, db, "petFrameWidth", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+            if not isGroupedMode then
+                widthSlider.disableOn = function(d) return d.petMatchOwnerWidth end
+            end
+
+            local heightSlider = group:AddWidget(GUI:CreateSlider(parent, L["Height"], 10, 40, 1, db, "petFrameHeight", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+            if not isGroupedMode then
+                heightSlider.disableOn = function(d) return d.petMatchOwnerHeight end
+            end
+        end
+
+        -- The group's own apply, named once so the footer's Reset Group and Hold:
+        -- Defaults run exactly what the group's controls run between them: the
+        -- size back through the full pet build, and the lightweight pass the two
+        -- sliders drive on a drag.
+        local function ApplyPetSize()
+            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end
+
+        if classicLayout then
+            -- SIZE GROUP (col1)
+            local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
+            sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
+            BuildPetSizeGroup({
+                group = sizeGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(sizeGroup, nil, 1)
+        else
+            -- ⚠ A NUMBER ONLY WHERE IT IS THE NUMBER IN USE. In attached mode
+            -- either dimension can be handed to the owner's frame, and
+            -- petMatchOwnerWidth ships ON -- so printing "Width 130" on a default
+            -- profile would name a value nothing renders. The matched half is
+            -- simply absent instead of being labelled: the row already says
+            -- "Size", the pane says which slider is greyed and why, and a summary
+            -- is not the place to re-explain a tick. In grouped mode neither tick
+            -- exists and both numbers are always the real ones.
+            local function PetSizeSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local attached = d.petGroupMode ~= "GROUPED"
+                if not (attached and d.petMatchOwnerWidth) then
+                    local w = tonumber(d.petFrameWidth)
+                    if w then parts[#parts + 1] = format("%s %d", L["Width"], math.floor(w)) end
+                end
+                if not (attached and d.petMatchOwnerHeight) then
+                    local h = tonumber(d.petFrameHeight)
+                    if h then parts[#parts + 1] = format("%s %d", L["Height"], math.floor(h)) end
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Four attached (two Match Owner ticks and the two sliders), two
+            -- grouped (the sliders alone). Nothing is hoisted: there is no boolean
+            -- here meaning "am I doing anything at all" -- a pet frame has a size
+            -- either way, and a tick carrying Match Owner Width would claim to
+            -- speak for the height beside it.
+            local PET_SIZE_COUNT = isGroupedMode and 2 or 4
+
+            local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPetSizeGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local petSizeRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Size"],
+                db      = tools.RowDB,
+                summary = PetSizeSummary,
+                count   = PET_SIZE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = sizeMount,
+            }))
+            tools.ClaimKeys(petSizeRow, sizeContent)
+            tools.WireModifiedTick(petSizeRow)
+            tools.WireFooter(petSizeRow, ApplyPetSize)
+            petSizeRow.disableOn = PetsOffRow
+        end
+
+        -- ===== APPEARANCE (a 280 box in column 2 in classic, the Frame band's
+        -- first row) =====
+        local function BuildPetAppearanceGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Health Bar Texture"], db, "petTexture", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 55)
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "petBackgroundColor", true, function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
+        end
+
+        -- The group's own apply: the lightweight pass both controls already drive.
+        local function ApplyPetAppearance()
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end
+
+        if classicLayout then
+            -- APPEARANCE GROUP (col2)
+            local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+            BuildPetAppearanceGroup({
+                group = appearanceGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(appearanceGroup, nil, 2)
+        else
+            -- The texture's NAME, and nothing else: it is the one thing in this
+            -- group that can be said in words, and a background colour cannot.
+            --
+            -- The name comes from DF:GetTextureNameFromPath -- the addon's own
+            -- media display-name resolver, and the one GUI:CreateTextureDropdown
+            -- itself prints on its button, so the row and the control behind it
+            -- cannot disagree. (The Font Settings row on the Frame page names its
+            -- font through this function's font sibling, for the same reason.)
+            local function PetAppearanceSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local name = DF.GetTextureNameFromPath and DF:GetTextureNameFromPath(d.petTexture)
+                if type(name) == "string" and name ~= "" then parts[#parts + 1] = name end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Two: the texture and the background colour. Nothing to hoist.
+            local PET_APPEARANCE_COUNT = 2
+
+            local appearMount, appearContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPetAppearanceGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local petAppearanceRow = petFrameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Appearance"],
+                db      = tools.RowDB,
+                summary = PetAppearanceSummary,
+                count   = PET_APPEARANCE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = appearMount,
+            }))
+            tools.ClaimKeys(petAppearanceRow, appearContent)
+            tools.WireModifiedTick(petAppearanceRow)
+            tools.WireFooter(petAppearanceRow, ApplyPetAppearance)
+            petAppearanceRow.disableOn = PetsOffRow
+        end
+
+        -- ===== BORDER (a 280 box in column 2 in classic, the Frame band's second
+        -- row) =====
+        -- include set tailored for a mini unit frame's border. Skipped:
+        -- animate (decoration, not alert), offset (Pet Frame has its own
+        -- Offset X / Y in the Position group in column 1), class / role colour
+        -- (UnitClass("pet") returns the pet family, not a class token),
+        -- colour-by-time / colour-by-type (no aura-state context).
+        --
+        -- ONE call, not the Frame page's two. That page splits Border and Border
+        -- Shadow into two rows because between them they are nineteen controls;
+        -- here the whole border is sixteen, of which the shadow is five, and a row
+        -- for five sub-controls of another row's feature is a level of nesting the
+        -- page does not earn. include.shadow keeps the shadow block inside
+        -- CreateBorderControls' own composition loop, which is what puts Show
+        -- Border's grey on top of it -- so this row needs no shadowDisableWhen
+        -- plumbing at all, the thing the Frame page had to hand over by hand.
+        --
+        -- ⚠ noShowToggle IS THE HOIST. With it the built-in Show Border checkbox
+        -- is not built and the row carries that tick instead; showKey is still
+        -- read, so borderOff still greys the other fifteen exactly as before.
+        local function BuildPetBorderGroup(tools2)
+            GUI:CreateBorderControls(tools2.group, db, "pet", {
+                parent       = tools2.parent,
+                include      = { alpha = true, inset = true, blendMode = true,
+                                 gradient = true, shadow = true },
+                fullUpdate   = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
+                lightUpdate  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
+                lightColors  = function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end,
+                refreshStates = tools2.refreshStates,
+                sizeMin = 1, sizeMax = 6, sizeStep = 1,
+                noShowToggle = tools2.hoistToggle or nil,
+                -- ☠ THE PAGE GATE, THROUGH THE FACTORY'S OWN DOOR. Every other
+                -- builder on this page greys behind petEnabled with
+                -- group.disableChildrenOn; this one cannot, because
+                -- CreateBorderControls owns the group and writes disableOn onto
+                -- each of the sixteen itself -- so the gate goes in as the
+                -- CONSUMER gate it is, which the factory composes on top of
+                -- borderOff and every widget's own predicate. nil in classic,
+                -- where the box's disableChildrenOn does the same job it always
+                -- has (and where the pane-first-child problem does not exist).
+                disableWhen  = tools2.popout and PetsOffRow or nil,
+            })
+        end
+
+        -- The group's own apply: the lightweight pass every border control drives.
+        local function ApplyPetBorder()
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end
+
+        if classicLayout then
+            -- ===== BORDER GROUP (Stage 4.3) =====
+            local petBorderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            petBorderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end
+            BuildPetBorderGroup({
+                group = petBorderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(petBorderGroup, nil, 2)
+        else
+            -- The Frame page's Border summary, less the colour source it has and
+            -- this one does not: thickness in pixels, the style word, and the
+            -- alpha only when it is doing something -- a row reading "Alpha 1.00"
+            -- on every default profile is noise (the Border row's own rule).
+            local function PetBorderSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local size = tonumber(d.petBorderSize)
+                if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+                local style = d.petBorderStyle
+                parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                                 or (style == "TEXTURE" and L["Texture"])
+                                 or L["Solid"]
+                local c = d.petBorderColor
+                local a = type(c) == "table" and tonumber(c.a) or nil
+                if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Fifteen: the sixteen CreateBorderControls builds for this include
+            -- set, less the hoisted Show Border. Pinned by test_border_builders,
+            -- which drives a pet-shaped call and counts what comes out.
+            local PET_BORDER_COUNT = 15
+
+            -- What the suppressed Show Border checkbox ran: the state pass and the
+            -- full update. ☠ NOT GUI:RefreshCurrentPage -- a rebuild retires every
+            -- widget on the page including the row being clicked, and the row's
+            -- write path calls row.Refresh() after this returns, on a dead frame.
+            local function OnPetBorderToggle()
+                ApplyPetBorder()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPetBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local petBorderRow = petFrameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = tools.RowDB,
+                toggle   = { key = "petShowBorder" },
+                summary  = PetBorderSummary,
+                count    = PET_BORDER_COUNT,
+                onToggle = OnPetBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            -- ⚠ THE PANE'S GROUP HAS NO disableChildrenOn OF ITS OWN, unlike every
+            -- other builder on this page: CreateBorderControls owns the whole group
+            -- and its composition loop writes disableOn onto each widget it built,
+            -- so the page gate rides on the ROW instead (PetsOffRow below) and the
+            -- classic arm keeps setting it on the box, exactly as it always did.
+            tools.ClaimKeys(petBorderRow, borderContent)
+            tools.WireModifiedTick(petBorderRow)
+            tools.WireFooter(petBorderRow, ApplyPetBorder)
+            tools.RegisterHoistedToggle(petBorderRow, L["Show Border"], "petShowBorder", OnPetBorderToggle)
+            petBorderRow.disableOn = PetsOffRow
+        end
+
+        -- ===== HEALTH BAR (a 280 box in column 2 in classic, the Frame band's
+        -- third row) =====
+        local function BuildPetHealthBarGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Health Bar Color"], healthColorValues, db, "petHealthColorMode", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+                GateRefresh(tools2)
+            end), 55)
+
+            local customHealthColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Custom Health Color"], db, "petHealthColor", false, function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
+            customHealthColor.hideOn = function(d) return d.petHealthColorMode ~= "CUSTOM" end
+
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Health Percentage"], db, "petShowHealthText", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end), 30)
+
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Power Bar"], db, "petShowPowerBar", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+                GateRefresh(tools2)
+            end), 30)
+
+            local petPowerHeight = group:AddWidget(GUI:CreateSlider(parent, L["Power Bar Height"], 1, 12, 1, db, "petPowerBarHeight", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+            petPowerHeight.disableOn = function(d) return not d.petShowPowerBar end  -- grey when power bar off
+
+            local petPowerColorMode = group:AddWidget(GUI:CreateDropdown(parent, L["Power Bar Color"], powerColorValues, db, "petPowerColorMode", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+                GateRefresh(tools2)
+            end), 55)
+            petPowerColorMode.disableOn = function(d) return not d.petShowPowerBar end  -- grey when power bar off
+
+            local customPowerColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Custom Power Color"], db, "petPowerColor", false, function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
+            -- Grey when the power bar is off (boolean fold); HIDE only for the non-CUSTOM
+            -- colour mode (variant gating). The two compose: hidden in non-CUSTOM, greyed
+            -- in CUSTOM while the power bar is off.
+            customPowerColor.disableOn = function(d) return not d.petShowPowerBar end
+            customPowerColor.hideOn = function(d) return d.petPowerColorMode ~= "CUSTOM" end
+        end
+
+        -- The group's own apply: the full pet build every control here commits
+        -- through, plus the lightweight pass the sliders and pickers drag on.
+        local function ApplyPetHealthBar()
+            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end
+
+        if classicLayout then
+            -- HEALTH BAR GROUP (col2)
+            local healthBarGroup = GUI:CreateSettingsGroup(self.child, 280)
+            healthBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Bar"]), 40)
+            BuildPetHealthBarGroup({
+                group = healthBarGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(healthBarGroup, nil, 2)
+        else
+            -- What colour the bar is, then whether there is a second bar under it.
+            -- Both in the controls' own words: the colour mode out of the
+            -- dropdown's option table, the power bar out of its checkbox's label
+            -- (the Dead/Offline row's "Custom Dead Background", same convention),
+            -- and the power bar only when it is on -- it ships off, so a row
+            -- naming it on a default profile would be reporting an absence.
+            --
+            -- ⚠ NO HOIST ON THIS ROW. Show Power Bar is the only boolean in the
+            -- group and it governs three of the seven controls; hoisted, it would
+            -- claim to speak for the four health-bar settings it has nothing to do
+            -- with (the Colour Picker row's precedent), and a row switched off
+            -- would grey a health bar that is always drawn.
+            local function PetHealthBarSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local mode = healthColorValues[d.petHealthColorMode]
+                if mode then parts[#parts + 1] = mode end
+                if d.petShowPowerBar then parts[#parts + 1] = L["Show Power Bar"] end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Seven: the colour mode and its custom colour, the health text tick,
+            -- the power bar tick, its height, its colour mode and its custom
+            -- colour.
+            local PET_HEALTH_BAR_COUNT = 7
+
+            local healthBarMount, healthBarContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPetHealthBarGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local petHealthBarRow = petFrameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Health Bar"],
+                db      = tools.RowDB,
+                summary = PetHealthBarSummary,
+                count   = PET_HEALTH_BAR_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = healthBarMount,
+            }))
+            tools.ClaimKeys(petHealthBarRow, healthBarContent)
+            tools.WireModifiedTick(petHealthBarRow)
+            tools.WireFooter(petHealthBarRow, ApplyPetHealthBar)
+            petHealthBarRow.disableOn = PetsOffRow
+        end
+
+        -- ===== NAME TEXT (a 280 box in column 2 in classic, the Text band's first
+        -- row) =====
+        local function BuildPetNameTextGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
+            group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "petNameFont", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 16, 1, db, "petNameFontSize", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+            group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "petNameFontOutline", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 55)
+            group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "petNameFontOutline", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 30)
+            group:AddWidget(GUI:CreateSlider(parent, L["Max Name Length"], 4, 20, 1, db, "petNameMaxLength", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end), 55)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Name Anchor"], textAnchorValues, db, "petNameAnchor", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 55)
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Name Text Color"], db, "petNameColor", false, function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
+            group:AddWidget(GUI:CreateSlider(parent, L["Name X Offset"], -30, 30, 1, db, "petNameX", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Name Y Offset"], -15, 15, 1, db, "petNameY", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+        end
+
+        -- The two text groups' apply is the same pair: the max-length and the font
+        -- size commit through the full pet build, everything else through the
+        -- lightweight pass.
+        local function ApplyPetText()
+            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+        end
+
+        -- Both text rows print the same three facts in the same order: the font,
+        -- its size, and where the text sits. The NAME comes from
+        -- DF:GetFontNameFromPath -- the addon's own font display-name resolver,
+        -- and the one GUI:CreateFontDropdown itself prints on its button, so the
+        -- row and the control behind it cannot disagree. The anchor word comes out
+        -- of the very table the dropdown offers. One factory, because the two
+        -- groups differ only in their key prefix.
+        local function TextRowSummary(fontKey, sizeKey, anchorKey)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                local fontName = DF.GetFontNameFromPath and DF:GetFontNameFromPath(d[fontKey])
+                if type(fontName) == "string" and fontName ~= "" then
+                    parts[#parts + 1] = fontName
+                end
+                local size = tonumber(d[sizeKey])
+                if size then parts[#parts + 1] = format("%d", math.floor(size)) end
+                local anchor = textAnchorValues[d[anchorKey]]
+                if anchor then parts[#parts + 1] = anchor end
+                return table.concat(parts, " \194\183 ")
+            end
+        end
+
+        if classicLayout then
+            -- NAME TEXT GROUP (col2)
+            local nameTextGroup = GUI:CreateSettingsGroup(self.child, 280)
+            nameTextGroup:AddWidget(GUI:CreateHeader(self.child, L["Name Text"]), 40)
+            BuildPetNameTextGroup({
+                group = nameTextGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(nameTextGroup, nil, 2)
+        else
+            -- Nine: the font, its size, the outline, the shadow tick, the length
+            -- cap, the anchor, the colour and the two offsets. Nothing to hoist --
+            -- a name is always drawn.
+            --
+            -- ⚠ THE OUTLINE KEY IS CLAIMED TWICE, and that is the walk working as
+            -- designed: the outline dropdown and the shadow tick are two views of
+            -- one stored value (petNameFontOutline), so both stamp it. A repeated
+            -- key costs the defaults engine one extra lookup and changes no answer.
+            local PET_NAME_TEXT_COUNT = 9
+
+            local nameMount, nameContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPetNameTextGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local petNameTextRow = petTextBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Name Text"],
+                db      = tools.RowDB,
+                summary = TextRowSummary("petNameFont", "petNameFontSize", "petNameAnchor"),
+                count   = PET_NAME_TEXT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = nameMount,
+            }))
+            tools.ClaimKeys(petNameTextRow, nameContent)
+            tools.WireModifiedTick(petNameTextRow)
+            tools.WireFooter(petNameTextRow, ApplyPetText)
+            petNameTextRow.disableOn = PetsOffRow
+        end
+
+        -- ===== POSITION (attached mode only: a 280 box in column 1 in classic,
+        -- the Layout band's last row) =====
+        -- Built only in ATTACHED mode, exactly as today -- in grouped mode there
+        -- is no owner to sit beside and the Group Settings row above owns the
+        -- placement instead.
+        local function BuildPetPositionGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
             -- ☠ LightweightUpdatePetFrames, NOT UpdateAllPetFramePositions: the
             -- latter branches only on the LIVE tracks (party/raid/arena), so in
             -- test mode these controls silently did nothing on keyboard entry —
             -- mouse drags only "worked" because drag-release runs a full update
             -- that happens to cover test pets (#1047). The lightweight pass is
             -- track-aware, test modes included.
-            positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorValues, db, "petAnchor", function()
+            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorValues, db, "petAnchor", function()
                 if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
             end), 55)
-            positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "petOffsetX", function()
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "petOffsetX", function()
                 if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
             end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-            positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "petOffsetY", function()
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "petOffsetY", function()
                 if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
             end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-            
-            Add(positionGroup, nil, 1)
         end
-        
-        -- HEALTH TEXT GROUP (col2)
-        local healthTextGroup = GUI:CreateSettingsGroup(self.child, 280)
-        healthTextGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Text"]), 40)
-        healthTextGroup.disableChildrenOn = function(d) return not d.petEnabled end
-        healthTextGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "petHealthFont", function()
+
+        -- The group's own apply: the lightweight pass all three controls drive.
+        local function ApplyPetPosition()
             if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        healthTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 14, 1, db, "petHealthFontSize", function()
-            if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        healthTextGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "petHealthFontOutline", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        healthTextGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "petHealthFontOutline", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 30)
-        healthTextGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Health Text Color"], db, "petHealthTextColor", false, function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
-        healthTextGroup:AddWidget(GUI:CreateDropdown(self.child, L["Health Text Anchor"], textAnchorValues, db, "petHealthAnchor", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end), 55)
-        healthTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Health X Offset"], -30, 30, 1, db, "petHealthX", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        healthTextGroup:AddWidget(GUI:CreateSlider(self.child, L["Health Y Offset"], -15, 15, 1, db, "petHealthY", function()
-            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
-        end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
-        Add(healthTextGroup, nil, 2)
+        end
+
+        if not isGroupedMode then
+            if classicLayout then
+                -- POSITION GROUP (col1, Attached mode only)
+                local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
+                positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
+                BuildPetPositionGroup({
+                    group = positionGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(positionGroup, nil, 1)
+            else
+                -- Which side of the owner, then the nudge -- the Group Settings
+                -- row's shape, in the owner's words rather than the raid's. The
+                -- offsets are printed as a pair when either is set (the Border
+                -- Shadow row's convention); petOffsetY ships at -1, so a default
+                -- profile shows both facts.
+                local function PetPositionSummary(d)
+                    if not d then return "" end
+                    local parts = {}
+                    local anchor = anchorValues[d.petAnchor]
+                    if anchor then parts[#parts + 1] = anchor end
+                    local ox = tonumber(d.petOffsetX) or 0
+                    local oy = tonumber(d.petOffsetY) or 0
+                    if ox ~= 0 or oy ~= 0 then
+                        parts[#parts + 1] = format("%d, %d", math.floor(ox), math.floor(oy))
+                    end
+                    return table.concat(parts, " \194\183 ")
+                end
+
+                -- Three: the anchor and its two offsets.
+                local PET_POSITION_COUNT = 3
+
+                local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildPetPositionGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                    GatePaneFirstChild(group)
+                end)
+                local petPositionRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Position"],
+                    db      = tools.RowDB,
+                    summary = PetPositionSummary,
+                    count   = PET_POSITION_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = positionMount,
+                }))
+                tools.ClaimKeys(petPositionRow, positionContent)
+                tools.WireModifiedTick(petPositionRow)
+                tools.WireFooter(petPositionRow, ApplyPetPosition)
+                petPositionRow.disableOn = PetsOffRow
+            end
+        end
+
+        -- ===== HEALTH TEXT (a 280 box in column 2 in classic, the Text band's
+        -- second row) =====
+        local function BuildPetHealthTextGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = function(d) return not d.petEnabled end
+
+            group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "petHealthFont", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 14, 1, db, "petHealthFontSize", function()
+                if DF.ApplyPetSettings then DF:ApplyPetSettings() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+            group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "petHealthFontOutline", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 55)
+            group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "petHealthFontOutline", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 30)
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Health Text Color"], db, "petHealthTextColor", false, function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 35)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Health Text Anchor"], textAnchorValues, db, "petHealthAnchor", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Health X Offset"], -30, 30, 1, db, "petHealthX", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Health Y Offset"], -15, 15, 1, db, "petHealthY", function()
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
+        end
+
+        if classicLayout then
+            -- HEALTH TEXT GROUP (col2)
+            local healthTextGroup = GUI:CreateSettingsGroup(self.child, 280)
+            healthTextGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Text"]), 40)
+            BuildPetHealthTextGroup({
+                group = healthTextGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(healthTextGroup, nil, 2)
+        else
+            -- Eight: the font, its size, the outline, the shadow tick, the colour,
+            -- the anchor and the two offsets. One fewer than Name Text -- there is
+            -- no length cap on a number. The outline key is claimed twice here for
+            -- the same reason it is there.
+            local PET_HEALTH_TEXT_COUNT = 8
+
+            local healthTextMount, healthTextContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPetHealthTextGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local petHealthTextRow = petTextBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Health Text"],
+                db      = tools.RowDB,
+                summary = TextRowSummary("petHealthFont", "petHealthFontSize", "petHealthAnchor"),
+                count   = PET_HEALTH_TEXT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = healthTextMount,
+            }))
+            tools.ClaimKeys(petHealthTextRow, healthTextContent)
+            tools.WireModifiedTick(petHealthTextRow)
+            tools.WireFooter(petHealthTextRow, ApplyPetText)
+            petHealthTextRow.disableOn = PetsOffRow
+        end
+
+        -- ☠ THE BANDS ARE ADDED HERE, NOT WHERE THEY WERE BUILT. `Add` resolves a
+        -- widget's slot height on the spot, so a band has to go in after the last
+        -- row has been put into it -- and all three go in after the two inline
+        -- boxes above, which is what keeps the page's own enable first.
+        if not classicLayout then
+            Add(petLayoutBand, nil, "both")
+            Add(petFrameBand, nil, "both")
+            Add(petTextBand, nil, "both")
+        end
     end)
     
     -- General > Settings (mode enable/disable, Blizzard frame toggles, profile-wide settings)
