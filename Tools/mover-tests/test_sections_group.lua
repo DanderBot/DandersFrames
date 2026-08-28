@@ -290,4 +290,71 @@ do
     host:SetSurfaceStyle(nil)
 end
 
+-- ============================================================
+-- RefreshChildValues -- THE VALUE SWEEP
+-- ------------------------------------------------------------
+-- ☠ THE BUG IT EXISTS FOR: with a feature row's popout open, "Reset Group" wrote
+-- thirteen keys, moved the frames and repainted the row summary -- and left every
+-- control inside the panel showing the values it had before. The undo of that
+-- reset had the identical gap, because it replays the same apply.
+--
+-- The reason is that RefreshChildStates is about a widget's STATE (greyed or
+-- not, plus whatever refreshContent a page bolted on for dynamic captions). A
+-- checkbox's tick, a slider's thumb, a dropdown's caption and a swatch are none
+-- of those -- the factories paint them at build and on their own OnShow, on the
+-- assumption that nothing writes a setting except the widget bound to it. A
+-- group reset is precisely the write that breaks that assumption.
+-- ============================================================
+print("-- Group: RefreshChildValues repaints bound values")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+
+    local hits = {}
+    local function valued(name)
+        local w = control(20)
+        w.refreshValue = function() hits[#hits + 1] = name end
+        return g:AddWidget(w, 20)
+    end
+
+    local header = g:AddWidget(control(20), 20)     -- no hook: a label, a header
+    valued("check")
+    valued("slider")
+    valued("swatch")
+
+    g:RefreshChildValues()
+    eq(#hits, 3, "values: every child that opted in was repainted")
+    eq(hits[1], "check", "values: ...in layout order")
+    eq(hits[3], "swatch", "values: ...to the last one")
+    check(rawget(header, "refreshValue") == nil,
+          "values: a widget with no bound value is simply skipped, not errored on")
+
+    -- ⚠ HIDDEN CHILDREN TOO, unlike the refreshContent half of
+    -- RefreshChildStates. A control hidden by a hideOn is still bound to a key a
+    -- reset just moved, and it is one predicate away from being on screen -- so
+    -- leaving it stale only defers the wrong number to the moment it appears.
+    hits = {}
+    local hidden = valued("hidden")
+    hidden.IsShown = function() return false end
+    g:RefreshChildValues()
+    eq(#hits, 4, "values: a hidden child is repainted as well")
+end
+
+-- ...and it is NOT folded into the state sweep. RefreshChildStates runs on every
+-- page RefreshStates, including ones a slider drag triggers, and a value repaint
+-- mid-drag snaps the thumb from where the mouse is back to the last committed
+-- step -- every step.
+print("-- Group: RefreshChildStates leaves bound values alone")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    local painted = 0
+    local w = control(20)
+    w.refreshValue = function() painted = painted + 1 end
+    g:AddWidget(w, 20)
+
+    g:RefreshChildStates()
+    eq(painted, 0, "states: the state sweep does not repaint values")
+    g:RefreshChildValues()
+    eq(painted, 1, "states: ...only the value sweep does")
+end
+
 CreateFrame = prevCreateFrame

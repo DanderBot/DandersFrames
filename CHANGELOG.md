@@ -15,6 +15,10 @@
 ### Bug Fixes
 
 - (Settings) Fix the settings window freezing the game for several seconds every time you opened or closed it after using the search box.
+- (Settings) Fix a long pause when opening the Changed Settings page, or searching, for the first time.
+- (Settings) Fix arrows showing as empty boxes on the Changed Settings page and in undo messages.
+- (Settings) Fix "Reset Group" leaving the controls inside an open panel showing their old values. Undo of a reset had the same problem.
+- (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
 - (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
 - (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
 - (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.
@@ -23,6 +27,7 @@
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
+- (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
 
 ## [5.3.1]
 

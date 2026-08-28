@@ -1951,6 +1951,22 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local dimHex = format("%02x%02x%02x",
             math.floor(cd.r * 255), math.floor(cd.g * 255), math.floor(cd.b * 255))
 
+        -- ☠ AN ICON, NOT AN ARROW CHARACTER. This was "\226\134\146" (U+2192 →)
+        -- and it rendered as an EMPTY BOX in game -- "2 ⃞ 1" in the report -- for
+        -- the same reason the Cyrillic and CJK squares happened: the settings
+        -- panel draws in the user's Settings Font, and the shipped default ("DF
+        -- Roboto SemiBold") carries Latin and punctuation and nothing else. Our
+        -- own art cannot be missing from the font, because it is not in a font.
+        -- Tinted to the dim colour by GUI:InlineIcon: a |cff escape does not
+        -- reach a texture, and a white arrow beside grey text reads as a
+        -- highlight rather than as punctuation.
+        --
+        -- ⚠ THE COPY-AS-TEXT BLOCK KEEPS ITS ASCII ">". It is pasted into a
+        -- support thread, where an inline texture escape is seven words of
+        -- gibberish -- ChangedSettings.BuildText already builds that half from
+        -- FormatValue's `ascii` path and is untouched by this.
+        local arrow = GUI:InlineIcon("chevron_right", 10, cd)
+
         -- ===== THE KNOWN GAP, STATED =====
         -- Not hidden, and shown on the EMPTY page too -- that is the reading it
         -- most has to survive, because "Everything is at its defaults" with no
@@ -2032,10 +2048,28 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
                 local value = rowBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
                 value:SetPoint("RIGHT", rowBtn, "RIGHT", -8, 0)
+                -- ☠ AND A LEFT BOUND, which is what actually clips. A FontString
+                -- anchored on ONE edge with word wrap off is unbounded on the
+                -- other: it grows to fit its string, which for a stored texture
+                -- path (the reported case) meant a cell running off the left of
+                -- the row and out of the page. The right edge was never the
+                -- problem -- it was pinned all along.
+                --
+                -- Anchored to the row's CENTRE rather than to a pixel column, so
+                -- the split tracks whatever width the group hands the row: half
+                -- for the setting's name, half for its value. Nothing moves for a
+                -- row whose two strings already fit, because both are justified
+                -- to their OUTER edges; a value that does not fit truncates
+                -- instead of escaping.
+                --
+                -- ⚠ No cycle with `name` below, which anchors its right edge to
+                -- this string's left: that edge is now fixed to rowBtn, so both
+                -- resolve from the row and neither waits on the other.
+                value:SetPoint("LEFT", rowBtn, "CENTER", 0, 0)
                 value:SetJustifyH("RIGHT")
                 value:SetWordWrap(false)
-                value:SetText(format("%s |cff%s\226\134\146 %s|r",
-                    CS.FormatValue(row.current), dimHex, CS.FormatValue(row.default)))
+                value:SetText(format("%s %s|cff%s%s|r",
+                    CS.FormatValue(row.current), arrow, dimHex, CS.FormatValue(row.default)))
                 -- The CURRENT half at full text weight, the "-> default" half
                 -- dimmed by the escape above. The current value is what the user
                 -- came to read; the default is context.

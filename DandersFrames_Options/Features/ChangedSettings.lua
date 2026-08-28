@@ -91,19 +91,83 @@ local function Channel255(c)
     return floor(c * 255 + 0.5)
 end
 
+-- ============================================================
+-- MEDIA PATHS
+-- ============================================================
+
+-- File extensions the media library's own art carries. Stripped from a filename
+-- fallback because "Minimalist" and "Minimalist.tga" say the same thing to a
+-- reader and only one of them fits in a cell.
+local MEDIA_EXT = { tga = true, blp = true, ttf = true, otf = true, ogg = true, mp3 = true }
+
+-- Is this string a MEDIA PATH rather than a setting value, and if so, what does
+-- a person call it?
+--
+-- ☠ THE REPORTED BUG: a statusbar texture is STORED as its full path, so a
+-- changed one printed as
+--   Interface\AddOns\DandersFrames\Media\Textures\DF_Smooth.tga
+-- in a two-column row 244 pixels wide -- which ran off the right of the page.
+--
+-- ⚠ THE TEST IS A BACKSLASH (or an "Interface/" prefix), NOT "contains a
+-- slash". Settings hold user-authored strings too, and the Text Designer's
+-- formats are full of forward slashes -- "%cur/%max" is a setting, not a file,
+-- and shortening it to "%max" would be a report that lies about the value. No
+-- WoW media path lacks a backslash, so the narrower test costs nothing.
+--
+-- The NAME comes from DF:GetTextureNameFromPath, which is the addon's existing
+-- path->display-name resolver (it walks the LibSharedMedia statusbar list, with
+-- separator, case and Interface-prefix normalisation, and falls back to the bare
+-- filename). Not re-implemented here: a second resolver would be free to
+-- disagree with the dropdown the user picked the texture from, and the whole
+-- point of the ledger is that it names things the way the pages do.
+--
+-- Returns nil for anything that is not a path, so the caller falls through to
+-- the string as stored.
+local function MediaName(v)
+    if not (v:find("\\", 1, true) or v:find("^[Ii]nterface/")) then return nil end
+
+    local name = DF.GetTextureNameFromPath and DF:GetTextureNameFromPath(v) or nil
+    if type(name) ~= "string" or name == "" then
+        -- Fonts, borders and sounds do not go through that resolver, and an
+        -- unregistered texture falls out of the bottom of it. The last segment
+        -- of the path is what a person would call the file either way.
+        name = v:match("([^/\\]+)$")
+    end
+    if type(name) ~= "string" or name == "" then return nil end
+
+    -- The resolver's own last resort hands back the filename WITH its extension,
+    -- and this cannot tell that apart from a registered name -- so the strip runs
+    -- on both. It is a no-op on a real display name ("Blizzard Raid Bar" ends in
+    -- no extension) and only ever fires on something that looks like a file.
+    local base, ext = name:match("^(.+)%.(%w+)$")
+    if base and base ~= "" and MEDIA_EXT[ext:lower()] then name = base end
+
+    return name
+end
+
 -- One setting value -> one short display string.
 --
 --   numbers        as-is: whole numbers plain, fractions to six significant
 --                  figures (%.6g, which prints 0.35 as "0.35" and 26 as "26"
 --                  without inventing trailing zeros on either).
 --   booleans       On / Off
+--   media paths    the name the media dropdown shows, never the path
 --   colour tables  #RRGGBB
 --   other tables   an ellipsis -- a nested block (the aura designer's, a
 --                  position) has no honest one-line form, and pretending
 --                  otherwise reads worse than admitting it.
 --
--- `ascii` is for the copy-to-clipboard text: it drops the localised words and
--- the ellipsis glyph so the pasted block survives any client and any forum.
+-- ☠ THE ELLIPSIS IS THREE DOTS, NOT U+2026. It used to be the single character
+-- on the page and ASCII only in the copy block, and the page half rendered as an
+-- EMPTY BOX in game: the settings panel draws in the user's Settings Font and
+-- the shipped default ("DF Roboto SemiBold") carries Latin, digits and
+-- punctuation and nothing else -- the same reason the ledger's arrow had to
+-- become an icon. An arrow has art to fall back on; an ellipsis does not need
+-- any, because "..." says the identical thing in a glyph every font has.
+--
+-- `ascii` therefore no longer changes this branch -- it is now only about the
+-- localised words (On/Off), which the copy block drops so a pasted report reads
+-- the same in a support thread whatever locale wrote it.
 -- NaN is named rather than run through %g, whose output for it is
 -- platform-dependent and would make the tests answer differently per machine.
 function ChangedSettings.FormatValue(v, ascii)
@@ -127,12 +191,16 @@ function ChangedSettings.FormatValue(v, ascii)
         return format("%.6g", v)
     end
 
-    if t == "string" then return v end
+    -- ⚠ THE SHORT FORM IN BOTH, `ascii` or not. The copy block is pasted into a
+    -- support thread and read by someone who did not write it, and an 80-column
+    -- texture path is no more use to them than it was on the page -- what they
+    -- want to know is which texture, which is the name.
+    if t == "string" then return MediaName(v) or v end
 
     if t == "table" then
         local r, g, b = ColorChannels(v)
         if r then return format("#%02X%02X%02X", Channel255(r), Channel255(g), Channel255(b)) end
-        return ascii and "..." or "…"
+        return "..."
     end
 
     return tostring(v)
@@ -320,19 +388,49 @@ end
 -- as a one-line hint rather than as "nothing changed" -- an empty ledger and an
 -- unbuilt one look identical on screen and mean opposite things.
 --   "combat"   a registry build is due and we will not run one mid-fight
+--   "building" a budgeted build is under way; the page refreshes itself when it
+--              lands (see the waiter below)
 --   "unbuilt"  the panel cannot produce a registry at all yet
 function ChangedSettings:BuildReport(GUI)
     local Search = DF.Search
     if not Search then return nil, "unbuilt" end
 
-    -- ☠ NO REGISTRY BUILD IN COMBAT. Building it re-runs all ~34 page builders
-    -- -- the same reason the search box refuses to search mid-fight -- and a
-    -- report is never worth a hitch in the middle of a pull. An ALREADY-built
-    -- registry costs nothing, so the guard is on the build, not on the page:
-    -- open the ledger before the pull and it keeps working through it.
-    if Search:RegistryIsStale() and InCombatLockdown() then return nil, "combat" end
+    -- ⚠ THE FLAG IS CHECKED AS WELL AS THE STALENESS, and it is not redundant
+    -- belt-and-braces. A build in flight has already emptied Search.Registry, so
+    -- today RegistryIsStale answers true for both -- but the thing that must
+    -- never happen here is reading a HALF-FILLED index and printing it as the
+    -- user's configuration, and that deserves to be said rather than inferred
+    -- from another function's implementation.
+    if Search:RegistryIsStale() or Search.RegistryBuilding then
+        -- ☠ NO REGISTRY BUILD IN COMBAT. Building it re-runs all ~34 page
+        -- builders -- the same reason the search box refuses to search mid-fight
+        -- -- and a report is never worth a hitch in the middle of a pull. An
+        -- ALREADY-built registry costs nothing, so the guard is on the build,
+        -- not on the page: open the ledger before the pull and it keeps working
+        -- through it.
+        if InCombatLockdown() then return nil, "combat" end
 
-    Search:EnsureRegistry()
+        -- ☠ BUDGETED, NOT SYNCHRONOUS. This call is what "the ledger lags like
+        -- crazy when opening" was: a cold registry means ~34 page builders, and
+        -- running them inside this page's own build put every one of them in the
+        -- frame that drew the page. Now the page renders its "building" state
+        -- immediately and rebuilds itself when the last slice lands.
+        --
+        -- ⚠ THE WAITER RE-CHECKS WHAT IS ON SCREEN. A build takes several
+        -- frames, and the user can navigate away inside them; refreshing the
+        -- page they left would rebuild a page nobody is looking at, and
+        -- RefreshCurrentPage would rebuild the WRONG one.
+        Search:EnsureRegistryAsync(function(ok)
+            if not ok then return end
+            if not (GUI and GUI.CurrentPageName == ChangedSettings.PAGE_ID) then return end
+            local page = GUI.Pages and GUI.Pages[ChangedSettings.PAGE_ID]
+            if page and page.Refresh and page:IsShown() then page:Refresh() end
+        end)
+        -- Unconditionally: EnsureRegistryAsync defers every path, so there is no
+        -- arm of it that can hand this call a usable registry before it returns.
+        return nil, "building"
+    end
+
     local registry = Search.Registry
     if not registry or #registry == 0 then return nil, "unbuilt" end
 

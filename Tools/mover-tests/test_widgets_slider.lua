@@ -1386,6 +1386,66 @@ do
     eq(db.frameWidth, 160, "legacy host: ...and the write landed")
 end
 
+-- ============================================================
+-- refreshValue -- THE GROUP-WIDE VALUE SWEEP'S HOOK
+-- ------------------------------------------------------------
+-- A group reset (the popout footer's "Reset Group", and the undo of one) writes
+-- every key behind the widgets' backs, so the controls have to be told to
+-- re-read. DandersUI Sections' RefreshChildValues walks a group calling this ONE
+-- name; the factories alias whatever they called it privately onto it, so a
+-- caller never has to know which kind of control it is holding.
+--
+-- ☠ IT MUST READ THE SOURCE, not a remembered value. That is the whole failure
+-- being fixed: the slider was showing the number it was built with while the db
+-- held the default the reset had just written.
+-- ============================================================
+do
+    local host = newHost(true)
+    local value = 26
+    local s = host:CreateSlider(pane(), {
+        label = "Border Thickness", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+        onChanged = function() end,
+    })
+    check(type(s.refreshValue) == "function", "refreshValue: the slider carries the hook")
+    eq(s.refreshValue, s.RefreshValue, "refreshValue: ...as the alias of its own re-read")
+
+    -- The write nothing told the widget about.
+    value = 2
+    s:refreshValue()
+    eq(s.slider:GetValue(), 2, "refreshValue: the thumb moved to what the db now holds")
+    eq(inputOf(s):GetText(), "2", "refreshValue: ...and so did the number beside it")
+
+    -- Clamped, not blindly written: an imported profile can carry a value the
+    -- slider's range does not cover, and SetValue would silently take the bound.
+    value = 5000
+    s:refreshValue()
+    eq(s.slider:GetValue(), 100, "refreshValue: an out-of-range value clamps to the track")
+end
+
+do
+    -- The dropdown's "value" is the caption it shows.
+    local host = newHost(true)
+    local pick = "SOLID"
+    local d = host:CreateDropdown(pane(), {
+        label   = "Border Style",
+        options = { SOLID = "Solid", TEXTURE = "Texture" },
+        get = function() return pick end,
+        set = function(v) pick = v end,
+    })
+    check(type(d.refreshValue) == "function", "refreshValue: the dropdown carries the hook")
+    pick = "TEXTURE"
+    d:refreshValue()
+    eq(d.opener.Text:GetText(), "Texture", "refreshValue: the opener re-reads its caption")
+end
+
+-- ⚠ The CHECKBOX and the COLOUR PICKER are wired the same way and are not
+-- exercised here: this file's host has no PixelUtil, which UI:StyleCheckButton
+-- needs at build, and the settings-panel colour picker lives in the companion
+-- addon, which does not load headlessly at all. Both aliases are pinned as
+-- source in test_group_actions.lua instead.
+
 -- ---- restore the globals -------------------------------------------
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 CreateColor, GetCursorPosition = prevCreateColor, prevCursor

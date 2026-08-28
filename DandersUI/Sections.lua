@@ -492,6 +492,40 @@ function UI:CreateSettingsGroup(parent, width, opts)
         end
     end
 
+    -- Re-read every child's BOUND VALUE out of the settings table and repaint it.
+    --
+    -- ☠ THIS IS NOT WHAT RefreshChildStates DOES, and the difference is the bug
+    -- it was added for. That one is about a widget's STATE -- greyed or not, and
+    -- whatever `refreshContent` a page bolted on for dynamic captions. A
+    -- checkbox's tick, a slider's thumb, a dropdown's caption and a swatch's
+    -- colour are none of those: the factories paint them once at build and then
+    -- on their own OnShow, on the reasonable assumption that nothing changes a
+    -- setting except the widget bound to it.
+    --
+    -- A GROUP RESET breaks that assumption -- it writes thirteen keys behind
+    -- every widget's back -- and so does the UNDO of one, which replays the same
+    -- apply. With the popout open, the reset moved the frames and the row summary
+    -- and left every control inside the panel showing the old numbers.
+    --
+    -- ⚠ DELIBERATELY NOT FOLDED INTO RefreshChildStates. That runs on every page
+    -- RefreshStates, including ones a slider drag triggers -- and a value repaint
+    -- in the middle of a drag would snap the thumb from where the mouse is to the
+    -- last quantised step, every step. This runs where a write happened that the
+    -- widgets could not have seen.
+    --
+    -- `refreshValue` is the one name a factory opts in with; the four spellings
+    -- the factories used to expose privately (Refresh / RefreshValue /
+    -- UpdateText / UpdateSwatch) are aliased onto it at their own definitions,
+    -- so a consumer never has to know which kind of control it is holding.
+    group.RefreshChildValues = function(self)
+        for _, entry in ipairs(self.groupChildren) do
+            local widget = entry.widget
+            if widget and widget.refreshValue then
+                widget:refreshValue()
+            end
+        end
+    end
+
     return group
 end
 

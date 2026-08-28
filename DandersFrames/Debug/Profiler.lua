@@ -576,6 +576,23 @@ local PROFILED_FUNCTIONS = {
     "FullProfileRefresh",
     "GUI.PageRefreshStates",
 
+    -- The settings SEARCH INDEX (options companion, resolving like
+    -- GUI.PageRefreshStates above -- named as missing until the panel loads).
+    -- These are the rows that answer "why did opening the Changed Settings page
+    -- hitch": one build re-runs ~34 page builders, so BuildFullRegistry's
+    -- ms-per-call IS the hitch, and its CALL COUNT is how many times the panel
+    -- threw the whole index away (every party/raid switch does).
+    --
+    -- ⚠ THE BUDGETED ONE READS DIFFERENTLY, on purpose. It returns after
+    -- queueing, so its ms column is ~0 by design -- the work lands in the
+    -- per-frame slices, which no wrapper sees. Read it as "a build was started
+    -- off the frame", and read BuildFullRegistry beside it as "a build was paid
+    -- for in one". A budgeted count with a synchronous count of zero is the fix
+    -- working.
+    "Search.BuildFullRegistry",
+    "Search.BuildFullRegistryBudgeted",
+    "ChangedSettings.BuildReport",
+
     "LightweightUpdateFrameSize",
     "LightweightUpdateFrameSpacing",
     "LightweightUpdateRaidLayout",

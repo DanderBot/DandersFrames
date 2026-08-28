@@ -445,7 +445,37 @@ function DF:CreateGUI()
     if DF.GUIFrame then return end
     
     -- Default and saved sizes
-    local defaultWidth, defaultHeight = 760, 520
+    --
+    -- ★ 640x600, AND ONLY THE DEFAULT. A first-run window is 120px narrower and
+    -- 80px taller than the 760x520 it was -- an interim step toward the slim
+    -- shell, and the height is what pays for the width: a narrower page is a
+    -- longer one.
+    --
+    -- ⚠ IT STAYS SINGLE-COLUMN, and it already was. The cutover is 590 CONTENT
+    -- pixels (SettingsBox.minCol * 2 + colGutter), which is a 777px window once
+    -- the two margins, the 155 nav and its gap are paid for -- so 760 was under
+    -- it too. Narrowing to 640 does not change the column count of any page; it
+    -- just stops the window claiming 120px it was not laying anything out in.
+    --
+    -- ⚠ NOBODY WHO ALREADY HAS A WINDOW MOVES. guiDb.width/height are read
+    -- below and win outright -- these two are what a profile with no stored size
+    -- falls back to, which after the account-wide move (see DF:GetWindowState)
+    -- means a fresh install and nothing else.
+    --
+    -- ...and the RESIZE FLOOR is untouched at 520x400, deliberately: the default
+    -- is not a minimum, and a user who wants it smaller than it opens should
+    -- keep being able to drag it there. See normalMinWidth below, and
+    -- ApplyPageWidthBounds, which raises the floor to 850 on the four wide pages
+    -- -- opening one of those from a 640 window widens it, exactly as it already
+    -- did from 760.
+    --
+    -- ⚠ THE NUMBERS THEMSELVES LIVE IN THE RESIDENT GUI.lua (GUI.WindowDefaults).
+    -- `/df resetgui` writes the default back into the window state from Core.lua,
+    -- which can run before this companion has ever loaded -- so a literal here
+    -- and a literal there were free to disagree, and a reset would "restore the
+    -- default" to a size the addon no longer ships.
+    local defaultWidth  = GUI.WindowDefaults.width
+    local defaultHeight = GUI.WindowDefaults.height
     local minWidth, minHeight = 520, 400
     local maxWidth, maxHeight = 1200, 900
     
@@ -1492,9 +1522,17 @@ function DF:CreateGUI()
         --
         -- %.4g, because a slider step lands on 0.30000000000000004 as readily as
         -- on 0.3 and the toast has to read like the number the user set.
+        --
+        -- ☠ THE ARROW IS AN ICON, NOT A CHARACTER. This read "(%.4g → %.4g)" and
+        -- the → came out as an empty box in game: the panel draws in the user's
+        -- Settings Font and the shipped default ("DF Roboto SemiBold") has no
+        -- arrows in it. Same failure as the CJK squares, one Unicode block along.
+        -- Built once, outside Detail: it is a constant string and the toast fires
+        -- on every undo keypress.
+        local toastArrow = GUI:InlineIcon("chevron_right", 10, C_TEXT_DIM)
         local function Detail(entry)
             if type(entry.old) == "number" and type(entry.new) == "number" then
-                return string.format(" (%.4g → %.4g)", entry.old, entry.new)
+                return string.format(" (%.4g %s %.4g)", entry.old, toastArrow, entry.new)
             end
             return ""
         end

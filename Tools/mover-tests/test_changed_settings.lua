@@ -97,10 +97,17 @@ do
     eq(F({ r = 2, g = -1, b = 0.5 }), "#FF0080", "format: channels clamp instead of overflowing")
 
     -- Anything else table-shaped has no honest one-line form.
-    eq(F({ x = 0, y = -325 }), "\226\128\166", "format: an opaque table is an ellipsis")
-    eq(F({ x = 0, y = -325 }, true), "...", "format: ...and three dots in ASCII")
-    eq(F({}), "\226\128\166", "format: an empty table too")
-    eq(F({ r = 1, g = 1 }), "\226\128\166", "format: a table with only two channels is not a colour")
+    --
+    -- ☠ THREE DOTS ON BOTH SIDES, not U+2026 on the page and "..." in the copy
+    -- block. The single character rendered as an EMPTY BOX in game: the settings
+    -- panel draws in the user's Settings Font and the shipped default carries
+    -- Latin and punctuation only -- the same reason the ledger's arrow became an
+    -- icon. An ellipsis needs no art, because "..." says the identical thing in
+    -- glyphs every font has.
+    eq(F({ x = 0, y = -325 }), "...", "format: an opaque table is an ellipsis")
+    eq(F({ x = 0, y = -325 }, true), "...", "format: ...spelled the same way in ASCII")
+    eq(F({}), "...", "format: an empty table too")
+    eq(F({ r = 1, g = 1 }), "...", "format: a table with only two channels is not a colour")
 
     eq(F(nil), "-", "format: a missing value is a dash, not the word nil")
 
@@ -117,6 +124,73 @@ do
     local clean = true
     for i = 1, #s do if s:byte(i) > 126 then clean = false end end
     check(clean, "format: the ASCII form of an opaque table is 7-bit")
+end
+
+-- ============================================================
+-- 5b. MEDIA PATHS
+-- ------------------------------------------------------------
+-- ☠ THE REPORTED BUG: a statusbar texture is STORED as its full path, so a
+-- changed one printed as
+--   Interface\AddOns\DandersFrames\Media\Textures\DF_Smooth.tga
+-- into a two-column row about 244 pixels wide -- which ran off the page.
+--
+-- The report says what the DROPDOWN says, which means going through the
+-- addon's existing path->name resolver rather than a second one written here:
+-- two resolvers are free to disagree, and then the ledger names a texture
+-- differently from the page the user picked it on.
+-- ============================================================
+do
+    local F = CS.FormatValue
+
+    -- The resolver, stubbed to exactly the shape the real one has: a registered
+    -- path answers with its display name, an unregistered one falls out of the
+    -- bottom as the bare filename WITH its extension. (The real one is
+    -- DF:GetTextureNameFromPath in Core/Config.lua, loaded further down this file
+    -- -- so this block owns the stub and drops it at the end.)
+    local REGISTERED = {
+        ["Interface\\AddOns\\DandersFrames\\Media\\Textures\\DF_Smooth.tga"] = "DF Smooth",
+        ["Interface\\AddOns\\SharedMedia\\statusbar\\Minimalist"]            = "Minimalist",
+    }
+    function DF:GetTextureNameFromPath(path)
+        return REGISTERED[path] or path:match("([^/\\]+)$")
+    end
+
+    eq(F("Interface\\AddOns\\DandersFrames\\Media\\Textures\\DF_Smooth.tga"), "DF Smooth",
+       "media: a registered texture prints the name the dropdown shows")
+    eq(F("Interface\\AddOns\\SharedMedia\\statusbar\\Minimalist"), "Minimalist",
+       "media: ...whether or not the file had an extension")
+
+    -- ⚠ THE SAME SHORT FORM IN THE COPY BLOCK. An 80-column path is no more use
+    -- to the person reading a support thread than it was on the page.
+    eq(F("Interface\\AddOns\\DandersFrames\\Media\\Textures\\DF_Smooth.tga", true), "DF Smooth",
+       "media: the ASCII form is the name too, not the path")
+
+    -- Unregistered: the filename, without the extension. A texture from an addon
+    -- the user has since removed still has to say SOMETHING a person can read.
+    eq(F("Interface\\AddOns\\Gone\\bars\\Aluminium.tga"), "Aluminium",
+       "media: an unresolvable path falls back to the filename")
+    eq(F("Interface\\Buttons\\WHITE8X8"), "WHITE8X8",
+       "media: ...and a path with no extension is just its last segment")
+    eq(F("Interface/AddOns/Gone/bars/Charcoal.blp"), "Charcoal",
+       "media: forward slashes count too, behind the Interface prefix")
+
+    -- ☠ AND THE THING THAT MUST NOT HAPPEN. Settings hold user-authored strings,
+    -- and the Text Designer's formats are full of forward slashes -- "%cur/%max"
+    -- is a setting, not a file, and shortening it to "%max" would be a report
+    -- that lies about the value. The test is a BACKSLASH (or an Interface
+    -- prefix), which no WoW media path lacks and no format string has.
+    eq(F("%cur/%max"), "%cur/%max", "media: a text format is not a path")
+    eq(F("a/b/c"), "a/b/c", "media: ...nor is any other bare slashed string")
+    eq(F("BOTTOMLEFT"), "BOTTOMLEFT", "media: an anchor is still itself")
+    eq(F("DF Roboto SemiBold"), "DF Roboto SemiBold", "media: ...and so is a font NAME")
+    eq(F(""), "", "media: an empty string is untouched")
+
+    -- The extension strip is only for extensions. A display name that happens to
+    -- contain a dot keeps everything after it.
+    eq(F("Interface\\x\\Details.Flat"), "Details.Flat",
+       "media: a dotted filename whose suffix is not a media extension is kept whole")
+
+    DF.GetTextureNameFromPath = nil
 end
 
 -- ============================================================
@@ -391,7 +465,7 @@ do
 end
 
 -- ============================================================
--- BuildReport -- THE TWO REFUSALS
+-- BuildReport -- THE REFUSALS
 -- The page renders whatever this returns, so "cannot answer" has to be
 -- distinguishable from "nothing changed". They look identical on screen and
 -- mean opposite things: one says the profile is clean, the other says nothing
@@ -401,18 +475,33 @@ end
 do
     local GUI = { SelectedMode = "party", CategoryOrder = {}, Categories = {} }
 
-    -- A stand-in for Features/Search.lua: the two entry points BuildReport uses,
+    -- A stand-in for Features/Search.lua: the entry points BuildReport uses,
     -- with a build that is recorded rather than performed. The REAL pair is
-    -- driven by test_page_parking; what matters here is only which of them
+    -- driven by test_search_registry; what matters here is only which of them
     -- BuildReport calls, and when.
-    local builds = 0
+    --
+    -- ⚠ THE BUILD IS ASYNC NOW. EnsureRegistryAsync starts a budgeted build and
+    -- answers "building"; the report is not available in the same call, and the
+    -- page shows its building state until the waiter fires. `finish` is this
+    -- fake's stand-in for the frames that would have passed.
+    local builds, waiter = 0, nil
     local fakeSearch = {
         Registry = { { dbKey = "absorbBarHeight", label = "Height", tab = "bars_absorb", tabLabel = "Absorbs" } },
         stale = false,
     }
     function fakeSearch:RegistryIsStale() return self.stale end
-    function fakeSearch:EnsureRegistry()
-        if self.stale then builds = builds + 1; self.stale = false end
+    function fakeSearch:EnsureRegistryAsync(onReady)
+        if not self.stale then return "ready" end
+        builds = builds + 1
+        self.RegistryBuilding = true
+        waiter = onReady
+        return "building"
+    end
+    local function finish()
+        fakeSearch.stale = false
+        fakeSearch.RegistryBuilding = false
+        local fn = waiter; waiter = nil
+        if fn then fn(true) end
     end
     DF.Search = fakeSearch
 
@@ -443,12 +532,32 @@ do
     check(report ~= nil, "report: an already-built registry answers in combat")
     eq(report.count, 1, "report: ...with the same answer as out of combat")
 
-    -- Out of combat, stale: it builds.
+    -- Out of combat, stale: it starts a BUDGETED build and says so. ☠ THE PAGE
+    -- MUST NOT GET A REPORT HERE. This call is made from inside the ledger's own
+    -- page build; answering it synchronously is what put ~34 page builders in
+    -- the frame that drew the page ("lags like crazy").
     IN_COMBAT = false
     fakeSearch.stale = true
-    report = CS:BuildReport(GUI)
-    eq(builds, 1, "report: out of combat a stale registry IS rebuilt")
-    check(report ~= nil, "report: ...and answers afterwards")
+    report, reason = CS:BuildReport(GUI)
+    eq(builds, 1, "report: out of combat a stale registry starts a build")
+    eq(report, nil, "report: ...and does NOT answer in the same call")
+    eq(reason, "building", "report: ...it names the build as the reason")
+
+    -- ...and once the build lands, the same call answers.
+    finish()
+    report, reason = CS:BuildReport(GUI)
+    check(report ~= nil, "report: a landed build answers")
+    eq(reason, nil, "report: ...with no reason attached")
+    eq(builds, 1, "report: ...and started no second build")
+
+    -- A build already in flight is not a second build, and is still not an
+    -- answer: two surfaces (the ledger and the search box) can be waiting on one.
+    fakeSearch.RegistryBuilding = true
+    report, reason = CS:BuildReport(GUI)
+    eq(report, nil, "report: a build in flight does not answer")
+    eq(reason, "building", "report: ...it reports the build")
+    eq(builds, 1, "report: ...and does not start another")
+    fakeSearch.RegistryBuilding = false
 
     -- The other refusals, each with the honest reason rather than an empty report.
     local savedSearch = DF.Search
@@ -473,6 +582,71 @@ do
 
     DF.Search = nil
     IN_COMBAT = false
+end
+
+-- ============================================================
+-- NO BARE GLYPHS ON THE SURFACES THIS PAGE DRAWS
+-- ------------------------------------------------------------
+-- ☠ WOW FONTS DO NOT HAVE ARROWS. The settings panel renders in the user's
+-- Settings Font and the shipped default ("DF Roboto SemiBold") -- like most font
+-- files an addon bundles -- carries Latin, digits and punctuation and nothing
+-- else. Anything outside that draws as an EMPTY BOX, which is what a ledger row
+-- was in game: "2 ⃞ 1" where it should have read "2 → 1". Same failure mode as
+-- the Cyrillic and CJK squares (#1054), one Unicode block along.
+--
+-- The fix is art we ship, through GUI:InlineIcon, because art cannot be missing
+-- from a font it is not in. These two lines are the whole reach a headless test
+-- has into a page it cannot load, so they pin exactly that: the two strings that
+-- had the arrow build it from the icon, and neither of the files still carries a
+-- raw U+2192 anywhere a FontString could pick it up.
+-- ============================================================
+do
+    local ARROW = "\226\134\146"        -- U+2192, the character that boxed
+
+    -- ⚠ CODE ONLY. The comments explaining this fix quote the character they are
+    -- about, and a check that banned it from those would ban writing the reason
+    -- down. Everything before a `--` is what can reach a FontString.
+    local function arrowInCode(src)
+        for line in (src .. "\n"):gmatch("([^\n]*)\n") do
+            local code = line:match("^(.-)%-%-") or line
+            if code:find(ARROW, 1, true) then return line end
+        end
+        return nil
+    end
+
+    local ledger = options_file_source("GUI/Pages/Modules.lua")
+    check(ledger:find('GUI:InlineIcon("chevron_right"', 1, true) ~= nil,
+          "glyphs: the ledger row's arrow is an inline icon")
+
+    -- ☠ AND THE ROW'S VALUE CELL IS BOUNDED ON BOTH EDGES. A FontString
+    -- anchored on ONE edge with word wrap off is unbounded on the other: it
+    -- grows to fit its string, which for a stored texture path meant a cell
+    -- running off the left of the row and out of the page. Shortening the path
+    -- (above) fixes the case that was reported; this is what stops the NEXT long
+    -- value doing it. Belt-and-braces on purpose, so both have to be removed for
+    -- the bug to come back.
+    check(ledger:find('value:SetPoint("LEFT", rowBtn, "CENTER", 0, 0)', 1, true) ~= nil,
+          "glyphs: the value cell has a left bound, so a long value truncates")
+    check(ledger:find("value:SetWordWrap(false)", 1, true) ~= nil,
+          "glyphs: ...and does not wrap into a second line instead")
+    eq(arrowInCode(ledger), nil,
+       "glyphs: ...and no live line in Modules.lua carries a bare arrow")
+
+    local panel = options_file_source("GUI/Panel.lua")
+    check(panel:find('GUI:InlineIcon("chevron_right"', 1, true) ~= nil,
+          "glyphs: the undo toast's arrow is an inline icon too")
+    eq(arrowInCode(panel), nil,
+       "glyphs: ...and no live line in Panel.lua carries a bare arrow")
+
+    -- The escape is the FOURTEEN-field form. The short |Tpath:h:w|t one takes no
+    -- vertex colour, and these arrows sit inside dimmed text -- a full-white icon
+    -- beside grey text reads as a highlight rather than as punctuation, and a
+    -- |cff escape does not reach a texture.
+    local widgets = options_file_source("GUI/SettingsWidgets.lua")
+    check(widgets:find("function GUI:InlineIcon(name, size, color)", 1, true) ~= nil,
+          "glyphs: the helper takes a colour")
+    check(widgets:find("|T%s%s:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t", 1, true) ~= nil,
+          "glyphs: ...and builds the long escape, which is the only one that tints")
 end
 
 CreateFrame   = savedCreateFrame
