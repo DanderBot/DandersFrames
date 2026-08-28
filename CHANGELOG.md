@@ -6,6 +6,8 @@
 
 ### Bug Fixes
 
+* (Auras) Fix a claimed Boss/Priority/Role debuff still rendering a second time in the debuff row's Crowd Control, Raid, Dispellable or Non-Player group whenever it also matched one of those categories. "Hide Duplicate Debuffs" only ever subtracted a category from the row's own Boss/Role/Priority record; a category an Aura Designer debuff group claimed outright had no such record to subtract from, so the other category records never learned to exclude it.
+
 ### Changes
 
 ## [5.3.0]
