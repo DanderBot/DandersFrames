@@ -651,112 +651,430 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local TIP_VIS_OOC = L["When this tooltip appears while you are out of combat. Always shows it on hover; a Hold option requires that key; Never suppresses it."]
         local TIP_VIS_COMBAT = L["When this tooltip appears while you are in combat, independently of the out-of-combat setting. Set this to Never and no key will reveal it mid-fight. Press or release a Hold key while already hovering and the tooltip follows immediately."]
 
-        -- ===== ROW 1: Frame Tooltips + Buff Tooltips =====
-
-        -- Frame Tooltips (Column 1)
-        local frameTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-        frameTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Tooltips"]), 40)
-        local frameTooltipEnable = frameTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Frame Tooltips"], db, "tooltipFrameEnabled", nil), 30)
-        frameTooltipEnable.keepEnabled = true
-        frameTooltipGroup.disableChildrenOn = function(d) return not d.tooltipFrameEnabled end
-        local frameVisOOC = frameTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Out of Combat"],
-            VIS_VALUES, db, "tooltipFrameOutOfCombat", function() end), 55)
-        frameVisOOC.tooltip = TIP_VIS_OOC
-
-        local frameVisCombat = frameTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show In Combat"],
-            VIS_VALUES, db, "tooltipFrameCombat", function() end), 55)
-        frameVisCombat.tooltip = TIP_VIS_COMBAT
-
+        -- ★ THE FIVE "ANCHOR TO" VALUE LISTS, AT PAGE SCOPE. Each used to be
+        -- declared inside its own box, which was fine while the box was the only
+        -- thing that read it. The popout rows print the CHOSEN anchor as their
+        -- summary, and the summary is built outside the group's builder -- so the
+        -- word for FRAME has to come from the same table the dropdown offers, or
+        -- a row could say "Unit Frame" while the control under it says "Buff
+        -- Icon". Up here they sit beside anchorPositionValues, which has always
+        -- been shared by all five dropdowns for exactly this reason.
+        --
+        -- ⚠ FIVE TABLES, NOT THREE, even though Frame and Binding are identical
+        -- today. They describe two different hovers and are free to diverge; one
+        -- shared table would make a future change to either silently change both.
+        -- Read-only to CreateDropdown, so sharing per-group is safe.
         local frameAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Unit Frame"],
         }
-        local frameAnchorTo = frameTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], frameAnchorValues, db, "tooltipFrameAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        frameAnchorTo.tooltip = TIP_ANCHOR_TO
-
-        local frameAnchorPos = frameTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipFrameAnchorPos", function() end), 55)
-        frameAnchorPos.disableOn = function(d) return d.tooltipFrameAnchor == "DEFAULT" end
-        frameAnchorPos.tooltip = TIP_ANCHOR_POS
-        
-        local frameOffsetX = frameTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipFrameX", function() end), 55)
-        frameOffsetX.disableOn = function(d) return d.tooltipFrameAnchor ~= "FRAME" end
-        
-        local frameOffsetY = frameTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipFrameY", function() end), 55)
-        frameOffsetY.disableOn = function(d) return d.tooltipFrameAnchor ~= "FRAME" end
-        
-        Add(frameTooltipGroup, nil, 1)
-
-        -- Binding Tooltips (Column 2) — pairs with Frame Tooltips: both anchor to
-        -- the Unit Frame, so they are the two boxes describing the SAME hover.
-        local bindTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-        bindTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Binding Tooltips"]), 40)
-        local bindTooltipEnable = bindTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Binding Tooltips"], db, "tooltipBindingEnabled", nil), 30)
-        bindTooltipEnable.keepEnabled = true
-        bindTooltipGroup.disableChildrenOn = function(d) return not d.tooltipBindingEnabled end
-        local bindVisOOC = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Out of Combat"],
-            VIS_VALUES, db, "tooltipBindingOutOfCombat", function() end), 55)
-        bindVisOOC.tooltip = TIP_VIS_OOC
-
-        local bindVisCombat = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show In Combat"],
-            VIS_VALUES, db, "tooltipBindingCombat", function() end), 55)
-        bindVisCombat.tooltip = TIP_VIS_COMBAT
-
         local bindAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Unit Frame"],
         }
-        local bindAnchorTo = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], bindAnchorValues, db, "tooltipBindingAnchor", function() GUI:RefreshCurrentPage() end), 55)
-        bindAnchorTo.tooltip = TIP_ANCHOR_TO
-
-        local bindAnchorPos = bindTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipBindingAnchorPos", function() end), 55)
-        bindAnchorPos.disableOn = function(d) return d.tooltipBindingAnchor == "DEFAULT" end
-        bindAnchorPos.tooltip = TIP_ANCHOR_POS
-
-        local bindOffsetX = bindTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipBindingX", function() end), 55)
-        bindOffsetX.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
-
-        local bindOffsetY = bindTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipBindingY", function() end), 55)
-        bindOffsetY.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
-
-        Add(bindTooltipGroup, nil, 2)
-
-        -- Buff Tooltips (Column 1)
-        local buffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-        buffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Tooltips"]), 40)
-        -- 12.1 factory rows read all of these on the layout-version bump: the Enable
-        -- toggle is structural (mouse-motion opt-in, in the row sig -> Rebuild), while
-        -- anchor/offsets/combat-hide ride style.tooltip and restyle in place
-        -- (SetTooltipAnchorPoint/SetHideTooltipInCombat are live mixin state, 68914+).
-        local RefreshAuraTooltips = function()
-            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
-            DF:UpdateAllFrames()
-        end
-        local buffTooltipEnable = buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Buff Tooltips"], db, "tooltipBuffEnabled", RefreshAuraTooltips), 30)
-        buffTooltipEnable.keepEnabled = true
-        buffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipBuffEnabled end
-        buffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", RefreshAuraTooltips), 30)
-
         local buffAnchorValues = {
             DEFAULT = L["Game Default"],
             CURSOR = L["Cursor"],
             FRAME = L["Buff Icon"],
         }
-        local buffAnchorTo = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
-        buffAnchorTo.tooltip = TIP_ANCHOR_TO
+        local debuffAnchorValues = {
+            DEFAULT = L["Game Default"],
+            CURSOR = L["Cursor"],
+            FRAME = L["Debuff Icon"],
+        }
+        local defAnchorValues = {
+            DEFAULT = L["Game Default"],
+            CURSOR = L["Cursor"],
+            FRAME = L["Defensive Icon"],
+        }
 
-        local buffAnchorPos = buffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", RefreshAuraTooltips), 55)
-        buffAnchorPos.disableOn = function(d) return d.tooltipBuffAnchor == "DEFAULT" end
-        buffAnchorPos.tooltip = TIP_ANCHOR_POS
+        -- 12.1 factory rows read all of these on the layout-version bump: the Enable
+        -- toggle is structural (mouse-motion opt-in, in the row sig -> Rebuild), while
+        -- anchor/offsets/combat-hide ride style.tooltip and restyle in place
+        -- (SetTooltipAnchorPoint/SetHideTooltipInCombat are live mixin state, 68914+).
+        --
+        -- ⚠ AT PAGE SCOPE, ABOVE EVERY BUILDER. It was declared inside the Buff
+        -- Tooltips block, which worked while the groups were straight-line code:
+        -- the three later boxes were written after it. The builders are CLOSURES
+        -- now, and a closure captures the upvalue that exists when it is created
+        -- -- so a builder declared above this line would see nil rather than this
+        -- function. Four groups and four footers drive it, so it has to be one
+        -- reference all of them share.
+        local RefreshAuraTooltips = function()
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            DF:UpdateAllFrames()
+        end
 
-        local buffOffsetX = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", RefreshAuraTooltips), 55)
-        buffOffsetX.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: seven 280 boxes in two columns,
+        -- in the columns and the order they have always had.
+        --
+        -- POPOUT turns SIX of them into feature rows in two bands, and leaves the
+        -- one single-option group inline wearing the band skin:
+        --
+        --   "Unit Frame"  Frame Tooltips, Binding Tooltips -- the two boxes that
+        --                 describe the SAME hover, both anchored to the frame
+        --                 under the mouse.
+        --   "Auras"       Buff, Debuff, Defensive Icon and Aura Designer
+        --                 Tooltips -- the four that describe hovering an ICON the
+        --                 addon draws, rather than the frame it sits on.
+        --   inline        Resurrection Icon Tooltips: one checkbox, which is not
+        --                 a click's worth of contents.
+        --
+        -- Both band headers are locale strings the page already ships -- the
+        -- "Unit Frame" one is the very word the first two boxes' Anchor To
+        -- dropdowns use for the thing they attach to.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)`
+        -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
+        -- it always built, which is what makes "classic is unchanged" structural
+        -- rather than a promise -- test_tooltips_page_builders.lua pins the
+        -- inventory of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
 
-        local buffOffsetY = buffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", RefreshAuraTooltips), 55)
-        buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
-        
-        Add(buffTooltipGroup, nil, 1)
+        -- ===== THE PAGE'S TWO BANDS =======================================
+        -- Full-width chromeless containers: a feature row's popout docks outside
+        -- the WINDOW and runs a beam back to the row, so a row that stopped 280px
+        -- in would leave that beam crossing half the page. Both carry a header,
+        -- because both hold more than one row and a header names the SECTION
+        -- rather than any of the rows under it.
+        local frameBand, auraBand
+        if tools then
+            frameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            frameBand:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame"]), 40)
+            auraBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            auraBand:AddWidget(GUI:CreateHeader(self.child, L["Auras"]), 40)
+        end
+
+        -- ☠ WHAT AN "ANCHOR TO" CHANGE COSTS, AND WHY IT IS NOT THE SAME IN BOTH
+        -- LAYOUTS. Picking an anchor re-gates the three controls under it (the
+        -- Anchor position greys under Game Default; the two offsets grey unless
+        -- the tooltip is pinned to the frame or icon). Classic has always paid
+        -- for that with a whole page REBUILD, and it keeps doing exactly that.
+        --
+        -- The pane must not. A rebuild retires every widget on the page including
+        -- the row the user is clicking through, and the helper's own prologue
+        -- closes every open panel on the way in -- so the dropdown they just used
+        -- would slam shut under their hand. What the rebuild was actually buying
+        -- is the hideOn/disableOn passes, and that is precisely what the pane's
+        -- own refresh does: ReflowPane re-runs the group's child states and
+        -- re-sizes the panel round it, then the page's own RefreshStates runs.
+        local function AnchorGateRefresh(tools2)
+            if tools2.popout then
+                tools2.refreshStates()
+            else
+                GUI:RefreshCurrentPage()
+            end
+        end
+
+        -- ===== THE TWO SUMMARY SHAPES =====================================
+        -- Both follow the sweep's convention: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these
+        -- keys. Two shapes because the page has two families:
+        --
+        --   HOVER (Frame, Binding) -- where the tooltip attaches, then WHEN it is
+        --   allowed in combat, taken straight from the five-way vocabulary those
+        --   two boxes use. The out-of-combat pick is deliberately absent: it is
+        --   "Always" on a default profile and on nearly every real one, so it
+        --   would spend the row's width saying nothing. The in-combat pick is the
+        --   one people go looking for, and it is named only when it is not the
+        --   plain Always -- "Combat Never", "Combat Hold Shift".
+        --
+        --   AURA (Buff, Debuff, Defensive) -- the same two facts, except the
+        --   combat half is a checkbox rather than a five-way pick. It reports
+        --   through the SAME words: Disable in Combat on says "Combat Never",
+        --   which is what it means and what the hover rows say for it.
+        --
+        -- ⚠ NO NEW LOCALE STRING for either. "Combat" is the word the Frame Fade
+        -- row already prints beside its in-combat value, and the anchor and
+        -- visibility words come out of the very tables the dropdowns offer.
+        local function HoverTipSummary(anchorValues, anchorKey, combatKey)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                local anchor = anchorValues[d[anchorKey]]
+                if anchor then parts[#parts + 1] = anchor end
+                local combat = d[combatKey]
+                if combat and combat ~= "SHOW" and VIS_VALUES[combat] then
+                    parts[#parts + 1] = format("%s %s", L["Combat"], VIS_VALUES[combat])
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+        end
+
+        local function AuraTipSummary(anchorValues, anchorKey, combatKey)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                local anchor = anchorValues[d[anchorKey]]
+                if anchor then parts[#parts + 1] = anchor end
+                if d[combatKey] then
+                    parts[#parts + 1] = format("%s %s", L["Combat"], L["Never"])
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+        end
+
+        -- ===== ROW 1: Frame Tooltips + Buff Tooltips =====
+
+        -- Frame Tooltips (a 280 box in column 1 in classic, the Unit Frame band's
+        -- first row). Verbatim, taking the group and parent it should build into:
+        -- same factories, same L keys, same db keys, same slot heights, same
+        -- disableOn.
+        --
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
+        -- own children while frame tooltips are off; the pane has to do the same,
+        -- and one builder serving both is what stops the two drifting. (The row's
+        -- hoisted tick greys the pane as well, from the outside -- both, exactly
+        -- as the Sorting page's first row does it.)
+        local function BuildFrameTooltipGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local frameTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Tooltips"], db, "tooltipFrameEnabled", nil), 30)
+                frameTooltipEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = function(d) return not d.tooltipFrameEnabled end
+
+            local frameVisOOC = group:AddWidget(GUI:CreateDropdown(parent, L["Show Out of Combat"],
+                VIS_VALUES, db, "tooltipFrameOutOfCombat", function() end), 55)
+            frameVisOOC.tooltip = TIP_VIS_OOC
+
+            local frameVisCombat = group:AddWidget(GUI:CreateDropdown(parent, L["Show In Combat"],
+                VIS_VALUES, db, "tooltipFrameCombat", function() end), 55)
+            frameVisCombat.tooltip = TIP_VIS_COMBAT
+
+            local frameAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], frameAnchorValues, db, "tooltipFrameAnchor", function() AnchorGateRefresh(tools2) end), 55)
+            frameAnchorTo.tooltip = TIP_ANCHOR_TO
+
+            local frameAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipFrameAnchorPos", function() end), 55)
+            frameAnchorPos.disableOn = function(d) return d.tooltipFrameAnchor == "DEFAULT" end
+            frameAnchorPos.tooltip = TIP_ANCHOR_POS
+
+            local frameOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -100, 100, 1, db, "tooltipFrameX", function() end), 55)
+            frameOffsetX.disableOn = function(d) return d.tooltipFrameAnchor ~= "FRAME" end
+
+            local frameOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -100, 100, 1, db, "tooltipFrameY", function() end), 55)
+            frameOffsetY.disableOn = function(d) return d.tooltipFrameAnchor ~= "FRAME" end
+        end
+
+        if classicLayout then
+            local frameTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+            frameTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Tooltips"]), 40)
+            BuildFrameTooltipGroup({
+                group = frameTooltipGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(frameTooltipGroup, nil, 1)
+        else
+            -- Six: two visibility picks, two anchor picks and two offsets. The
+            -- enable tick is HOISTED onto the row, so it is not one of them.
+            local FRAME_TOOLTIP_COUNT = 6
+
+            -- ☠ NOT GUI:RefreshCurrentPage, which is what the classic Anchor To
+            -- dropdown ends with. A rebuild retires every widget on the page
+            -- including the row being clicked, and the row's write path calls
+            -- row.Refresh() after this returns -- on a dead frame.
+            local function OnFrameTipToggle()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local frameMount, frameContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildFrameTooltipGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local frameRow = frameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Frame Tooltips"],
+                db       = tools.RowDB,
+                toggle   = { key = "tooltipFrameEnabled" },
+                summary  = HoverTipSummary(frameAnchorValues, "tooltipFrameAnchor", "tooltipFrameCombat"),
+                count    = FRAME_TOOLTIP_COUNT,
+                onToggle = OnFrameTipToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = frameMount,
+            }))
+            tools.ClaimKeys(frameRow, frameContent)
+            tools.WireModifiedTick(frameRow)
+            -- ⚠ A FOOTER WITH NO APPLY, and that is the honest answer rather than
+            -- a gap. Every control in this group is read at HOVER time -- which
+            -- is why all six of their own callbacks are empty -- so there is
+            -- nothing for a reset to re-apply beyond the repaint the helper does
+            -- for every row anyway.
+            tools.WireFooter(frameRow)
+            tools.RegisterHoistedToggle(frameRow, L["Enable Frame Tooltips"], "tooltipFrameEnabled", OnFrameTipToggle)
+        end
+
+        -- Binding Tooltips (a 280 box in column 2 in classic, the Unit Frame
+        -- band's second row) — pairs with Frame Tooltips: both anchor to
+        -- the Unit Frame, so they are the two boxes describing the SAME hover.
+        -- That pairing is what the band is: in classic it was two boxes side by
+        -- side and the reader had to notice; the band says it.
+        local function BuildBindTooltipGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local bindTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Binding Tooltips"], db, "tooltipBindingEnabled", nil), 30)
+                bindTooltipEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = function(d) return not d.tooltipBindingEnabled end
+
+            local bindVisOOC = group:AddWidget(GUI:CreateDropdown(parent, L["Show Out of Combat"],
+                VIS_VALUES, db, "tooltipBindingOutOfCombat", function() end), 55)
+            bindVisOOC.tooltip = TIP_VIS_OOC
+
+            local bindVisCombat = group:AddWidget(GUI:CreateDropdown(parent, L["Show In Combat"],
+                VIS_VALUES, db, "tooltipBindingCombat", function() end), 55)
+            bindVisCombat.tooltip = TIP_VIS_COMBAT
+
+            local bindAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], bindAnchorValues, db, "tooltipBindingAnchor", function() AnchorGateRefresh(tools2) end), 55)
+            bindAnchorTo.tooltip = TIP_ANCHOR_TO
+
+            local bindAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipBindingAnchorPos", function() end), 55)
+            bindAnchorPos.disableOn = function(d) return d.tooltipBindingAnchor == "DEFAULT" end
+            bindAnchorPos.tooltip = TIP_ANCHOR_POS
+
+            local bindOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -100, 100, 1, db, "tooltipBindingX", function() end), 55)
+            bindOffsetX.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
+
+            local bindOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -100, 100, 1, db, "tooltipBindingY", function() end), 55)
+            bindOffsetY.disableOn = function(d) return d.tooltipBindingAnchor ~= "FRAME" end
+        end
+
+        if classicLayout then
+            local bindTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+            bindTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Binding Tooltips"]), 40)
+            BuildBindTooltipGroup({
+                group = bindTooltipGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(bindTooltipGroup, nil, 2)
+        else
+            local BIND_TOOLTIP_COUNT = 6
+
+            local function OnBindTipToggle()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local bindMount, bindContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildBindTooltipGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local bindRow = frameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Binding Tooltips"],
+                db       = tools.RowDB,
+                toggle   = { key = "tooltipBindingEnabled" },
+                summary  = HoverTipSummary(bindAnchorValues, "tooltipBindingAnchor", "tooltipBindingCombat"),
+                count    = BIND_TOOLTIP_COUNT,
+                onToggle = OnBindTipToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = bindMount,
+            }))
+            tools.ClaimKeys(bindRow, bindContent)
+            tools.WireModifiedTick(bindRow)
+            -- No apply, for the reason the Frame Tooltips row has none.
+            tools.WireFooter(bindRow)
+            tools.RegisterHoistedToggle(bindRow, L["Enable Binding Tooltips"], "tooltipBindingEnabled", OnBindTipToggle)
+        end
+
+        -- Buff Tooltips (a 280 box in column 1 in classic, the Auras band's first
+        -- row). RefreshAuraTooltips used to be declared here; see its note at
+        -- page scope for why the closures forced it up.
+        local function BuildBuffTooltipGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local buffTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Buff Tooltips"], db, "tooltipBuffEnabled", RefreshAuraTooltips), 30)
+                buffTooltipEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = function(d) return not d.tooltipBuffEnabled end
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Disable in Combat"], db, "tooltipBuffDisableInCombat", RefreshAuraTooltips), 30)
+
+            local buffAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], buffAnchorValues, db, "tooltipBuffAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end), 55)
+            buffAnchorTo.tooltip = TIP_ANCHOR_TO
+
+            local buffAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipBuffAnchorPos", RefreshAuraTooltips), 55)
+            buffAnchorPos.disableOn = function(d) return d.tooltipBuffAnchor == "DEFAULT" end
+            buffAnchorPos.tooltip = TIP_ANCHOR_POS
+
+            local buffOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "tooltipBuffX", RefreshAuraTooltips), 55)
+            buffOffsetX.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
+
+            local buffOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "tooltipBuffY", RefreshAuraTooltips), 55)
+            buffOffsetY.disableOn = function(d) return d.tooltipBuffAnchor ~= "FRAME" end
+        end
+
+        if classicLayout then
+            local buffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+            buffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Buff Tooltips"]), 40)
+            BuildBuffTooltipGroup({
+                group = buffTooltipGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(buffTooltipGroup, nil, 1)
+        else
+            -- Five: the combat tick, two anchor picks and two offsets. The enable
+            -- tick is HOISTED onto the row, so it is not one of them.
+            local BUFF_TOOLTIP_COUNT = 5
+
+            local function OnBuffTipToggle()
+                RefreshAuraTooltips()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local buffMount, buffContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildBuffTooltipGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local buffRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Buff Tooltips"],
+                db       = tools.RowDB,
+                toggle   = { key = "tooltipBuffEnabled" },
+                summary  = AuraTipSummary(buffAnchorValues, "tooltipBuffAnchor", "tooltipBuffDisableInCombat"),
+                count    = BUFF_TOOLTIP_COUNT,
+                onToggle = OnBuffTipToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = buffMount,
+            }))
+            tools.ClaimKeys(buffRow, buffContent)
+            tools.WireModifiedTick(buffRow)
+            -- ⚠ THIS FAMILY *DOES* HAVE AN APPLY, unlike the two hover rows: the
+            -- aura buttons are the game's own, and a changed anchor or enable
+            -- flag has to be pushed into them.
+            tools.WireFooter(buffRow, RefreshAuraTooltips)
+            tools.RegisterHoistedToggle(buffRow, L["Enable Buff Tooltips"], "tooltipBuffEnabled", OnBuffTipToggle)
+        end
 
         -- ⚠ NO sync points between these boxes. Every tooltip box bar Resurrection
         -- is the same 320 tall by construction (header 40 + enable 30 + combat 30
@@ -769,64 +1087,152 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- 5 boxes of 320 plus one of 70 cannot be split evenly, so the short box
         -- belongs at the bottom of the SHORTER column (column 2), where a trailing
         -- gap reads as the end of a column rather than as a mistake.
+        --
+        -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY, and it still holds
+        -- there. The popout layout has no columns left to balance bar the one
+        -- Resurrection box: six of the seven groups are rows in two full-width
+        -- bands.
 
-        -- Debuff Tooltips (Column 1)
-        local debuffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-        debuffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Tooltips"]), 40)
-        local debuffTooltipEnable = debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Debuff Tooltips"], db, "tooltipDebuffEnabled", RefreshAuraTooltips), 30)
-        debuffTooltipEnable.keepEnabled = true
-        debuffTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDebuffEnabled end
-        debuffTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", RefreshAuraTooltips), 30)
+        -- Debuff Tooltips (a 280 box in column 2 in classic, the Auras band's
+        -- second row).
+        local function BuildDebuffTooltipGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        local debuffAnchorValues = {
-            DEFAULT = L["Game Default"],
-            CURSOR = L["Cursor"],
-            FRAME = L["Debuff Icon"],
-        }
-        local debuffAnchorTo = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
-        debuffAnchorTo.tooltip = TIP_ANCHOR_TO
+            if not tools2.hoistToggle then
+                local debuffTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Debuff Tooltips"], db, "tooltipDebuffEnabled", RefreshAuraTooltips), 30)
+                debuffTooltipEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = function(d) return not d.tooltipDebuffEnabled end
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Disable in Combat"], db, "tooltipDebuffDisableInCombat", RefreshAuraTooltips), 30)
 
-        local debuffAnchorPos = debuffTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", RefreshAuraTooltips), 55)
-        debuffAnchorPos.disableOn = function(d) return d.tooltipDebuffAnchor == "DEFAULT" end
-        debuffAnchorPos.tooltip = TIP_ANCHOR_POS
+            local debuffAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], debuffAnchorValues, db, "tooltipDebuffAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end), 55)
+            debuffAnchorTo.tooltip = TIP_ANCHOR_TO
 
-        local debuffOffsetX = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", RefreshAuraTooltips), 55)
-        debuffOffsetX.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
+            local debuffAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipDebuffAnchorPos", RefreshAuraTooltips), 55)
+            debuffAnchorPos.disableOn = function(d) return d.tooltipDebuffAnchor == "DEFAULT" end
+            debuffAnchorPos.tooltip = TIP_ANCHOR_POS
 
-        local debuffOffsetY = debuffTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", RefreshAuraTooltips), 55)
-        debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
-        
-        Add(debuffTooltipGroup, nil, 2)
+            local debuffOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "tooltipDebuffX", RefreshAuraTooltips), 55)
+            debuffOffsetX.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
 
-        -- Defensive Icon Tooltips (Column 1)
-        local defTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-        defTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Defensive Icon Tooltips"]), 40)
-        local defTooltipEnable = defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Defensive Icon Tooltips"], db, "tooltipDefensiveEnabled", RefreshAuraTooltips), 30)
-        defTooltipEnable.keepEnabled = true
-        defTooltipGroup.disableChildrenOn = function(d) return not d.tooltipDefensiveEnabled end
-        defTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", RefreshAuraTooltips), 30)
+            local debuffOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "tooltipDebuffY", RefreshAuraTooltips), 55)
+            debuffOffsetY.disableOn = function(d) return d.tooltipDebuffAnchor ~= "FRAME" end
+        end
 
-        local defAnchorValues = {
-            DEFAULT = L["Game Default"],
-            CURSOR = L["Cursor"],
-            FRAME = L["Defensive Icon"],
-        }
-        local defAnchorTo = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() RefreshAuraTooltips() GUI:RefreshCurrentPage() end), 55)
-        defAnchorTo.tooltip = TIP_ANCHOR_TO
+        if classicLayout then
+            local debuffTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+            debuffTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Tooltips"]), 40)
+            BuildDebuffTooltipGroup({
+                group = debuffTooltipGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(debuffTooltipGroup, nil, 2)
+        else
+            local DEBUFF_TOOLTIP_COUNT = 5
 
-        local defAnchorPos = defTooltipGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", RefreshAuraTooltips), 55)
-        defAnchorPos.disableOn = function(d) return d.tooltipDefensiveAnchor == "DEFAULT" end
-        defAnchorPos.tooltip = TIP_ANCHOR_POS
+            local function OnDebuffTipToggle()
+                RefreshAuraTooltips()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
 
-        local defOffsetX = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", RefreshAuraTooltips), 55)
-        defOffsetX.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
+            local debuffMount, debuffContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffTooltipGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local debuffRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Debuff Tooltips"],
+                db       = tools.RowDB,
+                toggle   = { key = "tooltipDebuffEnabled" },
+                summary  = AuraTipSummary(debuffAnchorValues, "tooltipDebuffAnchor", "tooltipDebuffDisableInCombat"),
+                count    = DEBUFF_TOOLTIP_COUNT,
+                onToggle = OnDebuffTipToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = debuffMount,
+            }))
+            tools.ClaimKeys(debuffRow, debuffContent)
+            tools.WireModifiedTick(debuffRow)
+            tools.WireFooter(debuffRow, RefreshAuraTooltips)
+            tools.RegisterHoistedToggle(debuffRow, L["Enable Debuff Tooltips"], "tooltipDebuffEnabled", OnDebuffTipToggle)
+        end
 
-        local defOffsetY = defTooltipGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", RefreshAuraTooltips), 55)
-        defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
-        
-        Add(defTooltipGroup, nil, 1)
+        -- Defensive Icon Tooltips (a 280 box in column 1 in classic, the Auras
+        -- band's third row).
+        local function BuildDefTooltipGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- Aura Designer Tooltips (Column 2). Lives HERE rather than on the Aura
+            if not tools2.hoistToggle then
+                local defTooltipEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Defensive Icon Tooltips"], db, "tooltipDefensiveEnabled", RefreshAuraTooltips), 30)
+                defTooltipEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = function(d) return not d.tooltipDefensiveEnabled end
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Disable in Combat"], db, "tooltipDefensiveDisableInCombat", RefreshAuraTooltips), 30)
+
+            local defAnchorTo = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor To"], defAnchorValues, db, "tooltipDefensiveAnchor", function() RefreshAuraTooltips() AnchorGateRefresh(tools2) end), 55)
+            defAnchorTo.tooltip = TIP_ANCHOR_TO
+
+            local defAnchorPos = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorPositionValues, db, "tooltipDefensiveAnchorPos", RefreshAuraTooltips), 55)
+            defAnchorPos.disableOn = function(d) return d.tooltipDefensiveAnchor == "DEFAULT" end
+            defAnchorPos.tooltip = TIP_ANCHOR_POS
+
+            local defOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -100, 100, 1, db, "tooltipDefensiveX", RefreshAuraTooltips), 55)
+            defOffsetX.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
+
+            local defOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -100, 100, 1, db, "tooltipDefensiveY", RefreshAuraTooltips), 55)
+            defOffsetY.disableOn = function(d) return d.tooltipDefensiveAnchor ~= "FRAME" end
+        end
+
+        if classicLayout then
+            local defTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+            defTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Defensive Icon Tooltips"]), 40)
+            BuildDefTooltipGroup({
+                group = defTooltipGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(defTooltipGroup, nil, 1)
+        else
+            local DEF_TOOLTIP_COUNT = 5
+
+            local function OnDefTipToggle()
+                RefreshAuraTooltips()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local defMount, defContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefTooltipGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local defRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Defensive Icon Tooltips"],
+                db       = tools.RowDB,
+                toggle   = { key = "tooltipDefensiveEnabled" },
+                summary  = AuraTipSummary(defAnchorValues, "tooltipDefensiveAnchor", "tooltipDefensiveDisableInCombat"),
+                count    = DEF_TOOLTIP_COUNT,
+                onToggle = OnDefTipToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = defMount,
+            }))
+            tools.ClaimKeys(defRow, defContent)
+            tools.WireModifiedTick(defRow)
+            tools.WireFooter(defRow, RefreshAuraTooltips)
+            tools.RegisterHoistedToggle(defRow, L["Enable Defensive Icon Tooltips"], "tooltipDefensiveEnabled", OnDefTipToggle)
+        end
+
+        -- Aura Designer Tooltips (a 280 box in column 2 in classic, the Auras
+        -- band's fourth row). Lives HERE rather than on the Aura
         -- Designer page: this setting only ever gets touched by someone who
         -- wants a tooltip and hasn't got one, or has one and doesn't want it —
         -- and both of those people go looking for "tooltip". The AD page links
@@ -837,22 +1243,106 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- chose those icons — that is the case worth having. Indicators and Bars
         -- are spells you placed and named yourself, so they gain little, but
         -- there's no harm in offering them.
-        local adTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
-        adTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Designer Tooltips"]), 40)
-        local adGroupsTip = adTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Groups"], db, "tooltipADGroupsEnabled", RefreshAuraTooltips), 30)
-        adGroupsTip.tooltip = L["Filter Groups and Debuff Groups. Their icons come from a filter rather than being placed one by one, so a tooltip is the only way to see what each one is."]
-        local adIndTip = adTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Indicators"], db, "tooltipADIndicatorsEnabled", RefreshAuraTooltips), 30)
-        adIndTip.tooltip = L["Icons and squares you placed yourself. You already chose these, so tooltips add less here."]
-        local adBarTip = adTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Bars"], db, "tooltipADBarsEnabled", RefreshAuraTooltips), 30)
-        adBarTip.tooltip = L["The Aura Designer bar."]
-        Add(adTooltipGroup, nil, 2)
+        --
+        -- ☠ A ROW WITH NO TICK, and that is a judgement rather than an omission.
+        -- The other four aura groups each have one boolean meaning "am I doing
+        -- anything at all"; this one has THREE, and they are INDEPENDENT -- any
+        -- of the three surfaces can have a tooltip without the others. Hoisting
+        -- one would claim it speaks for all three (the Color Picker row's
+        -- precedent), and inventing a fourth key to gate them is a migration for
+        -- a row's ornament. So the row is a way in and nothing else -- the kit
+        -- draws no tick, reserves its column so the row still lines up with the
+        -- three above it, and the group reads as permanently on, which it is.
+        -- It still gets the amber tick and the footer: all three keys are
+        -- ordinary per-mode profile keys the defaults engine answers for.
+        local function BuildADTooltipGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local adGroupsTip = group:AddWidget(GUI:CreateCheckbox(parent, L["Groups"], db, "tooltipADGroupsEnabled", RefreshAuraTooltips), 30)
+            adGroupsTip.tooltip = L["Filter Groups and Debuff Groups. Their icons come from a filter rather than being placed one by one, so a tooltip is the only way to see what each one is."]
+            local adIndTip = group:AddWidget(GUI:CreateCheckbox(parent, L["Indicators"], db, "tooltipADIndicatorsEnabled", RefreshAuraTooltips), 30)
+            adIndTip.tooltip = L["Icons and squares you placed yourself. You already chose these, so tooltips add less here."]
+            local adBarTip = group:AddWidget(GUI:CreateCheckbox(parent, L["Bars"], db, "tooltipADBarsEnabled", RefreshAuraTooltips), 30)
+            adBarTip.tooltip = L["The Aura Designer bar."]
+        end
+
+        if classicLayout then
+            local adTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+            adTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Designer Tooltips"]), 40)
+            BuildADTooltipGroup({
+                group = adTooltipGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(adTooltipGroup, nil, 2)
+        else
+            -- Which of the three surfaces are on, in the order the checkboxes
+            -- are in. Three items at most, all of them single words the locale
+            -- already ships as those checkboxes' own labels -- and with none of
+            -- them on it says nothing, which is the honest answer for a row whose
+            -- whole group is off.
+            local function ADTooltipSummary(d)
+                if not d then return "" end
+                local parts = {}
+                if d.tooltipADGroupsEnabled then parts[#parts + 1] = L["Groups"] end
+                if d.tooltipADIndicatorsEnabled then parts[#parts + 1] = L["Indicators"] end
+                if d.tooltipADBarsEnabled then parts[#parts + 1] = L["Bars"] end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Three, which is the whole group: nothing is hoisted onto the row,
+            -- because there is no single tick to hoist.
+            local AD_TOOLTIP_COUNT = 3
+
+            local adMount, adContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildADTooltipGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local adRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Aura Designer Tooltips"],
+                db      = tools.RowDB,
+                summary = ADTooltipSummary,
+                count   = AD_TOOLTIP_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = adMount,
+            }))
+            tools.ClaimKeys(adRow, adContent)
+            tools.WireModifiedTick(adRow)
+            tools.WireFooter(adRow, RefreshAuraTooltips)
+        end
 
         -- Resurrection Icon Tooltips (Column 2) — the one short box, kept last so
         -- the leftover space lands at the foot of a column.
-        local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+        --
+        -- STAYS INLINE in both layouts: one checkbox behind a click is a click
+        -- that buys nothing. It wears the band skin in the popout layout so it
+        -- does not read as a second visual language beside the rows -- the opts
+        -- table is nil in classic, which is what "no opts" already meant. And it
+        -- is not an aura, so it would not have belonged in the Auras band even if
+        -- it had earned a row.
+        --
+        -- ⚠ CONSTRUCTED HERE, ADDED IN TWO PLACES. Classic adds it at its own
+        -- slot, exactly where it always was. The popout layout cannot: `Add`
+        -- resolves a widget's slot height on the spot, so a band has to be added
+        -- AFTER the last row goes into it -- and the bands must still come FIRST,
+        -- because "both" is a sync point and a full-width band dropped in below a
+        -- lone column box would leave a hole beside it.
+        local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
         resTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Resurrection Icon Tooltips"]), 40)
         resTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
-        Add(resTooltipGroup, nil, 2)
+        if classicLayout then Add(resTooltipGroup, nil, 2) end
+
+        -- The two bands, then the one stay-inline box in its original column --
+        -- see the Resurrection note above for why the trio is added here rather
+        -- than in place, and why the bands have to come first.
+        if not classicLayout then
+            Add(frameBand, nil, "both")
+            Add(auraBand, nil, "both")
+            Add(resTooltipGroup, nil, 2)
+        end
 
         -- Sync point before See Also
         AddSyncPoint()
