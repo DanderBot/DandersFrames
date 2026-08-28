@@ -68,9 +68,10 @@ local math, table = math, table
 function UI:CreateSettingsGroup(parent, width, opts)
     -- opts can be a boolean (legacy: collapsible) or a table
     -- { collapsible, showSummary, collapseKey, chromeless, bandStyle, padding,
-    --   surface }.
-    -- chromeless, bandStyle, padding and surface are opt-in and change nothing
-    -- for a call site that passes none -- see where each is read below.
+    --   surface, innerColumns }.
+    -- chromeless, bandStyle, padding, surface and innerColumns are opt-in and
+    -- change nothing for a call site that passes none -- see where each is read
+    -- below.
     -- `surface` overrides the host's declared style for this one box (`false`
     -- forces it square).
     --
@@ -104,6 +105,34 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- reason it outranks the surface style: a group that IS another surface's
     -- contents must not draw a plate inside that surface either.
     group.bandStyle = (opts.bandStyle and not opts.chromeless) or false
+
+    -- ===== opts.innerColumns -- THE PLATE'S INTERIOR GRID ================
+    -- How many tracks LayoutChildren flows this group's children across. nil (or
+    -- 1) is the single column every group has always been, and every existing
+    -- call site gets exactly that.
+    --
+    -- It exists because WIDTH and DENSITY stopped being the same question. A
+    -- band-styled box spans the page like the bands beside it (Danders, on the
+    -- converted Frame page: "there is still an issue with their width --
+    -- Appearance spans the whole width, the others do not"), and a 280-wide
+    -- column of sliders simply stretched to 600 gives five bars twice as long as
+    -- any bar needs to be, with the label above each one adrift at the far left.
+    -- Two tracks spend the extra width on a SECOND control instead: Frame Width
+    -- beside Frame Height, and the plate is full width without a single control
+    -- being drawn at a size it was never measured at.
+    --
+    -- ⚠ ROW-MAJOR, not column-major. Reading order across a pair of related
+    -- controls is left-then-right (Width | Height, then Padding | Scale); filling
+    -- track one to the bottom first would put Height under Width and pair Width
+    -- with whatever happened to be halfway down the list.
+    --
+    -- A child opts OUT with `widget.fullRow = true` and gets the whole inner
+    -- width, which is what a wrapping blurb or a drag list wants. The section
+    -- HEADER is opted out for it: it is the group's title, it is the one child a
+    -- band-styled box draws outside the plate, and a title occupying half a row
+    -- with a slider beside it is not a title.
+    local innerColumns = tonumber(opts.innerColumns)
+    group.innerColumns = (innerColumns and innerColumns >= 2) and math.floor(innerColumns) or nil
 
     -- Visual styling - subtle background and border
     --
@@ -402,10 +431,27 @@ function UI:CreateSettingsGroup(parent, width, opts)
         local innerWidth = SnapLen(self, (self:GetWidth() or 0) - (padding * 2))
         local canSize = innerWidth > 0
 
-        -- Will this entry be laid out on this pass? Factored out of the loop below
-        -- so the run look-ahead cannot drift from the loop's own visibility test:
-        -- a hidden row must not break a run, or toggling one row's hideOn would
-        -- silently change the spacing of the rows around it.
+        -- ---- the interior grid's tracks (see opts.innerColumns) ----------
+        -- ONE track is the single column every group has always been, and every
+        -- number below collapses to the old arithmetic at that count: no gutter,
+        -- a track the full inner width, every child spanning it, and each row
+        -- holding exactly one child. That is what keeps the hundred-odd call
+        -- sites that ask for nothing byte-identical.
+        -- rawget, the convention every private-field read in this pack follows:
+        -- on a group that never asked for the grid the key is simply absent, and
+        -- this has to see that rather than whatever an __index might invent.
+        local columns = rawget(self, "innerColumns") or 1
+        if columns < 1 then columns = 1 end
+        local colGap = (columns > 1) and SnapLen(self, UI.SettingsBox.innerGap) or 0
+        local colWidth = innerWidth
+        if columns > 1 then
+            colWidth = SnapLen(self, (innerWidth - colGap * (columns - 1)) / columns)
+        end
+
+        -- Will this entry be laid out on this pass? Factored out of the passes
+        -- below so the run look-ahead cannot drift from the placement's own
+        -- visibility test: a hidden row must not break a run, or toggling one
+        -- row's hideOn would silently change the spacing of the rows around it.
         local layoutDB = host:Call("getSettingsDB")
         local function entryVisible(entry, index)
             if self.collapsed and index > 1 then return false end
@@ -415,28 +461,85 @@ function UI:CreateSettingsGroup(parent, width, opts)
             return true
         end
 
-        for i, entry in ipairs(self.groupChildren) do
+        -- ===== PASS 1 -- PLACE ==============================================
+        -- Every VISIBLE child onto a (row, column) slot, ROW-MAJOR: fill across
+        -- the tracks, then drop. A hidden child is simply never placed, which is
+        -- what collapses its slot -- the child after it takes the track it would
+        -- have had, so a hideOn flip re-flows the grid rather than leaving a
+        -- hole in it.
+        --
+        -- A FULL-ROW child (widget.fullRow, or a section header, which is one by
+        -- definition) closes whatever partial row is open and takes a row of its
+        -- own. Closing first is what stops a wrapping blurb landing beside the
+        -- control above it and then claiming the width of both.
+        local place, placed = {}, {}
+        do
+            local row, col = 1, 1
+            for i, entry in ipairs(self.groupChildren) do
+                -- Cleared for EVERY child, placed or not, so a gap-check report
+                -- never reads a flag left behind by the pass before this one.
+                if entry.widget then
+                    entry.widget._rowTightened, entry.widget._rowNextKind = false, nil
+                end
+                if entryVisible(entry, i) then
+                    local w = entry.widget
+                    -- rawget on the opt-out for the same reason as innerColumns
+                    -- above: an ABSENT key has to read as absent.
+                    local full = (columns == 1) or rawget(w, "fullRow") or (w.rowKind == "header")
+                    if full then
+                        if col > 1 then row, col = row + 1, 1 end
+                        place[i] = { row = row, col = 1, full = true }
+                        row, col = row + 1, 1
+                    else
+                        place[i] = { row = row, col = col, full = false }
+                        col = col + 1
+                        if col > columns then row, col = row + 1, 1 end
+                    end
+                    placed[#placed + 1] = i
+                end
+            end
+        end
+
+        -- ===== PASS 2 -- MEASURE ============================================
+        -- Each row is as tall as its TALLEST slot, which is the two-column
+        -- reading of the single column's "the row is its one slot".
+        local rowHeights = {}
+        for n, i in ipairs(placed) do
+            local entry = self.groupChildren[i]
             local widget = entry.widget
             local height = entry.height
+            local p = place[i]
 
             -- Close up a RUN of the same compact kind (see UI.RowGapTight). The
-            -- reduction is taken off THIS row's slot, so it only ever affects the
-            -- gap to the row below -- and only when that row is the same compact
-            -- kind, which is what keeps the boundary between different kinds at
-            -- the full RowGap.
+            -- reduction is taken off THIS slot, so it only ever affects the gap
+            -- to the row below -- and only when the slot below IT IN THE SAME
+            -- TRACK is the same compact kind, which is what keeps the boundary
+            -- between different kinds at the full RowGap. Per-track, because a
+            -- run of checkboxes flowing down column two is the same list the
+            -- rule was written for; a slider sitting beside them in column one
+            -- is not part of it and must not break it.
+            --
+            -- ⚠ A tightened slot only closes the gap if the OTHER slots on its
+            -- row tightened too -- the row is the max -- which is right: the row
+            -- below still needs clearance from whatever did not close up.
             local kind = widget.rowKind
             widget._rowTightened, widget._rowNextKind = false, nil
             if kind and UI.RowCompact[kind] then
-                for j = i + 1, #self.groupChildren do
-                    if entryVisible(self.groupChildren[j], j) then
+                for m = n + 1, #placed do
+                    local q = place[placed[m]]
+                    -- A full-row slot spans every track, so it is the thing below
+                    -- whichever track this one is in -- and a full-row slot's own
+                    -- "below" is simply the next row, whatever is in it.
+                    if q.row > p.row and (p.full or q.full or q.col == p.col) then
                         -- Recorded even when it does NOT match, so a gap-check report can
                         -- say WHY a run did not close up: a row with no rowKind
                         -- sitting between two checkboxes breaks the run for the
                         -- layout while being invisible to the report (a widget
                         -- that draws nothing is skipped there), which would look
                         -- like the tightening was simply inert.
-                        widget._rowNextKind = self.groupChildren[j].widget.rowKind or "<none>"
-                        if self.groupChildren[j].widget.rowKind == kind then
+                        local nextWidget = self.groupChildren[placed[m]].widget
+                        widget._rowNextKind = nextWidget.rowKind or "<none>"
+                        if nextWidget.rowKind == kind then
                             height = height - (UI.RowGap - UI.RowGapTight)
                             widget._rowTightened = true
                         end
@@ -445,49 +548,71 @@ function UI:CreateSettingsGroup(parent, width, opts)
                 end
             end
 
-            -- If collapsed, only show the header (first widget)
-            if self.collapsed and i > 1 then
-                widget:Hide()
-            else
-                -- Check if widget should be visible
-                local shouldShow = true
-                if widget.hideOn then
-                    local db = host:Call("getSettingsDB")
-                    if db and widget.hideOn(db) then
-                        shouldShow = false
-                    end
-                end
-
-                if shouldShow then
-                    widget:ClearAllPoints()
-                    -- Snap y at USE, not as it accumulates: rounding each row height
-                    -- in turn would let the error compound down a long column.
-                    widget:SetPoint("TOPLEFT", self, "TOPLEFT", padding, SnapLen(self, y))
-                    -- Set width to fit within group padding (only once the group has one)
-                    if canSize then widget:SetWidth(innerWidth) end
-                    widget:Show()
-                    y = y - height
-                    visibleCount = visibleCount + 1
-                else
-                    widget:Hide()
-                end
+            if not rowHeights[p.row] or height > rowHeights[p.row] then
+                rowHeights[p.row] = height
             end
+        end
+        local rowCount = #placed > 0 and place[placed[#placed]].row or 0
 
-            -- ---- the band-styled box's plate starts here ----------------
-            -- Straight after the TITLE row, and only after it: the header is the
-            -- one child that draws OUTSIDE the plate. `y` at this point is
-            -- exactly where the first row would have gone in a normal box, which
-            -- is also where a band's first popout-row plate sits under its own
-            -- header -- so recording it here (BEFORE the plate's own inset is
-            -- taken off) is what makes the header-to-plate gap on this box and
-            -- the header-to-plate gap on the band next to it the same number.
-            --
-            -- Not while COLLAPSED: there is nothing behind the title to put in a
-            -- plate, and an empty 20px rectangle under a collapsed heading reads
-            -- as a rendering fault.
-            if self.bandStyle and i == 1 and plateTop == nil and not self.collapsed then
+        -- ===== PASS 3 -- POSITION ===========================================
+        -- Walk the ROWS, not the children: a row's y is known only once every
+        -- slot on it has been measured, and both slots on a row share it.
+        --
+        -- The plate of a band-styled box starts after the row the TITLE is on --
+        -- `plateAfterRow`. Straight after that row and only after it: the header
+        -- is the one child that draws OUTSIDE the plate. `y` at that point is
+        -- exactly where the first row would have gone in a normal box, which is
+        -- also where a band's first popout-row plate sits under its own header --
+        -- so recording it there (BEFORE the plate's own inset is taken off) is
+        -- what makes the header-to-plate gap on this box and the header-to-plate
+        -- gap on the band next to it the same number.
+        --
+        -- ⚠ Row ZERO when the title itself is not laid out (hidden, or a group
+        -- with no children at all): the plate then starts flush at the top inset,
+        -- which is where the old single-pass loop left it for the same case.
+        --
+        -- Not while COLLAPSED: there is nothing behind the title to put in a
+        -- plate, and an empty 20px rectangle under a collapsed heading reads as a
+        -- rendering fault.
+        local plateAfterRow = place[1] and place[1].row or 0
+        local function OpenPlate()
+            if self.bandStyle and plateTop == nil and not self.collapsed then
                 plateTop = y
                 y = y - padding
+            end
+        end
+        -- ...and NOT on an empty group. The old loop opened the plate from inside
+        -- the child walk, so a group with no children never reached it and drew
+        -- no plate at all -- which is right: a plate with nothing in it is a
+        -- rectangle, not a section.
+        if plateAfterRow == 0 and #self.groupChildren > 0 then OpenPlate() end
+
+        -- Every row from 1 to the last one placed is occupied by construction --
+        -- the placer only opens a row it is about to put something on -- so this
+        -- walks a dense range rather than the placement list.
+        local rowY = {}
+        for r = 1, rowCount do
+            rowY[r] = y
+            y = y - (rowHeights[r] or 0)
+            if r == plateAfterRow then OpenPlate() end
+        end
+
+        for i, entry in ipairs(self.groupChildren) do
+            local widget = entry.widget
+            local p = place[i]
+            if p then
+                widget:ClearAllPoints()
+                -- Snap y at USE, not as it accumulates: rounding each row height
+                -- in turn would let the error compound down a long column.
+                local x = padding
+                if p.col > 1 then x = SnapLen(self, padding + (p.col - 1) * (colWidth + colGap)) end
+                widget:SetPoint("TOPLEFT", self, "TOPLEFT", x, SnapLen(self, rowY[p.row]))
+                -- Set width to fit within group padding (only once the group has one)
+                if canSize then widget:SetWidth(p.full and innerWidth or colWidth) end
+                widget:Show()
+                visibleCount = visibleCount + 1
+            else
+                widget:Hide()
             end
         end
 

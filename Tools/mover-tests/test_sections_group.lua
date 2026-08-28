@@ -41,7 +41,10 @@ local UI = {
     -- `width or` and `padding or` defaults from rather than repeating them as
     -- literals. Stated at the REAL values (DandersUI/Theme.lua) so the default
     -- tests below still assert the shipped numbers.
-    SettingsBox = { group = 280, pad = 10, colMargin = 5, minCol = 285, colGutter = 20 },
+    -- innerGap is the gutter BETWEEN a group's own interior tracks
+    -- (opts.innerColumns), as opposed to colGutter, which is the PAGE's.
+    SettingsBox = { group = 280, pad = 10, colMargin = 5, minCol = 285, colGutter = 20,
+                    innerGap = 10 },
     PopoutContentWidth = 260,
     -- The popout half of the box model, which the BAND-STYLED group takes its
     -- inset and its plate paint from. Real values (DandersUI/Theme.lua) for the
@@ -475,6 +478,235 @@ do
     eq(g:GetHeight(), 10 + 37 + 10, "band/collapse: ...and its inset is not charged to the height")
 
     host:SetSurfaceStyle(nil)
+end
+
+-- ============================================================
+-- 7. innerColumns -- THE PLATE'S INTERIOR GRID
+--
+-- The band skin gave the stay-inline boxes the bands' LOOK; it did not give
+-- them the bands' WIDTH, and that is what the eye went to next. Danders: "there
+-- is still an issue with their width -- Appearance spans the whole width, the
+-- others do not."
+--
+-- Width alone would have been a regression: a column of five sliders stretched
+-- to the page is five bars twice as long as any bar needs to be, each with its
+-- label stranded at the far left. So the box spans the page AND flows its
+-- interior across two tracks -- Frame Width beside Frame Height -- and the extra
+-- width buys a second control instead of a longer one.
+--
+-- ☠ THE LOAD-BEARING ASSERTION IS AGAIN THE DEFAULT. Every group in the addon
+-- that asks for nothing is one track, which is the single column LayoutChildren
+-- has always laid out -- sections 1-6 above are all written against that path
+-- and every one of them still runs through this code.
+--
+-- The geometry below is stated in the arithmetic the layout does, at the real
+-- tokens: a 280 box at the popout inset has 260 of inner width, and two tracks
+-- with a 10 gutter are 125 each at x = 10 and x = 145.
+-- ============================================================
+
+local INNER   = 280 - 2 * 10          -- 260
+local TRACK   = (INNER - 10) / 2      -- 125
+local TRACK_2 = 10 + TRACK + 10       -- 145, the second track's left edge
+-- Every band-styled box starts its content one inset + the title + one inset
+-- down: this is where row one of the plate's interior lands.
+local CONTENT = -(10 + 37 + 10)       -- -57
+
+print("-- Group: innerColumns is opt-in, and only from two tracks up")
+do
+    local plain = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    eq(rawget(plain, "innerColumns"), nil, "grid: a group that asks for nothing has no grid")
+
+    local one = host:CreateSettingsGroup(FakeUIFrame(), 280, { innerColumns = 1 })
+    eq(rawget(one, "innerColumns"), nil, "grid: one track is not a grid, it is the default")
+
+    local two = host:CreateSettingsGroup(FakeUIFrame(), 280, { innerColumns = 2 })
+    eq(rawget(two, "innerColumns"), 2, "grid: two is")
+
+    local junk = host:CreateSettingsGroup(FakeUIFrame(), 280, { innerColumns = "wide" })
+    eq(rawget(junk, "innerColumns"), nil, "grid: a non-number is ignored, not propagated")
+end
+
+print("-- Group: two tracks flow ROW-MAJOR, and a row is as tall as its tallest slot")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true, innerColumns = 2 })
+    g:SetWidth(280)
+
+    local head = g:AddWidget(headerRow(37), 37)
+    local a = g:AddWidget(control(55), 55)
+    local b = g:AddWidget(control(40), 40)
+    local c = g:AddWidget(control(30), 30)
+    local total = g:LayoutChildren()
+
+    -- The TITLE is a full row without being asked: it is the group's name, and
+    -- on a band-styled box it is the one child drawn outside the plate.
+    local hx, hy = pointAt(head)
+    eq(hx, 10, "grid: the title still sits at the group's own inset")
+    eq(hy, -10, "grid: ...one inset below the top")
+    eq(head:GetWidth(), INNER, "grid: ...spanning both tracks, because a half-width title is not a title")
+
+    -- ⚠ ROW-MAJOR: a and b are the FIRST PAIR, side by side. Column-major would
+    -- have put c under a and paired a with whatever was halfway down the list.
+    local ax, ay = pointAt(a)
+    local bx, by = pointAt(b)
+    eq(ax, 10, "grid: the first control takes track one")
+    eq(bx, TRACK_2, "grid: the second takes track two, one gutter across")
+    eq(ay, CONTENT, "grid: ...and both sit on the same row")
+    eq(by, CONTENT, "grid: ...at the same y")
+    eq(a:GetWidth(), TRACK, "grid: each is one track wide")
+    eq(b:GetWidth(), TRACK, "grid: ...both of them")
+
+    -- The row is 55 tall -- a's slot, not b's -- because the row below has to
+    -- clear whatever did NOT close up.
+    local cx, cy = pointAt(c)
+    eq(cx, 10, "grid: the third control wraps back to track one")
+    eq(cy, CONTENT - 55, "grid: ...one TALLEST-SLOT row down, not one 40 down")
+
+    eq(g:GetHeight(), 10 + 37 + 10 + 55 + 30 + 10,
+       "grid: the box is lead-in + title + plate inset + two rows + plate inset")
+    eq(total, g:GetHeight() + g.margin, "grid: ...plus the between-groups margin, as always")
+end
+
+print("-- Group: a fullRow child closes the open row and takes the plate's width")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true, innerColumns = 2 })
+    g:SetWidth(280)
+
+    g:AddWidget(headerRow(37), 37)
+    local a = g:AddWidget(control(55), 55)
+    local wide = control(25)
+    wide.fullRow = true
+    g:AddWidget(wide, 25)
+    local b = g:AddWidget(control(55), 55)
+    local c = g:AddWidget(control(55), 55)
+    g:LayoutChildren()
+
+    -- `a` is alone on its row: the blurb below it did not squeeze in beside it.
+    -- Closing the open row first is what stops a wrapping hint landing next to
+    -- the control above it and then claiming the width of both.
+    eq(select(2, pointAt(a)), CONTENT, "fullRow: the control before it keeps its row")
+    eq(a:GetWidth(), TRACK, "fullRow: ...at one track")
+
+    local wx, wy = pointAt(wide)
+    eq(wx, 10, "fullRow: the spanning child starts at track one")
+    eq(wy, CONTENT - 55, "fullRow: ...on a row of its own, below the open one")
+    eq(wide:GetWidth(), INNER, "fullRow: ...and takes the whole inner width")
+
+    -- ...and the flow picks the tracks back up underneath it.
+    eq(select(2, pointAt(b)), CONTENT - 55 - 25, "fullRow: the pair after it starts a fresh row")
+    eq(pointAt(c), TRACK_2, "fullRow: ...filling track two as normal")
+    eq(select(2, pointAt(c)), CONTENT - 55 - 25, "fullRow: ...beside it, not below it")
+end
+
+print("-- Group: a hidden child COLLAPSES its slot, and the grid re-flows round it")
+do
+    -- ☠ NOT a hole. The hideOn machinery has always removed a row from the flow
+    -- rather than leaving a gap where it was; in two tracks that means the child
+    -- AFTER it takes the track it would have had, so flipping one predicate
+    -- re-pairs the controls rather than stranding one.
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true, innerColumns = 2 })
+    g:SetWidth(280)
+
+    g:AddWidget(headerRow(37), 37)
+    local a = g:AddWidget(control(30), 30)
+    local b = g:AddWidget(control(30), 30)
+    local c = g:AddWidget(control(30), 30)
+    local d = g:AddWidget(control(30), 30)
+    settingsDB.hideB = false
+    b.hideOn = function(db) return db.hideB end
+
+    g:LayoutChildren()
+    eq(pointAt(b), TRACK_2, "hideOn: with the predicate false, b is track two of row one")
+    eq(pointAt(c), 10, "hideOn: ...and c starts row two")
+    eq(select(2, pointAt(d)), CONTENT - 30, "hideOn: ...with d beside it")
+    eq(g:GetHeight(), 10 + 37 + 10 + 30 + 30 + 10, "hideOn: two rows of content")
+
+    settingsDB.hideB = true
+    g:LayoutChildren()
+    check(not b:IsShown(), "hideOn: with it true, b is hidden")
+    eq(pointAt(c), TRACK_2, "hideOn: ...and c moves UP into the track b vacated")
+    eq(select(2, pointAt(c)), CONTENT, "hideOn: ...on row one, beside a")
+    eq(pointAt(d), 10, "hideOn: ...with d wrapping to row two")
+    eq(g:GetHeight(), 10 + 37 + 10 + 30 + 30 + 10, "hideOn: three visible children still need two rows")
+
+    -- One more off, and the whole thing collapses to a single row.
+    d.hideOn = function() return true end
+    g:LayoutChildren()
+    eq(select(2, pointAt(c)), CONTENT, "hideOn: two survivors share one row")
+    eq(g:GetHeight(), 10 + 37 + 10 + 30 + 10, "hideOn: ...and the box is one row shorter")
+    settingsDB.hideB = nil
+end
+
+print("-- Group: the compact-run tightening is PER TRACK")
+do
+    -- ⚠ The shared stub keeps RowCompact EMPTY so the arithmetic elsewhere in
+    -- this file is about placement rather than about gaps. This is the one
+    -- section that needs it, so it is turned on and put back.
+    UI.RowCompact.checkbox = true
+
+    local function tick(h)
+        local w = control(h or 25)
+        w.rowKind = "checkbox"
+        return w
+    end
+
+    -- Four ticks in two tracks. Each one's run partner is the tick BELOW IT IN
+    -- ITS OWN TRACK -- k1's is k3, not k2 -- which is the reading the rule was
+    -- written for: a run of checkboxes flowing down a column is one list.
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true, innerColumns = 2 })
+    g:SetWidth(280)
+    g:AddWidget(headerRow(37), 37)
+    local k1, k2 = g:AddWidget(tick(), 25), g:AddWidget(tick(), 25)
+    local k3, k4 = g:AddWidget(tick(), 25), g:AddWidget(tick(), 25)
+    g:LayoutChildren()
+
+    check(k1._rowTightened, "tighten: the first tick closes up on the one below it in its track")
+    check(k2._rowTightened, "tighten: ...and so does the one beside it, on its own track")
+    check(not k3._rowTightened, "tighten: the last row has nothing below it to close up to")
+    check(not k4._rowTightened, "tighten: ...in either track")
+    -- Row one is 25 - (14 - 6) = 17; row two keeps its full 25.
+    eq(select(2, pointAt(k3)), CONTENT - 17, "tighten: the second row sits a TIGHTENED slot down")
+    eq(g:GetHeight(), 10 + 37 + 10 + 17 + 25 + 10, "tighten: ...and the box is that much shorter")
+
+    -- ☠ A DIFFERENT KIND IN THE OTHER TRACK MUST NOT BREAK THE RUN. Under the
+    -- old single-column rule the very next child decided, so a slider sitting
+    -- beside a checkbox would have ended its run -- in a grid it is not below
+    -- it, it is next to it, and the list carries on down the track.
+    local h = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true, innerColumns = 2 })
+    h:SetWidth(280)
+    h:AddWidget(headerRow(37), 37)
+    local t1 = h:AddWidget(tick(), 25)
+    local bar = control(25); bar.rowKind = "slider"
+    h:AddWidget(bar, 25)
+    local t3 = h:AddWidget(tick(), 25)
+    h:AddWidget(tick(), 25)
+    h:LayoutChildren()
+    eq(t1._rowNextKind, "checkbox", "tighten: the slider beside it is not what comes next in its track")
+    check(t1._rowTightened, "tighten: ...so the run closes up through it")
+    check(not t3._rowTightened, "tighten: ...and the bottom row still does not")
+
+    UI.RowCompact.checkbox = nil
+end
+
+print("-- Group: the grid is not tied to the band skin")
+do
+    -- innerColumns is about DENSITY and bandStyle is about CHROME. They are used
+    -- together on the Frame page and they compose, but neither implies the other
+    -- -- a plain box asked for two tracks gets them, starting at its own inset
+    -- with no plate to sit inside.
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { innerColumns = 2 })
+    g:SetWidth(280)
+    local head = g:AddWidget(headerRow(37), 37)
+    local a = g:AddWidget(control(30), 30)
+    local b = g:AddWidget(control(30), 30)
+    g:LayoutChildren()
+
+    eq(rawget(g, "bandPlate"), nil, "grid/plain: no plate was built")
+    check(g._elementOpts ~= nil, "grid/plain: ...it is the ordinary box")
+    eq(select(2, pointAt(head)), -10, "grid/plain: the title is inside it, as always")
+    -- No plate inset, so row one is straight under the title.
+    eq(select(2, pointAt(a)), -(10 + 37), "grid/plain: and the first pair follows it directly")
+    eq(pointAt(b), TRACK_2, "grid/plain: with the second control on track two")
+    eq(g:GetHeight(), 10 + 37 + 30 + 10, "grid/plain: one title and one row of content")
 end
 
 -- ============================================================

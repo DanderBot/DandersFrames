@@ -269,11 +269,18 @@ end
 -- is what a sync point is for -- and the page reads primaries-then-features
 -- rather than opening on a band.
 --
+-- ☠ AND THE COLUMNS ARE NOW EMPTY IN THE POPOUT LAYOUT. Every stay-inline box
+-- spans "both" as well (see section 4 -- uniform width was the point), so the
+-- page's own column engine has nothing left in a numbered column. That is safe
+-- by construction rather than by luck: a run of "both" widgets is a run of sync
+-- points over two columns that are already equal, which is a plain single
+-- stack. The hole the old hoist existed to prevent needs an UNBALANCED flow,
+-- and there is no longer a flow to unbalance.
+--
 -- ⚠ WHAT THIS TEST CAN AND CANNOT SEE. Add() order IS page order (LayoutPage
 -- walks self.children), so the source order of the Add calls is the claim. It
--- is not a geometry test: the page cannot be built headlessly, so the two
--- widths are on the in-game checklist. What is pinned here is the invariant
--- that makes the two-column case safe -- no band Add before a column Add.
+-- is not a geometry test: the page cannot be built headlessly, so the widths
+-- are on the in-game checklist.
 -- ============================================================
 do
     -- Every Add on the Frame page, in source order, with what it was given.
@@ -284,8 +291,12 @@ do
     check(a ~= nil and b ~= nil and b > a, "order: the Frame page builder is locatable by its own ends")
     local page = SRC:sub(a or 1, b or 1)
 
+    -- ⚠ The column argument is no longer always a literal: the stay-inline boxes
+    -- pass INLINE_COL_1 / INLINE_COL_2, which ARE the literal in classic and
+    -- "both" in the popout layout (asserted below). So the capture has to accept
+    -- an identifier as well as a number or a quoted word.
     local adds = {}
-    for name, col in page:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"]+)%)") do
+    for name, col in page:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"_]+)%)") do
         adds[#adds + 1] = { name = name, col = col }
     end
     check(#adds >= 8, "order: the page's Add calls are readable (" .. #adds .. " found)")
@@ -307,19 +318,45 @@ do
     eq(adds[bandA] and adds[bandA].col, '"both"', "order: the Appearance band spans both columns")
     eq(adds[bandB] and adds[bandB].col, '"both"', "order: ...and so does the mover band")
 
-    -- ☠ THE INVARIANT: no "both" band is added before a COLUMN box. This is the
-    -- whole of why the old hoist existed, stated as the rule rather than as the
-    -- one arrangement that happened to satisfy it -- so a future group added in
-    -- the wrong place fails here instead of punching a hole at 900px wide.
-    local lastColumn = 0
-    for i, e in ipairs(adds) do
-        if e.col == "1" or e.col == "2" then lastColumn = i end
+    -- ---- the two shared column names, and what they resolve to -------
+    -- One place decides where a stay-inline box is added, gated on the layout,
+    -- for the same reason INLINE_BOX is one name: a per-site literal is the one
+    -- that gets missed.
+    check(SRC:find('local INLINE_COL_1 = classicLayout and 1 or "both"', 1, true) ~= nil,
+          "order: column 1 is the classic column, or the full width in the new layout")
+    check(SRC:find('local INLINE_COL_2 = classicLayout and 2 or "both"', 1, true) ~= nil,
+          "order: ...and so is column 2")
+
+    -- ☠ NOTHING IS LEFT IN A NUMBERED COLUMN IN THE POPOUT LAYOUT. Every
+    -- remaining numeric Add on the page is inside a `classicLayout` arm -- the
+    -- three boxes that layout keeps (Appearance, Frame Fade, Permanent Mover).
+    -- Stated as the rule so a new group added at `1` fails here rather than
+    -- shipping as the one narrow box on a page of full-width plates.
+    local CLASSIC_ONLY = {
+        appearanceGroup = true, frameFadeGroup = true, permMoverGroup = true,
+    }
+    for _, e in ipairs(adds) do
+        if e.col == "1" or e.col == "2" then
+            check(CLASSIC_ONLY[e.name] == true,
+                  "order: " .. e.name .. " is added at a numbered column, so it must be classic-only")
+        end
     end
-    check(lastColumn > 0, "order: the page still has column boxes")
-    check(bandA > lastColumn,
-          "order: the Appearance band is added after every column box, so its sync is an end-sync")
-    check(bandB > lastColumn,
-          "order: ...and so is the mover band's")
+    -- ...and the stay-inline boxes go through the shared names, never a literal.
+    local shared = 0
+    for _, e in ipairs(adds) do
+        if e.col == "INLINE_COL_1" or e.col == "INLINE_COL_2" then shared = shared + 1 end
+    end
+    eq(shared, 7, "order: all seven stay-inline boxes are added through the shared column names")
+
+    -- The bands are still added AFTER every stay-inline box, which is what keeps
+    -- the page reading primaries-then-features in either layout.
+    local lastInline = 0
+    for i, e in ipairs(adds) do
+        if e.col == "INLINE_COL_1" or e.col == "INLINE_COL_2" then lastInline = i end
+    end
+    check(lastInline > 0, "order: the page still has stay-inline boxes")
+    check(bandA > lastInline, "order: the Appearance band is added after every stay-inline box")
+    check(bandB > lastInline, "order: ...and so is the mover band")
 
     -- Primaries first, and by name: Frame Size then Layout Direction, both
     -- before anything that is a band.
@@ -363,16 +400,19 @@ do
 
     -- ---- every stay-inline box on the Frame page --------------------
     -- The full census of boxes that did NOT become bands: the two primaries and
-    -- the five raid boxes. Named rather than counted, so a rename fails here
-    -- instead of quietly reducing the count.
+    -- the five raid boxes, each with the opt table it is built with. Named
+    -- rather than counted, so a rename fails here instead of quietly reducing
+    -- the count -- and the OPT is named too, because which boxes take the
+    -- two-track interior is a per-box judgement (see section 5) and a box that
+    -- silently changed shape is exactly the drift this list exists to catch.
     local STAY_INLINE = {
-        "sizeGroup",        -- Frame Size
-        "layoutGroup",      -- Layout Direction
-        "raidModeGroup",    -- Raid Layout Mode
-        "groupLayoutGroup", -- Group Layout Settings
-        "groupVisGroup",    -- Group Visibility
-        "groupOrderGroup",  -- Group Display Order
-        "flatGridGroup",    -- Flat Grid Settings
+        { "sizeGroup",        "INLINE_GRID" },  -- Frame Size: five sliders
+        { "layoutGroup",      "INLINE_GRID" },  -- Layout Direction: two dropdowns
+        { "raidModeGroup",    "INLINE_BOX"  },  -- Raid Layout Mode: a tick and a blurb
+        { "groupLayoutGroup", "INLINE_GRID" },  -- Group Layout Settings
+        { "groupVisGroup",    "INLINE_GRID" },  -- Group Visibility: eight ticks
+        { "groupOrderGroup",  "INLINE_BOX"  },  -- Group Display Order: the drag list
+        { "flatGridGroup",    "INLINE_GRID" },  -- Flat Grid Settings
     }
     -- Scoped to the Frame page: `sizeGroup` and `layoutGroup` are also the names
     -- of boxes on OTHER pages in this file, and those are not part of this sweep.
@@ -381,10 +421,10 @@ do
     check(a ~= nil and b ~= nil and b > a, "band skin: the Frame page builder is locatable")
     local page = SRC:sub(a or 1, b or 1)
 
-    for _, name in ipairs(STAY_INLINE) do
-        local decl = "local " .. name .. " = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)"
+    for _, e in ipairs(STAY_INLINE) do
+        local decl = "local " .. e[1] .. " = GUI:CreateSettingsGroup(self.child, INLINE_W, " .. e[2] .. ")"
         check(page:find(decl, 1, true) ~= nil,
-              "band skin: " .. name .. " is built with the skin, at its own width")
+              "band skin: " .. e[1] .. " is built with the skin, at the page's width, as " .. e[2])
     end
 
     -- Nothing else on the page builds a 280 box WITHOUT it. This is the claim the
@@ -415,4 +455,92 @@ do
           "band skin: the Appearance band stays chromeless")
     check(page:find("GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })", 1, true) ~= nil,
           "band skin: ...and so does the mover band")
+end
+
+-- ============================================================
+-- 5. ONE WIDTH -- THE STAY-INLINE BOXES SPAN THE PAGE TOO
+--
+-- The skin made the survivors LOOK like the bands and left them 280 wide beside
+-- a band running to the corridor. Danders: "there is still an issue with their
+-- width -- Appearance spans the whole width, the others do not."
+--
+-- The fix is two halves and they only work together:
+--   ✓ WIDTH   -- every stay-inline box is built at the page's usable width, the
+--                SAME expression the two bands are built at, and added "both"
+--   ✓ DENSITY -- the boxes whose contents are pairs of compact controls flow
+--                their interior across TWO tracks (opts.innerColumns, covered
+--                headlessly in test_sections_group), so the extra width buys a
+--                second control rather than a 400px slider
+--
+-- What is pinned here is the page's side: the width is asked for and not
+-- guessed, it is the band's own expression, and the per-box judgement about
+-- which boxes take two tracks is recorded. The geometry itself is on the
+-- in-game checklist -- the page cannot be built headlessly.
+-- ============================================================
+do
+    local a = SRC:find("local INLINE_BOX = (not classicLayout)", 1, true)
+    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
+    local page = SRC:sub(a or 1, b or 1)
+
+    -- ---- the width, declared once and DERIVED ------------------------
+    check(page:find("local INLINE_W = classicLayout and GUI.SettingsBox.group or math.max(", 1, true) ~= nil,
+          "width: the stay-inline width is declared once, gated on the layout")
+    local decls = 0
+    for _ in page:gmatch("local INLINE_W%s*=") do decls = decls + 1 end
+    eq(decls, 1, "width: ...exactly once, not per call site")
+
+    -- ☠ THE EQUALITY CLAIM: a box and a band are built at the SAME number. Read
+    -- as the expression rather than as a value, because there is no value to
+    -- read headlessly -- but an expression copied character for character from
+    -- the band's cannot resolve to something else.
+    local BAND_EXPR = [[math.max(
+                GUI.PageUsableWidth(GUI.PageChildWidth(
+                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+                GUI.SettingsBox.group)]]
+    -- The bands' own copies sit one indent level deeper than INLINE_W's, so the
+    -- comparison is made on the whitespace-collapsed text.
+    local function flat(s) return (s:gsub("%s+", " ")) end
+    local wanted = flat(BAND_EXPR)
+    local seen = 0
+    for chunk in page:gmatch("math%.max%([^;]-GUI%.SettingsBox%.group%)") do
+        if flat(chunk) == wanted then seen = seen + 1 end
+    end
+    -- Three: the Appearance band's bandW, the mover band's moverBandW, and
+    -- INLINE_W. Any one of them drifting is the page going back to two widths.
+    eq(seen, 3, "width: the boxes and both bands ask for the width the same way")
+
+    -- ...and it is the width the LAYOUT PASS will hand out, not a literal: the
+    -- helper is the one PageRefreshStates stretches a \"both\" widget to.
+    check(page:find("GUI.PageUsableWidth(GUI.PageChildWidth(", 1, true) ~= nil,
+          "width: ...through the page's own helper, so it cannot drift from the layout pass")
+
+    -- ---- the two-track opt, DERIVED from the one-track one -----------
+    -- Section 4 pins that `bandStyle = true` is written exactly once. That stays
+    -- true only because INLINE_GRID takes the flag off INLINE_BOX rather than
+    -- restating it -- which is also what stops the two tables disagreeing about
+    -- the skin.
+    check(page:find("local INLINE_GRID = INLINE_BOX", 1, true) ~= nil,
+          "grid: the two-track opt is derived from the one-track opt")
+    check(page:find("and { bandStyle = INLINE_BOX.bandStyle, innerColumns = 2 }", 1, true) ~= nil,
+          "grid: ...taking the skin off it rather than restating the flag")
+    local cols = 0
+    for _ in page:gmatch("innerColumns%s*=%s*2") do cols = cols + 1 end
+    eq(cols, 1, "grid: the track count is written once, not copied to each call site")
+
+    -- ---- and the blurbs opt OUT of the grid ---------------------------
+    -- A wrapping hint describes the whole box, not the control beside it, and
+    -- half a plate is where a one-line hint becomes a three-line one. The three
+    -- boxes that are BOTH two-track AND carry a blurb each mark theirs.
+    local FULL_ROW = {
+        "groupLayoutHintLabel",  -- Group Layout Settings
+        "groupVisHintLabel",     -- Group Visibility
+        "flatGridHintLabel",     -- Flat Grid Settings
+    }
+    for _, name in ipairs(FULL_ROW) do
+        check(page:find(name .. ".fullRow = true", 1, true) ~= nil,
+              "grid: " .. name .. " spans the plate rather than one track")
+    end
+    local marks = 0
+    for _ in page:gmatch("%.fullRow%s*=%s*true") do marks = marks + 1 end
+    eq(marks, #FULL_ROW, "grid: ...and those are the only opt-outs on the page")
 end

@@ -300,6 +300,12 @@ UI.SettingsBox = {
     minCol     = 285,
     -- The slack the threshold demands on top of two minimum columns.
     colGutter  = 20,
+    -- The gutter BETWEEN a group's own interior columns (opts.innerColumns), as
+    -- opposed to colGutter, which is the slack the PAGE's two columns need.
+    -- Deliberately the group's own inset rather than the page's gutter: the
+    -- corridor down the middle of a plate is a continuation of the corridor
+    -- round its edge, and 20 in there reads as two boxes sharing a plate.
+    innerGap   = 10,
 }
 
 -- THE standard content width for a floating panel that carries settings widgets
