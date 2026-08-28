@@ -1570,15 +1570,34 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     
     btn:SetScript("OnShow", UpdateText)
     UpdateText()
-    
-    -- Refresh override indicators on show
-    container:SetScript("OnShow", function()
+
+    -- The WHOLE display: the button's caption and its preview font, plus the
+    -- override indicators beside the label. UpdateText alone is half of it --
+    -- the indicators are what say "an auto layout is overriding this key" -- so
+    -- the pair is named once here rather than spelled twice.
+    local function RefreshDisplay()
         UpdateText()
         if container.UpdateOverrideIndicators then
             container:UpdateOverrideIndicators(dbTable and dbTable[dbKey])
         end
-    end)
-    
+    end
+
+    -- Refresh override indicators on show
+    container:SetScript("OnShow", RefreshDisplay)
+
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote this key behind the widget's
+    -- back: a group Reset, a Hold: Defaults preview, or the undo of either.
+    --
+    -- ☠ THIS WAS THE ONE CONTROL IN A FONT PANE THAT DID NOT REPAINT. Every
+    -- other widget a Font Settings group mounts opts in already -- the size
+    -- slider and the outline dropdown through the kit (DandersUI/Widgets.lua),
+    -- the shadow tick through GUI:CreateCheckbox, the colour swatch through
+    -- GUI:CreateColorPicker -- so a Reset Group left this button alone, still
+    -- naming and previewing the previous font, until the panel was closed and
+    -- reopened and its OnShow fired. Pinned by test_order_lists.lua.
+    container.refreshValue = RefreshDisplay
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
