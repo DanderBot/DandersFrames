@@ -1367,7 +1367,44 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "fade". So the entire Dead/Offline Fading box was silently dropped from all
         -- three. Prefixes must be real key prefixes, not the box's name.
         Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
-        
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: three 280 boxes -- Out of Range in
+        -- column 1, then Dead/Offline Fading and Health Threshold Fading stacked in
+        -- column 2 with the block spacer between them.
+        --
+        -- POPOUT turns all three into feature rows in ONE band. Nothing stays
+        -- inline: every group on this page is a multi-control group, and the
+        -- smallest of them still holds three settings.
+        --
+        -- ⚠ THE BAND CARRIES NO HEADER, which is the Sorting page's sortBand rule
+        -- rather than an omission. A header names the SECTION -- and the section
+        -- here is the whole page, which the tab already calls "Fading". Written
+        -- above three rows labelled "Out of Range", "Dead/Offline Fading" and
+        -- "Health Threshold Fading" it would say the word a fourth time and name
+        -- nothing the rows do not.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box it
+        -- always built, which is what makes "classic is unchanged" structural
+        -- rather than a promise -- test_fading_page_builders.lua pins the inventory
+        -- of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which is
+        -- what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        -- The page's one band: full-width and chromeless, because a feature row's
+        -- popout docks outside the WINDOW and runs a beam back to the row, so a row
+        -- that stopped 280px in would leave that beam crossing half the page.
+        local fadeBand
+        if tools then
+            fadeBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
         -- Element-specific alpha sliders grey out (disabled-in-place) when the
         -- "Enable Element-Specific Alpha" toggle is off. The frame-level alpha
         -- slider is the alternate variant (shown only when element-specific is
@@ -1375,43 +1412,34 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function HideOOROptions(d)
             return not d.oorEnabled
         end
-        
+
         -- Helper to check if frame-level alpha should be hidden (when element-specific is enabled)
         local function HideFrameLevelAlpha(d)
             return d.oorEnabled
         end
-        
-        -- ===== OUT OF RANGE GROUP (Column 1) =====
-        local oorGroup = GUI:CreateSettingsGroup(self.child, 280)
-        oorGroup:AddWidget(GUI:CreateHeader(self.child, L["Out of Range"]), 40)
-        
-        -- Build dropdown options dynamically
-        local function GetRangeSpellDropdownOptions()
-            local options = {}
-            if DF.GetRangeSpellOptions then
-                local spellOptions = DF:GetRangeSpellOptions()
-                for _, opt in ipairs(spellOptions) do
-                    options[opt.value] = opt.label
-                end
-            else
-                options[0] = L["Auto (Spec Default)"]
-            end
-            return options
-        end
-        
-        -- Ensure db value is not nil (default to 0 = Auto)
-        if db.rangeCheckSpellID == nil then
-            db.rangeCheckSpellID = 0
-        end
-        
-        -- Helper to refresh info label
+
+        -- ☠ THREE HELPERS MOVED UP TO PAGE SCOPE, ABOVE EVERY BUILDER. All three
+        -- used to sit in the straight-line code between the controls that call
+        -- them, which was fine while the page WAS straight-line code. The builders
+        -- are CLOSURES now, and a closure captures the upvalue that exists when it
+        -- is CREATED -- so a builder declared above one of these would see nil
+        -- rather than the function. The rows need them from outside the builder as
+        -- well: a footer's Reset Group and Hold: Defaults have to push the same
+        -- work the group's own widgets push.
+        --
+        -- ⚠ THE RANGE PAIR READS THE PAGE'S OWN FIELDS (self.rangeSpellInput,
+        -- self.rangeSpellInfoLabel) rather than locals, and that indirection is
+        -- what makes them work in BOTH layouts. In the popout layout the input and
+        -- the label live in a pane, and a pane is built EAGERLY at page-build time
+        -- -- so the fields are set by the time anything calls these, exactly as
+        -- they were when the controls sat on the page.
         local function RefreshRangeInfoLabel()
             if self.rangeSpellInfoLabel and self.rangeSpellInfoLabel.SetText and DF.GetCurrentRangeSpellInfo then
                 local info = DF:GetCurrentRangeSpellInfo()
                 self.rangeSpellInfoLabel:SetText("|cFFAAAAAA" .. L["Active:"] .. " " .. (info.spellName or "None") .. " (" .. (info.range or "?") .. ")|r")
             end
         end
-        
+
         -- Set value callback - called AFTER dropdown has already set db.rangeCheckSpellID
         local function SetRangeSpellValue()
             local value = db.rangeCheckSpellID or 0
@@ -1423,216 +1451,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 self.rangeSpellInput.EditBox:SetText("")
             end
         end
-        
-        -- Range Check Spell row
-        local rangeSpellDropdown = oorGroup:AddWidget(GUI:CreateDropdown(self.child, L["Range Check Spell"], GetRangeSpellDropdownOptions(), db, "rangeCheckSpellID", SetRangeSpellValue), 55)
-        rangeSpellDropdown.tooltip = L["Select which spell to use for range checking. Auto will use your spec's default healing/friendly spell."]
-        
-        -- Custom Spell ID Input
-        local customSpellInput = oorGroup:AddWidget(GUI:CreateInput(self.child, L["Custom Spell ID"], 120), 55)
-        customSpellInput.tooltip = L["Enter any spell ID for range checking. Press Enter to apply. Leave empty to use dropdown selection."]
-        self.rangeSpellInput = customSpellInput
-        
-        -- Set initial value if it's a custom spell not in dropdown
-        if db.rangeCheckSpellID and db.rangeCheckSpellID > 0 then
-            local isInDropdown = false
-            if DF.GetRangeSpellOptions then
-                for _, opt in ipairs(DF:GetRangeSpellOptions()) do
-                    if opt.value == db.rangeCheckSpellID then
-                        isInDropdown = true
-                        break
-                    end
-                end
-            end
-            if not isInDropdown then
-                customSpellInput.EditBox:SetText(tostring(db.rangeCheckSpellID))
-            end
-        end
-        
-        customSpellInput.EditBox:SetNumeric(true)
-        customSpellInput.EditBox:SetMaxLetters(8)
-        
-        local function ApplyCustomSpellID()
-            local text = customSpellInput.EditBox:GetText()
-            local spellID = tonumber(text)
-            
-            if not text or text == "" then
-                return
-            end
-            
-            if spellID and spellID > 0 then
-                local spellName = C_Spell.GetSpellName(spellID)
-                if spellName then
-                    db.rangeCheckSpellID = spellID
-                    if DF.SetRangeCheckSpell then
-                        DF:SetRangeCheckSpell(spellID)
-                    end
-                    RefreshRangeInfoLabel()
-                    DF:Say("Range spell set to " .. spellName, "ID " .. spellID)
-                else
-                    DF:Err("Invalid spell ID: " .. spellID)
-                    customSpellInput.EditBox:SetText("")
-                end
-            end
-        end
-        
-        customSpellInput.EditBox:SetScript("OnEnterPressed", function(self)
-            ApplyCustomSpellID()
-            self:ClearFocus()
-        end)
-        customSpellInput.EditBox:SetScript("OnEditFocusLost", function(self)
-            ApplyCustomSpellID()
-        end)
-        
-        -- Info label showing current active spell
-        local rangeInfoText = L["Loading..."]
-        if DF.GetCurrentRangeSpellInfo then
-            local rangeInfo = DF:GetCurrentRangeSpellInfo()
-            rangeInfoText = (rangeInfo.spellName or "None") .. " (" .. (rangeInfo.range or "?") .. ")"
-        end
-        local infoLabel = oorGroup:AddWidget(GUI:CreateLabel(self.child, "|cFFAAAAAA" .. L["Active:"] .. " " .. rangeInfoText .. "|r", 250), 25)
-        self.rangeSpellInfoLabel = infoLabel
-
-        -- Range update interval
-        if db.rangeUpdateInterval == nil then
-            db.rangeUpdateInterval = 0.5
-        end
-        local intervalSlider = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Range Check Interval"], 0.1, 1.0, 0.05, db, "rangeUpdateInterval", nil, function()
-            if DF.SetRangeUpdateInterval then
-                DF:SetRangeUpdateInterval(db.rangeUpdateInterval)
-            end
-        end, true), 55)
-        intervalSlider.tooltip = L["How often to check range (seconds). Lower = more responsive but higher CPU. Default: 0.5s"]
-
-        -- Frame-level alpha (shown when element-specific is disabled)
-        local frameLevelAlpha = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Alpha (Out of Range)"], 0.1, 1.0, 0.05, db, "rangeFadeAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        frameLevelAlpha.hideOn = HideFrameLevelAlpha
-        
-        -- Element-specific toggle
-        oorGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
-            self:RefreshStates()
-        end), 30)
-        
-        -- Element-specific sliders (shown when enabled)
-        local oorHealth = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Health Bar Alpha"], 0.0, 1.0, 0.05, db, "oorHealthBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorHealth.disableOn = HideOOROptions
-        
-        local oorMissingHealth = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Missing Health Alpha"], 0.0, 1.0, 0.05, db, "oorMissingHealthAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorMissingHealth.disableOn = HideOOROptions
-
-        local oorBg = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Background Alpha"], 0.0, 1.0, 0.05, db, "oorBackgroundAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorBg.disableOn = HideOOROptions
-
-        local oorBorder = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Alpha"], 0.0, 1.0, 0.05, db, "oorBorderAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorBorder.disableOn = HideOOROptions
-
-        -- Unified Text Alpha: the Text Designer now renders all unit text, so a
-        -- single OOR alpha dims every TD text element (name/health/power/custom)
-        -- out of range — replacing the old per-element Name/Health text alphas.
-        local oorText = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Text Alpha"], 0.0, 1.0, 0.05, db, "oorTextAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorText.disableOn = HideOOROptions
-
-        local oorAuras = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Auras Alpha"], 0.0, 1.0, 0.05, db, "oorAurasAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorAuras.disableOn = HideOOROptions
-        
-        local oorIcons = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Alpha"], 0.0, 1.0, 0.05, db, "oorIconsAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorIcons.disableOn = HideOOROptions
-        
-        local oorDispel = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Dispel Overlay Alpha"], 0.0, 1.0, 0.05, db, "oorDispelOverlayAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorDispel.disableOn = HideOOROptions
-        
-        -- My Buff Indicator OOR slider removed — feature deprecated
-
-        local oorPower = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Power Bar Alpha"], 0.0, 1.0, 0.05, db, "oorPowerBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorPower.disableOn = HideOOROptions
-        
-        local oorMissingBuff = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Missing Buff Alpha"], 0.0, 1.0, 0.05, db, "oorMissingBuffAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorMissingBuff.disableOn = HideOOROptions
-        
-        local oorDefensive = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Defensive Icon Alpha"], 0.0, 1.0, 0.05, db, "oorDefensiveIconAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorDefensive.disableOn = HideOOROptions
-        
-        -- (Removed) the Targeted Spell Alpha slider on oorTargetedSpellAlpha. Its only
-        -- consumer was DF:UpdateTargetedSpellAppearance, which faded the group-frame
-        -- container and went with that display. Personal Targeted is a screen overlay
-        -- that never ran through ElementAppearance's out-of-range path, and the
-        -- Targeted List has its own container and colours — so the slider was moving
-        -- a value nothing read.
-
-        local oorAuraDesigner = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Aura Designer Alpha"], 0.0, 1.0, 0.05, db, "oorAuraDesignerAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorAuraDesigner.disableOn = HideOOROptions
-
-        Add(oorGroup, nil, 1)
-        
-        -- ===== DEAD/OFFLINE FADING GROUP (Column 2) =====
-        local deadGroup = GUI:CreateSettingsGroup(self.child, 280)
-        deadGroup:AddWidget(GUI:CreateHeader(self.child, L["Dead/Offline Fading"]), 40)
-        
-        local deadFadeEnable = deadGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Dead Fade"], db, "fadeDeadFrames", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-            DF:RefreshAllVisibleFrames()
-        end), 30)
-        deadFadeEnable.keepEnabled = true
-        deadGroup.disableChildrenOn = function(d) return not d.fadeDeadFrames end
-
-        -- Sliders grey out (disabled-in-place) via deadGroup.disableChildrenOn above.
-        deadGroup:AddWidget(GUI:CreateSlider(self.child, L["Background Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadBackground", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        deadGroup:AddWidget(GUI:CreateSlider(self.child, L["Health Bar Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadHealthBar", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        deadGroup:AddWidget(GUI:CreateSlider(self.child, L["Name Text Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadName", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        deadGroup:AddWidget(GUI:CreateSlider(self.child, L["Power Bar Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadPowerBar", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        deadGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadIcons", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        deadGroup:AddWidget(GUI:CreateSlider(self.child, L["Auras Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadAuras", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        deadGroup:AddWidget(GUI:CreateSlider(self.child, L["Status Text Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadStatusText", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
-
-        deadGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Custom Dead Background"], db, "fadeDeadUseCustomColor", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-            DF:RefreshAllVisibleFrames()
-        end), 30)
-
-        -- Colour picker also greys on the useCustomColor variant (disableOn composes
-        -- with the group's enable gate).
-        local deadBgColor = deadGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Dead Background Color"], db, "fadeDeadBackgroundColor", false, function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 35)
-        deadBgColor.disableOn = function(d) return not d.fadeDeadUseCustomColor end
-        
-        Add(deadGroup, nil, 2)
-        
-        -- ===== HEALTH THRESHOLD FADING (col2) =====
-        -- Column width, and the spacer above it is column 2 as well. A "both"
-        -- widget takes the LOWER of the two columns and drops both to it, so a
-        -- "both" spacer here would push column 2 down past the bottom of the
-        -- out-of-range group in column 1 and leave a hole under Dead/Offline.
-        --
-        -- Column 2 rather than 1 because column 1 carries the out-of-range group
-        -- and its long stack of per-element sliders, far and away the tallest
-        -- thing on the page.
-        AddSpace(GUI.Space.block, 2)
-        local hfGroup = GUI:CreateSettingsGroup(self.child, 280)
-        hfGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Threshold Fading"]), 40)
-
-        local hfEnable = hfGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Health Threshold Fade"], db, "healthFadeEnabled", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-            DF:RefreshAllVisibleFrames()
-        end), 30)
-        hfEnable.keepEnabled = true
-        -- Was set on hfGroup, which is a SettingsGroup and has no tooltip support,
-        -- so this explanation had never once been seen. It belongs on the enable
-        -- toggle anyway — that's the control you hover to ask "what is this?".
-        hfEnable.tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."]
-        hfGroup.disableChildrenOn = function(d) return not d.healthFadeEnabled end
-
-        local hfThreshold = hfGroup:AddWidget(GUI:CreateSlider(self.child, L["Health Threshold (%)"], 50, 100, 1, db, "healthFadeThreshold", function()
-            DF:UpdateAllFrames()
-            DF:RefreshAllVisibleFrames()
-        end), 55)
-        hfThreshold.tooltip = L["Units at or above this health percent are faded."]
-
-        hfGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
-            DF:UpdateAllFrames()
-            DF:RefreshAllVisibleFrames()
-        end), 30)
 
         -- Health fade sliders need UpdateAllFrameAppearances to force an immediate visual refresh.
         -- Unlike OOR/dead fade which refresh on range/state changes, health fade alpha values
@@ -1643,11 +1461,537 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
         end
 
-        local hfFrameAlpha = hfGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Alpha (Above Threshold)"], 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
-        hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
+        -- ===== OUT OF RANGE (a 280 box in column 1 in classic, the band's first
+        -- row) =====
+        -- Verbatim, taking the group and parent it should build into: same
+        -- factories, same L keys, same db keys, same callbacks, same slot heights,
+        -- same hideOn/disableOn.
+        --
+        -- ☠ A ROW WITH NO TICK, and that is a judgement rather than an omission.
+        -- The two rows under it each have one boolean meaning "am I doing anything
+        -- at all"; this group has none. oorEnabled looks like the candidate and is
+        -- the wrong answer twice over: it is a sub-MODE rather than an enable (out
+        -- of range fades either way -- one frame-level alpha, or twelve
+        -- per-element ones), and it HIDES the frame-level slider, so a row tick
+        -- switched off would grey the one control the group is left with. Hoisting
+        -- it would also claim it speaks for the whole pane, which is the Colour
+        -- Picker row's precedent and the reason the Frame Fade row has no tick
+        -- either. So the row is a way in and nothing else -- the kit draws no tick,
+        -- reserves its column so the row still lines up with the two below it, and
+        -- the group reads as permanently on, which it is. It still gets the amber
+        -- tick and the footer: every key here is an ordinary per-mode profile key
+        -- the defaults engine answers for.
+        --
+        -- ☠ THE TWO db SEEDS STAY EXACTLY WHERE THEY WERE, inside the builder and
+        -- ahead of the control that reads them. They are the page's only build-time
+        -- writes, and a pane is built EAGERLY (page build, not first open), so they
+        -- still land at the moment they always did -- which is what the export
+        -- byte-identity gate measures. Moving them out, or down into the popout's
+        -- open path, would move WHEN a profile changes shape.
+        local function BuildOutOfRangeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        Add(hfGroup, nil, 2)
-        
+            -- Build dropdown options dynamically
+            local function GetRangeSpellDropdownOptions()
+                local options = {}
+                if DF.GetRangeSpellOptions then
+                    local spellOptions = DF:GetRangeSpellOptions()
+                    for _, opt in ipairs(spellOptions) do
+                        options[opt.value] = opt.label
+                    end
+                else
+                    options[0] = L["Auto (Spec Default)"]
+                end
+                return options
+            end
+
+            -- Ensure db value is not nil (default to 0 = Auto)
+            if db.rangeCheckSpellID == nil then
+                db.rangeCheckSpellID = 0
+            end
+
+            -- Range Check Spell row
+            local rangeSpellDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Range Check Spell"], GetRangeSpellDropdownOptions(), db, "rangeCheckSpellID", SetRangeSpellValue), 55)
+            rangeSpellDropdown.tooltip = L["Select which spell to use for range checking. Auto will use your spec's default healing/friendly spell."]
+
+            -- Custom Spell ID Input
+            local customSpellInput = group:AddWidget(GUI:CreateInput(parent, L["Custom Spell ID"], 120), 55)
+            customSpellInput.tooltip = L["Enter any spell ID for range checking. Press Enter to apply. Leave empty to use dropdown selection."]
+            self.rangeSpellInput = customSpellInput
+
+            -- Set initial value if it's a custom spell not in dropdown
+            if db.rangeCheckSpellID and db.rangeCheckSpellID > 0 then
+                local isInDropdown = false
+                if DF.GetRangeSpellOptions then
+                    for _, opt in ipairs(DF:GetRangeSpellOptions()) do
+                        if opt.value == db.rangeCheckSpellID then
+                            isInDropdown = true
+                            break
+                        end
+                    end
+                end
+                if not isInDropdown then
+                    customSpellInput.EditBox:SetText(tostring(db.rangeCheckSpellID))
+                end
+            end
+
+            customSpellInput.EditBox:SetNumeric(true)
+            customSpellInput.EditBox:SetMaxLetters(8)
+
+            local function ApplyCustomSpellID()
+                local text = customSpellInput.EditBox:GetText()
+                local spellID = tonumber(text)
+
+                if not text or text == "" then
+                    return
+                end
+
+                if spellID and spellID > 0 then
+                    local spellName = C_Spell.GetSpellName(spellID)
+                    if spellName then
+                        db.rangeCheckSpellID = spellID
+                        if DF.SetRangeCheckSpell then
+                            DF:SetRangeCheckSpell(spellID)
+                        end
+                        RefreshRangeInfoLabel()
+                        DF:Say("Range spell set to " .. spellName, "ID " .. spellID)
+                    else
+                        DF:Err("Invalid spell ID: " .. spellID)
+                        customSpellInput.EditBox:SetText("")
+                    end
+                end
+            end
+
+            customSpellInput.EditBox:SetScript("OnEnterPressed", function(self)
+                ApplyCustomSpellID()
+                self:ClearFocus()
+            end)
+            customSpellInput.EditBox:SetScript("OnEditFocusLost", function(self)
+                ApplyCustomSpellID()
+            end)
+
+            -- Info label showing current active spell
+            local rangeInfoText = L["Loading..."]
+            if DF.GetCurrentRangeSpellInfo then
+                local rangeInfo = DF:GetCurrentRangeSpellInfo()
+                rangeInfoText = (rangeInfo.spellName or "None") .. " (" .. (rangeInfo.range or "?") .. ")"
+            end
+            local infoLabel = group:AddWidget(GUI:CreateLabel(parent, "|cFFAAAAAA" .. L["Active:"] .. " " .. rangeInfoText .. "|r", 250), 25)
+            self.rangeSpellInfoLabel = infoLabel
+
+            -- Range update interval
+            if db.rangeUpdateInterval == nil then
+                db.rangeUpdateInterval = 0.5
+            end
+            local intervalSlider = group:AddWidget(GUI:CreateSlider(parent, L["Range Check Interval"], 0.1, 1.0, 0.05, db, "rangeUpdateInterval", nil, function()
+                if DF.SetRangeUpdateInterval then
+                    DF:SetRangeUpdateInterval(db.rangeUpdateInterval)
+                end
+            end, true), 55)
+            intervalSlider.tooltip = L["How often to check range (seconds). Lower = more responsive but higher CPU. Default: 0.5s"]
+
+            -- Frame-level alpha (shown when element-specific is disabled)
+            local frameLevelAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Out of Range)"], 0.1, 1.0, 0.05, db, "rangeFadeAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            frameLevelAlpha.hideOn = HideFrameLevelAlpha
+
+            -- Element-specific toggle.
+            -- ⚠ tools2.refreshStates, NOT self:RefreshStates. This tick drives a
+            -- hideOn on the slider above it, so the pane changes HEIGHT when it is
+            -- clicked and the panel around it has to be told; the page's own
+            -- refresh alone never reaches a group living in a popout holder. In
+            -- classic the tools2 hook IS self:RefreshStates, so nothing changed
+            -- there. (The Frame Fade row's split checkbox, same reason.)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
+                tools2.refreshStates()
+            end), 30)
+
+            -- Element-specific sliders (shown when enabled)
+            local oorHealth = group:AddWidget(GUI:CreateSlider(parent, L["Health Bar Alpha"], 0.0, 1.0, 0.05, db, "oorHealthBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorHealth.disableOn = HideOOROptions
+
+            local oorMissingHealth = group:AddWidget(GUI:CreateSlider(parent, L["Missing Health Alpha"], 0.0, 1.0, 0.05, db, "oorMissingHealthAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorMissingHealth.disableOn = HideOOROptions
+
+            local oorBg = group:AddWidget(GUI:CreateSlider(parent, L["Background Alpha"], 0.0, 1.0, 0.05, db, "oorBackgroundAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorBg.disableOn = HideOOROptions
+
+            local oorBorder = group:AddWidget(GUI:CreateSlider(parent, L["Border Alpha"], 0.0, 1.0, 0.05, db, "oorBorderAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorBorder.disableOn = HideOOROptions
+
+            -- Unified Text Alpha: the Text Designer now renders all unit text, so a
+            -- single OOR alpha dims every TD text element (name/health/power/custom)
+            -- out of range — replacing the old per-element Name/Health text alphas.
+            local oorText = group:AddWidget(GUI:CreateSlider(parent, L["Text Alpha"], 0.0, 1.0, 0.05, db, "oorTextAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorText.disableOn = HideOOROptions
+
+            local oorAuras = group:AddWidget(GUI:CreateSlider(parent, L["Auras Alpha"], 0.0, 1.0, 0.05, db, "oorAurasAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorAuras.disableOn = HideOOROptions
+
+            local oorIcons = group:AddWidget(GUI:CreateSlider(parent, L["Icons Alpha"], 0.0, 1.0, 0.05, db, "oorIconsAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorIcons.disableOn = HideOOROptions
+
+            local oorDispel = group:AddWidget(GUI:CreateSlider(parent, L["Dispel Overlay Alpha"], 0.0, 1.0, 0.05, db, "oorDispelOverlayAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorDispel.disableOn = HideOOROptions
+
+            -- My Buff Indicator OOR slider removed — feature deprecated
+
+            local oorPower = group:AddWidget(GUI:CreateSlider(parent, L["Power Bar Alpha"], 0.0, 1.0, 0.05, db, "oorPowerBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorPower.disableOn = HideOOROptions
+
+            local oorMissingBuff = group:AddWidget(GUI:CreateSlider(parent, L["Missing Buff Alpha"], 0.0, 1.0, 0.05, db, "oorMissingBuffAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorMissingBuff.disableOn = HideOOROptions
+
+            local oorDefensive = group:AddWidget(GUI:CreateSlider(parent, L["Defensive Icon Alpha"], 0.0, 1.0, 0.05, db, "oorDefensiveIconAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorDefensive.disableOn = HideOOROptions
+
+            -- (Removed) the Targeted Spell Alpha slider on oorTargetedSpellAlpha. Its only
+            -- consumer was DF:UpdateTargetedSpellAppearance, which faded the group-frame
+            -- container and went with that display. Personal Targeted is a screen overlay
+            -- that never ran through ElementAppearance's out-of-range path, and the
+            -- Targeted List has its own container and colours — so the slider was moving
+            -- a value nothing read.
+
+            local oorAuraDesigner = group:AddWidget(GUI:CreateSlider(parent, L["Aura Designer Alpha"], 0.0, 1.0, 0.05, db, "oorAuraDesignerAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            oorAuraDesigner.disableOn = HideOOROptions
+        end
+
+        if classicLayout then
+            -- ===== OUT OF RANGE GROUP (Column 1) =====
+            local oorGroup = GUI:CreateSettingsGroup(self.child, 280)
+            oorGroup:AddWidget(GUI:CreateHeader(self.child, L["Out of Range"]), 40)
+            BuildOutOfRangeGroup({
+                group = oorGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(oorGroup, nil, 1)
+        else
+            -- The summary, per the sweep's convention: at most four items, a fixed
+            -- order, "\194\183" between them, WORDS localised and numbers raw, and
+            -- every read guarded because a profile mid-migration may be missing any
+            -- of these keys.
+            --
+            -- TWO SHAPES, because the group has two -- the same reason the Frame
+            -- Fade row's summary has two. With element-specific alpha OFF there is
+            -- one number and it is the frame's: L["Alpha"], the word that row
+            -- already prints beside an opacity. With it ON the frame-level slider
+            -- is HIDDEN and twelve element alphas apply, so a single number
+            -- labelled "Alpha" would be a lie -- it names the HEALTH BAR's instead,
+            -- which is the element that covers most of the frame and the one people
+            -- mean by "how faded is it". Its own slider's label says which alpha it
+            -- is, so the mode is legible from the summary alone: a per-element word
+            -- appears only in the per-element mode.
+            --
+            -- ⚠ NOTHING IS INVENTED. Both words are locale strings the page already
+            -- ships -- "Health Bar Alpha" is that slider's own label. The range
+            -- SPELL is deliberately absent: it is a spell name rather than a
+            -- setting value, it is 0 ("Auto") on nearly every profile, and the
+            -- group's own info label already says which one is live.
+            local function OutOfRangeSummary(d)
+                if not d then return "" end
+                local parts = {}
+                if d.oorEnabled then
+                    local hp = tonumber(d.oorHealthBarAlpha)
+                    if hp then parts[#parts + 1] = format("%s %.2f", L["Health Bar Alpha"], hp) end
+                else
+                    local a = tonumber(d.rangeFadeAlpha)
+                    if a then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Eighteen, which is the whole group -- the spell dropdown, the custom
+            -- spell box, the active-spell label, the interval, the frame alpha, the
+            -- element-specific tick and its twelve sliders. Nothing is hoisted onto
+            -- the row, because there is no tick to hoist.
+            local OUT_OF_RANGE_COUNT = 18
+
+            -- The group's own apply, named once so the footer's Reset Group and
+            -- Hold: Defaults run exactly what the group's controls run between
+            -- them: the range spell back into the range checker (which also
+            -- repaints the active-spell label and clears the custom box), the
+            -- interval back into the ticker, and a repaint for the alphas.
+            local function ApplyOutOfRange()
+                SetRangeSpellValue()
+                if DF.SetRangeUpdateInterval then
+                    DF:SetRangeUpdateInterval(db.rangeUpdateInterval)
+                end
+                DF:RefreshAllVisibleFrames()
+            end
+
+            local oorMount, oorContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildOutOfRangeGroup({
+                    group = group, parent = holder,
+                    -- The pane's own reflow: the element-specific tick drives a
+                    -- hideOn inside this group, so the pane changes height when it
+                    -- is clicked. (The closure calls self:RefreshStates too, so the
+                    -- page half is not lost.)
+                    refreshStates = reflow,
+                })
+            end)
+            local oorRow = fadeBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Out of Range"],
+                db      = tools.RowDB,
+                summary = OutOfRangeSummary,
+                count   = OUT_OF_RANGE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = oorMount,
+            }))
+            tools.ClaimKeys(oorRow, oorContent)
+            tools.WireModifiedTick(oorRow)
+            tools.WireFooter(oorRow, ApplyOutOfRange)
+        end
+
+        -- ===== DEAD/OFFLINE FADING (a 280 box in column 2 in classic, the band's
+        -- second row) =====
+        -- The textbook hoist: one enable with keepEnabled and a group gate that
+        -- greys everything behind it, which is the shape of "am I doing anything at
+        -- all".
+        --
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
+        -- own children while dead fading is off; the pane has to do the same, and
+        -- one builder serving both is what stops the two drifting. (The row's
+        -- hoisted tick greys the pane as well, from the outside.)
+        local function BuildDeadFadeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local deadFadeEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dead Fade"], db, "fadeDeadFrames", function()
+                    tools2.refreshStates()
+                    DF:UpdateAllFrames()
+                    DF:RefreshAllVisibleFrames()
+                end), 30)
+                deadFadeEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = function(d) return not d.fadeDeadFrames end
+
+            -- Sliders grey out (disabled-in-place) via group.disableChildrenOn above.
+            group:AddWidget(GUI:CreateSlider(parent, L["Background Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadBackground", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Health Bar Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadHealthBar", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Name Text Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadName", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Power Bar Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadPowerBar", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Icons Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadIcons", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Auras Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadAuras", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Status Text Alpha"], 0.0, 1.0, 0.05, db, "fadeDeadStatusText", function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 55)
+
+            -- ⚠ tools2.refreshStates, NOT self:RefreshStates: this tick gates the
+            -- colour picker under it, and a group living in a popout holder is not
+            -- reached by the page's own state pass. Identical in classic, where the
+            -- tools2 hook IS self:RefreshStates.
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Custom Dead Background"], db, "fadeDeadUseCustomColor", function()
+                tools2.refreshStates()
+                DF:UpdateAllFrames()
+                DF:RefreshAllVisibleFrames()
+            end), 30)
+
+            -- Colour picker also greys on the useCustomColor variant (disableOn composes
+            -- with the group's enable gate).
+            local deadBgColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Dead Background Color"], db, "fadeDeadBackgroundColor", false, function() DF:RefreshAllVisibleFrames() end, function() DF:RefreshAllVisibleFrames() end, true), 35)
+            deadBgColor.disableOn = function(d) return not d.fadeDeadUseCustomColor end
+        end
+
+        if classicLayout then
+            -- ===== DEAD/OFFLINE FADING GROUP (Column 2) =====
+            local deadGroup = GUI:CreateSettingsGroup(self.child, 280)
+            deadGroup:AddWidget(GUI:CreateHeader(self.child, L["Dead/Offline Fading"]), 40)
+            BuildDeadFadeGroup({
+                group = deadGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(deadGroup, nil, 2)
+        else
+            -- The row's own tick already says whether dead fading is on, so the
+            -- summary is about what is BEHIND it -- and only where that is doing
+            -- something. Seven alphas cannot fit, so it names the one that covers
+            -- most of the frame, and only when it actually fades: every one of the
+            -- seven ships at 1 bar the power bar, and a row reading "Health Bar
+            -- Alpha 1.00" on every default profile is noise (the Border row's
+            -- rule). The custom background follows it, in that checkbox's own
+            -- words, because a red dead frame is the other thing people set here.
+            local function DeadFadeSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local hp = tonumber(d.fadeDeadHealthBar)
+                if hp and hp < 1 then parts[#parts + 1] = format("%s %.2f", L["Health Bar Alpha"], hp) end
+                if d.fadeDeadUseCustomColor then parts[#parts + 1] = L["Custom Dead Background"] end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Nine: seven alphas, the custom-background tick and its colour. The
+            -- enable tick is HOISTED onto the row, so it is not one of them.
+            local DEAD_FADE_COUNT = 9
+
+            -- The group's own apply, named once so the footer's Reset Group and
+            -- Hold: Defaults run what the group's controls run between them.
+            local function ApplyDeadFade()
+                DF:UpdateAllFrames()
+                DF:RefreshAllVisibleFrames()
+            end
+
+            -- ☠ NOT GUI:RefreshCurrentPage. A rebuild retires every widget on the
+            -- page including the row being clicked, and the row's write path calls
+            -- row.Refresh() after this returns -- on a dead frame.
+            local function OnDeadFadeToggle()
+                ApplyDeadFade()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local deadMount, deadContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDeadFadeGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggle = true,
+                })
+            end)
+            local deadRow = fadeBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Dead/Offline Fading"],
+                db       = tools.RowDB,
+                toggle   = { key = "fadeDeadFrames" },
+                summary  = DeadFadeSummary,
+                count    = DEAD_FADE_COUNT,
+                onToggle = OnDeadFadeToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = deadMount,
+            }))
+            tools.ClaimKeys(deadRow, deadContent)
+            tools.WireModifiedTick(deadRow)
+            tools.WireFooter(deadRow, ApplyDeadFade)
+            tools.RegisterHoistedToggle(deadRow, L["Enable Dead Fade"], "fadeDeadFrames", OnDeadFadeToggle)
+        end
+
+        -- ===== HEALTH THRESHOLD FADING (a 280 box in column 2 in classic, the
+        -- band's third row) =====
+        -- The same textbook hoist as Dead/Offline: keepEnabled plus a group gate.
+        local function BuildHealthFadeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local hfEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Health Threshold Fade"], db, "healthFadeEnabled", function()
+                    tools2.refreshStates()
+                    DF:UpdateAllFrames()
+                    DF:RefreshAllVisibleFrames()
+                end), 30)
+                hfEnable.keepEnabled = true
+                -- Was set on hfGroup, which is a SettingsGroup and has no tooltip support,
+                -- so this explanation had never once been seen. It belongs on the enable
+                -- toggle anyway — that's the control you hover to ask "what is this?".
+                hfEnable.tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."]
+            end
+            group.disableChildrenOn = function(d) return not d.healthFadeEnabled end
+
+            local hfThreshold = group:AddWidget(GUI:CreateSlider(parent, L["Health Threshold (%)"], 50, 100, 1, db, "healthFadeThreshold", function()
+                DF:UpdateAllFrames()
+                DF:RefreshAllVisibleFrames()
+            end), 55)
+            hfThreshold.tooltip = L["Units at or above this health percent are faded."]
+
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
+                DF:UpdateAllFrames()
+                DF:RefreshAllVisibleFrames()
+            end), 30)
+
+            local hfFrameAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Frame Alpha (Above Threshold)"], 0.1, 1.0, 0.05, db, "healthFadeAlpha", nil, RefreshHealthFade, true), 55)
+            hfFrameAlpha.tooltip = L["Frame opacity when health is above the threshold."]
+        end
+
+        if classicLayout then
+            -- ===== HEALTH THRESHOLD FADING (col2) =====
+            -- Column width, and the spacer above it is column 2 as well. A "both"
+            -- widget takes the LOWER of the two columns and drops both to it, so a
+            -- "both" spacer here would push column 2 down past the bottom of the
+            -- out-of-range group in column 1 and leave a hole under Dead/Offline.
+            --
+            -- Column 2 rather than 1 because column 1 carries the out-of-range group
+            -- and its long stack of per-element sliders, far and away the tallest
+            -- thing on the page.
+            --
+            -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY, which is why the
+            -- spacer lives in this arm: the popout layout has no columns left to
+            -- balance -- all three groups are rows in one full-width band.
+            AddSpace(GUI.Space.block, 2)
+            local hfGroup = GUI:CreateSettingsGroup(self.child, 280)
+            hfGroup:AddWidget(GUI:CreateHeader(self.child, L["Health Threshold Fading"]), 40)
+            BuildHealthFadeGroup({
+                group = hfGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(hfGroup, nil, 2)
+        else
+            -- Threshold first, then the opacity it applies: the two numbers the
+            -- feature IS, in the order the controls are in. The threshold is a
+            -- percent and wears its sign; the opacity takes L["Alpha"], the word
+            -- the Frame Fade and Border rows already print beside one. Both are
+            -- shown unconditionally rather than only-when-changed: the row is off
+            -- on a default profile, so anyone reading this summary turned the
+            -- feature on and wants the numbers.
+            local function HealthFadeSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local t = tonumber(d.healthFadeThreshold)
+                if t then parts[#parts + 1] = format("%d%%", math.floor(t)) end
+                local a = tonumber(d.healthFadeAlpha)
+                if a then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Three: the threshold, the dispel escape hatch and the alpha. The
+            -- enable tick is HOISTED onto the row, so it is not one of them.
+            local HEALTH_FADE_COUNT = 3
+
+            -- The group's own apply. RefreshHealthFade is the alpha slider's own
+            -- half (the fade curve is cached, so a written value is not read until
+            -- it is invalidated); the frame update is what the threshold and the
+            -- dispel tick run.
+            local function ApplyHealthFade()
+                DF:UpdateAllFrames()
+                RefreshHealthFade()
+            end
+
+            local function OnHealthFadeToggle()
+                DF:UpdateAllFrames()
+                DF:RefreshAllVisibleFrames()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local hfMount, hfContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealthFadeGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggle = true,
+                })
+            end)
+            local hfRow = fadeBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Health Threshold Fading"],
+                db       = tools.RowDB,
+                toggle   = { key = "healthFadeEnabled" },
+                summary  = HealthFadeSummary,
+                count    = HEALTH_FADE_COUNT,
+                onToggle = OnHealthFadeToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = hfMount,
+            }))
+            tools.ClaimKeys(hfRow, hfContent)
+            tools.WireModifiedTick(hfRow)
+            tools.WireFooter(hfRow, ApplyHealthFade)
+            tools.RegisterHoistedToggle(hfRow, L["Enable Health Threshold Fade"], "healthFadeEnabled", OnHealthFadeToggle)
+        end
+
+        -- ☠ THE BAND IS ADDED HERE, NOT WHERE IT WAS BUILT. `Add` resolves a
+        -- widget's slot height on the spot, so a band has to go in after the last
+        -- row has been put into it.
+        if not classicLayout then
+            Add(fadeBand, nil, "both")
+        end
+
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
