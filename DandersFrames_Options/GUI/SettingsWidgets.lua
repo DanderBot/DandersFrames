@@ -894,6 +894,52 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
     return btn
 end
 
+-- ============================================================
+-- INLINE ICON ESCAPE
+-- ------------------------------------------------------------
+-- One of our own icons, as a |T...|t escape, for a FontString that has to carry
+-- a symbol in the middle of a sentence.
+--
+-- ☠ THIS EXISTS BECAUSE WOW FONTS DO NOT HAVE ARROWS. The settings panel renders
+-- in the user's chosen Settings Font, and the shipped default ("DF Roboto
+-- SemiBold") -- like most font files an addon bundles -- carries Latin, digits
+-- and punctuation and nothing else. Anything outside that renders as an EMPTY
+-- BOX, which is what the Changed Settings ledger's "current → default" arrow and
+-- the undo toast's "(3 → 2)" were on screen: 2 ⃞ 1. It is the same failure mode
+-- as the CJK squares in bug #1054, one block along. Art we ship cannot miss.
+--
+-- ⚠ THE FOURTEEN-FIELD FORM, not the short `|Tpath:h:w|t` one, and the vertex
+-- colour is the reason. These glyphs live inside DIMMED text (the "→ default"
+-- half of a ledger row is deliberately quieter than the current value), and a
+-- full-white icon beside grey text reads as a highlight rather than as
+-- punctuation. Colour escapes (|cff...|r) do not tint a texture; only the escape
+-- itself can. Our icons are white and tint cleanly -- /dficons says so on the
+-- window it draws them in.
+--
+--   name   an icon in Media\Icons (no path, no extension)
+--   size   rendered height AND width in pixels (default 12, the body text size)
+--   color  {r,g,b} 0-1, default the panel's body text colour
+--
+-- Every icon in Media\Icons is a 32x32 tga, which is what the texel arguments
+-- describe; a future icon at another size needs its own call, not a change here.
+local ICON_ESCAPE_PATH   = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+local ICON_ESCAPE_TEXELS = 32
+
+function GUI:InlineIcon(name, size, color)
+    size = size or 12
+    local c = color or C_TEXT
+    local function byte(v)
+        v = math.floor((v or 1) * 255 + 0.5)
+        if v < 0 then return 0 elseif v > 255 then return 255 end
+        return v
+    end
+    return format("|T%s%s:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t",
+        ICON_ESCAPE_PATH, name, size, size,
+        ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
+        ICON_ESCAPE_TEXELS, ICON_ESCAPE_TEXELS,
+        byte(c.r), byte(c.g), byte(c.b))
+end
+
 -- A hairline rule for use INSIDE a settings group: separates a sub-option from the
 -- controls it belongs to, or a scope switch from the list it governs, without the
 -- weight of a second header.

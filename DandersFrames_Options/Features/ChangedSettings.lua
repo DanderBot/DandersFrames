@@ -102,8 +102,17 @@ end
 --                  position) has no honest one-line form, and pretending
 --                  otherwise reads worse than admitting it.
 --
--- `ascii` is for the copy-to-clipboard text: it drops the localised words and
--- the ellipsis glyph so the pasted block survives any client and any forum.
+-- ☠ THE ELLIPSIS IS THREE DOTS, NOT U+2026. It used to be the single character
+-- on the page and ASCII only in the copy block, and the page half rendered as an
+-- EMPTY BOX in game: the settings panel draws in the user's Settings Font and
+-- the shipped default ("DF Roboto SemiBold") carries Latin, digits and
+-- punctuation and nothing else -- the same reason the ledger's arrow had to
+-- become an icon. An arrow has art to fall back on; an ellipsis does not need
+-- any, because "..." says the identical thing in a glyph every font has.
+--
+-- `ascii` therefore no longer changes this branch -- it is now only about the
+-- localised words (On/Off), which the copy block drops so a pasted report reads
+-- the same in a support thread whatever locale wrote it.
 -- NaN is named rather than run through %g, whose output for it is
 -- platform-dependent and would make the tests answer differently per machine.
 function ChangedSettings.FormatValue(v, ascii)
@@ -132,7 +141,7 @@ function ChangedSettings.FormatValue(v, ascii)
     if t == "table" then
         local r, g, b = ColorChannels(v)
         if r then return format("#%02X%02X%02X", Channel255(r), Channel255(g), Channel255(b)) end
-        return ascii and "..." or "…"
+        return "..."
     end
 
     return tostring(v)

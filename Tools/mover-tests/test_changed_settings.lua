@@ -97,10 +97,17 @@ do
     eq(F({ r = 2, g = -1, b = 0.5 }), "#FF0080", "format: channels clamp instead of overflowing")
 
     -- Anything else table-shaped has no honest one-line form.
-    eq(F({ x = 0, y = -325 }), "\226\128\166", "format: an opaque table is an ellipsis")
-    eq(F({ x = 0, y = -325 }, true), "...", "format: ...and three dots in ASCII")
-    eq(F({}), "\226\128\166", "format: an empty table too")
-    eq(F({ r = 1, g = 1 }), "\226\128\166", "format: a table with only two channels is not a colour")
+    --
+    -- ☠ THREE DOTS ON BOTH SIDES, not U+2026 on the page and "..." in the copy
+    -- block. The single character rendered as an EMPTY BOX in game: the settings
+    -- panel draws in the user's Settings Font and the shipped default carries
+    -- Latin and punctuation only -- the same reason the ledger's arrow became an
+    -- icon. An ellipsis needs no art, because "..." says the identical thing in
+    -- glyphs every font has.
+    eq(F({ x = 0, y = -325 }), "...", "format: an opaque table is an ellipsis")
+    eq(F({ x = 0, y = -325 }, true), "...", "format: ...spelled the same way in ASCII")
+    eq(F({}), "...", "format: an empty table too")
+    eq(F({ r = 1, g = 1 }), "...", "format: a table with only two channels is not a colour")
 
     eq(F(nil), "-", "format: a missing value is a dash, not the word nil")
 
@@ -508,6 +515,59 @@ do
 
     DF.Search = nil
     IN_COMBAT = false
+end
+
+-- ============================================================
+-- NO BARE GLYPHS ON THE SURFACES THIS PAGE DRAWS
+-- ------------------------------------------------------------
+-- ☠ WOW FONTS DO NOT HAVE ARROWS. The settings panel renders in the user's
+-- Settings Font and the shipped default ("DF Roboto SemiBold") -- like most font
+-- files an addon bundles -- carries Latin, digits and punctuation and nothing
+-- else. Anything outside that draws as an EMPTY BOX, which is what a ledger row
+-- was in game: "2 ⃞ 1" where it should have read "2 → 1". Same failure mode as
+-- the Cyrillic and CJK squares (#1054), one Unicode block along.
+--
+-- The fix is art we ship, through GUI:InlineIcon, because art cannot be missing
+-- from a font it is not in. These two lines are the whole reach a headless test
+-- has into a page it cannot load, so they pin exactly that: the two strings that
+-- had the arrow build it from the icon, and neither of the files still carries a
+-- raw U+2192 anywhere a FontString could pick it up.
+-- ============================================================
+do
+    local ARROW = "\226\134\146"        -- U+2192, the character that boxed
+
+    -- ⚠ CODE ONLY. The comments explaining this fix quote the character they are
+    -- about, and a check that banned it from those would ban writing the reason
+    -- down. Everything before a `--` is what can reach a FontString.
+    local function arrowInCode(src)
+        for line in (src .. "\n"):gmatch("([^\n]*)\n") do
+            local code = line:match("^(.-)%-%-") or line
+            if code:find(ARROW, 1, true) then return line end
+        end
+        return nil
+    end
+
+    local ledger = options_file_source("GUI/Pages/Modules.lua")
+    check(ledger:find('GUI:InlineIcon("chevron_right"', 1, true) ~= nil,
+          "glyphs: the ledger row's arrow is an inline icon")
+    eq(arrowInCode(ledger), nil,
+       "glyphs: ...and no live line in Modules.lua carries a bare arrow")
+
+    local panel = options_file_source("GUI/Panel.lua")
+    check(panel:find('GUI:InlineIcon("chevron_right"', 1, true) ~= nil,
+          "glyphs: the undo toast's arrow is an inline icon too")
+    eq(arrowInCode(panel), nil,
+       "glyphs: ...and no live line in Panel.lua carries a bare arrow")
+
+    -- The escape is the FOURTEEN-field form. The short |Tpath:h:w|t one takes no
+    -- vertex colour, and these arrows sit inside dimmed text -- a full-white icon
+    -- beside grey text reads as a highlight rather than as punctuation, and a
+    -- |cff escape does not reach a texture.
+    local widgets = options_file_source("GUI/SettingsWidgets.lua")
+    check(widgets:find("function GUI:InlineIcon(name, size, color)", 1, true) ~= nil,
+          "glyphs: the helper takes a colour")
+    check(widgets:find("|T%s%s:%d:%d:0:0:%d:%d:0:%d:0:%d:%d:%d:%d|t", 1, true) ~= nil,
+          "glyphs: ...and builds the long escape, which is the only one that tints")
 end
 
 CreateFrame   = savedCreateFrame

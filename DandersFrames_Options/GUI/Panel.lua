@@ -1492,9 +1492,17 @@ function DF:CreateGUI()
         --
         -- %.4g, because a slider step lands on 0.30000000000000004 as readily as
         -- on 0.3 and the toast has to read like the number the user set.
+        --
+        -- ☠ THE ARROW IS AN ICON, NOT A CHARACTER. This read "(%.4g → %.4g)" and
+        -- the → came out as an empty box in game: the panel draws in the user's
+        -- Settings Font and the shipped default ("DF Roboto SemiBold") has no
+        -- arrows in it. Same failure as the CJK squares, one Unicode block along.
+        -- Built once, outside Detail: it is a constant string and the toast fires
+        -- on every undo keypress.
+        local toastArrow = GUI:InlineIcon("chevron_right", 10, C_TEXT_DIM)
         local function Detail(entry)
             if type(entry.old) == "number" and type(entry.new) == "number" then
-                return string.format(" (%.4g → %.4g)", entry.old, entry.new)
+                return string.format(" (%.4g %s %.4g)", entry.old, toastArrow, entry.new)
             end
             return ""
         end

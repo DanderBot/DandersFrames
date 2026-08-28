@@ -2137,10 +2137,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if src == "CLASS" then parts[#parts + 1] = L["Class"]
                 elseif src == "ROLE" then parts[#parts + 1] = L["Role"] end
                 -- Only when it is actually doing something. A row reading
-                -- "α 1.00" on every default profile is noise.
+                -- "Alpha 1.00" on every default profile is noise.
+                --
+                -- ☠ THE WORD, NOT "\206\177" (U+03B1 α). The settings panel draws
+                -- in the user's Settings Font, and the shipped default ("DF
+                -- Roboto SemiBold") carries Latin, digits and punctuation --
+                -- Greek is as absent from it as the arrow that rendered as an
+                -- empty box in the Changed Settings ledger. L["Alpha"] already
+                -- exists and the summaries already localise their words
+                -- (Gradient, Class, Role), so this is the convention, not an
+                -- exception to it.
                 local c = d.frameBorderColor
                 local a = type(c) == "table" and tonumber(c.a) or nil
-                if a and a < 1 then parts[#parts + 1] = format("\206\177 %.2f", a) end
+                if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
                 return table.concat(parts, " \194\183 ")
             end
 
