@@ -45,12 +45,17 @@ local KIND = {
     CreateHeader = "header", CreateLabel = "label",
 }
 
--- The body of a `local function <name>(tools)` at the page builder's own indent.
+-- The body of a `local function <name>(tools2)` at the page builder's own indent.
 -- ⚠ Terminated on a newline + EIGHT spaces + `end`, which is the page builder's
 -- indent level: everything inside one of these bodies is indented further, so
 -- this is the function's own close and not one of its inline closures'.
+--
+-- ⚠ `tools2`, NOT `tools`. The page took GUI:CreatePopoutPageTools, so `tools` is
+-- the page-scope machinery table and a builder's own opts argument had to move
+-- aside -- the same rename every other converted page made, for the same reason:
+-- a builder that shadowed the name could never reach the page's verbs.
 local function builderBody(name)
-    local head = "local function " .. name .. "(tools)"
+    local head = "local function " .. name .. "(tools2)"
     local a = SRC:find(head, 1, true)
     check(a ~= nil, "source: the page declares " .. name)
     if not a then return "" end
@@ -211,7 +216,7 @@ do
     -- The hoist, and the arithmetic it implies. The checkbox is still IN the
     -- builder -- the classic box needs it -- behind the one flag the popout
     -- passes, so the pane mounts one fewer than the census.
-    check(body:find("if not tools.hoistToggle then") ~= nil,
+    check(body:find("if not tools2.hoistToggle then") ~= nil,
           "permanent mover: the enable checkbox is skipped when the row has hoisted it")
     local declared = tonumber(SRC:match("local PERM_MOVER_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "permanent mover: the page declares the row's count in one place")
@@ -253,9 +258,13 @@ do
     -- The row's own band: chromeless, built at the page's usable width (never a
     -- literal) and spanning both columns, so its right edge lands on the same
     -- corridor the Appearance band's rows do.
-    check(SRC:find("GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })", 1, true) ~= nil,
+    check(SRC:find("permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
           "permanent mover: the band is chromeless, because the row IS the surface")
-    check(SRC:find("moverBandW = math.max(", 1, true) ~= nil,
+    -- ...at the width the layout pass will stretch it to, asked for through the
+    -- shared helper rather than computed here. Section 5 pins that all three of
+    -- the page's bands ask the same way; the expression behind the name is
+    -- test_popout_page_tools' claim.
+    check(SRC:find("moverBandW", 1, true) == nil,
           "permanent mover: ...at the width the layout pass will stretch it to")
     check(SRC:find('Add(permMoverBand, nil, "both")', 1, true) ~= nil,
           "permanent mover: ...and spanning both columns")
@@ -559,7 +568,7 @@ do
     checkCensus(census(body), RAID_MODE, "raid layout mode")
     checkShared("BuildRaidModeGroup", "Raid Layout Mode")
 
-    check(body:find("if not tools.hoistToggle then") ~= nil,
+    check(body:find("if not tools2.hoistToggle then") ~= nil,
           "raid layout mode: the checkbox is skipped when the row has hoisted it")
 
     local opts = rowOpts("Raid Layout Mode")
@@ -686,9 +695,14 @@ do
     -- does not ship, so the walk alone would leave the row with eight keys the
     -- defaults engine cannot answer for: no amber tick, and a Reset Group that
     -- wrote nothing while saying it had.
-    check(SRC:find('ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })', 1, true) ~= nil,
+    check(SRC:find('tools.ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })', 1, true) ~= nil,
           "group visibility: the row claims the table key its ticks stand for")
-    check(SRC:find("local function ClaimKeys(row, group, extra)", 1, true) ~= nil,
+    -- ⚠ THE DOOR IS READ WHERE IT NOW LIVES. The claimer moved to the shared
+    -- helper with the rest of the machinery; the claim is unchanged -- there IS a
+    -- third argument for keys the walk cannot see, and this page is the one that
+    -- uses it.
+    check(options_file_source("GUI/Controls.lua")
+              :find("local function ClaimKeys(row, group, extra)", 1, true) ~= nil,
           "group visibility: ...through the shared claimer's own extra-keys door")
 
     check(SRC:find('groupVisRow.hideOn = function() return GUI.SelectedMode ~= "raid" end', 1, true) ~= nil,
@@ -789,35 +803,35 @@ do
           "inline: and nothing on the page asks for the band skin, because nothing is a box in the band's company")
 
     -- ---- the three bands, at ONE width ------------------------------
-    -- Read as the EXPRESSION rather than as a value, because there is no value to
-    -- read headlessly -- but an expression copied character for character cannot
-    -- resolve to something else.
-    local BAND_EXPR = [[math.max(
-                GUI.PageUsableWidth(GUI.PageChildWidth(
-                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
-                GUI.SettingsBox.group)]]
-    local function flat(s) return (s:gsub("%s+", " ")) end
-    local wanted = flat(BAND_EXPR)
-    local seen = 0
-    for chunk in page:gmatch("math%.max%([^;]-GUI%.SettingsBox%.group%)") do
-        if flat(chunk) == wanted then seen = seen + 1 end
-    end
-    -- Three: the Layout band's layoutBandW, the Appearance band's bandW and the
-    -- mover band's moverBandW. Any one of them drifting is the page going back to
-    -- two widths.
+    -- ⚠ THE THREE COPIES OF ONE EXPRESSION ARE GONE, which is exactly what the
+    -- note that used to stand here asked for and could not take: it was blocked on
+    -- the page owning its own machinery, and it no longer does. All three bands
+    -- ask tools.BandWidth() -- ONE name, resolved in one place -- and the
+    -- expression behind that name is pinned by test_popout_page_tools, where it
+    -- now lives, rather than retyped here.
     --
-    -- ⚠ THREE COPIES OF ONE EXPRESSION IS NOT THE END STATE. One shared name
-    -- would be better and is a clean follow-up; it is not taken here because
-    -- test_border_builders pins the Appearance band's own local by name, and the
-    -- border sweep's test is not this pass's to edit.
+    -- Pinned as name-plus-call rather than as a bare count, so a band that kept
+    -- the width but lost the chromeless skin (or vice versa) still fails.
+    local BAND = "GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })"
+    local seen, from = 0, 1
+    while true do
+        local s = page:find(BAND, from, true)
+        if not s then break end
+        seen, from = seen + 1, s + 1
+    end
+    -- Three: the Layout band, the Appearance band and the mover band. Any one of
+    -- them drifting is the page going back to more than one width.
     eq(seen, 3, "width: all three bands ask for the width the same way")
-    check(page:find("GUI.PageUsableWidth(GUI.PageChildWidth(", 1, true) ~= nil,
-          "width: ...through the page's own helper, so it cannot drift from the layout pass")
+    -- ...and NOTHING on the page computes it inline any more, which is the half
+    -- the count above cannot say on its own.
+    check(page:find("GUI.PageUsableWidth(GUI.PageChildWidth(", 1, true) == nil,
+          "width: ...through the shared helper, with no copy of the expression left on the page")
 
-    -- Each band is chromeless, because its ROWS are the surface.
-    for _, w in ipairs({ "layoutBandW", "bandW", "moverBandW" }) do
-        check(page:find("GUI:CreateSettingsGroup(self.child, " .. w .. ", { chromeless = true })", 1, true) ~= nil,
-              "width: the " .. w .. " band is chromeless")
+    -- Each band is chromeless, because its ROWS are the surface -- and each is one
+    -- of the three names the page is allowed to build at that width.
+    for _, band in ipairs({ "layoutBand", "appearanceGroup", "permMoverBand" }) do
+        check(page:find(band .. " = " .. BAND, 1, true) ~= nil,
+              "width: the " .. band .. " band is chromeless, at the shared width")
     end
 
     -- The Layout band carries a HEADER and the mover band does not, and both are
@@ -837,9 +851,16 @@ do
     -- PopoutContent takes the track count as an argument and passes it straight
     -- to the group, so a pane of sliders stays one track while the pane of eight
     -- one-word checkboxes takes two.
-    check(page:find("local function PopoutContent(buildInto, innerColumns)", 1, true) ~= nil,
+    --
+    -- ⚠ READ OUT OF THE SHARED HELPER, not the page: PopoutContent moved to
+    -- Controls.lua with the rest of the machinery. The claim is untouched -- the
+    -- track count is a per-ROW argument and not a per-page one -- so it is checked
+    -- where the argument now lives, and the page's own half (exactly one blurb
+    -- opting out of a track) stays below.
+    local controls = options_file_source("GUI/Controls.lua")
+    check(controls:find("local function PopoutContent(buildInto, innerColumns)", 1, true) ~= nil,
           "grid: the pane's track count is a per-row argument")
-    check(page:find("innerColumns = innerColumns }", 1, true) ~= nil,
+    check(controls:find("innerColumns = innerColumns }", 1, true) ~= nil,
           "grid: ...handed to the group rather than restated")
     local marks = 0
     for _ in page:gmatch("%.fullRow%s*=%s*true") do marks = marks + 1 end

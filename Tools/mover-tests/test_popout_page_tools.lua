@@ -10,11 +10,11 @@ local NS = ...
 -- Five more pages need all of it, and five copies would drift -- the first thing
 -- to drift being one of the load-bearing notes rather than the code under it.
 --
--- ⚠ THE FRAME PAGE IS NOT PORTED THIS PASS and this file does NOT ask it to be.
--- Its census tests read that page's source line by line, so moving it onto the
--- helper is its own commit with its own test edit. What is pinned here is that
--- the helper exists, that it exposes every verb, and that the Frame page still
--- compiles its own copy -- so the lift cannot have quietly hollowed it out.
+-- The Frame page was the last to come home, in its own commit with its own test
+-- edit: its census tests read that page's source line by line, so the port was
+-- never something the lift could do on its way past. What is pinned here is that
+-- the helper exists, that it exposes every verb, and that no page -- the Frame
+-- page included -- keeps a second copy of any of it.
 --
 -- Source-level, like the page-builder tests: the helper builds real frames and
 -- reads DF.db / GUI.SelectedMode, so it cannot be called headlessly.
@@ -44,6 +44,21 @@ do
     check(classicAt ~= nil, "tools: ...and the classic layout returns nil, doing nothing else")
     check(clearAt and classicAt and clearAt < classicAt,
           "tools: ...the clear happening BEFORE the classic bail, so classic loses it too")
+
+    -- ☠ AND SO DOES THE CLOSE, for the same reason and a sharper one. The FLIP to
+    -- classic is itself a rebuild, and it is the one rebuild that happens with a
+    -- panel standing open -- the tick that flips it lives inside one. Left below
+    -- the bail, the helper would hand a classic page back with an orphan panel
+    -- floating beside it, wired to a row this build has already retired.
+    local closeAt = BODY:find('GUI:CloseAllPopoutRows("rebuild")', 1, true)
+    check(closeAt ~= nil, "tools: every open row panel is closed on every build")
+    check(closeAt and classicAt and closeAt < classicAt,
+          "tools: ...BEFORE the classic bail, so a flip to classic takes the panels down too")
+    -- Still guarded, so an older embedded copy of the pack without the verb cannot
+    -- break a page -- and so the close is a plain no-op on a classic build that
+    -- never had a panel open.
+    check(BODY:find("if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows(\"rebuild\") end", 1, true) ~= nil,
+          "tools: ...and guarded on the verb, not called bare")
 end
 
 print("-- Popout page tools: the non-classic prologue, in order")
@@ -189,30 +204,41 @@ do
           "semantics: ...guarded on the METHOD, so the page need not know search exists")
 end
 
-print("-- Popout page tools: the Frame page keeps its own copy this pass")
+print("-- Popout page tools: the Frame page comes home")
 do
-    -- The lift is additive. The Frame page still declares every piece inline, so
-    -- nothing was hollowed out of it in the move -- and its census tests, which
-    -- read that source directly, still have something to read.
+    -- The page that WROTE this machinery is the last to take it back off the
+    -- shelf, so the sweep ends with one copy instead of six.
     -- ⚠ SCOPED TO THE FRAME PAGE'S OWN SLICE, not to the whole file. Pages/
-    -- Options.lua holds several pages, and General > Settings -- converted in
-    -- this same sweep -- DOES take the shared machinery. A whole-file search
-    -- would read that page's `local tools = GUI:CreatePopoutPageTools(self)` as
-    -- the Frame page having been ported behind this test's back.
+    -- Options.lua holds several pages, and a whole-file search would answer about
+    -- General > Settings -- which sits above this one and was converted earlier --
+    -- as readily as about this one.
     local SRC = options_file_source("GUI/Pages/Options.lua")
     local a = SRC:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
     local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
     check(a ~= nil and b ~= nil and b > a, "frame page: locatable by its own ends")
     local page = SRC:sub(a or 1, b or 1)
+
+    check(page:find("local tools = GUI:CreatePopoutPageTools(self)", 1, true) ~= nil,
+          "frame page: takes the shared machinery, unconditionally")
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "RowDB",
                          "ClaimKeys", "WireModifiedTick", "RefreshAfterGroupWrite",
                          "CombatReason", "HoldReason", "WireFooter",
                          "RegisterHoistedToggle" }) do
-        check(page:find("local function " .. v .. "(", 1, true) ~= nil,
-              "frame page: still compiles its own " .. v)
+        check(page:find("local function " .. v .. "(", 1, true) == nil,
+              "frame page: no longer re-declares " .. v)
     end
-    -- ...and it does NOT call the helper yet. Stated so that porting it is a
-    -- deliberate edit here rather than a silent one.
-    check(page:find("CreatePopoutPageTools", 1, true) == nil,
-          "frame page: and does not take the shared helper this pass")
+    -- The prologue's own state is the helper's too: a page that still touched
+    -- either of these would be running half a second copy.
+    check(page:find("_popoutHolders", 1, true) == nil,
+          "frame page: never manages the popout holders itself")
+    check(page:find("_popoutRowForKey", 1, true) == nil,
+          "frame page: ...nor the search row map")
+
+    -- ⚠ AND ITS BUILDERS TOOK THE HOUSE RENAME. Every builder on a converted page
+    -- takes its opts as `tools2`, because `tools` is the page-scope machinery --
+    -- a builder that shadowed the name could never reach the page's verbs.
+    check(page:find("local function BuildFrameSizeGroup(tools2)", 1, true) ~= nil,
+          "frame page: its builders take tools2, so nothing shadows the page's tools")
+    check(page:find("(tools)", 1, true) == nil,
+          "frame page: ...and no builder is left taking the shadowing name")
 end

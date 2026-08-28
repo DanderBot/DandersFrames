@@ -753,18 +753,25 @@ if GUI.CreateBorderShadowControls then
                 "classic still builds the 280 box")
         pageHas("if classicLayout then Add(appearanceGroup, nil, 2) end",
                 "...and still adds it to column 2, where it has always been")
-        -- Popout: the band. Width from the page helper (never a literal) and no
+        -- Popout: the band. Width from the shared helper (never a literal) and no
         -- box chrome. WHERE it is added is not decided in this block any more --
         -- see the band-order block in test_frame_page_builders, which owns that
         -- claim now that the page has more than one band.
-        pageHas("GUI.PageUsableWidth(GUI.PageChildWidth(",
-                "the band is built at the width the layout pass will stretch it to")
-        pageHas("GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })",
-                "...with no box chrome, because the rows ARE the surface")
+        --
+        -- ⚠ tools.BandWidth(), NOT A PAGE LOCAL. The page took
+        -- GUI:CreatePopoutPageTools, so the expression this used to read
+        -- (GUI.PageUsableWidth(GUI.PageChildWidth(...))) lives in Controls.lua and
+        -- is pinned by test_popout_page_tools. The claim here is unchanged: this
+        -- band asks for the width the layout pass will stretch it to rather than
+        -- naming a literal.
+        pageHas("GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })",
+                "the band is built at the width the layout pass will stretch it to, with no box chrome")
+        check(pageSrc:find("GUI:CreateSettingsGroup(self.child, 280, { chromeless", 1, true) == nil,
+              "band: ...and never at a literal")
         -- The band's padding is DEFAULT (the popout PANE is the zero-padding
         -- case, not this). That is what lands a row's right edge on the same
         -- corridor as a slider's value box -- see test_page_parking.
-        check(pageSrc:find("bandW, { chromeless = true, padding", 1, true) == nil,
+        check(pageSrc:find("tools.BandWidth(), { chromeless = true, padding", 1, true) == nil,
               "band: the band keeps the standard box padding, so its rows end at the corridor")
         -- Inside THIS block, the only Add is the classic box's: the popout one
         -- moved to the foot of the builder. Two unconditional Adds would lay the

@@ -1887,16 +1887,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- ⚠ TEMPORARY. Remove this control (and DF:IsClassicSettingsLayout) once the
             -- popout redesign is finished.
             --
-            -- ☠☠ THE ESCAPE HATCH NOW LIVES INSIDE A PANE, AND THE FLIP HAS TO
-            -- TAKE THE PANE DOWN ITSELF. In the popout layout the only way to
-            -- reach this tick is to open the Settings Panel Appearance row, so the
-            -- click that turns classic ON happens with a panel standing open --
-            -- and the rebuild below CANNOT close it: GUI:CreatePopoutPageTools
-            -- returns early when IsClassicSettingsLayout() is true, BEFORE its
-            -- CloseAllPopoutRows("rebuild") prologue, and a row popout is pinnable
-            -- so the shell's own source-death tick leaves it alone. Without the
-            -- close the user lands on a classic page with an orphan panel floating
-            -- beside it, wired to a row that is already in the trash.
+            -- ☠☠ THE ESCAPE HATCH LIVES INSIDE A PANE, AND THE FLIP TAKES THE PANE
+            -- DOWN ITSELF -- BEFORE the rebuild, which is the whole point. In the
+            -- popout layout the only way to reach this tick is to open the
+            -- Settings Panel Appearance row, so the click that turns classic ON
+            -- happens with a panel standing open, and a row popout is pinnable so
+            -- the shell's own source-death tick leaves it alone.
+            --
+            -- ⚠ GUI:CreatePopoutPageTools DOES CLOSE PANELS ON A CLASSIC BUILD --
+            -- its prologue runs above the classic early return, deliberately -- so
+            -- this line is no longer the ONLY thing that would close them. It is
+            -- kept because it is the only thing that closes them AT THE RIGHT
+            -- MOMENT: DoBuild retires a page's children BEFORE it calls the
+            -- builder, so the helper's close lands after the row the panel is
+            -- wired to is already in the trash. Closing here, ahead of the
+            -- rebuild, closes them while their rows are still alive. (It also
+            -- covers the path where RefreshCurrentPage returns early and no
+            -- builder runs at all.) Both are guarded no-ops the second time.
             --
             -- ⚠ AND THE REBUILD STAYS SYNCHRONOUS, unlike the Frame page's Raid
             -- Layout Mode toggle. That one is deferred because the tick is ON THE
@@ -2270,412 +2277,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- tag away.
         local classicLayout = DF:IsClassicSettingsLayout()
 
-        -- Cleared on EVERY build, classic included. It only ever has entries in
-        -- the popout layout, and a map left behind by a previous new-UI build
-        -- would point the settings-search jump at rows this build has retired.
-        self._popoutRowForKey = nil
-
-        -- ===== THE POPOUT-ROW MACHINERY, ONCE FOR THE WHOLE PAGE =============
-        -- Gate two built all of this INSIDE the Appearance block, because
-        -- Appearance was the only converted group on the page. It is not any
-        -- more: Frame Fade and Permanent Mover are rows too, and they are built
-        -- five hundred lines further down where that block's locals are long out
-        -- of scope. So the shared half lives here and the groups below take it as
-        -- given -- which is the shape the rest of the sweep needs as well.
+        -- ===== THE POPOUT-ROW MACHINERY, SHARED RATHER THAN OWNED =========
+        -- This page BUILT the first copy of all of it inline -- the eager
+        -- holders, the pane reflow, the key claim, the amber tick, the footer's
+        -- Reset Group / Hold: Defaults, the hoisted-toggle search repair and the
+        -- band width -- because it was the first page converted and there was
+        -- nothing yet to share. Five pages later there was, and every one of them
+        -- took GUI:CreatePopoutPageTools (Controls.lua); this page is the last to
+        -- come home, so the sweep ends with one copy instead of six.
         --
-        -- Everything here is DEFINED in both layouts and CALLED in neither by
-        -- itself. Only the prologue below has an effect, and it is guarded: in
-        -- classic mode nothing opens a popout, so there is nothing to close, no
-        -- holder to retire and no map to publish.
-        local POPOUT_W = GUI.PopoutContentWidth or 260
-
-        if not classicLayout then
-            -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT.
-            -- Every route into this builder is a REBUILD -- a party/raid switch,
-            -- a profile switch, the classic-layout flip, and the settings search
-            -- registry, which is built by re-running every page's builder -- and
-            -- an open popout from the PREVIOUS build is showing widgets wired to
-            -- the db table THAT build captured. After a mode switch that table is
-            -- the other mode's, so a slider dragged in a stale panel writes live
-            -- settings into the wrong mode. Guarded rather than called bare, so
-            -- an older embedded copy of the pack without the verb cannot break
-            -- the page.
-            if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
-
-            -- Retire the previous build's holders. They are deliberately NOT in
-            -- self.children -- anything in that list is laid out into one of the
-            -- page's columns, and these must never appear ON the page -- so
-            -- DoBuild's own retire loop never sees them and this is the only
-            -- thing that does.
-            if self._popoutHolders then
-                local trash = GUI._trashFrame
-                for _, holder in ipairs(self._popoutHolders) do
-                    holder:Hide()
-                    holder:ClearAllPoints()
-                    if trash then holder:SetParent(trash) end
-                end
-            end
-            self._popoutHolders = {}
-
-            -- ===== WHAT THE SETTINGS SEARCH NEEDS BACK =====================
-            -- Search builds its registry by re-running every page's builder, so
-            -- the eager holders below already put every popout control into it,
-            -- in its own section context -- an inline result recreates its own
-            -- widget from that metadata and edits fine wherever the source widget
-            -- happens to live. Two things do NOT survive the change of shape, and
-            -- both are put back per row:
-            --
-            --  (a) THE HOISTED TOGGLES. A row carries its group's on/off tick
-            --      itself, so the builder is told to suppress the checkbox that
-            --      used to be there -- and the CHECKBOX FACTORY is what
-            --      registered that setting with search. The settings are still
-            --      live, so losing the hits would make a toggleable setting
-            --      unfindable. Registered by hand at each row site, same L key
-            --      and same db key, so both layouts carry the identical entry.
-            --  (b) WHICH ROW OWNS A SETTING. A hit on a popout-only control
-            --      navigates to the section, which in this layout IS the rows --
-            --      the control is behind one of them. This map lets the jump
-            --      open it; without it the landing is correct but empty-looking.
-            self._popoutRowForKey = {}
-        end
-
-        -- Every pane currently mounted in a panel, so a toggle can re-flow the
-        -- group a user is looking at as well as the rows on the page. One list
-        -- for the page rather than one per group: a reset behind one row can
-        -- change what another row's pane is showing (nothing does today, but the
-        -- cost of the shared list is a repaint and the cost of the split one is a
-        -- stale open panel).
-        local mounted = {}
-
-        -- Re-flow one mounted group and put the panel back around it. The
-        -- pane is sized from the group's own FRAME height, not from
-        -- LayoutChildren's return: that return adds the between-groups
-        -- margin, which a lone group filling a popout has no use for.
-        local function ReflowPane(st, values)
-            local g = st.group
-            if not g then return end
-            g:LayoutChildren()
-            g:RefreshChildStates()
-            -- ☠ AND THE VALUES, when the caller says a write happened that
-            -- these widgets could not have seen. RefreshChildStates is about
-            -- STATE -- greyed or not, plus whatever refreshContent a page
-            -- bolted on -- and a checkbox's tick, a slider's thumb, a
-            -- dropdown's caption and a swatch are none of those: the
-            -- factories paint them at build and on their own OnShow, on the
-            -- assumption that nothing writes a setting except the widget
-            -- bound to it.
-            --
-            -- Reset Group breaks that assumption, and so does the UNDO of one
-            -- (it replays this same apply). Without this the reset moved the
-            -- frames and the row summary and left every control inside the
-            -- open panel reading the old numbers -- which is the reported bug.
-            --
-            -- ⚠ OPT-IN, not on every reflow. This also runs on a hideOn
-            -- change while the user is dragging a slider inside the pane, and
-            -- a value repaint mid-drag snaps the thumb from the mouse back to
-            -- the last committed step.
-            if values and g.RefreshChildValues then g:RefreshChildValues() end
-            if st.pane then st.pane:SetHeight(math.max(g:GetHeight() or 1, 1)) end
-            -- ...and the panel around the pane. The kit fixes a pane's height
-            -- at build, and a hideOn inside this group moves it afterwards
-            -- (Border Style = TEXTURE reveals the texture dropdown).
-            local po = st.po
-            if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
-        end
-
-        -- `values` rides through to ReflowPane: see its header for why a
-        -- value repaint is opt-in rather than part of every reflow.
-        local function ReflowMounted(values)
-            for _, st in ipairs(mounted) do
-                if not (st.po and st.po.closed) then ReflowPane(st, values) end
-            end
-        end
-
-        -- ONE row's popout content, built EAGERLY -- here, at page build
-        -- time, into a hidden holder -- rather than on the first open. Two
-        -- reasons, either sufficient on its own:
+        -- Every essay that used to sit over each verb here went WITH the code and
+        -- is still the load-bearing half of it -- read them there, not from a
+        -- summary here that would drift the moment either side moved.
         --
-        --   (a) the settings SEARCH registry is built by re-running every
-        --       page's builder, so a widget that does not exist until the
-        --       user opens a popout is a widget search can never find.
-        --   (b) some builders SEED db keys at build time (the border's colour
-        --       source, and the colour table itself on a profile that has
-        --       none). Moving those writes to first-open would move WHEN a
-        --       profile changes shape, which is exactly what the export
-        --       byte-identity gate measures.
-        --
-        -- The shell runs a row's `build` ONCE PER INSTANCE, not once per row,
-        -- so a SECOND instance (pin one, then click the row again) asks for
-        -- content a second time. The first call adopts the pre-built group;
-        -- every later one builds a fresh one through the same builder. Which
-        -- is why this is a factory rather than one captured group -- and why
-        -- each group carries its own `st`, so the refresh wired into group
-        -- one cannot re-flow group two.
-        --
-        -- `innerColumns` is the pane's own interior grid (DandersUI Sections'
-        -- opts.innerColumns), and it is per ROW rather than per page: a pane of
-        -- sliders at half of 260 is two stubby bars with their labels stranded,
-        -- while a pane of eight one-word checkboxes is exactly the list the
-        -- second track was written for. Omitted = absent = one track, which is
-        -- what every pane on this page but Group Visibility asks for.
-        local function PopoutContent(buildInto, innerColumns)
-            local function fresh()
-                local st = {}
-                local holder = CreateFrame("Frame", nil, self.child)
-                holder:SetSize(POPOUT_W, 1)
-                holder:Hide()
-                self._popoutHolders[#self._popoutHolders + 1] = holder
-                -- chromeless + zero padding: the popout already draws a
-                -- panel, and a faint bordered box inside one reads as a
-                -- second, smaller panel. The width is the popout's own
-                -- content width, so each control mounts at exactly the width
-                -- it has inline on the page.
-                st.group = GUI:CreateSettingsGroup(holder, POPOUT_W,
-                                                   { chromeless = true, padding = 0,
-                                                     innerColumns = innerColumns })
-                st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
-                -- What a builder's own dropdowns and checkboxes call. Cheap,
-                -- and deliberately NOT a page rebuild: see the toggles below.
-                buildInto(st.group, holder, function()
-                    ReflowPane(st)
-                    self:RefreshStates()
-                end)
-                return st
-            end
-
-            local pending = fresh()
-            -- The eagerly built group comes back ALONGSIDE the mount
-            -- function: it is the one instance that exists at page-build
-            -- time, so it is the one whose children can be read for the
-            -- search map below. Later instances build the same controls
-            -- from the same builder, so nothing is missed by ignoring them.
-            return function(po, pane)
-                local st = pending or fresh()
-                pending = nil
-                st.po, st.pane = po, pane
-                mounted[#mounted + 1] = st
-                st.group:SetParent(pane)
-                st.group:ClearAllPoints()
-                st.group:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
-                st.group:SetWidth(POPOUT_W)
-                st.group:Show()
-                ReflowPane(st)
-            end, pending.group
-        end
-
-        -- db as a FUNCTION, which is what the kit contract asks for: the row
-        -- re-resolves on every refresh, so a mode switch is followed rather
-        -- than frozen at the table this build captured.
-        local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
-
-        -- ---- the two search repairs, per the note in the prologue ----------
-        -- (b) Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not
-        -- from a key list and not from a name prefix -- "frameBorder" would
-        -- claim keys no popout owns (the row toggles themselves) and would
-        -- miss any spelled differently. Every shared factory stamps
-        -- container.searchEntry, so a control added to any builder is
-        -- covered without anyone having to remember this exists.
-        --
-        -- ...and the SAME walk answers a second question: which keys the
-        -- row's amber modified-tick is about. Collected onto the row as
-        -- row._claimedKeys so the tick can ask the diff engine "is any of
-        -- these not the shipped default", which is exactly "does the pane
-        -- behind this row contain a change".
-        --
-        -- ⚠ TWO SOURCES FOR THE KEY, and the second is not belt-and-braces.
-        -- searchEntry is stamped by the SEARCH registration, which is
-        -- guarded on DF.Search existing -- so on a build where search has
-        -- not registered, every key would be missed. container.overrideDbKey
-        -- is stamped by the toolkit's own AddOverrideIndicators, which every
-        -- db-bound control goes through regardless, and it covers the
-        -- colour pickers and checkboxes whose search entries are registered
-        -- by a different route.
-        --
-        -- ⚠ `extra` IS NOT A CONVENIENCE. A control may be bound to a key the
-        -- walk cannot see: the eight Group Visibility ticks are custom-get/set
-        -- boxes over ONE table setting, and each stamps a per-index override key
-        -- ("raidGroupVisible_3") that the profile does not ship. Left to the walk
-        -- alone the row would claim eight keys the defaults engine cannot answer
-        -- for, so its amber tick would never light and Reset Group would write
-        -- nothing while saying it had. The real key is named here instead.
-        local function ClaimKeys(row, group, extra)
-            if not (row and group and group.groupChildren) then return end
-            local claimed = row._claimedKeys or {}
-            row._claimedKeys = claimed
-            for _, e in ipairs(group.groupChildren) do
-                local w  = e.widget
-                local se = w and w.searchEntry
-                local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
-                if type(k) == "string" then
-                    self._popoutRowForKey[k] = row
-                    claimed[#claimed + 1] = k
-                end
-            end
-            for _, k in ipairs(extra or {}) do
-                self._popoutRowForKey[k] = row
-                claimed[#claimed + 1] = k
-            end
-        end
-
-        -- The tick's answer, for a row that has just had its keys claimed.
-        -- Re-read on every refresh (the row calls this, not the other way
-        -- round), so a write inside the popout lights it without anything
-        -- having to be invalidated. DF.Defaults is guarded because this page
-        -- is in the load-on-demand companion and the engine is resident.
-        local function WireModifiedTick(row)
-            if not (row and row.SetModifiedCheck) then return end
-            row:SetModifiedCheck(function(d)
-                local D = DF.Defaults
-                return (D and D:Count(d, row._claimedKeys or {}) or 0) > 0
-            end)
-        end
-
-        -- ---- the footer's two verbs ---------------------------------
-        -- What a write to any of a group's keys costs, in one place, so the
-        -- two buttons and every future one apply the SAME work.
-        --
-        -- `apply` is the GROUP's own half -- the bodies its widgets' own
-        -- callbacks drive, handed in per row because a border reset and a
-        -- permanent-mover reset do not cost the same work. Everything after
-        -- it is shared: ReflowMounted repaints the controls the user is
-        -- looking at (RefreshChildStates walks the group calling
-        -- refreshContent on every child), and the row's own Refresh re-reads
-        -- the summary and the modified tick.
-        --
-        -- ApplyScheduler coalesces the frame updates inside `apply`, so a
-        -- reset of thirteen keys is one apply, not thirteen.
-        local function RefreshAfterGroupWrite(apply)
-            if apply then apply() end
-            -- ⚠ WITH THE VALUE SWEEP. This is the one path where the keys
-            -- moved WITHOUT the widgets doing it -- a group reset, a hold,
-            -- and the undo/redo of a reset (which replays ApplyGroup) -- so
-            -- it is the one path that has to repaint what the controls read.
-            ReflowMounted(true)
-            if GUI.RefreshAllOverrideIndicators then
-                GUI.RefreshAllOverrideIndicators()
-            end
-            self:RefreshStates()
-        end
-
-        -- Can these buttons be pressed at all, and if not, why.
-        --
-        -- COMBAT greys both. Every key behind these rows reaches a secure
-        -- frame, and the addon's standing rule is that those writes are
-        -- deferred in combat -- the footer does not fight that, it just
-        -- says so.
-        local function CombatReason()
-            if InCombatLockdown() then return false, L["Cannot use this action in combat."] end
-            return true
-        end
-
-        -- ...and HOLD alone is additionally off while the raid auto-layout
-        -- machinery is live. Two different reasons, one gate:
-        --
-        --   EDITING a layout: `onSettingWritten` records every write as an
-        --   override edit for that layout. A hold writes twice -- defaults
-        --   in, the user's values back out -- so a preview nobody committed
-        --   to would land in the layout as two deliberate edits.
-        --   A LAYOUT RUNNING: `interceptWrite` redirects writes to the
-        --   stored baseline instead of the live table, so the preview would
-        --   change nothing on screen. A press-and-hold that shows the user
-        --   nothing is worse than one they cannot press.
-        --
-        -- RESET stays available in BOTH states, and that is not an
-        -- oversight. While editing, recording the defaults as this layout's
-        -- override edits is exactly what the user asked for; while a layout
-        -- is running, the redirect writes the defaults into the stored
-        -- baseline -- which is the table the modified dots and the row tick
-        -- are reporting on, so the reset does what they say it will.
-        local function HoldReason()
-            local ok, why = CombatReason()
-            if not ok then return false, why end
-            local AP = DF.AutoProfilesUI
-            if GUI.SelectedMode == "raid" and AP then
-                local editing = AP.IsEditing and AP:IsEditing()
-                local running = AP.IsLayoutActive and AP:IsLayoutActive()
-                if editing or running then
-                    return false, L["Unavailable while an auto layout is active or being edited."]
-                end
-            end
-            return true
-        end
-
-        -- The two verbs, wired onto a row whose keys have just been claimed.
-        -- Both close over row._claimedKeys by REFERENCE rather than reading
-        -- it now: ClaimKeys fills that table after the row is built, and a
-        -- copy taken here would be the empty one.
-        local function WireFooter(row, apply)
-            if not (row and row.SetActions) then return end
-            local held                    -- the hold's snapshot, between the two halves
-
-            -- THE GROUP'S APPLY, named once. Every verb below runs it after
-            -- it writes -- and Reset hands the same reference to the undo
-            -- engine, because an undo of a reset has no button press behind
-            -- it to run this for it. Restoring thirteen values and running
-            -- only the generic sweep is what "undo changed the numbers but
-            -- the frames did not move" looks like.
-            local function ApplyGroup()
-                RefreshAfterGroupWrite(apply)
-                row.Refresh()
-            end
-
-            row:SetActions({
-                {
-                    text        = L["Reset Group"],
-                    tooltipDesc = L["Reset every setting in this group to its default value."],
-                    enabled     = CombatReason,
-                    onClick     = function()
-                        local GA = DF.GroupActions
-                        if not GA then return end
-                        -- The row's own heading names the collapsed undo
-                        -- entry: a reset is one thing the user did to THIS
-                        -- group, and the group is what they will look for.
-                        GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode,
-                                     row._title or row._label, ApplyGroup)
-                        ApplyGroup()
-                    end,
-                },
-                {
-                    text        = L["Hold: Defaults"],
-                    hold        = true,
-                    tooltipDesc = L["Press and hold to preview this group at its default values. Release to restore your settings."],
-                    enabled     = HoldReason,
-                    onHoldStart = function()
-                        local GA = DF.GroupActions
-                        if not GA then return end
-                        held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
-                        ApplyGroup()
-                    end,
-                    onHoldEnd   = function()
-                        local GA = DF.GroupActions
-                        if not (GA and held) then return end
-                        GA:EndHold(GUI, RowDB(), row._claimedKeys or {}, held)
-                        held = nil
-                        -- The UNTHROTTLED apply on the way back, unlike the
-                        -- coalescing one used going in: a release is the
-                        -- moment the user is watching for their settings to
-                        -- come back, and a frame of defaults left on screen
-                        -- after they let go reads as the restore failing.
-                        GUI:Call("refreshNow")
-                        ApplyGroup()
-                    end,
-                },
-            })
-        end
-
-        -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
-        -- map: the tick is ON the row, so the section jump already lands on
-        -- the control the user searched for and opening the panel on top of
-        -- that would be noise. The callback is the one the suppressed
-        -- checkbox would have carried, so an inline result behaves as the
-        -- inline checkbox does in classic. Guarded on the METHOD, not just
-        -- the table -- Search is in this companion but the page must not care.
-        local function RegisterHoistedToggle(row, label, key, onToggle)
-            local S = DF.Search
-            if not (S and S.RegisterCheckbox) then return end
-            row.searchEntry = S:RegisterCheckbox(label, key, nil, false, onToggle)
-            if S.LinkSourceWidget then S:LinkSourceWidget(row) end
-        end
+        -- nil in classic, which is what every `if classicLayout then` arm below
+        -- leans on: the classic page never reaches a `tools.` call, so nothing
+        -- needs guarding at the call sites.
+        local tools = GUI:CreatePopoutPageTools(self)
 
         -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
         -- Two different things depending on the layout, decided here because the
@@ -2708,16 +2326,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         if classicLayout then
             appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
         else
-            -- The width the layout pass is about to give it, asked for rather
-            -- than guessed: GUI.PageUsableWidth is the same helper that pass
-            -- stretches "both" widgets to. Floored at a box's width so a page
-            -- built before the content frame has a size still gets a sane
-            -- container (the layout pass then stretches it as normal).
-            local bandW = math.max(
-                GUI.PageUsableWidth(GUI.PageChildWidth(
-                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
-                GUI.SettingsBox.group)
-            appearanceGroup = GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })
+            -- The width the layout pass is about to give it, ASKED FOR rather
+            -- than guessed -- tools.BandWidth() resolves the same helper that
+            -- pass stretches "both" widgets to, floored at a box's width so a
+            -- page built before the content frame has a size still gets a sane
+            -- container (the layout pass then stretches it as normal). All
+            -- three of this page's bands ask through it, which is what keeps
+            -- them one width rather than three copies of one expression.
+            appearanceGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
         end
 
         -- ===== LAYOUT: THE PAGE'S OTHER BAND ==============================
@@ -2738,11 +2354,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- themselves and Add themselves exactly where they always did.
         local layoutBand
         if not classicLayout then
-            local layoutBandW = math.max(
-                GUI.PageUsableWidth(GUI.PageChildWidth(
-                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
-                GUI.SettingsBox.group)
-            layoutBand = GUI:CreateSettingsGroup(self.child, layoutBandW, { chromeless = true })
+            layoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
             layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         end
 
@@ -2758,8 +2370,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- heights, same hideOn. Guarded by test_frame_page_builders.lua, which
         -- reads this body out of the source and checks it against the inventory
         -- it had inline.
-        local function BuildFrameSizeGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildFrameSizeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Height"], 20, 300, 1, db, "frameHeight", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
             group:AddWidget(GUI:CreateSlider(parent, L["Frame Padding"], 0, 10, 1, db, "framePadding", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
@@ -2835,21 +2447,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- is no boolean here meaning "am I doing anything".
             local FRAME_SIZE_COUNT = 5
 
-            local sizeMount, sizeContent = PopoutContent(function(group, holder, reflow)
+            local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFrameSizeGroup({ group = group, parent = holder, refreshStates = reflow })
             end)
             local sizeRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Frame Size"],
-                db      = RowDB,
+                db      = tools.RowDB,
                 summary = FrameSizeSummary,
                 count   = FRAME_SIZE_COUNT,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = sizeMount,
             }))
-            ClaimKeys(sizeRow, sizeContent)
-            WireModifiedTick(sizeRow)
-            WireFooter(sizeRow, ApplyFrameSize)
+            tools.ClaimKeys(sizeRow, sizeContent)
+            tools.WireModifiedTick(sizeRow)
+            tools.WireFooter(sizeRow, ApplyFrameSize)
         end
 
         -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
@@ -2872,9 +2484,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- rows greyed with Show Border because CreateBorderControls' own
         -- composition loop reached them; split out, the shadow builder is never
         -- inside that loop, so the same predicate has to be handed to it.
-        local function BuildBorderGroup(tools)
-            GUI:CreateBorderControls(tools.group, db, "frame", {
-                parent       = tools.parent,
+        local function BuildBorderGroup(tools2)
+            GUI:CreateBorderControls(tools2.group, db, "frame", {
+                parent       = tools2.parent,
                 include      = {
                     -- Frame Border is the outer chrome of the unit. It's a
                     -- structural element, not an alert surface, so animations
@@ -2888,22 +2500,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
                 lightUpdate  = function() DF:LightweightUpdateBorder() end,
                 lightColors  = function() DF:LightweightUpdateBorderColor() end,
-                refreshStates = tools.refreshStates,
+                refreshStates = tools2.refreshStates,
                 sizeMin = 1, sizeMax = 16, sizeStep = 1,
-                noShowToggle = tools.hoistToggles or nil,
+                noShowToggle = tools2.hoistToggles or nil,
             })
         end
-        local function BuildBorderShadowGroup(tools)
-            GUI:CreateBorderShadowControls(tools.group, db, "frame", {
-                parent       = tools.parent,
+        local function BuildBorderShadowGroup(tools2)
+            GUI:CreateBorderShadowControls(tools2.group, db, "frame", {
+                parent       = tools2.parent,
                 -- No lightColors: the shadow colour picker commits through
                 -- fullUpdate, exactly as it did inside the single call.
                 fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
                 lightUpdate  = function() DF:LightweightUpdateBorder() end,
-                refreshStates = tools.refreshStates,
-                hideWhen     = tools.shadowHideWhen,
-                disableWhen  = tools.shadowDisableWhen,
-                noEnableToggle = tools.hoistToggles or nil,
+                refreshStates = tools2.refreshStates,
+                hideWhen     = tools2.shadowHideWhen,
+                disableWhen  = tools2.shadowDisableWhen,
+                noEnableToggle = tools2.hoistToggles or nil,
             })
         end
         -- Show Border off greys the shadow block, in BOTH layouts. In the single
@@ -2953,7 +2565,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 self:RefreshStates()
                 -- ...and the panes, because Show Border also greys the shadow
                 -- block from inside the shadow popout.
-                ReflowMounted()
+                tools.ReflowMounted()
             end
 
             -- The summaries. Hand-authored per the agreed convention: at most
@@ -3026,7 +2638,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- and that is what follows the mode (GUI:SetAccent is written
             -- alongside every SelectedMode change), so party purple and raid
             -- orange come for free. The page rebuilds on a mode switch anyway.
-            local borderMount, borderContent = PopoutContent(function(group, holder, reflow)
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBorderGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
@@ -3035,7 +2647,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
             local borderRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Border"],
-                db       = RowDB,
+                db       = tools.RowDB,
                 toggle   = { key = "frameShowBorder" },
                 summary  = BorderSummary,
                 count    = BORDER_COUNT,
@@ -3044,12 +2656,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 clipTo   = self,
                 build    = borderMount,
             }))
-            ClaimKeys(borderRow, borderContent)
-            WireModifiedTick(borderRow)
-            WireFooter(borderRow, ApplyBorder)
-            RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder", OnBorderToggle)
+            tools.ClaimKeys(borderRow, borderContent)
+            tools.WireModifiedTick(borderRow)
+            tools.WireFooter(borderRow, ApplyBorder)
+            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder", OnBorderToggle)
 
-            local shadowMount, shadowContent = PopoutContent(function(group, holder, reflow)
+            local shadowMount, shadowContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBorderShadowGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
@@ -3063,7 +2675,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
             local shadowRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Border Shadow"],
-                db       = RowDB,
+                db       = tools.RowDB,
                 toggle   = { key = "frameBorderShadowEnabled" },
                 summary  = ShadowSummary,
                 count    = SHADOW_COUNT,
@@ -3072,10 +2684,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 clipTo   = self,
                 build    = shadowMount,
             }))
-            ClaimKeys(shadowRow, shadowContent)
-            WireModifiedTick(shadowRow)
-            WireFooter(shadowRow, ApplyBorder)
-            RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled", OnBorderToggle)
+            tools.ClaimKeys(shadowRow, shadowContent)
+            tools.WireModifiedTick(shadowRow)
+            tools.WireFooter(shadowRow, ApplyBorder)
+            tools.RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled", OnBorderToggle)
             -- The dependent grey, in the page's own idiom: the group's
             -- RefreshChildStates drives row:SetEnabled off this, and the row's
             -- explicit SetEnabled overrides its opts.enabled from there on, so
@@ -3118,13 +2730,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the move changed is where `group`, `parent` and the state refresh come
         -- from. Guarded by test_frame_page_builders.lua, which reads this body
         -- out of the source and checks it against the inventory it had inline.
-        local function BuildFrameFadeGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildFrameFadeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
             local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
             ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
             ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
             group:AddWidget(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
-                tools.refreshStates()
+                tools2.refreshStates()
                 RefreshFrameFade()
             end), 30)
             local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
@@ -3186,7 +2798,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- mounts by test_frame_page_builders.lua.
             local FRAME_FADE_COUNT = 7
 
-            local fadeMount, fadeContent = PopoutContent(function(group, holder, reflow)
+            local fadeMount, fadeContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFrameFadeGroup({
                     group = group, parent = holder,
                     -- The pane's own reflow, NOT self:RefreshStates alone: the
@@ -3204,16 +2816,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- labelled "Frame Fade", says the words twice for no gain.
             local fadeRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Frame Fade"],
-                db      = RowDB,
+                db      = tools.RowDB,
                 summary = FrameFadeSummary,
                 count   = FRAME_FADE_COUNT,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = fadeMount,
             }))
-            ClaimKeys(fadeRow, fadeContent)
-            WireModifiedTick(fadeRow)
-            WireFooter(fadeRow, RefreshFrameFade)
+            tools.ClaimKeys(fadeRow, fadeContent)
+            tools.WireModifiedTick(fadeRow)
+            tools.WireFooter(fadeRow, RefreshFrameFade)
         end
 
 
@@ -3289,8 +2901,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- The three dropdowns, verbatim, taking the group and parent they
         -- should build into. Guarded by test_frame_page_builders.lua against
         -- the inventory they had inline.
-        local function BuildLayoutDirectionGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildLayoutDirectionGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
             local growOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
             local growDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
             growDrop.hideOn = function() return GUI.SelectedMode == "raid" and db.raidUseGroups end
@@ -3405,21 +3017,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 UpdateFrames()
             end
 
-            local dirMount, dirContent = PopoutContent(function(group, holder, reflow)
+            local dirMount, dirContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildLayoutDirectionGroup({ group = group, parent = holder, refreshStates = reflow })
             end)
             local dirRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Layout Direction"],
-                db      = RowDB,
+                db      = tools.RowDB,
                 summary = LayoutDirectionSummary,
                 count   = LAYOUT_DIR_COUNT,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = dirMount,
             }))
-            ClaimKeys(dirRow, dirContent)
-            WireModifiedTick(dirRow)
-            WireFooter(dirRow, ApplyLayoutDirection)
+            tools.ClaimKeys(dirRow, dirContent)
+            tools.WireModifiedTick(dirRow)
+            tools.WireFooter(dirRow, ApplyLayoutDirection)
         end
 
         -- ===== RAID LAYOUT MODE (a 280 box in classic, a row in the band) ==
@@ -3491,9 +3103,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- The blurb, which is the whole of this group once the tick is hoisted.
-        local function BuildRaidModeGroup(tools)
-            local group, parent = tools.group, tools.parent
-            if not tools.hoistToggle then
+        local function BuildRaidModeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            if not tools2.hoistToggle then
                 group:AddWidget(GUI:CreateCheckbox(parent, L["Use Group-Based Layout"], db, "raidUseGroups", function()
                     ApplyRaidUseGroups()
                     if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
@@ -3529,7 +3141,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function OnRaidModeToggle()
                 ApplyRaidUseGroups()
                 self:RefreshStates()
-                ReflowMounted()
+                tools.ReflowMounted()
                 C_Timer.After(0, function()
                     if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                 end)
@@ -3543,7 +3155,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return L["Groups"]
             end
 
-            local raidModeMount = PopoutContent(function(group, holder, reflow)
+            local raidModeMount = tools.PopoutContent(function(group, holder, reflow)
                 BuildRaidModeGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
@@ -3552,7 +3164,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
             local raidModeRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Raid Layout Mode"],
-                db       = RowDB,
+                db       = tools.RowDB,
                 toggle   = { key = "raidUseGroups" },
                 summary  = RaidModeSummary,
                 offText  = L["Flat"],
@@ -3561,7 +3173,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 clipTo   = self,
                 build    = raidModeMount,
             }))
-            RegisterHoistedToggle(raidModeRow, L["Use Group-Based Layout"], "raidUseGroups", OnRaidModeToggle)
+            tools.RegisterHoistedToggle(raidModeRow, L["Use Group-Based Layout"], "raidUseGroups", OnRaidModeToggle)
             -- RAID ONLY, exactly as the box was. A row carries hideOn the same way
             -- any other widget in a settings group does -- LayoutChildren skips a
             -- hidden child and the plate re-flows round it -- so the band simply
@@ -3587,8 +3199,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- instance the user has open. Inside the builder `group` and
         -- `groupAnchorGrid` ARE the pane's own, one pair per instance, so a
         -- second (pinned) panel refreshes itself and not its sibling.
-        local function BuildGroupLayoutGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildGroupLayoutGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
             local groupLayoutHint = db.growDirection == "VERTICAL" and L["Players stack horizontally, groups grow top-to-bottom."] or L["Players stack vertically, groups grow left-to-right."]
             -- No fullRow: this group is one track wherever it is built now -- the
             -- classic 280 box, and a pane that asks for no interior grid -- so the
@@ -3837,21 +3449,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
             end
 
-            local groupLayoutMount, groupLayoutContent = PopoutContent(function(group, holder, reflow)
+            local groupLayoutMount, groupLayoutContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildGroupLayoutGroup({ group = group, parent = holder, refreshStates = reflow })
             end)
             local groupLayoutRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Group Layout Settings"],
-                db      = RowDB,
+                db      = tools.RowDB,
                 summary = GroupLayoutSummary,
                 count   = GROUP_LAYOUT_COUNT,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = groupLayoutMount,
             }))
-            ClaimKeys(groupLayoutRow, groupLayoutContent)
-            WireModifiedTick(groupLayoutRow)
-            WireFooter(groupLayoutRow, ApplyGroupLayout)
+            tools.ClaimKeys(groupLayoutRow, groupLayoutContent)
+            tools.WireModifiedTick(groupLayoutRow)
+            tools.WireFooter(groupLayoutRow, ApplyGroupLayout)
             groupLayoutRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
         end
 
@@ -3880,8 +3492,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             UpdateFrames()
         end
 
-        local function BuildGroupVisGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildGroupVisGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
             -- fullRow: a blurb describes the whole plate, not the tick beside it.
             -- Inert wherever the interior is one track (the classic box), live in
             -- the pane's two.
@@ -3941,21 +3553,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Nine: the hint and the eight ticks.
             local GROUP_VIS_COUNT = 9
 
-            local groupVisMount, groupVisContent = PopoutContent(function(group, holder, reflow)
+            local groupVisMount, groupVisContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildGroupVisGroup({ group = group, parent = holder, refreshStates = reflow })
             end, 2)
             local groupVisRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Group Visibility"],
-                db      = RowDB,
+                db      = tools.RowDB,
                 summary = GroupVisSummary,
                 count   = GROUP_VIS_COUNT,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = groupVisMount,
             }))
-            ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })
-            WireModifiedTick(groupVisRow)
-            WireFooter(groupVisRow, ApplyGroupVisibility)
+            tools.ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })
+            tools.WireModifiedTick(groupVisRow)
+            tools.WireFooter(groupVisRow, ApplyGroupVisibility)
             groupVisRow.hideOn = function() return GUI.SelectedMode ~= "raid" end
         end
 
@@ -3982,8 +3594,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- pane measures ~305px, so the wrap needs a UIParent under ~510px tall.
         -- Left alone rather than worked around: the alternative is capping the
         -- list, and a five-line group order is worse than a rare clip.
-        local function BuildGroupOrderGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildGroupOrderGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["Drag to reorder groups. Top = first."], 250), 25)
 
             local playerGroupFirstCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["My Group First"], db, "raidPlayerGroupFirst", function()
@@ -4057,21 +3669,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Three: the blurb, the tick and the list.
             local GROUP_ORDER_COUNT = 3
 
-            local groupOrderMount, groupOrderContent = PopoutContent(function(group, holder, reflow)
+            local groupOrderMount, groupOrderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildGroupOrderGroup({ group = group, parent = holder, refreshStates = reflow })
             end)
             local groupOrderRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Group Display Order"],
-                db      = RowDB,
+                db      = tools.RowDB,
                 summary = GroupOrderSummary,
                 count   = GROUP_ORDER_COUNT,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = groupOrderMount,
             }))
-            ClaimKeys(groupOrderRow, groupOrderContent)
-            WireModifiedTick(groupOrderRow)
-            WireFooter(groupOrderRow, ApplyGroupOrder)
+            tools.ClaimKeys(groupOrderRow, groupOrderContent)
+            tools.WireModifiedTick(groupOrderRow)
+            tools.WireFooter(groupOrderRow, ApplyGroupOrder)
             groupOrderRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
         end
 
@@ -4085,8 +3697,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if GUI.SelectedMode == "raid" then DF:UpdateRaidLayout() end
         end
 
-        local function BuildFlatGridGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildFlatGridGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["All players in a unified grid. Sorting applies raid-wide."], 250), 25)
 
             local playersPerLabel = db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"]
@@ -4161,21 +3773,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 UpdateFlatLayoutFull()
             end
 
-            local flatGridMount, flatGridContent = PopoutContent(function(group, holder, reflow)
+            local flatGridMount, flatGridContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFlatGridGroup({ group = group, parent = holder, refreshStates = reflow })
             end)
             local flatGridRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Flat Grid Settings"],
-                db      = RowDB,
+                db      = tools.RowDB,
                 summary = FlatGridSummary,
                 count   = FLAT_GRID_COUNT,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = flatGridMount,
             }))
-            ClaimKeys(flatGridRow, flatGridContent)
-            WireModifiedTick(flatGridRow)
-            WireFooter(flatGridRow, ApplyFlatGrid)
+            tools.ClaimKeys(flatGridRow, flatGridContent)
+            tools.WireModifiedTick(flatGridRow)
+            tools.WireFooter(flatGridRow, ApplyFlatGrid)
             flatGridRow.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
         end
         
@@ -4224,10 +3836,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- what the CLASSIC box greys with, and one builder serving both layouts
         -- means it carries the behaviour of both. Guarded by
         -- test_frame_page_builders.lua against the inventory it had inline.
-        local function BuildPermanentMoverGroup(tools)
-            local group, parent = tools.group, tools.parent
+        local function BuildPermanentMoverGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-            if not tools.hoistToggle then
+            if not tools2.hoistToggle then
                 group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Permanent Mover"], db, "permanentMover", function()
                     DF:UpdatePermanentMoverVisibility()
                 end), 30)
@@ -4331,7 +3943,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function OnPermMoverToggle()
                 DF:UpdatePermanentMoverVisibility()
                 self:RefreshStates()
-                ReflowMounted()
+                tools.ReflowMounted()
             end
 
             -- The summary: where the handle is, how big it is, and what it is
@@ -4355,7 +3967,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Sixteen controls, less the hoisted enable = fifteen in the pane.
             local PERM_MOVER_COUNT = 15
 
-            local moverMount, moverContent = PopoutContent(function(group, holder, reflow)
+            local moverMount, moverContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPermanentMoverGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
@@ -4370,14 +3982,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Built at the page's usable width for the same reason the Appearance
             -- band is -- see the long note there -- so the row's right edge lands
             -- on the corridor and its popout's beam is a short hop.
-            local moverBandW = math.max(
-                GUI.PageUsableWidth(GUI.PageChildWidth(
-                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
-                GUI.SettingsBox.group)
-            permMoverBand = GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })
+            permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
             local moverRow = permMoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Permanent Mover"],
-                db       = RowDB,
+                db       = tools.RowDB,
                 toggle   = { key = "permanentMover" },
                 summary  = PermMoverSummary,
                 count    = PERM_MOVER_COUNT,
@@ -4386,10 +3994,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 clipTo   = self,
                 build    = moverMount,
             }))
-            ClaimKeys(moverRow, moverContent)
-            WireModifiedTick(moverRow)
-            WireFooter(moverRow, ApplyPermMover)
-            RegisterHoistedToggle(moverRow, L["Enable Permanent Mover"], "permanentMover", OnPermMoverToggle)
+            tools.ClaimKeys(moverRow, moverContent)
+            tools.WireModifiedTick(moverRow)
+            tools.WireFooter(moverRow, ApplyPermMover)
+            tools.RegisterHoistedToggle(moverRow, L["Enable Permanent Mover"], "permanentMover", OnPermMoverToggle)
         end
 
         -- ===== THE BANDS, AND THE ORDER THEY ARE ADDED IN ====================
