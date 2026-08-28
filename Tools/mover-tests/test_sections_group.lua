@@ -27,6 +27,11 @@ local UI = {
         background = { r = 0.08, g = 0.08, b = 0.08, a = 0.95 },
         text       = { r = 0.9,  g = 0.9,  b = 0.9 },
         textDim    = { r = 0.5,  g = 0.5,  b = 0.5 },
+        -- The row plate's pair, which the band-styled box paints with. Distinct
+        -- numbers from each other and from every colour above, so an assertion
+        -- that a plate wears C_ELEMENT over C_BORDER cannot pass by coincidence.
+        element    = { r = 0.20, g = 0.21, b = 0.22 },
+        border     = { r = 0.31, g = 0.32, b = 0.33 },
     },
     -- The layout metrics LayoutChildren reads. RowCompact empty on purpose: the
     -- run-tightening has its own coverage and would only add noise to the
@@ -38,6 +43,12 @@ local UI = {
     -- tests below still assert the shipped numbers.
     SettingsBox = { group = 280, pad = 10, colMargin = 5, minCol = 285, colGutter = 20 },
     PopoutContentWidth = 260,
+    -- The popout half of the box model, which the BAND-STYLED group takes its
+    -- inset and its plate paint from. Real values (DandersUI/Theme.lua) for the
+    -- same reason SettingsBox is: the assertions below are about the shipped
+    -- rhythm, not about numbers this file invented.
+    PopoutPad = 10,
+    PopoutRow = { plate = 44, gap = 6, padX = 10, restFill = 0.55, restBorder = 0.5 },
     _state = {},
     _priv = {
         INFO_BANNER_TONES = {},
@@ -287,6 +298,182 @@ do
     local sq = host:CreateSettingsGroup(FakeUIFrame(), 280, { surface = false })
     check(UI:GetRoundedSurface(sq) == nil, "...and false squares one on a rounded host")
     check(sq._elementOpts ~= nil, "...with the square backdrop issued as before")
+    host:SetSurfaceStyle(nil)
+end
+
+-- ============================================================
+-- 6. BAND STYLE -- THE STAY-INLINE BOX'S SKIN
+--
+-- A page half-converted to bands speaks two visual languages: the converted
+-- sections are an accent header ABOVE a stack of fat row plates, the survivors
+-- are the classic dense box with the title INSIDE a faint white rectangle.
+-- Danders, on the converted Frame page: "Layout Direction does not match the
+-- Appearance settings."
+--
+-- bandStyle is the survivors' half, and it is exactly two moves: the TITLE
+-- leaves the box, and the BOX becomes a row plate. The widgets inside are
+-- untouched -- same factories, same order, same slots -- which is what makes
+-- this a skin rather than a conversion.
+--
+-- ☠ THE LOAD-BEARING ASSERTION IS STILL THE DEFAULT. Every call site that does
+-- not ask for it has to build exactly the box it always did, which section 1
+-- above pins; what is pinned here is that the opt does the two things it claims
+-- and touches nothing else.
+-- ============================================================
+
+-- The x/y a widget was anchored at, and the FIRST recorded point rather than the
+-- last: the plate is anchored twice (TOPLEFT and BOTTOMRIGHT) and it is the top
+-- edge that carries the claim.
+local function pointAt(w, i)
+    local pt = w._points[i or 1]
+    return pt and pt[4], pt and pt[5]
+end
+
+-- A title row: the first child of every settings group in this kit, and the one
+-- child a band-styled box draws outside its plate.
+local function headerRow(h)
+    local w = control(h or 37)
+    w.rowKind = "header"
+    return w
+end
+
+print("-- Group: bandStyle takes the title out of the box and the box off the plate")
+do
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true })
+
+    -- 1. THE BOX ITSELF WEARS NOTHING. Neither the square backdrop nor a rounded
+    --    surface: what carries the chrome is the plate, and a group drawing both
+    --    would be a rectangle with a second rectangle inside it.
+    eq(rawget(g, "_elementOpts"), nil, "band: the group frame is not itself a box")
+    check(UI:GetRoundedSurface(g) == nil, "band: ...and carries no rounded surface either")
+
+    -- 2. THE PLATE EXISTS, and it is a child frame rather than the group's own
+    --    backdrop -- a backdrop covers the whole rect by definition, and the
+    --    whole point is that this one stops short of the top edge.
+    local plate = rawget(g, "bandPlate")
+    check(plate ~= nil, "band: a plate frame is built for the chrome")
+    eq(plate:GetFrameLevel(), g:GetFrameLevel(),
+       "band: pinned to the group's own level, so it stays under every widget in it")
+
+    -- 3. ...WEARING THE ROW PLATE'S PAINT. The same C_ELEMENT-over-C_BORDER pair
+    --    at the same alphas a PopoutRow uses, at the ROW border weight, so an
+    --    inline box and the plates beside it are one surface.
+    local rs = UI:GetRoundedSurface(plate)
+    check(rs ~= nil and rs:IsShown(), "band: the plate wears a rounded surface")
+    local r, w = rs:GetRadius()
+    eq(r, UI.SurfaceStyle.radius, "band: at the shell's radius")
+    eq(w, UI.SurfaceStyle.rowBorderWidth, "band: and the ROW border weight, not the panel's")
+    eq(rs.fillA, UI.PopoutRow.restFill, "band: the row plate's rest fill")
+    eq(rs.borderA, UI.PopoutRow.restBorder, "band: inside the row plate's rest border")
+
+    -- 4. AND THE POPOUT PANE'S INSET, not the settings column's. Equal numbers
+    --    today; separate tokens because only one of them follows the popout.
+    eq(g.padding, UI.PopoutPad, "band: the inner inset is the popout pane's")
+
+    host:SetSurfaceStyle(nil)
+end
+
+print("-- Group: bandStyle's rhythm is the band's own header-to-plate gap")
+do
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true })
+    g:SetWidth(280)
+    local plate = rawget(g, "bandPlate")
+
+    local head = g:AddWidget(headerRow(37), 37)
+    local a, b = control(55), control(55)
+    g:AddWidget(a, 55)
+    g:AddWidget(b, 55)
+    local total = g:LayoutChildren()
+
+    -- The header sits where a header always sat: one inset down, one inset in.
+    -- ⚠ THE X IS THE ALIGNMENT CLAIM. A band is a chromeless container at this
+    -- same inset with its header as child one, so a band header and this one land
+    -- on the same column of the page -- which is the whole of "the titles line up".
+    local hx, hy = pointAt(head)
+    eq(hx, 10, "band: the title is inset by the group's own padding, like a band's")
+    eq(hy, -10, "band: ...and one inset below the top, with no box above it")
+
+    -- The plate starts exactly where the first row WOULD have started in a normal
+    -- box -- which is where a band's first row plate starts under its own header.
+    -- That equality is the rhythm: same gap under the title on both.
+    local px, py = pointAt(plate)
+    eq(px, 0, "band: the plate spans the group's full width")
+    eq(py, -(10 + 37), "band: and starts at the y a band's first row plate does")
+    check(plate:IsShown(), "band: the plate is drawn")
+
+    -- ...and the rows are then inset INSIDE it, exactly as a popout row's content
+    -- is inset inside its own plate.
+    eq(offsetY(a), -(10 + 37 + 10), "band: the first row sits one inset inside the plate")
+    eq(offsetY(b), -(10 + 37 + 10 + 55), "band: and the second a slot below it")
+    eq(g:GetHeight(), 10 + 37 + 10 + 55 + 55 + 10,
+       "band: the box is lead-in + title + plate inset + rows + plate inset")
+    eq(total, g:GetHeight() + g.margin, "band: ...plus the between-groups margin, as always")
+
+    host:SetSurfaceStyle(nil)
+end
+
+print("-- Group: bandStyle on a square host, and the options it composes with")
+do
+    -- A consumer that never opted into a surface style gets the plate as a SQUARE
+    -- element backdrop -- same two colours, no arc. The plate is still a separate
+    -- frame, so the title is still outside it.
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true })
+    local plate = rawget(g, "bandPlate")
+    check(plate ~= nil, "band/square: the plate is built on a square host too")
+    check(rawget(plate, "_elementOpts") ~= nil, "band/square: wearing the square backdrop")
+    eq(plate._elementOpts.bgColor[4], UI.PopoutRow.restFill, "band/square: at the plate's fill")
+    eq(plate._elementOpts.borderColor[4], UI.PopoutRow.restBorder, "band/square: and its border")
+    eq(rawget(g, "_elementOpts"), nil, "band/square: and the group is still not a box")
+
+    -- CHROMELESS OUTRANKS IT, the same way it outranks the surface style: a group
+    -- that IS another surface's contents must not draw a plate in there either.
+    local c = host:CreateSettingsGroup(FakeUIFrame(), 260,
+                                       { bandStyle = true, chromeless = true, padding = 0 })
+    eq(rawget(c, "bandPlate"), nil, "band: chromeless outranks it -- no plate")
+    eq(c.bandStyle, false, "band: ...and the group does not claim the skin")
+    eq(c.padding, 0, "band: ...nor does it take the popout inset over an explicit one")
+
+    -- An explicit padding still wins over the band default.
+    local p = host:CreateSettingsGroup(FakeUIFrame(), 280, { bandStyle = true, padding = 4 })
+    eq(p.padding, 4, "band: an explicit inset outranks the popout default")
+end
+
+print("-- Group: a collapsed bandStyle box draws no empty plate")
+do
+    -- Nothing behind the title to put in a plate, and a 20px empty rectangle
+    -- under a collapsed heading reads as a rendering fault rather than a section.
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    -- ⚠ A REAL ThemeListeners table on the parent. The collapse arrow registers
+    -- itself there, and the stub answers an unset key with a no-op FUNCTION --
+    -- so a bare FakeUIFrame would have the header setup table.insert into one.
+    local parent = FakeUIFrame()
+    parent.ThemeListeners = {}
+    local g = host:CreateSettingsGroup(parent, 280, { bandStyle = true, collapsible = true })
+    g:SetWidth(280)
+    local plate = rawget(g, "bandPlate")
+    -- Same stub artefact, one field further on: the collapse path guards on
+    -- `self.collapseSummary` before anything has built one, and an unset key on a
+    -- FakeUIFrame is a function rather than nil. Seeded with the fontstring the
+    -- lazy branch would have made, so the real guard is exercised rather than
+    -- bypassed.
+    g.collapseSummary = FakeUIFrame()
+
+    local head = headerRow(37)
+    head.text = FakeUIFrame()
+    head.text:SetText("Frame Size")
+    g:AddWidget(head, 37)
+    g:AddWidget(control(55), 55)
+
+    g:LayoutChildren()
+    check(plate:IsShown(), "band/collapse: expanded, the plate is drawn")
+
+    g.collapsed = true
+    g:LayoutChildren()
+    check(not plate:IsShown(), "band/collapse: collapsed, it is not")
+    eq(g:GetHeight(), 10 + 37 + 10, "band/collapse: ...and its inset is not charged to the height")
+
     host:SetSurfaceStyle(nil)
 end
 

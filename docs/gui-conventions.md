@@ -150,7 +150,7 @@ often hand-rolled by accident.
 | Slider | `CreateSlider(...,accentColor)`, `CreateRangeSlider(opts)` | customGet/customSet for nested db values |
 | Edit box | `CreateEditBox` (db-bound, label + override indicators), `CreateInput` (bare), `CreateTextArea(parent, opts)` (multi-line), `StyleEditBox(eb, {multiline,skipFont})` | |
 | Colour | `CreateColorPicker(...)` | hasAlpha + lightweight callback |
-| Containers | `CreateSettingsGroup`, `CreateCollapsibleSection`, `CreatePanelBackdrop`, `CreateElementBackdrop`, `CreateMoverBackdrop` | |
+| Containers | `CreateSettingsGroup`, `CreateCollapsibleSection`, `CreatePanelBackdrop`, `CreateElementBackdrop`, `CreateMoverBackdrop` | **`CreateSettingsGroup(parent, width, { bandStyle = true })` is the standard for any box that stays inline on a page that has bands.** The title is drawn as the same accent header the bands use, above the box, and the box becomes a PopoutRow plate — so a swept page reads as one visual language instead of two. Widgets inside are untouched. Declare the opts table **once per page**, gated on `DF:IsClassicSettingsLayout()` (`local INLINE_BOX = (not classicLayout) and { bandStyle = true } or nil`) and pass it by name; the classic branch must get `nil`. See `Pages/Options.lua`'s Frame page |
 | Banner / prose | `CreateInfoBanner` (tones info/caution/warning/danger/success; `:SetContent`), `CreateNote` | |
 | Cross-links | `CreateLink`, `CreateSeeAlso`, `CreateColorsPageLink`, `CreateDispelColorsPageLink` | jump to a related page and flash the target section |
 | Text | `CreateHeader`, `CreateLabel` | fonts via `SetSettingsFont` / `SafeSetFont` |

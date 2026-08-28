@@ -27,9 +27,19 @@ local S = UI._state
 local P = UI._priv
 local C_BACKGROUND, C_TEXT, C_TEXT_DIM =
       UI.Colors.background, UI.Colors.text, UI.Colors.textDim
+-- The ROW PLATE's two colours, for the band-styled group box (opts.bandStyle
+-- below). Taken from the same pair PopoutRow.lua paints its plate with, so a
+-- band of feature rows and an inline box sitting beside it are one surface
+-- drawn twice rather than two looks that happen to be similar.
+local C_ELEMENT, C_BORDER = UI.Colors.element, UI.Colors.border
 local ResolveRowHeight = UI.ResolveRowHeight
 local SnapLen = UI.SnapLen
 local CreateElementBackdrop = UI._priv.CreateElementBackdrop
+-- The plate's paint alphas and the popout pane's content inset -- both read
+-- here rather than restated, for the reason every other metric in this kit is a
+-- token: a look retuned in one file must not leave a second copy behind.
+local PLATE = UI.PopoutRow
+local POPOUT_PAD = UI.PopoutPad
 -- Tooltip primitives and the tone palette are in the RESIDENT half: live frames
 -- need them with this manifest unloaded. Aliases of those objects, not copies.
 local INFO_BANNER_TONES = P.INFO_BANNER_TONES
@@ -57,10 +67,12 @@ local math, table = math, table
 
 function UI:CreateSettingsGroup(parent, width, opts)
     -- opts can be a boolean (legacy: collapsible) or a table
-    -- { collapsible, showSummary, collapseKey, chromeless, padding, surface }.
-    -- chromeless, padding and surface are opt-in and change nothing for a call
-    -- site that passes none -- see where each is read below. `surface` overrides
-    -- the host's declared style for this one box (`false` forces it square).
+    -- { collapsible, showSummary, collapseKey, chromeless, bandStyle, padding,
+    --   surface }.
+    -- chromeless, bandStyle, padding and surface are opt-in and change nothing
+    -- for a call site that passes none -- see where each is read below.
+    -- `surface` overrides the host's declared style for this one box (`false`
+    -- forces it square).
     --
     -- ⚠ (Removed) onCollapseChanged. It was stored here and fired from both collapse
     -- paths, and NOTHING ever set it -- so neither guard could fire and the callback
@@ -88,6 +100,10 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- unique key (e.g. "afkIcon:Appearance"), so they don't toggle together.
     group.collapseKey = opts.collapseKey
     group.collapsed = false
+    -- The band skin, read by LayoutChildren. Chromeless outranks it for the same
+    -- reason it outranks the surface style: a group that IS another surface's
+    -- contents must not draw a plate inside that surface either.
+    group.bandStyle = (opts.bandStyle and not opts.chromeless) or false
 
     -- Visual styling - subtle background and border
     --
@@ -97,7 +113,24 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- a surface that already pads, e.g. a popout pane), which is why this is a
     -- type test rather than an `or` -- `0 or 10` would happen to work in Lua, but
     -- the test says what is meant.
-    local padding = (type(opts.padding) == "number") and opts.padding or UI.SettingsBox.pad
+    --
+    -- A BAND-STYLED box takes the POPOUT PANE's inset instead of the column's,
+    -- because that is the rhythm its neighbours are drawn at: the rows in a band
+    -- sit inside a plate that pads them by this much, and a box beside them
+    -- padding itself by a different number reads as a second grid. The two
+    -- numbers are equal today, so nothing moves -- they are separate tokens
+    -- because they answer different questions and only one of them follows the
+    -- popout if the popout is ever retuned.
+    -- ⚠ Branches, not an `or` chain, for the same reason the type test above is a
+    -- type test: 0 is a legal inset, and a chain would silently fall through it.
+    local padding
+    if type(opts.padding) == "number" then
+        padding = opts.padding
+    elseif opts.bandStyle and not opts.chromeless then
+        padding = POPOUT_PAD
+    else
+        padding = UI.SettingsBox.pad
+    end
     local margin = 10  -- Space between groups
     group.padding = padding
     group.margin = margin
@@ -130,7 +163,58 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- That is the intended reading (the skin is shared chrome, like the header),
     -- but it does mean classic-mode pages change shape without anything on the
     -- classic path being touched.
-    if not opts.chromeless then
+    --
+    -- ===== opts.bandStyle -- THE THIRD SHAPE ==========================
+    -- A page that has converted some of its sections into BANDS (a header above
+    -- a stack of full-width popout-row plates) and left others inline ends up
+    -- speaking two visual languages at once: the bands are header-outside plus
+    -- fat plates, the survivors are the classic dense box with its title INSIDE
+    -- a faint white rectangle. Danders, on the converted Frame page: "Layout
+    -- Direction does not match the Appearance settings."
+    --
+    -- bandStyle is the survivors' half of that conversion, and it is exactly two
+    -- moves -- no widget in the box changes, no factory is swapped:
+    --
+    --   1. THE TITLE LEAVES THE BOX. The header is still groupChildren[1] and is
+    --      still the same CreateHeader the bands use; LayoutChildren simply
+    --      starts the plate BELOW it, so the accent title sits on the page at
+    --      the same x and the same gap-to-content a band's header does.
+    --   2. THE BOX BECOMES A PLATE. Same fill, same border, same R8 at the ROW
+    --      weight as a PopoutRow -- read off the row's own tokens, not restated
+    --      -- so an inline box and the plates beside it are one surface.
+    --
+    -- ☠ IT IS A SEPARATE FRAME, NOT THE GROUP'S OWN BACKDROP, and it has to be:
+    -- the plate stops short of the group's top edge (that is the whole point),
+    -- and a backdrop on the group covers the whole rect by definition. Its level
+    -- is pinned to the GROUP's own so it stays under every widget added to the
+    -- group -- those land a level above their parent, and a plate left at the
+    -- default child level would be a coin flip against them.
+    if opts.bandStyle and not opts.chromeless then
+        local plate = CreateFrame("Frame", nil, group, "BackdropTemplate")
+        plate:SetFrameLevel(group:GetFrameLevel())
+        -- Re-anchored every pass by LayoutChildren, which is the only thing that
+        -- knows where the header ended. Anchored here too so a group that is
+        -- never laid out still has a plate with a rect rather than a floating one.
+        plate:SetPoint("TOPLEFT", group, "TOPLEFT", 0, 0)
+        plate:SetPoint("BOTTOMRIGHT", group, "BOTTOMRIGHT", 0, 0)
+        plate:Show()
+        group.bandPlate = plate
+
+        local style = UI.ResolveSurfaceStyle(host, opts.surface)
+        if style then
+            UI:ApplyRoundedChrome(plate, {
+                radius      = style.radius,
+                borderWidth = style.rowBorderWidth or style.borderWidth,
+                fill        = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, PLATE.restFill },
+                border      = { C_BORDER.r, C_BORDER.g, C_BORDER.b, PLATE.restBorder },
+            })
+        else
+            CreateElementBackdrop(plate, {
+                bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, PLATE.restFill },
+                borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, PLATE.restBorder },
+            })
+        end
+    elseif not opts.chromeless then
         local style = UI.ResolveSurfaceStyle(host, opts.surface)
         if style then
             UI:ApplyRoundedChrome(group, {
@@ -303,6 +387,11 @@ function UI:CreateSettingsGroup(parent, width, opts)
         local padding = SnapLen(self, self.padding)
         local y = -padding  -- Start with top padding
         local visibleCount = 0
+        -- Where a BAND-STYLED box's plate starts: the y the first row would have
+        -- landed at, which is the same offset below the header that a band's own
+        -- first row plate sits at. nil until the header has been placed, and nil
+        -- for every other kind of group -- see where it is set in the loop.
+        local plateTop = nil
         -- Width for child widgets. A group whose width is not resolved yet (created but
         -- not laid out, or anchors cleared) yields a non-positive innerWidth. Do NOT
         -- substitute a guessed width — a group can legitimately be far wider than its
@@ -382,6 +471,41 @@ function UI:CreateSettingsGroup(parent, width, opts)
                 else
                     widget:Hide()
                 end
+            end
+
+            -- ---- the band-styled box's plate starts here ----------------
+            -- Straight after the TITLE row, and only after it: the header is the
+            -- one child that draws OUTSIDE the plate. `y` at this point is
+            -- exactly where the first row would have gone in a normal box, which
+            -- is also where a band's first popout-row plate sits under its own
+            -- header -- so recording it here (BEFORE the plate's own inset is
+            -- taken off) is what makes the header-to-plate gap on this box and
+            -- the header-to-plate gap on the band next to it the same number.
+            --
+            -- Not while COLLAPSED: there is nothing behind the title to put in a
+            -- plate, and an empty 20px rectangle under a collapsed heading reads
+            -- as a rendering fault.
+            if self.bandStyle and i == 1 and plateTop == nil and not self.collapsed then
+                plateTop = y
+                y = y - padding
+            end
+        end
+
+        -- The plate itself, sized by the two ends the layout now knows: the y the
+        -- header stopped at, and the group's own bottom (whose padding the height
+        -- arithmetic below already provides).
+        -- rawget, the convention every private-field read in this pack follows:
+        -- on a group that never asked for the skin the key is simply absent, and
+        -- this has to see that rather than whatever an __index might invent.
+        local plate = rawget(self, "bandPlate")
+        if plate then
+            plate:ClearAllPoints()
+            if plateTop then
+                plate:SetPoint("TOPLEFT", self, "TOPLEFT", 0, SnapLen(self, plateTop))
+                plate:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, 0)
+                plate:Show()
+            else
+                plate:Hide()
             end
         end
 

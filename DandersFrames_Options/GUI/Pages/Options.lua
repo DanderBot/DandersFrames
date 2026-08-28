@@ -1820,6 +1820,37 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- of this builder for where the bands sit and why.
         local classicLayout = DF:IsClassicSettingsLayout()
 
+        -- ===== THE STAY-INLINE BOX'S SKIN, AND THE SWEEP'S STANDARD =======
+        -- A half-converted page speaks two visual languages at once. The bands
+        -- are an accent header ABOVE a stack of fat row plates; every box that
+        -- did NOT convert is still the classic dense group -- title INSIDE a
+        -- faint white rectangle, at the column's own inset. Side by side on one
+        -- page that reads as two systems, which is what Danders saw here: "if we
+        -- are gonna have mixed settings then we need to make sure they
+        -- thematically match -- Layout Direction does not match the Appearance
+        -- settings."
+        --
+        -- bandStyle (DandersUI/Sections.lua) is the answer, and it is a SKIN, not
+        -- a conversion: the title moves out of the box and is drawn as the same
+        -- header the bands use, and the box becomes a PopoutRow plate -- same
+        -- fill, same border, same R8 at the row weight, same inset. Nothing
+        -- inside changes. Same factories, same order, same slot heights, same
+        -- widths, same column.
+        --
+        -- ☠ ONE TABLE, PASSED AT EVERY STAY-INLINE SITE, AND IT IS THE SHAPE THE
+        -- REST OF THE SWEEP SHOULD COPY. The alternatives were both worse: a
+        -- host-level flag would skin every group in the addon including the
+        -- pages that have not been swept yet, and a per-site literal is the thing
+        -- that gets missed on the eighth box. One name, declared beside the
+        -- layout test it is gated on, so a new stay-inline group on this page is
+        -- opted in by passing it and opted out by not.
+        --
+        -- ⚠ nil IN CLASSIC, deliberately: the classic branch must build exactly
+        -- the box it always did, and `nil` is what "no opts" means to
+        -- CreateSettingsGroup. It is read-only to the factory, which is what
+        -- makes one shared table safe across every box below.
+        local INLINE_BOX = (not classicLayout) and { bandStyle = true } or nil
+
         -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
         -- Two different things depending on the layout, decided here because the
         -- CONSTRUCTED WIDTH is part of the answer and a group cannot be widened
@@ -1864,7 +1895,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- ===== FRAME SIZE GROUP (Column 1) =====
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Size"]), 40)
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Height"], 20, 300, 1, db, "frameHeight", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
@@ -2626,7 +2657,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
 
         -- ===== LAYOUT DIRECTION GROUP (Column 1) =====
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
         
         -- ☠☠ TWO DROPDOWNS, AND THE RAID+GROUPS ONE IS *DELIBERATELY* THE INVERSE.
@@ -2741,7 +2772,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(layoutGroup, nil, 1)
         
         -- ===== RAID LAYOUT MODE GROUP (Column 1, raid only) =====
-        local raidModeGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local raidModeGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
         raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
         raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
         
@@ -2800,7 +2831,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(raidModeGroup, nil, 1)
         
         -- ===== GROUP LAYOUT SETTINGS (Column 1, raid+groups only) =====
-        local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
         groupLayoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Layout Settings"]), 40)
         groupLayoutGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
         
@@ -3003,7 +3034,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(groupLayoutGroup, nil, 1)
         
         -- ===== GROUP VISIBILITY (Column 1, raid only) =====
-        local groupVisGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local groupVisGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
         groupVisGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Visibility"]), 40)
         groupVisGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
         
@@ -3040,7 +3071,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(groupVisGroup, nil, 1)
         
         -- ===== GROUP DISPLAY ORDER (Column 2, raid+groups only) =====
-        local groupOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local groupOrderGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
         groupOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Display Order"]), 40)
         groupOrderGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
         
@@ -3069,7 +3100,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         Add(groupOrderGroup, nil, 2)
         
         -- ===== FLAT GRID SETTINGS (Column 1, raid+flat only) =====
-        local flatGridGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local flatGridGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
         flatGridGroup:AddWidget(GUI:CreateHeader(self.child, L["Flat Grid Settings"]), 40)
         flatGridGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
         
