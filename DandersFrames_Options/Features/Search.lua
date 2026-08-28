@@ -224,6 +224,18 @@ end
 
 function Search:InvalidateRegistry()
     self.RegistryBuilt = false
+    -- ☠ ...AND STOP A BUDGETED BUILD IN FLIGHT. Its remaining slices would go on
+    -- appending pages to a registry nobody is asking for any more -- and on the
+    -- caller that matters (the party/raid buttons in GUI/Panel.lua) those pages
+    -- would be built for the OTHER mode than the ones already in the array. The
+    -- token is the abort: the drain checks it before every slice.
+    self._buildToken = (self._buildToken or 0) + 1
+    self.RegistryBuilding = false
+    -- The waiters go with it. Every one of them is "refresh the surface that was
+    -- waiting for this", and each caller that invalidates is on its way to
+    -- refresh that surface itself (the mode buttons run RefreshCurrentPage two
+    -- lines later) -- so firing them would be a second refresh, not a missing one.
+    self._buildWaiters = nil
 end
 
 function Search:RefreshIfActive()
@@ -258,19 +270,70 @@ function Search:EnsureRegistry()
     end
 end
 
-function Search:BuildFullRegistry()
+-- ============================================================
+-- THE BUILD, IN SLICES
+-- ------------------------------------------------------------
+-- Building the registry means RE-RUNNING EVERY PAGE'S BUILDER -- ~34 of them,
+-- 700-odd widgets -- and doing all of that inside ONE execution is what the
+-- ledger's first open was paying for ("lags like crazy" in game). The work is
+-- not removable: the index is built from the real builders precisely so it
+-- cannot drift from what the pages show. What IS removable is the single frame.
+--
+-- So a build is decomposed into STEPS -- one page each -- and there are two
+-- drivers over the same list:
+--   * BuildFullRegistry          runs every step NOW. The unchanged contract,
+--                                for any caller that needs an answer inside its
+--                                own execution (Find, and every existing site).
+--   * BuildFullRegistryBudgeted  spends at most REGISTRY_BUILD_BUDGET_MS per
+--                                execution and re-queues the rest on the next
+--                                frame, so no single frame carries more than a
+--                                slice. The ledger and the search box use this.
+--
+-- ★ THE PATTERN IS ELLESMERE'S RunBudgeted (EllesmereUI.lua), and so are its
+-- rules: nothing runs in the caller's own execution (the first slice is deferred
+-- too, so a caller that already spent real budget never gets this stacked on
+-- top); every step runs under pcall with the error routed to the standard
+-- handler and the chain CONTINUING, because a build that died mid-way would
+-- strand every later page AND the completion callback, which is worse than one
+-- page's failure; and every continuation gets a fresh watchdog budget.
+--
+-- ☠ WHAT IT DOES NOT DO: cache a registry per mode. That was considered and it
+-- is not safe here, because a registry entry is not pure data -- `entry.callback`
+-- and `entry.values` are captured from the PAGE BUILDER at the moment it ran, in
+-- the mode it ran in. The Pet Frames anchor dropdown is the standing proof: its
+-- option labels are "Below Party" / "Below Raid" by mode and its callback is
+-- `isRaidMode and <raid updater> or <party updater>` (GUI/Pages/Options.lua).
+-- Handing a raid search result the party entry would show the wrong words and
+-- run the wrong updater. `entry.sourceWidget` has the same problem from the
+-- other end: it points at a widget the NEXT build retires. So a mode switch
+-- still re-pays a full build -- it just no longer pays for it in one frame.
+-- ============================================================
+
+-- Milliseconds of CPU one slice may spend. Ellesmere's default, and for the same
+-- reason: small enough that no single execution can approach the 12.1 script
+-- watchdog on any machine at any page count.
+local REGISTRY_BUILD_BUDGET_MS = 8
+
+-- Reset the registry and produce the step list, or nil when there is nothing to
+-- build against. Shared by both drivers so they cannot disagree about what a
+-- build IS.
+function Search:_BeginRegistryBuild()
     self.Registry = {}
     registrationId = 0
-    
-    if not DF.GUI or not DF.GUI.Pages then 
-        return 
+
+    if not DF.GUI or not DF.GUI.Pages then
+        return nil
     end
-    
-    local originalTab = DF.GUI.CurrentPageName
-    
+
     -- Store the mode we're building for
     self.BuiltForMode = DF.GUI.SelectedMode
-    
+
+    -- Bumped on every build AND by InvalidateRegistry, so a budgeted drain can
+    -- tell "still mine" from "superseded" between slices.
+    self._buildToken = (self._buildToken or 0) + 1
+
+    local ctx = { token = self._buildToken, steps = {} }
+
     for tabName, page in pairs(DF.GUI.Pages) do
       -- ☠ A PAGE MAY OPT OUT, and one has to. The changed-settings ledger
       -- (GUI/Pages/Modules.lua) BUILDS ITSELF FROM THIS REGISTRY, so refreshing
@@ -282,45 +345,162 @@ function Search:BuildFullRegistry()
       -- report of settings is not itself a setting.
       -- Deliberately page-agnostic: any page may set `skipSearchIndex`.
       if not page.skipSearchIndex then
-        self:SetCurrentTab(tabName, page.tabLabel or tabName)
-        self.CurrentSection = nil
+        ctx.steps[#ctx.steps + 1] = function()
+            self:SetCurrentTab(tabName, page.tabLabel or tabName)
+            self.CurrentSection = nil
 
-        local wasShown = page:IsShown()
-        
-        if page.Refresh then
-            page:Refresh()
-        end
-        
-        if not wasShown then
-            page:Hide()
-            -- ☠ AND PUT IT BACK IN THE PAGE DOCK. Indexing means BUILDING all 34
-            -- pages, and leaving 700+ freshly-built widgets parented under the
-            -- settings window -- hidden or not -- is what made every later open
-            -- of it freeze the game for the best part of ten seconds. Hiding a
-            -- page does not take it out of the subtree the engine walks;
-            -- reparenting it does. See THE PAGE DOCK in GUI/Panel.lua.
-            --
-            -- ⚠ Parked pages keep their anchors to the content frame, so
-            -- page:Refresh() above builds correctly on a page already in the
-            -- dock (which, after the first tab switch, every page but one is).
-            if DF.GUI.ParkPage then DF.GUI:ParkPage(page) end
+            local wasShown = page:IsShown()
+
+            if page.Refresh then
+                page:Refresh()
+            end
+
+            if not wasShown then
+                page:Hide()
+                -- ☠ AND PUT IT BACK IN THE PAGE DOCK. Indexing means BUILDING all 34
+                -- pages, and leaving 700+ freshly-built widgets parented under the
+                -- settings window -- hidden or not -- is what made every later open
+                -- of it freeze the game for the best part of ten seconds. Hiding a
+                -- page does not take it out of the subtree the engine walks;
+                -- reparenting it does. See THE PAGE DOCK in GUI/Panel.lua.
+                --
+                -- ⚠ Parked pages keep their anchors to the content frame, so
+                -- page:Refresh() above builds correctly on a page already in the
+                -- dock (which, after the first tab switch, every page but one is).
+                if DF.GUI.ParkPage then DF.GUI:ParkPage(page) end
+            end
         end
       end
     end
 
-    if originalTab and DF.GUI.Pages[originalTab] then
+    return ctx
+end
+
+-- The tail every completed build runs, whichever driver got it there.
+function Search:_FinishRegistryBuild()
+    -- ⚠ THE PAGE ON SCREEN NOW, not the one that was on screen when the build
+    -- started. Under the synchronous driver those are the same name and this
+    -- reads exactly as it always did; under the budgeted one the user can change
+    -- tabs mid-drain, and re-showing the page they navigated AWAY from would be
+    -- the window changing itself under them a second after they clicked.
+    local currentTab = DF.GUI and DF.GUI.CurrentPageName
+    if currentTab and DF.GUI.Pages[currentTab] then
         -- The page the user is actually looking at comes back out of the dock.
-        -- It was never parked by the loop above (wasShown was true for it), so
+        -- It was never parked by the steps above (wasShown was true for it), so
         -- this is normally a no-op -- but it is the one page that MUST be
         -- adopted when this returns, so it is asserted rather than assumed.
-        if DF.GUI.AdoptPage then DF.GUI:AdoptPage(DF.GUI.Pages[originalTab]) end
-        DF.GUI.Pages[originalTab]:Show()
-        if DF.GUI.Pages[originalTab].RefreshStates then
-            DF.GUI.Pages[originalTab]:RefreshStates()
+        if DF.GUI.AdoptPage then DF.GUI:AdoptPage(DF.GUI.Pages[currentTab]) end
+        DF.GUI.Pages[currentTab]:Show()
+        if DF.GUI.Pages[currentTab].RefreshStates then
+            DF.GUI.Pages[currentTab]:RefreshStates()
         end
     end
-    
+
     self.RegistryBuilt = true
+    self.RegistryBuilding = false
+end
+
+-- Whoever asked to be told when the registry was usable, told -- ALWAYS on a
+-- later execution, never inside the build's own. A waiter is "rebuild the
+-- surface that was waiting for this", and every one of them can reach back into
+-- the search or the ledger; running that from inside the pass that just built
+-- them is the re-entrancy the skipSearchIndex flag exists to prevent.
+function Search:_FlushRegistryWaiters(ok)
+    local waiters = self._buildWaiters
+    self._buildWaiters = nil
+    if not waiters then return end
+    C_Timer.After(0, function()
+        for _, fn in ipairs(waiters) do
+            local pcOK, err = pcall(fn, ok)
+            if not pcOK and err then geterrorhandler()(err) end
+        end
+    end)
+end
+
+function Search:BuildFullRegistry()
+    local ctx = self:_BeginRegistryBuild()
+    if not ctx then
+        self.RegistryBuilding = false
+        self:_FlushRegistryWaiters(false)
+        return
+    end
+
+    for i = 1, #ctx.steps do
+        local ok, err = pcall(ctx.steps[i])
+        if not ok and err then geterrorhandler()(err) end
+    end
+
+    self:_FinishRegistryBuild()
+    self:_FlushRegistryWaiters(true)
+end
+
+-- The same build, spread across frames. `onDone(ok)` fires once, on the
+-- execution that finished the last slice; an ABORTED build (see the token check)
+-- never calls it, because the thing it would report on no longer exists.
+function Search:BuildFullRegistryBudgeted(onDone, msBudget)
+    local ctx = self:_BeginRegistryBuild()
+    if not ctx then
+        self.RegistryBuilding = false
+        -- Deferred even in the failure arm: "nothing runs in the caller's
+        -- execution" has to hold on every path, or a caller has to know which
+        -- one it took.
+        if onDone then C_Timer.After(0, function() onDone(false) end) end
+        return
+    end
+
+    self.RegistryBuilding = true
+
+    local budget = msBudget or REGISTRY_BUILD_BUDGET_MS
+    local i, n = 1, #ctx.steps
+
+    local function drain()
+        -- ☠ SUPERSEDED? STOP. A mode switch or any other InvalidateRegistry
+        -- bumps the token; carrying on would append pages built under the new
+        -- mode to a registry whose first half was built under the old one.
+        if self._buildToken ~= ctx.token then return end
+
+        local deadline = debugprofilestop() + budget
+        while i <= n do
+            local ok, err = pcall(ctx.steps[i])
+            i = i + 1
+            if not ok and err then geterrorhandler()(err) end
+            if i <= n and debugprofilestop() > deadline then
+                C_Timer.After(0, drain)
+                return
+            end
+        end
+
+        self:_FinishRegistryBuild()
+        if onDone then onDone(true) end
+    end
+
+    C_Timer.After(0, drain)
+end
+
+-- Make sure the registry is being built, and be told when it is usable.
+--
+-- Returns "ready" when nothing had to be built -- and in that case `onReady` is
+-- NOT called, because the caller is already standing in the moment it wanted.
+-- Returns "building" otherwise; `onReady(ok)` lands on a later frame.
+--
+-- Several callers can wait on ONE build (the ledger page and the search box both
+-- do), which is the other half of why this is not just "call the budgeted
+-- builder": two surfaces asking at once must not start two builds.
+function Search:EnsureRegistryAsync(onReady)
+    if not self:RegistryIsStale() then return "ready" end
+
+    if onReady then
+        self._buildWaiters = self._buildWaiters or {}
+        self._buildWaiters[#self._buildWaiters + 1] = onReady
+    end
+
+    if not self.RegistryBuilding then
+        self:BuildFullRegistryBudgeted(function(ok)
+            self:_FlushRegistryWaiters(ok)
+        end)
+    end
+
+    return "building"
 end
 
 -- ============================================================
@@ -1374,7 +1554,27 @@ end
 
 function Search:ShowResults(query)
     if not self.ResultsPanel then return end
-    
+
+    -- ☠ THE FIRST SEARCH OF A SESSION IS A FULL INDEX BUILD, and it used to run
+    -- inside this call -- one frame, ~34 page builders, the same hitch the
+    -- changed-settings ledger was reported for. It is budgeted now, so the panel
+    -- SAYS it is indexing and the query is re-run when the registry lands.
+    --
+    -- ⚠ THE QUERY IS RE-READ FROM THE BOX on the way back, not replayed from
+    -- this closure: a build takes several frames and the user goes on typing
+    -- through them, so answering the query they had when they started would put
+    -- stale results under a box that says something else.
+    if self:RegistryIsStale() or self.RegistryBuilding then
+        self:ShowBuildingMessage()
+        self:EnsureRegistryAsync(function(ok)
+            if not (ok and self.ResultsPanel and self.ResultsPanel:IsShown()) then return end
+            if InCombatLockdown() then return end
+            local live = self.SearchBar and self.SearchBar.editbox:GetText()
+            if live and live ~= "" then self:ShowResults(live) end
+        end)
+        return
+    end
+
     local results = self:Find(query)
     local panel = self.ResultsPanel
     local scrollChild = panel.scrollChild
@@ -1457,10 +1657,22 @@ function Search:HideResults()
 end
 
 function Search:ShowCombatMessage()
+    self:ShowPanelMessage(L["Search unavailable during combat"])
+end
+
+-- The panel standing in for results while the index is still being built. Same
+-- surface as the combat message and for the same reason: an empty panel reading
+-- "No settings found" during a build is not a slower answer, it is a WRONG one.
+-- HideResults puts EmptyMessage() back, so neither string can stick.
+function Search:ShowBuildingMessage()
+    self:ShowPanelMessage(L["Indexing settings..."])
+end
+
+function Search:ShowPanelMessage(text)
     if not self.ResultsPanel then return end
-    
+
     local panel = self.ResultsPanel
-    
+
     -- Clear existing results.
     -- ⚠ Hide only. SetParent(nil) here would orphan cards that are still in cardCache,
     -- so the next search would hand back a parentless frame that never draws.
@@ -1469,8 +1681,8 @@ function Search:ShowCombatMessage()
     end
     panel.resultWidgets = {}
 
-    -- Show combat message instead of "No results"
-    panel.noResults:SetText(L["Search unavailable during combat"])
+    -- Show the message instead of "No results"
+    panel.noResults:SetText(text)
     panel.noResults:Show()
     panel.countText:SetText("")
     panel.scroll:Hide()

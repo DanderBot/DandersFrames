@@ -320,19 +320,49 @@ end
 -- as a one-line hint rather than as "nothing changed" -- an empty ledger and an
 -- unbuilt one look identical on screen and mean opposite things.
 --   "combat"   a registry build is due and we will not run one mid-fight
+--   "building" a budgeted build is under way; the page refreshes itself when it
+--              lands (see the waiter below)
 --   "unbuilt"  the panel cannot produce a registry at all yet
 function ChangedSettings:BuildReport(GUI)
     local Search = DF.Search
     if not Search then return nil, "unbuilt" end
 
-    -- ☠ NO REGISTRY BUILD IN COMBAT. Building it re-runs all ~34 page builders
-    -- -- the same reason the search box refuses to search mid-fight -- and a
-    -- report is never worth a hitch in the middle of a pull. An ALREADY-built
-    -- registry costs nothing, so the guard is on the build, not on the page:
-    -- open the ledger before the pull and it keeps working through it.
-    if Search:RegistryIsStale() and InCombatLockdown() then return nil, "combat" end
+    -- ⚠ THE FLAG IS CHECKED AS WELL AS THE STALENESS, and it is not redundant
+    -- belt-and-braces. A build in flight has already emptied Search.Registry, so
+    -- today RegistryIsStale answers true for both -- but the thing that must
+    -- never happen here is reading a HALF-FILLED index and printing it as the
+    -- user's configuration, and that deserves to be said rather than inferred
+    -- from another function's implementation.
+    if Search:RegistryIsStale() or Search.RegistryBuilding then
+        -- ☠ NO REGISTRY BUILD IN COMBAT. Building it re-runs all ~34 page
+        -- builders -- the same reason the search box refuses to search mid-fight
+        -- -- and a report is never worth a hitch in the middle of a pull. An
+        -- ALREADY-built registry costs nothing, so the guard is on the build,
+        -- not on the page: open the ledger before the pull and it keeps working
+        -- through it.
+        if InCombatLockdown() then return nil, "combat" end
 
-    Search:EnsureRegistry()
+        -- ☠ BUDGETED, NOT SYNCHRONOUS. This call is what "the ledger lags like
+        -- crazy when opening" was: a cold registry means ~34 page builders, and
+        -- running them inside this page's own build put every one of them in the
+        -- frame that drew the page. Now the page renders its "building" state
+        -- immediately and rebuilds itself when the last slice lands.
+        --
+        -- ⚠ THE WAITER RE-CHECKS WHAT IS ON SCREEN. A build takes several
+        -- frames, and the user can navigate away inside them; refreshing the
+        -- page they left would rebuild a page nobody is looking at, and
+        -- RefreshCurrentPage would rebuild the WRONG one.
+        Search:EnsureRegistryAsync(function(ok)
+            if not ok then return end
+            if not (GUI and GUI.CurrentPageName == ChangedSettings.PAGE_ID) then return end
+            local page = GUI.Pages and GUI.Pages[ChangedSettings.PAGE_ID]
+            if page and page.Refresh and page:IsShown() then page:Refresh() end
+        end)
+        -- Unconditionally: EnsureRegistryAsync defers every path, so there is no
+        -- arm of it that can hand this call a usable registry before it returns.
+        return nil, "building"
+    end
+
     local registry = Search.Registry
     if not registry or #registry == 0 then return nil, "unbuilt" end
 

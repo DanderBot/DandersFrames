@@ -391,7 +391,7 @@ do
 end
 
 -- ============================================================
--- BuildReport -- THE TWO REFUSALS
+-- BuildReport -- THE REFUSALS
 -- The page renders whatever this returns, so "cannot answer" has to be
 -- distinguishable from "nothing changed". They look identical on screen and
 -- mean opposite things: one says the profile is clean, the other says nothing
@@ -401,18 +401,33 @@ end
 do
     local GUI = { SelectedMode = "party", CategoryOrder = {}, Categories = {} }
 
-    -- A stand-in for Features/Search.lua: the two entry points BuildReport uses,
+    -- A stand-in for Features/Search.lua: the entry points BuildReport uses,
     -- with a build that is recorded rather than performed. The REAL pair is
-    -- driven by test_page_parking; what matters here is only which of them
+    -- driven by test_search_registry; what matters here is only which of them
     -- BuildReport calls, and when.
-    local builds = 0
+    --
+    -- ⚠ THE BUILD IS ASYNC NOW. EnsureRegistryAsync starts a budgeted build and
+    -- answers "building"; the report is not available in the same call, and the
+    -- page shows its building state until the waiter fires. `finish` is this
+    -- fake's stand-in for the frames that would have passed.
+    local builds, waiter = 0, nil
     local fakeSearch = {
         Registry = { { dbKey = "absorbBarHeight", label = "Height", tab = "bars_absorb", tabLabel = "Absorbs" } },
         stale = false,
     }
     function fakeSearch:RegistryIsStale() return self.stale end
-    function fakeSearch:EnsureRegistry()
-        if self.stale then builds = builds + 1; self.stale = false end
+    function fakeSearch:EnsureRegistryAsync(onReady)
+        if not self.stale then return "ready" end
+        builds = builds + 1
+        self.RegistryBuilding = true
+        waiter = onReady
+        return "building"
+    end
+    local function finish()
+        fakeSearch.stale = false
+        fakeSearch.RegistryBuilding = false
+        local fn = waiter; waiter = nil
+        if fn then fn(true) end
     end
     DF.Search = fakeSearch
 
@@ -443,12 +458,32 @@ do
     check(report ~= nil, "report: an already-built registry answers in combat")
     eq(report.count, 1, "report: ...with the same answer as out of combat")
 
-    -- Out of combat, stale: it builds.
+    -- Out of combat, stale: it starts a BUDGETED build and says so. ☠ THE PAGE
+    -- MUST NOT GET A REPORT HERE. This call is made from inside the ledger's own
+    -- page build; answering it synchronously is what put ~34 page builders in
+    -- the frame that drew the page ("lags like crazy").
     IN_COMBAT = false
     fakeSearch.stale = true
-    report = CS:BuildReport(GUI)
-    eq(builds, 1, "report: out of combat a stale registry IS rebuilt")
-    check(report ~= nil, "report: ...and answers afterwards")
+    report, reason = CS:BuildReport(GUI)
+    eq(builds, 1, "report: out of combat a stale registry starts a build")
+    eq(report, nil, "report: ...and does NOT answer in the same call")
+    eq(reason, "building", "report: ...it names the build as the reason")
+
+    -- ...and once the build lands, the same call answers.
+    finish()
+    report, reason = CS:BuildReport(GUI)
+    check(report ~= nil, "report: a landed build answers")
+    eq(reason, nil, "report: ...with no reason attached")
+    eq(builds, 1, "report: ...and started no second build")
+
+    -- A build already in flight is not a second build, and is still not an
+    -- answer: two surfaces (the ledger and the search box) can be waiting on one.
+    fakeSearch.RegistryBuilding = true
+    report, reason = CS:BuildReport(GUI)
+    eq(report, nil, "report: a build in flight does not answer")
+    eq(reason, "building", "report: ...it reports the build")
+    eq(builds, 1, "report: ...and does not start another")
+    fakeSearch.RegistryBuilding = false
 
     -- The other refusals, each with the honest reason rather than an empty report.
     local savedSearch = DF.Search
