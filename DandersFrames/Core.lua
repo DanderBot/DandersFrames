@@ -7142,11 +7142,19 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "reset" then
                 DF:ResetFullProfile()
             elseif msg == "resetgui" then
-                -- Reset GUI scale, size, and position to defaults
+                -- Reset GUI scale, size, and position to defaults.
+                --
+                -- ☠ THE SHIPPED DEFAULT, NOT A LITERAL. This used to say 760x520
+                -- twice, in a file on the OTHER side of the load-on-demand split
+                -- from the window builder that also said it -- so the two were
+                -- free to drift, and "reset to default" would then restore a size
+                -- the addon no longer ships. GUI.WindowDefaults is resident
+                -- precisely so both readers can have it.
+                local wd = (DF.GUI and DF.GUI.WindowDefaults) or { width = 640, height = 600 }
                 local ws = DF:GetWindowState()
                 ws.scale = 1.0
-                ws.width = 760
-                ws.height = 520
+                ws.width = wd.width
+                ws.height = wd.height
                 ws.point = nil
                 ws.relPoint = nil
                 ws.x = nil
@@ -7154,7 +7162,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.GUIFrame then
                     DF.GUIFrame:ClearAllPoints()
                     DF.GUIFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-                    DF.GUIFrame:SetSize(760, 520)
+                    DF.GUIFrame:SetSize(wd.width, wd.height)
                     DF.GUIFrame:SetScale(1.0)
                     if DF.GUI and DF.GUI.ScaleSlider then
                         DF.GUI.ScaleSlider:SetValue(1.0)

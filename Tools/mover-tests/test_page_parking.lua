@@ -359,7 +359,16 @@ do
     -- rather than from the kit. Pinned so a wider nav (or a bigger default
     -- window) fails here instead of quietly making 521 wrong.
     has("tabFrame:SetWidth(SnapLen(frame, 155))", "the nav pane is 155 wide")
-    has("local defaultWidth, defaultHeight = 760, 520", "...and the window opens at 760")
+    -- ⚠ THE DEFAULT ONLY. A stored guiDb.width wins over it, so this number is
+    -- what a fresh install opens at and nothing else. It came down from 760x520:
+    -- 760 was just over the two-column cutover, so the shipped window opened
+    -- two-column, and the height went up because a one-column page is longer.
+    has("local defaultWidth  = GUI.WindowDefaults.width",
+        "...and the window's default size comes from the resident declaration")
+    has("local defaultHeight = GUI.WindowDefaults.height", "...both halves of it")
+    -- The resize FLOOR is deliberately NOT the default -- a user who wants the
+    -- window smaller than it opens can still drag it there.
+    has("local minWidth, minHeight = 520, 400", "...with the resize floor left below it")
 
     do
         local PAGE_WINDOW_PAD, PAGE_INSET = 12, 8
@@ -396,27 +405,53 @@ do
         eq(bandRowEdge, corridor,
            "corridor: a full-width feature row ends on the same line as a boxed widget")
 
-        -- What the band actually BUYS, at the 760 default window: the content box
+        -- What the band actually BUYS, at the 640 default window: the content box
         -- is the window less its two margins and the nav pane, the child is that
         -- less the inset and the gutter, and a row is the child less the page's
         -- two margins and the band's two paddings. The old 280-box row stopped
-        -- ~300px inside the window; this is the number that replaces it.
+        -- well inside the window; this is the number that replaces it.
         -- The nav pane's width and the gap beside it are Panel.lua's, pinned as
         -- source above (`navGap    = 8,`) and by the nav's own SetWidth(155).
-        local NAV_W, NAV_GAP, DEFAULT_WIN = 155, 8, 760
+        --
+        -- ☠ 640 IS PINNED TO THE DECLARATION, not copied into this test. The
+        -- window's default size is resident (GUI.WindowDefaults) because `/df
+        -- resetgui` writes it back from Core.lua, which can run before this
+        -- companion has ever loaded -- and the two used to be separate literals
+        -- free to disagree.
+        local NAV_W, NAV_GAP, DEFAULT_WIN = 155, 8, 640
+        do
+            local gui = df_file_source("GUI/GUI.lua")
+            check(gui:find("GUI.WindowDefaults = { width = 640, height = 600 }", 1, true) ~= nil,
+                  "band: the shipped default really is 640x600")
+            local core = df_file_source("Core.lua")
+            check(core:find("DF.GUI.WindowDefaults) or { width = 640, height = 600 }", 1, true) ~= nil,
+                  "band: ...and /df resetgui restores that, not a literal of its own")
+        end
         local contentW = DEFAULT_WIN - PAGE_WINDOW_PAD - NAV_W - NAV_GAP - PAGE_WINDOW_PAD
         local childW   = contentW - PAGE_INSET - scroll.gutter
         local rowW     = childW - 2 * box.colMargin - 2 * box.pad
         check(contentW < box.minCol * 2 + box.colGutter,
               "band: the default window is a ONE-column page, so the band is the whole of it")
-        eq(rowW, 521, "band: a feature row is 521 wide at the default window")
+        eq(rowW, 401, "band: a feature row is 401 wide at the default window")
         -- ...against what it was inside the 280 box: the inner width of a group.
-        eq(rowW - (box.group - 2 * box.pad), 261,
-           "band: which is 261px wider than the same row inside a 280 box")
-        -- And the old row's right edge really was ~300 inside the window.
+        eq(rowW - (box.group - 2 * box.pad), 141,
+           "band: which is 141px wider than the same row inside a 280 box")
+        -- And the boxed row's right edge really was that far inside the window.
         eq(childW - (box.colMargin + box.pad + (box.group - 2 * box.pad))
-           + scroll.gutter + PAGE_WINDOW_PAD, 302,
-           "band: the boxed row used to stop 302px inside the window; the band stops at 41")
+           + scroll.gutter + PAGE_WINDOW_PAD, 182,
+           "band: the boxed row used to stop 182px inside the window; the band stops at 41")
+
+        -- ☠ THE CUTOVER IS STILL ABOVE THE DEFAULT, AND WAS ALREADY ABOVE THE
+        -- OLD ONE. 640 is not what makes the shipped window single-column -- the
+        -- cutover is 590 content pixels, which is a 777px window once the two
+        -- margins, the nav and its gap are paid for, so 760 was under it too.
+        -- Pinned so "narrowing the default made everything one column" cannot be
+        -- believed, and so a future default that crosses 777 fails here.
+        local cutoverWindow = box.minCol * 2 + box.colGutter
+                            + PAGE_WINDOW_PAD + NAV_W + NAV_GAP + PAGE_WINDOW_PAD
+        eq(cutoverWindow, 777, "band: two columns need a 777px window")
+        check(DEFAULT_WIN < cutoverWindow, "band: ...which the 640 default is under")
+        check(760 < cutoverWindow, "band: ...and so was the 760 it replaced")
     end
 
     -- ---- SelectTab: park the outgoing, adopt the incoming ------------

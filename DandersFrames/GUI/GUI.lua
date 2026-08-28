@@ -446,6 +446,21 @@ for pageId, prefixes in pairs(DF.SECTION_PREFIXES) do
     end
 end
 -- ============================================================
+-- THE SETTINGS WINDOW'S DEFAULT SIZE
+-- ------------------------------------------------------------
+-- ☠ RESIDENT, because it has TWO readers on opposite sides of the load-on-demand
+-- split: GUI/Panel.lua builds the window with it (companion), and `/df resetgui`
+-- writes it back into the window state (Core.lua, resident -- and reachable
+-- before the panel has ever been opened). It was a literal in both, and they
+-- were free to disagree: a reset would then "restore the default" to a size the
+-- addon no longer ships.
+--
+-- ⚠ THE DEFAULT, NOT A MINIMUM. A stored guiDb.width/height wins over it
+-- everywhere, and the resize floor (Panel.lua's minWidth/minHeight) is lower on
+-- purpose -- a user who wants the window smaller than it opens can drag it there.
+GUI.WindowDefaults = { width = 640, height = 600 }
+
+-- ============================================================
 -- MODE + THEME (DandersFrames-only)
 -- ============================================================
 -- Track selected mode: "party" | "raid" | "clicks".
