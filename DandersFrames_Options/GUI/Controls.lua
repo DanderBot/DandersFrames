@@ -2759,6 +2759,13 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
     container.Refresh = function()
         UpdateItemPositions()
     end
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote the key behind this widget's
+    -- back -- a group Reset, a press-and-hold preview, or the undo of one. The
+    -- Frame page's Group Display Order row wires those verbs, and without the
+    -- alias a reset moved the raid and left the eight rows showing the order
+    -- the user had before it.
+    container.refreshValue = container.Refresh
     
     -- Override indicators for profile editing
     if dbKey and type(dbKey) == "string" and not (dbTable and rawget(dbTable, "_skipOverrideIndicators")) then

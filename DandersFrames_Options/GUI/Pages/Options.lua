@@ -1802,8 +1802,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end)
         end
         
-        -- Column 1 is the layout chain -- size, direction, raid mode, and
-        -- whichever group detail that mode implies. Column 2 keeps
+        -- CLASSIC: column 1 is the layout chain -- size, direction, raid mode,
+        -- and whichever group detail that mode implies. Column 2 keeps
         -- Appearance at the top, where styling sits on every other page.
         --
         -- Six boxes against three is not the imbalance it looks: FIVE of
@@ -1812,212 +1812,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Mover. Permanent Mover is also by far the biggest box here, which
         -- carries column 2 in raid.
         --
-        -- ⚠ ...IN CLASSIC LAYOUT. In the popout layout there are only TWO boxes
-        -- left in party mode -- Frame Size and Layout Direction, both column 1 --
-        -- because Appearance, Frame Fade and Permanent Mover are all FULL-WIDTH
-        -- BANDS of feature rows now. See the Appearance container block below for
-        -- what a band is and why it is full width, and the band block at the foot
-        -- of this builder for where the bands sit and why.
+        -- ☠ THE POPOUT LAYOUT HAS NO BOXES LEFT AT ALL. Every group on this
+        -- page is a feature ROW now, in one of three full-width bands -- Layout,
+        -- Appearance, Permanent Mover -- so nothing is left in a numbered column
+        -- and the page's own column engine has nothing to balance. That is the
+        -- point of this pass rather than a side effect of it: Danders asked to
+        -- SEE one uniform page instead of rows beside boxes, and whether it
+        -- reads better is not a question anyone can answer from a description.
+        --
+        -- ⚠ AND IT SUSPENDS THE PRIMARIES-STAY RULE, FOR THIS PAGE ONLY. Frame
+        -- Size and Layout Direction are the two controls a new user opens this
+        -- page for, and putting a primary behind a click is normally the wrong
+        -- trade. They are rows here so the comparison is honest -- a page that
+        -- kept two boxes at the top would be answering a softer question -- and
+        -- the classic layout is byte-identical either way, so the revert is one
+        -- tag away.
         local classicLayout = DF:IsClassicSettingsLayout()
-
-        -- ===== THE STAY-INLINE BOX'S SKIN, AND THE SWEEP'S STANDARD =======
-        -- A half-converted page speaks two visual languages at once. The bands
-        -- are an accent header ABOVE a stack of fat row plates; every box that
-        -- did NOT convert is still the classic dense group -- title INSIDE a
-        -- faint white rectangle, at the column's own inset. Side by side on one
-        -- page that reads as two systems, which is what Danders saw here: "if we
-        -- are gonna have mixed settings then we need to make sure they
-        -- thematically match -- Layout Direction does not match the Appearance
-        -- settings."
-        --
-        -- bandStyle (DandersUI/Sections.lua) is the answer, and it is a SKIN, not
-        -- a conversion: the title moves out of the box and is drawn as the same
-        -- header the bands use, and the box becomes a PopoutRow plate -- same
-        -- fill, same border, same R8 at the row weight, same inset. Nothing
-        -- inside changes. Same factories, same order, same slot heights, same
-        -- widths, same column.
-        --
-        -- ☠ ONE TABLE, PASSED AT EVERY STAY-INLINE SITE, AND IT IS THE SHAPE THE
-        -- REST OF THE SWEEP SHOULD COPY. The alternatives were both worse: a
-        -- host-level flag would skin every group in the addon including the
-        -- pages that have not been swept yet, and a per-site literal is the thing
-        -- that gets missed on the eighth box. One name, declared beside the
-        -- layout test it is gated on, so a new stay-inline group on this page is
-        -- opted in by passing it and opted out by not.
-        --
-        -- ⚠ nil IN CLASSIC, deliberately: the classic branch must build exactly
-        -- the box it always did, and `nil` is what "no opts" means to
-        -- CreateSettingsGroup. It is read-only to the factory, which is what
-        -- makes one shared table safe across every box below.
-        local INLINE_BOX = (not classicLayout) and { bandStyle = true } or nil
-
-        -- ===== ...AND THE WIDTH, WHICH THE SKIN DID NOT FIX ==================
-        -- The skin made the survivors LOOK like the bands. It did not make them
-        -- the same SIZE, and that is the next thing the eye goes to -- Danders,
-        -- on the band-styled page: "there is still an issue with their width --
-        -- Appearance spans the whole width, the others do not." A page of plates
-        -- that agree on fill, border, radius and inset and then stop at 280 while
-        -- the plate above them runs to the corridor does not read as one column
-        -- of sections; it reads as a wide thing with narrow things under it.
-        --
-        -- So every stay-inline box is now built at the page's usable width and
-        -- added spanning BOTH columns, exactly as the two bands are. Same
-        -- expression as the Appearance band's `bandW` above -- asked for rather
-        -- than guessed, because LayoutChildren sizes children off the group's
-        -- CURRENT width and a box built at 280 and stretched by the layout pass
-        -- lays its first pass out at 260.
-        --
-        -- ☠ WIDTH ALONE WOULD HAVE BEEN A REGRESSION, which is what INLINE_GRID
-        -- below is for. A column of five sliders simply stretched to the page is
-        -- five bars twice as long as any bar needs to be, each with its label
-        -- stranded at the far left of a 400px row. The width goes to a SECOND
-        -- control instead.
-        local INLINE_W = classicLayout and GUI.SettingsBox.group or math.max(
-            GUI.PageUsableWidth(GUI.PageChildWidth(
-                GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
-            GUI.SettingsBox.group)
-
-        -- The same skin with the plate's interior flowed across TWO tracks:
-        -- Frame Width beside Frame Height, Growth Direction beside Frames Grow
-        -- From, the eight group ticks four rows of two. Row-major, so a pair of
-        -- related controls reads left-then-right.
-        --
-        -- ⚠ DERIVED from INLINE_BOX rather than written beside it. Two literals
-        -- is two things to keep in step, and the one that gets missed is the box
-        -- that quietly stops matching its neighbours -- the exact failure this
-        -- page already has a test for.
-        --
-        -- Not every box wants it, and the judgement is per box rather than a
-        -- page-wide flag: a wrapping blurb or the group-order drag list has no
-        -- second column to pair with, so those boxes stay one track wide inside
-        -- their full-width plate and the boxes that are pairs of compact
-        -- controls take two.
-        local INLINE_GRID = INLINE_BOX
-            and { bandStyle = INLINE_BOX.bandStyle, innerColumns = 2 }
-            or nil
-
-        -- Where a stay-inline box is ADDED. In classic, its own column, exactly
-        -- as before. In the new layout there are no columns left on this page --
-        -- every box and both bands span "both" -- which the page's column engine
-        -- handles as a plain single stack (a run of "both" widgets is a run of
-        -- sync points with nothing to sync).
-        local INLINE_COL_1 = classicLayout and 1 or "both"
-        local INLINE_COL_2 = classicLayout and 2 or "both"
-
-        -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
-        -- Two different things depending on the layout, decided here because the
-        -- CONSTRUCTED WIDTH is part of the answer and a group cannot be widened
-        -- for free -- LayoutChildren sizes its children off the group's current
-        -- width, so a band built at 280 and stretched by the page's layout pass
-        -- would lay its rows out at 260 on the build and only correct them on the
-        -- next refresh.
-        --
-        --  * CLASSIC -- exactly what it has always been: a 280 box, in column 2,
-        --    added at its own place in the flow further down. Untouched.
-        --  * POPOUT  -- a CHROMELESS container the width of the page's content,
-        --    laid out as a band ACROSS the page rather than as a box beside one.
-        --    WHERE that band is added is decided at the foot of this builder; see
-        --    the band block there.
-        --
-        -- Why the band, and why full width: a feature row's popout docks outside
-        -- the WINDOW and runs a beam back to the row. A row that stops 280px in
-        -- leaves that beam crossing half the page, and the panel reads as
-        -- something floating beside the window rather than as this row's contents.
-        -- Full width puts the row's edge at the corridor -- the same right edge a
-        -- slider's value box lands on, since the container keeps the standard box
-        -- padding -- so the beam is the short hop it is meant to be.
-        --
-        -- Chromeless because the rows ARE the surface now. A faint bordered box
-        -- drawn round a full-width band reads as a second panel, and the section
-        -- keeps its identity from the "Appearance" header above the rows instead.
-        --
-        local appearanceGroup
-        if classicLayout then
-            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        else
-            -- The width the layout pass is about to give it, asked for rather
-            -- than guessed: GUI.PageUsableWidth is the same helper that pass
-            -- stretches "both" widgets to. Floored at a box's width so a page
-            -- built before the content frame has a size still gets a sane
-            -- container (the layout pass then stretches it as normal).
-            local bandW = math.max(
-                GUI.PageUsableWidth(GUI.PageChildWidth(
-                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
-                GUI.SettingsBox.group)
-            appearanceGroup = GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })
-        end
-
-        -- ===== FRAME SIZE GROUP (Column 1) =====
-        -- Five sliders, and nothing here wants a 400px bar: two tracks.
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
-        sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Size"]), 40)
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Height"], 20, 300, 1, db, "frameHeight", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Padding"], 0, 10, 1, db, "framePadding", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Scale"], 0.5, 2.0, 0.05, db, "frameScale", function() DF:UpdateContainerPosition() DF:UpdateRaidContainerPosition() UpdateFrames() end, function() DF:LightweightUpdateFrameScale() end, true), 55)
-        local frameSpacingSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Spacing"], -5, 50, 1, db, "frameSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSpacing() end, true), 55)
-        frameSpacingSlider.hideOn = function() return GUI.SelectedMode == "raid" and not db.raidUseGroups end
-        Add(sizeGroup, nil, INLINE_COL_1)
-        
-        -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
-        -- The container itself is built (and, for the band, added) above -- see
-        -- the note there. From here down the two layouts fill the SAME object.
-        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-        -- Canonical border controls via the unified helper. Replaces the
-        -- previous hand-rolled Show / Color / Style / Texture / Size block.
-        -- classColor + roleColor are now first-class helper include flags (no
-        -- bespoke "Use Class Color" extra needed). (Pixel-Perfect Scaling moved
-        -- to General > Settings > Rendering — it's a global, mode-agnostic flag.)
-        --
-        -- Border and Border Shadow are TWO builders, each taking the group and
-        -- parent it should build into, because popout gate two mounts them as two
-        -- separate popout rows. Here they are mounted back-to-back into the one
-        -- Appearance group, which is the same panel, in the same order, as the
-        -- single CreateBorderControls call they replaced.
-        --
-        -- ⚠ shadowDisableWhen is not decoration. In the single call the shadow
-        -- rows greyed with Show Border because CreateBorderControls' own
-        -- composition loop reached them; split out, the shadow builder is never
-        -- inside that loop, so the same predicate has to be handed to it.
-        local function BuildBorderGroup(tools)
-            GUI:CreateBorderControls(tools.group, db, "frame", {
-                parent       = tools.parent,
-                include      = {
-                    -- Frame Border is the outer chrome of the unit. It's a
-                    -- structural element, not an alert surface, so animations
-                    -- don't fit the design — removed in Stage 4.0 after Stage
-                    -- 3 used it as a dev playground.
-                    inset = true, offset = true, blendMode = true,
-                    gradient = true,
-                    classColor = true, roleColor = true,
-                    alpha = true,
-                },
-                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
-                lightUpdate  = function() DF:LightweightUpdateBorder() end,
-                lightColors  = function() DF:LightweightUpdateBorderColor() end,
-                refreshStates = tools.refreshStates,
-                sizeMin = 1, sizeMax = 16, sizeStep = 1,
-                noShowToggle = tools.hoistToggles or nil,
-            })
-        end
-        local function BuildBorderShadowGroup(tools)
-            GUI:CreateBorderShadowControls(tools.group, db, "frame", {
-                parent       = tools.parent,
-                -- No lightColors: the shadow colour picker commits through
-                -- fullUpdate, exactly as it did inside the single call.
-                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
-                lightUpdate  = function() DF:LightweightUpdateBorder() end,
-                refreshStates = tools.refreshStates,
-                hideWhen     = tools.shadowHideWhen,
-                disableWhen  = tools.shadowDisableWhen,
-                noEnableToggle = tools.hoistToggles or nil,
-            })
-        end
-        -- Show Border off greys the shadow block, in BOTH layouts. In the single
-        -- call it fell out of CreateBorderControls' own composition loop; split
-        -- out (and split again into two popouts) the predicate has to be handed
-        -- over explicitly. One definition, both branches.
-        local function BorderOff() return db.frameShowBorder == false end
 
         -- Cleared on EVERY build, classic included. It only ever has entries in
         -- the popout layout, and a map left behind by a previous new-UI build
@@ -2160,7 +1970,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- is why this is a factory rather than one captured group -- and why
         -- each group carries its own `st`, so the refresh wired into group
         -- one cannot re-flow group two.
-        local function PopoutContent(buildInto)
+        --
+        -- `innerColumns` is the pane's own interior grid (DandersUI Sections'
+        -- opts.innerColumns), and it is per ROW rather than per page: a pane of
+        -- sliders at half of 260 is two stubby bars with their labels stranded,
+        -- while a pane of eight one-word checkboxes is exactly the list the
+        -- second track was written for. Omitted = absent = one track, which is
+        -- what every pane on this page but Group Visibility asks for.
+        local function PopoutContent(buildInto, innerColumns)
             local function fresh()
                 local st = {}
                 local holder = CreateFrame("Frame", nil, self.child)
@@ -2173,7 +1990,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- content width, so each control mounts at exactly the width
                 -- it has inline on the page.
                 st.group = GUI:CreateSettingsGroup(holder, POPOUT_W,
-                                                   { chromeless = true, padding = 0 })
+                                                   { chromeless = true, padding = 0,
+                                                     innerColumns = innerColumns })
                 st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
                 -- What a builder's own dropdowns and checkboxes call. Cheap,
                 -- and deliberately NOT a page rebuild: see the toggles below.
@@ -2231,7 +2049,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- db-bound control goes through regardless, and it covers the
         -- colour pickers and checkboxes whose search entries are registered
         -- by a different route.
-        local function ClaimKeys(row, group)
+        --
+        -- ⚠ `extra` IS NOT A CONVENIENCE. A control may be bound to a key the
+        -- walk cannot see: the eight Group Visibility ticks are custom-get/set
+        -- boxes over ONE table setting, and each stamps a per-index override key
+        -- ("raidGroupVisible_3") that the profile does not ship. Left to the walk
+        -- alone the row would claim eight keys the defaults engine cannot answer
+        -- for, so its amber tick would never light and Reset Group would write
+        -- nothing while saying it had. The real key is named here instead.
+        local function ClaimKeys(row, group, extra)
             if not (row and group and group.groupChildren) then return end
             local claimed = row._claimedKeys or {}
             row._claimedKeys = claimed
@@ -2243,6 +2069,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     self._popoutRowForKey[k] = row
                     claimed[#claimed + 1] = k
                 end
+            end
+            for _, k in ipairs(extra or {}) do
+                self._popoutRowForKey[k] = row
+                claimed[#claimed + 1] = k
             end
         end
 
@@ -2405,6 +2235,242 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             row.searchEntry = S:RegisterCheckbox(label, key, nil, false, onToggle)
             if S.LinkSourceWidget then S:LinkSourceWidget(row) end
         end
+
+        -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
+        -- Two different things depending on the layout, decided here because the
+        -- CONSTRUCTED WIDTH is part of the answer and a group cannot be widened
+        -- for free -- LayoutChildren sizes its children off the group's current
+        -- width, so a band built at 280 and stretched by the page's layout pass
+        -- would lay its rows out at 260 on the build and only correct them on the
+        -- next refresh.
+        --
+        --  * CLASSIC -- exactly what it has always been: a 280 box, in column 2,
+        --    added at its own place in the flow further down. Untouched.
+        --  * POPOUT  -- a CHROMELESS container the width of the page's content,
+        --    laid out as a band ACROSS the page rather than as a box beside one.
+        --    WHERE that band is added is decided at the foot of this builder; see
+        --    the band block there.
+        --
+        -- Why the band, and why full width: a feature row's popout docks outside
+        -- the WINDOW and runs a beam back to the row. A row that stops 280px in
+        -- leaves that beam crossing half the page, and the panel reads as
+        -- something floating beside the window rather than as this row's contents.
+        -- Full width puts the row's edge at the corridor -- the same right edge a
+        -- slider's value box lands on, since the container keeps the standard box
+        -- padding -- so the beam is the short hop it is meant to be.
+        --
+        -- Chromeless because the rows ARE the surface now. A faint bordered box
+        -- drawn round a full-width band reads as a second panel, and the section
+        -- keeps its identity from the "Appearance" header above the rows instead.
+        --
+        local appearanceGroup
+        if classicLayout then
+            appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+        else
+            -- The width the layout pass is about to give it, asked for rather
+            -- than guessed: GUI.PageUsableWidth is the same helper that pass
+            -- stretches "both" widgets to. Floored at a box's width so a page
+            -- built before the content frame has a size still gets a sane
+            -- container (the layout pass then stretches it as normal).
+            local bandW = math.max(
+                GUI.PageUsableWidth(GUI.PageChildWidth(
+                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+                GUI.SettingsBox.group)
+            appearanceGroup = GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })
+        end
+
+        -- ===== LAYOUT: THE PAGE'S OTHER BAND ==============================
+        -- Everything the page used to keep as a box in a numbered column --
+        -- Frame Size, Layout Direction and the five raid boxes -- is a row in
+        -- here. Built exactly as the Appearance band above is (see the long note
+        -- there for why a band is chromeless and why it is the page's usable
+        -- width, not a literal), and ADDED at the foot of this builder with the
+        -- other two.
+        --
+        -- ⚠ THE HEADER IS THE SECTION'S NAME, NOT A ROW'S. Each row's own label
+        -- carries the group name it had as a box heading, so the band above them
+        -- says the one thing none of them does: that this is the layout half of
+        -- the page. (The mover band has no header for the opposite reason -- one
+        -- row, already named.)
+        --
+        -- Nothing is added here in classic: the seven boxes below build
+        -- themselves and Add themselves exactly where they always did.
+        local layoutBand
+        if not classicLayout then
+            local layoutBandW = math.max(
+                GUI.PageUsableWidth(GUI.PageChildWidth(
+                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+                GUI.SettingsBox.group)
+            layoutBand = GUI:CreateSettingsGroup(self.child, layoutBandW, { chromeless = true })
+            layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+        end
+
+        -- ===== FRAME SIZE (a 280 box in classic, a row in the Layout band) ===
+        -- The page's first PRIMARY to go behind a click, and the reason is the
+        -- comparison rather than the control: five sliders under a row that
+        -- already prints "138x59" is not obviously worse than five sliders in a
+        -- box, and "obviously" is the only word that settles it. See the layout
+        -- note at the top of this builder.
+        --
+        -- Verbatim, taking the group and parent it should build into -- same
+        -- factories, same L keys, same db keys, same callbacks, same slot
+        -- heights, same hideOn. Guarded by test_frame_page_builders.lua, which
+        -- reads this body out of the source and checks it against the inventory
+        -- it had inline.
+        local function BuildFrameSizeGroup(tools)
+            local group, parent = tools.group, tools.parent
+            group:AddWidget(GUI:CreateSlider(parent, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Frame Height"], 20, 300, 1, db, "frameHeight", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Frame Padding"], 0, 10, 1, db, "framePadding", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Frame Scale"], 0.5, 2.0, 0.05, db, "frameScale", function() DF:UpdateContainerPosition() DF:UpdateRaidContainerPosition() UpdateFrames() end, function() DF:LightweightUpdateFrameScale() end, true), 55)
+            local frameSpacingSlider = group:AddWidget(GUI:CreateSlider(parent, L["Frame Spacing"], -5, 50, 1, db, "frameSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSpacing() end, true), 55)
+            frameSpacingSlider.hideOn = function() return GUI.SelectedMode == "raid" and not db.raidUseGroups end
+        end
+
+        -- The group's own apply, named once so the footer's Reset and Hold run
+        -- exactly what the sliders' own callbacks do. The scale slider's is the
+        -- superset -- it repositions both containers as well as re-laying the
+        -- frames -- so a reset that moves scale AND width does the whole job.
+        local function ApplyFrameSize()
+            DF:UpdateContainerPosition()
+            DF:UpdateRaidContainerPosition()
+            UpdateFrames()
+        end
+
+        if classicLayout then
+            local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
+            sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Size"]), 40)
+            BuildFrameSizeGroup({
+                group = sizeGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(sizeGroup, nil, 1)
+        else
+            -- The summary, per the convention the border rows set: at most four
+            -- items, a fixed order, "\194\183" between them, WORDS localised and
+            -- numbers raw, labels only where a bare number would be ambiguous.
+            --
+            -- The SIZE is unconditional -- it is the question the group exists to
+            -- answer, and a Frame Size row that printed nothing on a default
+            -- profile would be the one row on the page saying less than its own
+            -- label. The other three are conditional for the opposite reason: a
+            -- default row reading "Scale 1.00 · Padding 0 · Spacing 0" says
+            -- nothing three times and spends the width doing it.
+            --
+            -- ☠ "138x59", NOT the multiplication sign. The settings panel draws
+            -- in the user's Settings Font and the shipped default carries Latin,
+            -- digits and punctuation -- the same reason the border summary spells
+            -- out L["Alpha"] instead of using the Greek letter. The Permanent
+            -- Mover summary already prints its handle size this way, so this is
+            -- the page's existing spelling rather than a new one.
+            local function FrameSizeSummary(d)
+                if not d then return "" end
+                local D = DF.Defaults
+                local parts = {}
+                local w, h = tonumber(d.frameWidth), tonumber(d.frameHeight)
+                if w and h then parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h)) end
+                -- "Not the shipped default" via the same engine the row's amber
+                -- tick asks, rather than a literal per key: the defaults live in
+                -- Config.lua and a number copied here would be a second copy of
+                -- them that nothing keeps in step.
+                local function changed(key) return D and D:IsModified(d, key) end
+                local sc = tonumber(d.frameScale)
+                if sc and changed("frameScale") then
+                    parts[#parts + 1] = format("%s %.2f", L["Scale"], sc)
+                end
+                local pad = tonumber(d.framePadding)
+                if pad and changed("framePadding") then
+                    parts[#parts + 1] = format("%s %d", L["Padding"], math.floor(pad))
+                end
+                local sp = tonumber(d.frameSpacing)
+                if sp and changed("frameSpacing") then
+                    parts[#parts + 1] = format("%s %d", L["Spacing"], math.floor(sp))
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Five, which is the whole group: nothing is hoisted, because there
+            -- is no boolean here meaning "am I doing anything".
+            local FRAME_SIZE_COUNT = 5
+
+            local sizeMount, sizeContent = PopoutContent(function(group, holder, reflow)
+                BuildFrameSizeGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local sizeRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Frame Size"],
+                db      = RowDB,
+                summary = FrameSizeSummary,
+                count   = FRAME_SIZE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = sizeMount,
+            }))
+            ClaimKeys(sizeRow, sizeContent)
+            WireModifiedTick(sizeRow)
+            WireFooter(sizeRow, ApplyFrameSize)
+        end
+
+        -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
+        -- The container itself is built (and, for the band, added) above -- see
+        -- the note there. From here down the two layouts fill the SAME object.
+        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        -- Canonical border controls via the unified helper. Replaces the
+        -- previous hand-rolled Show / Color / Style / Texture / Size block.
+        -- classColor + roleColor are now first-class helper include flags (no
+        -- bespoke "Use Class Color" extra needed). (Pixel-Perfect Scaling moved
+        -- to General > Settings > Rendering — it's a global, mode-agnostic flag.)
+        --
+        -- Border and Border Shadow are TWO builders, each taking the group and
+        -- parent it should build into, because popout gate two mounts them as two
+        -- separate popout rows. Here they are mounted back-to-back into the one
+        -- Appearance group, which is the same panel, in the same order, as the
+        -- single CreateBorderControls call they replaced.
+        --
+        -- ⚠ shadowDisableWhen is not decoration. In the single call the shadow
+        -- rows greyed with Show Border because CreateBorderControls' own
+        -- composition loop reached them; split out, the shadow builder is never
+        -- inside that loop, so the same predicate has to be handed to it.
+        local function BuildBorderGroup(tools)
+            GUI:CreateBorderControls(tools.group, db, "frame", {
+                parent       = tools.parent,
+                include      = {
+                    -- Frame Border is the outer chrome of the unit. It's a
+                    -- structural element, not an alert surface, so animations
+                    -- don't fit the design — removed in Stage 4.0 after Stage
+                    -- 3 used it as a dev playground.
+                    inset = true, offset = true, blendMode = true,
+                    gradient = true,
+                    classColor = true, roleColor = true,
+                    alpha = true,
+                },
+                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
+                lightUpdate  = function() DF:LightweightUpdateBorder() end,
+                lightColors  = function() DF:LightweightUpdateBorderColor() end,
+                refreshStates = tools.refreshStates,
+                sizeMin = 1, sizeMax = 16, sizeStep = 1,
+                noShowToggle = tools.hoistToggles or nil,
+            })
+        end
+        local function BuildBorderShadowGroup(tools)
+            GUI:CreateBorderShadowControls(tools.group, db, "frame", {
+                parent       = tools.parent,
+                -- No lightColors: the shadow colour picker commits through
+                -- fullUpdate, exactly as it did inside the single call.
+                fullUpdate   = function() UpdateFrames() DF:LightweightUpdateBorder() end,
+                lightUpdate  = function() DF:LightweightUpdateBorder() end,
+                refreshStates = tools.refreshStates,
+                hideWhen     = tools.shadowHideWhen,
+                disableWhen  = tools.shadowDisableWhen,
+                noEnableToggle = tools.hoistToggles or nil,
+            })
+        end
+        -- Show Border off greys the shadow block, in BOTH layouts. In the single
+        -- call it fell out of CreateBorderControls' own composition loop; split
+        -- out (and split again into two popouts) the predicate has to be handed
+        -- over explicitly. One definition, both branches.
+        local function BorderOff() return db.frameShowBorder == false end
+
 
         if classicLayout then
             local borderTools = {
@@ -2710,12 +2776,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
 
-        -- ===== LAYOUT DIRECTION GROUP (Column 1) =====
-        -- Two visible dropdowns at a time (the two Growth Direction variants are
-        -- mutually exclusive), which is exactly a pair: two tracks.
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
-        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
-        
+        -- ===== LAYOUT DIRECTION (a 280 box in classic, a row in the band) ===
+        -- Three dropdowns and never more than two of them visible: the two
+        -- Growth Direction variants are mutually exclusive, and Frames Grow
+        -- From is party-only.
+
         -- ☠☠ TWO DROPDOWNS, AND THE RAID+GROUPS ONE IS *DELIBERATELY* THE INVERSE.
         -- DO NOT "unify" them again. That was tried (be7e61e1) and it is the regression
         -- this comment exists to prevent.
@@ -2755,46 +2820,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- inverted before you have even opened it (Krathe, 2026-08-17). It survived this
         -- long only because "Start (Left/Top)" / "End (Right/Bottom)" sorted E-then-S,
         -- which was equally arbitrary but nobody expects an order from those.
-        local growOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
-        local growDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
-        growDrop.hideOn = function() return GUI.SelectedMode == "raid" and db.raidUseGroups end
-        growDrop.tooltip = L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
-
-        -- Grouped raid: same key, inverted labels, because the repeating unit is a group.
-        local groupGrowOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Columns"], VERTICAL = L["Rows"] }
-        local groupGrowDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], groupGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
-        groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
-        groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
-
-        -- ☠ THE OVERRIDE READOUT MUST SPEAK THE GLOBAL'S DIALECT. These two dropdowns
-        -- share ONE key with OPPOSITE label maps, so the word for a given stored value
-        -- depends on raidUseGroups -- and an auto layout can override raidUseGroups. An
-        -- auto layout with groups OFF, against a global with groups ON, therefore printed
-        -- the global's growth direction through the FLAT map: "(Global: Columns)" beside a
-        -- global page reading "Rows". Same value, wrong dialect, and it reads as the addon
-        -- being wrong about a setting the user can see for themselves.
-        -- ⚠ 2026-08-26: this used to describe a RESOLVER that "picks the map from the
-        -- GLOBAL raidUseGroups". No such thing ships. That was one of three widget-level
-        -- attempts, all reverted -- two of which silently never fired -- and the sentence
-        -- outlived the code it described. What actually happens: the PROFILE LAYER hands
-        -- back a growDirection already expressed in this profile's mode
-        -- (AutoProfilesUI:GetGlobalValue / GetRuntimeGlobalValue), so by the time a label
-        -- map is applied here there is only one dialect left and no map-picking to do.
-        -- ☠ Do not re-add a widget-side translation: with the source translating, a second
-        -- pass here inverts it straight back.
-        -- ⚠ Nothing in the profile layer changes what is STORED or drawn -- only the
-        -- the global. The label flip when you toggle the checkbox is not this bug and is
-        -- deliberate: the same value genuinely renders as rows in one mode and columns in
-        -- the other, so the word has to change with it (see the convention note above).
-        -- ⚠ NO OVERRIDE HOOKS HERE, DELIBERATELY. growDirection is mode-relative and a
-        -- layout can override the key that sets its mode, so a flat layout matching a
-        -- grouped global stores the OPPOSITE raw value -- which made the override row
-        -- report a difference the user does not have. Three widget-level attempts to
-        -- describe or suppress that did not hold; the answer lives in the profile layer
-        -- instead (AutoProfilesUI:GetGlobalValue / IsSettingOverridden translate
-        -- growDirection into the editing profile's mode), so the dot, the reset, the
-        -- readout and the tab stars all get one consistent answer with no widget
-        -- plumbing. Do not re-add a per-dropdown hook: it would translate twice.
 
         -- ☠ EVERY Start/End PAIR ON THIS PAGE SITS ON ONE OF TWO PERPENDICULAR AXES,
         -- AND WHICH ONE IS NOT GUESSABLE FROM THE CONTROL'S NAME. Get this wrong and the
@@ -2820,22 +2845,161 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local CROSS_START = isVert and L["Left"] or L["Top"]
         local CROSS_END   = isVert and L["Right"] or L["Bottom"]
 
-        -- Growth anchor (party only)
-        local anchorOptions = { _order = { "START", "CENTER", "END" }, START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
-        local anchorDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames), 55)
-        anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
-        
-        Add(layoutGroup, nil, INLINE_COL_1)
+        -- The three dropdowns, verbatim, taking the group and parent they
+        -- should build into. Guarded by test_frame_page_builders.lua against
+        -- the inventory they had inline.
+        local function BuildLayoutDirectionGroup(tools)
+            local group, parent = tools.group, tools.parent
+            local growOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
+            local growDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+            growDrop.hideOn = function() return GUI.SelectedMode == "raid" and db.raidUseGroups end
+            growDrop.tooltip = L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
 
-        -- ===== RAID LAYOUT MODE GROUP (Column 1, raid only) =====
-        -- ONE track: a lone checkbox and a wrapping blurb have nothing to pair
-        -- with, and a blurb given half a plate wraps to four lines beside a
-        -- checkbox that needs one.
-        local raidModeGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_BOX)
-        raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
-        raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
-        
-        raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
+            -- Grouped raid: same key, inverted labels, because the repeating unit is a group.
+            local groupGrowOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Columns"], VERTICAL = L["Rows"] }
+            local groupGrowDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], groupGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+            groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
+            groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
+
+            -- ☠ THE OVERRIDE READOUT MUST SPEAK THE GLOBAL'S DIALECT. These two dropdowns
+            -- share ONE key with OPPOSITE label maps, so the word for a given stored value
+            -- depends on raidUseGroups -- and an auto layout can override raidUseGroups. An
+            -- auto layout with groups OFF, against a global with groups ON, therefore printed
+            -- the global's growth direction through the FLAT map: "(Global: Columns)" beside a
+            -- global page reading "Rows". Same value, wrong dialect, and it reads as the addon
+            -- being wrong about a setting the user can see for themselves.
+            -- ⚠ 2026-08-26: this used to describe a RESOLVER that "picks the map from the
+            -- GLOBAL raidUseGroups". No such thing ships. That was one of three widget-level
+            -- attempts, all reverted -- two of which silently never fired -- and the sentence
+            -- outlived the code it described. What actually happens: the PROFILE LAYER hands
+            -- back a growDirection already expressed in this profile's mode
+            -- (AutoProfilesUI:GetGlobalValue / GetRuntimeGlobalValue), so by the time a label
+            -- map is applied here there is only one dialect left and no map-picking to do.
+            -- ☠ Do not re-add a widget-side translation: with the source translating, a second
+            -- pass here inverts it straight back.
+            -- ⚠ Nothing in the profile layer changes what is STORED or drawn -- only the
+            -- the global. The label flip when you toggle the checkbox is not this bug and is
+            -- deliberate: the same value genuinely renders as rows in one mode and columns in
+            -- the other, so the word has to change with it (see the convention note above).
+            -- ⚠ NO OVERRIDE HOOKS HERE, DELIBERATELY. growDirection is mode-relative and a
+            -- layout can override the key that sets its mode, so a flat layout matching a
+            -- grouped global stores the OPPOSITE raw value -- which made the override row
+            -- report a difference the user does not have. Three widget-level attempts to
+            -- describe or suppress that did not hold; the answer lives in the profile layer
+            -- instead (AutoProfilesUI:GetGlobalValue / IsSettingOverridden translate
+            -- growDirection into the editing profile's mode), so the dot, the reset, the
+            -- readout and the tab stars all get one consistent answer with no widget
+            -- plumbing. Do not re-add a per-dropdown hook: it would translate twice.
+
+            -- Growth anchor (party only)
+            local anchorOptions = { _order = { "START", "CENTER", "END" }, START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
+            local anchorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames), 55)
+            anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
+        end
+
+        if classicLayout then
+            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
+            BuildLayoutDirectionGroup({
+                group = layoutGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(layoutGroup, nil, 1)
+        else
+            -- Both dropdown values, in the order the pane shows them: the shape
+            -- of the repeating unit first, then where it starts from. The anchor
+            -- half is PARTY ONLY, because the control is -- a raid row that
+            -- printed a word for a dropdown it does not show would be reporting
+            -- a setting the user cannot reach from here.
+            --
+            -- ☠ THE WORDS ARE DERIVED FROM `d`, NOT FROM THE BUILD-TIME
+            -- MAIN_/CROSS_ LOCALS ABOVE. Those are baked from db.growDirection at
+            -- build; a summary is re-read on every refresh, so borrowing them
+            -- would leave the row naming the previous orientation's edge for as
+            -- long as it took the page to rebuild. Same rule as every other
+            -- summary here: read the table you were handed.
+            local function LayoutDirectionSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local vert    = d.growDirection == "VERTICAL"
+                local grouped = GUI.SelectedMode == "raid" and d.raidUseGroups
+                -- Grouped raid inverts the pair -- the repeating unit is a GROUP
+                -- there, see the ☠☠ note above the dropdowns. One place decides
+                -- it for the dropdown and this one has to agree with it.
+                if grouped then
+                    parts[#parts + 1] = vert and L["Rows"] or L["Columns"]
+                else
+                    parts[#parts + 1] = vert and L["Columns"] or L["Rows"]
+                end
+                if GUI.SelectedMode ~= "raid" then
+                    local a = d.growthAnchor or "START"
+                    parts[#parts + 1] = (a == "CENTER" and L["Center"])
+                                     or (a == "END" and (vert and L["Bottom"] or L["Right"]))
+                                     or (vert and L["Top"] or L["Left"])
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Three, which is the whole group: no tick to hoist, and the two
+            -- hidden-by-mode dropdowns still count -- the badge is about what is
+            -- behind the row, not about what today's mode is showing.
+            local LAYOUT_DIR_COUNT = 3
+
+            -- ☠ THE FOOTER'S APPLY DOES *NOT* REBUILD THE PAGE, and that is a
+            -- deliberate trade rather than an oversight. OnGrowthDirectionChanged
+            -- (which the two dropdowns use) defers a GUI:RefreshCurrentPage,
+            -- because Growth Direction decides the WORDS the anchor dropdowns
+            -- offer and those are baked at build. Running that from here would
+            -- retire the footer strip mid-press -- and Hold: Defaults releases on
+            -- the button's own mouse-up, so a rebuild between the press and the
+            -- release would leave the user's settings sitting at the defaults
+            -- with nothing left to restore them. Frames move and the summary is
+            -- live; what can go one build stale is the Frames Grow From menu's
+            -- edge words after a reset that flipped the direction, and any
+            -- rebuild (mode switch, reopening the window, touching either growth
+            -- dropdown) puts them right.
+            local function ApplyLayoutDirection()
+                UpdateDynamicLabels()
+                UpdateFrames()
+            end
+
+            local dirMount, dirContent = PopoutContent(function(group, holder, reflow)
+                BuildLayoutDirectionGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local dirRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Layout Direction"],
+                db      = RowDB,
+                summary = LayoutDirectionSummary,
+                count   = LAYOUT_DIR_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = dirMount,
+            }))
+            ClaimKeys(dirRow, dirContent)
+            WireModifiedTick(dirRow)
+            WireFooter(dirRow, ApplyLayoutDirection)
+        end
+
+        -- ===== RAID LAYOUT MODE (a 280 box in classic, a row in the band) ==
+        -- The page's one row whose TOGGLE is the group: Use Group-Based Layout
+        -- is exactly "am I doing anything", so it comes up onto the row and the
+        -- blurb that explains the two modes rides in the pane behind it.
+        --
+        -- ☠ NO COUNT, AND NO FOOTER, on this row. The badge claims how many
+        -- CONTROLS are behind the row and behind this one there are none -- the
+        -- tick is on the row and what is left is an explanation. The footer is
+        -- absent for a harder reason: Reset Group and Hold: Defaults write keys
+        -- through the generic engine, and raidUseGroups CANNOT be written that
+        -- way. Flipping it has to invert growDirection at the same moment or the
+        -- raid silently re-orients (see the ☠☠ note in the apply below), and
+        -- that compensation is only correct for a deliberate toggle -- the same
+        -- rule the grouped Players Grow From compensation states about itself. A
+        -- reset strip that re-oriented the raid would be worse than no strip.
+
+        -- What flipping the toggle costs, less the page rebuild -- see the two
+        -- call sites below for why that half is per layout.
+        local function ApplyRaidUseGroups()
             -- ☠☠ KEEP THE LAYOUT THE USER CAN SEE, NOT THE VALUE UNDER IT. growDirection
             -- is ONE key meaning OPPOSITE things in the two modes -- flat HORIZONTAL lays
             -- frames left-to-right (rows), grouped HORIZONTAL stacks each group five deep
@@ -2883,341 +3047,705 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     DF.FlatRaidFrames:SetEnabled(false)
                 end
             end
-            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-        end), 30)
-        
-        raidModeGroup:AddWidget(GUI:CreateLabel(self.child, L["Enabled: Players organized by raid groups (1-8).\nDisabled: All players in one flat grid."], 250), 45)
-        Add(raidModeGroup, nil, INLINE_COL_1)
-
-        -- ===== GROUP LAYOUT SETTINGS (Column 1, raid+groups only) =====
-        -- Two tracks: three sliders, two dropdowns and the corner picker all pair
-        -- up. The hint blurb at the top opts out (widget.fullRow below).
-        local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
-        groupLayoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Layout Settings"]), 40)
-        groupLayoutGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
-        
-        local groupLayoutHint = db.growDirection == "VERTICAL" and L["Players stack horizontally, groups grow top-to-bottom."] or L["Players stack vertically, groups grow left-to-right."]
-        -- fullRow: a blurb describes the whole box, not the control beside it,
-        -- and half a plate is where a one-line hint becomes a three-line one.
-        -- Inert in classic, where the box is one track wide anyway.
-        local groupLayoutHintLabel = groupLayoutGroup:AddWidget(GUI:CreateLabel(self.child, groupLayoutHint, 250), 25)
-        groupLayoutHintLabel.fullRow = true
-        
-        -- Six controls, four of them directional, and their labels already swap with the
-        -- growth direction -- so the tooltips have to swap with it too, or half of them
-        -- describe the other orientation. The page rebuilds on a direction change
-        -- (OnGrowthDirectionChanged), which is what keeps these in step. isVert and the
-        -- MAIN_/CROSS_ edge words are declared once with the anchor options above.
-        local groupSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Group Spacing"], -5, 100, 1, db, "raidGroupSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        groupSpacingSlider.tooltip = isVert and L["Gap between one group and the next down the same column."]
-            or L["Gap between one group and the next along the same row."]
-
-        -- ⚠ "Row Spacing" and "Groups Per Row" are gone, and not for tidiness. With the
-        -- Growth Direction dropdown above reading "Columns" in horizontal mode, a box that
-        -- then said Row three times was the exact collision Aphoex reported -- "Columns"
-        -- names the group's shape, "Row" named the arrangement of groups, both true at
-        -- once. These two are the last places the word appeared in the second sense, so
-        -- they now describe the WRAP instead, and Row/Column means one thing on this page.
-        -- They also stop swapping with the orientation, because wrapping is wrapping.
-        rowColSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Wrap Spacing"], -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        rowColSpacingSlider.tooltip = isVert and L["Gap between one column of groups and the column beside it."]
-            or L["Gap between one row of groups and the row below it."]
-
-        -- ☠ THIS SLIDER GATES THE ANCHOR GRID'S BOTTOM ROW, SO IT HAS TO REFRESH IT.
-        -- RefreshChildStates is what re-runs a child's disableOn and refreshContent, and
-        -- nothing calls it on a slider change -- CreateCheckbox self-calls it on toggle,
-        -- sliders never did. So moving 8 -> 7 left the wrap cells hidden until some
-        -- unrelated control was touched: the grid was correct, it had just never been
-        -- asked again. (This bit the old Row Order disableOn identically; it only became
-        -- visible once the gate had something to re-enable.)
-        local function UpdateFramesAndGates()
-            UpdateFrames()
-            if groupLayoutGroup.RefreshChildStates then groupLayoutGroup:RefreshChildStates() end
         end
-        groupsPerRowSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Groups Before Wrap"], 1, 8, 1, db, "raidGroupsPerRow", UpdateFramesAndGates, function()
-            DF:LightweightUpdateRaidLayout()
-            if groupLayoutGroup.RefreshChildStates then groupLayoutGroup:RefreshChildStates() end
-        end, true), 55)
-        groupsPerRowSlider.tooltip = isVert and L["How many groups sit in a column before a new column starts. At 8, every group shares one column."]
-            or L["How many groups sit on a row before a new row starts. At 8, every group shares one row."]
 
-        -- ☠ ONE CORNER PICKER, REPLACING "Groups Grow From" + "Row Order". Do not split
-        -- them back apart. They were two axes of one question -- which corner of the
-        -- reserved area does the block sit in -- asked in two vocabularies, three controls
-        -- apart, and nobody read them as one thing (Aphoex 2026-08-14, Krathe 2026-08-17).
-        --
-        -- raidGroupAnchor is the horizontal half (START/CENTER/END), raidGroupRowGrowth the
-        -- vertical (START/END). Both keys, values and defaults are UNCHANGED -- this is a
-        -- widget swap, so no migration and nothing to do for existing profiles.
-        --
-        -- ⚠ The vertical half is inert whenever there is only one row of groups, which is
-        -- the case at the default Groups Before Wrap = 8: both positioners flip the row
-        -- index as `rcIdx = (fullGridRC - 1) - rcIdx` over `ceil(8 / groupsPerRow)`, so at
-        -- 8 the flip is the identity. The grid hides its wrap cells there rather than
-        -- offering a choice that cannot land -- and it does NOT write the key, so a stored
-        -- END survives and comes back the moment the slider drops below 8.
-        -- ⚠ NOT clamped to the POPULATED group count either. The flip is deliberately over
-        -- the full eight-group grid, so with five groups at four per row the bottom cell
-        -- legitimately moves them to the bottom of that grid, not of the populated rows.
-        local groupAnchorGrid = groupLayoutGroup:AddWidget(
-            -- ⚠ Plain UpdateFramesAndGates again. The pin toggle used to be a separate
-            -- row whose hideOn only a page layout pass could re-evaluate, so a cell click
-            -- that changed the centre-ness had to force GUI:RefreshCurrentPage or the
-            -- checkbox appeared a click late. The toggle now lives inside this widget and
-            -- its own Refresh runs on every cell click, so that machinery is gone.
-            GUI:CreateAnchorGrid(self.child, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFramesAndGates, {
-                verticalInertFn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end,
-                -- ☠ In Rows growth the two keys swap screen axes -- raidGroupAnchor moves
-                -- things UP/DOWN there and raidGroupRowGrowth moves them LEFT/RIGHT, the
-                -- exact transpose of Columns growth. Without this the grid draws a corner
-                -- that is 90 degrees from where the frames land.
-                transposedFn = function(d) return d.growDirection == "VERTICAL" end,
-                -- ☠ Players Grow From = End mirrors the WRAP axis (the group anchors to the
-                -- far corner and the wrap offset is measured back from it), so the grid has
-                -- to translate or it names the wrong side. Decoupling them in the
-                -- positioners would move existing users' frames, which is not on the table.
-                --
-                -- ⚠ With Pin Main Group on, the meaning of the wrap cell CHANGES: the main
-                -- group is nailed to the anchor, so the only directional thing a user can
-                -- see is which side the OVERFLOW extends — the cell must name that side or
-                -- it reads as wrong (Krathe, 2026-08-18: "Center Left" with overflow going
-                -- right). Overflow sits opposite the main unit, and the main unit's screen
-                -- side is (playersEnd == wrapEnd), so displayed-side == overflow-side works
-                -- out to mirroring exactly when players is START — the inverse of the
-                -- unpinned rule. Derived against WrapKey's involution in Widgets.lua, not
-                -- assumed; the geometry itself never changes, only the translation.
-                wrapMirroredFn = function(d)
-                    local playersEnd = (d.raidPlayerAnchor or "START") == "END"
-                    if (d.raidGroupCenterMode or "ALL") == "MAIN" and (d.raidGroupAnchor or "START") == "CENTER" then
-                        return not playersEnd
-                    end
-                    return playersEnd
-                end,
+        -- The blurb, which is the whole of this group once the tick is hoisted.
+        local function BuildRaidModeGroup(tools)
+            local group, parent = tools.group, tools.parent
+            if not tools.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Use Group-Based Layout"], db, "raidUseGroups", function()
+                    ApplyRaidUseGroups()
+                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                end), 30)
+            end
+            group:AddWidget(GUI:CreateLabel(parent, L["Enabled: Players organized by raid groups (1-8).\nDisabled: All players in one flat grid."], 250), 45)
+        end
+
+        if classicLayout then
+            local raidModeGroup = GUI:CreateSettingsGroup(self.child, 280)
+            raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
+            raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
+            BuildRaidModeGroup({
+                group = raidModeGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(raidModeGroup, nil, 1)
+        else
+            -- ☠ THE REBUILD IS DEFERRED HERE AND IMMEDIATE IN CLASSIC, and the
+            -- difference is not cosmetic. The row's write path runs onToggle and
+            -- then row.Refresh() on the row it just wrote through; a synchronous
+            -- GUI:RefreshCurrentPage inside onToggle retires that row first, so
+            -- the Refresh would land on a dead frame. One frame later the page
+            -- has finished with the click and can be torn down safely.
+            --
+            -- ...and the rebuild really is needed, unlike the border and mover
+            -- toggles which settle for self:RefreshStates(). This toggle FLIPS
+            -- growDirection, and the orientation decides the WORDS every anchor
+            -- dropdown on this page offers -- those are baked at build time, so
+            -- without the rebuild the Group Layout and Flat Grid panes would go
+            -- on naming the previous orientation's edges.
+            local function OnRaidModeToggle()
+                ApplyRaidUseGroups()
+                self:RefreshStates()
+                ReflowMounted()
+                C_Timer.After(0, function()
+                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                end)
+            end
+
+            -- One word, and the OFF word is not "Off": both states are a raid
+            -- layout, so a row reading "Off" would say the raid was not being
+            -- laid out at all. `offText` is the kit's own hook for exactly this.
+            local function RaidModeSummary(d)
+                if not d then return "" end
+                return L["Groups"]
+            end
+
+            local raidModeMount = PopoutContent(function(group, holder, reflow)
+                BuildRaidModeGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggle = true,
+                })
+            end)
+            local raidModeRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Raid Layout Mode"],
+                db       = RowDB,
+                toggle   = { key = "raidUseGroups" },
+                summary  = RaidModeSummary,
+                offText  = L["Flat"],
+                onToggle = OnRaidModeToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = raidModeMount,
             }))
-        -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
-        -- groups so the drag box never resizes under you, so in a five-group raid the left
-        -- corners leave three groups' worth of gap on the right. That gap is what made the
-        -- old dropdown look broken when it was in fact the only one of the two doing
-        -- anything.
-        groupAnchorGrid.tooltip = L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
-
-        -- ☠ ITS OWN ROW, AND GREYED -- NEVER HIDDEN. Four arrangements have been tried and
-        -- this is the one that survives: flush row, indented row, a schematic, and finally
-        -- inline inside the picker beside the cells. The inline version broke on the
-        -- TRANSPOSE -- Rows growth draws the grid 2 wide x 3 tall instead of 3 x 2, so the
-        -- space the toggle sat in changes shape and it no longer lines up with anything
-        -- (Krathe, 2026-08-18).
-        --
-        -- ⚠ disableOn covers BOTH conditions and there is no hideOn. A control that
-        -- vanishes when it does not apply cannot be discovered, and it made the rows below
-        -- jump as the anchor or the wrap slider changed. (The anchor grid is the one
-        -- exception: it HIDES its inert wrap cells, because at 8 before wrap there really
-        -- is only one row of slots and an empty dim cell read as selectable -- see
-        -- GUI:CreateAnchorGrid. That is a picker of positions, not a control that can be
-        -- discovered by its label, so the rule here does not apply to it.)
-        --
-        -- ⚠ The callback must reposition the CONTAINER as well as the frames -- half of
-        -- this setting is a container anchor-reference shift, consumed only in
-        -- DF:UpdateRaidContainerPosition -- AND refresh the picker, because the meaning of
-        -- its wrap cell flips with this toggle (see wrapMirroredFn above).
-        local function UpdatePinMainGroup()
-            UpdateFrames()
-            if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
-            if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end
+            RegisterHoistedToggle(raidModeRow, L["Use Group-Based Layout"], "raidUseGroups", OnRaidModeToggle)
+            -- RAID ONLY, exactly as the box was. A row carries hideOn the same way
+            -- any other widget in a settings group does -- LayoutChildren skips a
+            -- hidden child and the plate re-flows round it -- so the band simply
+            -- has fewer rows in party mode.
+            raidModeRow.hideOn = function() return GUI.SelectedMode ~= "raid" end
         end
-        -- ☠ A STRING KEY, NOT THE BOOLEAN THIS REPLACED. A dropdown writes an option key,
-        -- and mapping string <-> boolean through customGet/customSet would have fed the
-        -- STRING into two AutoProfiles paths that take dbKey verbatim (HandleRuntimeWrite
-        -- and SetProfileSetting). An override of "ALL" is truthy, so it would have
-        -- switched the pin ON where it means OFF. raidGroupPinMainGroup never shipped, so
-        -- the type change costs no migration.
-        -- ⚠ The labels are deliberately bare -- the tooltip carries the meaning. "Default"
-        -- reuses the existing shared string; the key values stay ALL/MAIN so the geometry
-        -- and the saved setting are unaffected by any future relabelling.
-        local centerModeOptions = { _order = { "ALL", "MAIN" },
-            ALL = L["Default"], MAIN = L["Fixed"] }
-        local centerModeDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Center Mode"], centerModeOptions, db, "raidGroupCenterMode", UpdatePinMainGroup), 55)
-        centerModeDrop.disableOn = function(d)
-            d = d or db
-            return (d.raidGroupAnchor or "START") ~= "CENTER" or (d.raidGroupsPerRow or 8) >= 8
-        end
-        centerModeDrop.tooltip = L["What happens when your groups wrap onto more than one row. Needs Groups Anchor on a centre position.\n\nDefault: all groups stay centred together, so they shift sideways as the raid fills up.\n\nFixed: the first groups stay put, and extra groups appear to one side of them."]
 
-        -- Players Grow From = the direction players fill the group's main axis.
-        -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
-        -- stack players horizontally (Left/Right). Values map to START/END. CROSS axis.
-        local playerAnchorOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
-        -- ☠ FLIPPING THIS MUST NOT MOVE THE BLOCK, AND THAT IS WHY IT WRITES TWO KEYS.
-        -- raidPlayerAnchor mirrors the WRAP axis in the positioners (the group anchors to
-        -- the far corner and the wrap offset is measured back from it), so changing it
-        -- slid the whole raid to the other end of the reserved grid -- a control named
-        -- "Players Grow From" reaching well outside a group. Decoupling them in the
-        -- positioners would move existing users' frames and is not on the table, so the
-        -- compensation lives here: invert the stored wrap key at the same moment, and the
-        -- corner Groups Anchor names stays exactly where it was while only the gap inside
-        -- a partial group moves. The two controls become independent from the user's side
-        -- without a single line of geometry changing.
+        -- ===== GROUP LAYOUT SETTINGS (a 280 box in classic, a band row) =====
+        -- Raid + groups only, in both layouts. In classic that is a group-level
+        -- hideOn on the box; in the band it is the SAME predicate on the ROW,
+        -- which the settings group honours for any child (LayoutChildren skips a
+        -- hidden entry and re-flows round it). The two mode rows stay mutually
+        -- exclusive by construction: this one and Flat Grid Settings below read
+        -- opposite sides of raidUseGroups, so exactly one of them is ever in the
+        -- band.
         --
-        -- ⚠ ONLY WHEN THE WRAP AXIS CAN BE SEEN. At 8 before wrap there is one row, the
-        -- mirror has nowhere to move anything, and inverting the key would silently flip a
-        -- value whose effect only appears later when the slider drops below 8.
-        -- ⚠ A write triggered by another write is a pattern this addon has been bitten by
-        -- three times, so: this runs ONLY from this dropdown's own click handler. It never
-        -- fires at load, on a profile switch or on import, so no existing setup changes on
-        -- its own -- which is the whole reason it is safe to do here and not in a migration.
-        local function SetPlayerAnchorKeepingBlock(v)
-            local prev = db.raidPlayerAnchor or "START"
-            db.raidPlayerAnchor = v
-            if prev ~= v and (db.raidGroupsPerRow or 8) < 8 then
-                db.raidGroupRowGrowth = (db.raidGroupRowGrowth == "END") and "START" or "END"
+        -- ☠ THE TWO REFRESH COUPLINGS IN HERE ARE NAMED, AND THAT IS WHY THEY
+        -- MOVED INSIDE THE BUILDER. UpdateFramesAndGates re-asks the GROUP for a
+        -- state pass and UpdatePinMainGroup re-asks the anchor GRID for a repaint;
+        -- both used to close over the page-level box. Left out here they would
+        -- have gone on refreshing the object the CLASSIC branch built -- or, in
+        -- the popout layout, the eagerly built holder rather than whichever
+        -- instance the user has open. Inside the builder `group` and
+        -- `groupAnchorGrid` ARE the pane's own, one pair per instance, so a
+        -- second (pinned) panel refreshes itself and not its sibling.
+        local function BuildGroupLayoutGroup(tools)
+            local group, parent = tools.group, tools.parent
+            local groupLayoutHint = db.growDirection == "VERTICAL" and L["Players stack horizontally, groups grow top-to-bottom."] or L["Players stack vertically, groups grow left-to-right."]
+            -- No fullRow: this group is one track wherever it is built now -- the
+            -- classic 280 box, and a pane that asks for no interior grid -- so the
+            -- marker would be inert in both. Group Visibility is the only two-track
+            -- interior left on this page and the only place it still means anything.
+            group:AddWidget(GUI:CreateLabel(parent, groupLayoutHint, 250), 25)
+        
+            -- Six controls, four of them directional, and their labels already swap with the
+            -- growth direction -- so the tooltips have to swap with it too, or half of them
+            -- describe the other orientation. The page rebuilds on a direction change
+            -- (OnGrowthDirectionChanged), which is what keeps these in step. isVert and the
+            -- MAIN_/CROSS_ edge words are declared once with the anchor options above.
+            local groupSpacingSlider = group:AddWidget(GUI:CreateSlider(parent, L["Group Spacing"], -5, 100, 1, db, "raidGroupSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
+            groupSpacingSlider.tooltip = isVert and L["Gap between one group and the next down the same column."]
+                or L["Gap between one group and the next along the same row."]
+
+            -- ⚠ "Row Spacing" and "Groups Per Row" are gone, and not for tidiness. With the
+            -- Growth Direction dropdown above reading "Columns" in horizontal mode, a box that
+            -- then said Row three times was the exact collision Aphoex reported -- "Columns"
+            -- names the group's shape, "Row" named the arrangement of groups, both true at
+            -- once. These two are the last places the word appeared in the second sense, so
+            -- they now describe the WRAP instead, and Row/Column means one thing on this page.
+            -- They also stop swapping with the orientation, because wrapping is wrapping.
+            rowColSpacingSlider = group:AddWidget(GUI:CreateSlider(parent, L["Wrap Spacing"], -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
+            rowColSpacingSlider.tooltip = isVert and L["Gap between one column of groups and the column beside it."]
+                or L["Gap between one row of groups and the row below it."]
+
+            -- ☠ THIS SLIDER GATES THE ANCHOR GRID'S BOTTOM ROW, SO IT HAS TO REFRESH IT.
+            -- RefreshChildStates is what re-runs a child's disableOn and refreshContent, and
+            -- nothing calls it on a slider change -- CreateCheckbox self-calls it on toggle,
+            -- sliders never did. So moving 8 -> 7 left the wrap cells hidden until some
+            -- unrelated control was touched: the grid was correct, it had just never been
+            -- asked again. (This bit the old Row Order disableOn identically; it only became
+            -- visible once the gate had something to re-enable.)
+            local function UpdateFramesAndGates()
+                UpdateFrames()
+                if group.RefreshChildStates then group:RefreshChildStates() end
             end
-        end
-        -- ⚠ The auto-profile RUNTIME path skips customSet: CreateDropdown redirects the
-        -- write to the baseline and returns before it. The compensation still has to
-        -- happen there, or the baseline keeps the old wrap key and its block slides the
-        -- moment the overlay lifts. It is applied to the baseline ONLY when the wrap key
-        -- is itself overridden (HandleRuntimeWrite then lands it on the baseline and the
-        -- live overlay is untouched); when the wrap key is live, flipping it would move
-        -- the LIVE block under an unchanged live player anchor, which is the exact thing
-        -- this compensation exists to prevent -- so that half is deliberately left alone.
-        local function PlayerAnchorRuntimeWrite(v, prevGlobal)
-            local AP = DF.AutoProfilesUI
-            if not AP or (prevGlobal or "START") == v then return end
-            local base = DF._realRaidDB
-            if not base or (base.raidGroupsPerRow or 8) >= 8 then return end
-            if AP.IsOverriddenByRuntime and AP:IsOverriddenByRuntime("raidGroupRowGrowth") then
-                AP:HandleRuntimeWrite("raidGroupRowGrowth",
-                    (base.raidGroupRowGrowth == "END") and "START" or "END")
-            end
-        end
-        -- ⚠ UpdateFramesAndGates, not UpdateFrames: this rewrites the wrap key, so the
-        -- anchor grid has to be re-asked or it keeps showing the pre-flip corner.
-        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates, nil, SetPlayerAnchorKeepingBlock,
-            { onRuntimeWrite = PlayerAnchorRuntimeWrite }), 55)
-        playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
-        
-        Add(groupLayoutGroup, nil, INLINE_COL_1)
+            groupsPerRowSlider = group:AddWidget(GUI:CreateSlider(parent, L["Groups Before Wrap"], 1, 8, 1, db, "raidGroupsPerRow", UpdateFramesAndGates, function()
+                DF:LightweightUpdateRaidLayout()
+                if group.RefreshChildStates then group:RefreshChildStates() end
+            end, true), 55)
+            groupsPerRowSlider.tooltip = isVert and L["How many groups sit in a column before a new column starts. At 8, every group shares one column."]
+                or L["How many groups sit on a row before a new row starts. At 8, every group shares one row."]
 
-        -- ===== GROUP VISIBILITY (Column 1, raid only) =====
-        -- Eight ticks: two tracks turns a column of eight into four rows of two,
-        -- which is the shape a group picker wants anyway.
-        local groupVisGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
-        groupVisGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Visibility"]), 40)
-        groupVisGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
-        
-        local groupVisHintLabel = groupVisGroup:AddWidget(GUI:CreateLabel(self.child, L["Choose which groups to display."], 250), 25)
-        groupVisHintLabel.fullRow = true
-        
-        -- Initialize raidGroupVisible if it doesn't exist
-        if not db.raidGroupVisible then
-            db.raidGroupVisible = {[1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true}
-        end
-        
-        for i = 1, 8 do
-            local groupIndex = i
-            local overrideKey = "raidGroupVisible_" .. i
-            groupVisGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Group"] .. " " .. i, nil, nil,
-                function()
-                    if db.raidUseGroups then
-                        -- Separated mode
-                        DF:UpdateRaidHeaderVisibility(); DF:PositionRaidHeaders()
-                    else
-                        -- Flat mode - rebuild groupFilter and nameList
-                        if DF.FlatRaidFrames then
-                            DF.FlatRaidFrames:UpdateContainerSize()
-                            DF.FlatRaidFrames:UpdateSorting()
+            -- ☠ ONE CORNER PICKER, REPLACING "Groups Grow From" + "Row Order". Do not split
+            -- them back apart. They were two axes of one question -- which corner of the
+            -- reserved area does the block sit in -- asked in two vocabularies, three controls
+            -- apart, and nobody read them as one thing (Aphoex 2026-08-14, Krathe 2026-08-17).
+            --
+            -- raidGroupAnchor is the horizontal half (START/CENTER/END), raidGroupRowGrowth the
+            -- vertical (START/END). Both keys, values and defaults are UNCHANGED -- this is a
+            -- widget swap, so no migration and nothing to do for existing profiles.
+            --
+            -- ⚠ The vertical half is inert whenever there is only one row of groups, which is
+            -- the case at the default Groups Before Wrap = 8: both positioners flip the row
+            -- index as `rcIdx = (fullGridRC - 1) - rcIdx` over `ceil(8 / groupsPerRow)`, so at
+            -- 8 the flip is the identity. The grid hides its wrap cells there rather than
+            -- offering a choice that cannot land -- and it does NOT write the key, so a stored
+            -- END survives and comes back the moment the slider drops below 8.
+            -- ⚠ NOT clamped to the POPULATED group count either. The flip is deliberately over
+            -- the full eight-group grid, so with five groups at four per row the bottom cell
+            -- legitimately moves them to the bottom of that grid, not of the populated rows.
+            local groupAnchorGrid = group:AddWidget(
+                -- ⚠ Plain UpdateFramesAndGates again. The pin toggle used to be a separate
+                -- row whose hideOn only a page layout pass could re-evaluate, so a cell click
+                -- that changed the centre-ness had to force GUI:RefreshCurrentPage or the
+                -- checkbox appeared a click late. The toggle now lives inside this widget and
+                -- its own Refresh runs on every cell click, so that machinery is gone.
+                GUI:CreateAnchorGrid(parent, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFramesAndGates, {
+                    verticalInertFn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end,
+                    -- ☠ In Rows growth the two keys swap screen axes -- raidGroupAnchor moves
+                    -- things UP/DOWN there and raidGroupRowGrowth moves them LEFT/RIGHT, the
+                    -- exact transpose of Columns growth. Without this the grid draws a corner
+                    -- that is 90 degrees from where the frames land.
+                    transposedFn = function(d) return d.growDirection == "VERTICAL" end,
+                    -- ☠ Players Grow From = End mirrors the WRAP axis (the group anchors to the
+                    -- far corner and the wrap offset is measured back from it), so the grid has
+                    -- to translate or it names the wrong side. Decoupling them in the
+                    -- positioners would move existing users' frames, which is not on the table.
+                    --
+                    -- ⚠ With Pin Main Group on, the meaning of the wrap cell CHANGES: the main
+                    -- group is nailed to the anchor, so the only directional thing a user can
+                    -- see is which side the OVERFLOW extends — the cell must name that side or
+                    -- it reads as wrong (Krathe, 2026-08-18: "Center Left" with overflow going
+                    -- right). Overflow sits opposite the main unit, and the main unit's screen
+                    -- side is (playersEnd == wrapEnd), so displayed-side == overflow-side works
+                    -- out to mirroring exactly when players is START — the inverse of the
+                    -- unpinned rule. Derived against WrapKey's involution in Widgets.lua, not
+                    -- assumed; the geometry itself never changes, only the translation.
+                    wrapMirroredFn = function(d)
+                        local playersEnd = (d.raidPlayerAnchor or "START") == "END"
+                        if (d.raidGroupCenterMode or "ALL") == "MAIN" and (d.raidGroupAnchor or "START") == "CENTER" then
+                            return not playersEnd
                         end
-                    end
-                    UpdateFrames()
-                end,
-                function() return db.raidGroupVisible[groupIndex] ~= false end,
-                function(val) db.raidGroupVisible[groupIndex] = val end,
-                overrideKey
-            ), 25)
-        end
-        
-        Add(groupVisGroup, nil, INLINE_COL_1)
+                        return playersEnd
+                    end,
+                }))
+            -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
+            -- groups so the drag box never resizes under you, so in a five-group raid the left
+            -- corners leave three groups' worth of gap on the right. That gap is what made the
+            -- old dropdown look broken when it was in fact the only one of the two doing
+            -- anything.
+            groupAnchorGrid.tooltip = L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
 
-        -- ===== GROUP DISPLAY ORDER (Column 2, raid+groups only) =====
-        -- ONE track. The box is a blurb, a tick and a 230px drag list, and the
-        -- list is the box -- pairing it with the tick would give a 25px control
-        -- a 230px row and still leave the list to fill whatever was left.
-        local groupOrderGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_BOX)
-        groupOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Display Order"]), 40)
-        groupOrderGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
+            -- ☠ ITS OWN ROW, AND GREYED -- NEVER HIDDEN. Four arrangements have been tried and
+            -- this is the one that survives: flush row, indented row, a schematic, and finally
+            -- inline inside the picker beside the cells. The inline version broke on the
+            -- TRANSPOSE -- Rows growth draws the grid 2 wide x 3 tall instead of 3 x 2, so the
+            -- space the toggle sat in changes shape and it no longer lines up with anything
+            -- (Krathe, 2026-08-18).
+            --
+            -- ⚠ disableOn covers BOTH conditions and there is no hideOn. A control that
+            -- vanishes when it does not apply cannot be discovered, and it made the rows below
+            -- jump as the anchor or the wrap slider changed. (The anchor grid is the one
+            -- exception: it HIDES its inert wrap cells, because at 8 before wrap there really
+            -- is only one row of slots and an empty dim cell read as selectable -- see
+            -- GUI:CreateAnchorGrid. That is a picker of positions, not a control that can be
+            -- discovered by its label, so the rule here does not apply to it.)
+            --
+            -- ⚠ The callback must reposition the CONTAINER as well as the frames -- half of
+            -- this setting is a container anchor-reference shift, consumed only in
+            -- DF:UpdateRaidContainerPosition -- AND refresh the picker, because the meaning of
+            -- its wrap cell flips with this toggle (see wrapMirroredFn above).
+            local function UpdatePinMainGroup()
+                UpdateFrames()
+                if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+                if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end
+            end
+            -- ☠ A STRING KEY, NOT THE BOOLEAN THIS REPLACED. A dropdown writes an option key,
+            -- and mapping string <-> boolean through customGet/customSet would have fed the
+            -- STRING into two AutoProfiles paths that take dbKey verbatim (HandleRuntimeWrite
+            -- and SetProfileSetting). An override of "ALL" is truthy, so it would have
+            -- switched the pin ON where it means OFF. raidGroupPinMainGroup never shipped, so
+            -- the type change costs no migration.
+            -- ⚠ The labels are deliberately bare -- the tooltip carries the meaning. "Default"
+            -- reuses the existing shared string; the key values stay ALL/MAIN so the geometry
+            -- and the saved setting are unaffected by any future relabelling.
+            local centerModeOptions = { _order = { "ALL", "MAIN" },
+                ALL = L["Default"], MAIN = L["Fixed"] }
+            local centerModeDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Center Mode"], centerModeOptions, db, "raidGroupCenterMode", UpdatePinMainGroup), 55)
+            centerModeDrop.disableOn = function(d)
+                d = d or db
+                return (d.raidGroupAnchor or "START") ~= "CENTER" or (d.raidGroupsPerRow or 8) >= 8
+            end
+            centerModeDrop.tooltip = L["What happens when your groups wrap onto more than one row. Needs Groups Anchor on a centre position.\n\nDefault: all groups stay centred together, so they shift sideways as the raid fills up.\n\nFixed: the first groups stay put, and extra groups appear to one side of them."]
+
+            -- Players Grow From = the direction players fill the group's main axis.
+            -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
+            -- stack players horizontally (Left/Right). Values map to START/END. CROSS axis.
+            local playerAnchorOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
+            -- ☠ FLIPPING THIS MUST NOT MOVE THE BLOCK, AND THAT IS WHY IT WRITES TWO KEYS.
+            -- raidPlayerAnchor mirrors the WRAP axis in the positioners (the group anchors to
+            -- the far corner and the wrap offset is measured back from it), so changing it
+            -- slid the whole raid to the other end of the reserved grid -- a control named
+            -- "Players Grow From" reaching well outside a group. Decoupling them in the
+            -- positioners would move existing users' frames and is not on the table, so the
+            -- compensation lives here: invert the stored wrap key at the same moment, and the
+            -- corner Groups Anchor names stays exactly where it was while only the gap inside
+            -- a partial group moves. The two controls become independent from the user's side
+            -- without a single line of geometry changing.
+            --
+            -- ⚠ ONLY WHEN THE WRAP AXIS CAN BE SEEN. At 8 before wrap there is one row, the
+            -- mirror has nowhere to move anything, and inverting the key would silently flip a
+            -- value whose effect only appears later when the slider drops below 8.
+            -- ⚠ A write triggered by another write is a pattern this addon has been bitten by
+            -- three times, so: this runs ONLY from this dropdown's own click handler. It never
+            -- fires at load, on a profile switch or on import, so no existing setup changes on
+            -- its own -- which is the whole reason it is safe to do here and not in a migration.
+            local function SetPlayerAnchorKeepingBlock(v)
+                local prev = db.raidPlayerAnchor or "START"
+                db.raidPlayerAnchor = v
+                if prev ~= v and (db.raidGroupsPerRow or 8) < 8 then
+                    db.raidGroupRowGrowth = (db.raidGroupRowGrowth == "END") and "START" or "END"
+                end
+            end
+            -- ⚠ The auto-profile RUNTIME path skips customSet: CreateDropdown redirects the
+            -- write to the baseline and returns before it. The compensation still has to
+            -- happen there, or the baseline keeps the old wrap key and its block slides the
+            -- moment the overlay lifts. It is applied to the baseline ONLY when the wrap key
+            -- is itself overridden (HandleRuntimeWrite then lands it on the baseline and the
+            -- live overlay is untouched); when the wrap key is live, flipping it would move
+            -- the LIVE block under an unchanged live player anchor, which is the exact thing
+            -- this compensation exists to prevent -- so that half is deliberately left alone.
+            local function PlayerAnchorRuntimeWrite(v, prevGlobal)
+                local AP = DF.AutoProfilesUI
+                if not AP or (prevGlobal or "START") == v then return end
+                local base = DF._realRaidDB
+                if not base or (base.raidGroupsPerRow or 8) >= 8 then return end
+                if AP.IsOverriddenByRuntime and AP:IsOverriddenByRuntime("raidGroupRowGrowth") then
+                    AP:HandleRuntimeWrite("raidGroupRowGrowth",
+                        (base.raidGroupRowGrowth == "END") and "START" or "END")
+                end
+            end
+            -- ⚠ UpdateFramesAndGates, not UpdateFrames: this rewrites the wrap key, so the
+            -- anchor grid has to be re-asked or it keeps showing the pre-flip corner.
+            local playerAnchorDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates, nil, SetPlayerAnchorKeepingBlock,
+                { onRuntimeWrite = PlayerAnchorRuntimeWrite }), 55)
+            playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
-        groupOrderGroup:AddWidget(GUI:CreateLabel(self.child, L["Drag to reorder groups. Top = first."], 250), 25)
-        
-        local playerGroupFirstCheck = groupOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Group First"], db, "raidPlayerGroupFirst", function()
+        end
+
+        if classicLayout then
+            local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+            groupLayoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Layout Settings"]), 40)
+            groupLayoutGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
+            BuildGroupLayoutGroup({
+                group = groupLayoutGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(groupLayoutGroup, nil, 1)
+        else
+            -- Wrap first, because it is the number that decides the SHAPE of the
+            -- block, then the gap between groups. Both are bare numbers and both
+            -- need their word: "8 · 5" names nothing. Center Mode joins only when
+            -- it is Fixed -- Default is the default and says nothing.
+            --
+            -- The corner the Groups Anchor picker names is deliberately absent.
+            -- It is two keys read through a transpose and a mirror (see the
+            -- picker's own opts), so the honest word for it is not derivable
+            -- here without restating that logic -- and a summary that restated it
+            -- would be a second place for it to be wrong.
+            local function GroupLayoutSummary(d)
+                if not d then return "" end
+                local parts = {}
+                parts[#parts + 1] = format("%s %d", L["Wrap"], tonumber(d.raidGroupsPerRow) or 8)
+                local gap = tonumber(d.raidGroupSpacing)
+                if gap then parts[#parts + 1] = format("%s %d", L["Gap"], math.floor(gap)) end
+                if (d.raidGroupCenterMode or "ALL") == "MAIN" then
+                    parts[#parts + 1] = L["Fixed"]
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Seven: the hint, three sliders, the corner picker and two
+            -- dropdowns. Nothing is hoisted -- the group has no on/off of its
+            -- own, it is the detail BEHIND Use Group-Based Layout.
+            local GROUP_LAYOUT_COUNT = 7
+
+            -- The group's apply. UpdateFrames is what every control in here
+            -- eventually calls; the container reposition is the pin toggle's
+            -- extra half, and a Reset Group can move that key too.
+            local function ApplyGroupLayout()
+                UpdateFrames()
+                if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+            end
+
+            local groupLayoutMount, groupLayoutContent = PopoutContent(function(group, holder, reflow)
+                BuildGroupLayoutGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local groupLayoutRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Group Layout Settings"],
+                db      = RowDB,
+                summary = GroupLayoutSummary,
+                count   = GROUP_LAYOUT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = groupLayoutMount,
+            }))
+            ClaimKeys(groupLayoutRow, groupLayoutContent)
+            WireModifiedTick(groupLayoutRow)
+            WireFooter(groupLayoutRow, ApplyGroupLayout)
+            groupLayoutRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
+        end
+
+        -- ===== GROUP VISIBILITY (a 280 box in classic, a band row) ===========
+        -- Eight ticks, raid only. The PANE takes two tracks (see PopoutContent's
+        -- innerColumns): four rows of two is the shape a group picker wants, and
+        -- 260px of popout is exactly enough for two one-word checkboxes. The
+        -- classic box stays one track, as it always was.
+        --
+        -- ☠ THE TICKS ARE CUSTOM-GET/SET OVER ONE TABLE SETTING. Each stamps a
+        -- per-index override key ("raidGroupVisible_3") that the profile does not
+        -- ship, so the key walk alone would leave this row with eight keys the
+        -- defaults engine cannot answer for -- no amber tick, and a Reset Group
+        -- that wrote nothing. The real key is named to ClaimKeys instead.
+        local function ApplyGroupVisibility()
+            if db.raidUseGroups then
+                -- Separated mode
+                DF:UpdateRaidHeaderVisibility(); DF:PositionRaidHeaders()
+            else
+                -- Flat mode - rebuild groupFilter and nameList
+                if DF.FlatRaidFrames then
+                    DF.FlatRaidFrames:UpdateContainerSize()
+                    DF.FlatRaidFrames:UpdateSorting()
+                end
+            end
+            UpdateFrames()
+        end
+
+        local function BuildGroupVisGroup(tools)
+            local group, parent = tools.group, tools.parent
+            -- fullRow: a blurb describes the whole plate, not the tick beside it.
+            -- Inert wherever the interior is one track (the classic box), live in
+            -- the pane's two.
+            local groupVisHintLabel = group:AddWidget(GUI:CreateLabel(parent, L["Choose which groups to display."], 250), 25)
+            groupVisHintLabel.fullRow = true
+
+            -- Initialize raidGroupVisible if it doesn't exist
+            if not db.raidGroupVisible then
+                db.raidGroupVisible = {[1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true}
+            end
+
+            for i = 1, 8 do
+                local groupIndex = i
+                local overrideKey = "raidGroupVisible_" .. i
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Group"] .. " " .. i, nil, nil,
+                    ApplyGroupVisibility,
+                    function() return db.raidGroupVisible[groupIndex] ~= false end,
+                    function(val) db.raidGroupVisible[groupIndex] = val end,
+                    overrideKey
+                ), 25)
+            end
+        end
+
+        if classicLayout then
+            local groupVisGroup = GUI:CreateSettingsGroup(self.child, 280)
+            groupVisGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Visibility"]), 40)
+            groupVisGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
+            BuildGroupVisGroup({
+                group = groupVisGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(groupVisGroup, nil, 1)
+        else
+            -- How many of the eight are on, and -- while the list is short enough
+            -- to be worth reading -- which ones are not. Four or more hidden and
+            -- the numbers stop being a summary and start being the control, so
+            -- the count carries it alone.
+            local function GroupVisSummary(d)
+                if not d then return "" end
+                local vis = d.raidGroupVisible
+                local shown, hidden = 0, {}
+                for i = 1, 8 do
+                    if type(vis) ~= "table" or vis[i] ~= false then
+                        shown = shown + 1
+                    else
+                        hidden[#hidden + 1] = i
+                    end
+                end
+                local parts = { format("%d/8", shown) }
+                if #hidden > 0 and #hidden <= 3 then
+                    parts[#parts + 1] = format("%s %s", L["Hidden"], table.concat(hidden, ", "))
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Nine: the hint and the eight ticks.
+            local GROUP_VIS_COUNT = 9
+
+            local groupVisMount, groupVisContent = PopoutContent(function(group, holder, reflow)
+                BuildGroupVisGroup({ group = group, parent = holder, refreshStates = reflow })
+            end, 2)
+            local groupVisRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Group Visibility"],
+                db      = RowDB,
+                summary = GroupVisSummary,
+                count   = GROUP_VIS_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = groupVisMount,
+            }))
+            ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })
+            WireModifiedTick(groupVisRow)
+            WireFooter(groupVisRow, ApplyGroupVisibility)
+            groupVisRow.hideOn = function() return GUI.SelectedMode ~= "raid" end
+        end
+
+        -- ===== GROUP DISPLAY ORDER (a 280 box in classic, a band row) ========
+        -- ONE track wherever it is built: the box is a blurb, a tick and a 230px
+        -- drag list, and the list IS the box -- pairing it with the tick would
+        -- give a 25px control a 230px row and still leave the list to fill
+        -- whatever was left.
+        --
+        -- ☠ THE DRAG LIST WORKS INSIDE A POPOUT PANE, and it is worth saying why
+        -- rather than leaving it to be discovered. Every coordinate it uses is
+        -- SCREEN space taken live -- container:GetTop()/GetBottom() each frame and
+        -- GUI:CursorPos(frame), which divides by the FRAME's own effective scale
+        -- rather than UIParent's -- so it is indifferent to what it is parented
+        -- to and to the settings window's user scale. The drag is clamped to the
+        -- container's own rect (maxOffset in CreateGroupOrderList), so the ghost
+        -- cannot leave the pane, and the dragged item's frame level is set
+        -- relative to the container rather than absolutely, so it rises above its
+        -- siblings without punching through the panel.
+        --
+        -- ⚠ THE ONE CASE THAT WOULD DEGRADE IT: a pane taller than the shell's
+        -- cap (0.6 x UIParent height) is wrapped in a ScrollFrame, and a list
+        -- dragged inside a scrolled pane can be clipped at the pane's edge. This
+        -- pane measures ~305px, so the wrap needs a UIParent under ~510px tall.
+        -- Left alone rather than worked around: the alternative is capping the
+        -- list, and a five-line group order is worse than a rare clip.
+        local function BuildGroupOrderGroup(tools)
+            local group, parent = tools.group, tools.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["Drag to reorder groups. Top = first."], 250), 25)
+
+            local playerGroupFirstCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["My Group First"], db, "raidPlayerGroupFirst", function()
+                if DF.UpdatePlayerGroupTracking then DF:UpdatePlayerGroupTracking() end
+                if DF.UpdateRaidGroupOrderAttributes then DF:UpdateRaidGroupOrderAttributes() end
+                DF:TriggerRaidPosition()
+                UpdateFrames()
+            end), 25)
+            playerGroupFirstCheck.tooltip = L["When enabled, the group you are in will always be displayed first."]
+
+            -- Initialize raidGroupDisplayOrder if it doesn't exist
+            if not db.raidGroupDisplayOrder then
+                db.raidGroupDisplayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
+            end
+
+            local groupOrderWidget = GUI:CreateGroupOrderList(parent, db, "raidGroupDisplayOrder", function()
+                if DF.UpdateRaidGroupOrderAttributes then DF:UpdateRaidGroupOrderAttributes() end
+                DF:TriggerRaidPosition()
+                UpdateFrames()
+            end)
+            group:AddWidget(groupOrderWidget, 230)
+        end
+
+        -- What a write to either of this group's keys costs. Named once for the
+        -- footer's two verbs, and it is what the drag list's own callback does.
+        local function ApplyGroupOrder()
             if DF.UpdatePlayerGroupTracking then DF:UpdatePlayerGroupTracking() end
             if DF.UpdateRaidGroupOrderAttributes then DF:UpdateRaidGroupOrderAttributes() end
             DF:TriggerRaidPosition()
             UpdateFrames()
-        end), 25)
-        playerGroupFirstCheck.tooltip = L["When enabled, the group you are in will always be displayed first."]
-        
-        -- Initialize raidGroupDisplayOrder if it doesn't exist
-        if not db.raidGroupDisplayOrder then
-            db.raidGroupDisplayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
         end
-        
-        local groupOrderWidget = GUI:CreateGroupOrderList(self.child, db, "raidGroupDisplayOrder", function()
-            if DF.UpdateRaidGroupOrderAttributes then DF:UpdateRaidGroupOrderAttributes() end
-            DF:TriggerRaidPosition()
-            UpdateFrames()
-        end)
-        groupOrderGroup:AddWidget(groupOrderWidget, 230)
-        
-        Add(groupOrderGroup, nil, INLINE_COL_2)
 
-        -- ===== FLAT GRID SETTINGS (Column 1, raid+flat only) =====
-        -- Two tracks: three sliders and three dropdowns, all pairs.
-        local flatGridGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
-        flatGridGroup:AddWidget(GUI:CreateHeader(self.child, L["Flat Grid Settings"]), 40)
-        flatGridGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
-        
-        local flatGridHintLabel = flatGridGroup:AddWidget(GUI:CreateLabel(self.child, L["All players in a unified grid. Sorting applies raid-wide."], 250), 25)
-        flatGridHintLabel.fullRow = true
-        
+        if classicLayout then
+            local groupOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            groupOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Display Order"]), 40)
+            groupOrderGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
+            BuildGroupOrderGroup({
+                group = groupOrderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(groupOrderGroup, nil, 2)
+        else
+            -- The order itself, which is the whole point of the group, plus the
+            -- one qualifier that overrides it. Eight digits is a long token for a
+            -- summary and still the right one: any shorter rendering ("custom",
+            -- "1 first") would make the user open the pane to learn what the row
+            -- already knows.
+            local function GroupOrderSummary(d)
+                if not d then return "" end
+                local order = d.raidGroupDisplayOrder
+                local parts = {}
+                if type(order) == "table" and #order > 0 then
+                    local seen, out = {}, {}
+                    for _, n in ipairs(order) do
+                        n = tonumber(n)
+                        if n and n >= 1 and n <= 8 and not seen[n] then
+                            seen[n] = true
+                            out[#out + 1] = n
+                        end
+                    end
+                    for i = 1, 8 do
+                        if not seen[i] then out[#out + 1] = i end
+                    end
+                    parts[#parts + 1] = table.concat(out, " ")
+                end
+                if d.raidPlayerGroupFirst then parts[#parts + 1] = L["My Group First"] end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Three: the blurb, the tick and the list.
+            local GROUP_ORDER_COUNT = 3
+
+            local groupOrderMount, groupOrderContent = PopoutContent(function(group, holder, reflow)
+                BuildGroupOrderGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local groupOrderRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Group Display Order"],
+                db      = RowDB,
+                summary = GroupOrderSummary,
+                count   = GROUP_ORDER_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = groupOrderMount,
+            }))
+            ClaimKeys(groupOrderRow, groupOrderContent)
+            WireModifiedTick(groupOrderRow)
+            WireFooter(groupOrderRow, ApplyGroupOrder)
+            groupOrderRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
+        end
+
+        -- ===== FLAT GRID SETTINGS (a 280 box in classic, a band row) =========
+        -- Raid + FLAT only -- the opposite side of raidUseGroups from Group
+        -- Layout Settings above, which is what keeps exactly one of the two in
+        -- the band at a time.
         local function UpdateFlatLayoutFull()
             if InCombatLockdown() then return end
             if DF.headersInitialized then DF:ApplyHeaderSettings() end
             if GUI.SelectedMode == "raid" then DF:UpdateRaidLayout() end
         end
-        
-        local playersPerLabel = db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"]
-        playersPerRowSlider = flatGridGroup:AddWidget(GUI:CreateSlider(self.child, playersPerLabel, 1, 40, 1, db, "raidPlayersPerRow", UpdateFlatLayoutFull, UpdateFlatLayoutFull, true), 55)
-        
-        -- ☠ CROSS axis, NOT main -- these labels were MAIN_* and lied. GetGrowthAnchorPoint
-        -- pins innerContainer to a CORNER of raidContainer, and the block always matches
-        -- the container on the main axis (it is playersPerRow wide in Rows, five tall in
-        -- Columns), so only the cross component can move: END is BOTTOMLEFT in Rows and
-        -- TOPRIGHT in Columns. With MAIN_* the dropdown offered "Right" for Rows and moved
-        -- the grid DOWN. The sibling below is also cross-axis and that is not a duplicate:
-        -- this one ALIGNS the block in the reserved space, that one picks which end rows
-        -- stack FROM.
-        local growthAnchorOptions = { _order = { "START", "CENTER", "END" }, START= CROSS_START, CENTER= L["Center"], END= CROSS_END }
-        flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames), 55)
 
-        -- Columns/Rows Grow From = the direction the grid wraps (secondary axis).
-        -- VERTICAL (Columns) wraps left/right; HORIZONTAL (Rows) wraps top/bottom.
-        local flatColumnLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
-        local flatColumnOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
-        flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), 55)
+        local function BuildFlatGridGroup(tools)
+            local group, parent = tools.group, tools.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["All players in a unified grid. Sorting applies raid-wide."], 250), 25)
 
-        -- Players Grow From = the direction players fill the grid's main axis.
-        -- HORIZONTAL (Rows) fills Left/Right; VERTICAL (Columns) fills Top/Bottom.
-        -- Replaces the old "Reverse Order" checkbox; START/END values are identical.
-        -- ⚠ MAIN axis -- the OPPOSITE of the grouped Players Grow From, which is CROSS.
-        local flatFillOptions = { _order = { "START", "END" }, START= MAIN_START, END= MAIN_END }
-        flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], flatFillOptions, db, "raidFlatFrameAnchor", UpdateFrames), 55)
+            local playersPerLabel = db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"]
+            playersPerRowSlider = group:AddWidget(GUI:CreateSlider(parent, playersPerLabel, 1, 40, 1, db, "raidPlayersPerRow", UpdateFlatLayoutFull, UpdateFlatLayoutFull, true), 55)
+
+            -- ☠ CROSS axis, NOT main -- these labels were MAIN_* and lied. GetGrowthAnchorPoint
+            -- pins innerContainer to a CORNER of raidContainer, and the block always matches
+            -- the container on the main axis (it is playersPerRow wide in Rows, five tall in
+            -- Columns), so only the cross component can move: END is BOTTOMLEFT in Rows and
+            -- TOPRIGHT in Columns. With MAIN_* the dropdown offered "Right" for Rows and moved
+            -- the grid DOWN. The sibling below is also cross-axis and that is not a duplicate:
+            -- this one ALIGNS the block in the reserved space, that one picks which end rows
+            -- stack FROM.
+            local growthAnchorOptions = { _order = { "START", "CENTER", "END" }, START= CROSS_START, CENTER= L["Center"], END= CROSS_END }
+            group:AddWidget(GUI:CreateDropdown(parent, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames), 55)
+
+            -- Columns/Rows Grow From = the direction the grid wraps (secondary axis).
+            -- VERTICAL (Columns) wraps left/right; HORIZONTAL (Rows) wraps top/bottom.
+            local flatColumnLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
+            local flatColumnOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
+            group:AddWidget(GUI:CreateDropdown(parent, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), 55)
+
+            -- Players Grow From = the direction players fill the grid's main axis.
+            -- HORIZONTAL (Rows) fills Left/Right; VERTICAL (Columns) fills Top/Bottom.
+            -- Replaces the old "Reverse Order" checkbox; START/END values are identical.
+            -- ⚠ MAIN axis -- the OPPOSITE of the grouped Players Grow From, which is CROSS.
+            local flatFillOptions = { _order = { "START", "END" }, START= MAIN_START, END= MAIN_END }
+            group:AddWidget(GUI:CreateDropdown(parent, L["Players Grow From"], flatFillOptions, db, "raidFlatFrameAnchor", UpdateFrames), 55)
+
+            group:AddWidget(GUI:CreateSlider(parent, L["Horizontal Spacing"], -5, 100, 1, db, "raidFlatHorizontalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Vertical Spacing"], -5, 100, 1, db, "raidFlatVerticalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
+        end
+
+        if classicLayout then
+            local flatGridGroup = GUI:CreateSettingsGroup(self.child, 280)
+            flatGridGroup:AddWidget(GUI:CreateHeader(self.child, L["Flat Grid Settings"]), 40)
+            flatGridGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
+            BuildFlatGridGroup({
+                group = flatGridGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(flatGridGroup, nil, 1)
+        else
+            -- Two items, and the first deliberately borrows the word the GROUPED
+            -- row uses for its own wrap count: one row says how many groups fit
+            -- before the block wraps, the other how many players do, and the two
+            -- are never on screen together. The second is where the block sits in
+            -- the reserved area.
+            --
+            -- The edge words are derived from `d` rather than from the build-time
+            -- CROSS_ locals, for the reason the Layout Direction summary states.
+            local function FlatGridSummary(d)
+                if not d then return "" end
+                local parts = {}
+                parts[#parts + 1] = format("%s %d", L["Wrap"], tonumber(d.raidPlayersPerRow) or 1)
+                local vert = d.growDirection == "VERTICAL"
+                local a = d.raidFlatGrowthAnchor or "START"
+                parts[#parts + 1] = (a == "CENTER" and L["Center"])
+                                 or (a == "END" and (vert and L["Right"] or L["Bottom"]))
+                                 or (vert and L["Left"] or L["Top"])
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Seven: the hint, three sliders and three dropdowns.
+            local FLAT_GRID_COUNT = 7
+
+            -- Both halves: the sliders' own full pass re-applies the header, the
+            -- dropdowns' re-lays the frames, and a Reset Group can move either.
+            local function ApplyFlatGrid()
+                UpdateFrames()
+                UpdateFlatLayoutFull()
+            end
+
+            local flatGridMount, flatGridContent = PopoutContent(function(group, holder, reflow)
+                BuildFlatGridGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local flatGridRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Flat Grid Settings"],
+                db      = RowDB,
+                summary = FlatGridSummary,
+                count   = FLAT_GRID_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = flatGridMount,
+            }))
+            ClaimKeys(flatGridRow, flatGridContent)
+            WireModifiedTick(flatGridRow)
+            WireFooter(flatGridRow, ApplyFlatGrid)
+            flatGridRow.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
+        end
         
-        flatGridGroup:AddWidget(GUI:CreateSlider(self.child, L["Horizontal Spacing"], -5, 100, 1, db, "raidFlatHorizontalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
-        flatGridGroup:AddWidget(GUI:CreateSlider(self.child, L["Vertical Spacing"], -5, 100, 1, db, "raidFlatVerticalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
-        
-        Add(flatGridGroup, nil, INLINE_COL_1)
-        
-        -- Update labels on show
+        -- Update labels on show.
+        -- ⚠ THE THREE UPVALUES NOW POINT INTO WHICHEVER GROUP WAS BUILT LAST. In
+        -- classic that is the one box each; in the popout layout it is the pane
+        -- the eager holder built at page-build time, which is the instance that
+        -- exists when this runs. A second (pinned) instance re-points them, and
+        -- that is harmless: the only thing the hook does is re-read
+        -- db.growDirection and re-label the flat grid's slider, so the worst case
+        -- is the hook firing for the other copy of the same control.
         if groupsPerRowSlider and groupsPerRowSlider.label then
             groupsPerRowSlider:HookScript("OnShow", UpdateDynamicLabels)
         end
@@ -3423,42 +3951,37 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             RegisterHoistedToggle(moverRow, L["Enable Permanent Mover"], "permanentMover", OnPermMoverToggle)
         end
 
-        -- ===== THE BANDS, AND WHY THEY ARE ADDED HERE ========================
-        -- Popout layout only: the two full-width bands of feature rows, added
-        -- AFTER every column box on the page.
+        -- ===== THE BANDS, AND THE ORDER THEY ARE ADDED IN ====================
+        -- Popout layout only: the page's three full-width bands, and in this
+        -- layout they are the page -- there is nothing else left to add.
         --
-        -- ☠ THIS USED TO BE THE OTHER WAY ROUND, and the reason it was is worth
-        -- keeping because it is still true -- it just no longer applies. Add()
+        -- ☠ THE ORDERING CONSTRAINT THAT USED TO LIVE HERE IS GONE, and the note
+        -- is kept because the mechanism is still true of every other page. Add()
         -- records page order, and layoutCol "both" is ALSO a sync point: it takes
-        -- the lower of the two columns and drops BOTH to it. With Appearance the
-        -- only band on the page, adding it in its old column-2 slot (after Frame
-        -- Size) would have synced the columns mid-page and left a hole beside
-        -- Frame Size at two-column widths -- so it was hoisted above the first
-        -- column box instead, where both columns are still at the top and the
-        -- sync costs nothing.
+        -- the lower of the two columns and drops BOTH to it. A band added into
+        -- the middle of an unbalanced two-column flow therefore leaves a hole
+        -- beside whatever was above it -- which is why, when Appearance was the
+        -- only band here, it was hoisted above the first column box.
         --
-        -- The hole is a BAND-BEFORE-COLUMNS problem, and a band AFTER all of them
-        -- has nothing left to punch a hole in: the sync happens where the flow was
-        -- ending anyway, which is what a sync point is for. So the constraint that
-        -- forced Appearance above Frame Size is gone, and the page can go back to
-        -- reading the way it is meant to -- the primaries first (Frame Size,
-        -- Layout Direction, and whichever raid boxes the mode implies), then the
-        -- feature rows.
+        -- With every group converted there is no flow to unbalance: a run of
+        -- "both" widgets is a run of sync points over two columns that are
+        -- already equal, which is a plain single stack. So the order below is
+        -- purely READING order, and it is the order the page has always read in
+        -- -- the layout chain first, then how the frames look, then the mover.
         --
-        -- ⚠ AT THE DEFAULT WIDTH THIS IS PURELY ABOUT READING ORDER. 640 is a
+        -- ⚠ AT THE DEFAULT WIDTH NONE OF THIS EVEN ARISES. 640 is a
         -- single-column page (LayoutPage's usesTwoColumns needs room for two
-        -- boxes plus the gutter), so Add order IS visual order and there is no
-        -- sync to reason about at all. The paragraphs above are about the widened
-        -- window.
+        -- boxes plus the gutter), so Add order IS visual order. The paragraph
+        -- above is about the widened window.
         --
-        -- ⚠ AND ONE CONSEQUENCE TO KNOW ABOUT: in PARTY mode at two-column
-        -- widths, column 2 is now empty. Everything that used to be in it here is
-        -- either a band or raid-only, so the two primary boxes sit alone on the
-        -- left with the bands beneath them. That is the conversion's doing, not
-        -- this ordering's -- it reads the same whichever end the bands are added
-        -- at -- and moving a primary across to balance it is a page-design
-        -- decision, deliberately not taken here.
+        -- ⚠ AND THE ROW ORDER INSIDE THE LAYOUT BAND IS THE PAGE'S OLD ORDER,
+        -- not a tidied one. Group Layout Settings and Flat Grid Settings are
+        -- mutually exclusive and would sit better adjacent, but moving one past
+        -- Group Visibility would have moved its CLASSIC Add too -- the classic
+        -- column order is a thing this pass is not allowed to change, and one
+        -- source order serving both layouts is worth more than the adjacency.
         if not classicLayout then
+            Add(layoutBand, nil, "both")
             Add(appearanceGroup, nil, "both")
             Add(permMoverBand, nil, "both")
         end
