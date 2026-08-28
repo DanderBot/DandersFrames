@@ -688,12 +688,18 @@ if GUI.CreateBorderShadowControls then
     -- Source-read for the same reason the counts above are: the page file is far
     -- too tangled in the panel to build headlessly, but the call is still a
     -- claim that can be checked against the inventory.
+    --
+    -- ⚠ The trailing arg is the row's own commit, and it is matched loosely on
+    -- purpose: the sweep hoists a toggle on other groups of this page too (each
+    -- with its own callback), so this pins THE BORDER PAIR -- that they are the
+    -- first two registered, with the golden label and key -- rather than being a
+    -- census of every hoisted toggle on the page.
     do
         local got = {}
-        for label, key in pageSrc:gmatch('RegisterHoistedToggle%(%w+,%s*L%["([^"]+)"%],%s*"([^"]+)"%)') do
+        for label, key in pageSrc:gmatch('RegisterHoistedToggle%(%w+,%s*L%["([^"]+)"%],%s*"([^"]+)"') do
             got[#got + 1] = { label, key }
         end
-        eq(#got, 2, "hoisted search: the page registers exactly the two hoisted toggles")
+        check(#got >= 2, "hoisted search: the page registers the two hoisted border toggles")
         local want = { GOLDEN[1], GOLDEN[15] }
         for i = 1, 2 do
             if got[i] then
