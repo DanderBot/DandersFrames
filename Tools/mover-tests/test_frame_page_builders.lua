@@ -332,3 +332,87 @@ do
     check(SRC:find("if not classicLayout then\n            Add(appearanceGroup, nil, \"both\")", 1, true) ~= nil,
           "order: the bands are added only in the popout layout")
 end
+
+-- ============================================================
+-- 4. ONE VISUAL LANGUAGE -- THE STAY-INLINE BOXES WEAR THE BAND SKIN
+--
+-- The conversion left the page speaking two languages at once: the converted
+-- sections are an accent header above a stack of fat row plates, the survivors
+-- are the classic dense box with its title inside a faint white rectangle.
+-- Danders: "Layout Direction does not match the Appearance settings."
+--
+-- opts.bandStyle (DandersUI/Sections.lua, covered headlessly in
+-- test_sections_group) is the survivors' half. What is pinned HERE is the page's
+-- side of it, which is only three claims and all three are source-level:
+--   ✓ the opt-in is declared ONCE, gated on the layout, and passed by name
+--   ✓ every stay-inline box on this page passes it -- an eighth box added later
+--     without it is the exact drift this section exists to catch
+--   ✓ the CLASSIC branch passes nothing, so it builds the box it always did
+-- ============================================================
+do
+    -- ---- the opt-in, declared once and gated ------------------------
+    check(SRC:find("local INLINE_BOX = (not classicLayout) and { bandStyle = true } or nil", 1, true) ~= nil,
+          "band skin: the page declares the opt-in once, gated on the layout")
+
+    -- ☠ AND NOWHERE ELSE. A per-site literal is what gets missed on the eighth
+    -- box; one shared name is what makes "every stay-inline box" checkable at
+    -- all. Exactly one occurrence of the literal, and it is the declaration.
+    local literals = 0
+    for _ in SRC:gmatch("bandStyle%s*=%s*true") do literals = literals + 1 end
+    eq(literals, 1, "band skin: the flag is written once, not copied to each call site")
+
+    -- ---- every stay-inline box on the Frame page --------------------
+    -- The full census of boxes that did NOT become bands: the two primaries and
+    -- the five raid boxes. Named rather than counted, so a rename fails here
+    -- instead of quietly reducing the count.
+    local STAY_INLINE = {
+        "sizeGroup",        -- Frame Size
+        "layoutGroup",      -- Layout Direction
+        "raidModeGroup",    -- Raid Layout Mode
+        "groupLayoutGroup", -- Group Layout Settings
+        "groupVisGroup",    -- Group Visibility
+        "groupOrderGroup",  -- Group Display Order
+        "flatGridGroup",    -- Flat Grid Settings
+    }
+    -- Scoped to the Frame page: `sizeGroup` and `layoutGroup` are also the names
+    -- of boxes on OTHER pages in this file, and those are not part of this sweep.
+    local a = SRC:find("local INLINE_BOX = (not classicLayout)", 1, true)
+    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
+    check(a ~= nil and b ~= nil and b > a, "band skin: the Frame page builder is locatable")
+    local page = SRC:sub(a or 1, b or 1)
+
+    for _, name in ipairs(STAY_INLINE) do
+        local decl = "local " .. name .. " = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)"
+        check(page:find(decl, 1, true) ~= nil,
+              "band skin: " .. name .. " is built with the skin, at its own width")
+    end
+
+    -- Nothing else on the page builds a 280 box WITHOUT it. This is the claim the
+    -- named list above cannot make on its own: it says the seven are opted in,
+    -- not that they are all of them.
+    local bare = 0
+    for _ in page:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
+    -- The three that remain are the CLASSIC branch's own boxes -- Appearance,
+    -- Frame Fade and Permanent Mover, each inside a `classicLayout` arm, and each
+    -- of which has to stay exactly as it was.
+    eq(bare, 3, "band skin: the only bare 280 boxes left are the classic branch's three")
+
+    -- ---- and the classic branch is untouched ------------------------
+    -- ☠ THE LOAD-BEARING CLAIM OF THE WHOLE SWEEP. In classic, INLINE_BOX is nil
+    -- -- which is precisely what "no opts" means to CreateSettingsGroup -- and
+    -- the classic-only boxes never mention it at all.
+    check(SRC:find("local frameFadeGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "band skin: the classic Frame Fade box is built exactly as before")
+    check(SRC:find("local permMoverGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "band skin: ...and so is the classic Permanent Mover box")
+    check(page:find("appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "band skin: ...and the classic Appearance box")
+
+    -- ---- the bands do NOT take it -----------------------------------
+    -- A band is chromeless because its ROWS are the surface; a plate drawn round
+    -- a band would be the second panel the chromeless opt exists to avoid.
+    check(page:find("GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })", 1, true) ~= nil,
+          "band skin: the Appearance band stays chromeless")
+    check(page:find("GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })", 1, true) ~= nil,
+          "band skin: ...and so does the mover band")
+end
