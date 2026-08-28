@@ -3620,9 +3620,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageAbsorb, function(self, db, Add, AddSpace)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"absorbBar", "healAbsorb"}, L["Absorbs"], "bars_absorb"), 25, 2)
-        
+
         local currentSection = nil
-        
+
         -- Helper to add widgets to current section
         local function AddToSection(widget, height, col)
             Add(widget, height, col)
@@ -3631,194 +3631,441 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             return widget
         end
-        
-        -- ===== ABSORB SHIELD SECTION =====
-        local absorbSection = Add(GUI:CreateCollapsibleSection(self.child, L["Absorb Shield"], true), 36, "both")
-        currentSection = absorbSection
-        
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: two collapsible sections over
+        -- LOOSE WIDGETS -- no settings boxes at all. Twenty-one controls go
+        -- straight onto the page under "Absorb Shield" and fifteen under "Heal
+        -- Absorb", each with its own slot height and its own column.
+        --
+        -- POPOUT turns each section's pile into ONE feature row, in one
+        -- headerless band per section:
+        --
+        --   "Absorb Shield"   Absorb Shield
+        --   "Heal Absorb"     Heal Absorb
+        --
+        -- ☠ THIS IS THE SWEEP'S FIRST LOOSE-WIDGET PAGE, and it is why the
+        -- builders here take an `add` rather than a `group`. Every page converted
+        -- before this one built BOXES in classic, so a builder could be handed the
+        -- box and call `group:AddWidget(w, h)` in both layouts. There is no box
+        -- here: classic calls `AddToSection(w, h, col)` and the COLUMN is part of
+        -- what it always did. So the one thing that differs between the layouts is
+        -- named and handed in -- classic passes AddToSection, a pane passes a
+        -- closure that drops the column and mounts into its group -- and every
+        -- other line of the builder is the page's own source, unmoved. The classic
+        -- Add order, the heights and the columns are therefore structurally
+        -- unchanged rather than promised to be; test_absorbs_page_builders.lua
+        -- pins all three against the census taken before the move.
+        --
+        -- ☠ THE COLLAPSIBLE SECTIONS STAY, IN BOTH LAYOUTS -- the Health Bar
+        -- page's rule, for two of its three reasons: a section COLLAPSES and
+        -- persists that fold per title in SavedVariables (a band does neither), and
+        -- Panel.lua's layout note calls a section the page's second level for
+        -- PARALLEL SUB-FEATURES, which the shield and the heal absorb are. So each
+        -- band goes in THROUGH its section and carries no header of its own -- the
+        -- section bar above it already names it.
+        --
+        -- ⚠ AND EACH ROW REPEATS ITS SECTION'S NAME, which is the Health Bar
+        -- page's lesser of two evils again: a search hit finds its row BY LABEL, so
+        -- the label has to be the one word that describes the whole pane, and for
+        -- these two piles that word is the section's.
+        --
+        -- ⚠ NEITHER ROW CARRIES A TICK. There is no enable key for either bar --
+        -- the Display Mode dropdown IS the master, and neither list of modes has an
+        -- off -- so each row is a way in and nothing else. Both still get the amber
+        -- tick and the footer: every key here is an ordinary per-mode profile key.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        -- One band per section: full-width and chromeless, because a feature row's
+        -- popout docks outside the WINDOW and runs a beam back to the row, so a row
+        -- that stopped 280px in would leave that beam crossing half the page.
+        local absorbBand, healAbsorbBand
+        if tools then
+            absorbBand     = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            healAbsorbBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
+        -- ===== THE PAGE'S DROPDOWN VOCABULARY, AT PAGE SCOPE ==============
+        -- The two mode tables used to be declared beside the dropdown that offered
+        -- them. The rows print the chosen mode as their SUMMARY, and a summary is
+        -- written OUTSIDE the group's builder -- so the word has to come out of the
+        -- same table the dropdown offers, or a row could say one thing while the
+        -- control behind it says another. (The Health Bar page hoisted its six
+        -- dropdown tables for exactly this reason.)
+        --
+        -- ⚠ Orientation and Anchor move for a SECOND reason: they were declared in
+        -- the absorb-shield block and READ by the heal-absorb one, which was fine
+        -- while both were straight-line page code and is not once each is a closure
+        -- of its own. Same tables, same values, one declaration.
         local modeOptions = {
             OVERLAY = L["Overlay (on health bar)"],
             ATTACHED = L["Attached to Health"],
             ATTACHED_OVERFLOW = L["Attached + Overflow"],
             FLOATING = L["Floating Bar"],
         }
-        AddToSection(GUI:CreateDropdown(self.child, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-        end), 55, 1)
-        
-        local textureOptions = DF:GetTextureList()
-        -- Add stripe textures if not already present
-        local stripeTextures = {
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft"]= "DF Stripes Soft",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft_Wide"]= "DF Stripes Soft Wide",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes"]= "DF Stripes",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Sparse"]= "DF Stripes Sparse",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium"]= "DF Stripes Medium",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense"]= "DF Stripes Dense",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense"]= "DF Stripes Very Dense",
-        }
-        for path, name in pairs(stripeTextures) do
-            if not textureOptions[path] then
-                textureOptions[path] = name
-            end
-        end
-        AddToSection(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "absorbBarTexture", function() DF:UpdateAllFrames() end, textureOptions), 55, 1)
-        
-        AddToSection(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "absorbBarColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 1)
-        
-        local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
-        AddToSection(GUI:CreateDropdown(self.child, L["Blend Mode"], blendOptions, db, "absorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
-        
-        local overlayRev = AddToSection(GUI:CreateCheckbox(self.child, L["Reverse Overlay Fill"], db, "absorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
-        overlayRev.hideOn = function(d) return d.absorbBarMode ~= "OVERLAY" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
-        
-        local absorbClampOptions = {
-            [0] = L["None (no clamping)"],
-            [1] = L["Missing Health"],
-            [2] = L["Max Health"],
-        }
-        local absorbClampDropdown = AddToSection(GUI:CreateDropdown(self.child, L["Clamp Mode"], absorbClampOptions, db, "absorbBarAttachedClampMode", function() DF:UpdateAllFrames() end), 55, 1)
-        absorbClampDropdown.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
-        
-        local absorbShowOvershield = AddToSection(GUI:CreateCheckbox(self.child, L["Show Overshield Glow"], db, "absorbBarShowOvershield", function() DF:UpdateAllFrames() end), 25, 1)
-        absorbShowOvershield.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
-        absorbShowOvershield.tooltip = L["Shows a glow at max health when absorb exceeds the clamp limit."]
-        
-        local absorbOvershieldStyleOptions = {
-            SPARK = L["Spark"],
-            LINE = L["Line"],
-            GRADIENT = L["Gradient"],
-            GLOW = L["Glow"],
-        }
-        -- Overshield glow detail controls: HIDE for the wrong bar mode (variant), but
-        -- GREY (disabled-in-place) when the boolean "Show Overshield Glow" toggle is off.
-        local absorbOvershieldStyle = AddToSection(GUI:CreateDropdown(self.child, L["Glow Style"], absorbOvershieldStyleOptions, db, "absorbBarOvershieldStyle", function() DF:UpdateAllFrames() end), 55, 1)
-        absorbOvershieldStyle.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
-        absorbOvershieldStyle.disableOn = function(d) return not d.absorbBarShowOvershield end
-
-        local absorbOvershieldColor = AddToSection(GUI:CreateColorPicker(self.child, L["Glow Color"], db, "absorbBarOvershieldColor", false, nil, function() DF:UpdateAllFrames() end), 35, 1)
-        absorbOvershieldColor.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
-        absorbOvershieldColor.disableOn = function(d) return not d.absorbBarShowOvershield end
-
-        local absorbOvershieldAlpha = AddToSection(GUI:CreateSlider(self.child, L["Glow Alpha"], 0.1, 1, 0.05, db, "absorbBarOvershieldAlpha", nil, function() DF:UpdateAllFrames() end, true), 55, 1)
-        absorbOvershieldAlpha.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
-        absorbOvershieldAlpha.disableOn = function(d) return not d.absorbBarShowOvershield end
-
-        local absorbOvershieldReverse = AddToSection(GUI:CreateCheckbox(self.child, L["Reverse Position"], db, "absorbBarOvershieldReverse", function() DF:UpdateAllFrames() end), 25, 1)
-        absorbOvershieldReverse.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
-        absorbOvershieldReverse.disableOn = function(d) return not d.absorbBarShowOvershield end
-        absorbOvershieldReverse.tooltip = L["Moves the glow to the opposite side (no HP side instead of max HP side)."]
-        
-        -- Floating mode settings (column 2)
-        local floatingHeader = AddToSection(GUI:CreateHeader(self.child, L["Floating Bar Position"]), 45, 2)
-        floatingHeader.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local orientOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
-        local orientDropdown = AddToSection(GUI:CreateDropdown(self.child, L["Orientation"], orientOptions, db, "absorbBarOrientation", function() DF:UpdateAllFrames() end), 55, 1)
-        orientDropdown.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local revFill = AddToSection(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "absorbBarReverse", function() DF:UpdateAllFrames() end), 25, 2)
-        revFill.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local widthSlider = AddToSection(GUI:CreateSlider(self.child, L["Width"], 10, 200, 1, db, "absorbBarWidth", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
-        widthSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local heightSlider = AddToSection(GUI:CreateSlider(self.child, L["Height"], 1, 30, 1, db, "absorbBarHeight", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
-        heightSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local anchorOptions = {
-            TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"], CENTER= L["Center"],
-            TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
-        }
-        local anchorDropdown = AddToSection(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "absorbBarAnchor", function() DF:UpdateAllFrames() end), 55, 1)
-        anchorDropdown.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local xSlider = AddToSection(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "absorbBarX", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
-        xSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local ySlider = AddToSection(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "absorbBarY", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
-        ySlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local bgColorPicker = AddToSection(GUI:CreateColorPicker(self.child, L["Background Color"], db, "absorbBarBackgroundColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 2)
-        bgColorPicker.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        local levelSlider = AddToSection(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "absorbBarFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("absorb") end, true)), 55, 1)
-        levelSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
-        
-        currentSection = nil
-        AddSpace(GUI.Space.section, "both")
-        
-        -- ===== HEAL ABSORB SECTION =====
-        local healAbsorbSection = Add(GUI:CreateCollapsibleSection(self.child, L["Heal Absorb"], true), 36, "both")
-        currentSection = healAbsorbSection
-        
-        AddToSection(GUI:CreateLabel(self.child, L["Shows effects that reduce incoming healing (like Necrotic stacks)."], 260), 25, 1)
-        
         local healModeOptions = {
             OVERLAY = L["Overlay (on health bar)"],
             ATTACHED = L["Attached to Health"],
             FLOATING = L["Floating Bar"],
         }
-        AddToSection(GUI:CreateDropdown(self.child, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-        end), 55, 1)
-        
-        local healTextureOptions = DF:GetTextureList()
-        -- Add stripe textures if not already present
-        local healStripeTextures = {
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft"]= "DF Stripes Soft",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft_Wide"]= "DF Stripes Soft Wide",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes"]= "DF Stripes",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Sparse"]= "DF Stripes Sparse",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium"]= "DF Stripes Medium",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense"]= "DF Stripes Dense",
-            ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense"]= "DF Stripes Very Dense",
+        local orientOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
+        local anchorOptions = {
+            TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"], CENTER= L["Center"],
+            TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        for path, name in pairs(healStripeTextures) do
-            if not healTextureOptions[path] then
-                healTextureOptions[path] = name
-            end
+
+        -- The texture's display NAME, from the addon's own media resolver -- the
+        -- one GUI:CreateTextureDropdown prints on its own button, so a row and the
+        -- control behind it cannot disagree. Its own copy: the Health Bar and
+        -- Resource Bar helpers of the same name are locals inside THEIR closures.
+        local function TextureName(path)
+            local name = DF.GetTextureNameFromPath and DF:GetTextureNameFromPath(path)
+            if type(name) == "string" and name ~= "" then return name end
+            return nil
         end
-        AddToSection(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "healAbsorbBarTexture", function() DF:UpdateAllFrames() end, healTextureOptions), 55, 1)
-        
-        AddToSection(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "healAbsorbBarColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 1)
-        
-        local healBlendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
-        AddToSection(GUI:CreateDropdown(self.child, L["Blend Mode"], healBlendOptions, db, "healAbsorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
-        
-        local healOverlayRev = AddToSection(GUI:CreateCheckbox(self.child, L["Reverse Overlay Fill"], db, "healAbsorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
-        healOverlayRev.hideOn = function(d) return d.healAbsorbBarMode ~= "OVERLAY" end
-        
-        -- Heal Absorb Floating mode settings (column 2)
-        local healFloatingHeader = AddToSection(GUI:CreateHeader(self.child, L["Floating Bar Position"]), 45, 2)
-        healFloatingHeader.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healOrientDropdown = AddToSection(GUI:CreateDropdown(self.child, L["Orientation"], orientOptions, db, "healAbsorbBarOrientation", function() DF:UpdateAllFrames() end), 55, 1)
-        healOrientDropdown.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healRevFill = AddToSection(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "healAbsorbBarReverse", function() DF:UpdateAllFrames() end), 25, 2)
-        healRevFill.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healWidthSlider = AddToSection(GUI:CreateSlider(self.child, L["Width"], 10, 200, 1, db, "healAbsorbBarWidth", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
-        healWidthSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healHeightSlider = AddToSection(GUI:CreateSlider(self.child, L["Height"], 1, 30, 1, db, "healAbsorbBarHeight", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
-        healHeightSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healAnchorDropdown = AddToSection(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "healAbsorbBarAnchor", function() DF:UpdateAllFrames() end), 55, 1)
-        healAnchorDropdown.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healXSlider = AddToSection(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "healAbsorbBarX", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
-        healXSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healYSlider = AddToSection(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "healAbsorbBarY", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
-        healYSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
-        local healBgColorPicker = AddToSection(GUI:CreateColorPicker(self.child, L["Background Color"], db, "healAbsorbBarBackgroundColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 2)
-        healBgColorPicker.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
-        
+
+        -- ===== ABSORB SHIELD SECTION =====
+        local absorbSection = Add(GUI:CreateCollapsibleSection(self.child, L["Absorb Shield"], true), 36, "both")
+        currentSection = absorbSection
+
+        -- ===== ABSORB SHIELD (twenty-one loose widgets in classic, the Absorb
+        -- Shield band's only row) =====
+        --
+        -- ⚠ THE STRIPE MERGE STAYS INSIDE THE BUILDER. It augments the option table
+        -- the dropdown is about to be handed, which is the builder's own business;
+        -- moving it out would put a page-scope table in front of two dropdowns that
+        -- have always had one each.
+        --
+        -- ⚠ AND SO DOES THE "Floating Bar Position" HEADER -- the sweep's first
+        -- header INSIDE a pane. Classic needs it built (it is a widget on the page
+        -- like any other), and one builder serving both is what stops the layouts
+        -- drifting; in a pane it earns its place a second time, because FLOATING
+        -- mode shows fourteen controls in one stack and the header is what says
+        -- where the general four stop and the nine floating ones begin. It hides
+        -- with them in every other mode.
+        local function BuildAbsorbShieldGroup(tools2)
+            local add, parent = tools2.add, tools2.parent
+
+            add(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "absorbBarMode", function()
+                tools2.refreshStates()
+                DF:UpdateAllFrames()
+            end), 55, 1)
+
+            local textureOptions = DF:GetTextureList()
+            -- Add stripe textures if not already present
+            local stripeTextures = {
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft"]= "DF Stripes Soft",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft_Wide"]= "DF Stripes Soft Wide",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes"]= "DF Stripes",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Sparse"]= "DF Stripes Sparse",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium"]= "DF Stripes Medium",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense"]= "DF Stripes Dense",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense"]= "DF Stripes Very Dense",
+            }
+            for path, name in pairs(stripeTextures) do
+                if not textureOptions[path] then
+                    textureOptions[path] = name
+                end
+            end
+            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "absorbBarTexture", function() DF:UpdateAllFrames() end, textureOptions), 55, 1)
+
+            add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "absorbBarColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 1)
+
+            local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
+            add(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "absorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
+
+            local overlayRev = add(GUI:CreateCheckbox(parent, L["Reverse Overlay Fill"], db, "absorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
+            overlayRev.hideOn = function(d) return d.absorbBarMode ~= "OVERLAY" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
+
+            local absorbClampOptions = {
+                [0] = L["None (no clamping)"],
+                [1] = L["Missing Health"],
+                [2] = L["Max Health"],
+            }
+            local absorbClampDropdown = add(GUI:CreateDropdown(parent, L["Clamp Mode"], absorbClampOptions, db, "absorbBarAttachedClampMode", function() DF:UpdateAllFrames() end), 55, 1)
+            absorbClampDropdown.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" and d.absorbBarMode ~= "ATTACHED_OVERFLOW" end
+
+            local absorbShowOvershield = add(GUI:CreateCheckbox(parent, L["Show Overshield Glow"], db, "absorbBarShowOvershield", function() DF:UpdateAllFrames() end), 25, 1)
+            absorbShowOvershield.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
+            absorbShowOvershield.tooltip = L["Shows a glow at max health when absorb exceeds the clamp limit."]
+
+            local absorbOvershieldStyleOptions = {
+                SPARK = L["Spark"],
+                LINE = L["Line"],
+                GRADIENT = L["Gradient"],
+                GLOW = L["Glow"],
+            }
+            -- Overshield glow detail controls: HIDE for the wrong bar mode (variant), but
+            -- GREY (disabled-in-place) when the boolean "Show Overshield Glow" toggle is off.
+            local absorbOvershieldStyle = add(GUI:CreateDropdown(parent, L["Glow Style"], absorbOvershieldStyleOptions, db, "absorbBarOvershieldStyle", function() DF:UpdateAllFrames() end), 55, 1)
+            absorbOvershieldStyle.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
+            absorbOvershieldStyle.disableOn = function(d) return not d.absorbBarShowOvershield end
+
+            local absorbOvershieldColor = add(GUI:CreateColorPicker(parent, L["Glow Color"], db, "absorbBarOvershieldColor", false, nil, function() DF:UpdateAllFrames() end), 35, 1)
+            absorbOvershieldColor.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
+            absorbOvershieldColor.disableOn = function(d) return not d.absorbBarShowOvershield end
+
+            local absorbOvershieldAlpha = add(GUI:CreateSlider(parent, L["Glow Alpha"], 0.1, 1, 0.05, db, "absorbBarOvershieldAlpha", nil, function() DF:UpdateAllFrames() end, true), 55, 1)
+            absorbOvershieldAlpha.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
+            absorbOvershieldAlpha.disableOn = function(d) return not d.absorbBarShowOvershield end
+
+            local absorbOvershieldReverse = add(GUI:CreateCheckbox(parent, L["Reverse Position"], db, "absorbBarOvershieldReverse", function() DF:UpdateAllFrames() end), 25, 1)
+            absorbOvershieldReverse.hideOn = function(d) return d.absorbBarMode ~= "ATTACHED" end
+            absorbOvershieldReverse.disableOn = function(d) return not d.absorbBarShowOvershield end
+            absorbOvershieldReverse.tooltip = L["Moves the glow to the opposite side (no HP side instead of max HP side)."]
+
+            -- Floating mode settings (column 2)
+            local floatingHeader = add(GUI:CreateHeader(parent, L["Floating Bar Position"]), 45, 2)
+            floatingHeader.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local orientDropdown = add(GUI:CreateDropdown(parent, L["Orientation"], orientOptions, db, "absorbBarOrientation", function() DF:UpdateAllFrames() end), 55, 1)
+            orientDropdown.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local revFill = add(GUI:CreateCheckbox(parent, L["Reverse Fill"], db, "absorbBarReverse", function() DF:UpdateAllFrames() end), 25, 2)
+            revFill.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local widthSlider = add(GUI:CreateSlider(parent, L["Width"], 10, 200, 1, db, "absorbBarWidth", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
+            widthSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local heightSlider = add(GUI:CreateSlider(parent, L["Height"], 1, 30, 1, db, "absorbBarHeight", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
+            heightSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local anchorDropdown = add(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "absorbBarAnchor", function() DF:UpdateAllFrames() end), 55, 1)
+            anchorDropdown.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local xSlider = add(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "absorbBarX", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
+            xSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local ySlider = add(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "absorbBarY", nil, function() DF:LightweightUpdateAbsorbBar() end, true), 55, 1)
+            ySlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local bgColorPicker = add(GUI:CreateColorPicker(parent, L["Background Color"], db, "absorbBarBackgroundColor", true, nil, function() DF:LightweightUpdateAbsorbBarColor() end, true), 35, 2)
+            bgColorPicker.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+
+            local levelSlider = add(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "absorbBarFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("absorb") end, true)), 55, 1)
+            levelSlider.hideOn = function(d) return d.absorbBarMode ~= "FLOATING" end
+        end
+
+        -- The group's own apply, named once so the footer's Reset Group and
+        -- Hold: Defaults run exactly what the twenty controls run between them:
+        -- the full update most of them drive, the two lightweight absorb passes
+        -- (geometry and colour) and the frame-level ladder pass.
+        --
+        -- ⚠ ONE KEY THE ENGINE CANNOT ANSWER FOR: absorbBarOvershieldColor ships
+        -- as nil, so it is absent from PartyDefaults. The claim still names it --
+        -- the map is what lets a search hit on "Glow Color" open this panel -- and
+        -- the tick and the footer pass over it in silence, exactly as the Resource
+        -- Colors row's ten power swatches are passed over.
+        local function ApplyAbsorbShield()
+            DF:UpdateAllFrames()
+            DF:LightweightUpdateAbsorbBar()
+            DF:LightweightUpdateAbsorbBarColor()
+            DF:LightweightUpdateFrameLevel("absorb")
+        end
+
+        -- The display mode in the dropdown's own words, then the texture's name
+        -- through the addon's own resolver -- the Health Bar Background row's
+        -- shape. The mode goes first because it is the one pick that changes what
+        -- the other twenty controls are FOR.
+        local function AbsorbShieldSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = modeOptions[d.absorbBarMode]
+            if mode then parts[#parts + 1] = mode end
+            local name = TextureName(d.absorbBarTexture)
+            if name then parts[#parts + 1] = name end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        if classicLayout then
+            -- Straight onto the page, in the columns and at the heights it always
+            -- used: `add` IS AddToSection here, so this arm is the old code path
+            -- with the call renamed.
+            BuildAbsorbShieldGroup({
+                add = AddToSection,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+        else
+            -- Twenty-one: the mode pick, the texture, the swatch, the blend pick,
+            -- the overlay reverse, the clamp pick, the overshield tick and its four
+            -- detail controls, the floating header and the nine floating controls
+            -- under it. Most of them are hidden for most modes -- the count is what
+            -- the pane HOLDS, not what happens to be on show (the Health Bar Color
+            -- row's rule), and the header counts because the count is what the pane
+            -- MOUNTS (the Resource Colors row's, which counts its blurb and its
+            -- button the same way).
+            local ABSORB_SHIELD_COUNT = 21
+
+            local absorbMount, absorbContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildAbsorbShieldGroup({
+                    -- The column is DROPPED, not ignored by accident: a pane is one
+                    -- track, and the second column only ever existed to keep this
+                    -- pile off the page's left edge.
+                    add = function(w, h) return group:AddWidget(w, h) end,
+                    parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local absorbRow = absorbBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Absorb Shield"],
+                db      = tools.RowDB,
+                summary = AbsorbShieldSummary,
+                count   = ABSORB_SHIELD_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = absorbMount,
+            }))
+            tools.ClaimKeys(absorbRow, absorbContent)
+            tools.WireModifiedTick(absorbRow)
+            tools.WireFooter(absorbRow, ApplyAbsorbShield)
+
+            AddToSection(absorbBand, nil, "both")
+        end
+
+        currentSection = nil
+        AddSpace(GUI.Space.section, "both")
+
+        -- ===== HEAL ABSORB SECTION =====
+        local healAbsorbSection = Add(GUI:CreateCollapsibleSection(self.child, L["Heal Absorb"], true), 36, "both")
+        currentSection = healAbsorbSection
+
+        -- ===== HEAL ABSORB (fifteen loose widgets in classic, the Heal Absorb
+        -- band's only row) =====
+        --
+        -- ⚠ THE BLURB TRAVELS WITH THE CONTROLS. It says what a heal absorb IS,
+        -- which is the one thing a user opening this pane may not know, so it rides
+        -- into the pane as the group's first widget rather than being stranded on
+        -- the page under the row (the Class Colors row's blurb, same move).
+        local function BuildHealAbsorbGroup(tools2)
+            local add, parent = tools2.add, tools2.parent
+
+            add(GUI:CreateLabel(parent, L["Shows effects that reduce incoming healing (like Necrotic stacks)."], 260), 25, 1)
+
+            add(GUI:CreateDropdown(parent, L["Display Mode"], healModeOptions, db, "healAbsorbBarMode", function()
+                tools2.refreshStates()
+                DF:UpdateAllFrames()
+            end), 55, 1)
+
+            local healTextureOptions = DF:GetTextureList()
+            -- Add stripe textures if not already present
+            local healStripeTextures = {
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft"]= "DF Stripes Soft",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft_Wide"]= "DF Stripes Soft Wide",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes"]= "DF Stripes",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Sparse"]= "DF Stripes Sparse",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium"]= "DF Stripes Medium",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense"]= "DF Stripes Dense",
+                ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense"]= "DF Stripes Very Dense",
+            }
+            for path, name in pairs(healStripeTextures) do
+                if not healTextureOptions[path] then
+                    healTextureOptions[path] = name
+                end
+            end
+            add(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healAbsorbBarTexture", function() DF:UpdateAllFrames() end, healTextureOptions), 55, 1)
+
+            add(GUI:CreateColorPicker(parent, L["Bar Color"], db, "healAbsorbBarColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 1)
+
+            local healBlendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
+            add(GUI:CreateDropdown(parent, L["Blend Mode"], healBlendOptions, db, "healAbsorbBarBlendMode", function() DF:UpdateAllFrames() end), 55, 1)
+
+            local healOverlayRev = add(GUI:CreateCheckbox(parent, L["Reverse Overlay Fill"], db, "healAbsorbBarOverlayReverse", function() DF:UpdateAllFrames() end), 25, 1)
+            healOverlayRev.hideOn = function(d) return d.healAbsorbBarMode ~= "OVERLAY" end
+
+            -- Heal Absorb Floating mode settings (column 2)
+            local healFloatingHeader = add(GUI:CreateHeader(parent, L["Floating Bar Position"]), 45, 2)
+            healFloatingHeader.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healOrientDropdown = add(GUI:CreateDropdown(parent, L["Orientation"], orientOptions, db, "healAbsorbBarOrientation", function() DF:UpdateAllFrames() end), 55, 1)
+            healOrientDropdown.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healRevFill = add(GUI:CreateCheckbox(parent, L["Reverse Fill"], db, "healAbsorbBarReverse", function() DF:UpdateAllFrames() end), 25, 2)
+            healRevFill.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healWidthSlider = add(GUI:CreateSlider(parent, L["Width"], 10, 200, 1, db, "healAbsorbBarWidth", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
+            healWidthSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healHeightSlider = add(GUI:CreateSlider(parent, L["Height"], 1, 30, 1, db, "healAbsorbBarHeight", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
+            healHeightSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healAnchorDropdown = add(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "healAbsorbBarAnchor", function() DF:UpdateAllFrames() end), 55, 1)
+            healAnchorDropdown.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healXSlider = add(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "healAbsorbBarX", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
+            healXSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healYSlider = add(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "healAbsorbBarY", nil, function() DF:LightweightUpdateHealAbsorbBar() end, true), 55, 1)
+            healYSlider.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+
+            local healBgColorPicker = add(GUI:CreateColorPicker(parent, L["Background Color"], db, "healAbsorbBarBackgroundColor", true, nil, function() DF:LightweightUpdateHealAbsorbBarColor() end, true), 35, 2)
+            healBgColorPicker.hideOn = function(d) return d.healAbsorbBarMode ~= "FLOATING" end
+        end
+
+        -- The group's own apply: the full update most of its controls drive, plus
+        -- the two lightweight heal-absorb passes its sliders and swatches drive.
+        -- There is no frame-level pass here because this bar has no frame-level
+        -- slider -- it never had one.
+        local function ApplyHealAbsorb()
+            DF:UpdateAllFrames()
+            DF:LightweightUpdateHealAbsorbBar()
+            DF:LightweightUpdateHealAbsorbBarColor()
+        end
+
+        -- The same two words the shield's row prints, out of this bar's own mode
+        -- table: two rows in one page reading the same shape is the point.
+        local function HealAbsorbSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = healModeOptions[d.healAbsorbBarMode]
+            if mode then parts[#parts + 1] = mode end
+            local name = TextureName(d.healAbsorbBarTexture)
+            if name then parts[#parts + 1] = name end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        if classicLayout then
+            BuildHealAbsorbGroup({
+                add = AddToSection,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+        else
+            -- Fifteen: the blurb, the mode pick, the texture, the swatch, the blend
+            -- pick, the overlay reverse, the floating header and the eight floating
+            -- controls under it.
+            local HEAL_ABSORB_COUNT = 15
+
+            local healMount, healContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealAbsorbGroup({
+                    add = function(w, h) return group:AddWidget(w, h) end,
+                    parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local healAbsorbRow = healAbsorbBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Heal Absorb"],
+                db      = tools.RowDB,
+                summary = HealAbsorbSummary,
+                count   = HEAL_ABSORB_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = healMount,
+            }))
+            tools.ClaimKeys(healAbsorbRow, healContent)
+            tools.WireModifiedTick(healAbsorbRow)
+            tools.WireFooter(healAbsorbRow, ApplyHealAbsorb)
+
+            AddToSection(healAbsorbBand, nil, "both")
+        end
+
         currentSection = nil
     end)
     
