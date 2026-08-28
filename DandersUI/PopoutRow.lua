@@ -179,13 +179,18 @@ end
 -- ============================================================
 -- THE ACCENT, AND THE PANES THAT ARE NOT LOOKING
 -- ------------------------------------------------------------
--- ☠ THE MOUNT IS WHERE THE SESSION PILES UP. A pane is built once per (instance,
--- row) and then KEPT -- an unpinned panel is pooled rather than destroyed on
--- close, so the mount's children are every group the user has opened on every
--- page since login. The shell's accent cascade used to walk that whole pile on
--- every open, twice: measured at 226 ApplyThemeColor calls and 292 frame nodes
--- for one open on a 14-row page, growing with every row ever visited. That is
--- the open-and-close stutter.
+-- ☠ THE PANE CACHE IS WHERE THE SESSION PILES UP. A pane is built once per
+-- (instance, row) and then KEPT -- an unpinned panel is pooled rather than
+-- destroyed on close, so the cache holds every group the user has opened on
+-- every page since login. The shell's accent cascade used to walk that whole
+-- pile on every open, twice: measured at 226 ApplyThemeColor calls and 292 frame
+-- nodes for one open on a 14-row page, growing with every row ever visited. That
+-- is the open-and-close stutter.
+--
+-- ⚠ THE PILE IS NO LONGER UNDER THE MOUNT. That was the OTHER half of the same
+-- stutter and it took a second pass to find, because it costs nothing a Lua
+-- counter can see -- see THE PANE DOCK below. The cache still holds every pane;
+-- the MOUNT holds only the one on screen.
 --
 -- Only ONE of those panes is on screen. So the mount takes the cascade over
 -- (Popout.lua's dfCascadeInto) and paints the ACTIVE one, remembering the colour
@@ -213,6 +218,89 @@ local function cascadeActivePane(po, c)
     rec.tR, rec.tG, rec.tB, rec.tA = c.r, c.g, c.b, a
 end
 
+-- ============================================================
+-- THE PANE DOCK -- where a pane lives while it is NOT the one on screen.
+-- ------------------------------------------------------------
+-- ☠ THE SECOND ACCUMULATOR, and it is not Lua. The accent cascade was the first
+-- (see the block above) and stopping it made a re-open flat IN CALL COUNTS --
+-- measured here: walk, tint and frame-creation per re-open are identical after
+-- one page and after eight. Danders still had the stutter, still growing: "it
+-- gets worse the more popups I open, even when opening, switching tabs and
+-- opening more."
+--
+-- What was still growing is the MOUNT'S CHILD LIST. A pane is built once per
+-- (instance, row) and then KEPT, and every one of them stayed parented under
+-- `_rowMount` -- inside `content`, inside the popout frame. That frame is
+-- Show()n on every open and Hide()n on every close, and the ENGINE walks the
+-- whole subtree for visibility on each. So an open cost one pane's worth of
+-- engine work on the first row of the session and N panes' worth after N rows
+-- had been visited, with nothing in Lua to show for it.
+--
+-- This is the SAME disease the settings window itself had, and it is worth
+-- quoting the fix that cured it (DandersFrames_Options/GUI/Panel.lua, THE PAGE
+-- DOCK): every built page used to stay parented to `content`, shown or not, and
+-- that made opening the window take EIGHT SECONDS -- "the cost is the ENGINE
+-- walking that hidden subtree for visibility, not Lua we run". Reparenting the
+-- non-current pages away dropped the same Show from 7774ms to 90ms.
+--
+-- So a pane that is not the active one lives HERE instead: a detached,
+-- permanently hidden frame with NO PARENT AT ALL, outside the popout's tree
+-- entirely. The popout's subtree therefore holds EXACTLY ONE pane at any
+-- moment, whatever the session has built.
+--
+-- ⚠ PARKED, NOT DISCARDED -- the same distinction Panel.lua draws between its
+-- dock and its trash. The pane keeps its widgets, its gate roster, its accent
+-- stamp and its measured height; it is expected back, and coming back is a
+-- reparent rather than a rebuild. Nothing is built twice, which is the whole
+-- reason the pane cache exists (WoW never frees a frame, so reuse is the only
+-- economy there is).
+--
+-- ⚠ PER INSTANCE, not one dock for the library. A pinned panel has its own
+-- mount and its own active pane, and a shared dock would be library state that
+-- two consumers -- or two suites -- write into each other's. It also means the
+-- dock is created with whatever CreateFrame this file captured, which is what a
+-- headless run needs.
+--
+-- ⚠ A PARKED PANE KEEPS ITS ANCHORS to the mount (Panel.lua's dock relies on
+-- exactly this for the same reason): it still measures at its real size, so
+-- swapTo's re-measure and syncRowPaneHeight read the same numbers they always
+-- did. The anchors are re-asserted on adopt anyway rather than trusted to have
+-- survived the round trip -- again as AdoptPage does.
+--
+-- ⚠ WHAT MOVES IS rec.mounted, NOT rec.pane. Normally that is exactly one frame
+-- and it is rec.host. The scroll-wrapped case is why it is a LIST: SetScrollChild
+-- re-parents the pane INTO the scroll frame, so only the scroll frame hangs off
+-- the mount and parking it takes the pane along -- but that wrap is GUARDED (a
+-- surface with no scroll API gets an uncapped pane rather than an error), and on
+-- THAT path the pane is still a child of the mount and has to be parked with it
+-- or it is left behind in the very tree the dock exists to empty. Settled once,
+-- at build, by asking who the mount's children actually are -- see paneFor.
+-- ============================================================
+
+-- Out of the popout's tree. Idempotent, and cheap enough to call on every swap.
+local function parkPane(po, rec)
+    if not rec or rec.parked then return end
+    local dock = po._rowDock
+    if not dock or not rec.mounted then return end
+    for _, f in ipairs(rec.mounted) do f:SetParent(dock) end
+    rec.parked = true
+end
+
+-- ...and back into it, anchors re-asserted rather than trusted to have survived
+-- the round trip -- the same care Panel.lua's AdoptPage takes, and for the same
+-- reason: the height the swap re-measures is read off these anchors.
+local function adoptPane(po, rec)
+    if not rec or not rec.parked then return end
+    local mount = po._rowMount
+    if not mount or not rec.mounted then return end
+    for _, f in ipairs(rec.mounted) do
+        f:SetParent(mount)
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", mount, "TOPLEFT", 0, 0)
+    end
+    rec.parked = nil
+end
+
 -- The shell's build, run ONCE PER INSTANCE: a bare container and an empty pane
 -- cache. Everything a ROW puts in the popout is mounted into this later, by
 -- paneFor, so that the instance can outlive any one row's content.
@@ -222,6 +310,11 @@ local function mountBare(po, content)
     mount:SetWidth(po.width or UI.PopoutContentWidth)
     mount:SetHeight(1)
     po._rowMount = mount
+    -- The dock the panes that are not on screen live in -- see THE PANE DOCK.
+    -- Parentless and hidden, so nothing the engine walks can reach it.
+    local dock = CreateFrame("Frame")
+    dock:Hide()
+    po._rowDock = dock
     po._rowPanes = {}
     po._rowActive = nil
     -- The cascade stops here and this answers for everything under it -- see the
@@ -487,6 +580,17 @@ local function paneFor(po, row)
         rec.host, rec.h, rec.scroll = sf, cap, sf
     end
 
+    -- WHAT ACTUALLY HANGS OFF THE MOUNT, settled once, here -- the set the dock
+    -- parks and adopts as a unit. See THE PANE DOCK for why this is a list and
+    -- not simply rec.host: SetScrollChild is guarded, and where it did not take,
+    -- the pane is still the mount's child and must travel with the scroll frame.
+    local mounted = { rec.host }
+    if rec.pane ~= rec.host and type(rec.pane.GetParent) == "function"
+       and rec.pane:GetParent() == po._rowMount then
+        mounted[#mounted + 1] = rec.pane
+    end
+    rec.mounted = mounted
+
     rec.host:Hide()
     panes[row] = rec
     -- PRE-GREYED ON ARRIVAL. Opening the popout of a row that is already off has
@@ -564,7 +668,16 @@ local function swapTo(po, row)
     -- been toggled from somewhere else while this instance was showing a
     -- different row, and a hidden pane takes no refresh of its own.
     syncGate(po, row, rec)
-    if prev and prev ~= rec then prev.host:Hide() end
+    -- THE PANE THAT IS LEAVING GOES OUT OF THE TREE, not merely out of sight --
+    -- see THE PANE DOCK. Hidden-but-parented is exactly the state that made an
+    -- open cost more the more rows the session had visited.
+    if prev and prev ~= rec then
+        prev.host:Hide()
+        parkPane(po, prev)
+    end
+    -- ...and the one arriving comes back in. A no-op on the pane just built,
+    -- which has never been parked.
+    adoptPane(po, rec)
     rec.pane:Show()
     rec.host:Show()
     po._rowActive = rec

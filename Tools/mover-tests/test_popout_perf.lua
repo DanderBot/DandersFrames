@@ -149,7 +149,28 @@ CreateFrame = function(kind, _, parent)
     f._children = {}
     f._parent = parent
     f.GetParent = function(self) return self._parent end
-    f.SetParent = function(self, p) self._parent = p end
+    -- ☠ REPARENTING MOVES THE CHILD, and this stub has to model that or section 7
+    -- below measures nothing. A SetParent that only rewrites `_parent` leaves the
+    -- frame in its old parent's child list, so the subtree count -- the whole
+    -- point of that section -- reads the same before and after the fix and the
+    -- assertions pass either way.
+    f.SetParent = function(self, p)
+        local old = rawget(self, "_parent")
+        if type(old) == "table" then
+            local kids = rawget(old, "_children")
+            if kids then
+                for i = #kids, 1, -1 do
+                    if kids[i] == self then table.remove(kids, i) end
+                end
+            end
+        end
+        self._parent = p
+        if type(p) == "table" then
+            local kids = rawget(p, "_children")
+            if not kids then kids = {}; p._children = kids end
+            kids[#kids + 1] = self
+        end
+    end
     f.GetNumChildren = function(self) return #self._children end
     -- THE MEASUREMENT. One call per node the accent cascade descends into, which
     -- is the walk this whole file is about.
@@ -586,6 +607,204 @@ do
 
     host._perfActive = nil
     host.perf = nil
+end
+
+-- ============================================================
+-- 7. THE PANE THAT IS NOT ON SCREEN IS NOT IN THE TREE
+-- ------------------------------------------------------------
+-- THE SECOND ACCUMULATOR, and the one the counters above are blind to. Sections
+-- 1-6 pinned the LUA cost of an open flat, and it stayed flat -- but Danders
+-- still had the stutter, still growing: "it gets worse the more popups I open,
+-- even when opening, switching tabs and opening more."
+--
+-- Pages are PARKED, not rebuilt (Panel.lua's GUI:ParkPage), so a tab switch does
+-- not make new rows -- it gives the user MORE DISTINCT ROWS to open, and every
+-- one of them left a pane parented under `_rowMount` forever. That mount is
+-- inside the popout frame, which is Show()n on every open and Hide()n on every
+-- close, and the ENGINE walks the whole subtree for visibility on each. Nothing
+-- in Lua to count; the cost is entirely in the client.
+--
+-- The settings window had this exact disease and Panel.lua's THE PAGE DOCK
+-- records the cure and the numbers: every built page parented to `content`,
+-- shown or not, made GUIFrame:Show() take 7774ms -- "the cost is the ENGINE
+-- walking that hidden subtree for visibility, not Lua we run" -- and reparenting
+-- the non-current pages away dropped the same Show to 90ms.
+--
+-- Measured here, on 10 rows a page over 8 pages, as frames under the popout's
+-- own frame:
+--
+--     after 1 page   105        after 5 pages   505
+--     after 2 pages  205        after 8 pages   805   <- and it never comes down
+--
+-- With the pane dock: 15, flat, at every one of them.
+--
+-- Stated as an EQUALITY between a small page and a large one, the same
+-- discipline section 1 uses and for the same reason: what was wrong is the SHAPE
+-- of the cost, and a remembered constant would go stale the first time the shell
+-- grew a frame.
+-- ============================================================
+print("-- popout perf: a pane that is not showing is out of the popout's tree")
+
+-- Every frame under `f`, which is what the engine walks on each Show()/Hide().
+local function subtree(f)
+    local n = 0
+    for _, k in ipairs(rawget(f, "_children") or {}) do n = n + 1 + subtree(k) end
+    return n
+end
+
+local function mountedCount(po)
+    return #(rawget(po._rowMount, "_children") or {})
+end
+
+local function cachedCount(po)
+    local n = 0
+    for _ in pairs(po._rowPanes or {}) do n = n + 1 end
+    return n
+end
+
+do
+    local small = page(2, "dockSmall")
+    visitAll(small)
+    local smallTree = subtree(small[1].popout.frame)
+
+    local big = page(12, "dockBig")
+    visitAll(big)
+    local bigPo = big[1].popout
+    local bigTree = subtree(bigPo.frame)
+
+    eq(bigTree, smallTree,
+       "dock: a panel that has built 12 panes is the same size of tree as one that built 2")
+    eq(mountedCount(bigPo), 1,
+       "dock: ...because exactly one pane is mounted, whatever has been built")
+    -- The absolute number matters too, or "equal" could be satisfied by both
+    -- being enormous: one pane here is a group of 8 controls.
+    check(bigTree < WIDGETS * 2,
+          "dock: ...and the tree is one pane's worth, not twelve")
+
+    -- ...and the saving did NOT come from throwing the panes away. That is the
+    -- whole difference between a dock and a bin.
+    eq(cachedCount(bigPo), 12, "dock: every pane built is still cached")
+    for _, rec in pairs(bigPo._rowPanes) do
+        check(rec.host:GetParent() == bigPo._rowDock or rec == bigPo._rowActive,
+              "dock: a pane that is not active is parked in the dock")
+    end
+    big[1]:ClosePopout()
+    small[1]:ClosePopout()
+end
+
+print("-- popout perf: a parked pane comes back whole, not rebuilt")
+do
+    local builds = 0
+    local win = window()
+    local rows = {}
+    for i = 1, 3 do
+        local row = host:CreatePopoutRow(FakeUIFrame(), {
+            label = "Back " .. i, db = { on = true }, toggle = { key = "on" },
+            count = WIDGETS, window = win, popoutKey = "dockBack",
+            build = function(po, pane) builds = builds + 1; groupPane()(po, pane) end,
+        })
+        row:SetSize(260, M.slot)
+        row:SetFakeCenter(CX - 100, CY + (i * 8))
+        row:Show()
+        rows[i] = row
+    end
+    rows[1]:OpenPopout()
+    local po = rows[1].popout
+    local rec = po._rowPanes[rows[1]]
+    local widget = rec.kids[1]
+
+    rows[2]:OpenPopout()
+    eq(rec.parked, true, "back: swapping away parks the pane it left")
+    eq(rec.host:GetParent(), po._rowDock, "back: ...out of the popout's tree entirely")
+    check(subtree(po.frame) < WIDGETS * 2, "back: ...so the tree holds one pane, not two")
+
+    rows[1]:OpenPopout()
+    eq(builds, 2, "back: swapping back does NOT rebuild the pane -- three opens, two builds")
+    eq(rec.parked, nil, "back: it is adopted rather than rebuilt")
+    eq(rec.host:GetParent(), po._rowMount, "back: ...back under the mount")
+    check(rec.host:IsShown(), "back: ...and shown")
+    eq(rec.kids[1], widget, "back: with the very same widgets it was built with")
+    -- The anchors are re-asserted on adopt rather than trusted to the round trip,
+    -- which is what keeps the re-measure below honest.
+    eq(po.content:GetHeight(), 60, "back: and the panel is the height the pane measures")
+    rows[1]:ClosePopout()
+end
+
+print("-- popout perf: a pinned panel keeps its own pane and its own dock")
+do
+    local win = window()
+    local rows = {}
+    for i = 1, 2 do
+        local row = host:CreatePopoutRow(FakeUIFrame(), {
+            label = "Pin " .. i, db = { on = true }, toggle = { key = "on" },
+            count = WIDGETS, build = groupPane(), window = win, popoutKey = "dockPin",
+        })
+        row:SetSize(260, M.slot)
+        row:SetFakeCenter(CX - 100, CY + (i * 8))
+        row:Show()
+        rows[i] = row
+    end
+    rows[1]:OpenPopout()
+    local pinned = rows[1].popout
+    pinned:Pin(true)
+    local pinnedRec = pinned._rowPanes[rows[1]]
+
+    -- A fresh instance takes over the key; the pinned one keeps what it had.
+    rows[2]:OpenPopout()
+    local shared = rows[2].popout
+    check(shared ~= pinned, "pinned: the next row gets a new instance")
+    eq(pinnedRec.parked, nil, "pinned: the pinned panel's pane is NOT parked by it")
+    eq(pinnedRec.host:GetParent(), pinned._rowMount, "pinned: it stays under its own mount")
+    check(pinnedRec.host:IsShown(), "pinned: and stays on screen")
+    check(pinned._rowDock ~= shared._rowDock, "pinned: the two instances dock separately")
+    host:CloseAllPopoutRows("test")
+end
+
+print("-- popout perf: a scroll-wrapped pane parks by its scroll region")
+do
+    local win = window()
+    local rows = {}
+    for i = 1, 2 do
+        local row = host:CreatePopoutRow(FakeUIFrame(), {
+            label = "Tall " .. i, db = { on = true }, toggle = { key = "on" },
+            window = win, popoutKey = "dockTall",
+            -- Over the 60% cap (648 on the shim's 1080), so paneFor wraps it.
+            build = function(_, pane) pane:SetHeight(2000) end,
+        })
+        row:SetSize(260, M.slot)
+        row:SetFakeCenter(CX - 100, CY + (i * 8))
+        row:Show()
+        rows[i] = row
+    end
+    rows[1]:OpenPopout()
+    local po = rows[1].popout
+    local rec = po._rowPanes[rows[1]]
+    check(rec.scroll ~= nil, "scroll: the tall pane got a scroll region")
+
+    rows[2]:OpenPopout()
+    eq(rec.host, rec.scroll, "scroll: the scroll frame is what hangs off the mount")
+    eq(rec.host:GetParent(), po._rowDock, "scroll: ...and it is the thing that parks")
+    -- ☠ THE WHOLE RECORD LEAVES, and this is the claim that holds in both worlds.
+    -- In game SetScrollChild re-parents the pane into the scroll frame, so moving
+    -- the scroll frame takes it along; where that guarded call did NOT take, the
+    -- pane is still the mount's child and rec.mounted carries it too. Either way
+    -- nothing of a parked record may be left under the mount.
+    for _, f in ipairs(rec.mounted) do
+        eq(f:GetParent(), po._rowDock, "scroll: nothing of the record is left in the tree")
+    end
+    -- ...and the mount holds EXACTLY the active record's set and nothing else.
+    -- Counted against that set rather than against 1: in game the scroll wrap
+    -- re-parents the pane away and the answer is 1, but under a stub whose
+    -- SetScrollChild is a no-op the active record legitimately keeps two frames
+    -- there. What must be true in both is that the OTHER record contributes none.
+    eq(mountedCount(po), #po._rowActive.mounted,
+       "scroll: the mount holds only the row that is showing")
+
+    rows[1]:OpenPopout()
+    eq(rec.host:GetParent(), po._rowMount, "scroll: and the scroll region comes back")
+    eq(po.content:GetHeight(), UIParent:GetHeight() * 0.6,
+       "scroll: still measured at the cap, not at the pane's full height")
+    rows[1]:ClosePopout()
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
