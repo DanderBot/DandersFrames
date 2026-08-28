@@ -103,53 +103,208 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Initial update
         UpdateCombatBanner()
         
-        -- ===== SORTING OPTIONS GROUP (Column 1) =====
-        local sortOptionsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        sortOptionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame Sorting"]), 40)
-        sortOptionsGroup:AddWidget(GUI:CreateLabel(self.child, L["Sort party members by role, class, and name.\n\nSort order: Self Position > Role > Class > Name"], 250), 60)
-        
-        local raidSortNote = sortOptionsGroup:AddWidget(GUI:CreateLabel(self.child, L["Raid: Group layout sorts within each group.\nFlat grid layout sorts all players together."], 250), 35)
-        raidSortNote.hideOn = function() return GUI.SelectedMode ~= "raid" end
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: five 280 boxes in two columns.
+        -- POPOUT turns the three MULTI-CONTROL groups into feature rows -- Unit
+        -- Frame Sorting, Role Priority, Class Priority -- and leaves the two
+        -- single-option groups inline wearing the band skin, because a row whose
+        -- pane holds one dropdown is a click that buys nothing.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)`
+        -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
+        -- it always built, which is what makes "classic is unchanged" structural
+        -- rather than a promise -- test_sorting_page_builders.lua pins the
+        -- inventory of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
 
-        local sortEnable = sortOptionsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Custom Sorting"], db, "sortEnabled", function()
-            TriggerSortForCurrentMode()
-            UpdateCombatBanner()
-            self:RefreshStates()
-        end), 30)
-        sortEnable.keepEnabled = true
-        sortOptionsGroup.disableChildrenOn = DisableSortOptions
+        -- ===== THE PAGE'S TWO BANDS =======================================
+        -- Full-width chromeless containers: a feature row's popout docks outside
+        -- the WINDOW and runs a beam back to the row, so a row that stopped 280px
+        -- in would leave that beam crossing half the page.
+        --
+        -- The sorting band is ONE row whose own label already says "Unit Frame
+        -- Sorting", so it carries no header. The priority band is TWO rows and
+        -- gets one: a header names the SECTION, and "Priority" is the word both
+        -- rows share.
+        local sortBand, priorityBand
+        if tools then
+            sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            priorityBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            priorityBand:AddWidget(GUI:CreateHeader(self.child, L["Priority"]), 40)
+        end
 
-        local sortMeleeRanged = sortOptionsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Separate Melee & Ranged DPS"], db, "sortSeparateMeleeRanged", function()
-            TriggerSortForCurrentMode()
-            if roleOrderWidget and roleOrderWidget.Refresh then roleOrderWidget.Refresh() end
-            UpdateCombatBanner()
-        end), 30)
-        sortMeleeRanged.hideOn = HideSortOptions
-        
-        local sortByClass = sortOptionsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Sort by Class (within role)"], db, "sortByClass", function()
-            TriggerSortForCurrentMode()
-            self:RefreshStates()
-            UpdateCombatBanner()
-        end), 30)
-        sortByClass.hideOn = HideSortOptions
-        
-        local sortAlphaValues = {
-            [false] = L["Off"],
-            ["AZ"] = L["A to Z"],
-            ["ZA"] = L["Z to A"],
-            _order = {false, "AZ", "ZA"},
-        }
-        local sortAlpha = sortOptionsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Alphabetical (within class/role)"], sortAlphaValues, db, "sortAlphabetical", function()
-            TriggerSortForCurrentMode()
-            UpdateCombatBanner()
-        end), 55)
-        sortAlpha.hideOn = HideSortOptions
-        
-        Add(sortOptionsGroup, nil, 1)
+        -- ===== UNIT FRAME SORTING (a 280 box in classic, the sorting band's row)
+        -- Verbatim, taking the group and parent it should build into: same
+        -- factories, same L keys, same db keys, same slot heights, same hideOns.
+        --
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
+        -- own children while custom sorting is off; the pane has to do the same,
+        -- and one builder serving both is what stops the two drifting.
+        local function BuildSortOptionsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["Sort party members by role, class, and name.\n\nSort order: Self Position > Role > Class > Name"], 250), 60)
+
+            local raidSortNote = group:AddWidget(GUI:CreateLabel(parent, L["Raid: Group layout sorts within each group.\nFlat grid layout sorts all players together."], 250), 35)
+            raidSortNote.hideOn = function() return GUI.SelectedMode ~= "raid" end
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local sortEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Custom Sorting"], db, "sortEnabled", function()
+                    TriggerSortForCurrentMode()
+                    UpdateCombatBanner()
+                    self:RefreshStates()
+                end), 30)
+                sortEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = DisableSortOptions
+
+            local sortMeleeRanged = group:AddWidget(GUI:CreateCheckbox(parent, L["Separate Melee & Ranged DPS"], db, "sortSeparateMeleeRanged", function()
+                TriggerSortForCurrentMode()
+                -- The role list's SHAPE depends on this key -- four roles or
+                -- three -- so it has to be told. `roleOrderWidget` is whichever
+                -- instance the Role Priority builder made last (see its note);
+                -- `reflowValues` is the popout layout's own belt, repainting the
+                -- list in every mounted pane including a pinned second one.
+                if roleOrderWidget and roleOrderWidget.Refresh then roleOrderWidget.Refresh() end
+                if tools2.reflowValues then tools2.reflowValues() end
+                UpdateCombatBanner()
+                if tools2.refreshStates then tools2.refreshStates() end
+            end), 30)
+            sortMeleeRanged.hideOn = HideSortOptions
+
+            local sortByClass = group:AddWidget(GUI:CreateCheckbox(parent, L["Sort by Class (within role)"], db, "sortByClass", function()
+                TriggerSortForCurrentMode()
+                if tools2.refreshStates then tools2.refreshStates() end
+                UpdateCombatBanner()
+            end), 30)
+            sortByClass.hideOn = HideSortOptions
+
+            local sortAlphaValues = {
+                [false] = L["Off"],
+                ["AZ"] = L["A to Z"],
+                ["ZA"] = L["Z to A"],
+                _order = {false, "AZ", "ZA"},
+            }
+            local sortAlpha = group:AddWidget(GUI:CreateDropdown(parent, L["Alphabetical (within class/role)"], sortAlphaValues, db, "sortAlphabetical", function()
+                TriggerSortForCurrentMode()
+                UpdateCombatBanner()
+                if tools2.refreshStates then tools2.refreshStates() end
+            end), 55)
+            sortAlpha.hideOn = HideSortOptions
+        end
+
+        if classicLayout then
+            local sortOptionsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            sortOptionsGroup:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame Sorting"]), 40)
+            BuildSortOptionsGroup({
+                group = sortOptionsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(sortOptionsGroup, nil, 1)
+        else
+            -- The summary, per the page convention: at most four items, a fixed
+            -- order, "\194\183" between them, WORDS localised and numbers raw,
+            -- every read guarded because a profile mid-migration may be missing
+            -- any of these keys.
+            --
+            -- It reads as the group's own blurb does -- "Self Position > Role >
+            -- Class > Name" -- with the levels that are actually switched on.
+            -- L["Role"] is unconditional because role order is what this sorts by
+            -- whatever else is off, so a default profile still says something.
+            --
+            -- ⚠ THE MELEE/RANGED SPLIT IS DELIBERATELY NOT HERE. It refines the
+            -- Role entry rather than adding a level to the list, and there is no
+            -- short word for it in the locale -- the checkbox's own label is a
+            -- sentence. A summary is not worth inventing a string for.
+            local function SortOptionsSummary(d)
+                if not d then return "" end
+                local parts = { L["Role"] }
+                if d.sortByClass then parts[#parts + 1] = L["Class"] end
+                local alpha = d.sortAlphabetical
+                if alpha == "AZ" then parts[#parts + 1] = L["A to Z"]
+                elseif alpha == "ZA" then parts[#parts + 1] = L["Z to A"] end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Five: two blurbs and three controls. The enable tick is HOISTED
+            -- onto the row, so it is not one of them.
+            local SORT_OPTIONS_COUNT = 5
+
+            -- The group's own apply, named once so the footer's Reset and Hold do
+            -- exactly what the controls' own callbacks do.
+            local function ApplySortOptions()
+                TriggerSortForCurrentMode()
+                UpdateCombatBanner()
+            end
+
+            -- ☠ NOT GUI:RefreshCurrentPage, which is what the classic checkbox
+            -- ends with. A rebuild retires every widget on the page including the
+            -- row being clicked, and the row's write path calls row.Refresh()
+            -- after this returns -- on a dead frame. The rebuild was only ever
+            -- re-running the hideOn and disableOn passes, and RefreshStates does
+            -- both without destroying anything.
+            local function OnSortEnabledToggle()
+                ApplySortOptions()
+                -- The rows: this one's summary and off-state, and the two
+                -- priority rows, which grey on the same key.
+                self:RefreshStates()
+                -- ...and the panes, because the group gate greys the sort
+                -- controls from inside the pane too.
+                tools.ReflowMounted()
+            end
+
+            local sortMount, sortContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildSortOptionsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    reflowValues = function() tools.ReflowMounted(true) end,
+                    hoistToggle = true,
+                })
+            end)
+            local sortRow = sortBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Unit Frame Sorting"],
+                db       = tools.RowDB,
+                toggle   = { key = "sortEnabled" },
+                summary  = SortOptionsSummary,
+                count    = SORT_OPTIONS_COUNT,
+                onToggle = OnSortEnabledToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = sortMount,
+            }))
+            tools.ClaimKeys(sortRow, sortContent)
+            tools.WireModifiedTick(sortRow)
+            tools.WireFooter(sortRow, ApplySortOptions)
+            tools.RegisterHoistedToggle(sortRow, L["Enable Custom Sorting"], "sortEnabled", OnSortEnabledToggle)
+
+            -- ⚠ NO hideOn ON THIS ROW, and that mirrors classic exactly: the box
+            -- had none either, only its children did (HideSortOptions). Under a
+            -- FrameSort takeover the enable checkbox stayed visible while the
+            -- options around it vanished, and the row keeps that -- its pane's
+            -- own hideOns empty it out, and the row itself stays where the user
+            -- last saw it.
+            --
+            -- The band is added here rather than at the foot: Add's "both" is a
+            -- sync point, so a band dropped in below the two column-1 boxes would
+            -- leave a hole beside them. Above them there is no flow to unbalance.
+            Add(sortBand, nil, "both")
+        end
 
         -- ===== FRAMESORT INTEGRATION GROUP (Column 1) =====
+        -- STAYS INLINE in both layouts: one checkbox and a blurb, which is not a
+        -- click's worth of contents. It wears the band skin in the popout layout
+        -- so it does not read as a second visual language beside the rows -- the
+        -- opts table is nil in classic, which is what "no opts" already meant.
         if FrameSortApi then
-            local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)
+            local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
             frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
             frameSortGroup:AddWidget(GUI:CreateLabel(self.child, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
             frameSortGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use FrameSort Addon"], db, "useFrameSort", function()
@@ -171,7 +326,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== SELF POSITION GROUP (Column 1) =====
-        local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280)
+        -- STAYS INLINE, for the reason FrameSort Integration does: one dropdown
+        -- behind a click is a click that buys nothing. Band skin in the popout
+        -- layout, nil opts in classic. Its group-level hideOn and
+        -- disableChildrenOn are unchanged in both.
+        local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
         selfPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Self Position"]), 40)
         
         local selfPosValues = {
@@ -189,34 +348,147 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         selfPosGroup.disableChildrenOn = DisableSortOptions
         Add(selfPosGroup, nil, 1)
         
-        -- ===== ROLE PRIORITY GROUP (Column 2) =====
-        local rolePriorityGroup = GUI:CreateSettingsGroup(self.child, 280)
-        rolePriorityGroup:AddWidget(GUI:CreateHeader(self.child, L["Role Priority"]), 40)
-        rolePriorityGroup:AddWidget(GUI:CreateLabel(self.child, L["Drag to reorder. Top = first."], 250), 25)
-        
-        roleOrderWidget = GUI:CreateRoleOrderList(self.child, db, "sortRoleOrder", function()
-            TriggerSortForCurrentMode()
-        end, "sortSeparateMeleeRanged")
-        rolePriorityGroup:AddWidget(roleOrderWidget, 135)
-        rolePriorityGroup.hideOn = HideSortOptions
-        rolePriorityGroup.disableChildrenOn = DisableSortOptions
-        Add(rolePriorityGroup, nil, 2)
-        
-        -- ===== CLASS PRIORITY GROUP (Column 2) =====
-        local classPriorityGroup = GUI:CreateSettingsGroup(self.child, 280)
-        classPriorityGroup:AddWidget(GUI:CreateHeader(self.child, L["Class Priority"]), 40)
-        classPriorityGroup:AddWidget(GUI:CreateLabel(self.child, L["Drag to reorder. Top = first."], 250), 25)
-        
-        local classOrderWidget = GUI:CreateClassOrderList(self.child, db, "sortClassOrder", function()
-            TriggerSortForCurrentMode()
-        end)
-        classPriorityGroup:AddWidget(classOrderWidget, 320)
-        -- Hide under FrameSort takeover or when not sorting by class (variant
-        -- gates); grey out when custom sorting is disabled (enable gate).
-        classPriorityGroup.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end
-        classPriorityGroup.disableChildrenOn = DisableSortOptions
-        Add(classPriorityGroup, nil, 2)
-        
+        -- ===== ROLE PRIORITY (a 280 box in classic, a priority-band row) =====
+        -- ☠ THE WIDGET REFERENCE IS REBOUND ON EVERY BUILD, NOT CAPTURED ONCE.
+        -- `roleOrderWidget` is read by the Separate Melee & Ranged callback,
+        -- which has to repaint whichever role list the user can actually see --
+        -- and the popout shell runs a row's build ONCE PER INSTANCE, so pinning
+        -- one panel and reopening the row makes a second list. The upvalue is
+        -- assigned INSIDE the builder so it always names the newest instance;
+        -- the callback's `reflowValues` half then covers the older ones, which is
+        -- what the drag lists' refreshValue opt-in was added for.
+        local function BuildRolePriorityGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["Drag to reorder. Top = first."], 250), 25)
+
+            roleOrderWidget = GUI:CreateRoleOrderList(parent, db, "sortRoleOrder", function()
+                TriggerSortForCurrentMode()
+            end, "sortSeparateMeleeRanged")
+            group:AddWidget(roleOrderWidget, 135)
+            group.disableChildrenOn = DisableSortOptions
+        end
+
+        -- ===== CLASS PRIORITY (a 280 box in classic, a priority-band row) =====
+        local function BuildClassPriorityGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["Drag to reorder. Top = first."], 250), 25)
+
+            local classOrderWidget = GUI:CreateClassOrderList(parent, db, "sortClassOrder", function()
+                TriggerSortForCurrentMode()
+            end)
+            group:AddWidget(classOrderWidget, 320)
+            group.disableChildrenOn = DisableSortOptions
+        end
+
+        if classicLayout then
+            local rolePriorityGroup = GUI:CreateSettingsGroup(self.child, 280)
+            rolePriorityGroup:AddWidget(GUI:CreateHeader(self.child, L["Role Priority"]), 40)
+            BuildRolePriorityGroup({
+                group = rolePriorityGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            rolePriorityGroup.hideOn = HideSortOptions
+            Add(rolePriorityGroup, nil, 2)
+
+            local classPriorityGroup = GUI:CreateSettingsGroup(self.child, 280)
+            classPriorityGroup:AddWidget(GUI:CreateHeader(self.child, L["Class Priority"]), 40)
+            BuildClassPriorityGroup({
+                group = classPriorityGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            -- Hide under FrameSort takeover or when not sorting by class (variant
+            -- gates); grey out when custom sorting is disabled (enable gate).
+            classPriorityGroup.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end
+            Add(classPriorityGroup, nil, 2)
+        else
+            -- The summaries: the top of each list, which is the one thing a drag
+            -- order says in a line. Guarded reads, and NO invented words -- the
+            -- role names are the locale's own and the class names are the
+            -- client's, exactly as the two lists draw them. An order the page
+            -- cannot read yields "", and the kit still shows label and count.
+            --
+            -- ⚠ THE ROLE WORD FOLLOWS THE SPLIT. With Separate Melee & Ranged
+            -- off, the list folds MELEE and RANGED back into one DPS entry, so a
+            -- summary reading the raw stored token would name a role the user
+            -- cannot see in the list below it.
+            local function RoleWord(role, separate)
+                if role == "TANK" then return L["Tank"] end
+                if role == "HEALER" then return L["Healer"] end
+                if not separate then return L["DPS"] end
+                if role == "MELEE" then return L["Melee DPS"] end
+                if role == "RANGED" then return L["Ranged DPS"] end
+                return L["DPS"]
+            end
+
+            local function RolePrioritySummary(d)
+                if not d then return "" end
+                local order = d.sortRoleOrder
+                local top = type(order) == "table" and order[1] or nil
+                if type(top) ~= "string" then return "" end
+                return RoleWord(top, d.sortSeparateMeleeRanged) or ""
+            end
+
+            local function ClassPrioritySummary(d)
+                if not d then return "" end
+                local order = d.sortClassOrder
+                local top = type(order) == "table" and order[1] or nil
+                if type(top) ~= "string" then return "" end
+                local names = LOCALIZED_CLASS_NAMES_MALE
+                return (names and names[top]) or ""
+            end
+
+            -- Two apiece: the blurb and the drag list.
+            local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = 2, 2
+
+            -- Both lists write one TABLE key, and both rows carry Reset Group and
+            -- Hold: Defaults -- which is exactly the write the list itself did not
+            -- make. The lists answer the group-wide value sweep now
+            -- (Controls.lua, container.refreshValue), so the reset repaints them.
+            local roleMount, roleContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildRolePriorityGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local roleRow = priorityBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Role Priority"],
+                db      = tools.RowDB,
+                summary = RolePrioritySummary,
+                count   = ROLE_PRIORITY_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = roleMount,
+            }))
+            tools.ClaimKeys(roleRow, roleContent)
+            tools.WireModifiedTick(roleRow)
+            tools.WireFooter(roleRow, TriggerSortForCurrentMode)
+            -- The box's own two gates, on the row: HIDDEN under a FrameSort
+            -- takeover, GREYED while custom sorting is off. The pane keeps the
+            -- grey as well (the builder's disableChildrenOn), so an open panel
+            -- looks the way the row does.
+            roleRow.hideOn = HideSortOptions
+            roleRow.disableOn = DisableSortOptions
+
+            local classMount, classContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildClassPriorityGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local classRow = priorityBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Class Priority"],
+                db      = tools.RowDB,
+                summary = ClassPrioritySummary,
+                count   = CLASS_PRIORITY_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = classMount,
+            }))
+            tools.ClaimKeys(classRow, classContent)
+            tools.WireModifiedTick(classRow)
+            tools.WireFooter(classRow, TriggerSortForCurrentMode)
+            classRow.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end
+            classRow.disableOn = DisableSortOptions
+
+            Add(priorityBand, nil, "both")
+        end
+
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
