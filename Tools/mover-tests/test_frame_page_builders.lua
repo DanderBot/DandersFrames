@@ -74,7 +74,15 @@ local function census(body)
     for n, at in ipairs(starts) do
         local stop = starts[n + 1] and (starts[n + 1].s - 1) or #flat
         local chunk = flat:sub(at.s, stop)
-        local label = chunk:match('L%["([^"]+)"%]') or "(none)"
+        -- ☠ THE LABEL IS THE CALL'S SECOND ARGUMENT, not "the first L[...] in the
+        -- chunk". The looser reading held only while every widget was followed by
+        -- its own tooltip; the sweep put option TABLES between calls, and a
+        -- `{ CENTER = L["Center"] }` declared after one control and used by the
+        -- next made that control report "Center" as its name. Anchored to the
+        -- call, so a control labelled from a VARIABLE (the two flat-grid controls
+        -- whose names swap with the growth direction) honestly reads "(none)"
+        -- rather than borrowing a word from the line below it.
+        local label = chunk:match('GUI:Create%a+%(%s*[%w_%.]+%s*,%s*L%["([^"]+)"%]') or "(none)"
         local key   = chunk:match('%f[%w]db,%s*"([%w_]+)"') or "(none)"
         local h     = tonumber(chunk:match('%)%s*,%s*(%d+)%s*%)'))
         out[#out + 1] = { kind = at.kind, label = label, key = key, height = h }
@@ -257,290 +265,583 @@ do
 end
 
 -- ============================================================
--- 3. THE PAGE ORDER -- primaries first, then the bands
--- Appearance sat ABOVE Frame Size while it was the page's only band, and for a
--- real reason: layoutCol "both" is a SYNC POINT (LayoutPage drops both columns
--- to the lower of the two), so a band added into the middle of an unbalanced
--- flow leaves a hole beside whatever was above it. Hoisting it to the top made
--- that sync free, because both columns were still at zero.
+-- 3. THE PAGE IS ROWS -- WHERE THE THREE BANDS ARE ADDED
 --
--- With the page now mostly bands, the answer is the other end instead: a band
--- added AFTER every column box syncs where the flow was ending anyway, which
--- is what a sync point is for -- and the page reads primaries-then-features
--- rather than opening on a band.
+-- Danders: "make the whole frame page using popouts -- I want to see the
+-- difference." So every group on this page is a feature row now, in one of three
+-- full-width bands, and the popout layout adds nothing else at all.
 --
--- ☠ AND THE COLUMNS ARE NOW EMPTY IN THE POPOUT LAYOUT. Every stay-inline box
--- spans "both" as well (see section 4 -- uniform width was the point), so the
--- page's own column engine has nothing left in a numbered column. That is safe
--- by construction rather than by luck: a run of "both" widgets is a run of sync
--- points over two columns that are already equal, which is a plain single
--- stack. The hole the old hoist existed to prevent needs an UNBALANCED flow,
--- and there is no longer a flow to unbalance.
+-- ☠ THAT SUSPENDS THE PRIMARIES-STAY RULE, deliberately and for this page only.
+-- Frame Size and Layout Direction are what a new user opens the page for, and
+-- normally a primary does not go behind a click. They are rows here so the
+-- comparison is honest -- a page that kept two boxes at the top would be
+-- answering a softer question -- and the revert is one tag away because the
+-- classic layout is byte-identical either way, which is what section 4 pins.
+--
+-- The ORDER note that used to live here is still true and no longer applies:
+-- layoutCol "both" is a sync point (LayoutPage drops both columns to the lower of
+-- the two), so a band added into the middle of an UNBALANCED two-column flow
+-- leaves a hole beside whatever was above it. There is no flow left to unbalance
+-- -- a run of "both" widgets over two equal columns is a plain single stack -- so
+-- the order below is purely reading order.
 --
 -- ⚠ WHAT THIS TEST CAN AND CANNOT SEE. Add() order IS page order (LayoutPage
--- walks self.children), so the source order of the Add calls is the claim. It
--- is not a geometry test: the page cannot be built headlessly, so the widths
--- are on the in-game checklist.
+-- walks self.children), so the source order of the Add calls is the claim. It is
+-- not a geometry test: the page cannot be built headlessly, so the widths are on
+-- the in-game checklist.
 -- ============================================================
-do
-    -- Every Add on the Frame page, in source order, with what it was given.
-    -- Scoped to the page: the builder runs from the Frame page's own copy
-    -- button to the See Also bar at its foot.
+
+-- The Frame page's own source, from its copy button to the See Also bar at its
+-- foot. Scoped because `sizeGroup`, `layoutGroup` and `appearanceGroup` are the
+-- house names for those boxes and OTHER pages in this same file use them.
+local function framePage()
     local a = SRC:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
     local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
-    check(a ~= nil and b ~= nil and b > a, "order: the Frame page builder is locatable by its own ends")
-    local page = SRC:sub(a or 1, b or 1)
+    check(a ~= nil and b ~= nil and b > a, "the Frame page builder is locatable by its own ends")
+    return SRC:sub(a or 1, b or 1)
+end
 
-    -- ⚠ The column argument is no longer always a literal: the stay-inline boxes
-    -- pass INLINE_COL_1 / INLINE_COL_2, which ARE the literal in classic and
-    -- "both" in the popout layout (asserted below). So the capture has to accept
-    -- an identifier as well as a number or a quoted word.
+-- The ten groups that became rows or were already rows, with the row LABEL each
+-- one wears in the popout layout and the classic box variable it keeps. Named in
+-- band order, which is also source order.
+--
+-- ⚠ Raid Layout Mode carries a toggle and NO count; every other converted group
+-- is toggle-less with a count. Both facts are per-row claims, checked in
+-- section 4 -- this list is only the roster.
+local LAYOUT_ROWS = {
+    { "sizeGroup",        "Frame Size"            },
+    { "layoutGroup",      "Layout Direction"      },
+    { "raidModeGroup",    "Raid Layout Mode"      },
+    { "groupLayoutGroup", "Group Layout Settings" },
+    { "groupVisGroup",    "Group Visibility"      },
+    { "groupOrderGroup",  "Group Display Order"   },
+    { "flatGridGroup",    "Flat Grid Settings"    },
+}
+
+do
+    local page = framePage()
+
     local adds = {}
     for name, col in page:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"_]+)%)") do
         adds[#adds + 1] = { name = name, col = col }
     end
-    check(#adds >= 8, "order: the page's Add calls are readable (" .. #adds .. " found)")
+    check(#adds >= 10, "order: the page's Add calls are readable (" .. #adds .. " found)")
 
-    -- ⚠ BY NAME AND COLUMN. `appearanceGroup` is added TWICE in the source --
-    -- once as the classic 280 box into column 2, once as the band -- and they
-    -- are two different layouts, never both live. The column tells them apart.
     local function indexOf(name, col)
         for i, e in ipairs(adds) do
             if e.name == name and (col == nil or e.col == col) then return i end
         end
     end
 
-    -- The two bands are added at the END, in the layout-order block, and the
-    -- Appearance band is no longer the page's first widget.
-    local bandA, bandB = indexOf("appearanceGroup", '"both"'), indexOf("permMoverBand")
-    check(bandA ~= nil, "order: the Appearance container is added")
-    check(bandB ~= nil, "order: ...and so is the Permanent Mover band")
-    eq(adds[bandA] and adds[bandA].col, '"both"', "order: the Appearance band spans both columns")
-    eq(adds[bandB] and adds[bandB].col, '"both"', "order: ...and so does the mover band")
+    -- ---- the three bands, in reading order, at the foot ---------------
+    local bandL = indexOf("layoutBand", '"both"')
+    local bandA = indexOf("appearanceGroup", '"both"')
+    local bandM = indexOf("permMoverBand", '"both"')
+    check(bandL ~= nil, "order: the Layout band is added")
+    check(bandA ~= nil, "order: ...and the Appearance band")
+    check(bandM ~= nil, "order: ...and the Permanent Mover band")
+    check(bandL and bandA and bandL < bandA, "order: Layout comes before Appearance")
+    check(bandA and bandM and bandA < bandM, "order: ...and Appearance before the mover")
 
-    -- ---- the two shared column names, and what they resolve to -------
-    -- One place decides where a stay-inline box is added, gated on the layout,
-    -- for the same reason INLINE_BOX is one name: a per-site literal is the one
-    -- that gets missed.
-    check(SRC:find('local INLINE_COL_1 = classicLayout and 1 or "both"', 1, true) ~= nil,
-          "order: column 1 is the classic column, or the full width in the new layout")
-    check(SRC:find('local INLINE_COL_2 = classicLayout and 2 or "both"', 1, true) ~= nil,
-          "order: ...and so is column 2")
+    -- ...and they are the LAST three, which is the whole of "the popout layout
+    -- adds nothing else": everything before them is inside a classicLayout arm.
+    local n = #adds
+    check(bandL == n - 2 and bandA == n - 1 and bandM == n,
+          "order: the three bands are the last three Adds on the page")
 
-    -- ☠ NOTHING IS LEFT IN A NUMBERED COLUMN IN THE POPOUT LAYOUT. Every
-    -- remaining numeric Add on the page is inside a `classicLayout` arm -- the
-    -- three boxes that layout keeps (Appearance, Frame Fade, Permanent Mover).
-    -- Stated as the rule so a new group added at `1` fails here rather than
-    -- shipping as the one narrow box on a page of full-width plates.
+    -- The Add trio is guarded, so the classic layout adds none of them.
+    check(SRC:find("if not classicLayout then\n            Add(layoutBand, nil, \"both\")", 1, true) ~= nil,
+          "order: the bands are added only in the popout layout")
+
+    -- ☠ NOTHING IS LEFT IN A NUMBERED COLUMN IN THE POPOUT LAYOUT, and after this
+    -- sweep that is a stronger claim than it was: EVERY numbered Add on the page
+    -- belongs to a box the classic branch builds. Stated as a roster rather than a
+    -- count so a new group added at column 1 outside a classicLayout arm fails
+    -- here rather than shipping as the one narrow box on a page of plates.
     local CLASSIC_ONLY = {
         appearanceGroup = true, frameFadeGroup = true, permMoverGroup = true,
     }
+    for _, e in ipairs(LAYOUT_ROWS) do CLASSIC_ONLY[e[1]] = true end
     for _, e in ipairs(adds) do
         if e.col == "1" or e.col == "2" then
             check(CLASSIC_ONLY[e.name] == true,
                   "order: " .. e.name .. " is added at a numbered column, so it must be classic-only")
         end
     end
-    -- ...and the stay-inline boxes go through the shared names, never a literal.
-    local shared = 0
-    for _, e in ipairs(adds) do
-        if e.col == "INLINE_COL_1" or e.col == "INLINE_COL_2" then shared = shared + 1 end
+
+    -- ...and every one of the ten IS added at a numbered column, which is what
+    -- says the classic page still has all of them.
+    for _, e in ipairs(LAYOUT_ROWS) do
+        check(indexOf(e[1], "1") ~= nil or indexOf(e[1], "2") ~= nil,
+              "order: " .. e[1] .. " is still added as a classic box")
     end
-    eq(shared, 7, "order: all seven stay-inline boxes are added through the shared column names")
 
-    -- The bands are still added AFTER every stay-inline box, which is what keeps
-    -- the page reading primaries-then-features in either layout.
-    local lastInline = 0
-    for i, e in ipairs(adds) do
-        if e.col == "INLINE_COL_1" or e.col == "INLINE_COL_2" then lastInline = i end
-    end
-    check(lastInline > 0, "order: the page still has stay-inline boxes")
-    check(bandA > lastInline, "order: the Appearance band is added after every stay-inline box")
-    check(bandB > lastInline, "order: ...and so is the mover band")
-
-    -- Primaries first, and by name: Frame Size then Layout Direction, both
-    -- before anything that is a band.
-    local size, layout = indexOf("sizeGroup"), indexOf("layoutGroup")
-    check(size ~= nil and layout ~= nil, "order: both primary boxes are added")
-    check(size < layout, "order: Frame Size comes before Layout Direction")
-    check(layout < bandA, "order: ...and both come before the first band")
-
-    -- And the Add pair is guarded, so the classic layout adds neither band.
-    check(SRC:find("if not classicLayout then\n            Add(appearanceGroup, nil, \"both\")", 1, true) ~= nil,
-          "order: the bands are added only in the popout layout")
-end
-
--- ============================================================
--- 4. ONE VISUAL LANGUAGE -- THE STAY-INLINE BOXES WEAR THE BAND SKIN
---
--- The conversion left the page speaking two languages at once: the converted
--- sections are an accent header above a stack of fat row plates, the survivors
--- are the classic dense box with its title inside a faint white rectangle.
--- Danders: "Layout Direction does not match the Appearance settings."
---
--- opts.bandStyle (DandersUI/Sections.lua, covered headlessly in
--- test_sections_group) is the survivors' half. What is pinned HERE is the page's
--- side of it, which is only three claims and all three are source-level:
---   ✓ the opt-in is declared ONCE, gated on the layout, and passed by name
---   ✓ every stay-inline box on this page passes it -- an eighth box added later
---     without it is the exact drift this section exists to catch
---   ✓ the CLASSIC branch passes nothing, so it builds the box it always did
--- ============================================================
-do
-    -- ---- the opt-in, declared once and gated ------------------------
-    check(SRC:find("local INLINE_BOX = (not classicLayout) and { bandStyle = true } or nil", 1, true) ~= nil,
-          "band skin: the page declares the opt-in once, gated on the layout")
-
-    -- ☠ AND NOWHERE ELSE. A per-site literal is what gets missed on the eighth
-    -- box; one shared name is what makes "every stay-inline box" checkable at
-    -- all. Exactly one occurrence of the literal, and it is the declaration.
-    local literals = 0
-    for _ in SRC:gmatch("bandStyle%s*=%s*true") do literals = literals + 1 end
-    eq(literals, 1, "band skin: the flag is written once, not copied to each call site")
-
-    -- ---- every stay-inline box on the Frame page --------------------
-    -- The full census of boxes that did NOT become bands: the two primaries and
-    -- the five raid boxes, each with the opt table it is built with. Named
-    -- rather than counted, so a rename fails here instead of quietly reducing
-    -- the count -- and the OPT is named too, because which boxes take the
-    -- two-track interior is a per-box judgement (see section 5) and a box that
-    -- silently changed shape is exactly the drift this list exists to catch.
-    local STAY_INLINE = {
-        { "sizeGroup",        "INLINE_GRID" },  -- Frame Size: five sliders
-        { "layoutGroup",      "INLINE_GRID" },  -- Layout Direction: two dropdowns
-        { "raidModeGroup",    "INLINE_BOX"  },  -- Raid Layout Mode: a tick and a blurb
-        { "groupLayoutGroup", "INLINE_GRID" },  -- Group Layout Settings
-        { "groupVisGroup",    "INLINE_GRID" },  -- Group Visibility: eight ticks
-        { "groupOrderGroup",  "INLINE_BOX"  },  -- Group Display Order: the drag list
-        { "flatGridGroup",    "INLINE_GRID" },  -- Flat Grid Settings
+    -- ---- the classic column assignments, unchanged -------------------
+    -- The one thing this pass was not allowed to move. Group Display Order is
+    -- column 2 and everything else in the layout chain is column 1, exactly as
+    -- before -- which is also why the BAND's row order is the page's old source
+    -- order rather than a tidied one (Group Layout and Flat Grid would read
+    -- better adjacent, and moving one past Group Visibility would have moved its
+    -- classic Add with it).
+    local CLASSIC_COL = {
+        sizeGroup = "1", layoutGroup = "1", raidModeGroup = "1",
+        groupLayoutGroup = "1", groupVisGroup = "1", groupOrderGroup = "2",
+        flatGridGroup = "1", appearanceGroup = "2", frameFadeGroup = "2",
+        permMoverGroup = "2",
     }
-    -- Scoped to the Frame page: `sizeGroup` and `layoutGroup` are also the names
-    -- of boxes on OTHER pages in this file, and those are not part of this sweep.
-    local a = SRC:find("local INLINE_BOX = (not classicLayout)", 1, true)
-    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
-    check(a ~= nil and b ~= nil and b > a, "band skin: the Frame page builder is locatable")
-    local page = SRC:sub(a or 1, b or 1)
-
-    for _, e in ipairs(STAY_INLINE) do
-        local decl = "local " .. e[1] .. " = GUI:CreateSettingsGroup(self.child, INLINE_W, " .. e[2] .. ")"
-        check(page:find(decl, 1, true) ~= nil,
-              "band skin: " .. e[1] .. " is built with the skin, at the page's width, as " .. e[2])
+    for name, col in pairs(CLASSIC_COL) do
+        check(indexOf(name, col) ~= nil,
+              "order: the classic " .. name .. " still goes to column " .. col)
     end
 
-    -- Nothing else on the page builds a 280 box WITHOUT it. This is the claim the
-    -- named list above cannot make on its own: it says the seven are opted in,
-    -- not that they are all of them.
-    local bare = 0
-    for _ in page:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    -- The three that remain are the CLASSIC branch's own boxes -- Appearance,
-    -- Frame Fade and Permanent Mover, each inside a `classicLayout` arm, and each
-    -- of which has to stay exactly as it was.
-    eq(bare, 3, "band skin: the only bare 280 boxes left are the classic branch's three")
-
-    -- ---- and the classic branch is untouched ------------------------
-    -- ☠ THE LOAD-BEARING CLAIM OF THE WHOLE SWEEP. In classic, INLINE_BOX is nil
-    -- -- which is precisely what "no opts" means to CreateSettingsGroup -- and
-    -- the classic-only boxes never mention it at all.
-    check(SRC:find("local frameFadeGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          "band skin: the classic Frame Fade box is built exactly as before")
-    check(SRC:find("local permMoverGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          "band skin: ...and so is the classic Permanent Mover box")
-    check(page:find("appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
-          "band skin: ...and the classic Appearance box")
-
-    -- ---- the bands do NOT take it -----------------------------------
-    -- A band is chromeless because its ROWS are the surface; a plate drawn round
-    -- a band would be the second panel the chromeless opt exists to avoid.
-    check(page:find("GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })", 1, true) ~= nil,
-          "band skin: the Appearance band stays chromeless")
-    check(page:find("GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })", 1, true) ~= nil,
-          "band skin: ...and so does the mover band")
+    -- ---- and the band ROW order is the source order ------------------
+    -- A row is mounted with layoutBand:AddWidget, so the order of those calls IS
+    -- the band's order. Read as positions so a reordering fails here.
+    local prev = 0
+    for _, e in ipairs(LAYOUT_ROWS) do
+        local at = page:find('label   = L["' .. e[2] .. '"]', 1, true)
+                or page:find('label    = L["' .. e[2] .. '"]', 1, true)
+        check(at ~= nil, "band order: the " .. e[2] .. " row is declared")
+        check(at == nil or at > prev, "band order: ...after the row above it")
+        prev = at or prev
+    end
 end
 
 -- ============================================================
--- 5. ONE WIDTH -- THE STAY-INLINE BOXES SPAN THE PAGE TOO
+-- 4. THE SEVEN CONVERSIONS
 --
--- The skin made the survivors LOOK like the bands and left them 280 wide beside
--- a band running to the corridor. Danders: "there is still an issue with their
--- width -- Appearance spans the whole width, the others do not."
+-- One builder per group, mounted TWICE -- into the classic box and into the
+-- popout pane -- which is what makes "classic is identical to main" a structural
+-- fact rather than a promise. Each is checked the way Frame Fade and Permanent
+-- Mover are above: the widget census it had inline, the declared count against
+-- what the builder mounts, and the row's own declarations.
+-- ============================================================
+
+-- What every converted group on this page has in common, so the seven blocks
+-- below only have to state what is true of themselves.
+local function checkShared(builder, rowLabel, wide)
+    -- ONE builder, BOTH layouts. Three occurrences: the declaration and the two
+    -- mounts.
+    local calls = 0
+    for _ in SRC:gmatch(builder .. "%(") do calls = calls + 1 end
+    eq(calls, 3, rowLabel .. ": declared once, mounted twice -- classic box and popout pane")
+
+    -- The classic branch builds the box it always did, at the literal every other
+    -- classic-only box on this page uses.
+    local classicBox = SRC:match("local (%w+) = GUI:CreateSettingsGroup%(self%.child, 280%)\n%s*%1:AddWidget%(GUI:CreateHeader%(self%.child, L%[\"" .. rowLabel:gsub("%p", "%%%0") .. "\"%]%)")
+    check(classicBox ~= nil, rowLabel .. ": the classic 280 box is built with its own header")
+
+    -- The row is a member of the Layout band and carries the page's eager-holder
+    -- discipline: content built at page-build time, keys claimed off it, the
+    -- amber tick wired to those keys.
+    local opts = rowOpts(rowLabel)
+    check(opts ~= "" and opts:find("build", 1, true) ~= nil,
+          rowLabel .. ": the row is handed a pre-built mount")
+    check(opts:find("window   = DF.GUIFrame", 1, true) ~= nil
+       or opts:find("window  = DF.GUIFrame", 1, true) ~= nil,
+          rowLabel .. ": ...docked outside the settings window")
+    check(opts:find("clipTo", 1, true) ~= nil,
+          rowLabel .. ": ...and clipped by the page's own scroll frame, not the window")
+end
+
+-- 4.1 FRAME SIZE -- the first primary to go behind a click.
+local FRAME_SIZE = {
+    { "slider", "Frame Width",   "frameWidth",   55 },
+    { "slider", "Frame Height",  "frameHeight",  55 },
+    { "slider", "Frame Padding", "framePadding", 55 },
+    { "slider", "Frame Scale",   "frameScale",   55 },
+    { "slider", "Frame Spacing", "frameSpacing", 55 },
+}
+do
+    local body = builderBody("BuildFrameSizeGroup")
+    checkCensus(census(body), FRAME_SIZE, "frame size")
+    checkShared("BuildFrameSizeGroup", "Frame Size")
+
+    local declared = tonumber(SRC:match("local FRAME_SIZE_COUNT%s*=%s*(%d+)"))
+    check(declared ~= nil, "frame size: the page declares the row's count in one place")
+    eq(declared, #FRAME_SIZE, "frame size: ...and it is what the builder mounts")
+
+    local opts = rowOpts("Frame Size")
+    check(opts:find("toggle", 1, true) == nil,
+          "frame size: the row declares no toggle -- there is no 'am I doing anything' here")
+    check(opts:find("summary%s*=%s*FrameSizeSummary") ~= nil,
+          "frame size: ...it does declare a summary")
+    check(opts:find("count%s*=%s*FRAME_SIZE_COUNT") ~= nil,
+          "frame size: ...and the declared count, not a literal")
+
+    -- The summary prints the size with an ASCII x, for the reason the border
+    -- summary spells out L["Alpha"]: the settings font has no multiplication
+    -- sign, and the Permanent Mover row already prints its handle size this way.
+    local sum = SRC:match("local function FrameSizeSummary%(d%)(.-)local FRAME_SIZE_COUNT")
+    check(sum ~= nil, "frame size: the summary is a named function on the page")
+    if sum then
+        check(sum:find('"%%dx%%d"') ~= nil, "frame size: ...printing WxH in ASCII")
+        check(sum:find("\\195\\151", 1, true) == nil, "frame size: ...and never the multiplication sign")
+        -- The other three items appear only when they are doing something, and
+        -- "doing something" is asked of the defaults ENGINE rather than compared
+        -- against a number copied out of Config.lua.
+        check(sum:find("D:IsModified(d, key)", 1, true) ~= nil,
+              "frame size: ...and the conditional items ask the defaults engine")
+        for _, k in ipairs({ "frameScale", "framePadding", "frameSpacing" }) do
+            check(sum:find('changed("' .. k .. '")', 1, true) ~= nil,
+                  "frame size: ..." .. k .. " is conditional on being non-default")
+        end
+        -- Four items at most, which is the convention: the size plus three.
+        local items = 0
+        for _ in sum:gmatch("parts%[#parts %+ 1%]") do items = items + 1 end
+        eq(items, 4, "frame size: at most four items, per the summary convention")
+    end
+end
+
+-- 4.2 LAYOUT DIRECTION -- three dropdowns, at most two ever visible.
+local LAYOUT_DIR = {
+    { "dropdown", "Growth Direction", "growDirection", 55 },
+    { "dropdown", "Growth Direction", "growDirection", 55 },
+    { "dropdown", "Frames Grow From", "growthAnchor",  55 },
+}
+do
+    local body = builderBody("BuildLayoutDirectionGroup")
+    checkCensus(census(body), LAYOUT_DIR, "layout direction")
+    checkShared("BuildLayoutDirectionGroup", "Layout Direction")
+
+    local declared = tonumber(SRC:match("local LAYOUT_DIR_COUNT%s*=%s*(%d+)"))
+    check(declared ~= nil, "layout direction: the page declares the row's count in one place")
+    eq(declared, #LAYOUT_DIR, "layout direction: ...and it is what the builder mounts")
+
+    -- ☠ THE TWO INVERTED LABEL MAPS SURVIVED THE MOVE. This is the regression the
+    -- ☠☠ note above the dropdowns exists to prevent, and moving them into a
+    -- builder is exactly the kind of edit that would quietly unify them.
+    check(body:find('HORIZONTAL = L["Rows"], VERTICAL = L["Columns"]', 1, true) ~= nil,
+          "layout direction: the flat/party map is unchanged")
+    check(body:find('HORIZONTAL = L["Columns"], VERTICAL = L["Rows"]', 1, true) ~= nil,
+          "layout direction: ...and the grouped-raid map is still its inverse")
+
+    -- ☠ THE FOOTER MUST NOT REBUILD THE PAGE. OnGrowthDirectionChanged defers a
+    -- GUI:RefreshCurrentPage, and Hold: Defaults releases on the footer button's
+    -- own mouse-up -- a rebuild between the press and the release would retire
+    -- that button and leave the user's settings sitting at the defaults with
+    -- nothing left to restore them.
+    local apply = SRC:match("local function ApplyLayoutDirection%(%)(.-)\n            end")
+    check(apply ~= nil, "layout direction: the group's apply is a named function")
+    if apply then
+        check(apply:find("RefreshCurrentPage", 1, true) == nil,
+              "layout direction: ...and it never rebuilds the page")
+    end
+    check(SRC:find("WireFooter(dirRow, ApplyLayoutDirection)", 1, true) ~= nil,
+          "layout direction: ...which is what the footer runs")
+
+    local opts = rowOpts("Layout Direction")
+    check(opts:find("toggle", 1, true) == nil,
+          "layout direction: the row declares no toggle")
+    check(opts:find("summary%s*=%s*LayoutDirectionSummary") ~= nil,
+          "layout direction: ...it does declare a summary")
+    check(opts:find("count%s*=%s*LAYOUT_DIR_COUNT") ~= nil,
+          "layout direction: ...and the declared count, not a literal")
+
+    -- The summary reads the table it is handed, not the build-time edge words.
+    local sum = SRC:match("local function LayoutDirectionSummary%(d%)(.-)\n            end")
+    check(sum ~= nil, "layout direction: the summary is a named function on the page")
+    if sum then
+        check(sum:find("MAIN_START", 1, true) == nil and sum:find("CROSS_START", 1, true) == nil,
+              "layout direction: ...and never the build-time edge words, which go stale")
+        check(sum:find("d.raidUseGroups", 1, true) ~= nil,
+              "layout direction: ...it picks the dialect the dropdown would")
+    end
+end
+
+-- 4.3 RAID LAYOUT MODE -- the one row whose TOGGLE is the group.
+local RAID_MODE = {
+    { "checkbox", "Use Group-Based Layout", "raidUseGroups", 30 },
+    { "label",    "Enabled: Players organized by raid groups (1-8).\\nDisabled: All players in one flat grid.", "(none)", 45 },
+}
+do
+    local body = builderBody("BuildRaidModeGroup")
+    checkCensus(census(body), RAID_MODE, "raid layout mode")
+    checkShared("BuildRaidModeGroup", "Raid Layout Mode")
+
+    check(body:find("if not tools.hoistToggle then") ~= nil,
+          "raid layout mode: the checkbox is skipped when the row has hoisted it")
+
+    local opts = rowOpts("Raid Layout Mode")
+    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"raidUseGroups"%s*}') ~= nil,
+          "raid layout mode: the row's tick is the group's own key")
+    check(opts:find("offText%s*=%s*L%[\"Flat\"%]") ~= nil,
+          "raid layout mode: ...and OFF is spelled Flat, because both states are a layout")
+    check(opts:find("count", 1, true) == nil,
+          "raid layout mode: no count -- there are no controls behind this row, only a blurb")
+
+    -- ☠ NO FOOTER. Reset Group and Hold: Defaults write through the generic
+    -- engine, and raidUseGroups cannot be written that way: flipping it has to
+    -- invert growDirection at the same moment or the raid silently re-orients,
+    -- and that compensation is only correct for a deliberate toggle.
+    check(SRC:find("WireFooter(raidModeRow", 1, true) == nil,
+          "raid layout mode: the row has no footer, because its key cannot be reset generically")
+    check(SRC:find("ClaimKeys(raidModeRow", 1, true) == nil,
+          "raid layout mode: ...and claims nothing, for the same reason")
+
+    -- The hoisted toggle is re-registered with search under its own label and key.
+    check(SRC:find('RegisterHoistedToggle(raidModeRow, L["Use Group-Based Layout"], "raidUseGroups"', 1, true) ~= nil,
+          "raid layout mode: the hoisted toggle keeps its search entry")
+
+    -- ☠ THE REBUILD IS DEFERRED IN THE POPOUT LAYOUT AND IMMEDIATE IN CLASSIC.
+    -- The row's write path runs onToggle and THEN row.Refresh() on the row it
+    -- just wrote through, so a synchronous rebuild would leave that Refresh
+    -- landing on a retired frame.
+    check(SRC:find("local function OnRaidModeToggle()", 1, true) ~= nil,
+          "raid layout mode: the popout commit is a named function")
+    local commit = SRC:match("local function OnRaidModeToggle%(%)(.-)\n            end")
+    check(commit ~= nil and commit:find("C_Timer.After(0", 1, true) ~= nil,
+          "raid layout mode: ...and its page rebuild is deferred a frame")
+    check(body:find("if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end", 1, true) ~= nil,
+          "raid layout mode: ...while the classic checkbox rebuilds immediately, as it always did")
+
+    -- The apply is shared by both, so the growDirection compensation cannot end
+    -- up in one layout and not the other.
+    check(SRC:find("local function ApplyRaidUseGroups()", 1, true) ~= nil,
+          "raid layout mode: the toggle's work is named once for both layouts")
+    local apply = SRC:match("local function ApplyRaidUseGroups%(%)(.-)\n        end")
+    check(apply ~= nil and apply:find('db.growDirection = (db.growDirection == "HORIZONTAL") and "VERTICAL" or "HORIZONTAL"', 1, true) ~= nil,
+          "raid layout mode: ...including the growDirection compensation")
+
+    -- RAID ONLY, on the ROW, exactly as it was on the box.
+    check(SRC:find('raidModeRow.hideOn = function() return GUI.SelectedMode ~= "raid" end', 1, true) ~= nil,
+          "raid layout mode: the row is raid-only, the same predicate the box carried")
+end
+
+-- 4.4 GROUP LAYOUT SETTINGS -- and the two named refreshes that had to move.
+local GROUP_LAYOUT = {
+    { "label",    "(none)",              "(none)",              25 },
+    { "slider",   "Group Spacing",       "raidGroupSpacing",    55 },
+    { "slider",   "Wrap Spacing",        "raidRowColSpacing",   55 },
+    { "slider",   "Groups Before Wrap",  "raidGroupsPerRow",    55 },
+    { "dropdown", "Center Mode",         "raidGroupCenterMode", 55 },
+    { "dropdown", "Players Grow From",   "raidPlayerAnchor",    55 },
+}
+do
+    local body = builderBody("BuildGroupLayoutGroup")
+    -- ⚠ SIX, NOT SEVEN. The census reader knows the six shared FACTORIES; the
+    -- corner picker is CreateAnchorGrid and is checked by name below. It is still
+    -- a control the pane mounts, which is why the declared count is seven.
+    checkCensus(census(body), GROUP_LAYOUT, "group layout")
+    checkShared("BuildGroupLayoutGroup", "Group Layout Settings")
+    check(body:find('GUI:CreateAnchorGrid(parent, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth"', 1, true) ~= nil,
+          "group layout: the corner picker is mounted, on both its keys")
+
+    local declared = tonumber(SRC:match("local GROUP_LAYOUT_COUNT%s*=%s*(%d+)"))
+    check(declared ~= nil, "group layout: the page declares the row's count in one place")
+    eq(declared, #GROUP_LAYOUT + 1, "group layout: ...the census plus the corner picker")
+
+    -- ☠ THE TWO NAMED REFRESHES ARE INSIDE THE BUILDER NOW, and that is the whole
+    -- of the sweep-1 finding. UpdateFramesAndGates re-asks the GROUP for a state
+    -- pass and UpdatePinMainGroup re-asks the anchor GRID for a repaint; both used
+    -- to close over the page-level box, so left outside they would have gone on
+    -- refreshing the classic branch's object -- or, in the popout layout, the
+    -- eagerly built holder rather than whichever instance the user has open.
+    check(body:find("local function UpdateFramesAndGates()", 1, true) ~= nil,
+          "group layout: the gate refresh is declared inside the builder")
+    check(body:find("if group.RefreshChildStates then group:RefreshChildStates() end", 1, true) ~= nil,
+          "group layout: ...and refreshes the group it was handed, not a captured one")
+    check(body:find("groupLayoutGroup", 1, true) == nil,
+          "group layout: ...with no reference left to the page-level box")
+    check(body:find("local function UpdatePinMainGroup()", 1, true) ~= nil,
+          "group layout: the pin commit is declared inside the builder too")
+    check(body:find("if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end", 1, true) ~= nil,
+          "group layout: ...refreshing this pane's own picker")
+
+    local opts = rowOpts("Group Layout Settings")
+    check(opts:find("toggle", 1, true) == nil, "group layout: the row declares no toggle")
+    check(opts:find("count%s*=%s*GROUP_LAYOUT_COUNT") ~= nil,
+          "group layout: ...and the declared count, not a literal")
+    check(SRC:find('groupLayoutRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end', 1, true) ~= nil,
+          "group layout: the row carries the box's own raid+groups predicate")
+end
+
+-- 4.5 GROUP VISIBILITY -- eight ticks, and the only two-track pane on the page.
+local GROUP_VIS = {
+    { "label",    "Choose which groups to display.", "(none)", 25 },
+    { "checkbox", "Group",                           "(none)", 25 },
+}
+do
+    local body = builderBody("BuildGroupVisGroup")
+    -- ⚠ TWO ENTRIES FOR NINE WIDGETS: the eight ticks are ONE textual call inside
+    -- `for i = 1, 8`. The declared count below is what the pane actually mounts.
+    checkCensus(census(body), GROUP_VIS, "group visibility")
+    checkShared("BuildGroupVisGroup", "Group Visibility")
+    check(body:find("for i = 1, 8 do", 1, true) ~= nil,
+          "group visibility: the ticks are a loop over the eight groups")
+
+    local declared = tonumber(SRC:match("local GROUP_VIS_COUNT%s*=%s*(%d+)"))
+    check(declared ~= nil, "group visibility: the page declares the row's count in one place")
+    eq(declared, 9, "group visibility: ...the hint plus eight ticks")
+
+    -- The pane takes two tracks; the classic box does not, and neither does any
+    -- other pane on this page.
+    check(SRC:find("end, 2)", 1, true) ~= nil,
+          "group visibility: the pane is built with a second track")
+    check(SRC:find("groupVisHintLabel.fullRow = true", 1, true) ~= nil,
+          "group visibility: ...so the blurb takes the whole plate rather than one track")
+
+    -- ☠ THE REAL KEY IS NAMED TO ClaimKeys. The eight ticks are custom-get/set
+    -- over ONE table setting and each stamps a per-index override key the profile
+    -- does not ship, so the walk alone would leave the row with eight keys the
+    -- defaults engine cannot answer for: no amber tick, and a Reset Group that
+    -- wrote nothing while saying it had.
+    check(SRC:find('ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })', 1, true) ~= nil,
+          "group visibility: the row claims the table key its ticks stand for")
+    check(SRC:find("local function ClaimKeys(row, group, extra)", 1, true) ~= nil,
+          "group visibility: ...through the shared claimer's own extra-keys door")
+
+    check(SRC:find('groupVisRow.hideOn = function() return GUI.SelectedMode ~= "raid" end', 1, true) ~= nil,
+          "group visibility: the row is raid-only, the same predicate the box carried")
+end
+
+-- 4.6 GROUP DISPLAY ORDER -- the drag list, in a pane.
+local GROUP_ORDER = {
+    { "label",    "Drag to reorder groups. Top = first.", "(none)",               25 },
+    { "checkbox", "My Group First",                       "raidPlayerGroupFirst", 25 },
+}
+do
+    local body = builderBody("BuildGroupOrderGroup")
+    checkCensus(census(body), GROUP_ORDER, "group order")
+    checkShared("BuildGroupOrderGroup", "Group Display Order")
+    check(body:find('GUI:CreateGroupOrderList(parent, db, "raidGroupDisplayOrder"', 1, true) ~= nil,
+          "group order: the drag list is mounted into the pane's own parent")
+
+    local declared = tonumber(SRC:match("local GROUP_ORDER_COUNT%s*=%s*(%d+)"))
+    check(declared ~= nil, "group order: the page declares the row's count in one place")
+    eq(declared, #GROUP_ORDER + 1, "group order: ...the census plus the drag list")
+
+    -- ☠ THE LIST HAS TO REPAINT AFTER A WRITE IT DID NOT MAKE. It is bound to a
+    -- TABLE setting and the row wires Reset Group / Hold: Defaults, so without the
+    -- value-sweep alias a reset moved the raid and left the eight rows showing the
+    -- order the user had before it. Checked in the factory rather than the page,
+    -- which is where the gap was.
+    local controls = options_file_source("GUI/Controls.lua")
+    local list = controls:match("function GUI:CreateGroupOrderList(.-)\nend\n")
+    check(list ~= nil, "group order: the factory is locatable")
+    if list then
+        check(list:find("container.refreshValue = container.Refresh", 1, true) ~= nil,
+              "group order: ...and answers to the group-wide value sweep")
+    end
+
+    check(SRC:find('groupOrderRow.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end', 1, true) ~= nil,
+          "group order: the row carries the box's own raid+groups predicate")
+end
+
+-- 4.7 FLAT GRID SETTINGS -- the other side of raidUseGroups.
+local FLAT_GRID = {
+    { "label",    "All players in a unified grid. Sorting applies raid-wide.", "(none)",                    25 },
+    { "slider",   "(none)",              "raidPlayersPerRow",         55 },
+    { "dropdown", "Grid Alignment",      "raidFlatGrowthAnchor",      55 },
+    { "dropdown", "(none)",              "raidFlatColumnAnchor",      55 },
+    { "dropdown", "Players Grow From",   "raidFlatFrameAnchor",       55 },
+    { "slider",   "Horizontal Spacing",  "raidFlatHorizontalSpacing", 55 },
+    { "slider",   "Vertical Spacing",    "raidFlatVerticalSpacing",   55 },
+}
+do
+    local body = builderBody("BuildFlatGridGroup")
+    -- ⚠ TWO "(none)" LABELS, and they are not omissions: those two controls are
+    -- labelled from a VARIABLE that swaps with the growth direction (Players Per
+    -- Row / Per Column, Rows / Columns Grow From), so there is no L key at the
+    -- call site to read.
+    checkCensus(census(body), FLAT_GRID, "flat grid")
+    checkShared("BuildFlatGridGroup", "Flat Grid Settings")
+
+    local declared = tonumber(SRC:match("local FLAT_GRID_COUNT%s*=%s*(%d+)"))
+    check(declared ~= nil, "flat grid: the page declares the row's count in one place")
+    eq(declared, #FLAT_GRID, "flat grid: ...and it is what the builder mounts")
+
+    check(SRC:find('flatGridRow.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end', 1, true) ~= nil,
+          "flat grid: the row carries the box's own raid+flat predicate")
+
+    -- ...and the two mode rows are exact opposites, which is what keeps exactly
+    -- one of them in the band at a time.
+    check(SRC:find("or not db.raidUseGroups end", 1, true) ~= nil
+      and SRC:find("or db.raidUseGroups end", 1, true) ~= nil,
+          "flat grid: ...the inverse of the grouped row's, so the two never coexist")
+end
+
+-- ============================================================
+-- 5. ONE WIDTH, AND NOTHING LEFT INLINE
 --
--- The fix is two halves and they only work together:
---   ✓ WIDTH   -- every stay-inline box is built at the page's usable width, the
---                SAME expression the two bands are built at, and added "both"
---   ✓ DENSITY -- the boxes whose contents are pairs of compact controls flow
---                their interior across TWO tracks (opts.innerColumns, covered
---                headlessly in test_sections_group), so the extra width buys a
---                second control rather than a 400px slider
+-- The width batch gave every stay-inline box the page's usable width and a
+-- two-track interior so the extra width bought a second control. There are no
+-- stay-inline boxes any more, so the page-local INLINE_* names that batch
+-- introduced are gone with them -- what STAYS is the kit half (Sections'
+-- opts.bandStyle and opts.innerColumns), which other pages have yet to use.
 --
--- What is pinned here is the page's side: the width is asked for and not
--- guessed, it is the band's own expression, and the per-box judgement about
--- which boxes take two tracks is recorded. The geometry itself is on the
--- in-game checklist -- the page cannot be built headlessly.
+-- What is pinned here is what replaced them: three bands, all built at the same
+-- expression, and ten classic-only 280 boxes.
 -- ============================================================
 do
-    local a = SRC:find("local INLINE_BOX = (not classicLayout)", 1, true)
-    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
-    local page = SRC:sub(a or 1, b or 1)
+    local page = framePage()
 
-    -- ---- the width, declared once and DERIVED ------------------------
-    check(page:find("local INLINE_W = classicLayout and GUI.SettingsBox.group or math.max(", 1, true) ~= nil,
-          "width: the stay-inline width is declared once, gated on the layout")
-    local decls = 0
-    for _ in page:gmatch("local INLINE_W%s*=") do decls = decls + 1 end
-    eq(decls, 1, "width: ...exactly once, not per call site")
+    -- ---- the INLINE_* names are gone from this page ------------------
+    -- Named individually rather than as a prefix scan, so this reads as a list of
+    -- things that were removed rather than as a ban on the letters.
+    for _, name in ipairs({ "INLINE_BOX", "INLINE_GRID", "INLINE_W", "INLINE_COL_1", "INLINE_COL_2" }) do
+        check(page:find(name, 1, true) == nil,
+              "inline: " .. name .. " is gone -- there are no stay-inline boxes left")
+    end
+    -- ...and the SKIN is gone with them: a band's rows are the surface, so no box
+    -- on this page asks for the plate treatment any more.
+    check(page:find("bandStyle", 1, true) == nil,
+          "inline: and nothing on the page asks for the band skin, because nothing is a box in the band's company")
 
-    -- ☠ THE EQUALITY CLAIM: a box and a band are built at the SAME number. Read
-    -- as the expression rather than as a value, because there is no value to
-    -- read headlessly -- but an expression copied character for character from
-    -- the band's cannot resolve to something else.
+    -- ---- the three bands, at ONE width ------------------------------
+    -- Read as the EXPRESSION rather than as a value, because there is no value to
+    -- read headlessly -- but an expression copied character for character cannot
+    -- resolve to something else.
     local BAND_EXPR = [[math.max(
                 GUI.PageUsableWidth(GUI.PageChildWidth(
                     GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
                 GUI.SettingsBox.group)]]
-    -- The bands' own copies sit one indent level deeper than INLINE_W's, so the
-    -- comparison is made on the whitespace-collapsed text.
     local function flat(s) return (s:gsub("%s+", " ")) end
     local wanted = flat(BAND_EXPR)
     local seen = 0
     for chunk in page:gmatch("math%.max%([^;]-GUI%.SettingsBox%.group%)") do
         if flat(chunk) == wanted then seen = seen + 1 end
     end
-    -- Three: the Appearance band's bandW, the mover band's moverBandW, and
-    -- INLINE_W. Any one of them drifting is the page going back to two widths.
-    eq(seen, 3, "width: the boxes and both bands ask for the width the same way")
-
-    -- ...and it is the width the LAYOUT PASS will hand out, not a literal: the
-    -- helper is the one PageRefreshStates stretches a \"both\" widget to.
+    -- Three: the Layout band's layoutBandW, the Appearance band's bandW and the
+    -- mover band's moverBandW. Any one of them drifting is the page going back to
+    -- two widths.
+    --
+    -- ⚠ THREE COPIES OF ONE EXPRESSION IS NOT THE END STATE. One shared name
+    -- would be better and is a clean follow-up; it is not taken here because
+    -- test_border_builders pins the Appearance band's own local by name, and the
+    -- border sweep's test is not this pass's to edit.
+    eq(seen, 3, "width: all three bands ask for the width the same way")
     check(page:find("GUI.PageUsableWidth(GUI.PageChildWidth(", 1, true) ~= nil,
           "width: ...through the page's own helper, so it cannot drift from the layout pass")
 
-    -- ---- the two-track opt, DERIVED from the one-track one -----------
-    -- Section 4 pins that `bandStyle = true` is written exactly once. That stays
-    -- true only because INLINE_GRID takes the flag off INLINE_BOX rather than
-    -- restating it -- which is also what stops the two tables disagreeing about
-    -- the skin.
-    check(page:find("local INLINE_GRID = INLINE_BOX", 1, true) ~= nil,
-          "grid: the two-track opt is derived from the one-track opt")
-    check(page:find("and { bandStyle = INLINE_BOX.bandStyle, innerColumns = 2 }", 1, true) ~= nil,
-          "grid: ...taking the skin off it rather than restating the flag")
-    local cols = 0
-    for _ in page:gmatch("innerColumns%s*=%s*2") do cols = cols + 1 end
-    eq(cols, 1, "grid: the track count is written once, not copied to each call site")
-
-    -- ---- and the blurbs opt OUT of the grid ---------------------------
-    -- A wrapping hint describes the whole box, not the control beside it, and
-    -- half a plate is where a one-line hint becomes a three-line one. The three
-    -- boxes that are BOTH two-track AND carry a blurb each mark theirs.
-    local FULL_ROW = {
-        "groupLayoutHintLabel",  -- Group Layout Settings
-        "groupVisHintLabel",     -- Group Visibility
-        "flatGridHintLabel",     -- Flat Grid Settings
-    }
-    for _, name in ipairs(FULL_ROW) do
-        check(page:find(name .. ".fullRow = true", 1, true) ~= nil,
-              "grid: " .. name .. " spans the plate rather than one track")
+    -- Each band is chromeless, because its ROWS are the surface.
+    for _, w in ipairs({ "layoutBandW", "bandW", "moverBandW" }) do
+        check(page:find("GUI:CreateSettingsGroup(self.child, " .. w .. ", { chromeless = true })", 1, true) ~= nil,
+              "width: the " .. w .. " band is chromeless")
     end
+
+    -- The Layout band carries a HEADER and the mover band does not, and both are
+    -- the same rule: a header names a SECTION, and a band of one row whose label
+    -- already says the words does not need one said twice.
+    check(page:find('layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)', 1, true) ~= nil,
+          "width: the Layout band names itself above its rows")
+    check(page:find("permMoverBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
+          "width: ...and the one-row mover band still does not")
+
+    -- ---- the classic boxes, all ten of them -------------------------
+    local bare = 0
+    for _ in page:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
+    eq(bare, 10, "width: ten bare 280 boxes -- the seven converted here plus the sweep's three")
+
+    -- ---- the interior grid is per ROW, not per page -----------------
+    -- PopoutContent takes the track count as an argument and passes it straight
+    -- to the group, so a pane of sliders stays one track while the pane of eight
+    -- one-word checkboxes takes two.
+    check(page:find("local function PopoutContent(buildInto, innerColumns)", 1, true) ~= nil,
+          "grid: the pane's track count is a per-row argument")
+    check(page:find("innerColumns = innerColumns }", 1, true) ~= nil,
+          "grid: ...handed to the group rather than restated")
     local marks = 0
     for _ in page:gmatch("%.fullRow%s*=%s*true") do marks = marks + 1 end
-    eq(marks, #FULL_ROW, "grid: ...and those are the only opt-outs on the page")
+    eq(marks, 1, "grid: exactly one blurb opts out of a track, in the one two-track pane")
 end
