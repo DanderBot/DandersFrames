@@ -357,12 +357,21 @@ local function BuildDirectDebuffFilters(db, claimed)
                                   candidateFilters = cfFor(true, extra),
                                   style = importantStyle }
     end
-    -- Subtract whichever important records were declared. Returns a FRESH table each
-    -- call because cfFor mutates and returns the table it is handed.
+    -- Subtract whichever important records were declared, AND whichever
+    -- categories an Aura Designer group has claimed — a claimed category has
+    -- no row record of its own to read back, so leaving it out here let a
+    -- claimed Boss/Priority debuff double-render through CC/Raid/Dispellable/
+    -- Non-Player. Fresh table each call: cfFor mutates and returns what it's
+    -- handed.
+    local excludeBoss = boss or (claimed and claimed.boss) or false
+    local excludeRole = role or (claimed and claimed.role) or false
+    local excludePriority = db.debuffFilterPriority or (claimed and claimed.priority) or false
     local function notImportant(extra)
         extra = extra or {}
-        if importantFlag then extra[importantFlag] = false end
-        if priorityDeclared then extra.isPriorityAura = false end
+        if excludeBoss and excludeRole then extra.isBossOrRoleAura = false
+        elseif excludeBoss then extra.isBossAura = false
+        elseif excludeRole then extra.isRoleAura = false end
+        if excludePriority then extra.isPriorityAura = false end
         return extra
     end
     if ccToken and not (claimed and claimed.crowdControl) then
