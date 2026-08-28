@@ -5,13 +5,14 @@ local NS = ...
 -- ------------------------------------------------------------
 -- Display > Tooltips is the widest page in the sweep so far: SEVEN groups, six
 -- of which become feature rows in two bands and one of which -- a lone checkbox
--- -- stays inline wearing the band skin.
+-- -- becomes a CONTROL ROW in a third band, the same plate carrying the setting
+-- itself instead of a way in to fifteen of them.
 --
 --   "Unit Frame" band   Frame Tooltips, Binding Tooltips (hoisted enables)
 --   "Auras" band        Buff, Debuff, Defensive Icon (hoisted enables) and
 --                       Aura Designer Tooltips (NO tick -- three independent
 --                       surfaces, so there is no single boolean to hoist)
---   inline              Resurrection Icon Tooltips
+--   headerless band     Resurrection Icon Tooltips, as a control row
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
@@ -512,44 +513,67 @@ do
 end
 
 -- ============================================================
--- 6. WHAT STAYED INLINE, AND THE PAGE'S OWN ORDER
+-- 6. THE CONTROL ROW, THE BANDS AND THE PAGE'S OWN ORDER
 -- ============================================================
-print("-- Tooltips page: the stay-inline box, the bands and the order")
+print("-- Tooltips page: the control row, the bands and the order")
 do
-    -- ---- the one single-option group ----------------------------------
-    check(PAGE:find("local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "inline: Resurrection Icon Tooltips stays inline and wears the band skin")
-    check(PAGE:find('label%s*=%s*L%["Resurrection Icon Tooltips"%]') == nil,
-          "inline: ...and gets no row -- a pane holding one checkbox is a click that buys nothing")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL. One shared table off the tools,
-    -- so classic gets nil -- which is what "no opts" already meant.
+    -- ---- the one single-option group: a CONTROL ROW in a band of its own ----
+    -- Still not a popout row -- a pane holding one checkbox is a click that buys
+    -- nothing -- but no longer a 280 box beside two full-width bands either. The
+    -- checkbox wears the row plate, in a chromeless band at the same width.
+    check(PAGE:find('label%s*=%s*L%["Resurrection Icon Tooltips"%],\n%s*kind%s*=%s*"checkbox"') ~= nil,
+          "control row: Resurrection Icon Tooltips is a checkbox control row")
+    check(PAGE:find("resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+          "control row: ...in a chromeless band at the width the layout pass will give it")
+    check(PAGE:find("resBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
+          "control row: ...mounted into that band")
+    -- ⚠ NO HEIGHT PASSED. The factory owns the slot (fixedRowHeight plus the
+    -- popout row's own preferredHeight), which is what makes a control row and a
+    -- feature row share one rhythm.
+    check(PAGE:find("})), 30)", 1, true) == nil,
+          "control row: ...with no call-site slot height, because the factory owns it")
+    -- ONE label, and it is the group's own title -- the tick beside it already
+    -- says "enable", and this is the vocabulary the rows above are named in.
+    check(PAGE:find('GUI:CreateControlRow(self.child, {\n                label = L["Resurrection Icon Tooltips"]', 1, true) ~= nil,
+          "control row: ...named with the box's own title, not the tick's caption")
+    check(PAGE:find('tools.RegisterControlRow(resRow, "checkbox", "tooltipResurrectionEnabled")', 1, true) ~= nil,
+          "control row: ...and registered with search through the shared verb")
+    -- The classic arm still builds the box it always built, tick caption and all.
+    check(PAGE:find('local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)\n            resTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Resurrection Icon Tooltips"]), 40)', 1, true) ~= nil,
+          "control row: classic still builds the bare 280 box with its own header")
+    check(PAGE:find('GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil)', 1, true) ~= nil,
+          "control row: ...and the tick it always had, unchanged")
+    -- ⚠ NOTHING IS LEFT MOUNTED AT A COLUMN'S 280 BESIDE THE BANDS.
+    check(PAGE:find("280, tools and tools.INLINE_BOX or nil", 1, true) == nil,
+          "control row: no stay-inline 280 box is left on the page")
+    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL, wherever the skin is still used.
     check(PAGE:find("bandStyle", 1, true) == nil,
           "inline: the skin is taken from the tools, never restated as a literal")
 
-    -- ---- six bare 280 boxes left, all inside a classicLayout arm -------
+    -- ---- seven bare 280 boxes left, all inside a classicLayout arm -----
+    -- Seven rather than six: the Resurrection box moved out of the shared
+    -- construction and into the classic arm, where it is bare like the rest.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 6, "boxes: six bare 280 boxes left, and they are the classic branch's own")
+    eq(bare, 7, "boxes: seven bare 280 boxes left, and they are the classic branch's own")
 
     -- ---- the Add order ------------------------------------------------
-    -- ☠ THE BANDS FIRST. Add's "both" is a sync point, so a full-width band
-    -- dropped in below a lone column box would leave a hole beside it.
+    -- Three full-width bands in reading order. With nothing left in a column
+    -- there is no flow to unbalance, so this is purely the order the page reads
+    -- in -- the sync-point hole the old note was about cannot arise.
     local a = PAGE:find('Add(frameBand, nil, "both")', 1, true)
     local b = PAGE:find('Add(auraBand, nil, "both")', 1, true)
+    local c = PAGE:find('Add(resBand, nil, "both")', 1, true)
     check(a ~= nil and b ~= nil and a < b,
           "order: the two bands span both columns, hover band first")
-    -- The stay-inline box keeps column 2 in BOTH layouts, and the popout arm
-    -- adds it after the bands.
-    local classicAdd = PAGE:find("if classicLayout then Add(resTooltipGroup, nil, 2) end", 1, true)
-    check(classicAdd ~= nil, "order: classic adds the Resurrection box at its own slot, column 2")
-    local popoutAdd, at = nil, 1
-    while true do
-        local s = PAGE:find("Add(resTooltipGroup, nil, 2)", at, true)
-        if not s then break end
-        popoutAdd, at = s, s + 1
-    end
-    check(popoutAdd ~= nil and b ~= nil and b < popoutAdd,
-          "order: ...and the popout arm adds it after both bands, so nothing is left holed")
+    check(c ~= nil and b ~= nil and b < c,
+          "order: ...and the Resurrection band spans them too, last of the three")
+    -- Classic still adds its box at its own slot, in column 2.
+    check(PAGE:find("Add(resTooltipGroup, nil, 2)", 1, true) ~= nil,
+          "order: classic adds the Resurrection box at its own slot, column 2")
+    local col2 = 0
+    for _ in PAGE:gmatch("Add%(resTooltipGroup, nil, 2%)") do col2 = col2 + 1 end
+    eq(col2, 1, "order: ...exactly once, because only classic builds it")
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find("AddSyncPoint()", 1, true) ~= nil,

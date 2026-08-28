@@ -639,26 +639,62 @@ end
 -- ============================================================
 print("-- Settings page: the stay-inline boxes, the band, the banner and the order")
 do
-    -- ---- the skin, at the two stay-inline sites and nowhere else -----
-    local sites = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools and tools%.INLINE_BOX or nil%)") do
-        sites = sites + 1
-    end
-    eq(sites, 2, "inline: exactly two groups stay inline and wear the band skin")
-    check(PAGE:find("local minimapGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "inline: ...one of them is Minimap")
-    check(PAGE:find("local languageGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "inline: ...and the other is Language")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL. One shared table off the tools, so
-    -- classic gets nil -- which is what "no opts" already meant.
+    -- ---- the two single-control boxes are CONTROL ROWS now -----------
+    -- Each was one control under a title, standing at 280 beside a full-width
+    -- band. Each is now that control on the row plate, in a headerless band of
+    -- its own: the tick on the left where every popout row's tick is, the
+    -- dropdown right-aligned where every chevron ends.
+    check(PAGE:find("280, tools and tools.INLINE_BOX or nil", 1, true) == nil,
+          "control rows: no stay-inline 280 box is left on the page")
+    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL, wherever the skin is still used.
     check(PAGE:find("bandStyle", 1, true) == nil,
-          "inline: the skin is taken from the tools, never restated as a literal")
+          "control rows: the skin is taken from the tools, never restated as a literal")
 
-    -- Both boxes keep their single control, unchanged.
+    for _, band in ipairs({ "minimapBand", "languageBand" }) do
+        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+              "control rows: " .. band .. " is chromeless, at the width the layout pass will give it")
+        check(PAGE:find(band .. ":AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
+              "control rows: ...carrying its one control row")
+        -- ⚠ NO HEADER ON EITHER BAND. Both row labels already say the word the
+        -- box's title said, and a header repeating it above one row is the page
+        -- saying it twice.
+        check(PAGE:find(band .. ":AddWidget(GUI:CreateHeader", 1, true) == nil,
+              "control rows: ...and no header, because the row's own label says it")
+    end
+
+    -- The label each row is drawn with, and the kind.
+    check(PAGE:find('label = L["Show Minimap Button"],\n                kind  = "checkbox"', 1, true) ~= nil,
+          "control rows: the minimap row is a checkbox named by the tick's own caption")
+    check(PAGE:find('label     = L["Addon Language"],\n                kind      = "dropdown"', 1, true) ~= nil,
+          "control rows: the language row is a dropdown named by the control, not the box")
+
+    -- ☠ THE MINIMAP WRITE KEEPS THE HOST BRACKET. ControlRow brackets a {db,key}
+    -- write itself and forwards a consumer's own set() verbatim -- and this value
+    -- cannot use {db,key}, because makeBlizSet keeps one copy in each mode's
+    -- table. So the two hooks the classic checkbox fires are fired at the call
+    -- site, with the same nil table and the same override key.
+    check(PAGE:find('if GUI:Call("interceptWrite", nil, MINIMAP_KEY, v) then return end', 1, true) ~= nil,
+          "control rows: the minimap write still asks the runtime-write redirect first")
+    check(PAGE:find('GUI:Call("onSettingWritten", nil, MINIMAP_KEY, v, L["Show Minimap Button"], ApplyMinimapButton)', 1, true) ~= nil,
+          "control rows: ...and still announces the write, apply and all")
+
+    -- Both controls keep their binding, unchanged, in BOTH arms.
     check(PAGE:find('makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"', 1, true) ~= nil,
-          "inline: the minimap tick keeps its get / set / overrideKey trio")
+          "control rows: classic's minimap tick keeps its get / set / overrideKey trio")
     check(PAGE:find('GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride"', 1, true) ~= nil,
-          "inline: the language dropdown still writes the per-character SavedVariable")
+          "control rows: classic's language dropdown still writes the per-character SavedVariable")
+    check(PAGE:find('db        = DandersFramesCharDB,\n                key       = "languageOverride"', 1, true) ~= nil,
+          "control rows: ...and so does the row's, through the same table and key")
+    -- The blurb the box carried is not dropped: an inline dropdown's own label is
+    -- hidden, so `.openerTooltip` is where a paragraph can still be read.
+    check(PAGE:find("languageRow.control.openerTooltip", 1, true) ~= nil,
+          "control rows: the language blurb survives on the opener")
+
+    -- Both rows reach search through the ONE shared verb.
+    check(PAGE:find('tools.RegisterControlRow(minimapRow, "checkbox", nil, true, ApplyMinimapButton)', 1, true) ~= nil,
+          "control rows: the minimap tick registers as a custom get/set checkbox")
+    check(PAGE:find('tools.RegisterControlRow(languageRow, "dropdown", "languageOverride")', 1, true) ~= nil,
+          "control rows: ...and the language row adopts the entry its dropdown registered")
 
     -- ---- the band ----------------------------------------------------
     check(PAGE:find("settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
@@ -700,13 +736,13 @@ do
             if e.name == name and (col == nil or e.col == col) then return i end
         end
     end
-    -- ☠ THE BAND IS ADDED AFTER ITS LAST ROW AND BEFORE THE TWO INLINE BOXES, and
-    -- both halves of that are forced. `Add` resolves a widget's slot height on the
-    -- spot, so a band added before its rows would be measured empty; and "both" is
-    -- a sync point, so a full-width band dropped in BELOW a lone column box would
-    -- leave a hole beside it.
-    check(PAGE:find("if not classicLayout then\n            Add(settingsBand, nil, \"both\")\n            Add(minimapGroup, nil, 1)\n            Add(languageGroup, nil, 2)\n        end", 1, true) ~= nil,
-          "order: the popout arm adds the band, then the two boxes in their own columns")
+    -- ☠ EVERY BAND IS ADDED AFTER ITS LAST ROW. `Add` resolves a widget's slot
+    -- height on the spot, so a band added before its rows would be measured empty
+    -- -- which is why all three go in together here rather than in place. With
+    -- every one of them full width there is no column flow left to unbalance, so
+    -- the sync-point hole the old note was about cannot arise.
+    check(PAGE:find("if not classicLayout then\n            Add(settingsBand, nil, \"both\")\n            Add(minimapBand, nil, \"both\")\n            Add(languageBand, nil, \"both\")\n        end", 1, true) ~= nil,
+          "order: the popout arm adds the three bands, all of them spanning")
 
     -- ...and the CLASSIC order and columns are exactly what they were: modes,
     -- Blizzard and Minimap and Rendering in column 1; Appearance, Language and
@@ -725,11 +761,13 @@ do
         last = at or last
     end
 
-    -- Five bare 280 boxes are left, and every one is inside a classicLayout arm:
-    -- a sixth appearing outside one is the drift this counts.
+    -- Seven bare 280 boxes are left, and every one is inside a classicLayout arm:
+    -- an eighth appearing outside one is the drift this counts. Seven rather than
+    -- five because Minimap and Language moved out of the shared construction and
+    -- into the classic arm, where they are bare like the rest.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 5, "order: five bare 280 boxes left, and they are the classic branch's own")
+    eq(bare, 7, "order: seven bare 280 boxes left, and they are the classic branch's own")
 
     -- The page never had a copy button -- there is nothing per-mode on it to copy
     -- -- and this pass did not give it one.
