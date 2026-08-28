@@ -170,3 +170,88 @@ do
         check(sum:find("\\194\\183", 1, true) ~= nil, "frame fade: ...separated by the convention's dot")
     end
 end
+
+-- ============================================================
+-- 2. PERMANENT MOVER -- the page's textbook conversion
+-- One checkbox meaning "am I doing anything" and fifteen controls greying
+-- behind it. The tick is HOISTED onto the row, so the builder is told to skip
+-- it -- and the fifteen it still mounts is what the badge claims.
+-- ============================================================
+local PERM_MOVER = {
+    { "checkbox",    "Enable Permanent Mover", "permanentMover",                  30 },
+    { "dropdown",    "Handle Position",        "permanentMoverAnchor",            55 },
+    { "dropdown",    "Attach To",              "permanentMoverAttachTo",          55 },
+    { "slider",      "Offset X",               "permanentMoverOffsetX",           55 },
+    { "slider",      "Offset Y",               "permanentMoverOffsetY",           55 },
+    { "slider",      "Handle Width",           "permanentMoverWidth",             55 },
+    { "slider",      "Handle Height",          "permanentMoverHeight",            55 },
+    { "checkbox",    "Show on Hover Only",     "permanentMoverShowOnHover",       30 },
+    { "checkbox",    "Hide in Combat",         "permanentMoverHideInCombat",      30 },
+    { "colorpicker", "Handle Color",           "permanentMoverColor",             35 },
+    { "colorpicker", "Combat Color",           "permanentMoverCombatColor",       35 },
+    { "dropdown",    "Left Click",             "permanentMoverActionLeft",        55 },
+    { "dropdown",    "Right Click",            "permanentMoverActionRight",       55 },
+    { "dropdown",    "Shift+Left Click",       "permanentMoverActionShiftLeft",   55 },
+    { "dropdown",    "Shift+Right Click",      "permanentMoverActionShiftRight",  55 },
+    { "slider",      "Pull Timer Duration",    "permanentMoverPullTimerDuration", 55 },
+}
+
+do
+    local body = builderBody("BuildPermanentMoverGroup")
+    checkCensus(census(body), PERM_MOVER, "permanent mover")
+
+    -- The hoist, and the arithmetic it implies. The checkbox is still IN the
+    -- builder -- the classic box needs it -- behind the one flag the popout
+    -- passes, so the pane mounts one fewer than the census.
+    check(body:find("if not tools.hoistToggle then") ~= nil,
+          "permanent mover: the enable checkbox is skipped when the row has hoisted it")
+    local declared = tonumber(SRC:match("local PERM_MOVER_COUNT%s*=%s*(%d+)"))
+    check(declared ~= nil, "permanent mover: the page declares the row's count in one place")
+    eq(declared, #PERM_MOVER - 1, "permanent mover: ...the census less the hoisted tick")
+
+    -- The thirteen dependents keep greying on the key in BOTH layouts. The row's
+    -- toggle gate covers the pane, but the predicates are what the classic box
+    -- greys with, and one builder serves both -- so losing them would silently
+    -- ungrey the classic layout.
+    local greys = 0
+    for _ in body:gmatch("disableOn%s*=%s*function%(d%) return not d%.permanentMover end") do
+        greys = greys + 1
+    end
+    eq(greys, #PERM_MOVER - 1, "permanent mover: every control but the enable greys on it")
+
+    local opts = rowOpts("Permanent Mover")
+    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"permanentMover"%s*}') ~= nil,
+          "permanent mover: the row's tick is the group's own enable key")
+    check(opts:find("summary%s*=%s*PermMoverSummary") ~= nil,
+          "permanent mover: ...it declares a summary")
+    check(opts:find("count%s*=%s*PERM_MOVER_COUNT") ~= nil,
+          "permanent mover: ...and the declared count, not a literal")
+    check(opts:find("onToggle%s*=%s*OnPermMoverToggle") ~= nil,
+          "permanent mover: ...and a commit that is not a page rebuild")
+
+    -- The hoisted toggle is re-registered with search under the SAME label and
+    -- key the suppressed checkbox carried, or the setting becomes unfindable in
+    -- the popout layout while staying findable in classic.
+    local hoisted = SRC:match('RegisterHoistedToggle%(moverRow,%s*L%["([^"]+)"%],%s*"([^"]+)"')
+    eq(hoisted, PERM_MOVER[1][2], "permanent mover: the hoisted toggle is re-registered under its own label")
+    local _, hoistedKey = SRC:match('RegisterHoistedToggle%(moverRow,%s*L%["([^"]+)"%],%s*"([^"]+)"')
+    eq(hoistedKey, PERM_MOVER[1][3], "permanent mover: ...and its own db key")
+
+    -- ONE builder, BOTH layouts, same as Frame Fade.
+    local calls = 0
+    for _ in SRC:gmatch("BuildPermanentMoverGroup%(") do calls = calls + 1 end
+    eq(calls, 3, "permanent mover: declared once, mounted twice -- classic box and popout pane")
+
+    -- The row's own band: chromeless, built at the page's usable width (never a
+    -- literal) and spanning both columns, so its right edge lands on the same
+    -- corridor the Appearance band's rows do.
+    check(SRC:find("GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })", 1, true) ~= nil,
+          "permanent mover: the band is chromeless, because the row IS the surface")
+    check(SRC:find("moverBandW = math.max(", 1, true) ~= nil,
+          "permanent mover: ...at the width the layout pass will stretch it to")
+    check(SRC:find('Add(permMoverBand, nil, "both")', 1, true) ~= nil,
+          "permanent mover: ...and spanning both columns")
+    -- ...and NO header above it. The row's own label already says the words.
+    check(SRC:find('permMoverBand:AddWidget(GUI:CreateHeader', 1, true) == nil,
+          "permanent mover: the band carries no header -- the row's label is the name")
+end

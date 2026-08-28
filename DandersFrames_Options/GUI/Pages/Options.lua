@@ -3129,92 +3129,196 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             playersPerRowSlider:HookScript("OnShow", UpdateDynamicLabels)
         end
 
-        -- ===== PERMANENT MOVER GROUP (Column 2) =====
-        local permMoverGroup = GUI:CreateSettingsGroup(self.child, 280)
-        permMoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Permanent Mover"]), 40)
-
-        permMoverGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Permanent Mover"], db, "permanentMover", function()
-            DF:UpdatePermanentMoverVisibility()
-        end), 30)
-
+        -- ===== PERMANENT MOVER (Column 2 box, or a row of its own) ===========
+        -- The page's textbook conversion: ONE checkbox that means "am I doing
+        -- anything", and thirteen controls that grey behind it. That is exactly
+        -- what a feature row is -- the tick comes up onto the row, the rest goes
+        -- into the panel, and the fifteen-deep box that used to carry column 2 on
+        -- its own becomes one line.
+        --
+        -- Declared out here rather than inside the builder because the SUMMARY
+        -- reads it too: the row says which corner the handle sits in, and there
+        -- is one map of those words on this page, not two.
         local moverAnchorValues = {
             TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
             LEFT= L["Left"], RIGHT= L["Right"],
             BOTTOMLEFT= L["Bottom Left"], BOTTOM= L["Bottom"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        local permMoverAnchor = permMoverGroup:AddWidget(
-            GUI:CreateDropdown(self.child, L["Handle Position"], moverAnchorValues, db, "permanentMoverAnchor", function()
-                DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
-            end), 55)
-        permMoverAnchor.disableOn = function(d) return not d.permanentMover end
 
-        local attachValues = { CONTAINER= L["Container"], FIRST= L["First Unit"], LAST= L["Last Unit"] }
-        local permAttach = permMoverGroup:AddWidget(
-            GUI:CreateDropdown(self.child, L["Attach To"], attachValues, db, "permanentMoverAttachTo", function()
-                DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
-            end), 55)
-        permAttach.disableOn = function(d) return not d.permanentMover end
-        permAttach.tooltip = L["Attach the handle to the container, the first visible unit, or the last visible unit."]
+        -- Verbatim, less the enable checkbox when the row has hoisted it. Every
+        -- widget keeps its own `disableOn` on permanentMover even in the popout:
+        -- the row's toggle gate greys the pane as a whole, but the predicates are
+        -- what the CLASSIC box greys with, and one builder serving both layouts
+        -- means it carries the behaviour of both. Guarded by
+        -- test_frame_page_builders.lua against the inventory it had inline.
+        local function BuildPermanentMoverGroup(tools)
+            local group, parent = tools.group, tools.parent
 
-        local function PermMoverAnchorUpdate() DF:UpdatePermanentMoverAnchor(GUI.SelectedMode) end
-        local function PermMoverSizeUpdate() DF:UpdatePermanentMoverSize(GUI.SelectedMode) end
+            if not tools.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Permanent Mover"], db, "permanentMover", function()
+                    DF:UpdatePermanentMoverVisibility()
+                end), 30)
+            end
 
-        local permOffsetX = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -500, 500, 1, db, "permanentMoverOffsetX", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
-        permOffsetX.disableOn = function(d) return not d.permanentMover end
+            local permMoverAnchor = group:AddWidget(
+                GUI:CreateDropdown(parent, L["Handle Position"], moverAnchorValues, db, "permanentMoverAnchor", function()
+                    DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
+                end), 55)
+            permMoverAnchor.disableOn = function(d) return not d.permanentMover end
 
-        local permOffsetY = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -500, 500, 1, db, "permanentMoverOffsetY", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
-        permOffsetY.disableOn = function(d) return not d.permanentMover end
+            local attachValues = { CONTAINER= L["Container"], FIRST= L["First Unit"], LAST= L["Last Unit"] }
+            local permAttach = group:AddWidget(
+                GUI:CreateDropdown(parent, L["Attach To"], attachValues, db, "permanentMoverAttachTo", function()
+                    DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
+                end), 55)
+            permAttach.disableOn = function(d) return not d.permanentMover end
+            permAttach.tooltip = L["Attach the handle to the container, the first visible unit, or the last visible unit."]
 
-        local permWidth = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Handle Width"], 5, 500, 1, db, "permanentMoverWidth", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
-        permWidth.disableOn = function(d) return not d.permanentMover end
+            local function PermMoverAnchorUpdate() DF:UpdatePermanentMoverAnchor(GUI.SelectedMode) end
+            local function PermMoverSizeUpdate() DF:UpdatePermanentMoverSize(GUI.SelectedMode) end
 
-        local permHeight = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Handle Height"], 5, 500, 1, db, "permanentMoverHeight", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
-        permHeight.disableOn = function(d) return not d.permanentMover end
+            local permOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -500, 500, 1, db, "permanentMoverOffsetX", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
+            permOffsetX.disableOn = function(d) return not d.permanentMover end
 
-        local permHover = permMoverGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show on Hover Only"], db, "permanentMoverShowOnHover", function()
-            DF:UpdatePermanentMoverVisibility()
-        end), 30)
-        permHover.disableOn = function(d) return not d.permanentMover end
-        permHover.tooltip = L["Handle is invisible until you hover over it. Fades in and out smoothly."]
+            local permOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -500, 500, 1, db, "permanentMoverOffsetY", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
+            permOffsetY.disableOn = function(d) return not d.permanentMover end
 
-        local permCombat = permMoverGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "permanentMoverHideInCombat", function()
-            DF:UpdatePermanentMoverCombatState()
-        end), 30)
-        permCombat.disableOn = function(d) return not d.permanentMover end
-        permCombat.tooltip = L["Hides the handle during combat. If disabled, the handle changes color to indicate it is locked."]
+            local permWidth = group:AddWidget(GUI:CreateSlider(parent, L["Handle Width"], 5, 500, 1, db, "permanentMoverWidth", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
+            permWidth.disableOn = function(d) return not d.permanentMover end
 
-        local permColor = permMoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Handle Color"], db, "permanentMoverColor", false, function()
-            DF:UpdatePermanentMoverColor(GUI.SelectedMode)
-        end), 35)
-        permColor.disableOn = function(d) return not d.permanentMover end
+            local permHeight = group:AddWidget(GUI:CreateSlider(parent, L["Handle Height"], 5, 500, 1, db, "permanentMoverHeight", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
+            permHeight.disableOn = function(d) return not d.permanentMover end
 
-        local permCombatColor = permMoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Combat Color"], db, "permanentMoverCombatColor", false, nil), 35)
-        permCombatColor.disableOn = function(d) return not d.permanentMover end
-        permCombatColor.tooltip = L["Color shown when in combat to indicate the handle is locked."]
+            local permHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show on Hover Only"], db, "permanentMoverShowOnHover", function()
+                DF:UpdatePermanentMoverVisibility()
+            end), 30)
+            permHover.disableOn = function(d) return not d.permanentMover end
+            permHover.tooltip = L["Handle is invisible until you hover over it. Fades in and out smoothly."]
 
-        -- Quick action dropdowns
-        local actionValues = {}
-        for id, data in pairs(DF.PERM_MOVER_ACTIONS) do
-            actionValues[id] = data.label
+            local permCombat = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide in Combat"], db, "permanentMoverHideInCombat", function()
+                DF:UpdatePermanentMoverCombatState()
+            end), 30)
+            permCombat.disableOn = function(d) return not d.permanentMover end
+            permCombat.tooltip = L["Hides the handle during combat. If disabled, the handle changes color to indicate it is locked."]
+
+            local permColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Handle Color"], db, "permanentMoverColor", false, function()
+                DF:UpdatePermanentMoverColor(GUI.SelectedMode)
+            end), 35)
+            permColor.disableOn = function(d) return not d.permanentMover end
+
+            local permCombatColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Combat Color"], db, "permanentMoverCombatColor", false, nil), 35)
+            permCombatColor.disableOn = function(d) return not d.permanentMover end
+            permCombatColor.tooltip = L["Color shown when in combat to indicate the handle is locked."]
+
+            -- Quick action dropdowns
+            local actionValues = {}
+            for id, data in pairs(DF.PERM_MOVER_ACTIONS) do
+                actionValues[id] = data.label
+            end
+
+            local permActionLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Left Click"], actionValues, db, "permanentMoverActionLeft"), 55)
+            permActionLeft.disableOn = function(d) return not d.permanentMover end
+
+            local permActionRight = group:AddWidget(GUI:CreateDropdown(parent, L["Right Click"], actionValues, db, "permanentMoverActionRight"), 55)
+            permActionRight.disableOn = function(d) return not d.permanentMover end
+
+            local permActionShiftLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Left Click"], actionValues, db, "permanentMoverActionShiftLeft"), 55)
+            permActionShiftLeft.disableOn = function(d) return not d.permanentMover end
+
+            local permActionShiftRight = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Right Click"], actionValues, db, "permanentMoverActionShiftRight"), 55)
+            permActionShiftRight.disableOn = function(d) return not d.permanentMover end
+
+            local permPullTimer = group:AddWidget(GUI:CreateSlider(parent, L["Pull Timer Duration"], 3, 30, 1, db, "permanentMoverPullTimerDuration"), 55)
+            permPullTimer.disableOn = function(d) return not d.permanentMover end
+            permPullTimer.tooltip = L["Duration in seconds for the Pull Timer quick action."]
         end
 
-        local permActionLeft = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Left Click"], actionValues, db, "permanentMoverActionLeft"), 55)
-        permActionLeft.disableOn = function(d) return not d.permanentMover end
+        if classicLayout then
+            local permMoverGroup = GUI:CreateSettingsGroup(self.child, 280)
+            permMoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Permanent Mover"]), 40)
+            BuildPermanentMoverGroup({ group = permMoverGroup, parent = self.child })
+            Add(permMoverGroup, nil, 2)
+        else
+            -- The GROUP's apply, for the footer's two verbs. Every one of the
+            -- four calls, not just the one a given key needs: a Reset Group moves
+            -- position, size and colour at once, and the widgets' own callbacks
+            -- between them do exactly these four things.
+            local function ApplyPermMover()
+                DF:UpdatePermanentMoverVisibility()
+                DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
+                DF:UpdatePermanentMoverSize(GUI.SelectedMode)
+                DF:UpdatePermanentMoverColor(GUI.SelectedMode)
+            end
 
-        local permActionRight = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Right Click"], actionValues, db, "permanentMoverActionRight"), 55)
-        permActionRight.disableOn = function(d) return not d.permanentMover end
+            -- ☠ NOT GUI:RefreshCurrentPage, for the reason the border toggle is
+            -- not: a rebuild retires the row being clicked. The inline checkbox
+            -- got its greys from CreateCheckbox self-calling RefreshChildStates
+            -- on the group it was in; the row's tick is not that checkbox, so the
+            -- two passes are asked for by name.
+            local function OnPermMoverToggle()
+                DF:UpdatePermanentMoverVisibility()
+                self:RefreshStates()
+                ReflowMounted()
+            end
 
-        local permActionShiftLeft = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Shift+Left Click"], actionValues, db, "permanentMoverActionShiftLeft"), 55)
-        permActionShiftLeft.disableOn = function(d) return not d.permanentMover end
+            -- The summary: where the handle is, how big it is, and what it is
+            -- attached to when that is not the default. Three items, fixed order,
+            -- words localised and numbers raw -- and the attach word only when it
+            -- is doing something, because "Container" on every default profile is
+            -- noise the row cannot afford.
+            local function PermMoverSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local pos = d.permanentMoverAnchor and moverAnchorValues[d.permanentMoverAnchor]
+                if pos then parts[#parts + 1] = pos end
+                local w, h = tonumber(d.permanentMoverWidth), tonumber(d.permanentMoverHeight)
+                if w and h then parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h)) end
+                local attach = d.permanentMoverAttachTo
+                if attach == "FIRST" then parts[#parts + 1] = L["First Unit"]
+                elseif attach == "LAST" then parts[#parts + 1] = L["Last Unit"] end
+                return table.concat(parts, " \194\183 ")
+            end
 
-        local permActionShiftRight = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Shift+Right Click"], actionValues, db, "permanentMoverActionShiftRight"), 55)
-        permActionShiftRight.disableOn = function(d) return not d.permanentMover end
+            -- Sixteen controls, less the hoisted enable = fifteen in the pane.
+            local PERM_MOVER_COUNT = 15
 
-        local permPullTimer = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Pull Timer Duration"], 3, 30, 1, db, "permanentMoverPullTimerDuration"), 55)
-        permPullTimer.disableOn = function(d) return not d.permanentMover end
-        permPullTimer.tooltip = L["Duration in seconds for the Pull Timer quick action."]
+            local moverMount, moverContent = PopoutContent(function(group, holder, reflow)
+                BuildPermanentMoverGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggle = true,
+                })
+            end)
 
-        Add(permMoverGroup, nil, 2)
+            -- ITS OWN BAND, AND WITH NO HEADER. The Appearance band above is
+            -- three rows under a word that names none of them; this is one row
+            -- whose own label already says "Permanent Mover", and a header
+            -- repeating that directly above it is the page saying it twice.
+            -- Built at the page's usable width for the same reason the Appearance
+            -- band is -- see the long note there -- so the row's right edge lands
+            -- on the corridor and its popout's beam is a short hop.
+            local moverBandW = math.max(
+                GUI.PageUsableWidth(GUI.PageChildWidth(
+                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+                GUI.SettingsBox.group)
+            local permMoverBand = GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })
+            local moverRow = permMoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Permanent Mover"],
+                db       = RowDB,
+                toggle   = { key = "permanentMover" },
+                summary  = PermMoverSummary,
+                count    = PERM_MOVER_COUNT,
+                onToggle = OnPermMoverToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = moverMount,
+            }))
+            ClaimKeys(moverRow, moverContent)
+            WireModifiedTick(moverRow)
+            WireFooter(moverRow, ApplyPermMover)
+            RegisterHoistedToggle(moverRow, L["Enable Permanent Mover"], "permanentMover", OnPermMoverToggle)
+            Add(permMoverBand, nil, "both")
+        end
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")
