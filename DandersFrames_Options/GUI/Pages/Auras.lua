@@ -712,89 +712,20 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             DAMAGER = {r = 0.85, g = 0.20, b = 0.20, a = 1},
         }
 
-        -- ===== Column 1 =====
-        local col1 = GUI:CreateSettingsGroup(self.child, 280)
-        col1:AddWidget(GUI:CreateHeader(self.child, L["Class Colors"]), 40)
-        col1:AddWidget(GUI:CreateLabel(self.child, L["Customize class colors used throughout DandersFrames. Changes apply to health bars, name text, borders, and all other class-colored elements."], 260), 50)
-        
-        -- Reset All button
-        local resetAllBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
-        GUI:StyleButton(resetAllBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
-        resetAllBtn:SetScript("OnClick", function()
-            -- Reset all to Blizzard defaults
-            for _, info in ipairs(CLASS_LIST) do
-                local default = RAID_CLASS_COLORS[info.token]
-                if default then
-                    classColorsDB[info.token] = { r = default.r, g = default.g, b = default.b, a = 1 }
-                end
-            end
-            DF:RefreshAllVisibleFrames()
-            -- Refresh the options page to update swatches
-            if pageColors and pageColors.Refresh then
-                pageColors:Refresh()
-            end
-        end)
-        col1:AddWidget(resetAllBtn, 30)
-        
-        -- All classes in a single section
-        for i = 1, #CLASS_LIST do
-            local info = CLASS_LIST[i]
-            local token = info.token
-            -- Initialize from Blizzard defaults if not customized
-            if not classColorsDB[token] then
-                local default = RAID_CLASS_COLORS[token]
-                if default then
-                    classColorsDB[token] = { r = default.r, g = default.g, b = default.b, a = 1 }
-                end
-            end
-            col1:AddWidget(GUI:CreateColorPicker(self.child, info.name, classColorsDB, token, false, function()
-                DF:RefreshAllVisibleFrames()
-            end, function()
-                DF:RefreshAllVisibleFrames()
-            end, true), 30)
-        end
-
-        Add(col1, nil, 1)
-
-        -- ===== Column 2: Role Colors =====
-        local col2 = GUI:CreateSettingsGroup(self.child, 280)
-        col2:AddWidget(GUI:CreateHeader(self.child, L["Role Colors"]), 40)
-        col2:AddWidget(GUI:CreateLabel(self.child, L["Customize role colors used by any border whose Color Source is set to Role. Applies to Tank, Healer, and Damager assignments."], 260), 50)
-
-        local roleResetBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
-        GUI:StyleButton(roleResetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
-        roleResetBtn:SetScript("OnClick", function()
-            for _, info in ipairs(ROLE_LIST) do
-                local d = ROLE_DEFAULTS[info.token]
-                if d then roleColorsDB[info.token] = { r = d.r, g = d.g, b = d.b, a = d.a } end
-            end
-            DF:RefreshAllVisibleFrames()
-            if pageColors and pageColors.Refresh then pageColors:Refresh() end
-        end)
-        col2:AddWidget(roleResetBtn, 30)
-
-        for i = 1, #ROLE_LIST do
-            local info = ROLE_LIST[i]
-            if not roleColorsDB[info.token] then
-                local d = ROLE_DEFAULTS[info.token]
-                if d then roleColorsDB[info.token] = { r = d.r, g = d.g, b = d.b, a = d.a } end
-            end
-            col2:AddWidget(GUI:CreateColorPicker(self.child, info.name, roleColorsDB, info.token, false, function()
-                DF:RefreshAllVisibleFrames()
-            end, function()
-                DF:RefreshAllVisibleFrames()
-            end, true), 30)
-        end
-
-        Add(col2, nil, 2)
-
-        -- ===== Column 1 (cont.): Dispel Colours =====
+        -- ===== Dispel Colours: the page's third palette ====================
         -- Account-wide per-dispel-type palette (DF.db.dispelColors), the single source of
         -- truth for both the debuff-icon border and the dispel overlay. Defaults ARE the
         -- game palette (GetGameDispelPalette, queried from AuraUtil), so an untouched
         -- palette matches the game exactly; the overlay always follows it, the icon when
         -- "Color by Dispel Type" is on. No None/Physical picker — that border is hidden on
         -- no-dispel-type auras and the overlay never fires on them. Editing re-drives frames.
+        --
+        -- ☠ RESOLVED AT PAGE SCOPE, ABOVE THE BUILDERS, exactly as the two tables
+        -- above it are. The builders are CLOSURES now and a closure captures the
+        -- upvalue that exists when it is CREATED, so anything a builder reads has
+        -- to be declared before it. (The Fading page's three moved helpers, same
+        -- rule.) Only the table LOOKUP moved; the per-type seeding stayed with the
+        -- picker that reads it, inside the builder.
         local dispelColorsDB = DF.db.dispelColors
         if type(dispelColorsDB) ~= "table" then
             DF.db.dispelColors = {}
@@ -824,31 +755,398 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
             if DF.LightweightUpdateDispelOverlay then DF:LightweightUpdateDispelOverlay() end
         end
-        local dispelCol = GUI:CreateSettingsGroup(self.child, 280)
-        dispelCol:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
-        dispelCol:AddWidget(GUI:CreateLabel(self.child, L["Colours for each dispel type, used by the dispel overlay and the debuff-icon border (when Color by Dispel Type is on). Reset restores the game's colours."], 260), 55)
-        local dispelResetBtn = CreateFrame("Button", nil, self.child, "BackdropTemplate")
-        GUI:StyleButton(dispelResetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
-        dispelResetBtn:SetScript("OnClick", function()
-            for _, info in ipairs(DISPEL_LIST) do
-                local d = dispelGamePalette[info.key]
-                if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
-            end
-            DispelColorChanged()
-            if pageColors and pageColors.Refresh then pageColors:Refresh() end
-        end)
-        dispelCol:AddWidget(dispelResetBtn, 30)
-        for i = 1, #DISPEL_LIST do
-            local info = DISPEL_LIST[i]
-            if type(dispelColorsDB[info.key]) ~= "table" then
-                local d = dispelGamePalette[info.key]
-                if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
-            end
-            dispelCol:AddWidget(GUI:CreateColorPicker(self.child, info.name, dispelColorsDB, info.key, false, DispelColorChanged, DispelColorLive, true), 30)
-        end
-        Add(dispelCol, nil, 1)
 
-        -- ===== Column 2 (cont.): Color by Time Remaining =====
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: four 280 boxes -- Class Colors
+        -- then Dispel Type Colors down column 1, Role Colors then the Color by
+        -- Time section down column 2.
+        --
+        -- POPOUT turns the three PALETTES into feature rows in one band and leaves
+        -- Color by Time inline. Twenty-one colour swatches is the clearest case on
+        -- the sweep for a way in: a palette is a thing you open, edit and close,
+        -- and it was costing the page its whole first screen to say so.
+        --
+        -- ☠ EVERY KEY BEHIND THESE THREE ROWS IS A NON-PROFILE KEY, which changes
+        -- what a row is allowed to carry. classColors / roleColors / dispelColors
+        -- live at the ROOT of DF.db -- one set per profile, shared by party and
+        -- raid -- and DF.Defaults (DandersFrames/Core/Defaults.lua) answers for
+        -- DF.db.party / DF.db.raid / the stored raid baseline and nothing else. So
+        -- these rows claim their keys and stop there: no amber modified tick (it
+        -- could never light) and no Reset Group / Hold: Defaults footer (both write
+        -- through that same engine, and would stamp per-mode defaults for keys that
+        -- live somewhere else entirely). That is the Integrations page's Color
+        -- Picker row, one page up, and the reasoning is spelled out in full there.
+        -- Each group's own "Reset All to Default" button IS the reset story here,
+        -- and it stays inside the pane where it always was.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates, popout }. The classic branch mounts the
+        -- SAME builder into the box it always built, which is what makes "classic
+        -- is unchanged" structural rather than a promise --
+        -- test_colors_page_builders.lua pins the inventory of each one against the
+        -- census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which is
+        -- what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        -- The page's one band: full-width and chromeless, because a feature row's
+        -- popout docks outside the WINDOW and runs a beam back to the row, so a row
+        -- that stopped 280px in would leave that beam crossing half the page.
+        --
+        -- ⚠ NO HEADER ON IT, which is the Sorting page's sortBand rule rather than
+        -- an omission. A header names the SECTION, and the section over three rows
+        -- reading "Class Colors", "Role Colors" and "Dispel Type Colors" is just
+        -- "Colors" -- the word the tab already says. The one header that WOULD name
+        -- something the rows do not is Color by Time's, and that section keeps its
+        -- own (see below).
+        local paletteBand
+        if tools then
+            paletteBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
+        -- ⚠ COLOR BY TIME CHANGES COLUMN, and it is the only thing on the page that
+        -- moves. Classic puts it in column 2 because column 1 holds the dispel
+        -- palette (its own note, at the section below). In this layout the palettes
+        -- have left the columns entirely for the band, so column 1 is empty under
+        -- it -- and a 280 box pinned to the right with nothing beside it reads as a
+        -- rendering fault rather than as a section.
+        local cbtColumn = classicLayout and 2 or 1
+
+        -- ☠ WHAT A "RESET ALL TO DEFAULT" COSTS, AND WHY IT IS NOT THE SAME IN
+        -- BOTH LAYOUTS. The button writes every swatch in its group behind the
+        -- widgets' backs, so the swatches have to be repainted. Classic has always
+        -- paid for that with a whole page rebuild (pageColors:Refresh), and it
+        -- keeps doing exactly that.
+        --
+        -- The pane must not. A rebuild retires every widget on the page, and the
+        -- shared helper's own prologue closes every open panel on the way in -- so
+        -- the panel the button was clicked in would slam shut under the user's
+        -- hand. What the rebuild was actually buying is the swatch repaint, and
+        -- that is precisely the pane's value sweep: RefreshChildValues calls each
+        -- control's `refreshValue`, which for a colour picker IS its UpdateSwatch
+        -- (SettingsWidgets.lua). ReflowMounted(true) runs it on every mounted pane,
+        -- including a pinned second one. (The Tooltips page's AnchorGateRefresh is
+        -- the same shape for the same reason.)
+        local function RepaintSwatches(tools2)
+            if tools2.popout then
+                tools.ReflowMounted(true)
+            elseif pageColors and pageColors.Refresh then
+                pageColors:Refresh()
+            end
+        end
+
+        -- ===== CLASS COLORS (a 280 box in column 1 in classic, the band's first
+        -- row) =====
+        -- Verbatim, taking the group and parent it should build into: same
+        -- factories, same L keys, same db keys, same callbacks, same slot heights.
+        --
+        -- ☠ THE THIRTEEN SEEDS STAY EXACTLY WHERE THEY WERE, inside the loop and
+        -- ahead of the picker that reads each one. They are build-time writes to a
+        -- non-profile table, and a pane is built EAGERLY (page build, not first
+        -- open), so they still land at the moment they always did. Moving them out,
+        -- or down into the popout's open path, would move WHEN a profile changes
+        -- shape.
+        --
+        -- ☠ A ROW WITH NO TICK. There is no boolean here meaning "am I doing
+        -- anything": a palette is always in force, and the group's only non-picker
+        -- control is a reset button. The kit draws no tick, reserves its column so
+        -- the row still lines up with the two under it, and the group reads as
+        -- permanently on -- which it is.
+        local function BuildClassColorsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["Customize class colors used throughout DandersFrames. Changes apply to health bars, name text, borders, and all other class-colored elements."], 260), 50)
+
+            -- Reset All button
+            local resetAllBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+            GUI:StyleButton(resetAllBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
+            resetAllBtn:SetScript("OnClick", function()
+                -- Reset all to Blizzard defaults
+                for _, info in ipairs(CLASS_LIST) do
+                    local default = RAID_CLASS_COLORS[info.token]
+                    if default then
+                        classColorsDB[info.token] = { r = default.r, g = default.g, b = default.b, a = 1 }
+                    end
+                end
+                DF:RefreshAllVisibleFrames()
+                -- Repaint the swatches: a page rebuild in classic, the pane's own
+                -- value sweep in the popout layout.
+                RepaintSwatches(tools2)
+            end)
+            group:AddWidget(resetAllBtn, 30)
+
+            -- All classes in a single section
+            for i = 1, #CLASS_LIST do
+                local info = CLASS_LIST[i]
+                local token = info.token
+                -- Initialize from Blizzard defaults if not customized
+                if not classColorsDB[token] then
+                    local default = RAID_CLASS_COLORS[token]
+                    if default then
+                        classColorsDB[token] = { r = default.r, g = default.g, b = default.b, a = 1 }
+                    end
+                end
+                group:AddWidget(GUI:CreateColorPicker(parent, info.name, classColorsDB, token, false, function()
+                    DF:RefreshAllVisibleFrames()
+                end, function()
+                    DF:RefreshAllVisibleFrames()
+                end, true), 30)
+            end
+        end
+
+        if classicLayout then
+            -- ===== Column 1 =====
+            local col1 = GUI:CreateSettingsGroup(self.child, 280)
+            col1:AddWidget(GUI:CreateHeader(self.child, L["Class Colors"]), 40)
+            BuildClassColorsGroup({
+                group = col1,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(col1, nil, 1)
+        else
+            -- ⚠ NO SUMMARY, AND NOTHING IS INVENTED TO MAKE ONE. The sweep's
+            -- convention is at most four items in a fixed order, WORDS localised
+            -- and numbers raw -- and thirteen swatches have no four of anything.
+            -- "3 changed" would need both a new locale string and a defaults engine
+            -- that does not answer for this table (see the page note above); naming
+            -- a class would be picking one of thirteen at random. The kit still
+            -- shows the label and the count badge, which is what an empty summary
+            -- is for -- the Global Font Settings row's precedent.
+            --
+            -- Fifteen: the blurb, the reset button and the thirteen pickers. The
+            -- count is what the pane MOUNTS (the kit compares its declared number
+            -- against the pane's own roster), so a blurb and a button count --
+            -- exactly as that same Global Font Settings row's seven counts its
+            -- blurb and its Apply button.
+            local CLASS_COLORS_COUNT = 15
+
+            local classMount, classContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildClassColorsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local classRow = paletteBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Class Colors"],
+                -- ⚠ THE PROFILE ROOT, NOT tools.RowDB. Most rows on the sweep hand
+                -- the kit the per-mode table because that is where their keys live;
+                -- this palette is one set per PROFILE, shared by both modes, and a
+                -- row pointed at DF.db[mode] would be describing a table it is not
+                -- showing. (The Integrations row does the same with the
+                -- account-wide table.)
+                db      = function() return DF.db end,
+                count   = CLASS_COLORS_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = classMount,
+            }))
+            -- ☠ CLAIM THE KEYS, BUT NO TICK AND NO FOOTER -- the page note above
+            -- says why, and it is the Integrations row's rule verbatim. The claim
+            -- is NOT inert: every picker registers a search entry under its class
+            -- token (Search:RegisterColorPicker, dbKey = "WARRIOR"), so this is
+            -- what lets a search hit on "Warrior" open the panel the swatch is
+            -- behind. The claim's other half -- the amber tick's key list -- is
+            -- simply never read, because nothing wires the tick.
+            tools.ClaimKeys(classRow, classContent)
+        end
+
+        -- ===== ROLE COLORS (a 280 box in column 2 in classic, the band's second
+        -- row) =====
+        -- Same shape as Class Colors, three swatches instead of thirteen, and the
+        -- same three seeds staying inside the loop.
+        local function BuildRoleColorsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["Customize role colors used by any border whose Color Source is set to Role. Applies to Tank, Healer, and Damager assignments."], 260), 50)
+
+            local roleResetBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+            GUI:StyleButton(roleResetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
+            roleResetBtn:SetScript("OnClick", function()
+                for _, info in ipairs(ROLE_LIST) do
+                    local d = ROLE_DEFAULTS[info.token]
+                    if d then roleColorsDB[info.token] = { r = d.r, g = d.g, b = d.b, a = d.a } end
+                end
+                DF:RefreshAllVisibleFrames()
+                RepaintSwatches(tools2)
+            end)
+            group:AddWidget(roleResetBtn, 30)
+
+            for i = 1, #ROLE_LIST do
+                local info = ROLE_LIST[i]
+                if not roleColorsDB[info.token] then
+                    local d = ROLE_DEFAULTS[info.token]
+                    if d then roleColorsDB[info.token] = { r = d.r, g = d.g, b = d.b, a = d.a } end
+                end
+                group:AddWidget(GUI:CreateColorPicker(parent, info.name, roleColorsDB, info.token, false, function()
+                    DF:RefreshAllVisibleFrames()
+                end, function()
+                    DF:RefreshAllVisibleFrames()
+                end, true), 30)
+            end
+        end
+
+        if classicLayout then
+            -- ===== Column 2: Role Colors =====
+            local col2 = GUI:CreateSettingsGroup(self.child, 280)
+            col2:AddWidget(GUI:CreateHeader(self.child, L["Role Colors"]), 40)
+            BuildRoleColorsGroup({
+                group = col2,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(col2, nil, 2)
+        else
+            -- Five: the blurb, the reset button and the three pickers. No summary,
+            -- for the reason the row above has none.
+            local ROLE_COLORS_COUNT = 5
+
+            local roleMount, roleContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildRoleColorsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local roleRow = paletteBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Role Colors"],
+                db      = function() return DF.db end,
+                count   = ROLE_COLORS_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = roleMount,
+            }))
+            tools.ClaimKeys(roleRow, roleContent)
+        end
+
+        -- ===== DISPEL TYPE COLORS (a 280 box in column 1 in classic, the band's
+        -- third row) =====
+        -- The one palette whose commit is not a plain repaint: both callbacks stay
+        -- exactly as they were, page-scope above, so the pane and the box drive the
+        -- same work.
+        local function BuildDispelColorsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateLabel(parent, L["Colours for each dispel type, used by the dispel overlay and the debuff-icon border (when Color by Dispel Type is on). Reset restores the game's colours."], 260), 55)
+            local dispelResetBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+            GUI:StyleButton(dispelResetBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
+            dispelResetBtn:SetScript("OnClick", function()
+                for _, info in ipairs(DISPEL_LIST) do
+                    local d = dispelGamePalette[info.key]
+                    if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
+                end
+                DispelColorChanged()
+                RepaintSwatches(tools2)
+            end)
+            group:AddWidget(dispelResetBtn, 30)
+            for i = 1, #DISPEL_LIST do
+                local info = DISPEL_LIST[i]
+                if type(dispelColorsDB[info.key]) ~= "table" then
+                    local d = dispelGamePalette[info.key]
+                    if d then dispelColorsDB[info.key] = { r = d.r, g = d.g, b = d.b } end
+                end
+                group:AddWidget(GUI:CreateColorPicker(parent, info.name, dispelColorsDB, info.key, false, DispelColorChanged, DispelColorLive, true), 30)
+            end
+        end
+
+        if classicLayout then
+            local dispelCol = GUI:CreateSettingsGroup(self.child, 280)
+            dispelCol:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Colors"]), 40)
+            BuildDispelColorsGroup({
+                group = dispelCol,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(dispelCol, nil, 1)
+        else
+            -- Seven: the blurb, the reset button and the five pickers. No summary,
+            -- for the reason the two rows above have none.
+            local DISPEL_COLORS_COUNT = 7
+
+            local dispelMount, dispelContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelColorsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local dispelRow = paletteBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Dispel Type Colors"],
+                db      = function() return DF.db end,
+                count   = DISPEL_COLORS_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = dispelMount,
+            }))
+            tools.ClaimKeys(dispelRow, dispelContent)
+
+            -- ☠ THE SECTION ANCHOR HAS TO SURVIVE THE MOVE, and this is the only
+            -- row on the page that carries one. Two other pages link HERE -- the
+            -- debuff Border page and the Dispel Overlay page, both through
+            -- UI:CreateDispelColorsPageLink, which is LinkToSetting{ page =
+            -- "display_classcolors", section = L["Dispel Type Colors"] }. That jump
+            -- is Search:ScrollToSection, and it finds a section by asking every page
+            -- child -- and every settings-group child -- for :GetText(). In classic
+            -- the box's own HEADER answers. In this layout no header is built at
+            -- all: the row's name is a FontString INSIDE the row, which the walk
+            -- never reaches, so the link would scroll nowhere and flash nothing --
+            -- a DebugWarn, and a dead cross-link the user just sees do nothing.
+            --
+            -- One line puts the answer back, and it is the same move
+            -- GUI:CreateHeader itself makes: that factory returns a CONTAINER frame
+            -- and stamps `container.GetText` so the container answers for the
+            -- fontstring inside it (SettingsWidgets.lua). The walk then scrolls to
+            -- the ROW and flashes the band around it -- which is what classic did,
+            -- where it scrolled to the header and flashed the whole box.
+            --
+            -- ⚠ NOT DONE FOR THE OTHER TWO ROWS. Nothing links to "Class Colors" or
+            -- "Role Colors" by section, and an anchor nobody jumps to is a claim to
+            -- keep in step for no one.
+            dispelRow.GetText = function() return L["Dispel Type Colors"] end
+        end
+
+        -- ☠ THE BAND IS ADDED HERE, NOT WHERE IT WAS BUILT. `Add` resolves a
+        -- widget's slot height on the spot, so a band has to go in after the last
+        -- row has been put into it.
+        if not classicLayout then
+            Add(paletteBand, nil, "both")
+        end
+
+        -- ===== Color by Time Remaining -- STAYS INLINE IN BOTH LAYOUTS =====
+        -- ☠ THE ONE GROUP ON THIS PAGE THAT IS NOT A ROW, and the reasons are
+        -- structural rather than taste:
+        --
+        --   1. IT REBUILDS THE PAGE ON EVERY STRUCTURAL EDIT. Adding a stop,
+        --      removing one, committing a threshold and flipping the s/% tab all
+        --      end in pageColors:Refresh() -- and they have to, because each one
+        --      changes which WIDGETS the editor has (a stop row appears or goes,
+        --      and every remaining range label is recomputed from its neighbours).
+        --      Inside a pane that is fatal: a rebuild retires the pane, and the
+        --      shared helper's prologue closes every open panel on the way in, so
+        --      the editor would slam its own panel shut on each + click. The
+        --      palettes above dodge this because their reset only moves VALUES,
+        --      which the pane's value sweep repaints in place; there is no such
+        --      sweep for "this group now has a different list of children", and
+        --      hand-rolling one here would mean reimplementing the page builder's
+        --      own widget-retire loop inside a settings page. (Pet Frames keeps
+        --      Layout Mode inline for exactly this reason.)
+        --
+        --   2. ITS TITLE IS A CROSS-LINK ANCHOR, and a live one: every aura page
+        --      and the Aura Designer reach it through UI:CreateColorsPageLink ->
+        --      LinkToSetting{ page = "display_classcolors", section = the Color by
+        --      Time title }. Search:ScrollToSection resolves that against the page's
+        --      OWN children, and a CollapsibleSection is the one target it handles
+        --      specially -- it EXPANDS the section if the user had it closed, then
+        --      flashes the content rather than the 28px bar. Left inline, the
+        --      anchor is untouched and keeps all of that.
+        --
+        --   3. IT IS AN EDITOR, NOT A GROUP OF SETTINGS. A row's contract is a
+        --      label, a count of controls and a one-line summary; this box holds
+        --      unit tabs, a preview strip, a variable list of stops and a "how this
+        --      renders" legend. There is no honest count and no four-item summary
+        --      to write.
+        --
         -- Account-wide duration-colour breakpoints, shared by the buff / debuff / defensive
         -- rows AND the Aura Designer wherever "Color by Time Remaining" is enabled. Each stop
         -- colours the duration text from its threshold upward; the highest threshold at or below
@@ -1276,14 +1574,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             { width = 260 }))
 
         RefreshPreview()   -- tint the legend strips built after the first pass
-        Add(cbtGroup, nil, 2)
+        Add(cbtGroup, nil, cbtColumn)
         if cbtSection then cbtSection:RegisterChild(cbtGroup) end
         end   -- BuildSection
 
-        -- Column 2, not "both": the header belongs over the box it owns rather than
-        -- spanning the page (column 1 holds the dispel palette, which it does not own).
-        -- Width matches the box so the rule under the title lines up with it.
-        cbtSection = Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, 2)
+        -- One column, not "both": the header belongs over the box it owns rather than
+        -- spanning the page (in classic, column 1 holds the dispel palette, which it
+        -- does not own -- see cbtColumn above for why the popout layout puts it on the
+        -- other side instead). Width matches the box so the rule under the title lines
+        -- up with it.
+        cbtSection = Add(GUI:CreateCollapsibleSection(self.child, L["Color by Time"], true, 280), 36, cbtColumn)
         BuildSection()
     end)
 
