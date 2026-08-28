@@ -39,6 +39,39 @@ local min, max, abs = math.min, math.max, math.abs
 
 local Fx = UI.Fx
 
+-- ============================================================
+-- PERF MARKS
+-- ------------------------------------------------------------
+-- Core.lua's hook counters, written from INSIDE the library rather than from a
+-- consumer's hook -- same `host.perf` buckets, same `UI:PerfStart` switch, same
+-- `UI:PerfReport` printout, which walks whatever names it finds there and so
+-- picks these up without knowing they exist.
+--
+-- WHY THE LIBRARY NEEDS ANY. UI:Call can only count what crosses back into the
+-- consumer, and the open path's real cost was never there: it was the shell's
+-- own accent cascade, and a hook counter watched it happen without seeing it.
+--
+-- OFF BY DEFAULT AND FREE. One rawget when nothing is recording -- the same gate
+-- UI:Call itself takes -- and no timer starts and nothing is allocated until a
+-- consumer calls PerfStart. The names are prefixed so a report reads the
+-- library's own work apart from the consumer's hooks at a glance.
+local debugprofilestop = debugprofilestop or function() return 0 end
+
+local function perfStart(host)
+    if type(host) ~= "table" or not rawget(host, "_perfActive") then return nil end
+    return debugprofilestop()
+end
+
+-- t0 nil = recording was off when the work started, so nothing is recorded now:
+-- a PerfStart mid-open must not book a partial call at a wild duration.
+local function perfStop(host, name, t0)
+    if not t0 then return end
+    local p = rawget(host, "perf")
+    if not p then return end
+    p.counts[name] = (p.counts[name] or 0) + 1
+    p.ms[name] = (p.ms[name] or 0) + (debugprofilestop() - t0)
+end
+
 -- The box model comes from the theme (see Theme.lua's note on both): the frame's
 -- height is TITLE_H + PAD + content + PAD, and a consumer sizing a fixed panel
 -- has to be able to work that out without reading this file.
@@ -1079,12 +1112,52 @@ function Popout:_RefreshFooter()
     return self
 end
 
+-- Is the strip already showing EXACTLY this list? The layout is a function of
+-- the descriptors and of nothing else -- which buttons, in which order, with
+-- which labels -- so when all three match, re-running it re-anchors and
+-- re-labels pooled buttons into the positions they are already in.
+--
+-- ⚠ Worth asking because the answer is normally YES. Opening a row's panel
+-- renders the footer TWICE: adopt() puts the row's actions up, and the row's
+-- bind then re-states the same table through SetActions -- see bindRow in
+-- PopoutRow.lua, which does it so a PINNED instance (which never re-adopts)
+-- gets the verbs of whichever row it was re-bound to.
+--
+-- The DESCRIPTOR is compared by identity and its TEXT by value, because those
+-- are the two ways the strip can be wrong: a different action in the slot, or
+-- the same action relabelled in place. `enabled` is deliberately not among them
+-- -- that answer is re-asked by _RefreshFooter on every pass, which is what the
+-- caller below still gets.
+function Popout:_FooterMatches(list, n)
+    local btns = self._footerBtns
+    if not (self._footerOn and btns) then return false end
+    for i = 1, n do
+        local btn, act = btns[i], list[i]
+        if not btn or btn._dfAct ~= act then return false end
+        if btn._dfText ~= (act.text or "") then return false end
+    end
+    -- ...and nothing beyond them is still up. A shorter list must hide its
+    -- surplus, which is layout the early-out would skip.
+    for i = n + 1, #btns do
+        if btns[i]._dfAct ~= nil then return false end
+    end
+    return true
+end
+
 -- Put `self.actions` on screen. The whole of the per-adopt story: N descriptors
 -- in, N pooled buttons shown with their labels and widths, the surplus hidden,
 -- and the panel re-measured only when the STRIP's presence changed.
 function Popout:_RenderFooter()
     local list = self.actions
     local n = (type(list) == "table") and #list or 0
+
+    -- Already exactly this strip: nothing to lay out, and the hold stands (it is
+    -- a press on a descriptor that has not changed). The refresh below is NOT
+    -- skipped with it -- "can this be pressed" is answered by things the panel is
+    -- never told about, and it is the reason a second render was worth anything.
+    if n > 0 and self:_FooterMatches(list, n) then
+        return self:_RefreshFooter()
+    end
 
     if n == 0 then
         -- Withdrawn (or never declared). A pooled instance re-adopted by a
@@ -1103,6 +1176,9 @@ function Popout:_RenderFooter()
         return self
     end
 
+    -- From here down is the LAYOUT, which is the half worth timing: the two
+    -- returns above are the strip standing still and the strip going away.
+    local t0 = perfStart(self.host)
     local bar = self:_EnsureFooter()
     -- ☠ Any button whose descriptor is about to change must not still be held.
     -- Cheaper than working out whether THIS button's action survived the swap,
@@ -1125,7 +1201,11 @@ function Popout:_RenderFooter()
         btn._dfAct = act
         btn:SetWidth(share)
         btn:SetHeight(FOOTER.btnHeight)
-        if btn.SetText then btn:SetText(act.text or "") end
+        -- Remembered as well as set: it is half of what _FooterMatches compares,
+        -- and reading it back off the button would mean trusting every surface a
+        -- button might be (the headless stub answers a function for an unset key).
+        btn._dfText = act.text or ""
+        if btn.SetText then btn:SetText(btn._dfText) end
         btn:ClearAllPoints()
         if i == 1 then
             btn:SetPoint("LEFT", bar, "LEFT", PAD, 0)
@@ -1146,6 +1226,7 @@ function Popout:_RenderFooter()
         self:_Resize()
     end
     self:_RefreshFooter()
+    perfStop(self.host, "popout:footer", t0)
     return self
 end
 
@@ -1282,9 +1363,10 @@ end
 -- the one thing the shared-border story cannot survive.
 --
 -- nil resets to the host accent. The source outline repaints through
--- _ApplyAccent, which re-runs ApplyPixelBorder on it unconditionally --
--- _UpdateSourceOutline itself only repaints on a TARGET change, so it would not
--- have noticed a colour change on a shown outline.
+-- _ApplyAccent, which re-runs ApplyPixelBorder on it whenever the COLOUR has
+-- actually moved -- _UpdateSourceOutline itself only repaints on a TARGET
+-- change, so it would not have noticed a colour change on a shown outline, and
+-- a colour that has NOT changed leaves an outline already painted in it.
 --
 -- _ApplyAccent also CASCADES into the content, so the widgets the consumer
 -- mounted follow the chrome instead of staying in whatever colour they were
@@ -1333,8 +1415,26 @@ local CASCADE_DEPTH = 8
 -- repaint that reads host:GetAccent() at CLICK time rather than at theme time (a
 -- dropdown menu building its rows, an anchor grid cell re-activating) still
 -- comes up in the host colour until it is next rebuilt.
+--
+-- ☠ A SUBTREE MAY OWN ITS OWN REPAINT -- `frame.dfCascadeInto = fn(c)`, and the
+-- walk hands that frame the colour and goes no further down it.
+--
+-- The reason is the pool, and it is a cost that GROWS. One panel serves every
+-- row on a host, and each row's pane is built ONCE and then KEPT under the same
+-- mount -- shown or hidden -- for the rest of the session. So the mount's
+-- children are every group the user has ever opened, on every page, and a walk
+-- rooted above it re-tints all of them on every open. Measured on a 14-row page
+-- at 8 controls a row: 226 ApplyThemeColor calls and 292 nodes per open of ONE
+-- row, still climbing. That is the stutter.
+--
+-- A hidden pane does not need the colour AT the moment it changes -- it needs it
+-- before it is next SHOWN. So the owner takes the call, repaints the pane that is
+-- actually up, and catches the rest up as they come round. The shell keeps the
+-- rule (this colour, through ApplyThemeColor) and stops keeping the inventory.
 local function cascadeInto(frame, c, depth)
     if type(frame) ~= "table" or depth > CASCADE_DEPTH then return end
+    local own = rawget(frame, "dfCascadeInto")
+    if type(own) == "function" then return own(c) end
     local list = rawget(frame, "ThemeListeners")
     if type(list) == "table" then
         for _, w in ipairs(list) do
@@ -1348,12 +1448,26 @@ local function cascadeInto(frame, c, depth)
     for i = 1, #kids do cascadeInto(kids[i], c, depth + 1) end
 end
 
+-- The walk, from a root of the caller's choosing and in a colour of its choosing
+-- -- the other half of the dfCascadeInto bargain above. An owner that took the
+-- call for its subtree hands back the one branch it decided is worth painting,
+-- and gets the shell's rules applied to it rather than a second copy of them.
+--
+-- ⚠ The root handed in must be BELOW the frame that carries dfCascadeInto, or
+-- this re-enters that hand-off and recurses.
+function Popout:CascadeInto(frame, c)
+    cascadeInto(frame, c or self:GetAccent(), 0)
+    return self
+end
+
 -- Rooted at the FRAME, not at the content: the title bar is not a child of the
 -- content, and a consumer's header controls (a popout row's own toggle) live
 -- there. A cascade that missed them would leave the one control at the top of
 -- the panel in the colour everything else had just left.
 function Popout:_CascadeAccent()
+    local t0 = perfStart(self.host)
     cascadeInto(self.frame, self:GetAccent(), 0)
+    perfStop(self.host, "popout:cascade", t0)
 end
 
 -- ---- the panel's own chrome, in whichever style it wears ----------
@@ -1406,18 +1520,51 @@ end
 -- change comes up in the current colour rather than in whatever it was built in
 -- -- and, since adopt re-resolves the style too, in the current SHAPE rather
 -- than in whichever caller happened to build it.
+--
+-- ☠ COMPARE BEFORE PAINT. This runs TWICE on every open of a row's panel --
+-- once from adopt() and again from the row's bind, which re-states the accent it
+-- has just been adopted with -- and the second paint is a full re-issue of the
+-- panel's backdrop (or of its rounded fill and ring) for a colour and a shape
+-- that did not move. Same discipline the slider's bubble needed: nothing is
+-- re-anchored, re-issued or re-textured while the answer is the one already on
+-- screen.
+--
+-- The two things the paint is a function of are the COLOUR and the STYLE, so
+-- those are what is remembered. The style by IDENTITY, which is sound because
+-- ResolveSurfaceStyle hands back the very table it was given (or the host's)
+-- rather than a copy of it; the colour by VALUE, because the host's accent table
+-- is MUTATED IN PLACE by SetAccent -- an identity check there would sleep
+-- through every theme change on the host.
 function Popout:_ApplyAccent()
     local c = self:GetAccent()
-    self:_PaintChrome(c)
-    -- The title bar's cross, and the corner it would otherwise be standing in.
-    -- BOTH modes, unconditionally: the cross has to come back to the shell's own
-    -- offset on square as reliably as it moves off it when rounded, and putting
-    -- the call before any branch is what makes that one statement instead of two.
-    UI:InsetTitleButton(self.closeBtn, self.surface and self.surface.radius or nil)
-    if self.notch then self.notch:SetVertexColor(c.r, c.g, c.b, c.a or 1) end
-    if self.srcOutline then self:_PaintSourceOutline(c) end
+    local r, g, b, a = c.r, c.g, c.b, c.a or 1
+    if self._paintR ~= r or self._paintG ~= g or self._paintB ~= b
+       or self._paintA ~= a or self._paintSurface ~= (self.surface or false) then
+        self._paintR, self._paintG, self._paintB, self._paintA = r, g, b, a
+        self._paintSurface = self.surface or false
+        -- Marked at the CALL rather than inside _PaintChrome: that function has
+        -- an early return in its square arm, and the mark belongs to "a paint
+        -- happened" rather than to either of the two shapes.
+        local t0 = perfStart(self.host)
+        self:_PaintChrome(c)
+        perfStop(self.host, "popout:chrome", t0)
+        -- The title bar's cross, and the corner it would otherwise be standing
+        -- in. BOTH modes, unconditionally: the cross has to come back to the
+        -- shell's own offset on square as reliably as it moves off it when
+        -- rounded, and putting the call before any branch is what makes that one
+        -- statement instead of two.
+        UI:InsetTitleButton(self.closeBtn, self.surface and self.surface.radius or nil)
+        if self.notch then self.notch:SetVertexColor(r, g, b, a) end
+        if self.srcOutline then self:_PaintSourceOutline(c) end
+    end
     -- ...and the widgets INSIDE it, which are not chrome and do not read this
     -- popout's colour on their own.
+    --
+    -- OUTSIDE the compare, and deliberately: the CONTENT is not settled the way
+    -- the chrome is. A consumer mounts more of it after the fact (the build-time
+    -- cascade in the factory is exactly that case), and a pooled panel is handed
+    -- a pane it has never tinted. The walk is cheap once a subtree owner has
+    -- taken its own branch -- see cascadeInto.
     self:_CascadeAccent()
 end
 
@@ -1849,18 +1996,21 @@ function Popout:_UpdateBeam()
     -- Both endpoints are UIParent-centre; a line's offsets are read in the units
     -- of the frame it belongs to, so they go back through that frame's ratio.
     local bk = scaleRatio(b)
-    for _, line in ipairs({ b.glow, b.core }) do
-        if line then
-            line:SetStartPoint("CENTER", UIParent, ax / bk, ay / bk)
-            line:SetEndPoint("CENTER", UIParent, bx / bk, by / bk)
-        end
-    end
+    -- Each line stated in ONE block rather than a placement loop over
+    -- `{ b.glow, b.core }` and a paint block each. This runs on every frame of a
+    -- glide and on every tick that finds the source has moved, and that table
+    -- was two words of garbage per frame for a pair whose membership is fixed at
+    -- build.
     if b.glow then
+        b.glow:SetStartPoint("CENTER", UIParent, ax / bk, ay / bk)
+        b.glow:SetEndPoint("CENTER", UIParent, bx / bk, by / bk)
         b.glow:SetThickness(BEAM_GLOW_W)
         b.glow:SetColorTexture(c.r, c.g, c.b, BEAM_GLOW_A)
         b.glow:Show()
     end
     if b.core then
+        b.core:SetStartPoint("CENTER", UIParent, ax / bk, ay / bk)
+        b.core:SetEndPoint("CENTER", UIParent, bx / bk, by / bk)
         b.core:SetThickness(BEAM_CORE_W)
         b.core:SetColorTexture(c.r, c.g, c.b, BEAM_CORE_A)
         b.core:Show()
@@ -1981,6 +2131,10 @@ function Popout:GetTitle() return self.headerTitle end
 -- hanging in the air while its popout shrinks away reads as two events.
 function Popout:Close(reason)
     if self.closed then return self end
+    -- After the re-entry guard, so a second Close books nothing: the report is
+    -- about what closing COSTS, and the calls that turn straight round again are
+    -- not that.
+    local t0 = perfStart(self.host)
     self.closed = true
     -- ☠ FIRST, and before onClose. A hold whose panel is closing (the cross, a
     -- family sweep, the source going away) still owes its consumer the restore,
@@ -2018,6 +2172,7 @@ function Popout:Close(reason)
     if hadChrome then after(BEAM_DUR, popOut) else popOut() end
 
     safeCall(self.onClose, self, reason or "api")
+    perfStop(self.host, "popout:close", t0)
     return self
 end
 
@@ -2136,7 +2291,9 @@ function UI:CreatePopout(opts)
     local pooled = store.pooled[opts.key]
     if pooled then
         pooled.closed = false
+        local t0 = perfStart(host)
         adopt(pooled, opts)
+        perfStop(host, "popout:adopt", t0)
         local found = false
         for _, p in ipairs(store.live) do if p == pooled then found = true end end
         if not found then tinsert(store.live, pooled) end
