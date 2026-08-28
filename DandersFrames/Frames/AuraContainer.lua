@@ -665,59 +665,59 @@ local function anyLiveContainers()
     return next(AuraContainer._slotHandles or {}) ~= nil
 end
 
--- FROZEN-COUNT DETECTOR. Presence is secret, so staleness cannot be READ — but it has
--- an observable signature: `GetAuraGroupFrameCount` is a plain number (the AURAROW
--- watch reads it per second, combat included), and a stale container's counts FREEZE
--- non-zero while UNIT_AURA traffic keeps flowing for its unit. A healthy container's
--- counts move as auras come and go; a bounced-and-healed one moves on the next sample;
--- one that stays frozen through sweeps that bounced it is bounce-immune — the bricked
--- class, which only a rebuild can cure, and exactly the thing worth a loud log line.
+-- POOL-GROWTH DETECTOR. Presence is secret, so staleness cannot be READ — and the one
+-- number the engine leaves plain, `GetAuraGroupFrameCount`, is plain precisely because
+-- it leaks nothing: it returns the group's OWNED pool size, not its visible count
+-- (Blizzard_AuraContainerFrameProviders: GetOwnedFrameCount -> #ownedFrames). The pool
+-- is batch-allocated at 10 per group inside AddAuraGroup and NEVER shrinks — released
+-- buttons go back to `availableFrames` but stay owned. So for any group whose
+-- maxFrameCount is ≤ 10, this number is a CONSTANT 10 for the whole session, and
+-- "frozen" is the healthy state. (The first cut of this watch had that exactly
+-- backwards — it warned "POSSIBLY STALE" on frozen counts, which would have tripped on
+-- every healthy handle a few minutes into any raid. Genuine staleness has NO read-side
+-- signature; the wedge class is detectable only by its cure — a rebuild.)
 --
--- ⚠ A HEURISTIC, BY DESIGN, and phrased as one in the log: a genuinely long-lived
--- tracked aura also freezes its count. That is why this WARNS once per handle (with
--- the streak length and the unit's traffic) and logs the clear — a breadcrumb for
--- reading the log after a raid, not an alarm. Runs only while the AURACONTAINER
--- channel is on (DebugActive), the same contract as the AURAROW watch, so it costs
--- normal users nothing. Groups only: the dispel overlay and placed indicators declare
--- SLOTS, which have no count API.
-local staleWatch = setmetatable({}, { __mode = "k" })
-local STALE_STREAK = 6   -- consecutive unchanged 30s samples (~3 min) before the WARN
-local function sampleFrozenCounts()
+-- What the number CAN say, and says with a latch: the pool only grows (in steps of 10,
+-- AuraContainerCustomFrameProviderMixin:AcquireFrame -> CreateFrameBatch when dry) if
+-- MORE frames than it owns were simultaneously assigned in that ONE group. A gated
+-- group (HELPFUL + spell-ID pool, a handful of IDs) can never legitimately need >10 at
+-- once — growth there means the engine skipped the include map: the identity-gate
+-- fail-open flood. And because the pool never shrinks, the evidence SURVIVES the heal:
+-- a kick can empty the flood minutes before the log is read and this line still shows
+-- it happened. Runs only while the AURACONTAINER channel is on (DebugActive), same
+-- contract as the flow watch. Groups only: the dispel overlay and placed indicators
+-- declare SLOTS, which have no count API.
+local poolWatch = setmetatable({}, { __mode = "k" })
+local function samplePoolGrowth()
     if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
     for h in pairs(AuraContainer._handles or {}) do
         local keys = not h._destroyed and not h._testFrame
             and h.backend and h.backend.groupKeys
         local c = keys and #keys > 0 and h.backend.container
         if c and c.GetAuraGroupFrameCount then
-            local w = staleWatch[h]
-            if not w then w = { counts = {} }; staleWatch[h] = w end
-            local total, changed = 0, false
+            local w = poolWatch[h]
+            if not w then w = { base = {} }; poolWatch[h] = w end
             for i = 1, #keys do
-                local ok, n = pcall(c.GetAuraGroupFrameCount, c, keys[i])
+                local key = keys[i]
+                local ok, n = pcall(c.GetAuraGroupFrameCount, c, key)
                 n = (ok and type(n) == "number") and n or 0
-                if w.counts[keys[i]] ~= n then changed = true end
-                w.counts[keys[i]] = n
-                total = total + n
-            end
-            local unit = h.config and h.config.unit
-            local traffic = unit and flowCounts[unit] or 0
-            if changed or total == 0 then
-                if w.warned then
-                    DF:Debug(DBG, "frozen-count CLEARED unit=%s after %d samples (counts moved)",
-                        tostring(unit), w.streak or 0)
-                end
-                w.streak, w.warned = 0, nil
-            else
-                w.streak = (w.streak or 0) + 1
-                -- Traffic required AT the trip: frozen with no aura events is just a
-                -- quiet unit; frozen while events flow is the stale signature.
-                if w.streak >= STALE_STREAK and traffic >= 3 and not w.warned then
-                    w.warned = true
+                local base = w.base[key]
+                if base == nil then
+                    -- First sight is the batch allocation (10 per group); baseline
+                    -- silently. A flood that lands before the first sample baselines
+                    -- in — accepted; the canary probe covers arm-time state.
+                    w.base[key] = n
+                elseif n > base then
+                    w.base[key] = n
+                    local unit = h.config and h.config.unit
+                    local gated = h.backend.gatedGroupKeys and h.backend.gatedGroupKeys[key]
                     DF:DebugWarn(DBG,
-                        "POSSIBLY STALE (or a long-lived aura): unit=%s total=%d frozen for %d samples"
-                        .. " (~%ds) despite %d UNIT_AURA events this window — if a sweep bounced it"
-                        .. " and this persists, it is bounce-immune (rebuild-only class)",
-                        tostring(unit), total, w.streak, w.streak * SWEEP_INTERVAL, traffic)
+                        "POOL GREW unit=%s group=%s %d -> %d: more than %d auras were assigned to"
+                        .. " this one group at once%s. Latched for the session — this line is proof"
+                        .. " the overflow happened even if a kick has already healed the display.",
+                        tostring(unit), tostring(key), base, n, base,
+                        gated and " — and this is a GATED group (HELPFUL + spell-ID pool), so that"
+                            .. " is the identity-gate fail-open flood" or "")
                 end
             end
         end
@@ -726,9 +726,7 @@ end
 
 C_Timer.NewTicker(SWEEP_INTERVAL, function()
     syncFlowWatch()
-    -- Detector samples BEFORE the flow window is wiped, so "traffic while frozen"
-    -- reads the same 30s the counts were compared across.
-    sampleFrozenCounts()
+    samplePoolGrowth()
     flushFlowLog()
     if AuraContainer._testMode then return end
     if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal

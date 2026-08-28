@@ -4778,10 +4778,15 @@ end
 -- Render one container handle's live config. `h.config.filter` is the same
 -- value normalizeFilters() consumes, so this prints the groups Blizzard is
 -- actually being asked to build.
--- How many frames a group is CURRENTLY using, straight from the engine
--- (CustomAuraContainerSharedMixin:GetAuraGroupFrameCount -> the group's frame provider).
--- ★ This is the number the eye sees, and it is the one thing no amount of reading the
--- config can tell you: config.max is what each group is ALLOWED, this is what it TOOK.
+-- ☠ THE GROUP'S OWNED POOL SIZE, NOT ITS VISIBLE COUNT. GetAuraGroupFrameCount
+-- returns the frame provider's #ownedFrames (Blizzard_AuraContainerFrameProviders):
+-- batch-allocated at 10 per group inside AddAuraGroup, grown in steps of 10 when the
+-- pool runs dry, and NEVER shrunk — released buttons stay owned. It is plain-readable
+-- precisely because it leaks no presence. So a registered group reads 10 regardless of
+-- what is showing; the visible count is not observable from outside. What the number
+-- DOES carry is a session-latched high-water mark: pool > 10 proves that more than 10
+-- auras were simultaneously assigned to that ONE group at some point — for a gated
+-- (HELPFUL + spell-ID) group, the identity-gate fail-open flood.
 -- Blizzard models a non-existent group as an empty one, so an unknown key answers 0
 -- rather than throwing — safe to ask for every record including slot-mode ones.
 -- ⚠ pcall'd and secrecy-checked anyway: a count derived from a secret aura set could
@@ -4824,9 +4829,9 @@ local function dumpRow(o, label, h)
         tostring(sort and sort.direction or "Normal")))
     -- ☠ max IS PER GROUP, NOT PER ROW. Blizzard caps at AddAuraGroup/
     -- SetAuraGroupMaxFrameCount, so a row built from N filter records can render up to
-    -- N x max. The per-group counts below plus the TOTAL are the only way to see that
-    -- happening — and the only way to tell "one group overfilled" apart from "the same
-    -- aura landed in two groups", which look identical on screen.
+    -- N x max. The pool sizes below cannot count what is VISIBLE (see groupFrameCount's
+    -- header), but a pool above 10 names WHICH group once overflowed — that is the
+    -- per-group attribution the screen cannot give.
     -- The player's own dead state rides along because it changes what the ENGINE
     -- matches: "RAID" means "harmful auras the player can dispel", and the identity gate
     -- flips which candidate filters are applicable on harmful auras
@@ -4838,27 +4843,32 @@ local function dumpRow(o, label, h)
     local filter = cfg.filter
     if type(filter) == "string" then
         local n = groupFrameCount(h, "df1")
-        pr(o, "group 1: %s   showing=%s", filter, tostring(n))
+        pr(o, "group 1: %s   pool=%s", filter, tostring(n))
+        if type(n) == "number" and n > 10 then
+            o:Line(format("    pool %d > 10: this group once held more than 10 auras at"
+                .. " once (session high-water mark — survives any heal)", n), "BAD")
+        end
         return
     elseif type(filter) ~= "table" then
         pr(o, "filter: %s (unexpected type)", tostring(filter))
         return
     end
 
-    local total, counted = 0, true
+    local flooded = 0
     for i, f in ipairs(filter) do
         local str, key, cf
         if type(f) == "string" then str = f
         elseif type(f) == "table" then str, key, cf = f.filter, f.key, f.candidateFilters end
         -- Mirror the build's own key derivation (`rec.key or "df"..i`), or the count
         -- would be asked for a key the container never registered and answer 0.
-        -- `shown`, not `n`: the candidateFilters block below declares its own `n` for map
+        -- `pool`, not `n`: the candidateFilters block below declares its own `n` for map
         -- sizes, and two counts one nested inside the other is exactly how a dump starts
         -- reporting the wrong number.
-        local shown = groupFrameCount(h, key or ("df" .. i))
-        if type(shown) == "number" then total = total + shown else counted = false end
-        pr(o, "group %d%s: %s   showing=%s", i, key and (" [" .. tostring(key) .. "]") or "",
-            tostring(str), tostring(shown))
+        local pool = groupFrameCount(h, key or ("df" .. i))
+        local over = type(pool) == "number" and pool > 10
+        if over then flooded = flooded + 1 end
+        pr(o, "group %d%s: %s   pool=%s%s", i, key and (" [" .. tostring(key) .. "]") or "",
+            tostring(str), tostring(pool), over and "  << GREW PAST THE BATCH" or "")
         if cf then
             for _, ck in ipairs({ "isBossAura", "isRoleAura", "isBossOrRoleAura", "isPriorityAura",
                                   "isStealable", "canApplyAura", "isFromPlayerOrPlayerPet", "maxDuration" }) do
@@ -4875,18 +4885,18 @@ local function dumpRow(o, label, h)
         end
     end
 
-    -- THE LINE THIS WHOLE DUMP EXISTS FOR: what the row is allowed vs what it drew.
-    -- Flagged BAD when the total exceeds the setting, because that is the user-visible
-    -- claim ("Max Debuffs 3") being false — not a curiosity.
-    if counted then
-        local cap = tonumber(cfg.max)
-        local overCap = cap and total > cap
-        o:Line(format("TOTAL showing=%d across %d group%s (max=%s per GROUP%s)",
-            total, #filter, #filter == 1 and "" or "s", tostring(cfg.max),
-            cap and format(", so up to %d for this row", cap * #filter) or ""),
-            overCap and "BAD" or nil)
+    -- THE LINE THIS WHOLE DUMP EXISTS FOR: pools are session high-water marks, so a
+    -- flooded group testifies AFTER the fact — flagged BAD because for a gated group
+    -- >10 simultaneous auras means the engine skipped its spell-ID map (fail-open).
+    if flooded > 0 then
+        o:Line(format("%d group%s grew past the 10-frame batch: more than 10 auras sat in"
+            .. " one group at once at some point this session (latched even if since healed)",
+            flooded, flooded == 1 and "" or "s"), "BAD")
     else
-        o:Line("TOTAL showing: unavailable (a group count could not be read)", "WARN")
+        o:Line(format("pools at batch size across %d group%s — no group has ever exceeded"
+            .. " 10 simultaneous auras this session (visible counts are not readable;"
+            .. " pool growth is the only engine-side overflow signal)",
+            #filter, #filter == 1 and "" or "s"))
     end
 end
 
@@ -4912,27 +4922,17 @@ local WATCH_ROWS = {
     { "buff",      "buffFactory"      },
     { "defensive", "defensiveFactory" },
 }
--- unit/row -> the total last logged, so a steady overflow reports ONCE rather than once
--- per tick, and a recovery reports too (the clear is as diagnostic as the break).
-local overflowState = {}
-
--- Totals for one row: what it drew, what each group is allowed, and the per-group
--- breakdown. Returns nil if any group's count is unreadable — a partial total would be a
--- worse answer than no answer, because it reads as "under the cap".
-local function rowTotals(h)
-    local cfg = h.config
-    local filter = cfg and cfg.filter
-    if type(filter) ~= "table" then return nil end
-    local total, parts = 0, {}
-    for i, f in ipairs(filter) do
-        local key = (type(f) == "table" and f.key) or ("df" .. i)
-        local n = groupFrameCount(h, key)
-        if type(n) ~= "number" then return nil end
-        total = total + n
-        if n > 0 then parts[#parts + 1] = key .. "=" .. n end
-    end
-    return total, tonumber(cfg.max), #filter, (#parts > 0) and table.concat(parts, " ") or "none"
-end
+-- ☠ WHAT THIS WATCH CAN AND CANNOT SEE. groupFrameCount is the group's OWNED pool
+-- size (see its header), NOT the visible count — the first cut compared summed pools
+-- against cfg.max and would have cried OVERFLOW on every healthy row (a 6-record row
+-- reads 60 forever: six 10-frame batches; the 2026-08-26 field log's "60 against a max
+-- of 3" was exactly that arithmetic). Visible counts are not readable from outside.
+-- The one true engine-side signal is pool GROWTH: a pool only steps past its first-seen
+-- size when MORE auras than it owned were simultaneously assigned in that ONE group,
+-- so any growth is the overflow event, latched for the handle's lifetime. Baselines are
+-- keyed per HANDLE (weak) so a rebuilt row baselines its fresh container's batch
+-- instead of inheriting the old high-water mark and going blind.
+local poolBaseline = setmetatable({}, { __mode = "k" })
 
 -- File-local, not a closure built per tick: this runs once per frame per row per second
 -- while the category is on, and a fresh closure each pass is garbage for nothing.
@@ -4942,46 +4942,47 @@ local function checkFrameOverflow(frame)
         local label, field = WATCH_ROWS[i][1], WATCH_ROWS[i][2]
         local h = frame[field]
         if type(h) == "table" and type(h.GetUnit) == "function" and h.config then
-            local total, cap, groups, parts = rowTotals(h)
-            if total and cap and cap > 0 then
-                local stateKey = tostring(frame.unit) .. "/" .. label
-                local prev = overflowState[stateKey]
-                if total > cap then
-                    -- Re-log when the total MOVES, so a row climbing 4 -> 5 -> 6 is visible
-                    -- as a progression rather than collapsing into one line.
-                    if prev ~= total then
-                        overflowState[stateKey] = total
-                        -- The per-group breakdown is the whole diagnosis: it separates "one
-                        -- group overfilled" from "the same aura landed in two groups", which
-                        -- are indistinguishable on screen and have different causes.
-                        -- ★ THE PER-UNIT TERMS, because the report is "only SOME people".
-                        -- Whatever is different about the affected raiders has to be a
-                        -- per-unit value, and these are the ones the aura path actually
-                        -- reads. canAssist above all: it is the sole input to Blizzard's
-                        -- identity gate (isHarmful and UnitCanAssist -> spell-ID candidate
-                        -- filters are NOT applied), it is evaluated PER TARGET, and DF has
-                        -- already field-confirmed it goes false for everyone while you are
-                        -- a ghost (Update.lua's note on the observer-side case).
-                        -- pcall'd and secrecy-checked: dfInRange can hold a secret boolean
-                        -- from the UnitInRange fallback, and tostring on a secret makes the
-                        -- whole line vanish rather than erroring.
-                        local okA, canAssist = pcall(UnitCanAssist, "player", frame.unit)
-                        if not okA or (issecretvalue and issecretvalue(canAssist)) then canAssist = "?" end
-                        local inRange = frame.dfInRange
-                        if issecretvalue and issecretvalue(inRange) then inRange = "secret" end
-                        DF:DebugWarn("AURAROW",
-                            "OVERFLOW %s %s row: showing %d vs max %d per group over %d groups [%s]"
-                            .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
-                            tostring(frame.unit), label, total, cap, groups, parts,
-                            tostring(DF.playerIsDead), tostring(DF.playerInCombat),
-                            tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
-                            tostring(inRange))
+            local filter = h.config.filter
+            if type(filter) == "table" then
+                local base = poolBaseline[h]
+                if not base then base = {}; poolBaseline[h] = base end
+                for gi, f in ipairs(filter) do
+                    local key = (type(f) == "table" and f.key) or ("df" .. gi)
+                    local n = groupFrameCount(h, key)
+                    if type(n) == "number" and n > 0 then
+                        if base[key] == nil then
+                            -- First sight is the batch allocation; baseline silently.
+                            base[key] = n
+                        elseif n > base[key] then
+                            local prev = base[key]
+                            base[key] = n
+                            -- The group KEY is the whole diagnosis: it names which record's
+                            -- pool blew past its batch, which the screen cannot attribute.
+                            -- ★ THE PER-UNIT TERMS, because the report is "only SOME people".
+                            -- Whatever is different about the affected raiders has to be a
+                            -- per-unit value, and these are the ones the aura path actually
+                            -- reads. canAssist above all: it is the sole input to Blizzard's
+                            -- identity gate (isHarmful and UnitCanAssist -> spell-ID candidate
+                            -- filters are NOT applied), it is evaluated PER TARGET, and DF has
+                            -- already field-confirmed it goes false for everyone while you are
+                            -- a ghost (Update.lua's note on the observer-side case).
+                            -- pcall'd and secrecy-checked: dfInRange can hold a secret boolean
+                            -- from the UnitInRange fallback, and tostring on a secret makes the
+                            -- whole line vanish rather than erroring.
+                            local okA, canAssist = pcall(UnitCanAssist, "player", frame.unit)
+                            if not okA or (issecretvalue and issecretvalue(canAssist)) then canAssist = "?" end
+                            local inRange = frame.dfInRange
+                            if issecretvalue and issecretvalue(inRange) then inRange = "secret" end
+                            DF:DebugWarn("AURAROW",
+                                "POOL GREW %s %s row group %s: %d -> %d — more than %d auras sat in"
+                                .. " this one group at once (latched even if since healed)"
+                                .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
+                                tostring(frame.unit), label, tostring(key), prev, n, prev,
+                                tostring(DF.playerIsDead), tostring(DF.playerInCombat),
+                                tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
+                                tostring(inRange))
+                        end
                     end
-                elseif prev then
-                    overflowState[stateKey] = nil
-                    DF:Debug("AURAROW",
-                        "overflow cleared %s %s row: showing %d vs max %d [%s] dead=%s",
-                        tostring(frame.unit), label, total, cap, parts, tostring(DF.playerIsDead))
                 end
             end
         end
