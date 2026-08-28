@@ -511,45 +511,139 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- No copy-to-other-mode button: the only settings on this page are the
         -- colour-picker toggles, and those are account-wide now (see below), so
         -- there is nothing per-mode left to copy.
-        -- ===== COLOR PICKER GROUP (Column 1) =====
+        --
+        -- ===== COLOR PICKER (a 280 box in classic, a one-row band) =========
         -- Bound to the ACCOUNT-WIDE db, not the page's per-mode `db`. These render
         -- on both the Party and Raid tabs, and when they were per-mode the Raid copy
         -- was write-only -- the hooks only ever read party, so ticking it on Raid
         -- looked enabled and did nothing. One setting, one value, both tabs.
         local pickerDB = DF:GetGlobalDB()
-        local colorPickerGroup = GUI:CreateSettingsGroup(self.child, 280)
-        colorPickerGroup:AddWidget(GUI:CreateHeader(self.child, L["Color Picker"]), 40)
 
-        colorPickerGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use DF Color Picker"], pickerDB, "colorPickerOverride", function()
-            if pickerDB.colorPickerOverride or pickerDB.colorPickerGlobalOverride then
-                GUI:InstallColorPickerHook()
-            else
-                GUI:UninstallColorPickerHook()
-            end
-            if pickerDB.colorPickerOverride then
-                DF:Say("Color picker override enabled")
-            else
-                DF:Say("Color picker override disabled", nil, "WARN")
-            end
-        end), 30)
-        colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Replace Blizzard's color picker with the DandersFrames color picker for this addon."], 250), 40)
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery, taken unconditionally: nil in classic,
+        -- which is what the `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
 
-        colorPickerGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use DF Color Picker for All Addons"], pickerDB, "colorPickerGlobalOverride", function()
-            if pickerDB.colorPickerOverride or pickerDB.colorPickerGlobalOverride then
-                GUI:InstallColorPickerHook()
-            else
-                GUI:UninstallColorPickerHook()
-            end
-            if pickerDB.colorPickerGlobalOverride then
-                DF:Say("Custom color picker enabled for all addons")
-            else
-                DF:Say("Custom color picker disabled for all addons", nil, "WARN")
-            end
-        end), 30)
-        colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Show the DF color picker when any addon opens a color picker."], 250), 30)
+        -- The page's one band: full-width and chromeless, because a feature row's
+        -- popout docks outside the WINDOW and runs a beam back to the row, so a
+        -- row that stopped 280px in would leave that beam crossing half the page.
+        -- No header on it -- one row whose own label already says "Color Picker",
+        -- which is the Sorting page's sortBand rule.
+        local colorPickerBand
+        if tools then
+            colorPickerBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
 
-        Add(colorPickerGroup, nil, 1)
-        
+        -- The group's four widgets, verbatim, taking the group and parent they
+        -- should build into -- the same factories, L keys, db keys and slot
+        -- heights in both layouts.
+        --
+        -- ⚠ NO TOGGLE IS HOISTED. Neither tick means "am I doing anything": they
+        -- are two INDEPENDENT overrides (this addon's pickers, and every other
+        -- addon's), and either can be on without the other. A row that hoisted
+        -- one would be claiming it speaks for the pair.
+        local function BuildColorPickerGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Use DF Color Picker"], pickerDB, "colorPickerOverride", function()
+                if pickerDB.colorPickerOverride or pickerDB.colorPickerGlobalOverride then
+                    GUI:InstallColorPickerHook()
+                else
+                    GUI:UninstallColorPickerHook()
+                end
+                if pickerDB.colorPickerOverride then
+                    DF:Say("Color picker override enabled")
+                else
+                    DF:Say("Color picker override disabled", nil, "WARN")
+                end
+            end), 30)
+            group:AddWidget(GUI:CreateLabel(parent, L["Replace Blizzard's color picker with the DandersFrames color picker for this addon."], 250), 40)
+
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Use DF Color Picker for All Addons"], pickerDB, "colorPickerGlobalOverride", function()
+                if pickerDB.colorPickerOverride or pickerDB.colorPickerGlobalOverride then
+                    GUI:InstallColorPickerHook()
+                else
+                    GUI:UninstallColorPickerHook()
+                end
+                if pickerDB.colorPickerGlobalOverride then
+                    DF:Say("Custom color picker enabled for all addons")
+                else
+                    DF:Say("Custom color picker disabled for all addons", nil, "WARN")
+                end
+            end), 30)
+            group:AddWidget(GUI:CreateLabel(parent, L["Show the DF color picker when any addon opens a color picker."], 250), 30)
+        end
+
+        if classicLayout then
+            local colorPickerGroup = GUI:CreateSettingsGroup(self.child, 280)
+            colorPickerGroup:AddWidget(GUI:CreateHeader(self.child, L["Color Picker"]), 40)
+            BuildColorPickerGroup({
+                group = colorPickerGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(colorPickerGroup, nil, 1)
+        else
+            -- One word, and only for the state worth a word. Replacing every
+            -- OTHER addon's picker is the setting a user will want confirmed at a
+            -- glance, and L["All"] says it in a word the locale already ships.
+            -- The this-addon-only state gets nothing: there is no existing word
+            -- for it that is not either vague ("On", beside a row with no toggle)
+            -- or a brand name standing in for a sentence -- and a summary is not
+            -- worth inventing a string for. The kit still shows the label and the
+            -- count badge, which is what an empty summary is for.
+            local function ColorPickerSummary(d)
+                if not d then return "" end
+                if d.colorPickerGlobalOverride then return L["All"] end
+                return ""
+            end
+
+            -- Four: two ticks and the blurb under each.
+            local COLOR_PICKER_COUNT = 4
+
+            local pickerMount, pickerContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildColorPickerGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local pickerRow = colorPickerBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Color Picker"],
+                -- ⚠ THE GLOBAL TABLE, NOT tools.RowDB. Every other row on the
+                -- sweep hands the kit the per-mode table because that is where
+                -- its keys live; these two live in the account-wide db, and a row
+                -- pointed at the per-mode one would read nil for both and print a
+                -- summary about settings it is not showing.
+                db      = function() return DF:GetGlobalDB() end,
+                summary = ColorPickerSummary,
+                count   = COLOR_PICKER_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = pickerMount,
+            }))
+            -- ☠ CLAIM THE KEYS, BUT NO MODIFIED TICK AND NO FOOTER -- and that is
+            -- not an oversight to be tidied up by the next sweep.
+            --
+            -- ClaimKeys does two jobs. The one wanted here is the SEARCH row map:
+            -- it records which row owns a setting, so a search hit on "Use DF
+            -- Color Picker" can open the panel the control is behind. Without it
+            -- the setting is findable in classic and unreachable in the popout
+            -- layout.
+            --
+            -- The other job is the amber tick's key list, and that half is inert
+            -- here on purpose. DF.Defaults (DandersFrames/Core/Defaults.lua)
+            -- answers for DF.db.party / DF.db.raid / the stored raid baseline and
+            -- nothing else, so:
+            --   * WireModifiedTick would ask "is colorPickerOverride modified" of
+            --     a table that has never held it -- the tick could never light.
+            --   * WireFooter is worse than useless: Reset Group and Hold both
+            --     write through that same engine, so they would stamp PER-MODE
+            --     defaults for these two keys into DF.db[mode] -- inventing
+            --     settings in the wrong table while the account-wide values the
+            --     row is actually showing sat untouched.
+            -- The correct home for a reset here is a global-db-aware engine that
+            -- does not exist yet; until it does, no strip is the honest answer.
+            tools.ClaimKeys(pickerRow, pickerContent)
+
+            Add(colorPickerBand, nil, "both")
+        end
+
         -- (Masque Integration group removed on 12.1: Masque cannot skin the
         -- native container aura buttons — its script hooks and backdrops are
         -- blocked on the protected buttons — so the toggle had no effect.)
