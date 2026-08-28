@@ -746,30 +746,25 @@ if GUI.CreateBorderShadowControls then
                 "classic still builds the 280 box")
         pageHas("if classicLayout then Add(appearanceGroup, nil, 2) end",
                 "...and still adds it to column 2, where it has always been")
-        -- Popout: the band. Width from the page helper (never a literal), no box
-        -- chrome, and added across both columns.
+        -- Popout: the band. Width from the page helper (never a literal) and no
+        -- box chrome. WHERE it is added is not decided in this block any more --
+        -- see the band-order block in test_frame_page_builders, which owns that
+        -- claim now that the page has more than one band.
         pageHas("GUI.PageUsableWidth(GUI.PageChildWidth(",
                 "the band is built at the width the layout pass will stretch it to")
         pageHas("GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })",
                 "...with no box chrome, because the rows ARE the surface")
-        pageHas('Add(appearanceGroup, nil, "both")',
-                "...and spans both columns")
         -- The band's padding is DEFAULT (the popout PANE is the zero-padding
         -- case, not this). That is what lands a row's right edge on the same
         -- corridor as a slider's value box -- see test_page_parking.
         check(pageSrc:find("bandW, { chromeless = true, padding", 1, true) == nil,
               "band: the band keeps the standard box padding, so its rows end at the corridor")
-        -- Exactly one Add per layout: the band's is hoisted above the Frame Size
-        -- group (so "both" syncs two columns that are still at the top rather
-        -- than punching a hole mid-page), and the classic one stays at the
-        -- bottom of the block. Two unconditional Adds would lay it out twice.
+        -- Inside THIS block, the only Add is the classic box's: the popout one
+        -- moved to the foot of the builder. Two unconditional Adds would lay the
+        -- container out twice.
         local adds = 0
         for _ in pageSrc:gmatch("Add%(appearanceGroup,") do adds = adds + 1 end
-        eq(adds, 2, "band: the container is added once per layout, never unconditionally")
-        local bandAt    = pageSrc:find('Add(appearanceGroup, nil, "both")', 1, true)
-        local sizeAddAt = pageSrc:find("Add(sizeGroup, nil, 1)", 1, true)
-        check(bandAt and sizeAddAt and bandAt < sizeAddAt,
-              "band: it is added BEFORE the first column box, so it lands above the columns")
+        eq(adds, 1, "band: the Appearance block adds the classic box and nothing else")
     end
 end
 

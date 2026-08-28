@@ -1812,10 +1812,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Mover. Permanent Mover is also by far the biggest box here, which
         -- carries column 2 in raid.
         --
-        -- ⚠ ...IN CLASSIC LAYOUT. In the popout layout Appearance is not a box in
-        -- column 2 at all: it is a FULL-WIDTH BAND of feature rows above the
-        -- columns. See the Appearance block below for the whole of why, and for
-        -- why its Add() has to happen up here rather than where it is built.
+        -- ⚠ ...IN CLASSIC LAYOUT. In the popout layout there are only TWO boxes
+        -- left in party mode -- Frame Size and Layout Direction, both column 1 --
+        -- because Appearance, Frame Fade and Permanent Mover are all FULL-WIDTH
+        -- BANDS of feature rows now. See the Appearance container block below for
+        -- what a band is and why it is full width, and the band block at the foot
+        -- of this builder for where the bands sit and why.
         local classicLayout = DF:IsClassicSettingsLayout()
 
         -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
@@ -1829,8 +1831,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --  * CLASSIC -- exactly what it has always been: a 280 box, in column 2,
         --    added at its own place in the flow further down. Untouched.
         --  * POPOUT  -- a CHROMELESS container the width of the page's content,
-        --    added HERE, before the first column box, so it lays out as a band
-        --    ACROSS the top rather than as a box beside one.
+        --    laid out as a band ACROSS the page rather than as a box beside one.
+        --    WHERE that band is added is decided at the foot of this builder; see
+        --    the band block there.
         --
         -- Why the band, and why full width: a feature row's popout docks outside
         -- the WINDOW and runs a beam back to the row. A row that stops 280px in
@@ -1844,13 +1847,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- drawn round a full-width band reads as a second panel, and the section
         -- keeps its identity from the "Appearance" header above the rows instead.
         --
-        -- ☠ THE Add() FOR THE BAND IS HERE, NOT AT THE BOTTOM OF THE BLOCK.
-        -- Add() records page order, and layoutCol "both" is ALSO a sync point --
-        -- it takes the lower of the two columns and drops both to it. Added where
-        -- the classic box is added (after Frame Size) it would sync the columns
-        -- mid-page and leave a hole beside Frame Size at two-column widths. Added
-        -- first, both columns are still at the top, so the band costs nothing and
-        -- the column flow below it is exactly what it was.
         local appearanceGroup
         if classicLayout then
             appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -1865,7 +1861,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
                 GUI.SettingsBox.group)
             appearanceGroup = GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })
-            Add(appearanceGroup, nil, "both")
         end
 
         -- ===== FRAME SIZE GROUP (Column 1) =====
@@ -3139,6 +3134,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Declared out here rather than inside the builder because the SUMMARY
         -- reads it too: the row says which corner the handle sits in, and there
         -- is one map of those words on this page, not two.
+        --
+        -- ...and the band it goes in, declared here and ADDED at the foot of the
+        -- builder with the other one -- see the band block there for why the two
+        -- Add()s live together.
+        local permMoverBand
         local moverAnchorValues = {
             TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
             LEFT= L["Left"], RIGHT= L["Right"],
@@ -3301,7 +3301,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 GUI.PageUsableWidth(GUI.PageChildWidth(
                     GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
                 GUI.SettingsBox.group)
-            local permMoverBand = GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })
+            permMoverBand = GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })
             local moverRow = permMoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Permanent Mover"],
                 db       = RowDB,
@@ -3317,6 +3317,45 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             WireModifiedTick(moverRow)
             WireFooter(moverRow, ApplyPermMover)
             RegisterHoistedToggle(moverRow, L["Enable Permanent Mover"], "permanentMover", OnPermMoverToggle)
+        end
+
+        -- ===== THE BANDS, AND WHY THEY ARE ADDED HERE ========================
+        -- Popout layout only: the two full-width bands of feature rows, added
+        -- AFTER every column box on the page.
+        --
+        -- ☠ THIS USED TO BE THE OTHER WAY ROUND, and the reason it was is worth
+        -- keeping because it is still true -- it just no longer applies. Add()
+        -- records page order, and layoutCol "both" is ALSO a sync point: it takes
+        -- the lower of the two columns and drops BOTH to it. With Appearance the
+        -- only band on the page, adding it in its old column-2 slot (after Frame
+        -- Size) would have synced the columns mid-page and left a hole beside
+        -- Frame Size at two-column widths -- so it was hoisted above the first
+        -- column box instead, where both columns are still at the top and the
+        -- sync costs nothing.
+        --
+        -- The hole is a BAND-BEFORE-COLUMNS problem, and a band AFTER all of them
+        -- has nothing left to punch a hole in: the sync happens where the flow was
+        -- ending anyway, which is what a sync point is for. So the constraint that
+        -- forced Appearance above Frame Size is gone, and the page can go back to
+        -- reading the way it is meant to -- the primaries first (Frame Size,
+        -- Layout Direction, and whichever raid boxes the mode implies), then the
+        -- feature rows.
+        --
+        -- ⚠ AT THE DEFAULT WIDTH THIS IS PURELY ABOUT READING ORDER. 640 is a
+        -- single-column page (LayoutPage's usesTwoColumns needs room for two
+        -- boxes plus the gutter), so Add order IS visual order and there is no
+        -- sync to reason about at all. The paragraphs above are about the widened
+        -- window.
+        --
+        -- ⚠ AND ONE CONSEQUENCE TO KNOW ABOUT: in PARTY mode at two-column
+        -- widths, column 2 is now empty. Everything that used to be in it here is
+        -- either a band or raid-only, so the two primary boxes sit alone on the
+        -- left with the bands beneath them. That is the conversion's doing, not
+        -- this ordering's -- it reads the same whichever end the bands are added
+        -- at -- and moving a primary across to balance it is a page-design
+        -- decision, deliberately not taken here.
+        if not classicLayout then
+            Add(appearanceGroup, nil, "both")
             Add(permMoverBand, nil, "both")
         end
 

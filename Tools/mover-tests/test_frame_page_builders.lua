@@ -255,3 +255,80 @@ do
     check(SRC:find('permMoverBand:AddWidget(GUI:CreateHeader', 1, true) == nil,
           "permanent mover: the band carries no header -- the row's label is the name")
 end
+
+-- ============================================================
+-- 3. THE PAGE ORDER -- primaries first, then the bands
+-- Appearance sat ABOVE Frame Size while it was the page's only band, and for a
+-- real reason: layoutCol "both" is a SYNC POINT (LayoutPage drops both columns
+-- to the lower of the two), so a band added into the middle of an unbalanced
+-- flow leaves a hole beside whatever was above it. Hoisting it to the top made
+-- that sync free, because both columns were still at zero.
+--
+-- With the page now mostly bands, the answer is the other end instead: a band
+-- added AFTER every column box syncs where the flow was ending anyway, which
+-- is what a sync point is for -- and the page reads primaries-then-features
+-- rather than opening on a band.
+--
+-- ⚠ WHAT THIS TEST CAN AND CANNOT SEE. Add() order IS page order (LayoutPage
+-- walks self.children), so the source order of the Add calls is the claim. It
+-- is not a geometry test: the page cannot be built headlessly, so the two
+-- widths are on the in-game checklist. What is pinned here is the invariant
+-- that makes the two-column case safe -- no band Add before a column Add.
+-- ============================================================
+do
+    -- Every Add on the Frame page, in source order, with what it was given.
+    -- Scoped to the page: the builder runs from the Frame page's own copy
+    -- button to the See Also bar at its foot.
+    local a = SRC:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
+    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
+    check(a ~= nil and b ~= nil and b > a, "order: the Frame page builder is locatable by its own ends")
+    local page = SRC:sub(a or 1, b or 1)
+
+    local adds = {}
+    for name, col in page:gmatch("Add%((%a[%w_]*),%s*nil,%s*([%w\"]+)%)") do
+        adds[#adds + 1] = { name = name, col = col }
+    end
+    check(#adds >= 8, "order: the page's Add calls are readable (" .. #adds .. " found)")
+
+    -- ⚠ BY NAME AND COLUMN. `appearanceGroup` is added TWICE in the source --
+    -- once as the classic 280 box into column 2, once as the band -- and they
+    -- are two different layouts, never both live. The column tells them apart.
+    local function indexOf(name, col)
+        for i, e in ipairs(adds) do
+            if e.name == name and (col == nil or e.col == col) then return i end
+        end
+    end
+
+    -- The two bands are added at the END, in the layout-order block, and the
+    -- Appearance band is no longer the page's first widget.
+    local bandA, bandB = indexOf("appearanceGroup", '"both"'), indexOf("permMoverBand")
+    check(bandA ~= nil, "order: the Appearance container is added")
+    check(bandB ~= nil, "order: ...and so is the Permanent Mover band")
+    eq(adds[bandA] and adds[bandA].col, '"both"', "order: the Appearance band spans both columns")
+    eq(adds[bandB] and adds[bandB].col, '"both"', "order: ...and so does the mover band")
+
+    -- ☠ THE INVARIANT: no "both" band is added before a COLUMN box. This is the
+    -- whole of why the old hoist existed, stated as the rule rather than as the
+    -- one arrangement that happened to satisfy it -- so a future group added in
+    -- the wrong place fails here instead of punching a hole at 900px wide.
+    local lastColumn = 0
+    for i, e in ipairs(adds) do
+        if e.col == "1" or e.col == "2" then lastColumn = i end
+    end
+    check(lastColumn > 0, "order: the page still has column boxes")
+    check(bandA > lastColumn,
+          "order: the Appearance band is added after every column box, so its sync is an end-sync")
+    check(bandB > lastColumn,
+          "order: ...and so is the mover band's")
+
+    -- Primaries first, and by name: Frame Size then Layout Direction, both
+    -- before anything that is a band.
+    local size, layout = indexOf("sizeGroup"), indexOf("layoutGroup")
+    check(size ~= nil and layout ~= nil, "order: both primary boxes are added")
+    check(size < layout, "order: Frame Size comes before Layout Direction")
+    check(layout < bandA, "order: ...and both come before the first band")
+
+    -- And the Add pair is guarded, so the classic layout adds neither band.
+    check(SRC:find("if not classicLayout then\n            Add(appearanceGroup, nil, \"both\")", 1, true) ~= nil,
+          "order: the bands are added only in the popout layout")
+end
