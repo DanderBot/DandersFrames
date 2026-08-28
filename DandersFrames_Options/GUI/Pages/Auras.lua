@@ -4074,116 +4074,451 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageHealPrediction, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"healPrediction"}, L["Heal Prediction"], "bars_healpred"), 25, 2)
-        
-        -- ===== SETTINGS GROUP (Column 1) =====
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Heal Prediction"]), 40)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Heal Prediction"], db, "healPredictionEnabled", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-        end), 30)
 
-        local overhealCheckbox = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Overheal"], db, "healPredictionShowOverheal", function() DF:UpdateAllFrames() end), 30)
-        overhealCheckbox.disableOn = function(d) return not d.healPredictionEnabled end
-        overhealCheckbox.tooltip = L["When enabled, shows incoming heals even if they would overheal."]
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: three 280 boxes -- Settings and
+        -- Floating Bar Position down column 1, Floating Bar Anchor in column 2,
+        -- the last two hiding wholesale unless the bar is floating.
+        --
+        -- POPOUT turns all three into feature rows in ONE headerless band (the
+        -- Fading page's shape: three rows do not need dividing into bands, and a
+        -- band header over the only band on a page repeats the page's own name):
+        --
+        --   Heal Prediction        (hoisted enable)
+        --   Floating Bar Position  (hidden unless the bar is floating)
+        --   Floating Bar Anchor    (hidden unless the bar is floating)
+        --
+        -- ☠ THE TWO GROUP-LEVEL hideOns BECOME ROW-LEVEL ONES, and that works
+        -- because a band IS a settings group and a row IS one of its children:
+        -- the page's own RefreshStates lays out every group on the page and
+        -- LayoutChildren honours a child's hideOn (DandersUI Sections). So the
+        -- Display Mode dropdown inside the SETTINGS pane makes the two floating
+        -- rows appear and disappear through the same call it always used, with no
+        -- page rebuild involved -- and a panel left open on a row that has just
+        -- been hidden closes itself, which is the popout shell's own source-death
+        -- rule rather than anything this page wires. The predicate is named once
+        -- at page scope and handed to both layouts, so box and row cannot drift.
+        --
+        -- ☠ THE PAGE-WIDE GATE REACHES THE ROWS THEMSELVES -- the Pet Frames rule,
+        -- and this page is the third to need it. Every control here carries
+        -- `disableOn = not healPredictionEnabled` and still does; those gates stay
+        -- inside the builders so a pane greys exactly as its box did. But in
+        -- classic the whole page visibly dims while heal prediction is off, and
+        -- three bright rows over three grey panes would be the popout layout
+        -- saying something classic does not.
+        --
+        -- ⚠ THE SETTINGS ROW IS THE EXCEPTION: it carries the gate's own tick, so
+        -- greying it would leave no way to turn heal prediction back on.
+        --
+        -- ⚠ NO GatePaneFirstChild HERE, unlike the Resource Bar page. That repair
+        -- exists because DandersUI's group-level `disableChildrenOn` deliberately
+        -- skips child one (a box's header) and a pane has no header. This page has
+        -- never had a group gate -- every widget carries its OWN disableOn, and
+        -- RefreshChildStates applies those to every child including the first.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle is hoisted, `popout`
+        -- and `hoistToggle`. The classic branch mounts the SAME builder into the
+        -- box it always built, which is what makes "classic is unchanged"
+        -- structural rather than a promise -- test_healpred_page_builders.lua pins
+        -- the inventory of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
 
+        -- One band, full-width and chromeless, because a feature row's popout
+        -- docks outside the WINDOW and runs a beam back to the row, so a row that
+        -- stopped 280px in would leave that beam crossing half the page.
+        local healPredBand
+        if tools then
+            healPredBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
+        -- The two predicates the page turns on. The floating one is named once and
+        -- handed to BOTH layouts -- a box's hideOn in classic, a row's in the
+        -- popout -- so the two cannot drift. The gate is popout-only: in classic
+        -- the dimming is already done, control by control, inside the builders.
+        local function HealPredOffRow(d) return not (d or db).healPredictionEnabled end
+        local function HealPredFloatingHiddenOn(d) return d.healPredictionMode ~= "FLOATING" end
+
+        -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
+        -- These four tables used to sit inside the box that offered them. The rows
+        -- print the chosen value as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder -- so the word has to come out of the same
+        -- table the dropdown offers, or a row could say one thing while the
+        -- control behind it says another.
         local modeOptions = { OVERLAY= L["Attached to Health"], FLOATING= L["Floating Bar"] }
-        local modeDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Display Mode"], modeOptions, db, "healPredictionMode", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-        end), 55)
-        modeDropdown.disableOn = function(d) return not d.healPredictionEnabled end
-
         local showModeOptions = {
             ALL = L["All Incoming"], MINE = L["My Heals"], OTHERS = L["Others' Heals"],
             SPLIT = L["Split (Mine + Others)"],
             _order = { "ALL", "MINE", "OTHERS", "SPLIT" },
         }
-        local showModeDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Heals From"], showModeOptions, db, "healPredictionShowMode", function()
-            -- Rebuild so the colour picker(s) rebind to the selected mode.
-            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-            DF:UpdateAllFrames()
-        end), 55)
-        showModeDropdown.disableOn = function(d) return not d.healPredictionEnabled end
-        showModeDropdown.tooltip = L["Which incoming heals the bar shows: all sources, only yours, or only from others."]
-
-        local textureOptions = DF:GetTextureList()
-        local texDropdown = settingsGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() end, textureOptions), 55)
-        texDropdown.disableOn = function(d) return not d.healPredictionEnabled end
-
-        -- Colour picker(s): Split shows both segment colours; other modes show
-        -- the single colour for the selected mode. The mode dropdown rebuilds
-        -- the page so these rebind when the mode changes.
-        if db.healPredictionShowMode == "SPLIT" then
-            local myColor = settingsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["My Heals Color"], db, "healPredictionMyColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-            myColor.disableOn = function(d) return not d.healPredictionEnabled end
-            local othersColor = settingsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Others' Heals Color"], db, "healPredictionOthersColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-            othersColor.disableOn = function(d) return not d.healPredictionEnabled end
-        else
-            local showModeColorKey = (db.healPredictionShowMode == "ALL" and "healPredictionAllColor")
-                or (db.healPredictionShowMode == "OTHERS" and "healPredictionOthersColor")
-                or "healPredictionMyColor"
-            local myColor = settingsGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Heal Prediction Color"], db, showModeColorKey, true, nil, function() DF:UpdateAllFrames() end, true), 35)
-            myColor.disableOn = function(d) return not d.healPredictionEnabled end
-        end
-
-        local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
-        local blendDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], blendOptions, db, "healPredictionBlendMode", function() DF:UpdateAllFrames() end), 55)
-        blendDropdown.disableOn = function(d) return not d.healPredictionEnabled end
-
-        Add(settingsGroup, nil, 1)
-
-
-        -- ===== FLOATING POSITION GROUP (Column 1, conditional) =====
-        local floatingGroup = GUI:CreateSettingsGroup(self.child, 280)
-        floatingGroup:AddWidget(GUI:CreateHeader(self.child, L["Floating Bar Position"]), 40)
-        
         local orientOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
-        local orientDropdown = floatingGroup:AddWidget(GUI:CreateDropdown(self.child, L["Orientation"], orientOptions, db, "healPredictionOrientation", function() DF:UpdateAllFrames() end), 55)
-        orientDropdown.disableOn = function(d) return not d.healPredictionEnabled end
-        
-        local revFill = floatingGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "healPredictionReverse", function() DF:UpdateAllFrames() end), 30)
-        revFill.disableOn = function(d) return not d.healPredictionEnabled end
-        
-        local widthSlider = floatingGroup:AddWidget(GUI:CreateSlider(self.child, L["Width"], 10, 200, 1, db, "healPredictionWidth", nil, function() DF:UpdateAllFrames() end, true), 55)
-        widthSlider.disableOn = function(d) return not d.healPredictionEnabled end
-        
-        local heightSlider = floatingGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 30, 1, db, "healPredictionHeight", nil, function() DF:UpdateAllFrames() end, true), 55)
-        heightSlider.disableOn = function(d) return not d.healPredictionEnabled end
-        
-        floatingGroup.hideOn = function(d) return d.healPredictionMode ~= "FLOATING" end
-        Add(floatingGroup, nil, 1)
-        
-        -- ===== FLOATING ANCHOR GROUP (Column 2, conditional) =====
-        local anchorGroup = GUI:CreateSettingsGroup(self.child, 280)
-        anchorGroup:AddWidget(GUI:CreateHeader(self.child, L["Floating Bar Anchor"]), 40)
-        
         local anchorOptions = {
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        local anchorDropdown = anchorGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "healPredictionAnchor", function() DF:UpdateAllFrames() end), 55)
-        anchorDropdown.disableOn = function(d) return not d.healPredictionEnabled end
-        
-        local xSlider = anchorGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "healPredictionX", nil, function() DF:UpdateAllFrames() end, true), 55)
-        xSlider.disableOn = function(d) return not d.healPredictionEnabled end
-        
-        local ySlider = anchorGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "healPredictionY", nil, function() DF:UpdateAllFrames() end, true), 55)
-        ySlider.disableOn = function(d) return not d.healPredictionEnabled end
-        
-        local bgColorPicker = anchorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "healPredictionBackgroundColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-        bgColorPicker.disableOn = function(d) return not d.healPredictionEnabled end
 
-        -- ⚠ healPredictionFrameLevel has existed and been honoured since the ladder work
-        -- (Features/Auras.lua reads it, DF:ResolveHealPredictionBarLevel resolves it) but
-        -- had NO control anywhere — the only key of the eighteen in Config that a user
-        -- could not reach. Same shape and range as the absorb bar's, and FLOATING-only for
-        -- the same reason: the bound modes take the ladder's slot, not a slider.
-        local hpLevel = anchorGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "healPredictionFrameLevel", nil, function() DF:UpdateAllFrames() end, true)), 55)
-        hpLevel.disableOn = function(d) return not d.healPredictionEnabled end
+        -- ===== SETTINGS (a 280 box in column 1 in classic, the band's first
+        -- row) =====
+        --
+        -- ☠ THE COLOUR PICKERS ARE THE ONE PLACE THIS BUILDER BRANCHES ON LAYOUT,
+        -- and it is the sweep's first such branch. In classic the picker set is
+        -- decided AT BUILD TIME from the db: Split builds two, bound to the mine
+        -- and others colours; every other mode builds ONE, bound to whichever
+        -- colour that mode uses. Changing the mode therefore has to REBUILD THE
+        -- PAGE for the picker to rebind -- which is what the Show Heals From
+        -- callback does, and which is fatal inside a pane: a rebuild retires the
+        -- pane, and CreatePopoutPageTools' own prologue closes every open panel on
+        -- the way in, so the dropdown would slam shut the panel it was clicked in.
+        --
+        -- The pane builds ALL THREE instead and gates them with hideOn, so the
+        -- write targets are identical, the widget set never changes, and the
+        -- callback needs nothing more than the state pass every other dropdown on
+        -- the page runs. Classic keeps its conditional build, byte for byte.
+        --
+        -- ⚠ WHAT THAT COSTS, said plainly: under Mine the pane's picker reads "My
+        -- Heals Color" where the box read "Heal Prediction Color", and likewise
+        -- for Others. Both labels already ship and both are labels classic itself
+        -- uses for that key under Split, so the popout is a strict subset of the
+        -- page's own vocabulary -- it is simply always precise instead of
+        -- sometimes generic. Search gains by it: all three colours are findable in
+        -- the popout layout whatever the mode, where classic can only register the
+        -- one it happens to have built.
+        local function BuildHealPredictionSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        anchorGroup.hideOn = function(d) return d.healPredictionMode ~= "FLOATING" end
-        Add(anchorGroup, nil, 2)
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the page's only on/off control.
+            if not tools2.hoistToggle then
+                local hpEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Heal Prediction"], db, "healPredictionEnabled", function()
+                    tools2.refreshStates()
+                    DF:UpdateAllFrames()
+                end), 30)
+                hpEnable.keepEnabled = true
+            end
+
+            local overhealCheckbox = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Overheal"], db, "healPredictionShowOverheal", function() DF:UpdateAllFrames() end), 30)
+            overhealCheckbox.disableOn = function(d) return not d.healPredictionEnabled end
+            overhealCheckbox.tooltip = L["When enabled, shows incoming heals even if they would overheal."]
+
+            -- ⚠ tools2.refreshStates, and nothing else. This pick drives the two
+            -- FLOATING ROWS' own hideOn, which live on the page rather than in this
+            -- pane -- and the page's RefreshStates is exactly what re-lays the band
+            -- they are in. There is nothing to repaint in the other two panes: the
+            -- only gate their controls carry is the enable, which this is not.
+            local modeDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Display Mode"], modeOptions, db, "healPredictionMode", function()
+                tools2.refreshStates()
+                DF:UpdateAllFrames()
+            end), 55)
+            modeDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+
+            local showModeDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Show Heals From"], showModeOptions, db, "healPredictionShowMode", function()
+                if tools2.popout then
+                    -- The pane holds all three pickers already, so there is nothing
+                    -- to rebind -- and a rebuild from inside a pane would close the
+                    -- panel this dropdown was clicked in.
+                    tools2.refreshStates()
+                else
+                    -- Rebuild so the colour picker(s) rebind to the selected mode.
+                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                end
+                DF:UpdateAllFrames()
+            end), 55)
+            showModeDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+            showModeDropdown.tooltip = L["Which incoming heals the bar shows: all sources, only yours, or only from others."]
+
+            local textureOptions = DF:GetTextureList()
+            local texDropdown = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healPredictionTexture", function() DF:UpdateAllFrames() end, textureOptions), 55)
+            texDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+
+            if tools2.popout then
+                -- All three, gated by the mode rather than built by it. Split shows
+                -- the first two; Mine and Others show one each; All shows the third.
+                local myColor = group:AddWidget(GUI:CreateColorPicker(parent, L["My Heals Color"], db, "healPredictionMyColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+                myColor.disableOn = function(d) return not d.healPredictionEnabled end
+                myColor.hideOn = function(d)
+                    return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "MINE"
+                end
+
+                local othersColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Others' Heals Color"], db, "healPredictionOthersColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+                othersColor.disableOn = function(d) return not d.healPredictionEnabled end
+                othersColor.hideOn = function(d)
+                    return d.healPredictionShowMode ~= "SPLIT" and d.healPredictionShowMode ~= "OTHERS"
+                end
+
+                local allColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Heal Prediction Color"], db, "healPredictionAllColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+                allColor.disableOn = function(d) return not d.healPredictionEnabled end
+                allColor.hideOn = function(d) return d.healPredictionShowMode ~= "ALL" end
+            else
+                -- Colour picker(s): Split shows both segment colours; other modes show
+                -- the single colour for the selected mode. The mode dropdown rebuilds
+                -- the page so these rebind when the mode changes.
+                if db.healPredictionShowMode == "SPLIT" then
+                    local myColor = group:AddWidget(GUI:CreateColorPicker(parent, L["My Heals Color"], db, "healPredictionMyColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+                    myColor.disableOn = function(d) return not d.healPredictionEnabled end
+                    local othersColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Others' Heals Color"], db, "healPredictionOthersColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+                    othersColor.disableOn = function(d) return not d.healPredictionEnabled end
+                else
+                    local showModeColorKey = (db.healPredictionShowMode == "ALL" and "healPredictionAllColor")
+                        or (db.healPredictionShowMode == "OTHERS" and "healPredictionOthersColor")
+                        or "healPredictionMyColor"
+                    local myColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Heal Prediction Color"], db, showModeColorKey, true, nil, function() DF:UpdateAllFrames() end, true), 35)
+                    myColor.disableOn = function(d) return not d.healPredictionEnabled end
+                end
+            end
+
+            local blendOptions = { BLEND= L["Normal (BLEND)"], ADD= L["Additive (ADD)"] }
+            local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendOptions, db, "healPredictionBlendMode", function() DF:UpdateAllFrames() end), 55)
+            blendDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+        end
+
+        -- The group's own apply. Every control on this page drives the same full
+        -- update, so all three applies are that one call -- named per group
+        -- anyway, because two groups' resets are not obliged to cost the same
+        -- work and a shared one would hide it the day they stop.
+        local function ApplyHealPredictionSettings()
+            DF:UpdateAllFrames()
+        end
+
+        -- The display mode and then the source, both in their own dropdown's
+        -- words. Nothing is said about the texture or the colours: the mode
+        -- decides where the bar is drawn and the source decides what it counts,
+        -- which is what someone scanning the page is looking for.
+        local function HealPredictionSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = modeOptions[d.healPredictionMode]
+            if mode then parts[#parts + 1] = mode end
+            local from = showModeOptions[d.healPredictionShowMode]
+            if from then parts[#parts + 1] = from end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        if classicLayout then
+            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Heal Prediction"]), 40)
+            BuildHealPredictionSettingsGroup({
+                group = settingsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(settingsGroup, nil, 1)
+        else
+            -- Eight: the overheal tick, the display mode, the source pick, the
+            -- texture and the three colour swatches, then the blend pick. Two of
+            -- the three swatches are always hidden -- the count is what the pane
+            -- HOLDS, not what happens to be on show for the source currently
+            -- picked (the Health Bar Color row's rule). The enable tick is HOISTED
+            -- onto the row, so it is not one of them.
+            local HEAL_PREDICTION_COUNT = 8
+
+            -- ☠ NOT GUI:RefreshCurrentPage, and not a page rebuild of any kind: a
+            -- rebuild retires every widget on the page including the row being
+            -- clicked, and the row's write path calls row.Refresh() after this
+            -- returns -- on a dead frame. This is what the suppressed checkbox
+            -- ran, plus the page-scope reflow, because the gate this tick IS
+            -- reaches the controls in the OTHER TWO panes.
+            local function OnHealPredictionToggle()
+                DF:UpdateAllFrames()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealPredictionSettingsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local settingsRow = healPredBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Heal Prediction"],
+                db       = tools.RowDB,
+                toggle   = { key = "healPredictionEnabled" },
+                summary  = HealPredictionSettingsSummary,
+                count    = HEAL_PREDICTION_COUNT,
+                onToggle = OnHealPredictionToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = settingsMount,
+            }))
+            -- ⚠ ALL THREE COLOUR KEYS ARE CLAIMED, including the two the current
+            -- source does not use. Every one of them is a real per-mode profile key
+            -- the defaults engine answers for, so the amber tick and Reset Group are
+            -- honest about all three -- and the claim is what lets a search hit on
+            -- "Others' Heals Color" open this panel while the bar is set to Mine.
+            tools.ClaimKeys(settingsRow, settingsContent)
+            tools.WireModifiedTick(settingsRow)
+            tools.WireFooter(settingsRow, ApplyHealPredictionSettings)
+            tools.RegisterHoistedToggle(settingsRow, L["Enable Heal Prediction"], "healPredictionEnabled", OnHealPredictionToggle)
+        end
+
+        -- ===== FLOATING BAR POSITION (a 280 box in column 1 in classic, the
+        -- band's second row) =====
+        local function BuildHealPredictionFloatingGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            local orientDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Orientation"], orientOptions, db, "healPredictionOrientation", function() DF:UpdateAllFrames() end), 55)
+            orientDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+
+            local revFill = group:AddWidget(GUI:CreateCheckbox(parent, L["Reverse Fill"], db, "healPredictionReverse", function() DF:UpdateAllFrames() end), 30)
+            revFill.disableOn = function(d) return not d.healPredictionEnabled end
+
+            local widthSlider = group:AddWidget(GUI:CreateSlider(parent, L["Width"], 10, 200, 1, db, "healPredictionWidth", nil, function() DF:UpdateAllFrames() end, true), 55)
+            widthSlider.disableOn = function(d) return not d.healPredictionEnabled end
+
+            local heightSlider = group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 30, 1, db, "healPredictionHeight", nil, function() DF:UpdateAllFrames() end, true), 55)
+            heightSlider.disableOn = function(d) return not d.healPredictionEnabled end
+        end
+
+        local function ApplyHealPredictionFloating()
+            DF:UpdateAllFrames()
+        end
+
+        -- The orientation only when it is NOT the plain horizontal -- the Health
+        -- Bar Texture row's rule for a value that is the default on every profile
+        -- -- then the two sizes, which are always meaningful because this bar has
+        -- no match-the-health-bar switch.
+        local function HealPredictionFloatingSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if d.healPredictionOrientation and d.healPredictionOrientation ~= "HORIZONTAL" then
+                local o = orientOptions[d.healPredictionOrientation]
+                if o then parts[#parts + 1] = o end
+            end
+            parts[#parts + 1] = format("%s %d", L["Width"], math.floor(tonumber(d.healPredictionWidth) or 0))
+            parts[#parts + 1] = format("%s %d", L["Height"], math.floor(tonumber(d.healPredictionHeight) or 0))
+            return table.concat(parts, " \194\183 ")
+        end
+
+        if classicLayout then
+            local floatingGroup = GUI:CreateSettingsGroup(self.child, 280)
+            floatingGroup:AddWidget(GUI:CreateHeader(self.child, L["Floating Bar Position"]), 40)
+            BuildHealPredictionFloatingGroup({
+                group = floatingGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            floatingGroup.hideOn = HealPredFloatingHiddenOn
+            Add(floatingGroup, nil, 1)
+        else
+            -- Four: the orientation, the reverse-fill tick and the two sizes.
+            local HEAL_PREDICTION_FLOATING_COUNT = 4
+
+            local floatingMount, floatingContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealPredictionFloatingGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local floatingRow = healPredBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Floating Bar Position"],
+                db      = tools.RowDB,
+                summary = HealPredictionFloatingSummary,
+                count   = HEAL_PREDICTION_FLOATING_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = floatingMount,
+            }))
+            tools.ClaimKeys(floatingRow, floatingContent)
+            tools.WireModifiedTick(floatingRow)
+            tools.WireFooter(floatingRow, ApplyHealPredictionFloating)
+            floatingRow.hideOn = HealPredFloatingHiddenOn
+            floatingRow.disableOn = HealPredOffRow
+        end
+
+        -- ===== FLOATING BAR ANCHOR (a 280 box in column 2 in classic, the band's
+        -- third row) =====
+        local function BuildHealPredictionAnchorGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            local anchorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "healPredictionAnchor", function() DF:UpdateAllFrames() end), 55)
+            anchorDropdown.disableOn = function(d) return not d.healPredictionEnabled end
+
+            local xSlider = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "healPredictionX", nil, function() DF:UpdateAllFrames() end, true), 55)
+            xSlider.disableOn = function(d) return not d.healPredictionEnabled end
+
+            local ySlider = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "healPredictionY", nil, function() DF:UpdateAllFrames() end, true), 55)
+            ySlider.disableOn = function(d) return not d.healPredictionEnabled end
+
+            local bgColorPicker = group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "healPredictionBackgroundColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+            bgColorPicker.disableOn = function(d) return not d.healPredictionEnabled end
+
+            -- ⚠ healPredictionFrameLevel has existed and been honoured since the ladder work
+            -- (Features/Auras.lua reads it, DF:ResolveHealPredictionBarLevel resolves it) but
+            -- had NO control anywhere — the only key of the eighteen in Config that a user
+            -- could not reach. Same shape and range as the absorb bar's, and FLOATING-only for
+            -- the same reason: the bound modes take the ladder's slot, not a slider.
+            local hpLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "healPredictionFrameLevel", nil, function() DF:UpdateAllFrames() end, true)), 55)
+            hpLevel.disableOn = function(d) return not d.healPredictionEnabled end
+        end
+
+        local function ApplyHealPredictionAnchor()
+            DF:UpdateAllFrames()
+        end
+
+        -- The anchor in the dropdown's own words, and the offsets only when they
+        -- are doing something -- a row reading "0, 0" on every default profile is
+        -- noise (the Border row's rule). Both numbers go in together: an X with no
+        -- Y beside it reads as a coordinate with a missing half.
+        local function HealPredictionAnchorSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local anchor = anchorOptions[d.healPredictionAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            local x = math.floor(tonumber(d.healPredictionX) or 0)
+            local y = math.floor(tonumber(d.healPredictionY) or 0)
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        if classicLayout then
+            local anchorGroup = GUI:CreateSettingsGroup(self.child, 280)
+            anchorGroup:AddWidget(GUI:CreateHeader(self.child, L["Floating Bar Anchor"]), 40)
+            BuildHealPredictionAnchorGroup({
+                group = anchorGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            anchorGroup.hideOn = HealPredFloatingHiddenOn
+            Add(anchorGroup, nil, 2)
+        else
+            -- Five: the anchor, the two offsets, the background swatch and the
+            -- frame level.
+            local HEAL_PREDICTION_ANCHOR_COUNT = 5
+
+            local anchorMount, anchorContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealPredictionAnchorGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local anchorRow = healPredBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Floating Bar Anchor"],
+                db      = tools.RowDB,
+                summary = HealPredictionAnchorSummary,
+                count   = HEAL_PREDICTION_ANCHOR_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = anchorMount,
+            }))
+            tools.ClaimKeys(anchorRow, anchorContent)
+            tools.WireModifiedTick(anchorRow)
+            tools.WireFooter(anchorRow, ApplyHealPredictionAnchor)
+            anchorRow.hideOn = HealPredFloatingHiddenOn
+            anchorRow.disableOn = HealPredOffRow
+
+            -- ☠ THE BAND GOES IN AFTER ITS LAST ROW. `Add` resolves a widget's slot
+            -- height on the spot, so a band has to be added once it is full.
+            Add(healPredBand, nil, "both")
+        end
     end)
     
     -- ========================================
