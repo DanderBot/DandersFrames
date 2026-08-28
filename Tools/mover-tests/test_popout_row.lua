@@ -1123,25 +1123,46 @@ do
     local cbPt = few.checkButton._points[1]
     eq(cbPt[1], "LEFT", "cols: the toggle anchors LEFT, so it centres on the plate's midline")
     eq(cbPt[4], PAD_X, "cols: ...a pad in from the plate's left edge")
+    -- The LABEL column is a constant off the plate, not a hop off the tick: see
+    -- the toggle-less row below for the case that forces it.
     local lblPt = few.label._points[1]
-    eq(lblPt[2], few.checkButton, "cols: the label hangs off the toggle")
-    eq(lblPt[4], M.labelGap, "cols: at the label gap, which is wider than the column gap")
+    eq(lblPt[2], few.plate, "cols: the label anchors to the plate, like every other column")
+    eq(lblPt[4], PAD_X + M.check + M.labelGap,
+        "cols: past the tick's reserved column, at the label gap")
     check(M.labelGap > M.colGap, "cols: ...and that really is the wider of the two")
 end
 
--- A row with NO toggle puts its label on the same left edge the tick would have
--- occupied, so a mixed column does not have two label positions.
+-- A row with NO toggle RESERVES the tick's column anyway, so a band carrying
+-- both kinds -- a feature you switch on, and a group that is only a way in --
+-- has ONE label position rather than two 26px apart.
+--
+-- The same rule the badge pill already follows at the other end of the row: no
+-- count, no pill, but the gear still hangs off the pill's rect.
 do
-    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
-        label = "Untoggled", db = {}, build = counting("notoggle", 40), window = window(),
-    }))
+    local win = window()
+    local function row(opts)
+        opts.db, opts.window = {}, win
+        return place(host:CreatePopoutRow(FakeUIFrame(), opts))
+    end
+    local bare   = row({ label = "Untoggled", build = counting("notoggle", 40) })
+    local ticked = row({ label = "Toggled", toggle = { key = "on" },
+                         build = counting("hastoggle", 40) })
+
     -- rawget: `checkButton` is not underscore-prefixed, so the stub's method
     -- fallback answers a function for it; the claim is that the factory never
     -- wrote one.
-    eq(rawget(row, "checkButton"), nil, "cols: this row really has no toggle")
-    local pt = row.label._points[1]
-    eq(pt[2], row.plate, "cols: so the label anchors to the plate itself")
-    eq(pt[4], PAD_X, "cols: at the same pad the toggle would have started at")
+    eq(rawget(bare, "checkButton"), nil, "cols: the untoggled row really has no tick")
+    check(rawget(ticked, "checkButton") ~= nil, "cols: ...and the other one does")
+
+    local barePt, tickPt = bare.label._points[1], ticked.label._points[1]
+    eq(barePt[2], bare.plate, "cols: the untoggled label anchors to the plate")
+    eq(barePt[4], PAD_X + M.check + M.labelGap,
+        "cols: ...at the tick's column width, tick or no tick")
+    eq(barePt[4], tickPt[4], "cols: which is exactly where the toggled row's label starts")
+
+    -- ...and the row still reads as ON, with no off word and no gate to trip.
+    bare.Refresh()
+    check(bare._toggledOn, "cols: a row with nothing to switch is never switched off")
 end
 
 -- ============================================================

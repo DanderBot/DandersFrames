@@ -1812,10 +1812,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Mover. Permanent Mover is also by far the biggest box here, which
         -- carries column 2 in raid.
         --
-        -- ⚠ ...IN CLASSIC LAYOUT. In the popout layout Appearance is not a box in
-        -- column 2 at all: it is a FULL-WIDTH BAND of feature rows above the
-        -- columns. See the Appearance block below for the whole of why, and for
-        -- why its Add() has to happen up here rather than where it is built.
+        -- ⚠ ...IN CLASSIC LAYOUT. In the popout layout there are only TWO boxes
+        -- left in party mode -- Frame Size and Layout Direction, both column 1 --
+        -- because Appearance, Frame Fade and Permanent Mover are all FULL-WIDTH
+        -- BANDS of feature rows now. See the Appearance container block below for
+        -- what a band is and why it is full width, and the band block at the foot
+        -- of this builder for where the bands sit and why.
         local classicLayout = DF:IsClassicSettingsLayout()
 
         -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
@@ -1829,8 +1831,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --  * CLASSIC -- exactly what it has always been: a 280 box, in column 2,
         --    added at its own place in the flow further down. Untouched.
         --  * POPOUT  -- a CHROMELESS container the width of the page's content,
-        --    added HERE, before the first column box, so it lays out as a band
-        --    ACROSS the top rather than as a box beside one.
+        --    laid out as a band ACROSS the page rather than as a box beside one.
+        --    WHERE that band is added is decided at the foot of this builder; see
+        --    the band block there.
         --
         -- Why the band, and why full width: a feature row's popout docks outside
         -- the WINDOW and runs a beam back to the row. A row that stops 280px in
@@ -1844,13 +1847,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- drawn round a full-width band reads as a second panel, and the section
         -- keeps its identity from the "Appearance" header above the rows instead.
         --
-        -- ☠ THE Add() FOR THE BAND IS HERE, NOT AT THE BOTTOM OF THE BLOCK.
-        -- Add() records page order, and layoutCol "both" is ALSO a sync point --
-        -- it takes the lower of the two columns and drops both to it. Added where
-        -- the classic box is added (after Frame Size) it would sync the columns
-        -- mid-page and leave a hole beside Frame Size at two-column widths. Added
-        -- first, both columns are still at the top, so the band costs nothing and
-        -- the column flow below it is exactly what it was.
         local appearanceGroup
         if classicLayout then
             appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -1865,7 +1861,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
                 GUI.SettingsBox.group)
             appearanceGroup = GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })
-            Add(appearanceGroup, nil, "both")
         end
 
         -- ===== FRAME SIZE GROUP (Column 1) =====
@@ -1944,22 +1939,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- would point the settings-search jump at rows this build has retired.
         self._popoutRowForKey = nil
 
-        if classicLayout then
-            local borderTools = {
-                group  = appearanceGroup,
-                parent = self.child,
-                refreshStates = function() if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end end,
-                shadowDisableWhen = BorderOff,
-            }
-            BuildBorderGroup(borderTools)
-            BuildBorderShadowGroup(borderTools)
-        else
-            -- ===== THE SAME TWO GROUPS, AS TWO POPOUT ROWS ==================
-            -- Nineteen controls become two rows: a name, what it is currently
-            -- set to, a count and a way in. The Appearance header above stays --
-            -- the rows are contents of the box, not a replacement for it.
-            local POPOUT_W = GUI.PopoutContentWidth or 260
+        -- ===== THE POPOUT-ROW MACHINERY, ONCE FOR THE WHOLE PAGE =============
+        -- Gate two built all of this INSIDE the Appearance block, because
+        -- Appearance was the only converted group on the page. It is not any
+        -- more: Frame Fade and Permanent Mover are rows too, and they are built
+        -- five hundred lines further down where that block's locals are long out
+        -- of scope. So the shared half lives here and the groups below take it as
+        -- given -- which is the shape the rest of the sweep needs as well.
+        --
+        -- Everything here is DEFINED in both layouts and CALLED in neither by
+        -- itself. Only the prologue below has an effect, and it is guarded: in
+        -- classic mode nothing opens a popout, so there is nothing to close, no
+        -- holder to retire and no map to publish.
+        local POPOUT_W = GUI.PopoutContentWidth or 260
 
+        if not classicLayout then
             -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT.
             -- Every route into this builder is a REBUILD -- a party/raid switch,
             -- a profile switch, the classic-layout flip, and the settings search
@@ -1989,136 +1983,369 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             -- ===== WHAT THE SETTINGS SEARCH NEEDS BACK =====================
             -- Search builds its registry by re-running every page's builder, so
-            -- the eager holders below already put all seventeen popout controls
-            -- into it, in this same "Appearance" section context -- an inline
-            -- result recreates its own widget from that metadata and edits fine
-            -- wherever the source widget happens to live. Two things do NOT
-            -- survive the change of shape, and both are put back here:
+            -- the eager holders below already put every popout control into it,
+            -- in its own section context -- an inline result recreates its own
+            -- widget from that metadata and edits fine wherever the source widget
+            -- happens to live. Two things do NOT survive the change of shape, and
+            -- both are put back per row:
             --
-            --  (a) THE HOISTED TOGGLES. noShowToggle / noEnableToggle suppress
-            --      the two checkboxes, and the CHECKBOX FACTORY is what
-            --      registered "Show Border" and "Border Shadow" with search.
-            --      The settings are still live -- the rows' own ticks write
-            --      them -- so losing the hits would make a toggleable setting
-            --      unfindable. Registered by hand below, same L key and same db
-            --      key, so both layouts carry the identical entry.
+            --  (a) THE HOISTED TOGGLES. A row carries its group's on/off tick
+            --      itself, so the builder is told to suppress the checkbox that
+            --      used to be there -- and the CHECKBOX FACTORY is what
+            --      registered that setting with search. The settings are still
+            --      live, so losing the hits would make a toggleable setting
+            --      unfindable. Registered by hand at each row site, same L key
+            --      and same db key, so both layouts carry the identical entry.
             --  (b) WHICH ROW OWNS A SETTING. A hit on a popout-only control
-            --      (Border Thickness, Shadow Offset X, ...) navigates to the
-            --      Appearance section, which in this layout IS the two rows --
+            --      navigates to the section, which in this layout IS the rows --
             --      the control is behind one of them. This map lets the jump
             --      open it; without it the landing is correct but empty-looking.
             self._popoutRowForKey = {}
+        end
 
-            -- Every pane currently mounted in a panel, so a toggle can re-flow
-            -- the group a user is looking at as well as the rows on the page.
-            local mounted = {}
+        -- Every pane currently mounted in a panel, so a toggle can re-flow the
+        -- group a user is looking at as well as the rows on the page. One list
+        -- for the page rather than one per group: a reset behind one row can
+        -- change what another row's pane is showing (nothing does today, but the
+        -- cost of the shared list is a repaint and the cost of the split one is a
+        -- stale open panel).
+        local mounted = {}
 
-            -- Re-flow one mounted group and put the panel back around it. The
-            -- pane is sized from the group's own FRAME height, not from
-            -- LayoutChildren's return: that return adds the between-groups
-            -- margin, which a lone group filling a popout has no use for.
-            local function ReflowPane(st, values)
-                local g = st.group
-                if not g then return end
-                g:LayoutChildren()
-                g:RefreshChildStates()
-                -- ☠ AND THE VALUES, when the caller says a write happened that
-                -- these widgets could not have seen. RefreshChildStates is about
-                -- STATE -- greyed or not, plus whatever refreshContent a page
-                -- bolted on -- and a checkbox's tick, a slider's thumb, a
-                -- dropdown's caption and a swatch are none of those: the
-                -- factories paint them at build and on their own OnShow, on the
-                -- assumption that nothing writes a setting except the widget
-                -- bound to it.
-                --
-                -- Reset Group breaks that assumption, and so does the UNDO of one
-                -- (it replays this same apply). Without this the reset moved the
-                -- frames and the row summary and left every control inside the
-                -- open panel reading the old numbers -- which is the reported bug.
-                --
-                -- ⚠ OPT-IN, not on every reflow. This also runs on a hideOn
-                -- change while the user is dragging a slider inside the pane, and
-                -- a value repaint mid-drag snaps the thumb from the mouse back to
-                -- the last committed step.
-                if values and g.RefreshChildValues then g:RefreshChildValues() end
-                if st.pane then st.pane:SetHeight(math.max(g:GetHeight() or 1, 1)) end
-                -- ...and the panel around the pane. The kit fixes a pane's height
-                -- at build, and a hideOn inside this group moves it afterwards
-                -- (Border Style = TEXTURE reveals the texture dropdown).
-                local po = st.po
-                if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
-            end
-
-            -- `values` rides through to ReflowPane: see its header for why a
-            -- value repaint is opt-in rather than part of every reflow.
-            local function ReflowMounted(values)
-                for _, st in ipairs(mounted) do
-                    if not (st.po and st.po.closed) then ReflowPane(st, values) end
-                end
-            end
-
-            -- ONE row's popout content, built EAGERLY -- here, at page build
-            -- time, into a hidden holder -- rather than on the first open. Two
-            -- reasons, either sufficient on its own:
+        -- Re-flow one mounted group and put the panel back around it. The
+        -- pane is sized from the group's own FRAME height, not from
+        -- LayoutChildren's return: that return adds the between-groups
+        -- margin, which a lone group filling a popout has no use for.
+        local function ReflowPane(st, values)
+            local g = st.group
+            if not g then return end
+            g:LayoutChildren()
+            g:RefreshChildStates()
+            -- ☠ AND THE VALUES, when the caller says a write happened that
+            -- these widgets could not have seen. RefreshChildStates is about
+            -- STATE -- greyed or not, plus whatever refreshContent a page
+            -- bolted on -- and a checkbox's tick, a slider's thumb, a
+            -- dropdown's caption and a swatch are none of those: the
+            -- factories paint them at build and on their own OnShow, on the
+            -- assumption that nothing writes a setting except the widget
+            -- bound to it.
             --
-            --   (a) the settings SEARCH registry is built by re-running every
-            --       page's builder, so a widget that does not exist until the
-            --       user opens a popout is a widget search can never find.
-            --   (b) CreateBorderControls SEEDS db keys at build time -- the
-            --       colour source, and the colour table itself on a profile that
-            --       has none. Moving those writes to first-open would move WHEN a
-            --       profile changes shape, which is exactly what the export
-            --       byte-identity gate measures.
+            -- Reset Group breaks that assumption, and so does the UNDO of one
+            -- (it replays this same apply). Without this the reset moved the
+            -- frames and the row summary and left every control inside the
+            -- open panel reading the old numbers -- which is the reported bug.
             --
-            -- The shell runs a row's `build` ONCE PER INSTANCE, not once per row,
-            -- so a SECOND instance (pin one, then click the row again) asks for
-            -- content a second time. The first call adopts the pre-built group;
-            -- every later one builds a fresh one through the same builder. Which
-            -- is why this is a factory rather than one captured group -- and why
-            -- each group carries its own `st`, so the refresh wired into group
-            -- one cannot re-flow group two.
-            local function PopoutContent(buildInto)
-                local function fresh()
-                    local st = {}
-                    local holder = CreateFrame("Frame", nil, self.child)
-                    holder:SetSize(POPOUT_W, 1)
-                    holder:Hide()
-                    self._popoutHolders[#self._popoutHolders + 1] = holder
-                    -- chromeless + zero padding: the popout already draws a
-                    -- panel, and a faint bordered box inside one reads as a
-                    -- second, smaller panel. The width is the popout's own
-                    -- content width, so each control mounts at exactly the width
-                    -- it has inline on the page.
-                    st.group = GUI:CreateSettingsGroup(holder, POPOUT_W,
-                                                       { chromeless = true, padding = 0 })
-                    st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
-                    -- What the style / colour-source dropdowns call. Cheap, and
-                    -- deliberately NOT a page rebuild: see the toggle below.
-                    buildInto(st.group, holder, function()
-                        ReflowPane(st)
-                        self:RefreshStates()
-                    end)
-                    return st
-                end
+            -- ⚠ OPT-IN, not on every reflow. This also runs on a hideOn
+            -- change while the user is dragging a slider inside the pane, and
+            -- a value repaint mid-drag snaps the thumb from the mouse back to
+            -- the last committed step.
+            if values and g.RefreshChildValues then g:RefreshChildValues() end
+            if st.pane then st.pane:SetHeight(math.max(g:GetHeight() or 1, 1)) end
+            -- ...and the panel around the pane. The kit fixes a pane's height
+            -- at build, and a hideOn inside this group moves it afterwards
+            -- (Border Style = TEXTURE reveals the texture dropdown).
+            local po = st.po
+            if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
+        end
 
-                local pending = fresh()
-                -- The eagerly built group comes back ALONGSIDE the mount
-                -- function: it is the one instance that exists at page-build
-                -- time, so it is the one whose children can be read for the
-                -- search map below. Later instances build the same controls
-                -- from the same builder, so nothing is missed by ignoring them.
-                return function(po, pane)
-                    local st = pending or fresh()
-                    pending = nil
-                    st.po, st.pane = po, pane
-                    mounted[#mounted + 1] = st
-                    st.group:SetParent(pane)
-                    st.group:ClearAllPoints()
-                    st.group:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
-                    st.group:SetWidth(POPOUT_W)
-                    st.group:Show()
+        -- `values` rides through to ReflowPane: see its header for why a
+        -- value repaint is opt-in rather than part of every reflow.
+        local function ReflowMounted(values)
+            for _, st in ipairs(mounted) do
+                if not (st.po and st.po.closed) then ReflowPane(st, values) end
+            end
+        end
+
+        -- ONE row's popout content, built EAGERLY -- here, at page build
+        -- time, into a hidden holder -- rather than on the first open. Two
+        -- reasons, either sufficient on its own:
+        --
+        --   (a) the settings SEARCH registry is built by re-running every
+        --       page's builder, so a widget that does not exist until the
+        --       user opens a popout is a widget search can never find.
+        --   (b) some builders SEED db keys at build time (the border's colour
+        --       source, and the colour table itself on a profile that has
+        --       none). Moving those writes to first-open would move WHEN a
+        --       profile changes shape, which is exactly what the export
+        --       byte-identity gate measures.
+        --
+        -- The shell runs a row's `build` ONCE PER INSTANCE, not once per row,
+        -- so a SECOND instance (pin one, then click the row again) asks for
+        -- content a second time. The first call adopts the pre-built group;
+        -- every later one builds a fresh one through the same builder. Which
+        -- is why this is a factory rather than one captured group -- and why
+        -- each group carries its own `st`, so the refresh wired into group
+        -- one cannot re-flow group two.
+        local function PopoutContent(buildInto)
+            local function fresh()
+                local st = {}
+                local holder = CreateFrame("Frame", nil, self.child)
+                holder:SetSize(POPOUT_W, 1)
+                holder:Hide()
+                self._popoutHolders[#self._popoutHolders + 1] = holder
+                -- chromeless + zero padding: the popout already draws a
+                -- panel, and a faint bordered box inside one reads as a
+                -- second, smaller panel. The width is the popout's own
+                -- content width, so each control mounts at exactly the width
+                -- it has inline on the page.
+                st.group = GUI:CreateSettingsGroup(holder, POPOUT_W,
+                                                   { chromeless = true, padding = 0 })
+                st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+                -- What a builder's own dropdowns and checkboxes call. Cheap,
+                -- and deliberately NOT a page rebuild: see the toggles below.
+                buildInto(st.group, holder, function()
                     ReflowPane(st)
-                end, pending.group
+                    self:RefreshStates()
+                end)
+                return st
+            end
+
+            local pending = fresh()
+            -- The eagerly built group comes back ALONGSIDE the mount
+            -- function: it is the one instance that exists at page-build
+            -- time, so it is the one whose children can be read for the
+            -- search map below. Later instances build the same controls
+            -- from the same builder, so nothing is missed by ignoring them.
+            return function(po, pane)
+                local st = pending or fresh()
+                pending = nil
+                st.po, st.pane = po, pane
+                mounted[#mounted + 1] = st
+                st.group:SetParent(pane)
+                st.group:ClearAllPoints()
+                st.group:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
+                st.group:SetWidth(POPOUT_W)
+                st.group:Show()
+                ReflowPane(st)
+            end, pending.group
+        end
+
+        -- db as a FUNCTION, which is what the kit contract asks for: the row
+        -- re-resolves on every refresh, so a mode switch is followed rather
+        -- than frozen at the table this build captured.
+        local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
+
+        -- ---- the two search repairs, per the note in the prologue ----------
+        -- (b) Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not
+        -- from a key list and not from a name prefix -- "frameBorder" would
+        -- claim keys no popout owns (the row toggles themselves) and would
+        -- miss any spelled differently. Every shared factory stamps
+        -- container.searchEntry, so a control added to any builder is
+        -- covered without anyone having to remember this exists.
+        --
+        -- ...and the SAME walk answers a second question: which keys the
+        -- row's amber modified-tick is about. Collected onto the row as
+        -- row._claimedKeys so the tick can ask the diff engine "is any of
+        -- these not the shipped default", which is exactly "does the pane
+        -- behind this row contain a change".
+        --
+        -- ⚠ TWO SOURCES FOR THE KEY, and the second is not belt-and-braces.
+        -- searchEntry is stamped by the SEARCH registration, which is
+        -- guarded on DF.Search existing -- so on a build where search has
+        -- not registered, every key would be missed. container.overrideDbKey
+        -- is stamped by the toolkit's own AddOverrideIndicators, which every
+        -- db-bound control goes through regardless, and it covers the
+        -- colour pickers and checkboxes whose search entries are registered
+        -- by a different route.
+        local function ClaimKeys(row, group)
+            if not (row and group and group.groupChildren) then return end
+            local claimed = row._claimedKeys or {}
+            row._claimedKeys = claimed
+            for _, e in ipairs(group.groupChildren) do
+                local w  = e.widget
+                local se = w and w.searchEntry
+                local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
+                if type(k) == "string" then
+                    self._popoutRowForKey[k] = row
+                    claimed[#claimed + 1] = k
+                end
+            end
+        end
+
+        -- The tick's answer, for a row that has just had its keys claimed.
+        -- Re-read on every refresh (the row calls this, not the other way
+        -- round), so a write inside the popout lights it without anything
+        -- having to be invalidated. DF.Defaults is guarded because this page
+        -- is in the load-on-demand companion and the engine is resident.
+        local function WireModifiedTick(row)
+            if not (row and row.SetModifiedCheck) then return end
+            row:SetModifiedCheck(function(d)
+                local D = DF.Defaults
+                return (D and D:Count(d, row._claimedKeys or {}) or 0) > 0
+            end)
+        end
+
+        -- ---- the footer's two verbs ---------------------------------
+        -- What a write to any of a group's keys costs, in one place, so the
+        -- two buttons and every future one apply the SAME work.
+        --
+        -- `apply` is the GROUP's own half -- the bodies its widgets' own
+        -- callbacks drive, handed in per row because a border reset and a
+        -- permanent-mover reset do not cost the same work. Everything after
+        -- it is shared: ReflowMounted repaints the controls the user is
+        -- looking at (RefreshChildStates walks the group calling
+        -- refreshContent on every child), and the row's own Refresh re-reads
+        -- the summary and the modified tick.
+        --
+        -- ApplyScheduler coalesces the frame updates inside `apply`, so a
+        -- reset of thirteen keys is one apply, not thirteen.
+        local function RefreshAfterGroupWrite(apply)
+            if apply then apply() end
+            -- ⚠ WITH THE VALUE SWEEP. This is the one path where the keys
+            -- moved WITHOUT the widgets doing it -- a group reset, a hold,
+            -- and the undo/redo of a reset (which replays ApplyGroup) -- so
+            -- it is the one path that has to repaint what the controls read.
+            ReflowMounted(true)
+            if GUI.RefreshAllOverrideIndicators then
+                GUI.RefreshAllOverrideIndicators()
+            end
+            self:RefreshStates()
+        end
+
+        -- Can these buttons be pressed at all, and if not, why.
+        --
+        -- COMBAT greys both. Every key behind these rows reaches a secure
+        -- frame, and the addon's standing rule is that those writes are
+        -- deferred in combat -- the footer does not fight that, it just
+        -- says so.
+        local function CombatReason()
+            if InCombatLockdown() then return false, L["Cannot use this action in combat."] end
+            return true
+        end
+
+        -- ...and HOLD alone is additionally off while the raid auto-layout
+        -- machinery is live. Two different reasons, one gate:
+        --
+        --   EDITING a layout: `onSettingWritten` records every write as an
+        --   override edit for that layout. A hold writes twice -- defaults
+        --   in, the user's values back out -- so a preview nobody committed
+        --   to would land in the layout as two deliberate edits.
+        --   A LAYOUT RUNNING: `interceptWrite` redirects writes to the
+        --   stored baseline instead of the live table, so the preview would
+        --   change nothing on screen. A press-and-hold that shows the user
+        --   nothing is worse than one they cannot press.
+        --
+        -- RESET stays available in BOTH states, and that is not an
+        -- oversight. While editing, recording the defaults as this layout's
+        -- override edits is exactly what the user asked for; while a layout
+        -- is running, the redirect writes the defaults into the stored
+        -- baseline -- which is the table the modified dots and the row tick
+        -- are reporting on, so the reset does what they say it will.
+        local function HoldReason()
+            local ok, why = CombatReason()
+            if not ok then return false, why end
+            local AP = DF.AutoProfilesUI
+            if GUI.SelectedMode == "raid" and AP then
+                local editing = AP.IsEditing and AP:IsEditing()
+                local running = AP.IsLayoutActive and AP:IsLayoutActive()
+                if editing or running then
+                    return false, L["Unavailable while an auto layout is active or being edited."]
+                end
+            end
+            return true
+        end
+
+        -- The two verbs, wired onto a row whose keys have just been claimed.
+        -- Both close over row._claimedKeys by REFERENCE rather than reading
+        -- it now: ClaimKeys fills that table after the row is built, and a
+        -- copy taken here would be the empty one.
+        local function WireFooter(row, apply)
+            if not (row and row.SetActions) then return end
+            local held                    -- the hold's snapshot, between the two halves
+
+            -- THE GROUP'S APPLY, named once. Every verb below runs it after
+            -- it writes -- and Reset hands the same reference to the undo
+            -- engine, because an undo of a reset has no button press behind
+            -- it to run this for it. Restoring thirteen values and running
+            -- only the generic sweep is what "undo changed the numbers but
+            -- the frames did not move" looks like.
+            local function ApplyGroup()
+                RefreshAfterGroupWrite(apply)
+                row.Refresh()
+            end
+
+            row:SetActions({
+                {
+                    text        = L["Reset Group"],
+                    tooltipDesc = L["Reset every setting in this group to its default value."],
+                    enabled     = CombatReason,
+                    onClick     = function()
+                        local GA = DF.GroupActions
+                        if not GA then return end
+                        -- The row's own heading names the collapsed undo
+                        -- entry: a reset is one thing the user did to THIS
+                        -- group, and the group is what they will look for.
+                        GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode,
+                                     row._title or row._label, ApplyGroup)
+                        ApplyGroup()
+                    end,
+                },
+                {
+                    text        = L["Hold: Defaults"],
+                    hold        = true,
+                    tooltipDesc = L["Press and hold to preview this group at its default values. Release to restore your settings."],
+                    enabled     = HoldReason,
+                    onHoldStart = function()
+                        local GA = DF.GroupActions
+                        if not GA then return end
+                        held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                        ApplyGroup()
+                    end,
+                    onHoldEnd   = function()
+                        local GA = DF.GroupActions
+                        if not (GA and held) then return end
+                        GA:EndHold(GUI, RowDB(), row._claimedKeys or {}, held)
+                        held = nil
+                        -- The UNTHROTTLED apply on the way back, unlike the
+                        -- coalescing one used going in: a release is the
+                        -- moment the user is watching for their settings to
+                        -- come back, and a frame of defaults left on screen
+                        -- after they let go reads as the restore failing.
+                        GUI:Call("refreshNow")
+                        ApplyGroup()
+                    end,
+                },
+            })
+        end
+
+        -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
+        -- map: the tick is ON the row, so the section jump already lands on
+        -- the control the user searched for and opening the panel on top of
+        -- that would be noise. The callback is the one the suppressed
+        -- checkbox would have carried, so an inline result behaves as the
+        -- inline checkbox does in classic. Guarded on the METHOD, not just
+        -- the table -- Search is in this companion but the page must not care.
+        local function RegisterHoistedToggle(row, label, key, onToggle)
+            local S = DF.Search
+            if not (S and S.RegisterCheckbox) then return end
+            row.searchEntry = S:RegisterCheckbox(label, key, nil, false, onToggle)
+            if S.LinkSourceWidget then S:LinkSourceWidget(row) end
+        end
+
+        if classicLayout then
+            local borderTools = {
+                group  = appearanceGroup,
+                parent = self.child,
+                refreshStates = function() if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end end,
+                shadowDisableWhen = BorderOff,
+            }
+            BuildBorderGroup(borderTools)
+            BuildBorderShadowGroup(borderTools)
+        else
+            -- ===== THE SAME TWO GROUPS, AS TWO POPOUT ROWS ==================
+            -- Nineteen controls become two rows: a name, what it is currently
+            -- set to, a count and a way in. The Appearance header above stays --
+            -- the rows are contents of the box, not a replacement for it.
+            --
+            -- The shared half (the eager holders, the reflow, the claims, the
+            -- footer verbs) is the page-scope machinery above; what is left here
+            -- is what is true of THESE two groups and nothing else.
+
+            -- The group's own apply: what its widgets' callbacks already do,
+            -- named once so the row's footer verbs and its toggle run the same
+            -- work. Handed to WireFooter, which owns the shared half of it.
+            local function ApplyBorder()
+                UpdateFrames()
+                DF:LightweightUpdateBorder()
             end
 
             -- ☠ NOT GUI:RefreshCurrentPage, which is what today's inline
@@ -2128,8 +2355,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- for these two controls: re-running the hideOn and disableOn passes.
             -- self:RefreshStates() does both and destroys nothing.
             local function OnBorderToggle()
-                UpdateFrames()
-                DF:LightweightUpdateBorder()
+                ApplyBorder()
                 -- The rows: the toggled row's own summary, and the other row's
                 -- dependent grey (Show Border governs Border Shadow).
                 self:RefreshStates()
@@ -2196,206 +2422,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- calls and counts what comes out.
             local BORDER_COUNT, SHADOW_COUNT = 13, 4
 
-            -- db as a FUNCTION, which is what the kit contract asks for: the row
-            -- re-resolves on every refresh, so a mode switch is followed rather
-            -- than frozen at the table this build captured.
-            local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
-
-            -- ---- the two search repairs, per the note at the top -----------
-            -- (b) Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not
-            -- from a key list and not from a name prefix -- "frameBorder" would
-            -- claim keys no popout owns (the row toggles themselves) and would
-            -- miss any spelled differently. Every shared factory stamps
-            -- container.searchEntry, so a control added to either builder is
-            -- covered without anyone having to remember this exists.
-            --
-            -- ...and the SAME walk answers a second question: which keys the
-            -- row's amber modified-tick is about. Collected onto the row as
-            -- row._claimedKeys so the tick can ask the diff engine "is any of
-            -- these not the shipped default", which is exactly "does the pane
-            -- behind this row contain a change".
-            --
-            -- ⚠ TWO SOURCES FOR THE KEY, and the second is not belt-and-braces.
-            -- searchEntry is stamped by the SEARCH registration, which is
-            -- guarded on DF.Search existing -- so on a build where search has
-            -- not registered, every key would be missed. container.overrideDbKey
-            -- is stamped by the toolkit's own AddOverrideIndicators, which every
-            -- db-bound control goes through regardless, and it covers the
-            -- colour pickers and checkboxes whose search entries are registered
-            -- by a different route.
-            local function ClaimKeys(row, group)
-                if not (row and group and group.groupChildren) then return end
-                local claimed = row._claimedKeys or {}
-                row._claimedKeys = claimed
-                for _, e in ipairs(group.groupChildren) do
-                    local w  = e.widget
-                    local se = w and w.searchEntry
-                    local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
-                    if type(k) == "string" then
-                        self._popoutRowForKey[k] = row
-                        claimed[#claimed + 1] = k
-                    end
-                end
-            end
-
-            -- The tick's answer, for a row that has just had its keys claimed.
-            -- Re-read on every refresh (the row calls this, not the other way
-            -- round), so a write inside the popout lights it without anything
-            -- having to be invalidated. DF.Defaults is guarded because this page
-            -- is in the load-on-demand companion and the engine is resident.
-            local function WireModifiedTick(row)
-                if not (row and row.SetModifiedCheck) then return end
-                row:SetModifiedCheck(function(d)
-                    local D = DF.Defaults
-                    return (D and D:Count(d, row._claimedKeys or {}) or 0) > 0
-                end)
-            end
-
-            -- ---- the footer's two verbs ---------------------------------
-            -- What a write to any of these keys costs, in one place, so the two
-            -- buttons and every future one apply the SAME work. Deliberately the
-            -- bodies the widgets themselves drive: OnBorderToggle's first two
-            -- lines are the group's real apply, ReflowMounted repaints the
-            -- controls the user is looking at (RefreshChildStates walks the
-            -- group calling refreshContent on every child), and the row's own
-            -- Refresh re-reads the summary and the modified tick.
-            --
-            -- ApplyScheduler coalesces UpdateFrames + LightweightUpdateBorder,
-            -- so a reset of thirteen keys is one apply, not thirteen.
-            local function RefreshAfterGroupWrite()
-                UpdateFrames()
-                DF:LightweightUpdateBorder()
-                -- ⚠ WITH THE VALUE SWEEP. This is the one path where the keys
-                -- moved WITHOUT the widgets doing it -- a group reset, a hold,
-                -- and the undo/redo of a reset (which replays ApplyGroup) -- so
-                -- it is the one path that has to repaint what the controls read.
-                ReflowMounted(true)
-                if GUI.RefreshAllOverrideIndicators then
-                    GUI.RefreshAllOverrideIndicators()
-                end
-                self:RefreshStates()
-            end
-
-            -- Can these buttons be pressed at all, and if not, why.
-            --
-            -- COMBAT greys both. Every key behind these two rows reaches a
-            -- secure frame, and the addon's standing rule is that those writes
-            -- are deferred in combat -- the footer does not fight that, it just
-            -- says so.
-            local function CombatReason()
-                if InCombatLockdown() then return false, L["Cannot use this action in combat."] end
-                return true
-            end
-
-            -- ...and HOLD alone is additionally off while the raid auto-layout
-            -- machinery is live. Two different reasons, one gate:
-            --
-            --   EDITING a layout: `onSettingWritten` records every write as an
-            --   override edit for that layout. A hold writes twice -- defaults
-            --   in, the user's values back out -- so a preview nobody committed
-            --   to would land in the layout as two deliberate edits.
-            --   A LAYOUT RUNNING: `interceptWrite` redirects writes to the
-            --   stored baseline instead of the live table, so the preview would
-            --   change nothing on screen. A press-and-hold that shows the user
-            --   nothing is worse than one they cannot press.
-            --
-            -- RESET stays available in BOTH states, and that is not an
-            -- oversight. While editing, recording the defaults as this layout's
-            -- override edits is exactly what the user asked for; while a layout
-            -- is running, the redirect writes the defaults into the stored
-            -- baseline -- which is the table the modified dots and the row tick
-            -- are reporting on, so the reset does what they say it will.
-            local function HoldReason()
-                local ok, why = CombatReason()
-                if not ok then return false, why end
-                local AP = DF.AutoProfilesUI
-                if GUI.SelectedMode == "raid" and AP then
-                    local editing = AP.IsEditing and AP:IsEditing()
-                    local running = AP.IsLayoutActive and AP:IsLayoutActive()
-                    if editing or running then
-                        return false, L["Unavailable while an auto layout is active or being edited."]
-                    end
-                end
-                return true
-            end
-
-            -- The two verbs, wired onto a row whose keys have just been claimed.
-            -- Both close over row._claimedKeys by REFERENCE rather than reading
-            -- it now: ClaimKeys fills that table after the row is built, and a
-            -- copy taken here would be the empty one.
-            local function WireFooter(row)
-                if not (row and row.SetActions) then return end
-                local held                    -- the hold's snapshot, between the two halves
-
-                -- THE GROUP'S APPLY, named once. Every verb below runs it after
-                -- it writes -- and Reset hands the same reference to the undo
-                -- engine, because an undo of a reset has no button press behind
-                -- it to run this for it. Restoring thirteen values and running
-                -- only the generic sweep is what "undo changed the numbers but
-                -- the frames did not move" looks like.
-                local function ApplyGroup()
-                    RefreshAfterGroupWrite()
-                    row.Refresh()
-                end
-
-                row:SetActions({
-                    {
-                        text        = L["Reset Group"],
-                        tooltipDesc = L["Reset every setting in this group to its default value."],
-                        enabled     = CombatReason,
-                        onClick     = function()
-                            local GA = DF.GroupActions
-                            if not GA then return end
-                            -- The row's own heading names the collapsed undo
-                            -- entry: a reset is one thing the user did to THIS
-                            -- group, and the group is what they will look for.
-                            GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode,
-                                         row._title or row._label, ApplyGroup)
-                            ApplyGroup()
-                        end,
-                    },
-                    {
-                        text        = L["Hold: Defaults"],
-                        hold        = true,
-                        tooltipDesc = L["Press and hold to preview this group at its default values. Release to restore your settings."],
-                        enabled     = HoldReason,
-                        onHoldStart = function()
-                            local GA = DF.GroupActions
-                            if not GA then return end
-                            held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
-                            ApplyGroup()
-                        end,
-                        onHoldEnd   = function()
-                            local GA = DF.GroupActions
-                            if not (GA and held) then return end
-                            GA:EndHold(GUI, RowDB(), row._claimedKeys or {}, held)
-                            held = nil
-                            -- The UNTHROTTLED apply on the way back, unlike the
-                            -- coalescing one used going in: a release is the
-                            -- moment the user is watching for their settings to
-                            -- come back, and a frame of defaults left on screen
-                            -- after they let go reads as the restore failing.
-                            GUI:Call("refreshNow")
-                            ApplyGroup()
-                        end,
-                    },
-                })
-            end
-
-            -- (a) The hoisted toggle's own entry. Deliberately NOT added to the
-            -- map: the tick is ON the row, so the section jump already lands on
-            -- the control the user searched for and opening the panel on top of
-            -- that would be noise. The callback is the one the suppressed
-            -- checkbox would have carried, so an inline result behaves as the
-            -- inline checkbox does in classic. Guarded on the METHOD, not just
-            -- the table -- Search is in this companion but the page must not care.
-            local function RegisterHoistedToggle(row, label, key)
-                local S = DF.Search
-                if not (S and S.RegisterCheckbox) then return end
-                row.searchEntry = S:RegisterCheckbox(label, key, nil, false, OnBorderToggle)
-                if S.LinkSourceWidget then S:LinkSourceWidget(row) end
-            end
-
             -- window vs clipTo: the WINDOW decides where the panel stands (it
             -- docks outside its edge); the page's SCROLL FRAME decides whether the
             -- row is still on screen, and `self` IS that ScrollFrame -- self.child
@@ -2428,8 +2454,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }))
             ClaimKeys(borderRow, borderContent)
             WireModifiedTick(borderRow)
-            WireFooter(borderRow)
-            RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder")
+            WireFooter(borderRow, ApplyBorder)
+            RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder", OnBorderToggle)
 
             local shadowMount, shadowContent = PopoutContent(function(group, holder, reflow)
                 BuildBorderShadowGroup({
@@ -2456,8 +2482,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }))
             ClaimKeys(shadowRow, shadowContent)
             WireModifiedTick(shadowRow)
-            WireFooter(shadowRow)
-            RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled")
+            WireFooter(shadowRow, ApplyBorder)
+            RegisterHoistedToggle(shadowRow, L["Border Shadow"], "frameBorderShadowEnabled", OnBorderToggle)
             -- The dependent grey, in the page's own idiom: the group's
             -- RefreshChildStates drives row:SetEnabled off this, and the row's
             -- explicit SetEnabled overrides its opts.enabled from there on, so
@@ -2469,13 +2495,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- container note above), and adding it twice would lay it out twice.
         if classicLayout then Add(appearanceGroup, nil, 2) end
 
-        -- ===== FRAME FADE GROUP (Column 2) =====
+        -- ===== FRAME FADE (Column 2 box, or the third row in the band) =======
         -- Whole-frame base opacity, multiplied with the range / health fades
         -- (DF:GetFrameBaseAlpha, ElementAppearance). One global slider, or -- with the
         -- split on -- an out-of-combat and an in-combat value, plus a hover option that
         -- shows the in-combat value while the mouse is on a frame out of combat.
-        local frameFadeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        frameFadeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Fade"]), 40)
+        --
+        -- ☠ A ROW WITH NO TICK, and that is a judgement rather than an omission.
+        -- Every other converted group on this page has one boolean that means
+        -- "am I doing anything at all"; this one does not. frameFadeSplitCombat
+        -- looks like a candidate and is the wrong answer twice over: it is a MODE
+        -- rather than an enable (both states fade), and it HIDES the global
+        -- slider, so a row tick that switched it off would grey the one control
+        -- the group exists for. So the row is a way in and nothing else -- the
+        -- kit draws no tick, reserves its column so the row still lines up with
+        -- Border and Border Shadow above it, and the group reads as permanently
+        -- on, which it is.
         local function RefreshFrameFade()
             if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
             -- Pets re-apply their fade only on a range-cache miss; flush it so the
@@ -2484,31 +2519,110 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF:RefreshAllVisibleFrames()
             if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
         end
-        local ffGlobal = frameFadeGroup:AddWidget(GUI:CreateSlider(self.child, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
-        ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
-        ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
-        frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
-            self:RefreshStates()
-            RefreshFrameFade()
-        end), 30)
-        local ffOOC = frameFadeGroup:AddWidget(GUI:CreateSlider(self.child, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
-        ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
-        ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
-        local ffCombat = frameFadeGroup:AddWidget(GUI:CreateSlider(self.child, L["In Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
-        ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
-        local ffInstance = frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
-        ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
-        ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
-        local ffHover = frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
-        ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
-        ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]
-        local ffHoverScope = frameFadeGroup:AddWidget(GUI:CreateDropdown(self.child, L["Hover Applies To"], {
-            ALL   = L["All Frames"],
-            FRAME = L["Hovered Frame Only"],
-        }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
-        ffHoverScope.disableOn = function(d) return not d.frameFadeSplitCombat or not d.frameFadeHoverUsesCombat end
-        ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
-        Add(frameFadeGroup, nil, 2)
+
+        -- The group's seven controls, verbatim, taking the group and parent they
+        -- should build into. Same factories, same L keys, same db keys, same
+        -- callbacks, same slot heights, same hideOn/disableOn -- the only thing
+        -- the move changed is where `group`, `parent` and the state refresh come
+        -- from. Guarded by test_frame_page_builders.lua, which reads this body
+        -- out of the source and checks it against the inventory it had inline.
+        local function BuildFrameFadeGroup(tools)
+            local group, parent = tools.group, tools.parent
+            local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
+            ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
+            ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
+                tools.refreshStates()
+                RefreshFrameFade()
+            end), 30)
+            local ffOOC = group:AddWidget(GUI:CreateSlider(parent, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
+            ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
+            ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
+            local ffCombat = group:AddWidget(GUI:CreateSlider(parent, L["In Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
+            ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
+            local ffInstance = group:AddWidget(GUI:CreateCheckbox(parent, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
+            ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
+            ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
+            local ffHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
+            ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
+            ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]
+            local ffHoverScope = group:AddWidget(GUI:CreateDropdown(parent, L["Hover Applies To"], {
+                ALL   = L["All Frames"],
+                FRAME = L["Hovered Frame Only"],
+            }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
+            ffHoverScope.disableOn = function(d) return not d.frameFadeSplitCombat or not d.frameFadeHoverUsesCombat end
+            ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
+        end
+
+        if classicLayout then
+            local frameFadeGroup = GUI:CreateSettingsGroup(self.child, 280)
+            frameFadeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Fade"]), 40)
+            BuildFrameFadeGroup({
+                group = frameFadeGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(frameFadeGroup, nil, 2)
+        else
+            -- The summary, per the same convention the border rows follow: at
+            -- most four items, a fixed order, "\194\183" between them, WORDS
+            -- localised and numbers raw, labels only where a bare number would be
+            -- ambiguous -- and here every number is an opacity, so each carries
+            -- the word that says WHICH opacity it is.
+            --
+            -- Two shapes, because the group has two: one value when the split is
+            -- off, the out-of-combat value plus the in-combat one when it is on.
+            -- The hover options are deliberately absent -- they are qualifiers on
+            -- the in-combat value, not values of their own, and a row that listed
+            -- them would spend its width on the least of what it does.
+            local function FrameFadeSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local base = d.frameFadeSplitCombat and d.frameFadeAlphaOutOfCombat
+                                                     or d.frameFadeAlpha
+                base = tonumber(base)
+                if base then parts[#parts + 1] = format("%s %.2f", L["Alpha"], base) end
+                if d.frameFadeSplitCombat then
+                    local inc = tonumber(d.frameFadeAlphaInCombat)
+                    if inc then parts[#parts + 1] = format("%s %.2f", L["Combat"], inc) end
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Seven, which is the whole group: nothing is hoisted onto the row,
+            -- because there is no tick to hoist. Checked against what the builder
+            -- mounts by test_frame_page_builders.lua.
+            local FRAME_FADE_COUNT = 7
+
+            local fadeMount, fadeContent = PopoutContent(function(group, holder, reflow)
+                BuildFrameFadeGroup({
+                    group = group, parent = holder,
+                    -- The pane's own reflow, NOT self:RefreshStates alone: the
+                    -- split checkbox drives three hideOn predicates inside this
+                    -- group, so the pane changes height when it is clicked and
+                    -- the panel around it has to be told. (The closure calls
+                    -- self:RefreshStates too, so the page half is not lost.)
+                    refreshStates = reflow,
+                })
+            end)
+            -- Into the SAME band as Border and Border Shadow. Frame Fade is how
+            -- much of the frame you can see, which is the same question the
+            -- border rows answer about its edge -- and the alternative, a band of
+            -- its own under a "Frame Fade" header sitting directly above a row
+            -- labelled "Frame Fade", says the words twice for no gain.
+            local fadeRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Frame Fade"],
+                db      = RowDB,
+                summary = FrameFadeSummary,
+                count   = FRAME_FADE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = fadeMount,
+            }))
+            ClaimKeys(fadeRow, fadeContent)
+            WireModifiedTick(fadeRow)
+            WireFooter(fadeRow, RefreshFrameFade)
+        end
 
 
         -- ===== LAYOUT DIRECTION GROUP (Column 1) =====
@@ -3010,92 +3124,240 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             playersPerRowSlider:HookScript("OnShow", UpdateDynamicLabels)
         end
 
-        -- ===== PERMANENT MOVER GROUP (Column 2) =====
-        local permMoverGroup = GUI:CreateSettingsGroup(self.child, 280)
-        permMoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Permanent Mover"]), 40)
-
-        permMoverGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Permanent Mover"], db, "permanentMover", function()
-            DF:UpdatePermanentMoverVisibility()
-        end), 30)
-
+        -- ===== PERMANENT MOVER (Column 2 box, or a row of its own) ===========
+        -- The page's textbook conversion: ONE checkbox that means "am I doing
+        -- anything", and thirteen controls that grey behind it. That is exactly
+        -- what a feature row is -- the tick comes up onto the row, the rest goes
+        -- into the panel, and the fifteen-deep box that used to carry column 2 on
+        -- its own becomes one line.
+        --
+        -- Declared out here rather than inside the builder because the SUMMARY
+        -- reads it too: the row says which corner the handle sits in, and there
+        -- is one map of those words on this page, not two.
+        --
+        -- ...and the band it goes in, declared here and ADDED at the foot of the
+        -- builder with the other one -- see the band block there for why the two
+        -- Add()s live together.
+        local permMoverBand
         local moverAnchorValues = {
             TOPLEFT= L["Top Left"], TOP= L["Top"], TOPRIGHT= L["Top Right"],
             LEFT= L["Left"], RIGHT= L["Right"],
             BOTTOMLEFT= L["Bottom Left"], BOTTOM= L["Bottom"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        local permMoverAnchor = permMoverGroup:AddWidget(
-            GUI:CreateDropdown(self.child, L["Handle Position"], moverAnchorValues, db, "permanentMoverAnchor", function()
-                DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
-            end), 55)
-        permMoverAnchor.disableOn = function(d) return not d.permanentMover end
 
-        local attachValues = { CONTAINER= L["Container"], FIRST= L["First Unit"], LAST= L["Last Unit"] }
-        local permAttach = permMoverGroup:AddWidget(
-            GUI:CreateDropdown(self.child, L["Attach To"], attachValues, db, "permanentMoverAttachTo", function()
-                DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
-            end), 55)
-        permAttach.disableOn = function(d) return not d.permanentMover end
-        permAttach.tooltip = L["Attach the handle to the container, the first visible unit, or the last visible unit."]
+        -- Verbatim, less the enable checkbox when the row has hoisted it. Every
+        -- widget keeps its own `disableOn` on permanentMover even in the popout:
+        -- the row's toggle gate greys the pane as a whole, but the predicates are
+        -- what the CLASSIC box greys with, and one builder serving both layouts
+        -- means it carries the behaviour of both. Guarded by
+        -- test_frame_page_builders.lua against the inventory it had inline.
+        local function BuildPermanentMoverGroup(tools)
+            local group, parent = tools.group, tools.parent
 
-        local function PermMoverAnchorUpdate() DF:UpdatePermanentMoverAnchor(GUI.SelectedMode) end
-        local function PermMoverSizeUpdate() DF:UpdatePermanentMoverSize(GUI.SelectedMode) end
+            if not tools.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Permanent Mover"], db, "permanentMover", function()
+                    DF:UpdatePermanentMoverVisibility()
+                end), 30)
+            end
 
-        local permOffsetX = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -500, 500, 1, db, "permanentMoverOffsetX", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
-        permOffsetX.disableOn = function(d) return not d.permanentMover end
+            local permMoverAnchor = group:AddWidget(
+                GUI:CreateDropdown(parent, L["Handle Position"], moverAnchorValues, db, "permanentMoverAnchor", function()
+                    DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
+                end), 55)
+            permMoverAnchor.disableOn = function(d) return not d.permanentMover end
 
-        local permOffsetY = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -500, 500, 1, db, "permanentMoverOffsetY", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
-        permOffsetY.disableOn = function(d) return not d.permanentMover end
+            local attachValues = { CONTAINER= L["Container"], FIRST= L["First Unit"], LAST= L["Last Unit"] }
+            local permAttach = group:AddWidget(
+                GUI:CreateDropdown(parent, L["Attach To"], attachValues, db, "permanentMoverAttachTo", function()
+                    DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
+                end), 55)
+            permAttach.disableOn = function(d) return not d.permanentMover end
+            permAttach.tooltip = L["Attach the handle to the container, the first visible unit, or the last visible unit."]
 
-        local permWidth = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Handle Width"], 5, 500, 1, db, "permanentMoverWidth", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
-        permWidth.disableOn = function(d) return not d.permanentMover end
+            local function PermMoverAnchorUpdate() DF:UpdatePermanentMoverAnchor(GUI.SelectedMode) end
+            local function PermMoverSizeUpdate() DF:UpdatePermanentMoverSize(GUI.SelectedMode) end
 
-        local permHeight = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Handle Height"], 5, 500, 1, db, "permanentMoverHeight", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
-        permHeight.disableOn = function(d) return not d.permanentMover end
+            local permOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -500, 500, 1, db, "permanentMoverOffsetX", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
+            permOffsetX.disableOn = function(d) return not d.permanentMover end
 
-        local permHover = permMoverGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show on Hover Only"], db, "permanentMoverShowOnHover", function()
-            DF:UpdatePermanentMoverVisibility()
-        end), 30)
-        permHover.disableOn = function(d) return not d.permanentMover end
-        permHover.tooltip = L["Handle is invisible until you hover over it. Fades in and out smoothly."]
+            local permOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -500, 500, 1, db, "permanentMoverOffsetY", PermMoverAnchorUpdate, PermMoverAnchorUpdate), 55)
+            permOffsetY.disableOn = function(d) return not d.permanentMover end
 
-        local permCombat = permMoverGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "permanentMoverHideInCombat", function()
-            DF:UpdatePermanentMoverCombatState()
-        end), 30)
-        permCombat.disableOn = function(d) return not d.permanentMover end
-        permCombat.tooltip = L["Hides the handle during combat. If disabled, the handle changes color to indicate it is locked."]
+            local permWidth = group:AddWidget(GUI:CreateSlider(parent, L["Handle Width"], 5, 500, 1, db, "permanentMoverWidth", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
+            permWidth.disableOn = function(d) return not d.permanentMover end
 
-        local permColor = permMoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Handle Color"], db, "permanentMoverColor", false, function()
-            DF:UpdatePermanentMoverColor(GUI.SelectedMode)
-        end), 35)
-        permColor.disableOn = function(d) return not d.permanentMover end
+            local permHeight = group:AddWidget(GUI:CreateSlider(parent, L["Handle Height"], 5, 500, 1, db, "permanentMoverHeight", PermMoverSizeUpdate, PermMoverSizeUpdate), 55)
+            permHeight.disableOn = function(d) return not d.permanentMover end
 
-        local permCombatColor = permMoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Combat Color"], db, "permanentMoverCombatColor", false, nil), 35)
-        permCombatColor.disableOn = function(d) return not d.permanentMover end
-        permCombatColor.tooltip = L["Color shown when in combat to indicate the handle is locked."]
+            local permHover = group:AddWidget(GUI:CreateCheckbox(parent, L["Show on Hover Only"], db, "permanentMoverShowOnHover", function()
+                DF:UpdatePermanentMoverVisibility()
+            end), 30)
+            permHover.disableOn = function(d) return not d.permanentMover end
+            permHover.tooltip = L["Handle is invisible until you hover over it. Fades in and out smoothly."]
 
-        -- Quick action dropdowns
-        local actionValues = {}
-        for id, data in pairs(DF.PERM_MOVER_ACTIONS) do
-            actionValues[id] = data.label
+            local permCombat = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide in Combat"], db, "permanentMoverHideInCombat", function()
+                DF:UpdatePermanentMoverCombatState()
+            end), 30)
+            permCombat.disableOn = function(d) return not d.permanentMover end
+            permCombat.tooltip = L["Hides the handle during combat. If disabled, the handle changes color to indicate it is locked."]
+
+            local permColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Handle Color"], db, "permanentMoverColor", false, function()
+                DF:UpdatePermanentMoverColor(GUI.SelectedMode)
+            end), 35)
+            permColor.disableOn = function(d) return not d.permanentMover end
+
+            local permCombatColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Combat Color"], db, "permanentMoverCombatColor", false, nil), 35)
+            permCombatColor.disableOn = function(d) return not d.permanentMover end
+            permCombatColor.tooltip = L["Color shown when in combat to indicate the handle is locked."]
+
+            -- Quick action dropdowns
+            local actionValues = {}
+            for id, data in pairs(DF.PERM_MOVER_ACTIONS) do
+                actionValues[id] = data.label
+            end
+
+            local permActionLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Left Click"], actionValues, db, "permanentMoverActionLeft"), 55)
+            permActionLeft.disableOn = function(d) return not d.permanentMover end
+
+            local permActionRight = group:AddWidget(GUI:CreateDropdown(parent, L["Right Click"], actionValues, db, "permanentMoverActionRight"), 55)
+            permActionRight.disableOn = function(d) return not d.permanentMover end
+
+            local permActionShiftLeft = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Left Click"], actionValues, db, "permanentMoverActionShiftLeft"), 55)
+            permActionShiftLeft.disableOn = function(d) return not d.permanentMover end
+
+            local permActionShiftRight = group:AddWidget(GUI:CreateDropdown(parent, L["Shift+Right Click"], actionValues, db, "permanentMoverActionShiftRight"), 55)
+            permActionShiftRight.disableOn = function(d) return not d.permanentMover end
+
+            local permPullTimer = group:AddWidget(GUI:CreateSlider(parent, L["Pull Timer Duration"], 3, 30, 1, db, "permanentMoverPullTimerDuration"), 55)
+            permPullTimer.disableOn = function(d) return not d.permanentMover end
+            permPullTimer.tooltip = L["Duration in seconds for the Pull Timer quick action."]
         end
 
-        local permActionLeft = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Left Click"], actionValues, db, "permanentMoverActionLeft"), 55)
-        permActionLeft.disableOn = function(d) return not d.permanentMover end
+        if classicLayout then
+            local permMoverGroup = GUI:CreateSettingsGroup(self.child, 280)
+            permMoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Permanent Mover"]), 40)
+            BuildPermanentMoverGroup({ group = permMoverGroup, parent = self.child })
+            Add(permMoverGroup, nil, 2)
+        else
+            -- The GROUP's apply, for the footer's two verbs. Every one of the
+            -- four calls, not just the one a given key needs: a Reset Group moves
+            -- position, size and colour at once, and the widgets' own callbacks
+            -- between them do exactly these four things.
+            local function ApplyPermMover()
+                DF:UpdatePermanentMoverVisibility()
+                DF:UpdatePermanentMoverAnchor(GUI.SelectedMode)
+                DF:UpdatePermanentMoverSize(GUI.SelectedMode)
+                DF:UpdatePermanentMoverColor(GUI.SelectedMode)
+            end
 
-        local permActionRight = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Right Click"], actionValues, db, "permanentMoverActionRight"), 55)
-        permActionRight.disableOn = function(d) return not d.permanentMover end
+            -- ☠ NOT GUI:RefreshCurrentPage, for the reason the border toggle is
+            -- not: a rebuild retires the row being clicked. The inline checkbox
+            -- got its greys from CreateCheckbox self-calling RefreshChildStates
+            -- on the group it was in; the row's tick is not that checkbox, so the
+            -- two passes are asked for by name.
+            local function OnPermMoverToggle()
+                DF:UpdatePermanentMoverVisibility()
+                self:RefreshStates()
+                ReflowMounted()
+            end
 
-        local permActionShiftLeft = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Shift+Left Click"], actionValues, db, "permanentMoverActionShiftLeft"), 55)
-        permActionShiftLeft.disableOn = function(d) return not d.permanentMover end
+            -- The summary: where the handle is, how big it is, and what it is
+            -- attached to when that is not the default. Three items, fixed order,
+            -- words localised and numbers raw -- and the attach word only when it
+            -- is doing something, because "Container" on every default profile is
+            -- noise the row cannot afford.
+            local function PermMoverSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local pos = d.permanentMoverAnchor and moverAnchorValues[d.permanentMoverAnchor]
+                if pos then parts[#parts + 1] = pos end
+                local w, h = tonumber(d.permanentMoverWidth), tonumber(d.permanentMoverHeight)
+                if w and h then parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h)) end
+                local attach = d.permanentMoverAttachTo
+                if attach == "FIRST" then parts[#parts + 1] = L["First Unit"]
+                elseif attach == "LAST" then parts[#parts + 1] = L["Last Unit"] end
+                return table.concat(parts, " \194\183 ")
+            end
 
-        local permActionShiftRight = permMoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Shift+Right Click"], actionValues, db, "permanentMoverActionShiftRight"), 55)
-        permActionShiftRight.disableOn = function(d) return not d.permanentMover end
+            -- Sixteen controls, less the hoisted enable = fifteen in the pane.
+            local PERM_MOVER_COUNT = 15
 
-        local permPullTimer = permMoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Pull Timer Duration"], 3, 30, 1, db, "permanentMoverPullTimerDuration"), 55)
-        permPullTimer.disableOn = function(d) return not d.permanentMover end
-        permPullTimer.tooltip = L["Duration in seconds for the Pull Timer quick action."]
+            local moverMount, moverContent = PopoutContent(function(group, holder, reflow)
+                BuildPermanentMoverGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggle = true,
+                })
+            end)
 
-        Add(permMoverGroup, nil, 2)
+            -- ITS OWN BAND, AND WITH NO HEADER. The Appearance band above is
+            -- three rows under a word that names none of them; this is one row
+            -- whose own label already says "Permanent Mover", and a header
+            -- repeating that directly above it is the page saying it twice.
+            -- Built at the page's usable width for the same reason the Appearance
+            -- band is -- see the long note there -- so the row's right edge lands
+            -- on the corridor and its popout's beam is a short hop.
+            local moverBandW = math.max(
+                GUI.PageUsableWidth(GUI.PageChildWidth(
+                    GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+                GUI.SettingsBox.group)
+            permMoverBand = GUI:CreateSettingsGroup(self.child, moverBandW, { chromeless = true })
+            local moverRow = permMoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Permanent Mover"],
+                db       = RowDB,
+                toggle   = { key = "permanentMover" },
+                summary  = PermMoverSummary,
+                count    = PERM_MOVER_COUNT,
+                onToggle = OnPermMoverToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = moverMount,
+            }))
+            ClaimKeys(moverRow, moverContent)
+            WireModifiedTick(moverRow)
+            WireFooter(moverRow, ApplyPermMover)
+            RegisterHoistedToggle(moverRow, L["Enable Permanent Mover"], "permanentMover", OnPermMoverToggle)
+        end
+
+        -- ===== THE BANDS, AND WHY THEY ARE ADDED HERE ========================
+        -- Popout layout only: the two full-width bands of feature rows, added
+        -- AFTER every column box on the page.
+        --
+        -- ☠ THIS USED TO BE THE OTHER WAY ROUND, and the reason it was is worth
+        -- keeping because it is still true -- it just no longer applies. Add()
+        -- records page order, and layoutCol "both" is ALSO a sync point: it takes
+        -- the lower of the two columns and drops BOTH to it. With Appearance the
+        -- only band on the page, adding it in its old column-2 slot (after Frame
+        -- Size) would have synced the columns mid-page and left a hole beside
+        -- Frame Size at two-column widths -- so it was hoisted above the first
+        -- column box instead, where both columns are still at the top and the
+        -- sync costs nothing.
+        --
+        -- The hole is a BAND-BEFORE-COLUMNS problem, and a band AFTER all of them
+        -- has nothing left to punch a hole in: the sync happens where the flow was
+        -- ending anyway, which is what a sync point is for. So the constraint that
+        -- forced Appearance above Frame Size is gone, and the page can go back to
+        -- reading the way it is meant to -- the primaries first (Frame Size,
+        -- Layout Direction, and whichever raid boxes the mode implies), then the
+        -- feature rows.
+        --
+        -- ⚠ AT THE DEFAULT WIDTH THIS IS PURELY ABOUT READING ORDER. 640 is a
+        -- single-column page (LayoutPage's usesTwoColumns needs room for two
+        -- boxes plus the gutter), so Add order IS visual order and there is no
+        -- sync to reason about at all. The paragraphs above are about the widened
+        -- window.
+        --
+        -- ⚠ AND ONE CONSEQUENCE TO KNOW ABOUT: in PARTY mode at two-column
+        -- widths, column 2 is now empty. Everything that used to be in it here is
+        -- either a band or raid-only, so the two primary boxes sit alone on the
+        -- left with the bands beneath them. That is the conversion's doing, not
+        -- this ordering's -- it reads the same whichever end the bands are added
+        -- at -- and moving a primary across to balance it is a page-design
+        -- decision, deliberately not taken here.
+        if not classicLayout then
+            Add(appearanceGroup, nil, "both")
+            Add(permMoverBand, nil, "both")
+        end
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")
