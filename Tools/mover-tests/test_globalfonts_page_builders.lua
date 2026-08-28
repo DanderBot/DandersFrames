@@ -336,6 +336,43 @@ do
 
     check(PAGE:find("tools.ClaimKeys(shadowRow, shadowContent)", 1, true) ~= nil,
           "shadow settings: the row claims whatever the pane registered")
+
+    -- ☠ AND THAT ONE LINE IS ALSO THIS PAGE'S ONLY SECTION ANCHOR. Every
+    -- per-element "Shadow" checkbox in the addon sits under a link built by
+    -- UI:CreateGlobalFontsShadowLink, which jumps here by SECTION NAME -- and
+    -- that jump is Search:ScrollToSection, which finds a section by asking every
+    -- page child, and every settings-group child, for :GetText(). In classic the
+    -- box's own HEADER answers. In this layout no header is built at all: the
+    -- row's name is a FontString INSIDE the row, which the walk never reaches, so
+    -- the link scrolled nowhere and flashed nothing -- a DebugWarn, and a dead
+    -- cross-link the user just sees do nothing.
+    --
+    -- ClaimKeys is what puts the answer back: it stamps every row it is handed
+    -- with a GetText returning that row's own label (GUI/Controls.lua, and
+    -- test_popout_page_tools drives it). So the three facts below have to agree,
+    -- and all three are READ rather than retyped -- the link's target comes out
+    -- of the kit's source, the row's label out of the page's, and the mechanism
+    -- out of the helper's. Any one of them moving on its own fails here instead
+    -- of going quiet in game.
+    do
+        local KIT  = ui_file_source("Sections.lua")
+        local link = KIT:match("function UI:CreateGlobalFontsShadowLink%(parent, width%)(.-)\nend")
+        check(link ~= nil, "shadow link: the kit declares CreateGlobalFontsShadowLink")
+        if link then
+            check(link:find('page    = "general_fonts",', 1, true) ~= nil,
+                  "shadow link: ...aimed at this page")
+            local target = link:match('section = L%["([^"]+)"%]')
+            eq(target, "Shadow Settings",
+               "shadow link: ...and at this row's own label, which is the anchor it needs")
+        end
+
+        local CTRL  = options_file_source("GUI/Controls.lua")
+        local claim = CTRL:match("local function ClaimKeys%(row, group, extra%)(.-)\n    end")
+        check(claim ~= nil and claim:find("AnchorRow(row)", 1, true) ~= nil,
+              "shadow link: the shared key claim anchors every row it is handed")
+        check(CTRL:find("row.GetText = function() return name end", 1, true) ~= nil,
+              "shadow link: ...with a GetText answering the row's own label")
+    end
     check(PAGE:find("tools.WireModifiedTick(shadowRow)", 1, true) ~= nil,
           "shadow settings: ...its amber tick asks about exactly those keys")
     check(PAGE:find("tools.WireFooter(shadowRow, UpdateShadowSettings)", 1, true) ~= nil,

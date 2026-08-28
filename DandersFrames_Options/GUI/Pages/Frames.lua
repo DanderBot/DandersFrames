@@ -413,6 +413,22 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 clipTo  = self,
                 build   = shadowMount,
             }))
+            -- ☠ THIS ROW CARRIES A SECTION ANCHOR, and it is the only one on the
+            -- page that is jumped to from somewhere else. Every per-element
+            -- "Shadow" checkbox in the addon sits under a link built by
+            -- UI:CreateGlobalFontsShadowLink (DandersUI/Sections.lua), which is
+            -- LinkToSetting{ page = "general_fonts", section = L["Shadow
+            -- Settings"] } -- and that jump is Search:ScrollToSection, which finds
+            -- a section by asking every page child, and every settings-group
+            -- child, for :GetText(). In classic the box's own HEADER answers. In
+            -- this layout no header is built at all: the row's name is a
+            -- FontString INSIDE the row, which the walk never reaches.
+            --
+            -- ClaimKeys is what puts the answer back -- it stamps every row it is
+            -- given with a GetText returning that row's own label, which is
+            -- exactly this link's section name. So the line below is load-bearing
+            -- for more than the search row map, and removing it would take this
+            -- cross-link down with it in silence.
             tools.ClaimKeys(shadowRow, shadowContent)
             tools.WireModifiedTick(shadowRow)
             tools.WireFooter(shadowRow, UpdateShadowSettings)

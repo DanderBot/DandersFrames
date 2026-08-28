@@ -129,6 +129,73 @@ end
 -- ============================================================
 local registrationId = 0
 
+-- The keyword bag, from the three facts an entry carries: its own label, the
+-- section it was registered under and the tab that section is on.
+--
+-- ★ EXTRACTED FROM Register SO SetEntrySection CAN RE-RUN IT. A section that is
+-- corrected AFTER registration -- which is what a popout row does to everything
+-- inside its pane -- would otherwise leave the OLD section's words sitting in
+-- here, and those words SCORE (see Find's keyword pass, +40 a hit). Fixing the
+-- breadcrumb while leaving "auras" matching every Tooltips control would be half
+-- a fix. Verbatim from where it lived; the `or {}` on the label arm is what
+-- callers that pass their own keywords rely on, and it is kept.
+local function BuildKeywords(entry)
+    if entry.label then
+        entry.keywords = entry.keywords or {}
+        for word in string.gmatch(entry.label:lower(), "%w+") do
+            if #word > 2 then
+                table.insert(entry.keywords, word)
+            end
+        end
+    end
+
+    if entry.section then
+        for word in string.gmatch(entry.section:lower(), "%w+") do
+            if #word > 2 then
+                table.insert(entry.keywords, word)
+            end
+        end
+    end
+
+    if entry.tab then
+        table.insert(entry.keywords, entry.tab:lower())
+    end
+end
+
+-- ★ CORRECT AN ENTRY'S SECTION AFTER THE FACT, keywords and all.
+--
+-- ☠ WHY THIS EXISTS. `entry.section` is stamped from Search.CurrentSection at
+-- registration, and CurrentSection is only ever moved by GUI:CreateHeader and
+-- GUI:CreateCollapsibleSection (GUI/SettingsWidgets.lua). On a CLASSIC page the
+-- two interleave with the controls -- header, its controls, next header -- so
+-- every entry inherits the header directly above it and the stamp is right.
+--
+-- A POPOUT page does not build in that order. Its band headers are created UP
+-- FRONT, and then every row's pane is built EAGERLY into a hidden holder, so
+-- every control on the page registers while CurrentSection still holds whichever
+-- band header was created LAST -- the whole Tooltips page reading "Auras", every
+-- row on a page with no band header reading whatever the previous page left.
+-- Position-dependent context cannot describe a page that no longer builds in
+-- position order, so the ROW names its own contents afterwards instead
+-- (GUI:CreatePopoutPageTools' ClaimKeys, GUI/Controls.lua).
+--
+-- Guarded on `entry.id`: Register hands back keyless entries, entries for the
+-- other mode's defaults and everything offered after the registry was built
+-- WITHOUT adding them to the Registry, and an id is the one mark that says the
+-- entry is really in there. Re-sectioning an entry nothing can find would be a
+-- write nobody reads.
+function Search:SetEntrySection(entry, section)
+    if type(entry) ~= "table" or not entry.id then return end
+    if type(section) ~= "string" or section == "" then return end
+    if entry.section == section then return end
+
+    entry.section = section
+    -- Rebuilt rather than appended to: the point is to LOSE the old section's
+    -- words, which an append would keep.
+    entry.keywords = {}
+    BuildKeywords(entry)
+end
+
 function Search:Register(entry)
     if self.RegistryBuilt then
         return entry
@@ -180,28 +247,9 @@ function Search:Register(entry)
     -- Store the current mode (party/raid) for filtering search results
     entry.mode = currentMode
     
-    -- Auto-generate keywords from label
-    if entry.label then
-        entry.keywords = entry.keywords or {}
-        for word in string.gmatch(entry.label:lower(), "%w+") do
-            if #word > 2 then
-                table.insert(entry.keywords, word)
-            end
-        end
-    end
-    
-    if entry.section then
-        for word in string.gmatch(entry.section:lower(), "%w+") do
-            if #word > 2 then
-                table.insert(entry.keywords, word)
-            end
-        end
-    end
-    
-    if entry.tab then
-        table.insert(entry.keywords, entry.tab:lower())
-    end
-    
+    -- Auto-generate keywords from the label, the section and the tab.
+    BuildKeywords(entry)
+
     table.insert(self.Registry, entry)
     return entry
 end
