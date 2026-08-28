@@ -506,12 +506,15 @@ end
 -- 6. THE CLASSIC-LAYOUT ESCAPE HATCH -- the one decision this pass had to make
 --
 -- ☠ IN THE POPOUT LAYOUT THIS TICK LIVES INSIDE A PANE, so the click that turns
--- classic ON happens with a panel standing open -- and the rebuild it triggers
--- CANNOT close it. GUI:CreatePopoutPageTools returns early when
--- IsClassicSettingsLayout() is true, BEFORE its CloseAllPopoutRows("rebuild")
--- prologue, and a row popout is pinnable so the shell's own source-death tick
--- leaves it alone. Without an explicit close the user lands on a classic page
--- with an orphan panel floating beside it, wired to a row already in the trash.
+-- classic ON happens with a panel standing open, and a row popout is pinnable so
+-- the shell's own source-death tick leaves it alone.
+--
+-- ⚠ THE HELPER CLOSES PANELS ON A CLASSIC BUILD TOO -- its prologue runs above
+-- the classic early return -- so this close is no longer the only one. It is kept
+-- because it is the only one at the right MOMENT: DoBuild retires a page's
+-- children before it calls the builder, so the helper's close lands after the row
+-- the panel is wired to is already in the trash. The ORDER assertion below is
+-- therefore the load-bearing one.
 --
 -- ⚠ AND THE REBUILD STAYS SYNCHRONOUS, unlike the Frame page's Raid Layout Mode
 -- toggle. That one defers because the tick is ON THE ROW and the kit calls

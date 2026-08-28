@@ -691,24 +691,36 @@ if GUI.CreateBorderShadowControls then
     --
     -- ⚠ The trailing arg is the row's own commit, and it is matched loosely on
     -- purpose: the sweep hoists a toggle on other groups of this page too (each
-    -- with its own callback), so this pins THE BORDER PAIR -- that they are the
-    -- first two registered, with the golden label and key -- rather than being a
-    -- census of every hoisted toggle on the page.
+    -- with its own callback), so this pins THE BORDER PAIR -- the golden label
+    -- and key on each -- rather than being a census of every hoisted toggle on
+    -- the page.
+    --
+    -- ☠ MATCHED BY THE ROW EACH ONE IS WIRED TO, NOT BY POSITION IN THE FILE.
+    -- This used to take the FIRST TWO RegisterHoistedToggle calls in
+    -- Pages/Options.lua, on the assumption the border pair were the earliest
+    -- hoists in it. The DISPLAY sweep broke that assumption -- Display >
+    -- Visibility hoists Solo Mode and its builder sits ABOVE the Frame page in
+    -- the same file -- and the failure it produced said "entry 1 uses the golden
+    -- label (got Solo Mode)", which is a true statement about a check asking the
+    -- wrong question. Naming the two rows is what this was always about.
     do
         local got = {}
-        for label, key in pageSrc:gmatch('RegisterHoistedToggle%(%w+,%s*L%["([^"]+)"%],%s*"([^"]+)"') do
-            got[#got + 1] = { label, key }
+        for row, label, key in pageSrc:gmatch('RegisterHoistedToggle%((%w+),%s*L%["([^"]+)"%],%s*"([^"]+)"') do
+            got[row] = { label, key }
         end
-        check(#got >= 2, "hoisted search: the page registers the two hoisted border toggles")
-        local want = { GOLDEN[1], GOLDEN[15] }
+        check(got.borderRow ~= nil and got.shadowRow ~= nil,
+              "hoisted search: the page registers the two hoisted border toggles")
+        local want = { { "borderRow", GOLDEN[1] }, { "shadowRow", GOLDEN[15] } }
         for i = 1, 2 do
-            if got[i] then
-                eq(got[i][1], want[i][2],
+            local rowName, golden = want[i][1], want[i][2]
+            local e = got[rowName]
+            if e then
+                eq(e[1], golden[2],
                    string.format("hoisted search: entry %d uses the golden label", i))
-                eq(got[i][2], want[i][3],
+                eq(e[2], golden[3],
                    string.format("hoisted search: entry %d uses the golden db key", i))
             else
-                check(false, string.format("hoisted search: entry %d missing (wanted %s)", i, want[i][2]))
+                check(false, string.format("hoisted search: entry %d missing (wanted %s)", i, golden[2]))
             end
         end
     end
@@ -753,18 +765,25 @@ if GUI.CreateBorderShadowControls then
                 "classic still builds the 280 box")
         pageHas("if classicLayout then Add(appearanceGroup, nil, 2) end",
                 "...and still adds it to column 2, where it has always been")
-        -- Popout: the band. Width from the page helper (never a literal) and no
+        -- Popout: the band. Width from the shared helper (never a literal) and no
         -- box chrome. WHERE it is added is not decided in this block any more --
         -- see the band-order block in test_frame_page_builders, which owns that
         -- claim now that the page has more than one band.
-        pageHas("GUI.PageUsableWidth(GUI.PageChildWidth(",
-                "the band is built at the width the layout pass will stretch it to")
-        pageHas("GUI:CreateSettingsGroup(self.child, bandW, { chromeless = true })",
-                "...with no box chrome, because the rows ARE the surface")
+        --
+        -- ⚠ tools.BandWidth(), NOT A PAGE LOCAL. The page took
+        -- GUI:CreatePopoutPageTools, so the expression this used to read
+        -- (GUI.PageUsableWidth(GUI.PageChildWidth(...))) lives in Controls.lua and
+        -- is pinned by test_popout_page_tools. The claim here is unchanged: this
+        -- band asks for the width the layout pass will stretch it to rather than
+        -- naming a literal.
+        pageHas("GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })",
+                "the band is built at the width the layout pass will stretch it to, with no box chrome")
+        check(pageSrc:find("GUI:CreateSettingsGroup(self.child, 280, { chromeless", 1, true) == nil,
+              "band: ...and never at a literal")
         -- The band's padding is DEFAULT (the popout PANE is the zero-padding
         -- case, not this). That is what lands a row's right edge on the same
         -- corridor as a slider's value box -- see test_page_parking.
-        check(pageSrc:find("bandW, { chromeless = true, padding", 1, true) == nil,
+        check(pageSrc:find("tools.BandWidth(), { chromeless = true, padding", 1, true) == nil,
               "band: the band keeps the standard box padding, so its rows end at the corridor")
         -- Inside THIS block, the only Add is the classic box's: the popout one
         -- moved to the foot of the builder. Two unconditional Adds would lay the
@@ -772,6 +791,197 @@ if GUI.CreateBorderShadowControls then
         local adds = 0
         for _ in pageSrc:gmatch("Add%(appearanceGroup,") do adds = adds + 1 end
         eq(adds, 1, "band: the Appearance block adds the classic box and nothing else")
+    end
+end
+
+-- ============================================================
+-- 4. THE PET FRAMES PAGE'S BORDER -- a DIFFERENT include set, ONE row
+-- Display > Pet Frames mounts its whole border as a single popout row, not the
+-- Frame page's two. The reason is size rather than taste: the pet border is
+-- sixteen controls where the frame's is nineteen, and five of those sixteen are
+-- the shadow -- a row for five sub-controls of another row's feature is a level
+-- of nesting that page does not earn. Keeping include.shadow also keeps the
+-- shadow block inside CreateBorderControls' own composition loop, which is what
+-- puts Show Border's grey on top of it: no shadowDisableWhen has to be handed
+-- over by hand, which is the one thing the split cost the Frame page.
+--
+-- What is pinned here is the same claim section 3 makes for the Frame page, for
+-- the other include set: the pane's inventory, that dropping the hoisted Show
+-- Border removes EXACTLY that row, the build-time db seed, and that the number
+-- the page declares is the number a build produces.
+--
+-- ⚠ NO COLOUR SOURCE ROW, AND THEREFORE NO COLOUR-SOURCE SEED. Pets pass
+-- neither classColor nor roleColor -- UnitClass("pet") answers the pet family,
+-- not a class token -- so the dropdown is not built and the STATIC default is
+-- never written. That makes the pet build's seed strictly smaller than the frame
+-- build's, and it is the half of this that a profile export would notice.
+if GUI.CreateBorderShadowControls then
+    local PET_OPTS = { alpha = true, inset = true, blendMode = true,
+                       gradient = true, shadow = true }
+
+    local function newPetDB(withColor)
+        local db = {
+            petShowBorder          = true,
+            petBorderShadowEnabled = true,
+            petBorderStyle         = "SOLID",
+            petBorderSize          = 1,
+            petBorderTexture       = "SOLID",
+        }
+        if withColor then db.petBorderColor = { r = 0, g = 0, b = 0, a = 1 } end
+        return db
+    end
+
+    -- The whole build, in the order the panel draws it. Sixteen: no offset pair
+    -- (the page has its own Offset X / Y in the Position group) and no colour
+    -- source, which is where the frame's nineteen go.
+    local PET_GOLDEN = {
+        { "checkbox",    "Show Border",          "petShowBorder",                 30 },
+        { "slider",      "Border Thickness",     "petBorderSize",                 55 },
+        { "dropdown",    "Border Style",         "petBorderStyle",                55 },
+        { "dropdown",    "Border Texture",       "petBorderTexture",              55 },
+        { "colorpicker", "Gradient Start Color", "petBorderGradientStartColor",   35 },
+        { "colorpicker", "Gradient End Color",   "petBorderGradientEndColor",     35 },
+        { "dropdown",    "Gradient Direction",   "petBorderGradientDirection",    55 },
+        { "colorpicker", "Border Color",         "petBorderColor",                35 },
+        { "slider",      "Border Alpha",         "(none)",                        55 },
+        { "slider",      "Border Inset",         "petBorderInset",                55 },
+        { "dropdown",    "Border Blend Mode",    "petBorderBlendMode",            55 },
+        { "checkbox",    "Border Shadow",        "petBorderShadowEnabled",        30 },
+        { "colorpicker", "Shadow Color",         "petBorderShadowColor",          35 },
+        { "slider",      "Shadow Size",          "petBorderShadowSize",           55 },
+        { "slider",      "Shadow Offset X",      "petBorderShadowOffsetX",        55 },
+        { "slider",      "Shadow Offset Y",      "petBorderShadowOffsetY",        55 },
+    }
+
+    -- ---- the classic box: the whole sixteen ----
+    local petClassicRec, petClassicW, petClassicDB
+    do
+        rec = {}
+        local tools = newTools()
+        petClassicDB = newPetDB(true)
+        local before = keySet(petClassicDB)
+        petClassicW = GUI:CreateBorderControls(newGroup(), petClassicDB, "pet", {
+            parent  = tools.parent,
+            include = PET_OPTS,
+            fullUpdate    = tools.full,
+            lightUpdate   = tools.light,
+            lightColors   = tools.colors,
+            refreshStates = tools.refresh,
+            sizeMin = 1, sizeMax = 6, sizeStep = 1,
+        })
+        petClassicRec = rec
+        checkInventory(petClassicRec, PET_GOLDEN, "pet classic")
+        eq(tools.fired.full + tools.fired.light + tools.fired.colors + tools.fired.refresh, 0,
+           "pet classic: building fired no callbacks")
+
+        local byLabel = {}
+        for _, e in ipairs(petClassicRec) do byLabel[e.label] = e end
+        eq(byLabel["Border Thickness"].min, 1, "pet classic: thickness min is the page's")
+        eq(byLabel["Border Thickness"].max, 6, "pet classic: ...and its max, which is not the frame's 16")
+
+        -- With the colour table already present, a pet build writes NOTHING.
+        local added = newKeys(before, petClassicDB)
+        eq(#added, 0, "pet seed: a pet border build with a colour table writes nothing at all")
+    end
+
+    -- ...and the one write it does make on a profile with no colour table. Still
+    -- one, not the frame build's two: there is no colour source to default.
+    do
+        rec = {}
+        local t, db2 = newTools(), newPetDB(false)
+        local was = keySet(db2)
+        GUI:CreateBorderControls(newGroup(), db2, "pet", {
+            parent = t.parent, include = PET_OPTS,
+            fullUpdate = t.full, lightUpdate = t.light, lightColors = t.colors,
+            refreshStates = t.refresh,
+            sizeMin = 1, sizeMax = 6, sizeStep = 1,
+        })
+        local added = newKeys(was, db2)
+        eq(#added, 1, "pet seed: a db with no border colour gets exactly one write")
+        eq(added[1], "petBorderColor", "pet seed: ...the colour table")
+        eq(db2.petBorderColor.a, 1, "pet seed: seeded fully opaque")
+        eq(db2.petBorderColorSource, nil, "pet seed: ...and NO colour source, because there is no dropdown for one")
+    end
+
+    -- ---- the popout pane: the same sixteen less the hoisted Show Border ----
+    local petPaneRec, petPaneW, petPaneDB
+    do
+        rec = {}
+        local tools = newTools()
+        petPaneDB = newPetDB(true)
+        local before = keySet(petPaneDB)
+        petPaneW = GUI:CreateBorderControls(newGroup(), petPaneDB, "pet", {
+            parent  = tools.parent,
+            include = PET_OPTS,
+            fullUpdate    = tools.full,
+            lightUpdate   = tools.light,
+            lightColors   = tools.colors,
+            refreshStates = tools.refresh,
+            sizeMin = 1, sizeMax = 6, sizeStep = 1,
+            noShowToggle  = true,
+            -- The page's own gate, in through the consumer door: pet frames
+            -- switched off greys the whole pane, which is what the classic box's
+            -- disableChildrenOn does for it there.
+            disableWhen   = function(d) return d.petEnabled == false end,
+        })
+        petPaneRec = rec
+
+        -- Field for field against the classic rows, minus `slot`: a popout group
+        -- starts its own numbering at 1.
+        local PANE_COMPARED = {}
+        for _, f in ipairs(COMPARED) do
+            if f ~= "slot" then PANE_COMPARED[#PANE_COMPARED + 1] = f end
+        end
+        eq(#petPaneRec, #PET_GOLDEN - 1, "pet pane: exactly one row fewer than the classic box")
+        eq(petPaneW.show, nil, "pet pane: ...and it is the hoisted Show Border checkbox")
+        for i = 1, #petPaneRec do
+            for _, field in ipairs(PANE_COMPARED) do
+                local a, b = petPaneRec[i][field], petClassicRec[i + 1][field]
+                if field == "dbTable" then a, b = a ~= false, b ~= false end
+                eq(tostring(a), tostring(b),
+                   string.format("pet pane: row %d field %s matches the classic build", i, field))
+            end
+        end
+        eq(#newKeys(before, petPaneDB), 0, "pet pane seed: the hoist changed no build-time write")
+    end
+
+    -- ---- the greys the one call still owns ----
+    -- Show Border has no checkbox in the pane and still governs all fifteen,
+    -- INCLUDING the five shadow rows -- which is the whole reason this page keeps
+    -- one call rather than splitting it. And the page gate reaches every row,
+    -- first child included, which is what disableWhen is for here.
+    do
+        petPaneDB.petShowBorder, petPaneDB.petBorderShadowEnabled = true, true
+        petPaneDB.petEnabled = true
+        eq(petPaneW.size.disableOn(nil), false, "pet grey: border on -- thickness is live")
+        eq(petPaneW.shadowColor.disableOn(nil), false, "pet grey: ...and the shadow colour")
+        petPaneDB.petShowBorder = false
+        eq(petPaneW.size.disableOn(nil), true, "pet grey: border off -- thickness greys")
+        eq(petPaneW.shadowColor.disableOn(nil), true,
+           "pet grey: ...and the shadow block with it, from the factory's own loop")
+        petPaneDB.petShowBorder = true
+        petPaneDB.petBorderShadowEnabled = false
+        eq(petPaneW.size.disableOn(nil), false, "pet grey: shadow off -- the border controls are untouched")
+        eq(petPaneW.shadowColor.disableOn(nil), true, "pet grey: ...and its sub-controls grey on their own key")
+        petPaneDB.petBorderShadowEnabled = true
+        -- The page gate, over the top of both.
+        petPaneDB.petEnabled = false
+        eq(petPaneW.size.disableOn(nil), true, "pet grey: pet frames off -- the whole pane greys")
+        eq(petPaneW.shadowEnabled.disableOn(nil), true, "pet grey: ...the shadow toggle included")
+        petPaneDB.petEnabled = true
+    end
+
+    -- ---- and the number the ROW declares ----
+    -- Read out of the page's source rather than retyped: the count badge is a
+    -- CLAIM about how much is inside, and the kit checks it against what a build
+    -- actually mounted. This checks it against what the builder produces, before
+    -- anyone gets in-game to see the mismatch reported.
+    do
+        local pageSrc = options_file_source("GUI/Pages/Options.lua")
+        local declared = tonumber(pageSrc:match("local PET_BORDER_COUNT%s*=%s*(%d+)"))
+        check(declared ~= nil, "pet counts: the Pet Frames page declares the Border row's count in one place")
+        eq(declared, #petPaneRec, "pet counts: ...and it is what the pane mounts")
+        eq(#petPaneRec, 15, "pet counts: which is 15 -- the sixteen less the hoisted Show Border")
     end
 end
 

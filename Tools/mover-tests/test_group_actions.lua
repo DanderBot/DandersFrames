@@ -405,9 +405,13 @@ end
 -- in the load-on-demand companion.
 -- ============================================================
 do
-    local page = options_file_source("GUI/Pages/Options.lua")
+    -- ⚠ THE REFLOW MOVED HOUSE. Both lines below were the Frame page's own inline
+    -- machinery when this block was written; they are GUI:CreatePopoutPageTools'
+    -- now (Controls.lua), and every converted page reaches them through it. The
+    -- claims are unchanged -- only where they are read from is.
+    local tools = options_file_source("GUI/Controls.lua")
     local function hasPage(needle, msg)
-        check(page:find(needle, 1, true) ~= nil, "readback: " .. msg)
+        check(tools:find(needle, 1, true) ~= nil, "readback: " .. msg)
     end
 
     hasPage("if values and g.RefreshChildValues then g:RefreshChildValues() end",
@@ -418,17 +422,22 @@ do
     -- runs on a hideOn change while a slider inside the pane is being dragged,
     -- and a value repaint mid-drag snaps the thumb from the mouse back to the
     -- last committed step -- every step. Exactly one caller may pass true.
+    --
+    -- Counted over the helper AND the page that calls it most, because the callers
+    -- are now split across the two: the helper holds the one opted-in call, the
+    -- page holds the bare `tools.ReflowMounted()` toggles.
     do
+        local both = tools .. options_file_source("GUI/Pages/Options.lua")
         local n, from = 0, 1
         while true do
-            local s = page:find("ReflowMounted(", from, true)
+            local s = both:find("ReflowMounted(", from, true)
             if not s then break end
             n, from = n + 1, s + 1
         end
         check(n >= 2, "readback: ReflowMounted has more than one caller")
         local trues, from2 = 0, 1
         while true do
-            local s = page:find("ReflowMounted(true)", from2, true)
+            local s = both:find("ReflowMounted(true)", from2, true)
             if not s then break end
             trues, from2 = trues + 1, s + 1
         end

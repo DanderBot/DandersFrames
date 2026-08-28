@@ -1253,14 +1253,34 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         end)
     end
 
-    -- Refresh override indicators on show
-    container:SetScript("OnShow", function()
+    -- The WHOLE display: the button's caption, its texture swatch and the
+    -- (missing) tag -- all three derived inside UpdateText -- plus the override
+    -- indicators beside the label, which are painted separately. Named once so
+    -- the two callers below cannot drift apart.
+    local function RefreshDisplay()
         UpdateText()
         if container.UpdateOverrideIndicators then
             container:UpdateOverrideIndicators(dbTable and dbTable[dbKey])
         end
-    end)
-    
+    end
+
+    -- Refresh override indicators on show
+    container:SetScript("OnShow", RefreshDisplay)
+
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote this key behind the widget's
+    -- back: a group Reset, a Hold: Defaults preview, or the undo of either.
+    --
+    -- ☠ SAME GAP THE FONT DROPDOWN HAD, AND FOR THE SAME REASON: both are
+    -- hand-rolled preview menus that predate the kit's dropdown and share none
+    -- of its code, so neither inherited its opt-in. Harmless while a texture
+    -- dropdown only ever sat on a page; the Pet Frames Appearance row now mounts
+    -- one inside a popout pane carrying Reset Group and Hold: Defaults, so a
+    -- swatch still previewing the previous texture after a reset is a thing a
+    -- user can see -- and it would stay wrong until the panel was closed and
+    -- reopened and its OnShow fired. Pinned by test_order_lists.lua.
+    container.refreshValue = RefreshDisplay
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
@@ -1274,7 +1294,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             btn.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         end
     end
-    
+
     -- SEARCH: Register this setting (use current texture list)
     if DF.Search and dbKey and type(dbKey) == "string" then
         local currentOptions = customOptions or DF:GetTextureList()
@@ -3811,15 +3831,13 @@ end
 -- THE POPOUT PAGE'S SHARED MACHINERY
 -- ------------------------------------------------------------
 -- Everything a settings page needs to mount its groups as popout feature rows,
--- lifted out of the Frame page, which built the first copy of it inline (see
--- the Frame page's page-scope machinery, Pages/Options.lua ~1837, where each
--- piece still carries its full essay). Five more pages need the same eight
--- verbs; five more copies would drift, and the first thing to drift would be
--- one of the load-bearing notes rather than the code under it.
---
--- ⚠ THE FRAME PAGE KEEPS ITS OWN COPY THIS PASS. Its census tests pin that
--- page's source line by line, so porting it is its own commit with its own test
--- edit. This is the shared half for every page that converts AFTER it.
+-- lifted out of the Frame page, which built the first copy of it inline because
+-- it was the first page converted and there was nothing yet to share. Five more
+-- pages needed the same eight verbs; five more copies would drift, and the first
+-- thing to drift would be one of the load-bearing notes rather than the code
+-- under it. The Frame page came home last, in its own commit -- its census tests
+-- pin that page's source line by line -- so this is now the ONLY copy, and the
+-- essays below are the only place each piece is explained.
 --
 -- USAGE, at the top of a BuildPage builder and unconditionally:
 --
@@ -3852,8 +3870,6 @@ function GUI:CreatePopoutPageTools(page)
     -- point the settings-search jump at rows this build has retired.
     page._popoutRowForKey = nil
 
-    if DF:IsClassicSettingsLayout() then return nil end
-
     -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT. Every route
     -- into a page builder is a REBUILD -- a party/raid switch, a profile switch,
     -- the classic-layout flip, and the settings search registry, which is built
@@ -3863,7 +3879,17 @@ function GUI:CreatePopoutPageTools(page)
     -- stale panel writes live settings into the wrong mode. Guarded rather than
     -- called bare, so an older embedded copy of the pack without the verb cannot
     -- break the page.
+    --
+    -- ☠ AND IT IS ABOVE THE CLASSIC BAIL, FOR THE SAME REASON THE MAP CLEAR IS.
+    -- The flip TO classic is itself a rebuild, and it is the one rebuild that
+    -- happens with a panel standing open -- the tick that flips it lives inside
+    -- one. Left below the early return, the helper would hand the classic page
+    -- back with an orphan panel still floating beside it, wired to a row this
+    -- build has retired. Classic has nothing open otherwise, so on every other
+    -- classic build this is a no-op over an empty registry.
     if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
+
+    if DF:IsClassicSettingsLayout() then return nil end
 
     -- Retire the previous build's holders. They are deliberately NOT in
     -- page.children -- anything in that list is laid out into one of the page's
