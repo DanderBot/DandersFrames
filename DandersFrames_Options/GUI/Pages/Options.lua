@@ -1851,6 +1851,59 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- makes one shared table safe across every box below.
         local INLINE_BOX = (not classicLayout) and { bandStyle = true } or nil
 
+        -- ===== ...AND THE WIDTH, WHICH THE SKIN DID NOT FIX ==================
+        -- The skin made the survivors LOOK like the bands. It did not make them
+        -- the same SIZE, and that is the next thing the eye goes to -- Danders,
+        -- on the band-styled page: "there is still an issue with their width --
+        -- Appearance spans the whole width, the others do not." A page of plates
+        -- that agree on fill, border, radius and inset and then stop at 280 while
+        -- the plate above them runs to the corridor does not read as one column
+        -- of sections; it reads as a wide thing with narrow things under it.
+        --
+        -- So every stay-inline box is now built at the page's usable width and
+        -- added spanning BOTH columns, exactly as the two bands are. Same
+        -- expression as the Appearance band's `bandW` above -- asked for rather
+        -- than guessed, because LayoutChildren sizes children off the group's
+        -- CURRENT width and a box built at 280 and stretched by the layout pass
+        -- lays its first pass out at 260.
+        --
+        -- ☠ WIDTH ALONE WOULD HAVE BEEN A REGRESSION, which is what INLINE_GRID
+        -- below is for. A column of five sliders simply stretched to the page is
+        -- five bars twice as long as any bar needs to be, each with its label
+        -- stranded at the far left of a 400px row. The width goes to a SECOND
+        -- control instead.
+        local INLINE_W = classicLayout and GUI.SettingsBox.group or math.max(
+            GUI.PageUsableWidth(GUI.PageChildWidth(
+                GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+            GUI.SettingsBox.group)
+
+        -- The same skin with the plate's interior flowed across TWO tracks:
+        -- Frame Width beside Frame Height, Growth Direction beside Frames Grow
+        -- From, the eight group ticks four rows of two. Row-major, so a pair of
+        -- related controls reads left-then-right.
+        --
+        -- ⚠ DERIVED from INLINE_BOX rather than written beside it. Two literals
+        -- is two things to keep in step, and the one that gets missed is the box
+        -- that quietly stops matching its neighbours -- the exact failure this
+        -- page already has a test for.
+        --
+        -- Not every box wants it, and the judgement is per box rather than a
+        -- page-wide flag: a wrapping blurb or the group-order drag list has no
+        -- second column to pair with, so those boxes stay one track wide inside
+        -- their full-width plate and the boxes that are pairs of compact
+        -- controls take two.
+        local INLINE_GRID = INLINE_BOX
+            and { bandStyle = INLINE_BOX.bandStyle, innerColumns = 2 }
+            or nil
+
+        -- Where a stay-inline box is ADDED. In classic, its own column, exactly
+        -- as before. In the new layout there are no columns left on this page --
+        -- every box and both bands span "both" -- which the page's column engine
+        -- handles as a plain single stack (a run of "both" widgets is a run of
+        -- sync points with nothing to sync).
+        local INLINE_COL_1 = classicLayout and 1 or "both"
+        local INLINE_COL_2 = classicLayout and 2 or "both"
+
         -- ===== APPEARANCE: THE CONTAINER, AND WHERE IT SITS ==============
         -- Two different things depending on the layout, decided here because the
         -- CONSTRUCTED WIDTH is part of the answer and a group cannot be widened
@@ -1895,7 +1948,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- ===== FRAME SIZE GROUP (Column 1) =====
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
+        -- Five sliders, and nothing here wants a 400px bar: two tracks.
+        local sizeGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Size"]), 40)
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Width"], 60, 300, 1, db, "frameWidth", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Height"], 20, 300, 1, db, "frameHeight", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
@@ -1903,7 +1957,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Scale"], 0.5, 2.0, 0.05, db, "frameScale", function() DF:UpdateContainerPosition() DF:UpdateRaidContainerPosition() UpdateFrames() end, function() DF:LightweightUpdateFrameScale() end, true), 55)
         local frameSpacingSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Spacing"], -5, 50, 1, db, "frameSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSpacing() end, true), 55)
         frameSpacingSlider.hideOn = function() return GUI.SelectedMode == "raid" and not db.raidUseGroups end
-        Add(sizeGroup, nil, 1)
+        Add(sizeGroup, nil, INLINE_COL_1)
         
         -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
         -- The container itself is built (and, for the band, added) above -- see
@@ -2657,7 +2711,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
 
         -- ===== LAYOUT DIRECTION GROUP (Column 1) =====
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
+        -- Two visible dropdowns at a time (the two Growth Direction variants are
+        -- mutually exclusive), which is exactly a pair: two tracks.
+        local layoutGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
         
         -- ☠☠ TWO DROPDOWNS, AND THE RAID+GROUPS ONE IS *DELIBERATELY* THE INVERSE.
@@ -2769,10 +2825,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local anchorDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames), 55)
         anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
         
-        Add(layoutGroup, nil, 1)
-        
+        Add(layoutGroup, nil, INLINE_COL_1)
+
         -- ===== RAID LAYOUT MODE GROUP (Column 1, raid only) =====
-        local raidModeGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
+        -- ONE track: a lone checkbox and a wrapping blurb have nothing to pair
+        -- with, and a blurb given half a plate wraps to four lines beside a
+        -- checkbox that needs one.
+        local raidModeGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_BOX)
         raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
         raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
         
@@ -2828,15 +2887,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 30)
         
         raidModeGroup:AddWidget(GUI:CreateLabel(self.child, L["Enabled: Players organized by raid groups (1-8).\nDisabled: All players in one flat grid."], 250), 45)
-        Add(raidModeGroup, nil, 1)
-        
+        Add(raidModeGroup, nil, INLINE_COL_1)
+
         -- ===== GROUP LAYOUT SETTINGS (Column 1, raid+groups only) =====
-        local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
+        -- Two tracks: three sliders, two dropdowns and the corner picker all pair
+        -- up. The hint blurb at the top opts out (widget.fullRow below).
+        local groupLayoutGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
         groupLayoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Layout Settings"]), 40)
         groupLayoutGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
         
         local groupLayoutHint = db.growDirection == "VERTICAL" and L["Players stack horizontally, groups grow top-to-bottom."] or L["Players stack vertically, groups grow left-to-right."]
-        groupLayoutGroup:AddWidget(GUI:CreateLabel(self.child, groupLayoutHint, 250), 25)
+        -- fullRow: a blurb describes the whole box, not the control beside it,
+        -- and half a plate is where a one-line hint becomes a three-line one.
+        -- Inert in classic, where the box is one track wide anyway.
+        local groupLayoutHintLabel = groupLayoutGroup:AddWidget(GUI:CreateLabel(self.child, groupLayoutHint, 250), 25)
+        groupLayoutHintLabel.fullRow = true
         
         -- Six controls, four of them directional, and their labels already swap with the
         -- growth direction -- so the tooltips have to swap with it too, or half of them
@@ -3031,14 +3096,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             { onRuntimeWrite = PlayerAnchorRuntimeWrite }), 55)
         playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
-        Add(groupLayoutGroup, nil, 1)
-        
+        Add(groupLayoutGroup, nil, INLINE_COL_1)
+
         -- ===== GROUP VISIBILITY (Column 1, raid only) =====
-        local groupVisGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
+        -- Eight ticks: two tracks turns a column of eight into four rows of two,
+        -- which is the shape a group picker wants anyway.
+        local groupVisGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
         groupVisGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Visibility"]), 40)
         groupVisGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
         
-        groupVisGroup:AddWidget(GUI:CreateLabel(self.child, L["Choose which groups to display."], 250), 25)
+        local groupVisHintLabel = groupVisGroup:AddWidget(GUI:CreateLabel(self.child, L["Choose which groups to display."], 250), 25)
+        groupVisHintLabel.fullRow = true
         
         -- Initialize raidGroupVisible if it doesn't exist
         if not db.raidGroupVisible then
@@ -3068,10 +3136,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             ), 25)
         end
         
-        Add(groupVisGroup, nil, 1)
-        
+        Add(groupVisGroup, nil, INLINE_COL_1)
+
         -- ===== GROUP DISPLAY ORDER (Column 2, raid+groups only) =====
-        local groupOrderGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
+        -- ONE track. The box is a blurb, a tick and a 230px drag list, and the
+        -- list is the box -- pairing it with the tick would give a 25px control
+        -- a 230px row and still leave the list to fill whatever was left.
+        local groupOrderGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_BOX)
         groupOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Group Display Order"]), 40)
         groupOrderGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
         
@@ -3097,14 +3168,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end)
         groupOrderGroup:AddWidget(groupOrderWidget, 230)
         
-        Add(groupOrderGroup, nil, 2)
-        
+        Add(groupOrderGroup, nil, INLINE_COL_2)
+
         -- ===== FLAT GRID SETTINGS (Column 1, raid+flat only) =====
-        local flatGridGroup = GUI:CreateSettingsGroup(self.child, 280, INLINE_BOX)
+        -- Two tracks: three sliders and three dropdowns, all pairs.
+        local flatGridGroup = GUI:CreateSettingsGroup(self.child, INLINE_W, INLINE_GRID)
         flatGridGroup:AddWidget(GUI:CreateHeader(self.child, L["Flat Grid Settings"]), 40)
         flatGridGroup.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
         
-        flatGridGroup:AddWidget(GUI:CreateLabel(self.child, L["All players in a unified grid. Sorting applies raid-wide."], 250), 25)
+        local flatGridHintLabel = flatGridGroup:AddWidget(GUI:CreateLabel(self.child, L["All players in a unified grid. Sorting applies raid-wide."], 250), 25)
+        flatGridHintLabel.fullRow = true
         
         local function UpdateFlatLayoutFull()
             if InCombatLockdown() then return end
@@ -3142,7 +3215,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         flatGridGroup:AddWidget(GUI:CreateSlider(self.child, L["Horizontal Spacing"], -5, 100, 1, db, "raidFlatHorizontalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
         flatGridGroup:AddWidget(GUI:CreateSlider(self.child, L["Vertical Spacing"], -5, 100, 1, db, "raidFlatVerticalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
         
-        Add(flatGridGroup, nil, 1)
+        Add(flatGridGroup, nil, INLINE_COL_1)
         
         -- Update labels on show
         if groupsPerRowSlider and groupsPerRowSlider.label then
