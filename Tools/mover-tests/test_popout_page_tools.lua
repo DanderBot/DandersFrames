@@ -194,7 +194,16 @@ do
     -- The lift is additive. The Frame page still declares every piece inline, so
     -- nothing was hollowed out of it in the move -- and its census tests, which
     -- read that source directly, still have something to read.
-    local page = options_file_source("GUI/Pages/Options.lua")
+    -- ⚠ SCOPED TO THE FRAME PAGE'S OWN SLICE, not to the whole file. Pages/
+    -- Options.lua holds several pages, and General > Settings -- converted in
+    -- this same sweep -- DOES take the shared machinery. A whole-file search
+    -- would read that page's `local tools = GUI:CreatePopoutPageTools(self)` as
+    -- the Frame page having been ported behind this test's back.
+    local SRC = options_file_source("GUI/Pages/Options.lua")
+    local a = SRC:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
+    local b = SRC:find('{pageId = "general_sorting", label = L["Sorting"]}', 1, true)
+    check(a ~= nil and b ~= nil and b > a, "frame page: locatable by its own ends")
+    local page = SRC:sub(a or 1, b or 1)
     for _, v in ipairs({ "PopoutContent", "ReflowPane", "ReflowMounted", "RowDB",
                          "ClaimKeys", "WireModifiedTick", "RefreshAfterGroupWrite",
                          "CombatReason", "HoldReason", "WireFooter",

@@ -729,7 +729,14 @@ if GUI.CreateBorderShadowControls then
         -- and `appearanceGroup` are the house names for those two boxes and other
         -- pages in this same file use both, so a whole-file count answers about
         -- the Pet page as readily as about this one.
-        local blockStart = pageSrc:find("local classicLayout = DF:IsClassicSettingsLayout()", 1, true)
+        -- ⚠ AND THE SEARCH STARTS AT THE FRAME PAGE, not at the top of the file.
+        -- `local classicLayout = DF:IsClassicSettingsLayout()` is the first line
+        -- of every converted page's builder, and General > Settings -- converted
+        -- in the same sweep -- sits ABOVE this one in Pages/Options.lua, so a
+        -- search from byte 1 would open the slice on that page instead.
+        local frameAt = pageSrc:find('Add(CreateCopyButton(self.child, {"frame", "permanentMover"', 1, true)
+        check(frameAt ~= nil, "band: the Frame page is locatable by its copy button")
+        local blockStart = pageSrc:find("local classicLayout = DF:IsClassicSettingsLayout()", frameAt or 1, true)
         local blockEnd   = pageSrc:find("if classicLayout then Add(appearanceGroup, nil, 2) end", 1, true)
         check(blockStart ~= nil, "band: the Frame page decides the layout mode by name")
         check(blockEnd ~= nil and blockStart and blockEnd > blockStart,

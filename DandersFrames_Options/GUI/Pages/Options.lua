@@ -1308,6 +1308,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- party and raid mode dbs so the value stays consistent regardless
         -- of which mode is currently selected. The Blizzard frames are
         -- global UI elements so the toggle conceptually has no mode.
+        --
+        -- ☠ THESE STAY AT PAGE SCOPE, in both layouts. Three of the builders
+        -- below are bound to them, the classic box and every pane instance must
+        -- drive the SAME setter, and neither closes over anything group-specific.
         local function makeBlizGet(key)
             return function() return DF.db.party and DF.db.party[key] end
         end
@@ -1394,7 +1398,64 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
         end
 
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: seven 280 boxes under the info
+        -- banner, four in column one and three in column two. POPOUT turns the
+        -- five MULTI-CONTROL groups into feature rows -- Frame Modes, Blizzard
+        -- Frames, Rendering, Settings Panel Appearance, Notifications -- and
+        -- leaves the two single-control groups (Minimap, Language) inline wearing
+        -- the band skin, because a pane holding one checkbox is a click that buys
+        -- nothing.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates }. The classic branch mounts the SAME
+        -- builder into the box it always built, which is what makes "classic is
+        -- unchanged" structural rather than a promise --
+        -- test_settings_page_builders.lua pins the inventory of each one against
+        -- the census taken before the move.
+        --
+        -- ☠☠ NOT ONE ROW ON THIS PAGE CARRIES A MODIFIED TICK OR A RESET STRIP,
+        -- and that is the page's whole rule rather than five separate omissions.
+        -- DF.Defaults (DandersFrames/Core/Defaults.lua) answers for DF.db.party /
+        -- DF.db.raid / the stored raid baseline and NOTHING ELSE, and this page
+        -- does not own one plain per-mode profile key:
+        --
+        --   * partyEnabled / raidEnabled / settingsFont / settingsFontOutline sit
+        --     at the DF.db ROOT -- profile-wide, not per mode;
+        --   * the four Blizzard toggles, the minimap button and Pixel-Perfect
+        --     Scaling ARE stored per mode, but they are read party-canonical and
+        --     written to BOTH tables through makeBlizSet. The generic engine
+        --     writes ONE mode's table, so a Reset Group here would desync exactly
+        --     the pair those setters exist to keep together;
+        --   * the aura update rate and the two notification ticks are
+        --     account-wide (DF:GetGlobalDB());
+        --   * the language override lives on the per-character SavedVariable;
+        --   * "Use classic settings layout" is an account-level flag with no db
+        --     table at all.
+        --
+        -- So every row here is a WAY IN and nothing else: ClaimKeys for the search
+        -- jump, no WireModifiedTick, no WireFooter. That is the Integrations and
+        -- Global Fonts rule, reached by a harder road -- on those pages a footer
+        -- would merely have been INERT; here it would be DESTRUCTIVE. And two of
+        -- these groups need a UI RELOAD to take effect, so a reset that silently
+        -- flipped partyEnabled would leave the user looking at frames the addon no
+        -- longer believes it owns, with no prompt to put it right.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what every `if classicLayout then` arm below leans on.
+        --
+        -- ⚠ tools.RowDB IS NEVER USED ON THIS PAGE, and that is the same fact as
+        -- the paragraph above: it resolves DF.db[GUI.SelectedMode], and no row
+        -- here reads a per-mode table. Each row names the table its own keys live
+        -- in instead -- the Integrations row's precedent.
+        local tools = GUI:CreatePopoutPageTools(self)
+
         -- ===== INFO BANNER (global settings notice) =====
+        -- Untouched by the conversion and still the first thing on the page: it
+        -- is the sentence that explains why none of this has a party/raid split,
+        -- and a banner folded behind a click would be a warning nobody reads.
         do
             local banner = GUI:CreateInfoBanner(self.child, {
                 tone = "info",
@@ -1403,90 +1464,264 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             Add(banner, banner.layoutHeight, "both")
         end
 
-        -- ===== FRAME MODES GROUP (Column 1, Top) =====
-        local modesGroup = GUI:CreateSettingsGroup(self.child, 280)
-        modesGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Modes"]), 40)
-        modesGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Party Frames"], DF.db, "partyEnabled", function() PromptReloadAfterModeToggle("party") end), 30)
-        modesGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Raid Frames"], DF.db, "raidEnabled", function() PromptReloadAfterModeToggle("raid") end), 30)
-        modesGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["Completely enable or disable the Party or Raid frame system. Disabled modes are never created, consuming zero performance in the background. Requires a UI reload to apply."],
-            260), 80)
-        Add(modesGroup, nil, 1)
+        -- ===== THE PAGE'S ONE BAND ========================================
+        -- Full-width and chromeless: a feature row's popout docks outside the
+        -- WINDOW and runs a beam back to the row, so a row that stopped 280px in
+        -- would leave that beam crossing half the page.
+        --
+        -- ⚠ NO HEADER ON IT, and ONE band rather than two. A header names a
+        -- SECTION, and these five rows share no word that none of them says
+        -- alone: "Frame Modes", "Blizzard Frames" and "Rendering" are not a
+        -- section anyone would call anything, and neither are "Settings Panel
+        -- Appearance" and "Notifications". Splitting them would mean inventing two
+        -- section names -- and the classic page never had them either; the info
+        -- banner above already says the one thing that IS true of the whole page.
+        local settingsBand
+        if tools then
+            settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
 
-        -- ===== BLIZZARD FRAMES GROUP (Column 1, Bottom) =====
+        -- ===== FRAME MODES (a 280 box in classic, the band's first row) =====
+        -- Verbatim, taking the group and parent it should build into: same
+        -- factories, same L keys, same db table and keys, same callbacks, same
+        -- slot heights.
+        --
+        -- ⚠ NO TOGGLE IS HOISTED, and there are two candidates. Neither tick means
+        -- "am I doing anything": Enable Party Frames and Enable Raid Frames are two
+        -- INDEPENDENT modes and either can be off without the other, so a row that
+        -- hoisted one would be claiming it speaks for the pair. That is the
+        -- Integrations row's rule about its two colour-picker overrides.
+        local function BuildFrameModesGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Party Frames"], DF.db, "partyEnabled", function() PromptReloadAfterModeToggle("party") end), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Raid Frames"], DF.db, "raidEnabled", function() PromptReloadAfterModeToggle("raid") end), 30)
+            group:AddWidget(GUI:CreateLabel(parent,
+                L["Completely enable or disable the Party or Raid frame system. Disabled modes are never created, consuming zero performance in the background. Requires a UI reload to apply."],
+                260), 80)
+        end
+
+        if classicLayout then
+            -- ===== FRAME MODES GROUP (Column 1, Top) =====
+            local modesGroup = GUI:CreateSettingsGroup(self.child, 280)
+            modesGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Modes"]), 40)
+            BuildFrameModesGroup({
+                group = modesGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(modesGroup, nil, 1)
+        else
+            -- The summary says the one thing on this page worth saying at a
+            -- glance, and only while it is true: which mode is switched OFF. Both
+            -- on is the shipped state and prints nothing, which is correct -- a
+            -- row reading "Party · Raid" on every default profile would spend its
+            -- width telling the user the addon is doing its job.
+            --
+            -- The words are the locale's own -- L["Party"], L["Raid"], L["Off"] --
+            -- paired the way every other summary on the sweep pairs a label with
+            -- its value (Frame Size's "Scale 1.05", Border's "Alpha 0.80"). No
+            -- string is invented for this row.
+            --
+            -- ⚠ `== false`, NOT `not d.partyEnabled`. ABSENT MEANS ENABLED for
+            -- these two keys -- Profile.lua's copy-and-apply-by-presence note says
+            -- so, and the reload prompt above tests them the same way -- so a
+            -- profile that has not been seeded yet would otherwise be reported as
+            -- having both modes off.
+            local function FrameModesSummary(d)
+                if not d then return "" end
+                local parts = {}
+                if d.partyEnabled == false then parts[#parts + 1] = format("%s %s", L["Party"], L["Off"]) end
+                if d.raidEnabled  == false then parts[#parts + 1] = format("%s %s", L["Raid"],  L["Off"]) end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Three, which is the whole group: the two ticks and the explainer
+            -- under them. Nothing is hoisted, per the note above the builder.
+            local FRAME_MODES_COUNT = 3
+
+            local modesMount, modesContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildFrameModesGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local modesRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Frame Modes"],
+                -- ⚠ THE PROFILE ROOT, NOT tools.RowDB. These two keys are stored
+                -- at DF.db itself, not under DF.db.party / DF.db.raid, and a row
+                -- pointed at the per-mode table would read nil for both and print
+                -- nothing whatever the user had set. Same move the Integrations
+                -- row makes for its account-wide pair.
+                db      = function() return DF.db end,
+                summary = FrameModesSummary,
+                count   = FRAME_MODES_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = modesMount,
+            }))
+            -- Claimed for the SEARCH row map only -- no tick, no footer. See the
+            -- page-wide rule at the top of this builder.
+            tools.ClaimKeys(modesRow, modesContent)
+        end
+
+        -- ===== BLIZZARD FRAMES (a 280 box in classic, a band row) ===========
         -- Storage stays per-mode (party + raid both updated via setter sync)
         -- so AutoProfiles and ExportCategories continue to work unchanged.
-        local blizzardGroup = GUI:CreateSettingsGroup(self.child, 280)
-        blizzardGroup:AddWidget(GUI:CreateHeader(self.child, L["Blizzard Frames"]), 40)
-
-        local disablePartyCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
-            self.child, L["Disable Blizzard Party Frames"],
-            DF.db.party, "hideBlizzardPartyFrames",
-            function() PromptReloadBlizzard() end,
-            makeBlizGet("hideBlizzardPartyFrames"),
-            makeBlizSet("hideBlizzardPartyFrames", function() DF:UpdateBlizzardFrameVisibility() end)
-        ), 30)
-        disablePartyCheck.tooltip = L["Hides and unregisters all events on the default Blizzard party frames so they consume no performance."]
-
-        local disableRaidCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
-            self.child, L["Disable Blizzard Raid Frames"],
-            DF.db.party, "hideBlizzardRaidFrames",
-            function() PromptReloadBlizzard() end,
-            makeBlizGet("hideBlizzardRaidFrames"),
-            makeBlizSet("hideBlizzardRaidFrames", function() DF:UpdateBlizzardFrameVisibility() end)
-        ), 30)
-        disableRaidCheck.tooltip = L["Hides and unregisters all events on the default Blizzard raid frames so they consume no performance."]
-
-        local disablePlayerCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
-            self.child, L["Hide Blizzard Player Frame"],
-            nil, nil,
-            function() DF:UpdateDefaultPlayerFrame() end,
-            makeBlizGet("hideDefaultPlayerFrame"),
-            makeBlizSet("hideDefaultPlayerFrame", function() DF:UpdateDefaultPlayerFrame() end),
-            "hideDefaultPlayerFrame"
-        ), 30)
-        disablePlayerCheck.tooltip = L["Hides the default Blizzard player portrait and health bar."]
-
-        -- Visual divider to separate the related sub-option (Show Side Menu only
-        -- applies once a Blizzard frame is disabled).
         --
-        -- This rule was hand-rolled here first; it is now GUI:CreateSeparator, so the
-        -- Buff Bar page's scope/filter split draws the identical line instead of a
-        -- second copy of the same five lines.
-        blizzardGroup:AddWidget(GUI:CreateSeparator(self.child), 14)
+        -- Verbatim, taking the group and parent it should build into -- the four
+        -- ticks, their tooltips, the separator and the side-menu disableOn, in the
+        -- same order at the same slot heights.
+        --
+        -- ⚠ NO TOGGLE IS HOISTED here either, for the Frame Modes reason twice
+        -- over: these are four independent switches over three different Blizzard
+        -- frames plus a sub-option, and none of them is the group's "am I doing
+        -- anything".
+        local function BuildBlizzardFramesGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        local sideMenuCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
-            self.child, L["Show Party/Raid Side Menu"],
-            DF.db.party, "showBlizzardSideMenu",
-            function() PromptReloadBlizzard() end,
-            makeBlizGet("showBlizzardSideMenu"),
-            makeBlizSet("showBlizzardSideMenu", function() DF:UpdateBlizzardFrameVisibility() end)
-        ), 30)
-        sideMenuCheck.disableOn = function()
-            local p = DF.db.party
-            return not (p and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames))
+            local disablePartyCheck = group:AddWidget(GUI:CreateCheckbox(
+                parent, L["Disable Blizzard Party Frames"],
+                DF.db.party, "hideBlizzardPartyFrames",
+                function() PromptReloadBlizzard() end,
+                makeBlizGet("hideBlizzardPartyFrames"),
+                makeBlizSet("hideBlizzardPartyFrames", function() DF:UpdateBlizzardFrameVisibility() end)
+            ), 30)
+            disablePartyCheck.tooltip = L["Hides and unregisters all events on the default Blizzard party frames so they consume no performance."]
+
+            local disableRaidCheck = group:AddWidget(GUI:CreateCheckbox(
+                parent, L["Disable Blizzard Raid Frames"],
+                DF.db.party, "hideBlizzardRaidFrames",
+                function() PromptReloadBlizzard() end,
+                makeBlizGet("hideBlizzardRaidFrames"),
+                makeBlizSet("hideBlizzardRaidFrames", function() DF:UpdateBlizzardFrameVisibility() end)
+            ), 30)
+            disableRaidCheck.tooltip = L["Hides and unregisters all events on the default Blizzard raid frames so they consume no performance."]
+
+            local disablePlayerCheck = group:AddWidget(GUI:CreateCheckbox(
+                parent, L["Hide Blizzard Player Frame"],
+                nil, nil,
+                function() DF:UpdateDefaultPlayerFrame() end,
+                makeBlizGet("hideDefaultPlayerFrame"),
+                makeBlizSet("hideDefaultPlayerFrame", function() DF:UpdateDefaultPlayerFrame() end),
+                "hideDefaultPlayerFrame"
+            ), 30)
+            disablePlayerCheck.tooltip = L["Hides the default Blizzard player portrait and health bar."]
+
+            -- Visual divider to separate the related sub-option (Show Side Menu only
+            -- applies once a Blizzard frame is disabled).
+            --
+            -- This rule was hand-rolled here first; it is now GUI:CreateSeparator, so the
+            -- Buff Bar page's scope/filter split draws the identical line instead of a
+            -- second copy of the same five lines.
+            group:AddWidget(GUI:CreateSeparator(parent), 14)
+
+            local sideMenuCheck = group:AddWidget(GUI:CreateCheckbox(
+                parent, L["Show Party/Raid Side Menu"],
+                DF.db.party, "showBlizzardSideMenu",
+                function() PromptReloadBlizzard() end,
+                makeBlizGet("showBlizzardSideMenu"),
+                makeBlizSet("showBlizzardSideMenu", function() DF:UpdateBlizzardFrameVisibility() end)
+            ), 30)
+            -- ⚠ STAYS INSIDE THE BUILDER. In classic this greys the side-menu tick
+            -- in the box; the pane has to do the same, and one builder serving both
+            -- is what stops the two drifting.
+            --
+            -- ⚠ IN THE PANE IT IS ONE REFRESH BEHIND, and that is an accepted trade
+            -- rather than an oversight. The grey is applied by the group's
+            -- RefreshChildStates, which the checkbox factory reaches implicitly
+            -- through `parent:RefreshStates()` -- and the parent is the page child
+            -- in classic (which forwards to the page) but a bare popout holder in a
+            -- pane, which has no such method. Repairing it means appending a
+            -- refreshStates call to the two Disable Blizzard * callbacks, i.e.
+            -- editing a reload-popup callback this pass is not allowed to touch --
+            -- and both of those settings put a "reload required" prompt on screen
+            -- the moment they are clicked, so the panel behind it is about to be
+            -- rebuilt anyway. The next reflow (or reopening the row) puts it right.
+            sideMenuCheck.disableOn = function()
+                local p = DF.db.party
+                return not (p and (p.hideBlizzardPartyFrames or p.hideBlizzardRaidFrames))
+            end
+            sideMenuCheck.tooltip = L["Shows the ping wheel & party management menu when Blizzard frames are disabled."]
         end
-        sideMenuCheck.tooltip = L["Shows the ping wheel & party management menu when Blizzard frames are disabled."]
 
-        Add(blizzardGroup, nil, 1)
+        if classicLayout then
+            -- ===== BLIZZARD FRAMES GROUP (Column 1, Bottom) =====
+            local blizzardGroup = GUI:CreateSettingsGroup(self.child, 280)
+            blizzardGroup:AddWidget(GUI:CreateHeader(self.child, L["Blizzard Frames"]), 40)
+            BuildBlizzardFramesGroup({
+                group = blizzardGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(blizzardGroup, nil, 1)
+        else
+            -- ☠ NO SUMMARY ON THIS ROW, and it is a judgement rather than a gap.
+            -- Every honest phrasing needs a word for the DIRECTION -- these ticks
+            -- HIDE things -- and the only words the locale has for the frames
+            -- themselves are L["Party"] and L["Raid"], which is exactly what the
+            -- Frame Modes row directly above prints about the OPPOSITE state. A
+            -- row reading "Party · Raid" under one reading "Party Off" would be
+            -- the page contradicting itself in two lines. The kit still shows the
+            -- label and the count badge, which is what no summary is for.
+            --
+            -- Five: the four ticks and the separator between the third and the
+            -- fourth. The separator is a widget in the group's roster like any
+            -- other, so the badge counts it -- the kit measures what is MOUNTED.
+            local BLIZZARD_FRAMES_COUNT = 5
+
+            local blizMount, blizContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildBlizzardFramesGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local blizRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Blizzard Frames"],
+                -- ⚠ PARTY-CANONICAL, which is what the getters above read. These
+                -- keys ARE per-mode in storage, but one value is kept in both
+                -- tables by makeBlizSet, and party is the copy every reader here
+                -- goes to -- so the row is handed the same table its controls are,
+                -- rather than whichever mode the tab strip happens to be on.
+                db      = function() return DF.db and DF.db.party end,
+                count   = BLIZZARD_FRAMES_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = blizMount,
+            }))
+            -- Claimed for the SEARCH row map only -- no tick, no footer. Here the
+            -- footer would be worse than inert: Reset Group writes ONE mode's
+            -- table, and these four keys are only ever correct in both.
+            tools.ClaimKeys(blizRow, blizContent)
+        end
 
         -- ===== MINIMAP GROUP (Column 1) =====
         -- The minimap button is a single global UI element (no mode), so it lives
         -- here rather than the per-mode Visibility page. Reads party-canonical and
         -- writes both dbs so it stays consistent regardless of selected mode.
-        local minimapGroup = GUI:CreateSettingsGroup(self.child, 280)
+        --
+        -- STAYS INLINE in both layouts: one checkbox behind a click is a click
+        -- that buys nothing. It wears the band skin in the popout layout so it
+        -- does not read as a second visual language beside the rows -- the opts
+        -- table is nil in classic, which is what "no opts" already meant.
+        --
+        -- ⚠ CONSTRUCTED HERE, ADDED IN TWO PLACES. Classic adds it at its own
+        -- slot, exactly where it always was. The popout layout cannot: `Add`
+        -- resolves a widget's slot height on the spot, so the band has to be added
+        -- AFTER the last row goes into it -- and the band must still come FIRST,
+        -- because "both" is a sync point and a full-width band dropped in below a
+        -- lone column box would leave a hole beside it. So the popout arm at the
+        -- foot does the three in order: band, then this box, then Language.
+        local minimapGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
         minimapGroup:AddWidget(GUI:CreateHeader(self.child, L["Minimap"]), 40)
         minimapGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function()
             DF:UpdateMinimapButton()
         end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)
-        Add(minimapGroup, nil, 1)
+        if classicLayout then Add(minimapGroup, nil, 1) end
 
-        -- ===== RENDERING GROUP (Column 1) =====
+        -- ===== RENDERING (a 280 box in classic, a band row) =================
         -- Pixel-Perfect Scaling is a render-quality flag read by every frame and
         -- element in BOTH modes (Frames/Core.lua GetPixelScale + 60-odd db.pixelPerfect
         -- reads), so it's global — read party-canonical, write both mode dbs (same
         -- pattern as the Blizzard/Minimap toggles above) — and lives here rather than
         -- on the per-mode Frame page.
+        --
+        -- ☠ AT PAGE SCOPE, like the two makeBliz helpers: the classic box and every
+        -- pane instance must drive the same refresh, and it closes over nothing
+        -- group-specific.
         local function refreshPixelPerfect()
             -- Re-apply header sizing + refresh the live frames (UpdateAllFrames auto-
             -- routes party vs raid by the real in-world context) plus any test frames.
@@ -1496,111 +1731,268 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF:RefreshTestFramesWithLayout()
             end
         end
-        local renderingGroup = GUI:CreateSettingsGroup(self.child, 280)
-        renderingGroup:AddWidget(GUI:CreateHeader(self.child, L["Rendering"]), 40)
-        renderingGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pixel-Perfect Scaling"],
-            nil, nil, refreshPixelPerfect,
-            makeBlizGet("pixelPerfect"), makeBlizSet("pixelPerfect"), "pixelPerfect"), 30)
-        -- Label slots below are sized for the WRAPPED text plus a gap. Labels are
-        -- variable-height widgets (GUI.RowHeight only governs fixed ones), so the
-        -- slot is whatever is passed here — too small and the next widget's label
-        -- sits on the last line of this one.
-        renderingGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["Snaps sizes and borders to exact pixels for crisp rendering."], 250), 42)
-        -- Pixel-perfect scale hint: at a UI Scale of 768/physicalHeight, one UI unit
-        -- equals one physical pixel, so snapping has nothing to round away and borders
-        -- are at their crispest. Tell the user that value (and whether they're already
-        -- there) — purely informational, we never change their scale for them.
-        do
-            local function computeScaleHint()
-                local _, physH = GetPhysicalScreenSize()
-                local recScale = (physH and physH > 0) and (768 / physH) or 1
-                local pp = (DF.GetPixelScale and DF:GetPixelScale()) or 1
-                if math.abs(pp - 1) < 0.01 then
-                    return L["Your UI Scale is already pixel-perfect for this resolution."]
-                end
-                return string.format(
-                    L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."],
-                    recScale, recScale)
-            end
-            local scaleHint = GUI:CreateLabel(self.child, computeScaleHint(), 250)
-            -- Recompute on page refresh so the hint isn't stale after a resolution or
-            -- UI-scale change (GetPixelScale is re-cached on those events). Idempotent
-            -- SetText — only writes when the text actually changed — so no relayout loop.
-            scaleHint.refreshContent = function()
-                local t = computeScaleHint()
-                if t ~= scaleHint._dfLastHint then
-                    scaleHint._dfLastHint = t
-                    scaleHint:SetText(t)
-                end
-            end
-            -- 3 wrapped lines (~48px) + a clear gap before the dropdown below.
-            renderingGroup:AddWidget(scaleHint, 72)
-        end
-        -- Aura duration-text update rate (account-wide, DF.GlobalDefaults). Feeds the
-        -- native duration binding at bind time (creation-frozen), so a change is
-        -- structural: invalidate the memoized value + re-drive rows AND the Aura
-        -- Designer (the ApplyColorByTime pattern — the other global folded into the
-        -- aura struct sigs).
-        local auraDurRateValues = {
-            SMOOTH = L["Smooth"], NORMAL = L["Normal"], PERFORMANCE = L["Performance"],
-            _order = { "SMOOTH", "NORMAL", "PERFORMANCE" },
-        }
-        renderingGroup:AddWidget(GUI:CreateDropdown(self.child, L["Aura Duration Update Rate"],
-            auraDurRateValues, DF:GetGlobalDB(), "auraDurationUpdateInterval", function()
-                if DF.InvalidateAuraDurationUpdateInterval then DF:InvalidateAuraDurationUpdateInterval() end
-                if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
-                if DF.UpdateAllFrames then DF:UpdateAllFrames() end
-                if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end
-            end), 55)
-        renderingGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["How often aura countdown text refreshes. Smooth updates ten times a second, Performance once a second. Normal keeps the standard rate."],
-            250), 52)
-        Add(renderingGroup, nil, 1)
 
-        -- ===== SETTINGS PANEL APPEARANCE GROUP (Column 2, Top) =====
+        -- Verbatim, taking the group and parent it should build into -- the tick,
+        -- its blurb, the live scale hint, the update-rate dropdown and its blurb.
+        --
+        -- ☠ THE SCALE HINT'S refreshContent SURVIVES THE MOVE, and it has to:
+        -- the pane's reflow calls the group's RefreshChildStates, which walks
+        -- groupChildren calling refreshContent on every shown child (DandersUI
+        -- Sections.lua ~738). So the hint re-computes inside an open panel exactly
+        -- as it did inline on the page.
+        local function BuildRenderingGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Pixel-Perfect Scaling"],
+                nil, nil, refreshPixelPerfect,
+                makeBlizGet("pixelPerfect"), makeBlizSet("pixelPerfect"), "pixelPerfect"), 30)
+            -- Label slots below are sized for the WRAPPED text plus a gap. Labels are
+            -- variable-height widgets (GUI.RowHeight only governs fixed ones), so the
+            -- slot is whatever is passed here — too small and the next widget's label
+            -- sits on the last line of this one.
+            group:AddWidget(GUI:CreateLabel(parent,
+                L["Snaps sizes and borders to exact pixels for crisp rendering."], 250), 42)
+            -- Pixel-perfect scale hint: at a UI Scale of 768/physicalHeight, one UI unit
+            -- equals one physical pixel, so snapping has nothing to round away and borders
+            -- are at their crispest. Tell the user that value (and whether they're already
+            -- there) — purely informational, we never change their scale for them.
+            do
+                local function computeScaleHint()
+                    local _, physH = GetPhysicalScreenSize()
+                    local recScale = (physH and physH > 0) and (768 / physH) or 1
+                    local pp = (DF.GetPixelScale and DF:GetPixelScale()) or 1
+                    if math.abs(pp - 1) < 0.01 then
+                        return L["Your UI Scale is already pixel-perfect for this resolution."]
+                    end
+                    return string.format(
+                        L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."],
+                        recScale, recScale)
+                end
+                local scaleHint = GUI:CreateLabel(parent, computeScaleHint(), 250)
+                -- Recompute on page refresh so the hint isn't stale after a resolution or
+                -- UI-scale change (GetPixelScale is re-cached on those events). Idempotent
+                -- SetText — only writes when the text actually changed — so no relayout loop.
+                scaleHint.refreshContent = function()
+                    local t = computeScaleHint()
+                    if t ~= scaleHint._dfLastHint then
+                        scaleHint._dfLastHint = t
+                        scaleHint:SetText(t)
+                    end
+                end
+                -- 3 wrapped lines (~48px) + a clear gap before the dropdown below.
+                group:AddWidget(scaleHint, 72)
+            end
+            -- Aura duration-text update rate (account-wide, DF.GlobalDefaults). Feeds the
+            -- native duration binding at bind time (creation-frozen), so a change is
+            -- structural: invalidate the memoized value + re-drive rows AND the Aura
+            -- Designer (the ApplyColorByTime pattern — the other global folded into the
+            -- aura struct sigs).
+            local auraDurRateValues = {
+                SMOOTH = L["Smooth"], NORMAL = L["Normal"], PERFORMANCE = L["Performance"],
+                _order = { "SMOOTH", "NORMAL", "PERFORMANCE" },
+            }
+            group:AddWidget(GUI:CreateDropdown(parent, L["Aura Duration Update Rate"],
+                auraDurRateValues, DF:GetGlobalDB(), "auraDurationUpdateInterval", function()
+                    if DF.InvalidateAuraDurationUpdateInterval then DF:InvalidateAuraDurationUpdateInterval() end
+                    if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+                    if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+                    if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                    end
+                end), 55)
+            group:AddWidget(GUI:CreateLabel(parent,
+                L["How often aura countdown text refreshes. Smooth updates ten times a second, Performance once a second. Normal keeps the standard rate."],
+                250), 52)
+        end
+
+        if classicLayout then
+            -- ===== RENDERING GROUP (Column 1) =====
+            local renderingGroup = GUI:CreateSettingsGroup(self.child, 280)
+            renderingGroup:AddWidget(GUI:CreateHeader(self.child, L["Rendering"]), 40)
+            BuildRenderingGroup({
+                group = renderingGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(renderingGroup, nil, 1)
+        else
+            -- One word, and only for the two states worth a word: the update rate
+            -- when it is not the shipped NORMAL. That is the whole summary, and
+            -- the two things it leaves out are left out for different reasons:
+            --
+            --   * NORMAL says nothing -- it is the default, and a row printing it
+            --     on every profile spends its width saying so;
+            --   * Pixel-Perfect Scaling is not in `d` AT ALL. This row's table is
+            --     the account-wide one the update rate lives in (see db below),
+            --     and pixelPerfect is read party-canonical out of DF.db.party. A
+            --     summary is not worth a second table lookup behind the kit's
+            --     back, and the tick is a yes/no with no word to spend anyway.
+            local function RenderingSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local rate = d.auraDurationUpdateInterval
+                if rate == "SMOOTH" then parts[#parts + 1] = L["Smooth"]
+                elseif rate == "PERFORMANCE" then parts[#parts + 1] = L["Performance"]
+                end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Five: the tick, its blurb, the live scale hint, the dropdown and the
+            -- blurb under it. Nothing is hoisted -- Pixel-Perfect Scaling is one
+            -- of two independent settings in here, not the group's on/off.
+            local RENDERING_COUNT = 5
+
+            local renderMount, renderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildRenderingGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local renderRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Rendering"],
+                -- ⚠ THE ACCOUNT-WIDE TABLE, because that is where the one key the
+                -- summary reads lives. This group is genuinely split across two
+                -- stores -- see the summary's note -- and a row can only be handed
+                -- one; the honest choice is the table it actually reports on.
+                db      = function() return DF:GetGlobalDB() end,
+                summary = RenderingSummary,
+                count   = RENDERING_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = renderMount,
+            }))
+            -- Claimed for the SEARCH row map only -- no tick, no footer: one key
+            -- is written to both mode tables at once, the other is account-wide,
+            -- and the generic engine can write neither correctly.
+            tools.ClaimKeys(renderRow, renderContent)
+        end
+
+        -- ===== SETTINGS PANEL APPEARANCE (a 280 box in classic, a band row) =
         -- Controls the look of this settings panel itself — does NOT affect
         -- in-game frame text (use Health Text / Name Text pages for those).
-        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings Panel Appearance"]), 40)
-        appearanceGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Settings Font"], DF.db, "settingsFont", function()
-            if GUI.RefreshSettingsFont then GUI:RefreshSettingsFont() end
-        end), 55)
-        appearanceGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Settings Font Outline"], DF.db, "settingsFontOutline", function()
-            if GUI.RefreshSettingsFont then GUI:RefreshSettingsFont() end
-        end), 55)
-        appearanceGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those."],
-            260), 60)
+        local function BuildPanelAppearanceGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateFontDropdown(parent, L["Settings Font"], DF.db, "settingsFont", function()
+                if GUI.RefreshSettingsFont then GUI:RefreshSettingsFont() end
+            end), 55)
+            group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Settings Font Outline"], DF.db, "settingsFontOutline", function()
+                if GUI.RefreshSettingsFont then GUI:RefreshSettingsFont() end
+            end), 55)
+            group:AddWidget(GUI:CreateLabel(parent,
+                L["Font used for this settings panel. Does not affect in-game frame text — use the Text Designer for those."],
+                260), 60)
 
-        -- Classic-layout fallback for the settings redesign. Account-level and
-        -- stored at the ROOT of the SavedVariable, so it takes the get/set form of
-        -- the factory rather than a (dbTable, key) pair — same shape the Blizzard /
-        -- minimap toggles above use for their non-db storage. No overrideKey: this
-        -- is not a profile setting, so it has no auto-profile override to indicate.
-        --
-        -- ⚠ TEMPORARY. Remove this control (and DF:IsClassicSettingsLayout) once the
-        -- popout redesign is finished.
-        local classicCheck = appearanceGroup:AddWidget(GUI:CreateCheckbox(
-            self.child, L["Use classic settings layout"],
-            nil, nil,
-            function()
-                -- Every page picks its container at BUILD time, so a page already
-                -- built in the other mode would re-show with stale layout. Drop every
-                -- page's build cache, then rebuild the one on screen right now.
-                if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
-                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-            end,
-            function() return DF:IsClassicSettingsLayout() end,
-            function(val) DF:SetClassicSettingsLayout(val) end
-        ), 30)
-        classicCheck.tooltip = L["Show settings groups in the old inline layout instead of the new popout rows. A temporary aid while the redesign settles in — this option will be removed in a later update."]
+            -- Classic-layout fallback for the settings redesign. Account-level and
+            -- stored at the ROOT of the SavedVariable, so it takes the get/set form of
+            -- the factory rather than a (dbTable, key) pair — same shape the Blizzard /
+            -- minimap toggles above use for their non-db storage. No overrideKey: this
+            -- is not a profile setting, so it has no auto-profile override to indicate.
+            --
+            -- ⚠ TEMPORARY. Remove this control (and DF:IsClassicSettingsLayout) once the
+            -- popout redesign is finished.
+            --
+            -- ☠☠ THE ESCAPE HATCH NOW LIVES INSIDE A PANE, AND THE FLIP HAS TO
+            -- TAKE THE PANE DOWN ITSELF. In the popout layout the only way to
+            -- reach this tick is to open the Settings Panel Appearance row, so the
+            -- click that turns classic ON happens with a panel standing open --
+            -- and the rebuild below CANNOT close it: GUI:CreatePopoutPageTools
+            -- returns early when IsClassicSettingsLayout() is true, BEFORE its
+            -- CloseAllPopoutRows("rebuild") prologue, and a row popout is pinnable
+            -- so the shell's own source-death tick leaves it alone. Without the
+            -- close the user lands on a classic page with an orphan panel floating
+            -- beside it, wired to a row that is already in the trash.
+            --
+            -- ⚠ AND THE REBUILD STAYS SYNCHRONOUS, unlike the Frame page's Raid
+            -- Layout Mode toggle. That one is deferred because the tick is ON THE
+            -- ROW and the kit calls row.Refresh() after the write -- on a frame the
+            -- rebuild has just retired. This tick is an ordinary checkbox INSIDE
+            -- the pane: the factory's OnClick does the write, this callback, then
+            -- `parent.RefreshStates` (the pane holder has none) and DF:UpdateAll,
+            -- so there is no row refresh to land on a dead frame and nothing to
+            -- gain from a frame's delay.
+            --
+            -- ⚠ Unconditional, not popout-only: in classic there is no open panel
+            -- and CloseAllPopoutRows is a guarded no-op, so one builder still
+            -- serves both layouts. It also takes down any panel PINNED out of the
+            -- layout being left, which is right -- those belong to the old shape.
+            local classicCheck = group:AddWidget(GUI:CreateCheckbox(
+                parent, L["Use classic settings layout"],
+                nil, nil,
+                function()
+                    -- The panels first: see the note above for why the rebuild
+                    -- cannot do this half itself.
+                    if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("layoutFlip") end
+                    -- Every page picks its container at BUILD time, so a page already
+                    -- built in the other mode would re-show with stale layout. Drop every
+                    -- page's build cache, then rebuild the one on screen right now.
+                    if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
+                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                end,
+                function() return DF:IsClassicSettingsLayout() end,
+                function(val) DF:SetClassicSettingsLayout(val) end
+            ), 30)
+            classicCheck.tooltip = L["Show settings groups in the old inline layout instead of the new popout rows. A temporary aid while the redesign settles in — this option will be removed in a later update."]
+        end
 
-        Add(appearanceGroup, nil, 2)
+        if classicLayout then
+            -- ===== SETTINGS PANEL APPEARANCE GROUP (Column 2, Top) =====
+            local panelAppearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+            panelAppearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings Panel Appearance"]), 40)
+            BuildPanelAppearanceGroup({
+                group = panelAppearanceGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(panelAppearanceGroup, nil, 2)
+        else
+            -- ⚠ THE FONT NAME IS UNCONDITIONAL, and it is the whole summary. It is
+            -- the row's headline -- the one applied, visible state on this page,
+            -- since the user is looking at the font while they read it -- and a
+            -- Settings Panel Appearance row that printed nothing on a default
+            -- profile would say less than its own label.
+            --
+            -- The NAME comes from DF:GetFontNameFromPath, the addon's own font
+            -- display-name resolver and the one CreateFontDropdown prints on its
+            -- own button, so the row and the control behind it cannot disagree --
+            -- the Group Labels Font Settings row's precedent.
+            --
+            -- The outline is deliberately absent: this row's second half is not a
+            -- font description, it is the classic-layout escape hatch, and a
+            -- summary that spent its width on "Outline" while saying nothing about
+            -- the switch beside it would be reporting the least of what is in
+            -- here. (There is no word for the switch either -- the row's own
+            -- tick column is empty, and "classic" is not a locale string.)
+            local function PanelAppearanceSummary(d)
+                if not d then return "" end
+                local name = DF.GetFontNameFromPath and DF:GetFontNameFromPath(d.settingsFont)
+                if type(name) == "string" and name ~= "" then return name end
+                return ""
+            end
+
+            -- Four: the two dropdowns, the blurb and the classic-layout tick.
+            local PANEL_APPEARANCE_COUNT = 4
+
+            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPanelAppearanceGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local appearanceRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Settings Panel Appearance"],
+                -- The profile ROOT again: settingsFont and settingsFontOutline are
+                -- stored there, not per mode.
+                db      = function() return DF.db end,
+                summary = PanelAppearanceSummary,
+                count   = PANEL_APPEARANCE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = appearanceMount,
+            }))
+            -- Claimed for the SEARCH row map only -- no tick, no footer: two root
+            -- keys and one account-level flag, none of which the per-mode defaults
+            -- engine can answer for.
+            tools.ClaimKeys(appearanceRow, appearanceContent)
+        end
 
         -- ===== LANGUAGE GROUP (Column 2, Bottom) =====
+        -- STAYS INLINE in both layouts, for the reason the Minimap box does: one
+        -- dropdown behind a click is a click that buys nothing. Band skin in the
+        -- popout layout, nil opts in classic; added at the foot there, in place
+        -- here. (See the Minimap note for the band-before-boxes ordering.)
         local languageValues = {
             AUTO  = L["Auto (use client language)"],
             enUS  = "English",
@@ -1615,7 +2007,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             zhCN  = "中文 (简体)",
             zhTW  = "中文 (繁體)",
         }
-        local languageGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local languageGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
         languageGroup:AddWidget(GUI:CreateHeader(self.child, L["Language"]), 40)
         -- Language override lives on the per-character SavedVariable so
         -- locale files can read it at file-load time (before DF.db exists).
@@ -1634,21 +2026,70 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         languageGroup:AddWidget(GUI:CreateLabel(self.child,
             L["Override the addon's display language. Auto follows your WoW client language. Translations are community-contributed and may be incomplete."],
             260), 60)
-        Add(languageGroup, nil, 2)
+        if classicLayout then Add(languageGroup, nil, 2) end
 
-        -- ===== NOTIFICATIONS GROUP (Column 2, Bottom) =====
-        local notificationsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        notificationsGroup:AddWidget(GUI:CreateHeader(self.child, L["Notifications"]), 40)
-        notificationsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Notify me when a newer version is available"],
-            DF:GetGlobalDB(), "notifyOutdated", function()
-                -- Setting applies immediately; no extra callback needed.
-            end), 30)
-        local loginMsgCheck = notificationsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show the login message"],
-            DF:GetGlobalDB(), "showLoginMessage", function()
-                -- Read once at login; nothing to re-render now.
-            end), 30)
-        loginMsgCheck.tooltip = L["The one-line greeting printed to chat when you log in. Takes effect at your next login."]
-        Add(notificationsGroup, nil, 2)
+        -- ===== NOTIFICATIONS (a 280 box in classic, the band's last row) ====
+        -- Verbatim, including the two empty-bodied callbacks: neither setting has
+        -- anything to re-render now (one is read by the version check, the other
+        -- at next login), and the comments saying so are the reason nobody adds a
+        -- refresh call to them.
+        local function BuildNotificationsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Notify me when a newer version is available"],
+                DF:GetGlobalDB(), "notifyOutdated", function()
+                    -- Setting applies immediately; no extra callback needed.
+                end), 30)
+            local loginMsgCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["Show the login message"],
+                DF:GetGlobalDB(), "showLoginMessage", function()
+                    -- Read once at login; nothing to re-render now.
+                end), 30)
+            loginMsgCheck.tooltip = L["The one-line greeting printed to chat when you log in. Takes effect at your next login."]
+        end
+
+        if classicLayout then
+            -- ===== NOTIFICATIONS GROUP (Column 2, Bottom) =====
+            local notificationsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            notificationsGroup:AddWidget(GUI:CreateHeader(self.child, L["Notifications"]), 40)
+            BuildNotificationsGroup({
+                group = notificationsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(notificationsGroup, nil, 2)
+        else
+            -- ☠ NO SUMMARY. Two yes/nos, and neither has a word: "Notify me when a
+            -- newer version is available" is not a value anyone would print, and
+            -- the locale ships no honest one-word stand-in for either. Both are ON
+            -- by default, so the only state worth reporting is a user who turned
+            -- one OFF -- which is precisely what a summary cannot say without
+            -- naming the setting it is about. The count badge carries the row.
+            local NOTIFICATIONS_COUNT = 2
+
+            local notifyMount, notifyContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildNotificationsGroup({ group = group, parent = holder, refreshStates = reflow })
+            end)
+            local notifyRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Notifications"],
+                -- The account-wide table, which is where both ticks are stored.
+                db      = function() return DF:GetGlobalDB() end,
+                count   = NOTIFICATIONS_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = notifyMount,
+            }))
+            -- Claimed for the SEARCH row map only -- no tick, no footer: the
+            -- per-mode defaults engine has never held either key.
+            tools.ClaimKeys(notifyRow, notifyContent)
+        end
+
+        -- The band, then the two stay-inline boxes in their original columns --
+        -- see the Minimap note for why the trio is added here rather than in
+        -- place, and why the band has to be first.
+        if not classicLayout then
+            Add(settingsBand, nil, "both")
+            Add(minimapGroup, nil, 1)
+            Add(languageGroup, nil, 2)
+        end
     end)
 
     -- General > Frame
