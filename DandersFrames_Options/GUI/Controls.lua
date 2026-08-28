@@ -2131,7 +2131,14 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
     container.Refresh = function()
         UpdateItemPositions()
     end
-    
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote the key behind this widget's
+    -- back -- a group Reset, a press-and-hold preview, or the undo of one. Same
+    -- alias CreateGroupOrderList carries, and for the same reason: the Sorting
+    -- page's Role Priority row wires those verbs, and without it the sweep
+    -- repaints every widget in an open pane EXCEPT this list.
+    container.refreshValue = container.Refresh
+
     -- Override indicators for profile editing
     if dbKey and type(dbKey) == "string" and not (dbTable and rawget(dbTable, "_skipOverrideIndicators")) then
         local function onReset()
@@ -2454,7 +2461,12 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
     container.Refresh = function()
         UpdateItemPositions()
     end
-    
+    -- ...and under the group-wide value sweep's one name, exactly as the role
+    -- and group lists carry it: the Sorting page's Class Priority row wires
+    -- Reset Group and Hold: Defaults, and without this alias those write the
+    -- key and leave the thirteen rows showing the order the user had before.
+    container.refreshValue = container.Refresh
+
     -- Override indicators for profile editing
     if dbKey and type(dbKey) == "string" and not (dbTable and rawget(dbTable, "_skipOverrideIndicators")) then
         local function onReset()
