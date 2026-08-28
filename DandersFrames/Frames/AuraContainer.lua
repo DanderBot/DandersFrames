@@ -738,13 +738,28 @@ end)
 
 local regenFrame = CreateFrame("Frame")
 regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-regenFrame:SetScript("OnEvent", function()
-    -- 2s: after the regen flush (deferred rebuilds/tunings) and the combat-end event
-    -- burst, so the kick re-parses the settled state rather than racing it.
-    C_Timer.After(2, function()
+-- ☠ ZONE-IN KICK, added after the 2026-08-28 field report (identical stacked icon in
+-- every container, M+, live 5.3.1). The engine's identity gate is evaluated PER PARSE,
+-- and delta parses never re-run old auras — so an aura applied during the zone-in
+-- window (a key's start aura lands exactly then) that gets a wrong gate verdict keeps
+-- it for as long as it lives. The gate's group-member exemption is documented as
+-- token-shaped, but that is a DOC-STRING claim never verified live; if the C side has
+-- any state-dependent window during loading/roster sync, zone-in is where it is. One
+-- full re-parse after the world settles re-runs the gate against settled state and
+-- unlatches any aura parsed during the window. Cheap either way: one test-exit-sized
+-- kick per loading screen.
+regenFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+regenFrame:SetScript("OnEvent", function(_, event)
+    local delay = (event == "PLAYER_ENTERING_WORLD") and 8 or 2
+    -- 2s after regen: after the regen flush (deferred rebuilds/tunings) and the
+    -- combat-end event burst, so the kick re-parses settled state rather than racing
+    -- it. 8s after zone-in: past the loading hitch, roster sync and the initial aura
+    -- storm, but well before the first pull needs correct frames.
+    C_Timer.After(delay, function()
         if InCombatLockdown() or AuraContainer._testMode then return end
         if not anyLiveContainers() then return end
-        AuraContainer._kickLiveParse("post-combat heal")
+        AuraContainer._kickLiveParse(event == "PLAYER_ENTERING_WORLD"
+            and "zone-in heal" or "post-combat heal")
     end)
 end)
 
