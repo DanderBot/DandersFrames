@@ -99,6 +99,41 @@ do
 end
 
 -- ============================================================
+-- AND SO DOES THE TEXTURE DROPDOWN
+-- ------------------------------------------------------------
+-- The third hand-rolled preview menu in this file, and the last of them to opt
+-- in. Same shape as the font dropdown, same reason it was missed -- it predates
+-- the kit's dropdown and shares none of its code -- and the same trigger: the
+-- Pet Frames Appearance row mounts one inside a popout pane with Reset Group
+-- and Hold: Defaults on the row, so a swatch still previewing the previous
+-- texture after a reset is a thing a user can now see.
+--
+-- ⚠ THE ALIAS POINTS AT THE WHOLE DISPLAY, NOT AT UpdateText. As with the font
+-- dropdown the repaint is in two halves -- UpdateText paints the caption, the
+-- swatch and the (missing) tag; the override indicators beside the label are
+-- painted separately -- and a reset moves both.
+-- ============================================================
+print("-- Texture dropdown: the preview swatch opts into the value sweep")
+do
+    local body = factoryBody("CreateTextureDropdown")
+    check(body:find("local function RefreshDisplay()", 1, true) ~= nil,
+          "texture dropdown: the full repaint is a named function")
+    check(body:find("container.refreshValue = RefreshDisplay", 1, true) ~= nil,
+          "texture dropdown: ...and answers to RefreshChildValues under the shared name")
+    -- ONE body for both callers, as above.
+    check(body:find('container:SetScript("OnShow", RefreshDisplay)', 1, true) ~= nil,
+          "texture dropdown: ...and the re-show path runs the same function, not a copy")
+    local refresh = body:match("local function RefreshDisplay%(%)(.-)\n    end")
+    check(refresh ~= nil, "texture dropdown: the repaint's body is readable")
+    if refresh then
+        check(refresh:find("UpdateText()", 1, true) ~= nil,
+              "texture dropdown: ...it repaints the caption, the swatch and the (missing) tag")
+        check(refresh:find("container:UpdateOverrideIndicators(", 1, true) ~= nil,
+              "texture dropdown: ...and the override indicators a reset can also move")
+    end
+end
+
+-- ============================================================
 -- ...AND THE FOUR FACTORIES BESIDE IT ALREADY DID
 -- ------------------------------------------------------------
 -- The rest of a Font Settings group. Checked here so "the font dropdown was the

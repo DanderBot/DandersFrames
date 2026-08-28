@@ -1253,14 +1253,34 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         end)
     end
 
-    -- Refresh override indicators on show
-    container:SetScript("OnShow", function()
+    -- The WHOLE display: the button's caption, its texture swatch and the
+    -- (missing) tag -- all three derived inside UpdateText -- plus the override
+    -- indicators beside the label, which are painted separately. Named once so
+    -- the two callers below cannot drift apart.
+    local function RefreshDisplay()
         UpdateText()
         if container.UpdateOverrideIndicators then
             container:UpdateOverrideIndicators(dbTable and dbTable[dbKey])
         end
-    end)
-    
+    end
+
+    -- Refresh override indicators on show
+    container:SetScript("OnShow", RefreshDisplay)
+
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote this key behind the widget's
+    -- back: a group Reset, a Hold: Defaults preview, or the undo of either.
+    --
+    -- ☠ SAME GAP THE FONT DROPDOWN HAD, AND FOR THE SAME REASON: both are
+    -- hand-rolled preview menus that predate the kit's dropdown and share none
+    -- of its code, so neither inherited its opt-in. Harmless while a texture
+    -- dropdown only ever sat on a page; the Pet Frames Appearance row now mounts
+    -- one inside a popout pane carrying Reset Group and Hold: Defaults, so a
+    -- swatch still previewing the previous texture after a reset is a thing a
+    -- user can see -- and it would stay wrong until the panel was closed and
+    -- reopened and its OnShow fired. Pinned by test_order_lists.lua.
+    container.refreshValue = RefreshDisplay
+
     container.SetEnabled = function(self, enabled)
         -- Dim the whole widget so its preview/value (texture swatch, font preview,
         -- selected text) greys with the label rather than staying full-bright.
@@ -1274,7 +1294,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             btn.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         end
     end
-    
+
     -- SEARCH: Register this setting (use current texture list)
     if DF.Search and dbKey and type(dbKey) == "string" then
         local currentOptions = customOptions or DF:GetTextureList()
