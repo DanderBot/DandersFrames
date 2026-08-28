@@ -3787,3 +3787,423 @@ function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey
     dd.dfRefreshExample = RefreshExample
     return dd
 end
+
+-- ============================================================
+-- THE POPOUT PAGE'S SHARED MACHINERY
+-- ------------------------------------------------------------
+-- Everything a settings page needs to mount its groups as popout feature rows,
+-- lifted out of the Frame page, which built the first copy of it inline (see
+-- the Frame page's page-scope machinery, Pages/Options.lua ~1837, where each
+-- piece still carries its full essay). Five more pages need the same eight
+-- verbs; five more copies would drift, and the first thing to drift would be
+-- one of the load-bearing notes rather than the code under it.
+--
+-- ⚠ THE FRAME PAGE KEEPS ITS OWN COPY THIS PASS. Its census tests pin that
+-- page's source line by line, so porting it is its own commit with its own test
+-- edit. This is the shared half for every page that converts AFTER it.
+--
+-- USAGE, at the top of a BuildPage builder and unconditionally:
+--
+--     local classicLayout = DF:IsClassicSettingsLayout()
+--     local tools = GUI:CreatePopoutPageTools(self)
+--
+-- `tools` is nil in the classic layout, which is what makes the classic branch
+-- of every converted group a plain `if classicLayout then` arm building the box
+-- it always built.
+--
+-- WHAT COMES BACK (all closing over this page's own state -- its mounted panes,
+-- its holders, its row map -- so two pages built in one session cannot reflow
+-- each other's panels):
+--
+--   PopoutContent(buildInto, innerColumns) -> mount, eagerGroup
+--   ClaimKeys(row, group, extra)
+--   WireModifiedTick(row)
+--   WireFooter(row, apply)
+--   RegisterHoistedToggle(row, label, key, onToggle)
+--   ReflowMounted(values)
+--   RowDB()
+--   BandWidth()
+--   INLINE_BOX          -- the stay-inline box's band skin
+-- ============================================================
+function GUI:CreatePopoutPageTools(page)
+    if not page then return nil end
+
+    -- Cleared on EVERY build, classic included. It only ever has entries in the
+    -- popout layout, and a map left behind by a previous new-UI build would
+    -- point the settings-search jump at rows this build has retired.
+    page._popoutRowForKey = nil
+
+    if DF:IsClassicSettingsLayout() then return nil end
+
+    -- ☠ CLOSE EVERY OPEN ROW PANEL FIRST, BEFORE ANYTHING IS BUILT. Every route
+    -- into a page builder is a REBUILD -- a party/raid switch, a profile switch,
+    -- the classic-layout flip, and the settings search registry, which is built
+    -- by re-running every page's builder -- and an open popout from the PREVIOUS
+    -- build is showing widgets wired to the db table THAT build captured. After
+    -- a mode switch that table is the other mode's, so a slider dragged in a
+    -- stale panel writes live settings into the wrong mode. Guarded rather than
+    -- called bare, so an older embedded copy of the pack without the verb cannot
+    -- break the page.
+    if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("rebuild") end
+
+    -- Retire the previous build's holders. They are deliberately NOT in
+    -- page.children -- anything in that list is laid out into one of the page's
+    -- columns, and these must never appear ON the page -- so DoBuild's own
+    -- retire loop never sees them and this is the only thing that does.
+    if page._popoutHolders then
+        local trash = GUI._trashFrame
+        for _, holder in ipairs(page._popoutHolders) do
+            holder:Hide()
+            holder:ClearAllPoints()
+            if trash then holder:SetParent(trash) end
+        end
+    end
+    page._popoutHolders = {}
+
+    -- What the settings SEARCH needs back, per row: (a) the hoisted toggles,
+    -- whose checkbox factory was what registered them with search, and (b) which
+    -- row owns a setting, so a hit on a popout-only control can open the panel
+    -- it is behind. (a) is RegisterHoistedToggle below; this is (b)'s map.
+    page._popoutRowForKey = {}
+
+    local POPOUT_W = GUI.PopoutContentWidth or 260
+
+    -- Every pane currently mounted in a panel, so a toggle can re-flow the group
+    -- the user is looking at as well as the rows on the page. One list per PAGE
+    -- rather than per group: a reset behind one row can change what another
+    -- row's pane is showing, and a stale open panel costs more than a repaint.
+    local mounted = {}
+
+    -- Re-flow one mounted group and put the panel back around it. Sized from the
+    -- group's own FRAME height, not LayoutChildren's return, which adds the
+    -- between-groups margin a lone group in a popout has no use for.
+    local function ReflowPane(st, values)
+        local g = st.group
+        if not g then return end
+        g:LayoutChildren()
+        g:RefreshChildStates()
+        -- ☠ AND THE VALUES, when the caller says a write happened that these
+        -- widgets could not have seen (a group Reset, a hold, the undo of one).
+        -- RefreshChildStates is about STATE; a checkbox's tick, a slider's thumb
+        -- and a dropdown's caption are painted at build and on OnShow, on the
+        -- assumption nothing writes a setting except the widget bound to it.
+        --
+        -- ⚠ OPT-IN, not on every reflow: this also runs on a hideOn change while
+        -- a slider inside the pane is being dragged, and a value repaint mid-drag
+        -- snaps the thumb from the mouse back to the last committed step.
+        if values and g.RefreshChildValues then g:RefreshChildValues() end
+        if st.pane then st.pane:SetHeight(math.max(g:GetHeight() or 1, 1)) end
+        -- ...and the panel around the pane. The kit fixes a pane's height at
+        -- build, and a hideOn inside this group moves it afterwards.
+        local po = st.po
+        if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
+    end
+
+    -- `values` rides through to ReflowPane: see its header for why a value
+    -- repaint is opt-in rather than part of every reflow.
+    local function ReflowMounted(values)
+        for _, st in ipairs(mounted) do
+            if not (st.po and st.po.closed) then ReflowPane(st, values) end
+        end
+    end
+
+    -- ONE row's popout content, built EAGERLY -- at page build time, into a
+    -- hidden holder -- rather than on first open. Two reasons, either sufficient
+    -- on its own:
+    --   (a) the settings SEARCH registry is built by re-running every page's
+    --       builder, so a widget that does not exist until the user opens a
+    --       popout is a widget search can never find;
+    --   (b) some builders SEED db keys at build time, and moving those writes to
+    --       first-open would move WHEN a profile changes shape, which is exactly
+    --       what the export byte-identity gate measures.
+    --
+    -- The shell runs a row's `build` ONCE PER INSTANCE, so a SECOND instance (pin
+    -- one, then click the row again) asks for content a second time: the first
+    -- call adopts the pre-built group, every later one builds a fresh one through
+    -- the same builder. Which is why this is a factory rather than one captured
+    -- group -- and why each group carries its own `st`, so the refresh wired into
+    -- group one cannot re-flow group two.
+    --
+    -- `innerColumns` is the pane's own interior grid (DandersUI Sections'
+    -- opts.innerColumns), per ROW rather than per page: a pane of sliders at half
+    -- width is two stubby bars with their labels stranded, while a pane of
+    -- one-word checkboxes is exactly the list the second track was written for.
+    -- Omitted = absent = one track.
+    local function PopoutContent(buildInto, innerColumns)
+        local function fresh()
+            local st = {}
+            local holder = CreateFrame("Frame", nil, page.child)
+            holder:SetSize(POPOUT_W, 1)
+            holder:Hide()
+            page._popoutHolders[#page._popoutHolders + 1] = holder
+            -- chromeless + zero padding: the popout already draws a panel, and a
+            -- faint bordered box inside one reads as a second, smaller panel. The
+            -- width is the popout's own content width, so each control mounts at
+            -- exactly the width it has inline on the page.
+            st.group = GUI:CreateSettingsGroup(holder, POPOUT_W,
+                                               { chromeless = true, padding = 0,
+                                                 innerColumns = innerColumns })
+            st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+            -- What a builder's own dropdowns and checkboxes call. Cheap, and
+            -- deliberately NOT a page rebuild: a rebuild retires the row the user
+            -- is clicking through.
+            buildInto(st.group, holder, function()
+                ReflowPane(st)
+                page:RefreshStates()
+            end)
+            return st
+        end
+
+        local pending = fresh()
+        -- The eagerly built group comes back ALONGSIDE the mount function: it is
+        -- the one instance that exists at page-build time, so it is the one whose
+        -- children ClaimKeys can walk. Later instances build the same controls
+        -- from the same builder, so nothing is missed by ignoring them.
+        return function(po, pane)
+            local st = pending or fresh()
+            pending = nil
+            st.po, st.pane = po, pane
+            mounted[#mounted + 1] = st
+            st.group:SetParent(pane)
+            st.group:ClearAllPoints()
+            st.group:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
+            st.group:SetWidth(POPOUT_W)
+            st.group:Show()
+            ReflowPane(st)
+        end, pending.group
+    end
+
+    -- db as a FUNCTION, which is what the kit contract asks for: the row
+    -- re-resolves on every refresh, so a mode switch is followed rather than
+    -- frozen at the table this build captured.
+    local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
+
+    -- Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not from a key list
+    -- and not from a name prefix -- a prefix would claim keys no popout owns and
+    -- would miss any spelled differently. Every shared factory stamps
+    -- container.searchEntry, so a control added to any builder is covered
+    -- without anyone having to remember this exists.
+    --
+    -- ...and the SAME walk answers which keys the row's amber modified-tick is
+    -- about, collected onto row._claimedKeys so the tick can ask the diff engine
+    -- "is any of these not the shipped default", which is exactly "does the pane
+    -- behind this row contain a change".
+    --
+    -- ⚠ TWO SOURCES FOR THE KEY, and the second is not belt-and-braces.
+    -- searchEntry is stamped by the SEARCH registration, which is guarded on
+    -- DF.Search existing -- so on a build where search has not registered, every
+    -- key would be missed. container.overrideDbKey is stamped by the toolkit's
+    -- own AddOverrideIndicators, which every db-bound control goes through
+    -- regardless, and it covers the colour pickers and checkboxes whose search
+    -- entries are registered by a different route.
+    --
+    -- ⚠ `extra` IS NOT A CONVENIENCE. A control may be bound to a key the walk
+    -- cannot see: custom-get/set ticks over ONE table setting each stamp a
+    -- per-index override key the profile does not ship. Left to the walk alone
+    -- the row would claim keys the defaults engine cannot answer for, so its
+    -- amber tick would never light and Reset Group would write nothing while
+    -- saying it had. The real key is named through this door instead.
+    local function ClaimKeys(row, group, extra)
+        if not (row and group and group.groupChildren) then return end
+        local claimed = row._claimedKeys or {}
+        row._claimedKeys = claimed
+        for _, e in ipairs(group.groupChildren) do
+            local w  = e.widget
+            local se = w and w.searchEntry
+            local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
+            if type(k) == "string" then
+                page._popoutRowForKey[k] = row
+                claimed[#claimed + 1] = k
+            end
+        end
+        for _, k in ipairs(extra or {}) do
+            page._popoutRowForKey[k] = row
+            claimed[#claimed + 1] = k
+        end
+    end
+
+    -- The tick's answer, for a row that has just had its keys claimed. Re-read on
+    -- every refresh (the row calls this, not the other way round), so a write
+    -- inside the popout lights it without anything having to be invalidated.
+    -- DF.Defaults is guarded because these pages are in the load-on-demand
+    -- companion and the engine is resident.
+    local function WireModifiedTick(row)
+        if not (row and row.SetModifiedCheck) then return end
+        row:SetModifiedCheck(function(d)
+            local D = DF.Defaults
+            return (D and D:Count(d, row._claimedKeys or {}) or 0) > 0
+        end)
+    end
+
+    -- What a write to any of a group's keys costs, in one place, so the two
+    -- footer buttons and every future one apply the SAME work.
+    --
+    -- `apply` is the GROUP's own half -- the bodies its widgets' own callbacks
+    -- drive, handed in per row because two groups' resets do not cost the same
+    -- work. Everything after it is shared: ReflowMounted repaints the controls
+    -- the user is looking at, and the row's own Refresh re-reads the summary and
+    -- the modified tick.
+    local function RefreshAfterGroupWrite(apply)
+        if apply then apply() end
+        -- ⚠ WITH THE VALUE SWEEP. This is the one path where the keys moved
+        -- WITHOUT the widgets doing it -- a group reset, a hold, and the
+        -- undo/redo of a reset (which replays ApplyGroup) -- so it is the one
+        -- path that has to repaint what the controls read.
+        ReflowMounted(true)
+        if GUI.RefreshAllOverrideIndicators then
+            GUI.RefreshAllOverrideIndicators()
+        end
+        page:RefreshStates()
+    end
+
+    -- Can these buttons be pressed at all, and if not, why. COMBAT greys both:
+    -- every key behind these rows reaches a secure frame, and the addon's
+    -- standing rule is that those writes are deferred in combat -- the footer
+    -- does not fight that, it just says so.
+    local function CombatReason()
+        if InCombatLockdown() then return false, L["Cannot use this action in combat."] end
+        return true
+    end
+
+    -- ...and HOLD alone is additionally off while the raid auto-layout machinery
+    -- is live. Two different reasons, one gate:
+    --
+    --   EDITING a layout: every write is recorded as an override edit for that
+    --   layout, and a hold writes twice -- defaults in, the user's values back
+    --   out -- so a preview nobody committed to would land as two deliberate
+    --   edits. A LAYOUT RUNNING: writes are redirected to the stored baseline
+    --   instead of the live table, so the preview would change nothing on screen.
+    --
+    -- RESET stays available in BOTH states, and that is not an oversight. While
+    -- editing, recording the defaults as this layout's override edits is exactly
+    -- what the user asked for; while a layout is running, the redirect writes
+    -- them into the stored baseline -- which is the table the modified dots and
+    -- the row tick are reporting on, so the reset does what they say it will.
+    local function HoldReason()
+        local ok, why = CombatReason()
+        if not ok then return false, why end
+        local AP = DF.AutoProfilesUI
+        if GUI.SelectedMode == "raid" and AP then
+            local editing = AP.IsEditing and AP:IsEditing()
+            local running = AP.IsLayoutActive and AP:IsLayoutActive()
+            if editing or running then
+                return false, L["Unavailable while an auto layout is active or being edited."]
+            end
+        end
+        return true
+    end
+
+    -- The two verbs, wired onto a row whose keys have just been claimed. Both
+    -- close over row._claimedKeys BY REFERENCE rather than reading it now:
+    -- ClaimKeys fills that table after the row is built, and a copy taken here
+    -- would be the empty one.
+    local function WireFooter(row, apply)
+        if not (row and row.SetActions) then return end
+        local held                    -- the hold's snapshot, between the two halves
+
+        -- THE GROUP'S APPLY, named once. Every verb runs it after it writes --
+        -- and Reset hands the same reference to the undo engine, because an undo
+        -- of a reset has no button press behind it to run this for it. Restoring
+        -- the values and running only the generic sweep is what "undo changed the
+        -- numbers but the frames did not move" looks like.
+        local function ApplyGroup()
+            RefreshAfterGroupWrite(apply)
+            row.Refresh()
+        end
+
+        row:SetActions({
+            {
+                text        = L["Reset Group"],
+                tooltipDesc = L["Reset every setting in this group to its default value."],
+                enabled     = CombatReason,
+                onClick     = function()
+                    local GA = DF.GroupActions
+                    if not GA then return end
+                    -- The row's own heading names the collapsed undo entry: a
+                    -- reset is one thing the user did to THIS group, and the
+                    -- group is what they will look for.
+                    GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode,
+                                 row._title or row._label, ApplyGroup)
+                    ApplyGroup()
+                end,
+            },
+            {
+                text        = L["Hold: Defaults"],
+                hold        = true,
+                tooltipDesc = L["Press and hold to preview this group at its default values. Release to restore your settings."],
+                enabled     = HoldReason,
+                onHoldStart = function()
+                    local GA = DF.GroupActions
+                    if not GA then return end
+                    held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                    ApplyGroup()
+                end,
+                onHoldEnd   = function()
+                    local GA = DF.GroupActions
+                    if not (GA and held) then return end
+                    GA:EndHold(GUI, RowDB(), row._claimedKeys or {}, held)
+                    held = nil
+                    -- The UNTHROTTLED apply on the way back, unlike the
+                    -- coalescing one used going in: a release is the moment the
+                    -- user is watching for their settings to come back, and a
+                    -- frame of defaults left on screen after they let go reads as
+                    -- the restore failing.
+                    GUI:Call("refreshNow")
+                    ApplyGroup()
+                end,
+            },
+        })
+    end
+
+    -- The hoisted toggle's own search entry. Deliberately NOT added to the row
+    -- map: the tick is ON the row, so the section jump already lands on the
+    -- control the user searched for, and opening the panel on top of that would
+    -- be noise. The callback is the one the suppressed checkbox would have
+    -- carried, so an inline result behaves as the inline checkbox does in
+    -- classic. Guarded on the METHOD, not just the table -- Search is in this
+    -- companion but the page must not care.
+    local function RegisterHoistedToggle(row, label, key, onToggle)
+        local Search = DF.Search
+        if not (Search and Search.RegisterCheckbox) then return end
+        row.searchEntry = Search:RegisterCheckbox(label, key, nil, false, onToggle)
+        if Search.LinkSourceWidget then Search:LinkSourceWidget(row) end
+    end
+
+    -- The width a full-width band is CONSTRUCTED at, asked for rather than
+    -- guessed: GUI.PageUsableWidth is the same helper the layout pass stretches
+    -- "both" widgets to. A group cannot be widened for free -- LayoutChildren
+    -- sizes its children off the group's CURRENT width -- so a band built at 280
+    -- and stretched by the layout pass would lay its rows out at the wrong width
+    -- on the build and only correct them on the next refresh. Floored at a box's
+    -- width so a page built before the content frame has a size still gets a sane
+    -- container.
+    local function BandWidth()
+        return math.max(
+            GUI.PageUsableWidth(GUI.PageChildWidth(
+                GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
+            GUI.SettingsBox.group)
+    end
+
+    return {
+        PopoutContent         = PopoutContent,
+        RowDB                 = RowDB,
+        ClaimKeys             = ClaimKeys,
+        WireModifiedTick      = WireModifiedTick,
+        WireFooter            = WireFooter,
+        RegisterHoistedToggle = RegisterHoistedToggle,
+        ReflowMounted         = ReflowMounted,
+        BandWidth             = BandWidth,
+
+        -- ☠ ONE TABLE, PASSED AT EVERY STAY-INLINE SITE. A single-option group
+        -- that stays inline beside a page of bands is speaking the other visual
+        -- language -- a title INSIDE a faint rectangle next to accent headers
+        -- over fat row plates. bandStyle (DandersUI/Sections.lua) is the skin
+        -- that settles it: the title moves out of the box and is drawn as the
+        -- band's own header, and the box becomes a PopoutRow plate. Nothing
+        -- inside changes. Read-only to the factory, which is what makes one
+        -- shared table safe across every box on the page. Callers write
+        -- `tools and tools.INLINE_BOX or nil`, so classic gets nil -- which is
+        -- exactly what "no opts" already meant to CreateSettingsGroup.
+        INLINE_BOX            = { bandStyle = true },
+    }
+end
