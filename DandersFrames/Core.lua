@@ -7168,6 +7168,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         DF.GUI.ScaleSlider:SetValue(1.0)
                     end
                     DF.GUIFrame:Show()
+                    -- Same tail as the resize handle's OnMouseUp: a programmatic
+                    -- SetSize is still a resize, and without the refresh the
+                    -- current page keeps the OLD width's layout until the user
+                    -- happens to drag the corner (reported on Changed Settings,
+                    -- whose full-width rows made the stale width obvious).
+                    if DF.GUI then
+                        if DF.GUI.SelectedMode == "clicks" then
+                            if DF.ClickCast and DF.ClickCast.RefreshSpellGrid then
+                                DF.ClickCast:RefreshSpellGrid(true)
+                            end
+                        elseif DF.GUI.RefreshCurrentPage then
+                            DF.GUI:RefreshCurrentPage()
+                        end
+                    end
                 end
                 DF:Say(L["GUI reset to default size, scale, and position."])
             elseif msg == "pixelcheck" then
