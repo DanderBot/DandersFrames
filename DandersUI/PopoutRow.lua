@@ -572,6 +572,11 @@ end
 --              OFF also GATES the popout: every widget in this row's pane greys
 --              and stops taking input. The popout's own header toggle, pin and
 --              cross stay live -- see THE OFF GATE above
+--              OMIT IT for a group that has no on/off of its own -- a way IN and
+--              nothing else. No tick is drawn (here or in the popout's header),
+--              the row reads as permanently on (no offText, no off gate), and the
+--              tick's COLUMN is still reserved so the row lines up with toggled
+--              rows beside it
 --   summary    fn(db) -> string, rendered live in the row
 --   offText    the single word shown instead of the summary while toggled off
 --   count      declared number of controls in the group (the badge, and the
@@ -825,7 +830,17 @@ function UI:CreatePopoutRow(parent, opts)
 
     local label = host:CreateLabelNative(plate, { size = M.labelSize, color = C_TEXT })
     label:SetText(row._label)
-    label:SetPoint("LEFT", cb or plate, cb and "RIGHT" or "LEFT", cb and M.labelGap or M.padX, 0)
+    -- ☠ THE TICK'S COLUMN IS RESERVED WHETHER OR NOT A TICK IS DRAWN, exactly as
+    -- the count badge's is (see badgePill:SetShown just above: no count, no pill,
+    -- but the gear still hangs off the pill's RECT so the right-hand columns land
+    -- at the same x on every row).
+    --
+    -- The left column had the other rule until a page mixed the two kinds. A row
+    -- with a feature to switch on and a row that is only a way IN to a group are
+    -- both rows, they sit in the same band, and anchoring the label to `cb or
+    -- plate` started their names 26px apart -- which is the ragged list the
+    -- right-hand columns were made fixed to avoid. One constant, both kinds.
+    label:SetPoint("LEFT", plate, "LEFT", M.padX + M.check + M.labelGap, 0)
     label:SetJustifyH("LEFT")
     if label.SetWordWrap then label:SetWordWrap(false) end
     row.label = label
