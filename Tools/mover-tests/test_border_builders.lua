@@ -691,24 +691,36 @@ if GUI.CreateBorderShadowControls then
     --
     -- ⚠ The trailing arg is the row's own commit, and it is matched loosely on
     -- purpose: the sweep hoists a toggle on other groups of this page too (each
-    -- with its own callback), so this pins THE BORDER PAIR -- that they are the
-    -- first two registered, with the golden label and key -- rather than being a
-    -- census of every hoisted toggle on the page.
+    -- with its own callback), so this pins THE BORDER PAIR -- the golden label
+    -- and key on each -- rather than being a census of every hoisted toggle on
+    -- the page.
+    --
+    -- ☠ MATCHED BY THE ROW EACH ONE IS WIRED TO, NOT BY POSITION IN THE FILE.
+    -- This used to take the FIRST TWO RegisterHoistedToggle calls in
+    -- Pages/Options.lua, on the assumption the border pair were the earliest
+    -- hoists in it. The DISPLAY sweep broke that assumption -- Display >
+    -- Visibility hoists Solo Mode and its builder sits ABOVE the Frame page in
+    -- the same file -- and the failure it produced said "entry 1 uses the golden
+    -- label (got Solo Mode)", which is a true statement about a check asking the
+    -- wrong question. Naming the two rows is what this was always about.
     do
         local got = {}
-        for label, key in pageSrc:gmatch('RegisterHoistedToggle%(%w+,%s*L%["([^"]+)"%],%s*"([^"]+)"') do
-            got[#got + 1] = { label, key }
+        for row, label, key in pageSrc:gmatch('RegisterHoistedToggle%((%w+),%s*L%["([^"]+)"%],%s*"([^"]+)"') do
+            got[row] = { label, key }
         end
-        check(#got >= 2, "hoisted search: the page registers the two hoisted border toggles")
-        local want = { GOLDEN[1], GOLDEN[15] }
+        check(got.borderRow ~= nil and got.shadowRow ~= nil,
+              "hoisted search: the page registers the two hoisted border toggles")
+        local want = { { "borderRow", GOLDEN[1] }, { "shadowRow", GOLDEN[15] } }
         for i = 1, 2 do
-            if got[i] then
-                eq(got[i][1], want[i][2],
+            local rowName, golden = want[i][1], want[i][2]
+            local e = got[rowName]
+            if e then
+                eq(e[1], golden[2],
                    string.format("hoisted search: entry %d uses the golden label", i))
-                eq(got[i][2], want[i][3],
+                eq(e[2], golden[3],
                    string.format("hoisted search: entry %d uses the golden db key", i))
             else
-                check(false, string.format("hoisted search: entry %d missing (wanted %s)", i, want[i][2]))
+                check(false, string.format("hoisted search: entry %d missing (wanted %s)", i, golden[2]))
             end
         end
     end

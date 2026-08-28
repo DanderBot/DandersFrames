@@ -367,55 +367,232 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     BuildPage(pageVisibility, function(self, db, Add, AddSpace, AddSyncPoint)
         Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "restedIndicator"}, L["Visibility"], "display_visibility"), 25, 2)
 
-        -- ===== FRAME DISPLAY GROUP (Column 1) =====
-        local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280)
-        frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)
-        
-        local soloMode = frameDisplayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Solo Mode"], db, "soloMode", function()
-            DF:UpdateAllFrames()
-            DF:UpdateDefaultPlayerFrame()
-        end), 30)
-        soloMode.hideOn = function() return GUI.SelectedMode == "raid" end
-        
-        local restedIndicator = frameDisplayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Rested Indicator"], db, "restedIndicator", function()
-            DF:UpdateRestedIndicator()
-        end), 30)
-        restedIndicator.hideOn = function() return GUI.SelectedMode == "raid" end
-        restedIndicator.disableOn = function(d) return not d.soloMode end
-        restedIndicator.tooltip = L["Show rested indicators when in a rested area (inn, city)."]
-        
-        local restedIcon = frameDisplayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["    Show ZZZ Icon"], db, "restedIndicatorIcon", function()
-            DF:UpdateRestedIndicator()
-        end), 30)
-        restedIcon.hideOn = function() return GUI.SelectedMode == "raid" end
-        restedIcon.disableOn = function(d) return not d.soloMode or not d.restedIndicator end
-        restedIcon.tooltip = L["Show the animated ZZZ icon on the player frame."]
-        
-        local restedGlow = frameDisplayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["    Show Frame Glow"], db, "restedIndicatorGlow", function()
-            DF:UpdateRestedIndicator()
-        end), 30)
-        restedGlow.hideOn = function() return GUI.SelectedMode == "raid" end
-        restedGlow.disableOn = function(d) return not d.soloMode or not d.restedIndicator end
-        restedGlow.tooltip = L["Show a pulsing yellow glow around the frame."]
-        
-        local soloNote = frameDisplayGroup:AddWidget(GUI:CreateLabel(self.child, L["Solo Mode: Show your player frame when not in a group."], 250), 30)
-        soloNote.hideOn = function() return GUI.SelectedMode == "raid" end
-        
-        local hidePlayer = frameDisplayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Self from Party Frames"], db, "hidePlayerFrame", function()
-            -- Update the secure header's showPlayer attribute
-            if not InCombatLockdown() and DF.partyHeader then
-                DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)
-            end
-            -- Reapply header settings to reposition frames
-            if DF.ApplyHeaderSettings then
-                DF:ApplyHeaderSettings()
-            end
-            DF:UpdateAllFrames()
-        end), 30)
-        hidePlayer.hideOn = function() return GUI.SelectedMode == "raid" end
-        hidePlayer.tooltip = L["Removes your player frame from the DandersFrames party display."]
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: ONE 280 box in column 1 headed
+        -- "Frame Display", holding all six controls in their original order.
+        --
+        -- ☠ THE POPOUT LAYOUT SPLITS THAT BOX IN TWO, because it was never one
+        -- feature. Solo Mode plus the three rested controls is a GATED group --
+        -- turn Solo Mode off and none of them do anything, which is exactly what
+        -- their own disableOn predicates already say -- so it becomes a feature
+        -- ROW with the enable hoisted onto it. "Hide Self from Party Frames" is
+        -- an INDEPENDENT tick that works whether or not you ever play solo, so it
+        -- cannot go behind that gate: a row hoisting soloMode over both would
+        -- grey a setting soloing has nothing to do with (the Color Picker row's
+        -- precedent -- a hoisted tick claims to speak for everything in the
+        -- pane). It is a single option on its own, so it stays INLINE wearing the
+        -- band skin -- a pane holding one checkbox is a click that buys nothing.
+        --
+        -- ⚠ WHICH HEADER GOES WHERE, and no new locale string for either. The
+        -- band carries none: one row whose own label already says "Solo Mode"
+        -- does not need the word repeated above it (the Sorting page's sortBand
+        -- rule). The box keeps L["Frame Display"] -- it is the header that
+        -- checkbox has sat under all along, and what is left of that group.
+        --
+        -- ⚠ THE PAGE IS partyOnly (set just below this builder) and every widget
+        -- here carries its own raid hideOn. Both are kept exactly as they were:
+        -- the tab is never reachable in raid mode, and the per-widget guards are
+        -- the belt that has always been there.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what the `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
 
-        Add(frameDisplayGroup, nil, 1)
+        -- The page's one band: full-width and chromeless, because a feature row's
+        -- popout docks outside the WINDOW and runs a beam back to the row, so a
+        -- row that stopped 280px in would leave that beam crossing half the page.
+        local soloBand
+        if tools then
+            soloBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
+        -- ===== SOLO MODE (the top of the classic box, the band's one row) =====
+        -- Verbatim, taking the group and parent it should build into: same
+        -- factories, same L keys, same db keys, same callbacks, same slot
+        -- heights, same hideOn/disableOn. Guarded by
+        -- test_visibility_page_builders.lua, which reads this body out of the
+        -- source and checks it against the inventory it had inline.
+        --
+        -- ⚠ THE COMPOUND disableOn PREDICATES ARE UNCHANGED, including the
+        -- "not d.soloMode" half that the hoisted tick's own off-gate already
+        -- covers inside the pane. Classic has no row and needs that half; one
+        -- builder serving both is what stops the two drifting, and a redundant
+        -- grey costs nothing.
+        local function BuildSoloModeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local soloMode = group:AddWidget(GUI:CreateCheckbox(parent, L["Solo Mode"], db, "soloMode", function()
+                    DF:UpdateAllFrames()
+                    DF:UpdateDefaultPlayerFrame()
+                end), 30)
+                soloMode.hideOn = function() return GUI.SelectedMode == "raid" end
+            end
+
+            local restedIndicator = group:AddWidget(GUI:CreateCheckbox(parent, L["Rested Indicator"], db, "restedIndicator", function()
+                DF:UpdateRestedIndicator()
+            end), 30)
+            restedIndicator.hideOn = function() return GUI.SelectedMode == "raid" end
+            restedIndicator.disableOn = function(d) return not d.soloMode end
+            restedIndicator.tooltip = L["Show rested indicators when in a rested area (inn, city)."]
+
+            local restedIcon = group:AddWidget(GUI:CreateCheckbox(parent, L["    Show ZZZ Icon"], db, "restedIndicatorIcon", function()
+                DF:UpdateRestedIndicator()
+            end), 30)
+            restedIcon.hideOn = function() return GUI.SelectedMode == "raid" end
+            restedIcon.disableOn = function(d) return not d.soloMode or not d.restedIndicator end
+            restedIcon.tooltip = L["Show the animated ZZZ icon on the player frame."]
+
+            local restedGlow = group:AddWidget(GUI:CreateCheckbox(parent, L["    Show Frame Glow"], db, "restedIndicatorGlow", function()
+                DF:UpdateRestedIndicator()
+            end), 30)
+            restedGlow.hideOn = function() return GUI.SelectedMode == "raid" end
+            restedGlow.disableOn = function(d) return not d.soloMode or not d.restedIndicator end
+            restedGlow.tooltip = L["Show a pulsing yellow glow around the frame."]
+
+            local soloNote = group:AddWidget(GUI:CreateLabel(parent, L["Solo Mode: Show your player frame when not in a group."], 250), 30)
+            soloNote.hideOn = function() return GUI.SelectedMode == "raid" end
+        end
+
+        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, an
+        -- inline box of its own in the popout layout) =====
+        -- ⚠ THE CALLBACK IS VERBATIM AND MUST STAY SO: it writes a SECURE header
+        -- attribute, which is why it is gated on InCombatLockdown before it
+        -- touches showPlayer.
+        local function BuildHideSelfGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local hidePlayer = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Self from Party Frames"], db, "hidePlayerFrame", function()
+                -- Update the secure header's showPlayer attribute
+                if not InCombatLockdown() and DF.partyHeader then
+                    DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)
+                end
+                -- Reapply header settings to reposition frames
+                if DF.ApplyHeaderSettings then
+                    DF:ApplyHeaderSettings()
+                end
+                DF:UpdateAllFrames()
+            end), 30)
+            hidePlayer.hideOn = function() return GUI.SelectedMode == "raid" end
+            hidePlayer.tooltip = L["Removes your player frame from the DandersFrames party display."]
+        end
+
+        if classicLayout then
+            -- ===== FRAME DISPLAY GROUP (Column 1) =====
+            -- One box, both builders, in the order the six controls always had.
+            local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280)
+            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)
+            BuildSoloModeGroup({
+                group = frameDisplayGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            BuildHideSelfGroup({
+                group = frameDisplayGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(frameDisplayGroup, nil, 1)
+        else
+            -- The summary, per the sweep's convention: at most four items, a
+            -- fixed order, "\194\183" between them, WORDS localised and numbers
+            -- raw, every read guarded because a profile mid-migration may be
+            -- missing any of these keys.
+            --
+            -- The row's own tick already says whether Solo Mode is on, so the
+            -- summary is about the one thing BEHIND it -- the rested indicator
+            -- and how it is drawn. With the indicator off there is nothing left
+            -- to report and it says nothing; the kit still shows the label, the
+            -- tick and the count badge, which is what an empty summary is for.
+            --
+            -- ⚠ NOTHING IS INVENTED. "Rested Indicator" is the checkbox's own
+            -- label, and "Icon" / "Glow" are single words the locale already
+            -- ships -- the two sub-ticks' own labels ("    Show ZZZ Icon",
+            -- "    Show Frame Glow") carry the indent that pins them under their
+            -- parent and are far too long for a summary line.
+            local function SoloModeSummary(d)
+                if not d then return "" end
+                if not d.restedIndicator then return "" end
+                local parts = { L["Rested Indicator"] }
+                if d.restedIndicatorIcon then parts[#parts + 1] = L["Icon"] end
+                if d.restedIndicatorGlow then parts[#parts + 1] = L["Glow"] end
+                return table.concat(parts, " \194\183 ")
+            end
+
+            -- Four: three ticks and the blurb. The Solo Mode tick is HOISTED onto
+            -- the row, so it is not one of them.
+            local SOLO_MODE_COUNT = 4
+
+            -- The group's own apply, named once so the footer's Reset Group and
+            -- Hold: Defaults run exactly what the four controls' own callbacks do
+            -- between them.
+            local function ApplySoloMode()
+                DF:UpdateAllFrames()
+                DF:UpdateDefaultPlayerFrame()
+                DF:UpdateRestedIndicator()
+            end
+
+            -- ☠ NOT GUI:RefreshCurrentPage. A rebuild retires every widget on the
+            -- page including the row being clicked, and the row's write path
+            -- calls row.Refresh() after this returns -- on a dead frame.
+            local function OnSoloModeToggle()
+                DF:UpdateAllFrames()
+                DF:UpdateDefaultPlayerFrame()
+                -- The row -- its summary and its off state -- and the pane, whose
+                -- three rested controls grey on this key from the inside too.
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local soloMount, soloContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildSoloModeGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    hoistToggle = true,
+                })
+            end)
+            local soloRow = soloBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Solo Mode"],
+                db       = tools.RowDB,
+                toggle   = { key = "soloMode" },
+                summary  = SoloModeSummary,
+                count    = SOLO_MODE_COUNT,
+                onToggle = OnSoloModeToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = soloMount,
+            }))
+            tools.ClaimKeys(soloRow, soloContent)
+            tools.WireModifiedTick(soloRow)
+            tools.WireFooter(soloRow, ApplySoloMode)
+            tools.RegisterHoistedToggle(soloRow, L["Solo Mode"], "soloMode", OnSoloModeToggle)
+
+            -- ⚠ NO hideOn ON THE ROW, which mirrors classic exactly: the box had
+            -- none either, only its children did. In raid the widgets inside
+            -- empty themselves out and the row stays where the user last saw it
+            -- -- and the tab is partyOnly, so nobody ever gets there.
+
+            -- ===== WHAT IS LEFT OF FRAME DISPLAY (Column 1) =====
+            -- The one independent tick, in the box it always lived in, wearing
+            -- the band skin so it does not read as a second visual language
+            -- beside the row above it.
+            local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)
+            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)
+            BuildHideSelfGroup({
+                group = frameDisplayGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+
+            -- ☠ THE BAND FIRST. Add's "both" is a sync point, so a full-width
+            -- band dropped in below a lone column box would leave a hole beside
+            -- it.
+            Add(soloBand, nil, "both")
+            Add(frameDisplayGroup, nil, 1)
+        end
     end)
     -- The Visibility tab is entirely party/solo-oriented, so hide it in raid mode.
     if GUI.Tabs and GUI.Tabs["display_visibility"] then
