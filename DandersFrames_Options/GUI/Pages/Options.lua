@@ -458,24 +458,33 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             soloNote.hideOn = function() return GUI.SelectedMode == "raid" end
         end
 
-        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, an
-        -- inline box of its own in the popout layout) =====
+        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, a
+        -- control row of its own in the popout layout) =====
         -- ⚠ THE CALLBACK IS VERBATIM AND MUST STAY SO: it writes a SECURE header
         -- attribute, which is why it is gated on InCombatLockdown before it
         -- touches showPlayer.
+        --
+        -- ☠ AND IT IS NAMED, AT PAGE SCOPE, BECAUSE BOTH LAYOUTS NOW DRIVE IT.
+        -- Classic runs it from the checkbox inside the builder below; the popout
+        -- layout runs it from a control row, which is not a checkbox and cannot
+        -- reach into the builder for it. A second copy of a body that writes a
+        -- secure attribute is exactly the duplication "verbatim" is meant to
+        -- prevent, so there is one copy and both arms point at it.
+        local function ApplyHideSelf()
+            -- Update the secure header's showPlayer attribute
+            if not InCombatLockdown() and DF.partyHeader then
+                DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)
+            end
+            -- Reapply header settings to reposition frames
+            if DF.ApplyHeaderSettings then
+                DF:ApplyHeaderSettings()
+            end
+            DF:UpdateAllFrames()
+        end
+
         local function BuildHideSelfGroup(tools2)
             local group, parent = tools2.group, tools2.parent
-            local hidePlayer = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Self from Party Frames"], db, "hidePlayerFrame", function()
-                -- Update the secure header's showPlayer attribute
-                if not InCombatLockdown() and DF.partyHeader then
-                    DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)
-                end
-                -- Reapply header settings to reposition frames
-                if DF.ApplyHeaderSettings then
-                    DF:ApplyHeaderSettings()
-                end
-                DF:UpdateAllFrames()
-            end), 30)
+            local hidePlayer = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Self from Party Frames"], db, "hidePlayerFrame", ApplyHideSelf), 30)
             hidePlayer.hideOn = function() return GUI.SelectedMode == "raid" end
             hidePlayer.tooltip = L["Removes your player frame from the DandersFrames party display."]
         end
@@ -575,23 +584,53 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- empty themselves out and the row stays where the user last saw it
             -- -- and the tab is partyOnly, so nobody ever gets there.
 
-            -- ===== WHAT IS LEFT OF FRAME DISPLAY (Column 1) =====
-            -- The one independent tick, in the box it always lived in, wearing
-            -- the band skin so it does not read as a second visual language
-            -- beside the row above it.
-            local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)
-            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)
-            BuildHideSelfGroup({
-                group = frameDisplayGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
+            -- ===== WHAT IS LEFT OF FRAME DISPLAY: A CONTROL ROW =================
+            -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT.
+            -- With Solo Mode gone to the band above, this box holds ONE tick, and a
+            -- pane holding one checkbox is a click that buys nothing. But a 280 box
+            -- beside a full-width band is the one thing a column of plates cannot
+            -- absorb: a narrower rectangle with its own border and its own left
+            -- edge, in a list whose whole argument is that every row starts at the
+            -- same x. So the tick wears the same plate the row above it does
+            -- (DandersUI/ControlRow.lua), in a band of its own.
+            --
+            -- ⚠ THE HEADER GOES WITH THE BOX. "Frame Display" named a box of six
+            -- controls; five of them left, and the one that stayed is not about
+            -- display in that sense. This page carries no band headers at all -- the
+            -- Solo Mode band above has none either -- so a header here would be the
+            -- page's only one, over a single row that already names itself. Classic
+            -- keeps the title, because classic still has the box it titles.
+            --
+            -- ⚠ THE CHILD'S hideOn BECOMES THE ROW'S, because the row IS that
+            -- child. Under the box it was the tick that hid in raid and the box
+            -- that stayed, drawn empty; the kit stamps this onto the frame and the
+            -- band's own layout collapses the whole slot instead. (The Solo Mode
+            -- row above still carries none, for the reason stated there: it stands
+            -- for a group whose CHILDREN hide, not for one control.)
+            local hideSelfBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local hideSelfRow = hideSelfBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Hide Self from Party Frames"],
+                kind      = "checkbox",
+                -- The FUNCTION form, like the row above: the table is re-resolved
+                -- on each read, so a mode switch is followed rather than frozen at
+                -- whichever table this build captured.
+                db        = tools.RowDB,
+                key       = "hidePlayerFrame",
+                onChanged = ApplyHideSelf,
+                hideOn    = function() return GUI.SelectedMode == "raid" end,
+                -- The tick's own sentence, unchanged. A checkbox row shows this on
+                -- the PLATE's hover rather than through a hit frame over its label
+                -- -- see the ☠ at ControlRow's interaction block -- so the whole row
+                -- answers it, which is what the box's one-line tick effectively did.
+                tooltip   = L["Removes your player frame from the DandersFrames party display."],
+            }))
+            tools.RegisterControlRow(hideSelfRow, "checkbox", "hidePlayerFrame")
 
-            -- ☠ THE BAND FIRST. Add's "both" is a sync point, so a full-width
-            -- band dropped in below a lone column box would leave a hole beside
-            -- it.
+            -- Both bands, in reading order. With nothing left in a column there is
+            -- no flow to unbalance -- the sync-point hole that used to force the
+            -- band above the lone column box cannot arise.
             Add(soloBand, nil, "both")
-            Add(frameDisplayGroup, nil, 1)
+            Add(hideSelfBand, nil, "both")
         end
     end)
     -- The Visibility tab is entirely party/solo-oriented, so hide it in raid mode.

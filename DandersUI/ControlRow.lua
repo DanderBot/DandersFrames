@@ -306,7 +306,10 @@ end
 --              UI.SurfaceStyle). A table rounds the plate at that radius and the
 --              style's rowBorderWidth; `false` forces square on a host that has
 --              opted in; OMIT and the row takes the host's own declaration
---   tooltip    forwarded to the embedded control
+--   tooltip    a spec, or a bare string titled with the row's label. Shown on the
+--              ROW's own hover (see the ☠ at the interaction block for why it
+--              cannot be left to the embedded factory), and forwarded to that
+--              factory as well
 --
 --   per kind, forwarded to the embedded factory:
 --     slider    min, max, step (REQUIRED), lightweight, dbRef is derived
@@ -701,8 +704,40 @@ function UI:CreateControlRow(parent, opts)
     end
 
     -- ---- interaction ----------------------------------------------
-    row:SetScript("OnEnter", function() row._hovered = true;  paintState() end)
-    row:SetScript("OnLeave", function() row._hovered = false; paintState() end)
+    -- ☠ THE ROW SHOWS ITS OWN TOOLTIP, BECAUSE FOR HALF THE KINDS NOTHING ELSE
+    -- CAN. `tooltip` is forwarded to the embedded factory, and every factory hangs
+    -- it on the LABEL it was handed -- which this shape hides, because the row
+    -- draws the name itself -- so the attach lands on a hidden, zero-wide region
+    -- and can never fire. A CHECKBOX row does not even get that far: its tick is
+    -- hand-built from the shared styler, for the reason stated up at that branch,
+    -- and never sees the option at all. The plate is the one thing every kind has,
+    -- and it already owns the hover.
+    --
+    -- ⚠ NO HIT FRAME, which is the one place this departs from AttachTooltip. That
+    -- helper lays a MOUSE-ENABLED frame over the label region, and a mouse-enabled
+    -- child inside the plate takes the hover away from the row -- so the plate
+    -- would drop back to rest across the whole width of its own label, which on a
+    -- checkbox row is most of it. The row's own OnEnter is already here; it costs
+    -- nothing and it cannot fight the paint.
+    --
+    -- A bare string is wrapped into a spec titled with the row's name -- the same
+    -- normalisation the kit's own opener tooltip does, so a consumer may pass
+    -- either form.
+    row.tooltip = opts.tooltip
+
+    row:SetScript("OnEnter", function()
+        row._hovered = true
+        paintState()
+        local spec = row.tooltip
+        if not spec then return end
+        if type(spec) == "string" then spec = { title = labelText, lines = { spec } } end
+        host:ShowTooltip(row, spec)
+    end)
+    row:SetScript("OnLeave", function()
+        row._hovered = false
+        paintState()
+        if row.tooltip then host:HideTooltip() end
+    end)
 
     if cb then
         cb:SetScript("OnClick", function(self)

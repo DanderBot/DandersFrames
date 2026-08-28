@@ -208,6 +208,14 @@ function UI:CreateButtonNative(parent, opts)
     return b
 end
 
+-- The tooltip surface, RECORDED rather than drawn: what a row shows is only
+-- observable as the spec it asked for and the frame it hung it off.
+local tipCalls, tipHidden = {}, 0
+function UI:ShowTooltip(anchor, spec)
+    tipCalls[#tipCalls + 1] = { anchor = anchor, spec = spec }
+end
+function UI:HideTooltip() tipHidden = tipHidden + 1 end
+
 -- The colour picker: RECORDS the call and hands its callbacks back, so a test can
 -- drive an accept the way a user would.
 local pickerCalls = {}
@@ -242,6 +250,11 @@ local DATA_KEYS = { hideOn = true, control = true, controlKind = true,
                     isControlRow = true, popout = true, popoutRadius = true,
                     refreshValue = true, RefreshValue = true,
                     Refresh = true, refreshContent = true,
+                    -- ...AND THE TOOLTIP SPEC, for the same reason. The row's own
+                    -- OnEnter early-outs on `row.tooltip` being absent; a truthy
+                    -- no-op would make every row show one, and the row with none
+                    -- would be asserted against nothing.
+                    tooltip = true,
                     -- The kit's own click-refusal flag (Widgets.lua's buttons
                     -- early-out on it). A truthy no-op here would refuse every
                     -- click on a live control.
@@ -623,6 +636,60 @@ do
     row:GetScript("OnEnter")()
     eq(row.plate._fill.a, M.hoverFill, "hover: a greyed row still lifts under the cursor")
     row:GetScript("OnLeave")()
+end
+
+-- ============================================================
+-- 3b. THE TOOLTIP RIDES THE PLATE'S OWN HOVER
+-- ☠ AND IT HAS TO. Every factory hangs a forwarded tooltip on the LABEL it was
+-- handed, and this shape hides that label because the row draws the name itself;
+-- a CHECKBOX row never gets that far, because its tick is hand-built from the
+-- shared styler and never sees the option. The plate is the one thing every kind
+-- has -- and it must NOT be a hit frame, because a mouse-enabled child inside the
+-- plate would take the hover away from the row and drop it back to rest across
+-- the whole width of its own label.
+-- ============================================================
+print("-- ControlRow: the tooltip rides the plate's own hover")
+do
+    local before, hidBefore = #tipCalls, tipHidden
+    local row = host:CreateControlRow(FakeUIFrame(), {
+        label = "Hide Self", kind = "checkbox", tooltip = "Removes your player frame.",
+    })
+    eq(rawget(row, "tooltip"), "Removes your player frame.",
+       "tooltip: the spec is stamped on the row, where a search result can read it")
+
+    row:GetScript("OnEnter")()
+    eq(#tipCalls, before + 1, "tooltip: entering the plate shows it")
+    local call = tipCalls[#tipCalls]
+    eq(call.anchor, row, "tooltip: ...anchored to the ROW, not to a hit frame over its label")
+    eq(call.spec.title, "Hide Self", "tooltip: a bare string is titled with the row's own name")
+    eq(call.spec.lines[1], "Removes your player frame.", "tooltip: ...and carries the sentence")
+    -- The paint is untouched by the tooltip: both still happen on one hover.
+    eq(row.plate._fill.a, M.hoverFill, "tooltip: ...and the plate still lifts, because nothing stole the hover")
+
+    row:GetScript("OnLeave")()
+    eq(tipHidden, hidBefore + 1, "tooltip: leaving hides it")
+    eq(row.plate._fill.a, M.restFill, "tooltip: ...and the plate drops back")
+
+    -- A row with no tooltip asks for nothing and hides nothing -- the hover paint
+    -- is the whole of its OnEnter, exactly as before.
+    local n, hid = #tipCalls, tipHidden
+    local bare = host:CreateControlRow(FakeUIFrame(), { label = "Bare", kind = "checkbox" })
+    bare:GetScript("OnEnter")()
+    bare:GetScript("OnLeave")()
+    eq(#tipCalls, n, "tooltip: a row without one shows nothing")
+    eq(tipHidden, hid, "tooltip: ...and hides nothing on the way out")
+
+    -- A full spec is passed straight through rather than re-wrapped.
+    local spec = { title = "Own Title", lines = { "a", "b" } }
+    local dd = host:CreateControlRow(FakeUIFrame(), {
+        label = "Anchor", kind = "dropdown", options = { A = "A" }, tooltip = spec,
+    })
+    dd:GetScript("OnEnter")()
+    eq(tipCalls[#tipCalls].spec, spec, "tooltip: a table spec reaches the surface untouched")
+    -- ...and it still reaches the embedded factory, which is where the override
+    -- markers and the result card look for it.
+    eq(dd.control._dropdownOpts.tooltip, spec, "tooltip: ...and the factory is still handed it too")
+    dd:GetScript("OnLeave")()
 end
 
 -- ============================================================
