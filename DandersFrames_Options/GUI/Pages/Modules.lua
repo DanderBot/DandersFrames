@@ -2022,7 +2022,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             DF:ShowPopupInput({
                 title       = L["Changed Settings"],
                 message     = L["Press Ctrl+A to select all, then Ctrl+C to copy"],
-                text        = CS.BuildText(fresh, { modeLabel = modeLabel }),
+                text        = CS.BuildText(fresh, { modeLabel = modeLabel, version = DF.VERSION }),
                 multiline   = true,
                 readOnly    = true,
                 cancelLabel = L["Close"],

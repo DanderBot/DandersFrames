@@ -336,6 +336,9 @@ function ChangedSettings.BuildText(report, opts)
     local out = {}
 
     local title = opts.title or "DandersFrames"
+    -- The version rides in the header: this text ends up in bug reports, and
+    -- "what version are you on" is the first question it can pre-answer.
+    if opts.version then title = title .. " v" .. tostring(opts.version) end
     if opts.modeLabel then title = title .. " (" .. opts.modeLabel .. ")" end
     out[#out + 1] = title
 
