@@ -2279,6 +2279,10 @@ function UI:CreateSlider(parent, opts)
         local v = ReadValue()
         if v ~= nil then UpdateValue(math.max(minVal, math.min(maxVal, v))) end
     end
+    -- ...and under the group-wide sweep's one name (UI Sections'
+    -- RefreshChildValues), so a caller that wrote thirteen keys behind every
+    -- widget's back does not have to know which kind each control is.
+    container.refreshValue = container.RefreshValue
     -- Runtime range. A slider whose UNIT is decided elsewhere (seconds vs percent) is built
     -- once but must re-scale in place, or flipping that dial leaves a 1-60 track in front of
     -- a percentage until the panel is rebuilt. Pair with container.label for the caption.
@@ -2866,6 +2870,9 @@ function UI:CreateAnchorGrid(parent, opts)
         end
     end
     container.refreshContent = function(self) self:Refresh() end
+    -- ...and the group-wide value sweep's name (UI Sections' RefreshChildValues):
+    -- the grid's "value" is which cell is lit.
+    container.refreshValue = function(self) self:Refresh() end
 
     container.SetEnabled = function(self, enabled)
         self.enabled = enabled and true or false
@@ -3059,6 +3066,9 @@ function UI:CreateDropdown(parent, opts)
         end
     end
     container.UpdateText = UpdateText  -- Expose for reset
+    -- ...and under the group-wide sweep's one name (UI Sections'
+    -- RefreshChildValues): a dropdown's "value" is the caption it shows.
+    container.refreshValue = UpdateText
     container.SetDisplayOverride = function(self, text)
         displayOverride = text
         UpdateText()
@@ -3510,6 +3520,9 @@ function UI:CreateCheckbox(parent, opts)
 
     container.Refresh = function() cb:SetChecked(opts.get and opts.get() and true or false) end
     container.refreshContent = container.Refresh
+    -- The group-wide value sweep's one name (UI Sections' RefreshChildValues).
+    -- See its header for why a bound value needs a hook of its own.
+    container.refreshValue = container.Refresh
     container.SetEnabled = function(self, enabled)
         cb:SetEnabled(enabled)
         self:SetAlpha(enabled and 1 or 0.4)

@@ -382,4 +382,65 @@ do
     DF.SettingsUndo = savedSU
 end
 
+-- ============================================================
+-- THE READ-BACK HALF -- source, not behaviour
+-- ------------------------------------------------------------
+-- ☠ THE BUG: with the popout open, Reset Group wrote every key, moved the
+-- frames and repainted the row summary -- and left every control INSIDE the
+-- panel showing the values it had before. The undo of that reset had the same
+-- gap, because it replays the same apply.
+--
+-- A write is only half the verb. The other half is telling the widgets, and the
+-- widgets cannot know: the factories paint a tick, a thumb, a caption and a
+-- swatch at build and on their own OnShow, on the assumption that nothing writes
+-- a setting except the widget bound to it -- which is exactly what a group reset
+-- breaks.
+--
+-- The behaviour is tested where it lives: RefreshChildValues against the real
+-- group in test_sections_group.lua, and the slider's and dropdown's own hooks
+-- against the real factories in test_widgets_slider.lua. What ONLY the source
+-- can say is that the page WIRED it, and that the two factories neither of those
+-- files can build carry the hook -- GUI/Pages/Options.lua is far too tangled in
+-- the live panel to load, and the settings-panel checkbox and colour picker are
+-- in the load-on-demand companion.
+-- ============================================================
+do
+    local page = options_file_source("GUI/Pages/Options.lua")
+    local function hasPage(needle, msg)
+        check(page:find(needle, 1, true) ~= nil, "readback: " .. msg)
+    end
+
+    hasPage("if values and g.RefreshChildValues then g:RefreshChildValues() end",
+            "the pane reflow can repaint bound values")
+    hasPage("ReflowMounted(true)",
+            "...and the group's post-write apply asks it to")
+    -- ⚠ OPT-IN, and this is the assertion that keeps it so. ReflowMounted also
+    -- runs on a hideOn change while a slider inside the pane is being dragged,
+    -- and a value repaint mid-drag snaps the thumb from the mouse back to the
+    -- last committed step -- every step. Exactly one caller may pass true.
+    do
+        local n, from = 0, 1
+        while true do
+            local s = page:find("ReflowMounted(", from, true)
+            if not s then break end
+            n, from = n + 1, s + 1
+        end
+        check(n >= 2, "readback: ReflowMounted has more than one caller")
+        local trues, from2 = 0, 1
+        while true do
+            local s = page:find("ReflowMounted(true)", from2, true)
+            if not s then break end
+            trues, from2 = trues + 1, s + 1
+        end
+        eq(trues, 1, "readback: ...and exactly one of them asks for the value sweep")
+    end
+
+    -- The two factories that cannot be built headlessly.
+    local widgets = options_file_source("GUI/SettingsWidgets.lua")
+    check(widgets:find("container.refreshValue = UpdateState", 1, true) ~= nil,
+          "readback: the settings checkbox carries the value hook")
+    check(widgets:find("container.refreshValue = UpdateSwatch", 1, true) ~= nil,
+          "readback: ...and so does the colour picker")
+end
+
 DandersFrames = savedDandersFrames

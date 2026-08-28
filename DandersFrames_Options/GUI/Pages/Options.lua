@@ -2017,11 +2017,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- pane is sized from the group's own FRAME height, not from
             -- LayoutChildren's return: that return adds the between-groups
             -- margin, which a lone group filling a popout has no use for.
-            local function ReflowPane(st)
+            local function ReflowPane(st, values)
                 local g = st.group
                 if not g then return end
                 g:LayoutChildren()
                 g:RefreshChildStates()
+                -- ☠ AND THE VALUES, when the caller says a write happened that
+                -- these widgets could not have seen. RefreshChildStates is about
+                -- STATE -- greyed or not, plus whatever refreshContent a page
+                -- bolted on -- and a checkbox's tick, a slider's thumb, a
+                -- dropdown's caption and a swatch are none of those: the
+                -- factories paint them at build and on their own OnShow, on the
+                -- assumption that nothing writes a setting except the widget
+                -- bound to it.
+                --
+                -- Reset Group breaks that assumption, and so does the UNDO of one
+                -- (it replays this same apply). Without this the reset moved the
+                -- frames and the row summary and left every control inside the
+                -- open panel reading the old numbers -- which is the reported bug.
+                --
+                -- ⚠ OPT-IN, not on every reflow. This also runs on a hideOn
+                -- change while the user is dragging a slider inside the pane, and
+                -- a value repaint mid-drag snaps the thumb from the mouse back to
+                -- the last committed step.
+                if values and g.RefreshChildValues then g:RefreshChildValues() end
                 if st.pane then st.pane:SetHeight(math.max(g:GetHeight() or 1, 1)) end
                 -- ...and the panel around the pane. The kit fixes a pane's height
                 -- at build, and a hideOn inside this group moves it afterwards
@@ -2030,9 +2049,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
             end
 
-            local function ReflowMounted()
+            -- `values` rides through to ReflowPane: see its header for why a
+            -- value repaint is opt-in rather than part of every reflow.
+            local function ReflowMounted(values)
                 for _, st in ipairs(mounted) do
-                    if not (st.po and st.po.closed) then ReflowPane(st) end
+                    if not (st.po and st.po.closed) then ReflowPane(st, values) end
                 end
             end
 
@@ -2244,7 +2265,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local function RefreshAfterGroupWrite()
                 UpdateFrames()
                 DF:LightweightUpdateBorder()
-                ReflowMounted()
+                -- ⚠ WITH THE VALUE SWEEP. This is the one path where the keys
+                -- moved WITHOUT the widgets doing it -- a group reset, a hold,
+                -- and the undo/redo of a reset (which replays ApplyGroup) -- so
+                -- it is the one path that has to repaint what the controls read.
+                ReflowMounted(true)
                 if GUI.RefreshAllOverrideIndicators then
                     GUI.RefreshAllOverrideIndicators()
                 end

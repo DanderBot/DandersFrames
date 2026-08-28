@@ -1704,6 +1704,10 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     -- CreateSegmentToggle:Refresh(); before this, call sites reached for a
     -- Hide()/Show() bounce to fire the OnShow above.
     container.Refresh = UpdateState
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues), for a caller that wrote the key behind this widget's
+    -- back -- a group reset, or the undo of one.
+    container.refreshValue = UpdateState
     cb:SetScript("OnClick", function(self)
         local val = self:GetChecked()
         -- Was gated on DF.debugEnabled and printed straight to CHAT, bypassing the
@@ -1858,6 +1862,9 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
         end
     end
     container.refreshContent = function(self) self:Refresh() end
+    -- ...and the group-wide value sweep's name (DandersUI Sections'
+    -- RefreshChildValues): a segment toggle's "value" is which segment is lit.
+    container.refreshValue = function(self) self:Refresh() end
 
     container.SetEnabled = function(self, enabled)
         self:SetAlpha(enabled and 1 or 0.4)
@@ -2470,7 +2477,10 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         end
     end
     container.UpdateSwatch = UpdateSwatch  -- Expose for reset
-    
+    -- ...and under the group-wide value sweep's one name (DandersUI Sections'
+    -- RefreshChildValues): a colour picker's "value" is the swatch.
+    container.refreshValue = UpdateSwatch
+
     btn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
     end)
