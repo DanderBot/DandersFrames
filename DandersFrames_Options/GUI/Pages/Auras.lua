@@ -1605,44 +1605,194 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return widget
         end
         
-        -- ===== HEALTH BAR SECTION =====
-        local healthBarSection = Add(GUI:CreateCollapsibleSection(self.child, L["Health Bar"], true), 36, "both")
-        currentSection = healthBarSection
-        
-        -- ===== COLOR GROUP (Column 1) =====
-        local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
-        colorGroup:AddWidget(GUI:CreateHeader(self.child, L["Color"]), 40)
-        
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: three collapsible sections over
+        -- seven 280 boxes -- Color (col 1), Texture (col 2), the health gradient
+        -- editor (col 1) and Background (col 2) under "Health Bar"; the settings
+        -- box (col 1) and its own gradient editor (col 1) under "Missing Health";
+        -- and one settings box (col 1) under "Reduced Max Health".
+        --
+        -- POPOUT turns FIVE of those boxes into feature rows -- one headerless
+        -- band per section -- and leaves the two gradient editors inline wearing
+        -- the band skin:
+        --
+        --   "Health Bar"          Color, Texture, Background
+        --   "Missing Health"      Missing Health
+        --   "Reduced Max Health"  Reduced Max Health (hoisted enable)
+        --
+        -- ☠ THE COLLAPSIBLE SECTIONS STAY, IN BOTH LAYOUTS, and that is a
+        -- departure from every page converted before this one -- none of them had
+        -- a second level to keep. Three reasons, any one of them enough:
+        --
+        --   1. A SECTION IS NOT A BAND. It COLLAPSES, and the fold is persisted
+        --      per title in SavedVariables (GUI:GetCollapsedGroups). Replaced by
+        --      a plain band header, a fold the user set in the other layout would
+        --      silently do nothing here.
+        --   2. THE TWO GRADIENT EDITORS ARE SECTION CHILDREN. They stay inline
+        --      (see their own note), and it is the section that folds them away
+        --      with the feature they belong to. A band would have to re-implement
+        --      that, for nothing.
+        --   3. Panel.lua's own layout note calls a section the page's second
+        --      level for PARALLEL SUB-FEATURES and names this page as its
+        --      example. The bar, the missing-health fill and the reduced-max
+        --      overlay are exactly that.
+        --
+        -- ⚠ SO THE BANDS CARRY NO HEADER -- the Fading page's sortBand rule. The
+        -- section bar directly above each band already names the section, and a
+        -- header under it would say the same word twice.
+        --
+        -- ⚠ AND THE TWO ONE-ROW SECTIONS REPEAT THEIR NAME ON THE ROW, which is
+        -- the lesser of two evils rather than an oversight. Both of those boxes
+        -- are headed "Settings" in classic, and two rows both called "Settings"
+        -- would break the breadcrumb jump: a search hit finds its row BY LABEL
+        -- (ClaimKeys' own anchor, 85a7e047), so labels must be distinct per page.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)`
+        -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
+        -- it always built, which is what makes "classic is unchanged" structural
+        -- rather than a promise -- test_healthbar_page_builders.lua pins the
+        -- inventory of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which
+        -- is what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        -- One band per section: full-width and chromeless, because a feature
+        -- row's popout docks outside the WINDOW and runs a beam back to the row,
+        -- so a row that stopped 280px in would leave that beam crossing half the
+        -- page. Each is added INTO its section (AddToSection), so folding the
+        -- section hides the band and the rows in it -- and a panel left open on a
+        -- row that has just been hidden closes itself, which is the popout
+        -- shell's own source-death rule rather than anything this page wires.
+        local healthBand, missingBand, reducedBand
+        if tools then
+            healthBand  = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            missingBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            reducedBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
+        -- ===== THE PAGE'S DROPDOWN VOCABULARY, AT PAGE SCOPE ==============
+        -- Every one of these tables used to be declared inside the box that
+        -- offered it. The rows print the chosen value as their SUMMARY, and a
+        -- summary is written OUTSIDE the group's builder -- so the word has to
+        -- come out of the same table the dropdown offers, or a row could say one
+        -- thing while the control behind it says another. (The Tooltips page
+        -- hoisted its five Anchor To tables for exactly this reason.)
         local colorModes = { CLASS= L["Class Color"], CUSTOM= L["Custom Color"], PERCENT= L["Health Gradient"] }
-        colorGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], colorModes, db, "healthColorMode", function()
-            self:RefreshStates()
-            DF:UpdateColorCurve()
-            -- Refresh health colors on all frames (same as alpha slider)
-            DF:RefreshAllVisibleFrames()
-        end), 55)
-        
-        local classAlpha = colorGroup:AddWidget(GUI:CreateSlider(self.child, L["Health Bar Alpha"], 0, 1, 0.05, db, "classColorAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        classAlpha.hideOn = function(d) return d.healthColorMode ~= "CLASS" and d.healthColorMode ~= "PERCENT" end
-        
-        local customColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Custom Health Color"], db, "healthColor", true, nil, function() DF:LightweightUpdateHealthColor() end, true), 35)
-        customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end
-        
-        AddToSection(colorGroup, nil, 1)
-        
-        -- ===== TEXTURE GROUP (Column 2) =====
-        local textureGroup = GUI:CreateSettingsGroup(self.child, 280)
-        textureGroup:AddWidget(GUI:CreateHeader(self.child, L["Texture"]), 40)
-        textureGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "healthTexture"), 55)
-        
         local orientOptions = {
             HORIZONTAL= L["Left to Right"], HORIZONTAL_INV= L["Right to Left"],
             VERTICAL= L["Bottom to Top"], VERTICAL_INV= L["Top to Bottom"],
         }
-        textureGroup:AddWidget(GUI:CreateDropdown(self.child, L["Fill Direction"], orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
-        textureGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Smooth Bar Animation"], db, "smoothBars", function() DF:UpdateAllFrames() end), 30)
-        
-        AddToSection(textureGroup, nil, 2)
-        
+        local bgModes = { CUSTOM= L["Custom Color"], CLASS= L["Class Color"] }
+        local bgFillModes = { BACKGROUND= L["Background Only"], MISSING_HEALTH= L["Missing Health Only"], BOTH= L["Both"] }
+        local missingHealthColorModes = { CUSTOM= L["Custom Color"], CLASS= L["Class Color"], PERCENT= L["Health Gradient"] }
+        local reducedBlendOpts = { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Modulate"] }
+
+        -- The texture's display NAME, from the addon's own media resolver -- the
+        -- one GUI:CreateTextureDropdown prints on its own button, so a row and
+        -- the control behind it cannot disagree. (Pet Frames' Appearance row
+        -- names its texture through this same function, for the same reason.)
+        local function TextureName(path)
+            local name = DF.GetTextureNameFromPath and DF:GetTextureNameFromPath(path)
+            if type(name) == "string" and name ~= "" then return name end
+            return nil
+        end
+
+        -- ☠ THE FOUR MODE DROPDOWNS RE-GATE THINGS ON BOTH SIDES OF THE PANE.
+        -- Picking a colour mode hides or shows controls in its OWN group and the
+        -- gradient editor that stays out on the page. Classic paid for that with
+        -- self:RefreshStates() -- the page's own hideOn/disableOn pass, NOT
+        -- GUI:RefreshCurrentPage -- so there is no rebuild to unpick here, which
+        -- is why this page needs no AnchorGateRefresh-style branch.
+        --
+        -- tools2.refreshStates IS that same call in classic (the arm hands it
+        -- `function() self:RefreshStates() end`) and, in a pane, ReflowPane
+        -- followed by the page's own RefreshStates -- which re-runs the group's
+        -- child states, re-sizes the panel round them, and then re-runs the page
+        -- pass the inline gradient boxes' hideOn rides on. One call, both jobs,
+        -- in both layouts.
+
+        -- ===== HEALTH BAR SECTION =====
+        local healthBarSection = Add(GUI:CreateCollapsibleSection(self.child, L["Health Bar"], true), 36, "both")
+        currentSection = healthBarSection
+
+        -- ===== COLOR (a 280 box in column 1 in classic, the Health Bar band's
+        -- first row) =====
+        local function BuildHealthColorGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], colorModes, db, "healthColorMode", function()
+                tools2.refreshStates()
+                DF:UpdateColorCurve()
+                -- Refresh health colors on all frames (same as alpha slider)
+                DF:RefreshAllVisibleFrames()
+            end), 55)
+
+            local classAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Health Bar Alpha"], 0, 1, 0.05, db, "classColorAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            classAlpha.hideOn = function(d) return d.healthColorMode ~= "CLASS" and d.healthColorMode ~= "PERCENT" end
+
+            local customColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Custom Health Color"], db, "healthColor", true, nil, function() DF:LightweightUpdateHealthColor() end, true), 35)
+            customColor.hideOn = function(d) return d.healthColorMode ~= "CUSTOM" end
+        end
+
+        -- The group's own apply, named once so the footer's Reset Group and
+        -- Hold: Defaults run exactly what the three controls run between them.
+        local function ApplyHealthColor()
+            DF:UpdateColorCurve()
+            DF:LightweightUpdateHealthColor()
+            DF:RefreshAllVisibleFrames()
+        end
+
+        -- The mode in the dropdown's own words, and the alpha ONLY when it is
+        -- doing something -- a row reading "Alpha 1.00" on every default profile
+        -- is noise (the Border row's rule). The alpha is absent under Custom
+        -- Color for a second reason: its slider is hidden there.
+        local function HealthColorSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = colorModes[d.healthColorMode]
+            if mode then parts[#parts + 1] = mode end
+            if d.healthColorMode ~= "CUSTOM" then
+                local a = tonumber(d.classColorAlpha)
+                if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        -- ===== TEXTURE (a 280 box in column 2 in classic, the Health Bar band's
+        -- second row) =====
+        local function BuildHealthTextureGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "healthTexture"), 55)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Fill Direction"], orientOptions, db, "healthOrientation", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Smooth Bar Animation"], db, "smoothBars", function() DF:UpdateAllFrames() end), 30)
+        end
+
+        -- The group's own apply. ⚠ The texture dropdown carries no callback of
+        -- its own -- it never did -- so the full update is the whole of it.
+        local function ApplyHealthTexture()
+            DF:UpdateAllFrames()
+        end
+
+        -- The texture's name, and the fill direction only when it is NOT the
+        -- plain left-to-right -- the same discipline the Tooltips hover rows use
+        -- for their in-combat pick, which is named only when it is not Always.
+        local function HealthTextureSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local name = TextureName(d.healthTexture)
+            if name then parts[#parts + 1] = name end
+            if d.healthOrientation and d.healthOrientation ~= "HORIZONTAL" then
+                local dir = orientOptions[d.healthOrientation]
+                if dir then parts[#parts + 1] = dir end
+            end
+            return table.concat(parts, " \194\183 ")
+        end
+
         -- ===== GRADIENT GROUP (Column 1, conditional) =====
         -- ☠ WAS A FULL-WIDTH HEADER, A 550px BAR AND THREE 280px GROUPS -- roughly 500px
         -- of page across both columns for what is one ramp. It is one box under Color
@@ -1665,9 +1815,33 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- then were editing legacy keys the renderer no longer reads on any migrated
         -- profile (BuildColorStops resolves <prefix>Stops first). The body keeps the
         -- surrounding indent so the factoring reads as what it is in the diff.
+        --
+        -- ★ AND IT STAYS INLINE IN BOTH LAYOUTS -- the Color by Time precedent,
+        -- for the same structural reason rather than for taste. GradRebuild ends
+        -- in pageHealthBar:Refresh(), a full PAGE REBUILD, and it has to: adding
+        -- a stop, removing one and committing a threshold each change which
+        -- WIDGETS the editor has, and every remaining stepper's bounds are
+        -- recomputed from its neighbours. Inside a pane that is fatal -- a
+        -- rebuild retires the pane, and CreatePopoutPageTools' own prologue
+        -- closes every open panel on the way in, so the editor would slam its own
+        -- panel shut on each + click. There is no rebuild-one-pane verb, and
+        -- hand-rolling one here means reimplementing the page builder's widget
+        -- retire loop inside a settings page.
+        --
+        -- ⚠ IT DOES WEAR THE BAND SKIN in the popout layout, unlike Color by
+        -- Time, and the difference is what each of them IS rather than a change
+        -- of mind: Color by Time is a CollapsibleSection, which the skin does not
+        -- apply to at all, while this is an ordinary settings box with a header
+        -- -- exactly the shape tools.INLINE_BOX exists for. Left bare it would be
+        -- a title inside a faint rectangle sitting under a band of fat row
+        -- plates, which is the two-visual-languages problem the skin settles.
+        --
+        -- ⚠ A REBUILD FROM HERE CLOSES ANY OPEN ROW PANEL, and that is accepted
+        -- rather than fixed: the panel's contents are the colour/texture rows,
+        -- not the ramp, and the Colors page's palettes made the same trade.
         local function BuildGradientStopBox(prefix, hideOn)
         local listKey = prefix .. "Stops"
-        local gradGroup = GUI:CreateSettingsGroup(self.child, 280)
+        local gradGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
         gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
         local gradInner = GUI:GroupInnerWidth(gradGroup)
         -- Own copy: the Colors page's `iconPath` is a local inside ITS BuildPage closure,
@@ -1949,30 +2123,61 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         AddToSection(gradGroup, nil, 1)
         end
 
-        BuildGradientStopBox("healthColor",
-            function(d) return d.healthColorMode ~= "PERCENT" end)
+        -- ===== BACKGROUND (a 280 box in column 2 in classic, the Health Bar
+        -- band's third row) =====
+        local function BuildHealthBackgroundGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- ===== BACKGROUND GROUP (Column 1) =====
-        local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
-        bgGroup:AddWidget(GUI:CreateHeader(self.child, L["Background"]), 40)
-        
-        local bgModes = { CUSTOM= L["Custom Color"], CLASS= L["Class Color"] }
-        bgGroup:AddWidget(GUI:CreateDropdown(self.child, L["Background Mode"], bgModes, db, "backgroundColorMode", function()
-            self:RefreshStates()
+            group:AddWidget(GUI:CreateDropdown(parent, L["Background Mode"], bgModes, db, "backgroundColorMode", function()
+                tools2.refreshStates()
+                DF:LightweightUpdateBackgroundColor()
+            end), 55)
+
+            local bgTextureOptions = DF:GetTextureList(true)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Background Texture"], db, "backgroundTexture", function()
+                DF:LightweightUpdateBackgroundColor()
+            end, bgTextureOptions), 55)
+
+            local bgColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "backgroundColor", true, nil, function() DF:LightweightUpdateBackgroundColor() end, true), 35)
+            bgColor.hideOn = function(d) return d.backgroundColorMode ~= "CUSTOM" end
+
+            local bgClassAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Background Alpha"], 0, 1, 0.05, db, "backgroundClassAlpha", nil, function() DF:LightweightUpdateBackgroundColor() end, true), 55)
+            bgClassAlpha.hideOn = function(d) return d.backgroundColorMode ~= "CLASS" end
+        end
+
+        -- The group's own apply: the lightweight pass all four controls drive.
+        local function ApplyHealthBackground()
             DF:LightweightUpdateBackgroundColor()
-        end), 55)
-        
-        local bgTextureOptions = DF:GetTextureList(true)
-        bgGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Background Texture"], db, "backgroundTexture", function()
-            DF:LightweightUpdateBackgroundColor()
-        end, bgTextureOptions), 55)
-        
-        local bgColor = bgGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "backgroundColor", true, nil, function() DF:LightweightUpdateBackgroundColor() end, true), 35)
-        bgColor.hideOn = function(d) return d.backgroundColorMode ~= "CUSTOM" end
-        
-        local bgClassAlpha = bgGroup:AddWidget(GUI:CreateSlider(self.child, L["Background Alpha"], 0, 1, 0.05, db, "backgroundClassAlpha", nil, function() DF:LightweightUpdateBackgroundColor() end, true), 55)
-        bgClassAlpha.hideOn = function(d) return d.backgroundColorMode ~= "CLASS" end
-        
+        end
+
+        -- The colour source in the dropdown's own words, then the texture's name
+        -- through the same resolver the Texture row uses.
+        local function HealthBackgroundSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = bgModes[d.backgroundColorMode]
+            if mode then parts[#parts + 1] = mode end
+            local name = TextureName(d.backgroundTexture)
+            if name then parts[#parts + 1] = name end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        -- ===== THE HEALTH BAR SECTION'S MOUNT ==============================
+        -- ☠ ONE if/else FOR THE WHOLE SECTION, rather than the per-group arm
+        -- every other converted page uses, and the classic Add ORDER is why. The
+        -- page has always added Color (1), Texture (2), the gradient editor (1),
+        -- Background (2) -- the gradient sits BETWEEN the two column-2 boxes. The
+        -- popout layout cannot interleave like that: the band is a "both" widget,
+        -- which is a SYNC POINT, so it has to go in before the column-1 gradient
+        -- box or that box would be stranded at the top with an empty column
+        -- beside it and the band pushed under both.
+        --
+        -- Splitting the Background group's arm in two would have kept the rhythm
+        -- and hidden the reason; one block per LAYOUT says it instead. Nothing
+        -- about the classic branch moves: same builders, same headers, same
+        -- columns, same order, and the same call into BuildGradientStopBox at the
+        -- same point in the sequence.
+        --
         -- ★ COLUMN 2, under Texture. Column 1 carries Color and then the Gradient editor,
         -- which is ~280 lines of widgets and expands further as stops are added — so with
         -- the gradient open, column 1 ran long while column 2 held Texture and nothing
@@ -1983,7 +2188,119 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- way — column 2 then holds two groups against column 1's one. That is the lesser
         -- imbalance, and the pending "gradient editor as a single-column box" rework
         -- changes the same balance, so the two want checking together.
-        AddToSection(bgGroup, nil, 2)
+        -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY. The popout layout has no
+        -- columns left to balance in this section: the three boxes are rows in one
+        -- full-width band, and only the gradient editor is still in a column.
+        local function HealthGradientHiddenOn(d) return d.healthColorMode ~= "PERCENT" end
+
+        if classicLayout then
+            local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
+            colorGroup:AddWidget(GUI:CreateHeader(self.child, L["Color"]), 40)
+            BuildHealthColorGroup({
+                group = colorGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(colorGroup, nil, 1)
+
+            local textureGroup = GUI:CreateSettingsGroup(self.child, 280)
+            textureGroup:AddWidget(GUI:CreateHeader(self.child, L["Texture"]), 40)
+            BuildHealthTextureGroup({
+                group = textureGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(textureGroup, nil, 2)
+
+            BuildGradientStopBox("healthColor", HealthGradientHiddenOn)
+
+            local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
+            bgGroup:AddWidget(GUI:CreateHeader(self.child, L["Background"]), 40)
+            BuildHealthBackgroundGroup({
+                group = bgGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(bgGroup, nil, 2)
+        else
+            -- Three: the mode pick, the alpha and the custom swatch. One of the
+            -- latter two is always hidden -- the group's own hideOn doing its
+            -- job -- because the count is what the group HOLDS, not what happens
+            -- to be on show for the mode currently picked.
+            local HEALTH_COLOR_COUNT = 3
+            -- Three: the texture, the fill direction and the smoothing tick.
+            local HEALTH_TEXTURE_COUNT = 3
+            -- Four: the colour source, the texture, the swatch and the alpha.
+            local HEALTH_BACKGROUND_COUNT = 4
+
+            local colorMount, colorContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealthColorGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local colorRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Color"],
+                db      = tools.RowDB,
+                summary = HealthColorSummary,
+                count   = HEALTH_COLOR_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = colorMount,
+            }))
+            tools.ClaimKeys(colorRow, colorContent)
+            tools.WireModifiedTick(colorRow)
+            tools.WireFooter(colorRow, ApplyHealthColor)
+
+            local textureMount, textureContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealthTextureGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local textureRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Texture"],
+                db      = tools.RowDB,
+                summary = HealthTextureSummary,
+                count   = HEALTH_TEXTURE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = textureMount,
+            }))
+            tools.ClaimKeys(textureRow, textureContent)
+            tools.WireModifiedTick(textureRow)
+            tools.WireFooter(textureRow, ApplyHealthTexture)
+
+            local bgMount, bgContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHealthBackgroundGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local bgRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Background"],
+                db      = tools.RowDB,
+                summary = HealthBackgroundSummary,
+                count   = HEALTH_BACKGROUND_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = bgMount,
+            }))
+            tools.ClaimKeys(bgRow, bgContent)
+            tools.WireModifiedTick(bgRow)
+            tools.WireFooter(bgRow, ApplyHealthBackground)
+
+            -- ☠ THE BAND GOES IN AFTER ITS LAST ROW AND BEFORE THE GRADIENT BOX.
+            -- `Add` resolves a widget's slot height on the spot, so a band has to
+            -- be added once it is full; and "both" is a sync point, so it must
+            -- still precede the column-1 editor under it.
+            AddToSection(healthBand, nil, "both")
+
+            BuildGradientStopBox("healthColor", HealthGradientHiddenOn)
+        end
 
         currentSection = nil
         AddSpace(GUI.Space.section, "both")
@@ -1992,41 +2309,64 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local missingSection = Add(GUI:CreateCollapsibleSection(self.child, L["Missing Health"], true), 36, "both")
         currentSection = missingSection
         
-        -- ===== MISSING HEALTH GROUP (Column 1) =====
-        local missingGroup = GUI:CreateSettingsGroup(self.child, 280)
-        missingGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        
-        local bgFillModes = { BACKGROUND= L["Background Only"], MISSING_HEALTH= L["Missing Health Only"], BOTH= L["Both"] }
-        local bgFillMode = missingGroup:AddWidget(GUI:CreateDropdown(self.child, L["Background Fill"], bgFillModes, db, "backgroundMode", function()
-            self:RefreshStates()
-            DF:UpdateAllFrames()
-        end), 55)
-        bgFillMode.tooltip = L["Background Only: Normal solid background\nMissing Health Only: Shows colored bar where health is missing\nBoth: Shows both"]
-        
-        local missingHealthTextureOptions = DF:GetTextureList(false)
-        local missingHealthTexture = missingGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Missing Health Texture"], db, "missingHealthTexture", function()
-            DF:UpdateAllFrames()
-        end, missingHealthTextureOptions), 55)
-        missingHealthTexture.hideOn = function(d) return d.backgroundMode == "BACKGROUND" end
-        
-        local missingHealthColorModes = { CUSTOM= L["Custom Color"], CLASS= L["Class Color"], PERCENT= L["Health Gradient"] }
-        local missingHealthColorMode = missingGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], missingHealthColorModes, db, "missingHealthColorMode", function()
-            self:RefreshStates()
+        -- ===== MISSING HEALTH (a 280 box in column 1 in classic, the Missing
+        -- Health band's only row) =====
+        local function BuildMissingHealthGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            local bgFillMode = group:AddWidget(GUI:CreateDropdown(parent, L["Background Fill"], bgFillModes, db, "backgroundMode", function()
+                tools2.refreshStates()
+                DF:UpdateAllFrames()
+            end), 55)
+            bgFillMode.tooltip = L["Background Only: Normal solid background\nMissing Health Only: Shows colored bar where health is missing\nBoth: Shows both"]
+
+            local missingHealthTextureOptions = DF:GetTextureList(false)
+            local missingHealthTexture = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Missing Health Texture"], db, "missingHealthTexture", function()
+                DF:UpdateAllFrames()
+            end, missingHealthTextureOptions), 55)
+            missingHealthTexture.hideOn = function(d) return d.backgroundMode == "BACKGROUND" end
+
+            local missingHealthColorMode = group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], missingHealthColorModes, db, "missingHealthColorMode", function()
+                tools2.refreshStates()
+                DF:UpdateColorCurve()
+                DF:UpdateAllFrames()
+            end), 55)
+            missingHealthColorMode.hideOn = function(d) return d.backgroundMode == "BACKGROUND" end
+
+            local missingHealthColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Missing Health Color"], db, "missingHealthColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
+            missingHealthColor.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "CUSTOM" end
+
+            local missingHealthClassAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Class Color Alpha"], 0, 1, 0.05, db, "missingHealthClassAlpha", nil, function() DF:UpdateAllFrames() end, true), 55)
+            missingHealthClassAlpha.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "CLASS" end
+
+            local missingHealthGradientAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Gradient Color Alpha"], 0, 1, 0.05, db, "missingHealthGradientAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            missingHealthGradientAlpha.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+        end
+
+        -- The group's own apply: the union of what its six controls run -- the
+        -- curve rebuild the colour-mode pick drives, the full update five of them
+        -- drive, and the visible-frame repaint the gradient alpha drives.
+        local function ApplyMissingHealth()
             DF:UpdateColorCurve()
             DF:UpdateAllFrames()
-        end), 55)
-        missingHealthColorMode.hideOn = function(d) return d.backgroundMode == "BACKGROUND" end
-        
-        local missingHealthColor = missingGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Missing Health Color"], db, "missingHealthColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
-        missingHealthColor.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "CUSTOM" end
-        
-        local missingHealthClassAlpha = missingGroup:AddWidget(GUI:CreateSlider(self.child, L["Class Color Alpha"], 0, 1, 0.05, db, "missingHealthClassAlpha", nil, function() DF:UpdateAllFrames() end, true), 55)
-        missingHealthClassAlpha.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "CLASS" end
-        
-        local missingHealthGradientAlpha = missingGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Color Alpha"], 0, 1, 0.05, db, "missingHealthGradientAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        missingHealthGradientAlpha.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
+            DF:RefreshAllVisibleFrames()
+        end
 
-        AddToSection(missingGroup, nil, 1)
+        -- The fill mode, then the colour source -- and the second only when the
+        -- fill is not Background Only, because everything below that pick is
+        -- HIDDEN there and a summary must not describe controls the pane is not
+        -- showing.
+        local function MissingHealthSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local fill = bgFillModes[d.backgroundMode]
+            if fill then parts[#parts + 1] = fill end
+            if d.backgroundMode ~= "BACKGROUND" then
+                local mode = missingHealthColorModes[d.missingHealthColorMode]
+                if mode then parts[#parts + 1] = mode end
+            end
+            return table.concat(parts, " \194\183 ")
+        end
 
         -- ===== MISSING HEALTH GRADIENT (Column 1, conditional) =====
         -- ☠ The old Low/Medium/High stage groups that sat here (550px bar + three
@@ -2035,8 +2375,55 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- missingHealthColorStops, which every migrated profile does. The controls
         -- moved frames on no screen, and the preview bar above them read the stop
         -- list, so it did not respond either. Same stop-list box as the health bar.
-        BuildGradientStopBox("missingHealthColor",
-            function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end)
+        local function MissingGradientHiddenOn(d)
+            return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT"
+        end
+
+        -- One if/else for the section, for the reason the Health Bar section has
+        -- one: the band is a "both" widget and so a sync point, so it has to be
+        -- added before the column-1 gradient editor under it.
+        if classicLayout then
+            local missingGroup = GUI:CreateSettingsGroup(self.child, 280)
+            missingGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+            BuildMissingHealthGroup({
+                group = missingGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(missingGroup, nil, 1)
+
+            BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)
+        else
+            -- Six: the fill pick, the texture, the colour-mode pick, the swatch
+            -- and the two alphas. Nothing is hoisted -- backgroundMode is a
+            -- three-way pick, not a boolean, so there is no tick that means "am I
+            -- doing anything at all".
+            local MISSING_HEALTH_COUNT = 6
+
+            local missingMount, missingContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildMissingHealthGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local missingRow = missingBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Missing Health"],
+                db      = tools.RowDB,
+                summary = MissingHealthSummary,
+                count   = MISSING_HEALTH_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = missingMount,
+            }))
+            tools.ClaimKeys(missingRow, missingContent)
+            tools.WireModifiedTick(missingRow)
+            tools.WireFooter(missingRow, ApplyMissingHealth)
+
+            AddToSection(missingBand, nil, "both")
+
+            BuildGradientStopBox("missingHealthColor", MissingGradientHiddenOn)
+        end
 
         currentSection = nil
 
@@ -2046,18 +2433,105 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local reducedSection = Add(GUI:CreateCollapsibleSection(self.child, L["Reduced Max Health"], true), 36, "both")
         currentSection = reducedSection
 
-        -- ===== REDUCED MAX HEALTH SETTINGS GROUP (Column 1) =====
-        local reducedGroup = GUI:CreateSettingsGroup(self.child, 280)
-        reducedGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        local reducedEnable = reducedGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable"], db, "reducedMaxHealthEnabled", function() self:RefreshStates() DF:UpdateAllFrames() end), 30)
-        reducedEnable.keepEnabled = true
-        reducedGroup.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end
-        reducedGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
-        reducedGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() end), 55)
-        reducedGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
-        local reducedBlendOpts = { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Modulate"] }
-        reducedGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
-        AddToSection(reducedGroup, nil, 1)
+        -- ===== REDUCED MAX HEALTH (a 280 box in column 1 in classic, the
+        -- Reduced Max Health band's only row) =====
+        --
+        -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER. In classic the box greys its
+        -- own children while the overlay is off; the pane has to do the same, and
+        -- one builder serving both is what stops the two drifting. (The row's
+        -- hoisted tick greys the pane as well, from the outside -- both, exactly
+        -- as the Sorting page's first row does it.)
+        local function BuildReducedMaxHealthGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local reducedEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], db, "reducedMaxHealthEnabled", function() tools2.refreshStates() DF:UpdateAllFrames() end), 30)
+                reducedEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = function(d) return not d.reducedMaxHealthEnabled end
+
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Clip Health Bar"], db, "reducedMaxHealthClipHealthBar", function() DF:UpdateAllFrames() end), 30)
+            group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "reducedMaxHealthTexture", function() DF:UpdateAllFrames() end), 55)
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "reducedMaxHealthColor", true, nil, function() DF:LightweightUpdateReducedMaxHealthColor() end, true), 35)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], reducedBlendOpts, db, "reducedMaxHealthBlendMode", function() DF:UpdateAllFrames() end), 55)
+        end
+
+        -- The group's own apply: the full update the clip tick, the texture and
+        -- the blend pick drive (and the enable tick with them in classic), plus
+        -- the lightweight colour pass the swatch drives.
+        local function ApplyReducedMaxHealth()
+            DF:UpdateAllFrames()
+            DF:LightweightUpdateReducedMaxHealthColor()
+        end
+
+        -- The overlay's texture, and the blend only when it is NOT the plain
+        -- Blend -- the Texture row's own rule for a value that is the default on
+        -- every profile.
+        local function ReducedMaxHealthSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local name = TextureName(d.reducedMaxHealthTexture)
+            if name then parts[#parts + 1] = name end
+            if d.reducedMaxHealthBlendMode and d.reducedMaxHealthBlendMode ~= "BLEND" then
+                local blend = reducedBlendOpts[d.reducedMaxHealthBlendMode]
+                if blend then parts[#parts + 1] = blend end
+            end
+            return table.concat(parts, " \194\183 ")
+        end
+
+        if classicLayout then
+            local reducedGroup = GUI:CreateSettingsGroup(self.child, 280)
+            reducedGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+            BuildReducedMaxHealthGroup({
+                group = reducedGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(reducedGroup, nil, 1)
+        else
+            -- Four: the clip tick, the texture, the swatch and the blend pick.
+            -- The enable tick is HOISTED onto the row, so it is not one of them.
+            local REDUCED_MAX_HEALTH_COUNT = 4
+
+            -- ☠ NOT GUI:RefreshCurrentPage, and not a page rebuild of any kind: a
+            -- rebuild retires every widget on the page including the row being
+            -- clicked, and the row's write path calls row.Refresh() after this
+            -- returns -- on a dead frame. This is what the suppressed checkbox
+            -- ran, plus the reflow that repaints the pane behind the tick.
+            local function OnReducedMaxToggle()
+                DF:UpdateAllFrames()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local reducedMount, reducedContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildReducedMaxHealthGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local reducedRow = reducedBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Reduced Max Health"],
+                db       = tools.RowDB,
+                toggle   = { key = "reducedMaxHealthEnabled" },
+                summary  = ReducedMaxHealthSummary,
+                count    = REDUCED_MAX_HEALTH_COUNT,
+                onToggle = OnReducedMaxToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = reducedMount,
+            }))
+            tools.ClaimKeys(reducedRow, reducedContent)
+            tools.WireModifiedTick(reducedRow)
+            tools.WireFooter(reducedRow, ApplyReducedMaxHealth)
+            tools.RegisterHoistedToggle(reducedRow, L["Enable"], "reducedMaxHealthEnabled", OnReducedMaxToggle)
+
+            AddToSection(reducedBand, nil, "both")
+        end
 
         currentSection = nil
 
