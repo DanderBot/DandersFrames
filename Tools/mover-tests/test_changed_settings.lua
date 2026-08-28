@@ -127,6 +127,73 @@ do
 end
 
 -- ============================================================
+-- 5b. MEDIA PATHS
+-- ------------------------------------------------------------
+-- ☠ THE REPORTED BUG: a statusbar texture is STORED as its full path, so a
+-- changed one printed as
+--   Interface\AddOns\DandersFrames\Media\Textures\DF_Smooth.tga
+-- into a two-column row about 244 pixels wide -- which ran off the page.
+--
+-- The report says what the DROPDOWN says, which means going through the
+-- addon's existing path->name resolver rather than a second one written here:
+-- two resolvers are free to disagree, and then the ledger names a texture
+-- differently from the page the user picked it on.
+-- ============================================================
+do
+    local F = CS.FormatValue
+
+    -- The resolver, stubbed to exactly the shape the real one has: a registered
+    -- path answers with its display name, an unregistered one falls out of the
+    -- bottom as the bare filename WITH its extension. (The real one is
+    -- DF:GetTextureNameFromPath in Core/Config.lua, loaded further down this file
+    -- -- so this block owns the stub and drops it at the end.)
+    local REGISTERED = {
+        ["Interface\\AddOns\\DandersFrames\\Media\\Textures\\DF_Smooth.tga"] = "DF Smooth",
+        ["Interface\\AddOns\\SharedMedia\\statusbar\\Minimalist"]            = "Minimalist",
+    }
+    function DF:GetTextureNameFromPath(path)
+        return REGISTERED[path] or path:match("([^/\\]+)$")
+    end
+
+    eq(F("Interface\\AddOns\\DandersFrames\\Media\\Textures\\DF_Smooth.tga"), "DF Smooth",
+       "media: a registered texture prints the name the dropdown shows")
+    eq(F("Interface\\AddOns\\SharedMedia\\statusbar\\Minimalist"), "Minimalist",
+       "media: ...whether or not the file had an extension")
+
+    -- ⚠ THE SAME SHORT FORM IN THE COPY BLOCK. An 80-column path is no more use
+    -- to the person reading a support thread than it was on the page.
+    eq(F("Interface\\AddOns\\DandersFrames\\Media\\Textures\\DF_Smooth.tga", true), "DF Smooth",
+       "media: the ASCII form is the name too, not the path")
+
+    -- Unregistered: the filename, without the extension. A texture from an addon
+    -- the user has since removed still has to say SOMETHING a person can read.
+    eq(F("Interface\\AddOns\\Gone\\bars\\Aluminium.tga"), "Aluminium",
+       "media: an unresolvable path falls back to the filename")
+    eq(F("Interface\\Buttons\\WHITE8X8"), "WHITE8X8",
+       "media: ...and a path with no extension is just its last segment")
+    eq(F("Interface/AddOns/Gone/bars/Charcoal.blp"), "Charcoal",
+       "media: forward slashes count too, behind the Interface prefix")
+
+    -- ☠ AND THE THING THAT MUST NOT HAPPEN. Settings hold user-authored strings,
+    -- and the Text Designer's formats are full of forward slashes -- "%cur/%max"
+    -- is a setting, not a file, and shortening it to "%max" would be a report
+    -- that lies about the value. The test is a BACKSLASH (or an Interface
+    -- prefix), which no WoW media path lacks and no format string has.
+    eq(F("%cur/%max"), "%cur/%max", "media: a text format is not a path")
+    eq(F("a/b/c"), "a/b/c", "media: ...nor is any other bare slashed string")
+    eq(F("BOTTOMLEFT"), "BOTTOMLEFT", "media: an anchor is still itself")
+    eq(F("DF Roboto SemiBold"), "DF Roboto SemiBold", "media: ...and so is a font NAME")
+    eq(F(""), "", "media: an empty string is untouched")
+
+    -- The extension strip is only for extensions. A display name that happens to
+    -- contain a dot keeps everything after it.
+    eq(F("Interface\\x\\Details.Flat"), "Details.Flat",
+       "media: a dotted filename whose suffix is not a media extension is kept whole")
+
+    DF.GetTextureNameFromPath = nil
+end
+
+-- ============================================================
 -- 4. BoundKeys -- WHICH ENTRIES ARE LEDGER MATERIAL
 -- ============================================================
 do
@@ -550,6 +617,18 @@ do
     local ledger = options_file_source("GUI/Pages/Modules.lua")
     check(ledger:find('GUI:InlineIcon("chevron_right"', 1, true) ~= nil,
           "glyphs: the ledger row's arrow is an inline icon")
+
+    -- ☠ AND THE ROW'S VALUE CELL IS BOUNDED ON BOTH EDGES. A FontString
+    -- anchored on ONE edge with word wrap off is unbounded on the other: it
+    -- grows to fit its string, which for a stored texture path meant a cell
+    -- running off the left of the row and out of the page. Shortening the path
+    -- (above) fixes the case that was reported; this is what stops the NEXT long
+    -- value doing it. Belt-and-braces on purpose, so both have to be removed for
+    -- the bug to come back.
+    check(ledger:find('value:SetPoint("LEFT", rowBtn, "CENTER", 0, 0)', 1, true) ~= nil,
+          "glyphs: the value cell has a left bound, so a long value truncates")
+    check(ledger:find("value:SetWordWrap(false)", 1, true) ~= nil,
+          "glyphs: ...and does not wrap into a second line instead")
     eq(arrowInCode(ledger), nil,
        "glyphs: ...and no live line in Modules.lua carries a bare arrow")
 

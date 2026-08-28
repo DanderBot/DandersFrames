@@ -2048,6 +2048,24 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
                 local value = rowBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
                 value:SetPoint("RIGHT", rowBtn, "RIGHT", -8, 0)
+                -- ☠ AND A LEFT BOUND, which is what actually clips. A FontString
+                -- anchored on ONE edge with word wrap off is unbounded on the
+                -- other: it grows to fit its string, which for a stored texture
+                -- path (the reported case) meant a cell running off the left of
+                -- the row and out of the page. The right edge was never the
+                -- problem -- it was pinned all along.
+                --
+                -- Anchored to the row's CENTRE rather than to a pixel column, so
+                -- the split tracks whatever width the group hands the row: half
+                -- for the setting's name, half for its value. Nothing moves for a
+                -- row whose two strings already fit, because both are justified
+                -- to their OUTER edges; a value that does not fit truncates
+                -- instead of escaping.
+                --
+                -- ⚠ No cycle with `name` below, which anchors its right edge to
+                -- this string's left: that edge is now fixed to rowBtn, so both
+                -- resolve from the row and neither waits on the other.
+                value:SetPoint("LEFT", rowBtn, "CENTER", 0, 0)
                 value:SetJustifyH("RIGHT")
                 value:SetWordWrap(false)
                 value:SetText(format("%s %s|cff%s%s|r",

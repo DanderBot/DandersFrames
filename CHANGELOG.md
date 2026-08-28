@@ -18,6 +18,7 @@
 - (Settings) Fix a long pause when opening the Changed Settings page, or searching, for the first time.
 - (Settings) Fix arrows showing as empty boxes on the Changed Settings page and in undo messages.
 - (Settings) Fix "Reset Group" leaving the controls inside an open panel showing their old values. Undo of a reset had the same problem.
+- (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
 - (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
 - (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
 - (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.

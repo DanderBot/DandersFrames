@@ -91,12 +91,67 @@ local function Channel255(c)
     return floor(c * 255 + 0.5)
 end
 
+-- ============================================================
+-- MEDIA PATHS
+-- ============================================================
+
+-- File extensions the media library's own art carries. Stripped from a filename
+-- fallback because "Minimalist" and "Minimalist.tga" say the same thing to a
+-- reader and only one of them fits in a cell.
+local MEDIA_EXT = { tga = true, blp = true, ttf = true, otf = true, ogg = true, mp3 = true }
+
+-- Is this string a MEDIA PATH rather than a setting value, and if so, what does
+-- a person call it?
+--
+-- ☠ THE REPORTED BUG: a statusbar texture is STORED as its full path, so a
+-- changed one printed as
+--   Interface\AddOns\DandersFrames\Media\Textures\DF_Smooth.tga
+-- in a two-column row 244 pixels wide -- which ran off the right of the page.
+--
+-- ⚠ THE TEST IS A BACKSLASH (or an "Interface/" prefix), NOT "contains a
+-- slash". Settings hold user-authored strings too, and the Text Designer's
+-- formats are full of forward slashes -- "%cur/%max" is a setting, not a file,
+-- and shortening it to "%max" would be a report that lies about the value. No
+-- WoW media path lacks a backslash, so the narrower test costs nothing.
+--
+-- The NAME comes from DF:GetTextureNameFromPath, which is the addon's existing
+-- path->display-name resolver (it walks the LibSharedMedia statusbar list, with
+-- separator, case and Interface-prefix normalisation, and falls back to the bare
+-- filename). Not re-implemented here: a second resolver would be free to
+-- disagree with the dropdown the user picked the texture from, and the whole
+-- point of the ledger is that it names things the way the pages do.
+--
+-- Returns nil for anything that is not a path, so the caller falls through to
+-- the string as stored.
+local function MediaName(v)
+    if not (v:find("\\", 1, true) or v:find("^[Ii]nterface/")) then return nil end
+
+    local name = DF.GetTextureNameFromPath and DF:GetTextureNameFromPath(v) or nil
+    if type(name) ~= "string" or name == "" then
+        -- Fonts, borders and sounds do not go through that resolver, and an
+        -- unregistered texture falls out of the bottom of it. The last segment
+        -- of the path is what a person would call the file either way.
+        name = v:match("([^/\\]+)$")
+    end
+    if type(name) ~= "string" or name == "" then return nil end
+
+    -- The resolver's own last resort hands back the filename WITH its extension,
+    -- and this cannot tell that apart from a registered name -- so the strip runs
+    -- on both. It is a no-op on a real display name ("Blizzard Raid Bar" ends in
+    -- no extension) and only ever fires on something that looks like a file.
+    local base, ext = name:match("^(.+)%.(%w+)$")
+    if base and base ~= "" and MEDIA_EXT[ext:lower()] then name = base end
+
+    return name
+end
+
 -- One setting value -> one short display string.
 --
 --   numbers        as-is: whole numbers plain, fractions to six significant
 --                  figures (%.6g, which prints 0.35 as "0.35" and 26 as "26"
 --                  without inventing trailing zeros on either).
 --   booleans       On / Off
+--   media paths    the name the media dropdown shows, never the path
 --   colour tables  #RRGGBB
 --   other tables   an ellipsis -- a nested block (the aura designer's, a
 --                  position) has no honest one-line form, and pretending
@@ -136,7 +191,11 @@ function ChangedSettings.FormatValue(v, ascii)
         return format("%.6g", v)
     end
 
-    if t == "string" then return v end
+    -- ⚠ THE SHORT FORM IN BOTH, `ascii` or not. The copy block is pasted into a
+    -- support thread and read by someone who did not write it, and an 80-column
+    -- texture path is no more use to them than it was on the page -- what they
+    -- want to know is which texture, which is the name.
+    if t == "string" then return MediaName(v) or v end
 
     if t == "table" then
         local r, g, b = ColorChannels(v)
