@@ -88,11 +88,16 @@ do
     eq(e.dbKey, "frameShowBorder", "register: ...against the same db key the checkbox used")
     eq(#Search.Registry, 1, "register: and it reached the registry")
 
-    -- The registration context is the LAST HEADER, not the widget's parent -- which
-    -- is the whole reason a popout's content, built into a hidden holder, still
-    -- lands in the right section.
+    -- ⚠ THE REGISTRATION CONTEXT IS THE LAST HEADER, not the widget's parent.
+    -- That is what lets a popout's content register at all from a hidden holder
+    -- -- but it is ALSO the bug: a converted page builds its band headers UP
+    -- FRONT and then every row's pane eagerly, so on a real page every entry
+    -- inherits whichever band header came last rather than the row it is behind.
+    -- One header is set here, so the two answers coincide and this only pins the
+    -- mechanism; what corrects it is Search:SetEntrySection, driven below and
+    -- called from the shared row machinery (test_popout_page_tools).
     local slider = Search:RegisterSlider("Border Thickness", "frameBorderSize", 1, 16, 1, nil, nil)
-    eq(slider.section, "Appearance", "register: popout content lands in the row's own section")
+    eq(slider.section, "Appearance", "register: an entry takes whatever section was last set")
     eq(slider.minVal, 1, "register: a slider carries its range, so a result can recreate it")
     eq(slider.maxVal, 16, "register: ...both ends")
 end
@@ -111,6 +116,47 @@ do
     eq(late.id, nil, "register: nothing registers once the registry is built")
     eq(#Search.Registry, 0, "register: ...the registry is unchanged")
     Search.RegistryBuilt = false
+end
+
+-- ============================================================
+-- 1b. THE SECTION, CORRECTED AFTER THE FACT
+-- ------------------------------------------------------------
+-- Position-dependent context cannot describe a page that no longer builds in
+-- position order, so a popout row names its own contents once they exist. This
+-- is that door, on its own; the caller is pinned in test_popout_page_tools.
+-- ============================================================
+do
+    resetRegistry()
+    local e = Search:RegisterCheckbox("Show Border", "frameShowBorder", nil, false, nil)
+    eq(e.section, "Appearance", "resection: the entry starts on the last header")
+
+    Search:SetEntrySection(e, "Border")
+    eq(e.section, "Border", "resection: ...and takes the row's name instead")
+
+    -- ☠ KEYWORDS AND ALL. Find scores a keyword hit, so the old section's words
+    -- left in place would keep matching a page the entry has nothing to do with.
+    local words = {}
+    for _, w in ipairs(e.keywords or {}) do words[w] = true end
+    check(not words["appearance"], "resection: the old section's words are dropped")
+    check(words["border"], "resection: ...and the new one's indexed")
+    check(words["show"], "resection: ...while the entry's own label survives")
+    check(words["general_frame"], "resection: ...and so does its tab")
+
+    -- No-ops, each for its own reason.
+    Search:SetEntrySection(e, "")
+    eq(e.section, "Border", "resection: an empty name is refused")
+    Search:SetEntrySection(e, nil)
+    eq(e.section, "Border", "resection: ...and so is no name at all")
+
+    -- ☠ AND AN ENTRY THAT NEVER REACHED THE REGISTRY IS LEFT ALONE. Register
+    -- hands back keyless entries, entries for the other mode's defaults and
+    -- anything offered after the registry was sealed WITHOUT adding them, and an
+    -- id is the one mark that says an entry is really in there. Re-sectioning one
+    -- nothing can find would be a write nobody reads.
+    local dropped = Search:RegisterSlider("Nonsense", "noSuchSettingAnywhere", 0, 1, 1, nil, nil)
+    eq(dropped.id, nil, "resection: the dropped entry is unregistered, as before")
+    Search:SetEntrySection(dropped, "Border")
+    eq(dropped.section, nil, "resection: ...and is not re-sectioned")
 end
 
 -- ============================================================

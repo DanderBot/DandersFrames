@@ -16,21 +16,30 @@ local NS = ...
 -- the helper exists, that it exposes every verb, and that no page -- the Frame
 -- page included -- keeps a second copy of any of it.
 --
--- Source-level, like the page-builder tests: the helper builds real frames and
--- reads DF.db / GUI.SelectedMode, so it cannot be called headlessly.
+-- Mostly source-level, like the page-builder tests: the parts that matter build
+-- real frames and read DF.db / GUI.SelectedMode. But the helper's PROLOGUE and
+-- its verb declarations touch nothing but the page table, so section 6 lifts the
+-- function out by source, compiles it into a stub environment and drives the key
+-- claim and the hoisted toggle against the REAL Features/Search.lua -- which is
+-- the only way to measure what a search breadcrumb actually ends up saying.
 -- ============================================================
 
 local SRC = options_file_source("GUI/Controls.lua")
 
--- The helper's own body, from its declaration to the next `end` at column zero.
-local BODY = (function()
+-- The helper's declaration and its closing `end` at column zero. BODY stops
+-- short of the `end` (every source assertion below only wants what is inside
+-- it); CHUNK includes it, because section 6 COMPILES AND RUNS the helper.
+local DECL_AT, END_AT = (function()
     local a = SRC:find("function GUI:CreatePopoutPageTools(page)", 1, true)
     check(a ~= nil, "source: Controls.lua declares GUI:CreatePopoutPageTools")
-    if not a then return "" end
+    if not a then return nil, nil end
     local b = SRC:find("\nend\n", a, true)
     check(b ~= nil and b > a, "source: ...and it closes at the file's own indent")
-    return SRC:sub(a, b or a)
+    return a, b
 end)()
+
+local BODY  = (DECL_AT and END_AT) and SRC:sub(DECL_AT, END_AT) or ""
+local CHUNK = (DECL_AT and END_AT) and SRC:sub(DECL_AT, END_AT + 4) or ""
 
 print("-- Popout page tools: one page argument, and a classic-safe early return")
 do
@@ -106,7 +115,8 @@ do
 
     -- ReflowPane and the three gates are internal -- the pages never call them
     -- directly -- but they are the ones the semantics live in.
-    for _, v in ipairs({ "ReflowPane", "RefreshAfterGroupWrite", "CombatReason", "HoldReason" }) do
+    for _, v in ipairs({ "ReflowPane", "RefreshAfterGroupWrite", "CombatReason", "HoldReason",
+                         "RowLabel", "AnchorRow", "StampSection" }) do
         check(BODY:find("local function " .. v .. "(", 1, true) ~= nil,
               "verbs: " .. v .. " is the helper's own, not a page's")
     end
@@ -241,4 +251,204 @@ do
           "frame page: its builders take tools2, so nothing shadows the page's tools")
     check(page:find("(tools)", 1, true) == nil,
           "frame page: ...and no builder is left taking the shadowing name")
+end
+
+print("-- Popout page tools: a row is a section, in source")
+do
+    -- ☠ THE BUG THIS FIXES, stated once so the assertions below read as
+    -- consequences rather than as taste. `entry.section` is stamped from
+    -- Search.CurrentSection at registration, and CurrentSection is only ever
+    -- moved by GUI:CreateHeader and GUI:CreateCollapsibleSection. A classic page
+    -- interleaves those with its controls, so each entry inherits the header
+    -- above it. A CONVERTED page does not: its band headers are built UP FRONT
+    -- and then every row's pane is built eagerly, so every entry on the page
+    -- inherited whichever band header was created LAST -- the whole Tooltips page
+    -- reading "Auras". Section 6 drives the real thing and proves it; this
+    -- section pins WHERE the repair lives, because "in the shared helper" is what
+    -- makes it true of the pages already converted and of the ones still to come.
+    check(BODY:find("Search:SetEntrySection(entry, name)", 1, true) ~= nil,
+          "section: the stamp goes through Search's own door, not by hand")
+    check(BODY:find("if not (entry and Search and Search.SetEntrySection) then return end", 1, true) ~= nil,
+          "section: ...guarded on the METHOD, so a page need not know search exists")
+
+    -- The row's name is read from the SAME pair the footer reads for the undo
+    -- entry's heading, so a row is called one thing everywhere.
+    check(BODY:find("local name = row and (row._title or row._label)", 1, true) ~= nil,
+          "section: the row's name is _title or _label, the footer's own pair")
+
+    -- ---- the anchor, and why it is inseparable from the stamp -------
+    -- Renaming a breadcrumb to a section name nothing on the page answers to
+    -- would leave the jump scrolling nowhere and flashing nothing.
+    check(BODY:find("row.GetText = function() return name end", 1, true) ~= nil,
+          "anchor: a row answers to its own name, as CreateHeader's container does")
+    local anchorAt = BODY:find("AnchorRow(row)", 1, true)
+    local guardAt  = BODY:find("if not (group and group.groupChildren) then return end", 1, true)
+    check(anchorAt ~= nil and guardAt ~= nil and anchorAt < guardAt,
+          "anchor: ...stamped ABOVE the group guard, so an empty pane still names its row")
+
+    -- ---- the walk stamps, the extras deliberately do not ------------
+    local claim = BODY:match("local function ClaimKeys%(row, group, extra%)(.-)\n    end")
+    check(claim ~= nil, "section: the key walk is locatable")
+    if claim then
+        check(claim:find("StampSection(row, se)", 1, true) ~= nil,
+              "section: every control the walk sees is re-sectioned onto the row")
+        -- ⚠ AND THE EXTRA KEYS ARE NOT. An extra is named precisely because the
+        -- walk cannot see it, so there is no searchEntry to stamp -- and reaching
+        -- one would mean hunting the Registry by dbKey, which the search card
+        -- cache's own key proves is ambiguous across pages.
+        local extras = claim:match("for _, k in ipairs%(extra or {}%) do(.-)\n        end")
+        check(extras ~= nil, "section: the extra-keys arm is locatable")
+        check(extras == nil or extras:find("StampSection", 1, true) == nil,
+              "section: ...and it re-sections nothing, because it has no entry to stamp")
+    end
+
+    -- ---- the hoisted toggle takes the same name ---------------------
+    -- Its entry is registered from the PAGE builder rather than from inside a
+    -- pane, so the walk never reaches it -- but it inherited the same wrong
+    -- section, and the tick IS the row.
+    local hoist = BODY:match("local function RegisterHoistedToggle%(row, label, key, onToggle%)(.-)\n    end")
+    check(hoist ~= nil, "section: the hoisted toggle's registration is locatable")
+    if hoist then
+        check(hoist:find("StampSection(row, row.searchEntry)", 1, true) ~= nil,
+              "section: a hoisted toggle's own entry is re-sectioned onto its row")
+        check(hoist:find("AnchorRow(row)", 1, true) ~= nil,
+              "section: ...and a row that only hoists a toggle is still anchored")
+    end
+end
+
+-- ============================================================
+-- 6. THE SAME THING, RUN RATHER THAN READ
+-- ------------------------------------------------------------
+-- ☠ THE HELPER CAN BE CALLED HEADLESSLY AFTER ALL -- but only the helper. Its
+-- PROLOGUE touches nothing but the page table (the close is guarded, the holder
+-- retire is skipped on a first build), and every verb it hands back is declared
+-- there and then; the frames only appear inside PopoutContent, which this
+-- section never calls. So the function is lifted out of Controls.lua BY SOURCE
+-- -- the file as a whole is far too tangled in the panel to load -- compiled
+-- into an environment holding a stub GUI and DF, and driven against the REAL
+-- Features/Search.lua.
+--
+-- That is what makes this worth its length: the entry a row corrects is a
+-- genuine registry entry, registered by the genuine Register under a genuine
+-- stale section, so the correction is measured rather than asserted.
+--
+-- ☠ THE HARNESS SHARES ONE LUA RUNTIME ACROSS EVERY TEST FILE. This section
+-- replaces the `DandersFrames` global (Search.lua takes its host off it, not off
+-- the varargs); it is restored at the end.
+-- ============================================================
+print("-- Popout page tools: a row is a section, driven for real")
+do
+    local savedDF = DandersFrames
+
+    local DF = {}
+    DF.L = setmetatable({}, { __index = function(_, k) return k end })
+    -- Register drops any entry the current mode has no default for, so the two
+    -- keys under test have to exist here or nothing would ever be registered.
+    DF.PartyDefaults = { tooltipFrameX = 0, tooltipFrameEnabled = true }
+    DF.RaidDefaults  = { tooltipFrameX = 0, tooltipFrameEnabled = true }
+    function DF:DebugWarn() end
+    -- SettingsBox only has to EXIST for Search.lua's file scope to load; the real
+    -- table is driven against Search.lua in test_page_parking.
+    DF.GUI = {
+        SelectedMode = "party",
+        Pages = {},
+        SettingsBox = { group = 280, pad = 10, colMargin = 5, minCol = 285, colGutter = 20 },
+    }
+    local classic = false
+    DF.IsClassicSettingsLayout = function() return classic end
+    DandersFrames = DF
+
+    load_options_file_into("Features/Search.lua", NS)
+    local Search = DF.Search
+    check(Search ~= nil, "live: the real Search file loads")
+    check(Search and Search.SetEntrySection ~= nil,
+          "live: ...and publishes the after-the-fact section door the helper calls")
+
+    -- The helper, compiled into its own environment. `GUI` and `DF` are file
+    -- locals in Controls.lua, so as a standalone chunk they are globals -- which
+    -- setfenv is exactly for. Everything else falls through to the real _G.
+    local env = setmetatable({ GUI = DF.GUI, DF = DF, L = DF.L }, { __index = _G })
+    local fn = (loadstring or load)(CHUNK, "@CreatePopoutPageTools")
+    check(fn ~= nil, "live: the helper's source compiles on its own")
+    if fn then
+        setfenv(fn, env)
+        fn()
+    end
+    check(DF.GUI.CreatePopoutPageTools ~= nil, "live: ...and installs itself on GUI")
+
+    -- One page's worth of registrations, in the order a CONVERTED page makes
+    -- them: the band header first (which is all SetCurrentSection ever hears),
+    -- then every pane's controls, eagerly, underneath it.
+    local function registerUnder(section, label, key)
+        Search:SetCurrentSection(section)
+        return Search:RegisterCheckbox(label, key)
+    end
+
+    local page, tools, band, hoisted
+    local function buildPage()
+        Search.Registry = {}
+        Search.RegistryBuilt = false
+        Search:SetCurrentTab("tooltips", "Tooltips")
+        page  = {}
+        tools = DF.GUI:CreatePopoutPageTools(page)
+        -- The LAST band header on the page -- the wrong answer every entry below
+        -- it inherits, which is the whole bug.
+        band  = registerUnder("Auras", "Show Out of Combat", "tooltipFrameX")
+        hoisted = nil
+        if tools then
+            local row = { _label = "Frame Tooltips" }
+            tools.ClaimKeys(row, { groupChildren = { { widget = { searchEntry = band } } } })
+
+            local togRow = { _label = "Binding Tooltips" }
+            tools.RegisterHoistedToggle(togRow, "Enable Binding Tooltips",
+                                        "tooltipFrameEnabled", function() end)
+            hoisted = { row = togRow, entry = togRow.searchEntry }
+            return row, togRow
+        end
+    end
+
+    -- ---- the popout layout: the row names what is behind it ---------
+    classic = false
+    local row, togRow = buildPage()
+    check(tools ~= nil, "live: the popout layout hands back the tools")
+    eq(band.section, "Frame Tooltips",
+       "live: a claimed control reads its ROW's name, not the last band header")
+    eq(page._popoutRowForKey["tooltipFrameX"], row,
+       "live: ...and the row map still points the jump at that row")
+    eq(row.GetText and row:GetText(), "Frame Tooltips",
+       "live: ...and the row answers to that same name, so the jump can land")
+
+    -- The stale section's words go with it. They are not cosmetic: Find scores a
+    -- keyword hit, so "auras" left behind would keep matching every control on a
+    -- page that has nothing to do with auras.
+    local words = {}
+    for _, k in ipairs(band.keywords or {}) do words[k] = true end
+    check(not words["auras"], "live: the old section's keywords are dropped, not kept")
+    check(words["frame"] and words["tooltips"],
+          "live: ...and the new one's are indexed in their place")
+    check(words["combat"], "live: ...while the entry's own label survives untouched")
+
+    -- ---- the hoisted toggle -----------------------------------------
+    check(hoisted ~= nil and hoisted.entry ~= nil, "live: the hoisted toggle registered an entry")
+    if hoisted and hoisted.entry then
+        eq(hoisted.entry.section, "Binding Tooltips",
+           "live: a hoisted toggle's entry reads its own row, not the last band header")
+        eq(togRow.GetText and togRow:GetText(), "Binding Tooltips",
+           "live: ...and that row is anchored too, though it claimed nothing")
+    end
+
+    -- ---- and CLASSIC is untouched, by construction -------------------
+    -- The helper returns nil before it declares a single verb, so there is
+    -- nothing in the classic layout that could stamp anything: an entry keeps
+    -- exactly the section CreateHeader gave it.
+    classic = true
+    buildPage()
+    check(tools == nil, "classic: the helper hands back nothing at all")
+    eq(band.section, "Auras",
+       "classic: ...so an entry keeps exactly the section its header set")
+    local classicWords = {}
+    for _, k in ipairs(band.keywords or {}) do classicWords[k] = true end
+    check(classicWords["auras"], "classic: ...keywords and all")
+
+    DandersFrames = savedDF
 end

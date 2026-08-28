@@ -4023,6 +4023,66 @@ function GUI:CreatePopoutPageTools(page)
     -- frozen at the table this build captured.
     local function RowDB() return DF.db and DF.db[GUI.SelectedMode] end
 
+    -- ============================================================
+    -- A ROW IS A SECTION -- the two halves of saying so
+    -- ------------------------------------------------------------
+    -- In classic, a block of settings is a BOX WITH A HEADER, and that one header
+    -- does two jobs nobody had to think about: it is what the settings search
+    -- writes into every entry's breadcrumb (GUI:CreateHeader ends by calling
+    -- Search:SetCurrentSection), and it is what a cross-link or a breadcrumb
+    -- click FINDS the block by (Search:ScrollToSection asks every page child, and
+    -- every settings-group child, for :GetText()).
+    --
+    -- A popout row is that same block, and it has no header at all -- its name is
+    -- a FontString inside the row. So both jobs have to be done deliberately, and
+    -- they are done here rather than per page: the sweep has produced forty-odd
+    -- rows across a dozen pages, and forty copies of a two-line stamp is forty
+    -- chances to leave one out silently.
+    --
+    -- ☠ NEITHER HALF IS OPTIONAL, AND THEY ONLY WORK AS A PAIR. Stamping the
+    -- section without the anchor renames every breadcrumb to a section name
+    -- nothing on the page answers to, so the jump scrolls nowhere and flashes
+    -- nothing -- ScrollToSection's own DebugWarn, and "I clicked the result and
+    -- it did nothing" from the outside. Anchoring without the stamp leaves the
+    -- breadcrumbs reading whichever band header was built last.
+    local function RowLabel(row)
+        local name = row and (row._title or row._label)
+        if type(name) == "string" and name ~= "" then return name end
+        return nil
+    end
+
+    -- HALF ONE: the row answers to its own name. This is the move GUI:CreateHeader
+    -- itself makes -- that factory returns a CONTAINER and stamps
+    -- `container.GetText` so the container answers for the fontstring inside it
+    -- (GUI/SettingsWidgets.lua) -- applied to the row for the fontstring inside
+    -- IT. The walk then scrolls to the ROW and flashes the band around it, which
+    -- is what classic did when it scrolled to the header and flashed the box.
+    --
+    -- ⚠ IT OVERWRITES THE BUTTON'S OWN GetText, deliberately. A PopoutRow is a
+    -- Button (the whole row is the click target), so it inherits a GetText that
+    -- reads a fontstring the row never sets -- it answers nil to every lookup.
+    -- Nothing in the kit or the pages calls it. A page that wants a different
+    -- anchor still wins by assigning after ClaimKeys, which is the order every
+    -- caller already uses.
+    local function AnchorRow(row)
+        local name = RowLabel(row)
+        if not name then return end
+        row.GetText = function() return name end
+    end
+
+    -- HALF TWO: everything the pane registered says it lives in this row.
+    -- Guarded on the METHOD, not the table -- Search is in this companion, but a
+    -- page must not have to care whether it loaded. See Search:SetEntrySection
+    -- (Features/Search.lua) for why the correction has to happen after the fact
+    -- rather than by moving Search.CurrentSection around.
+    local function StampSection(row, entry)
+        local Search = DF.Search
+        if not (entry and Search and Search.SetEntrySection) then return end
+        local name = RowLabel(row)
+        if not name then return end
+        Search:SetEntrySection(entry, name)
+    end
+
     -- Built by WALKING WHAT THE CONTENT ACTUALLY REGISTERED, not from a key list
     -- and not from a name prefix -- a prefix would claim keys no popout owns and
     -- would miss any spelled differently. Every shared factory stamps
@@ -4048,8 +4108,16 @@ function GUI:CreatePopoutPageTools(page)
     -- the row would claim keys the defaults engine cannot answer for, so its
     -- amber tick would never light and Reset Group would write nothing while
     -- saying it had. The real key is named through this door instead.
+    --
+    -- ⚠ AND THE SAME WALK IS WHERE THE SEARCH BREADCRUMB IS PUT RIGHT -- see
+    -- RowSection below, which is the third job this one pass does.
     local function ClaimKeys(row, group, extra)
-        if not (row and group and group.groupChildren) then return end
+        if not row then return end
+        -- The row's own name, ABOVE the group guard: a row is worth naming even
+        -- if the pane behind it turned out to have nothing the walk can see, and
+        -- the cross-links that jump to a row by name do not care what is in it.
+        AnchorRow(row)
+        if not (group and group.groupChildren) then return end
         local claimed = row._claimedKeys or {}
         row._claimedKeys = claimed
         for _, e in ipairs(group.groupChildren) do
@@ -4060,7 +4128,23 @@ function GUI:CreatePopoutPageTools(page)
                 page._popoutRowForKey[k] = row
                 claimed[#claimed + 1] = k
             end
+            -- Whatever this control registered with SEARCH now says it lives in
+            -- this row, not in whichever band header happened to be built last.
+            StampSection(row, se)
         end
+        -- ⚠ THE EXTRA KEYS ARE CLAIMED BUT NOT RE-SECTIONED, and that is a
+        -- refusal rather than an omission. An extra is named because the WALK
+        -- CANNOT SEE IT -- there is no widget and therefore no searchEntry to
+        -- stamp -- so the only way to reach one would be to hunt the Registry for
+        -- a matching dbKey. That is not safe from here: the same dbKey is
+        -- legitimately registered from more than one page (the search card cache
+        -- keys on tab AND section for exactly that reason), and this helper has
+        -- no honest way to tell which of those hits is the one on THIS page --
+        -- Search.CurrentTab is only meaningful during a registry build, and a
+        -- page rebuilt by a tab click would be reading a stale one. Re-sectioning
+        -- another page's entry is a worse bug than the one being fixed. Today the
+        -- single extra in the addon is a per-index override key with no search
+        -- entry at all, so nothing is missed by saying no.
         for _, k in ipairs(extra or {}) do
             page._popoutRowForKey[k] = row
             claimed[#claimed + 1] = k
@@ -4207,11 +4291,22 @@ function GUI:CreatePopoutPageTools(page)
     -- carried, so an inline result behaves as the inline checkbox does in
     -- classic. Guarded on the METHOD, not just the table -- Search is in this
     -- companion but the page must not care.
+    --
+    -- ⚠ AND IT TAKES THE SAME SECTION AS THE PANE BEHIND IT. This entry is
+    -- registered from the page builder, not from inside a pane, but it is
+    -- registered at the same moment and inherits the same wrong answer -- the
+    -- band header built last. The tick IS the row, so "Tooltips > Frame Tooltips"
+    -- is what its breadcrumb should read, exactly like the six controls behind
+    -- it. Stamped here rather than left to ClaimKeys because this entry is on the
+    -- ROW, not in the group ClaimKeys walks, and a row may hoist a toggle whether
+    -- or not it claims anything.
     local function RegisterHoistedToggle(row, label, key, onToggle)
         local Search = DF.Search
         if not (Search and Search.RegisterCheckbox) then return end
         row.searchEntry = Search:RegisterCheckbox(label, key, nil, false, onToggle)
         if Search.LinkSourceWidget then Search:LinkSourceWidget(row) end
+        AnchorRow(row)
+        StampSection(row, row.searchEntry)
     end
 
     -- The width a full-width band is CONSTRUCTED at, asked for rather than
