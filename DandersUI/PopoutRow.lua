@@ -45,6 +45,26 @@ local format = string.format
 local tremove = table.remove
 local max = math.max
 
+-- Perf marks, the same pair Popout.lua declares and for the same reason -- see
+-- its PERF MARKS block. Written into `host.perf`, printed by UI:PerfReport, and
+-- one rawget when nothing is recording. Kept file-local rather than shared off
+-- the library: they are two closures, and a published pair would be a surface
+-- the kit does not want to owe anybody.
+local debugprofilestop = debugprofilestop or function() return 0 end
+
+local function perfStart(host)
+    if type(host) ~= "table" or not rawget(host, "_perfActive") then return nil end
+    return debugprofilestop()
+end
+
+local function perfStop(host, name, t0)
+    if not t0 then return end
+    local p = rawget(host, "perf")
+    if not p then return end
+    p.counts[name] = (p.counts[name] or 0) + 1
+    p.ms[name] = (p.ms[name] or 0) + (debugprofilestop() - t0)
+end
+
 local C_TEXT, C_TEXT_DIM = UI.Colors.text, UI.Colors.textDim
 local C_ELEMENT, C_BORDER = UI.Colors.element, UI.Colors.border
 local C_HOVER, C_BACKGROUND = UI.Colors.hover, UI.Colors.background
@@ -156,6 +176,43 @@ local function syncRowPaneHeight(po)
     return po
 end
 
+-- ============================================================
+-- THE ACCENT, AND THE PANES THAT ARE NOT LOOKING
+-- ------------------------------------------------------------
+-- ☠ THE MOUNT IS WHERE THE SESSION PILES UP. A pane is built once per (instance,
+-- row) and then KEPT -- an unpinned panel is pooled rather than destroyed on
+-- close, so the mount's children are every group the user has opened on every
+-- page since login. The shell's accent cascade used to walk that whole pile on
+-- every open, twice: measured at 226 ApplyThemeColor calls and 292 frame nodes
+-- for one open on a 14-row page, growing with every row ever visited. That is
+-- the open-and-close stutter.
+--
+-- Only ONE of those panes is on screen. So the mount takes the cascade over
+-- (Popout.lua's dfCascadeInto) and paints the ACTIVE one, remembering the colour
+-- it went on in; a pane that was hidden when the colour moved catches up on the
+-- swap that shows it. Every widget a user can SEE is in the colour the chrome
+-- is, which is the whole of what the cascade ever promised.
+-- ============================================================
+
+-- Paint the pane that is UP, if it is not already wearing this colour, and
+-- remember what it went on in. No active pane is the state the very first adopt
+-- cascades in -- nothing is mounted yet -- and a pane is built ONCE and never
+-- grows (see paneFor), so the stamp cannot go stale under a widget that arrived
+-- after it.
+--
+-- Compared by VALUE, not by identity: the host's accent table is MUTATED IN
+-- PLACE by a theme change, so a remembered reference to it would always agree
+-- with itself and no theme change would ever repaint anything.
+local function cascadeActivePane(po, c)
+    local rec = po._rowActive
+    if not rec then return end
+    c = c or po:GetAccent()
+    local a = c.a or 1
+    if rec.tR == c.r and rec.tG == c.g and rec.tB == c.b and rec.tA == a then return end
+    po:CascadeInto(rec.pane, c)
+    rec.tR, rec.tG, rec.tB, rec.tA = c.r, c.g, c.b, a
+end
+
 -- The shell's build, run ONCE PER INSTANCE: a bare container and an empty pane
 -- cache. Everything a ROW puts in the popout is mounted into this later, by
 -- paneFor, so that the instance can outlive any one row's content.
@@ -167,6 +224,10 @@ local function mountBare(po, content)
     po._rowMount = mount
     po._rowPanes = {}
     po._rowActive = nil
+    -- The cascade stops here and this answers for everything under it -- see the
+    -- block above. On the MOUNT rather than on the content, so the shell still
+    -- walks anything else a consumer parents into the panel.
+    mount.dfCascadeInto = function(c) cascadeActivePane(po, c) end
     -- Published on the INSTANCE rather than kept private, because the thing that
     -- knows a pane re-flowed is the consumer's own control (see below).
     po.SyncRowPaneHeight = syncRowPaneHeight
@@ -350,6 +411,11 @@ local function paneFor(po, row)
     local rec = panes[row]
     if rec then return rec, false end
 
+    -- The once-per-(instance, row) cost, and the one an intermittent stutter is
+    -- most naturally blamed on -- so it is measured separately from the swap
+    -- rather than lumped into it.
+    local t0 = perfStart(po.host)
+
     local width = po.width or UI.PopoutContentWidth
     local pane = CreateFrame("Frame", nil, po._rowMount)
     pane:SetPoint("TOPLEFT", 0, 0)
@@ -448,6 +514,7 @@ local function paneFor(po, row)
             end
         end
     end
+    perfStop(po.host, "popoutrow:paneBuild", t0)
     return rec, true
 end
 
@@ -490,6 +557,7 @@ end
 
 -- Show `row`'s pane on this instance and take the old one down.
 local function swapTo(po, row)
+    local t0 = perfStart(po.host)
     local prev = po._rowActive
     local rec = paneFor(po, row)
     -- Re-synced on every swap, not just on build: a CACHED pane's row may have
@@ -508,7 +576,13 @@ local function swapTo(po, row)
     if not rec.scroll then rec.h = max(rec.pane:GetHeight() or 0, 1) end
     po.content:SetHeight(rec.h)
     po:Resize()
+    -- ...and the bind is ALSO what re-tints the pane just mounted. Its SetAccent
+    -- runs the shell's cascade, which reaches the mount's hand-off, which paints
+    -- whichever pane _rowActive now names -- this one. That is why _rowActive is
+    -- set ABOVE the bind and not below it, and why the swap needs no cascade of
+    -- its own. See THE ACCENT, AND THE PANES THAT ARE NOT LOOKING.
     bindRow(po, row)
+    perfStop(po.host, "popoutrow:swap", t0)
     return rec
 end
 
@@ -1083,6 +1157,11 @@ function UI:CreatePopoutRow(parent, opts)
         -- beside the row would put the panel on top of the list it came from --
         -- which is the whole reason the outsideOf placement exists.
         if not row._window then return row end
+        -- THE WHOLE CLICK, end to end: the adopt (or the build), the pane swap,
+        -- the dock and the chrome. Every other mark in this pair of files
+        -- decomposes this one, so a report that shows a slow open says in the
+        -- same breath which part of it was slow.
+        local t0 = perfStart(host)
         local po = host:CreatePopout({
             key     = row._key,
             title   = row._title,
@@ -1123,6 +1202,7 @@ function UI:CreatePopoutRow(parent, opts)
         po:Follow(row, { outsideOf = row._window, clipTo = row._clipTo })
         row.popout = po
         if not po.pinned then storeFor(host).shared[row._key] = po end
+        perfStop(host, "popoutrow:open", t0)
         return row
     end
 

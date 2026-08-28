@@ -188,6 +188,7 @@ its commit stays on OK/Apply.
 | `UI:CreateSelectionMarker(parent, opts)` | One accent bar for a whole group of tabs or rows, which GLIDES between them. `opts.axis` `"x"` (an underline along the member's bottom edge) or `"y"` (a rail down its left). `marker:SetTo(target, color, instant)` / `:Clear()` / `:ClearIf(target)` / `:GetOwner()`. Pair with `StyleButton{ tab = true, tabStripe = false }` so members draw no stripe of their own |
 | `UI.Colors`, `UI.DialogColors`, `UI.RowGap`, `UI.RowHeight`, `UI.Space`, `UI.MEDIA` | Palette and metrics. Never hardcode a colour. `UI.Colors` carries the neutrals (`background`, `panel`, `element`, `border`, `hover`, `text`, `textDim`), the two accent poles (`accent`, `raid`), the note tones (`warning`, `notice`) and the mover-overlay roles `anchorRoot` (green: a mover that other movers are anchored to) and `anchored` (purple: a mover anchored to another mover), plus `danger` (red: a blocked or occupied surface) |
 | `UI.SnapLen(frame, v)`, `UI.SnapLenUp(frame, v)`, `UI.SnapHeightEven(frame, v)`, `UI:CursorPos(frame)` | Pixel-grid maths |
+| `UI:PerfStart()`, `UI:PerfStop()`, `UI:PerfReport()` | Per-host call counts and wall time, printed through your `debug` hook under `"PERF"`. Every hook the kit fires goes through `UI:Call` and is counted by name, with an applies-per-drag line for the last slider drag. The popout shell books its own internal work into the same buckets — `popoutrow:open` (a whole row click, end to end) decomposes into `popoutrow:paneBuild`, `popoutrow:swap`, `popout:adopt`, `popout:cascade`, `popout:chrome`, `popout:footer`, and `popout:close` for the other direction. Off by default and free when off: one `rawget` per mark, nothing allocated and no timer started until `PerfStart` |
 
 Scroll frames must use `ScrollFrameTemplate` (not `UIPanelScrollFrameTemplate`) for
 `StyleScrollBar` to find their parts.
@@ -251,7 +252,8 @@ something to dock to.
 | `po:SetHeader(title, icon)`, `po:GetTitle()` | Title bar contents |
 | `po:Resize()` | Re-fit the height after changing the content's height |
 | `po:GetAccent()` | The colour this popout's chrome is drawn in: `opts.accent`, else the host accent |
-| `po:SetAccent(c)` | Live re-tint of a popout that is already up: border, connection point, beam and source outline all repaint, **and the colour cascades into the widgets the consumer mounted** (see below). `nil` hands it back to the host accent. `adopt` paints at open time; this is the only way to repaint one mid-flight (a party/raid mode switch under an open panel) |
+| `po:SetAccent(c)` | Live re-tint of a popout that is already up: border, connection point, beam and source outline all repaint **when the colour has actually moved**, and the colour cascades into the widgets the consumer mounted (see below). `nil` hands it back to the host accent. `adopt` paints at open time; this is the only way to repaint one mid-flight (a party/raid mode switch under an open panel) |
+| `po:CascadeInto(root, c)` | Run the accent cascade over one branch, in one colour. For a subtree that has taken its own repaint over with `dfCascadeInto` (see below); `root` must be below the frame carrying that marker |
 | `po:HideChrome()` | Take the beam and the source outline down at once, animations cancelled — for a consumer hiding the popout by hand (a combat suspend, a drag). Neither is a child of `po.frame`, so nothing else would |
 | `po:Close([reason])`, `po:IsShown()` | Close hands `reason` to `onClose`. A pinned instance is discarded; an unpinned one goes back to the pool |
 | `UI.PopoutPickSide(src, w, h, gap, screenW, screenH)`, `UI.PopoutDockPos(src, side, w, h, gap)`, `UI.PopoutOutsidePos(win, row, w, h, gap, screenW, screenH, forcedSide)`, `UI.PopoutNotchTip(rect, side, size)`, `UI.PopoutNearestOnRect(rect, x, y)`, `UI.PopoutIsAdjacent(a, b, gap)` | The docking and beam geometry as pure functions (on the library, not a host). Rects are centre-based, in UIParent-centre units. `PopoutOutsidePos` is the settings placement's whole geometry — it answers `side, x, y` for a popout standing outside `win`, **centred on** `row`, then clamped into the window's vertical span (skipped when the popout is taller than the window, since no position there satisfies it) and finally onto the screen; the dock, the retarget glide and the tests all read that one answer. Centred, not hung from the row's top: a tall popout hung by its top drops its whole body below the row it belongs to and ends up level with a part of the list it has nothing to do with. `PopoutIsAdjacent` is published for consumers; the shell itself no longer consults it |
@@ -312,6 +314,29 @@ site's choice, not an inherited one), and any repaint that reads
 `host:GetAccent()` at *click* time rather than at theme time — a dropdown menu
 building its rows, an anchor grid cell re-activating — comes up in the host
 colour until it is next rebuilt.
+
+**A subtree may own its own repaint** — set `frame.dfCascadeInto = function(c)`
+and the walk hands that frame the colour and descends no further down it. The
+owner repaints whatever it decides is worth repainting, normally through
+`po:CascadeInto(root, c)` so the shell's rules (`ApplyThemeColor`, the depth
+bound) still apply; the root it passes must be *below* the frame carrying the
+marker, or the hand-off re-enters itself.
+
+This exists because a cascade over a *cache* is a cost that grows. Popout rows
+share one pooled panel and keep every pane they have ever built under one mount,
+so the shell's walk was re-tinting every group the user had opened all session,
+on every open — measured at 226 `ApplyThemeColor` calls per open on a 14-row
+page. Only one pane is on screen, so the mount takes the call, paints that one,
+and catches a hidden pane up on the swap that shows it. If you cache built
+content inside a popout, do the same.
+
+**Chrome is compare-before-paint.** `_ApplyAccent` re-issues the panel's backdrop
+(or its rounded fill and ring), the connection point's tint and the source
+outline only when the colour or the surface style has actually moved. Opening a
+row's panel applies the accent twice — once from `adopt`, once from the row's
+bind — and the second was a full re-issue of a shape that had not changed. The
+colour is compared by *value*, not by identity: the host's accent table is
+mutated in place, so an identity check would sleep through every theme change.
 
 ### Popout rows (options manifest)
 
