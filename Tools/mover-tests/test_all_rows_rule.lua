@@ -42,6 +42,16 @@ for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
     PAGES[#PAGES + 1] = "GUI/" .. name:gsub("\\", "/")
 end
 
+-- ⚠ AND THE ONE PAGE THAT IS NOT IN GUI\Pages. The Aura Designer's popout page
+-- lives with the rest of the designer's editor rather than with the settings
+-- pages, because it is one arm of a builder whose other arm is the split panel.
+-- It is a settings page for every purpose this rule cares about, so a shape
+-- exemption on the grounds of which folder it sits in would be exactly the gap
+-- this file was written to close.
+for name in TOC:gmatch("AuraDesigner\\(UI\\Rows%.lua)") do
+    PAGES[#PAGES + 1] = "AuraDesigner/" .. name:gsub("\\", "/")
+end
+
 print("-- All-rows rule: every settings page shares two edges")
 do
     check(#PAGES >= 8, "toc: the manifest lists the page files (found " .. #PAGES .. ")")

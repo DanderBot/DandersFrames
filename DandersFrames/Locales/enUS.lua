@@ -1812,6 +1812,9 @@ L["Top Right"] = true
 L["Top Edge"] = true
 L["Top to Bottom"] = true
 L["Total:"] = true
+-- The Aura Designer row page's name for the block the card captions "TRIGGERED
+-- BY". Sentence case, like every other row label on the page.
+L["Triggered By"] = true
 L["Trinkets & Items"] = true
 L["Truncate Mode"] = true
 L["Turn on Others Only for an effect to ignore your own casts."] = true
@@ -1941,6 +1944,10 @@ L["COPY APPEARANCE FROM"] = true
 L["Categories shown here are hidden from the main debuff bar automatically."] = true
 L["Channel"] = true
 L["Click"] = true
+-- The Aura Designer row page's name for the block the card captions "COPY
+-- APPEARANCE FROM". A row's label is a NAME, in sentence case like every other
+-- one on the page; the caption inside it stays as it is.
+L["Copy Appearance"] = true
 L["Copy Settings to %s"] = true
 L["Custom Sound Path"] = true
 L["Customise"] = true

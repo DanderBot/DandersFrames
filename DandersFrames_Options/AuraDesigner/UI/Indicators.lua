@@ -50,6 +50,30 @@ local function CountTypeColorConfigs(typeKey)
     return n
 end
 
+-- ============================================================
+-- "SOMETHING STRUCTURAL CHANGED HERE: REDRAW WHAT SHOWS IT"
+-- ------------------------------------------------------------
+-- Fifteen controls in this file reveal or hide a sibling when they are toggled --
+-- the pandemic colour picker, the icon's text-only mode, every sound sub-control.
+-- On the CARD that has always meant a full page rebuild, which is fine there: the
+-- card is rebuilt and re-expanded in place.
+--
+-- ☠ IN A POPOUT PANE A REBUILD IS THE ONE THING THAT MUST NOT HAPPEN. Every route
+-- into a page builder closes every open panel first (CreatePopoutPageTools' own
+-- first act), so a control that rebuilt the page would shut the panel the user is
+-- clicking through, mid-edit, every time. The pane's own re-flow is the same
+-- redraw at the right scope -- it re-evaluates the hideOns inside the pane and
+-- runs the page's state pass, which is what re-evaluates the ROWS' hideOns too.
+--
+-- The host tells the two apart: a pane parent carries dfAD_ReflowInPane, stamped
+-- by AddGroup's collect wrapper. A card parent does not, and takes the old path.
+local function ADStructuralRedraw(host)
+    local reflow = host and host.dfAD_ReflowInPane
+    if reflow then reflow() return end
+    DF:AuraDesigner_RefreshPage()
+end
+P.ADStructuralRedraw = ADStructuralRedraw
+
 -- "Only during pandemic window" — the frame-level twin of the icon Pandemic cue.
 -- The colour wash is handed to the engine's refresh-window driver (Factory
 -- wantsPandemicColor -> AuraContainer bindNative), so it shows only while a refresh
@@ -70,7 +94,7 @@ local function AddPandemicColor(g, parent, proxy, RPL)
         -- STRUCTURAL: enabling emits a SECOND container, and its engine bind needs
         -- secure context -> a full refresh, not a restyle.
         DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-        DF:AuraDesigner_RefreshPage()   -- the colour picker below appears/disappears
+        ADStructuralRedraw(parent)   -- the colour picker below appears/disappears
     end)
     cb.hideOn = function() return proxy.showWhenMissing and true or false end
     cb.tooltip = L["Switches to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
@@ -91,9 +115,31 @@ end
 
 -- layoutGroup: optional layout group table; if set, anchor/offset controls are replaced with a note
 -- indicatorID: optional indicator ID for placed indicators (used by Copy From)
-local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOffset, layoutGroup, indicatorID)
+--
+-- ☠ collect: COLLECT MODE, and it is the whole seam the popout rework hangs off.
+-- Handed a table, this function builds NOTHING. It walks the same branches and
+-- records each section it would have built as { header, build }, then returns the
+-- table. The row page (AuraDesigner/UI/Rows.lua) turns each entry into one popout
+-- row and calls `build(group, paneParent, reflow)` when that row's pane is mounted.
+--
+-- ⚠ THE SECTION BODIES ARE NOT COPIED, MOVED OR REWRITTEN. They are the same
+-- closures, run later against a different `parent`. `parent` is this function's
+-- own parameter -- a plain local -- so re-pointing it before a body runs re-points
+-- every widget that body creates, with no edit to any of them. A control that
+-- moved pane but lost its proxy binding would read the fallback and look correct
+-- while writing nowhere, which is the one failure this whole shape exists to make
+-- impossible: the binding is `proxy`, and `proxy` never moves.
+--
+-- ⚠ AND THE TOP-LEVEL AddWidget REDIRECTS. Two things (Copy Appearance From, and
+-- the bar's expiry note) are added to the card's own stack rather than to a group.
+-- In collect mode `curGroup` is the pane's group while a body runs, so those calls
+-- land in the pane they belong to instead of anchoring onto a parent that is not
+-- laying anything out.
+local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOffset, layoutGroup, indicatorID, collect)
     local proxy = optProxy or CreateProxy(auraName, typeKey)
     local contentWidth = width or 248
+    -- The pane group currently being filled (collect mode only). See AddWidget.
+    local curGroup
     -- widgets[] entries are {widget, height} so the reflow path can use
     -- group.calculatedHeight (current after a LayoutChildren) while
     -- non-group widgets fall back to the stored at-build-time height.
@@ -127,6 +173,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     end
 
     local function AddWidget(widget, height)
+        -- Collect mode: the card has no stack, so a loose widget belongs to
+        -- whichever pane's body is running. Sized by the group, not by hand.
+        if curGroup then
+            curGroup:AddWidget(widget, height or 30)
+            return
+        end
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
         if widget.SetWidth then widget:SetWidth(contentWidth - 10) end
         tinsert(widgets, { widget = widget, height = height or 30 })
@@ -142,6 +194,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- group.calculatedHeight for groups so the new layout flows correctly.
     -- The host container's height is updated too so any parent scroll
     -- range stays accurate.
+    -- Not in collect mode: there is no stack to walk, and stamping this would put
+    -- a card's reflow onto whatever host the collector happened to hand in.
+    if not collect then
     parent.dfAD_ReflowWidgets = function()
         local y = startY
         for _, entry in ipairs(widgets) do
@@ -159,8 +214,44 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end
         parent:SetHeight(y)
     end
+    end
 
-    local function AddGroup(header, buildFn, showSummary)
+    -- ONE section, in whichever shape the caller asked for. Collect mode records
+    -- the body and returns nil -- see the note on `collect` above -- so a caller
+    -- that captures the group (only the bar's Appearance does) gets nil there and
+    -- must cope, which it does: its one reader is a scroll helper that already
+    -- guards on the split panel's scroll frame existing.
+    local function AddGroup(header, buildFn, showSummary, hideOn)
+        if collect then
+            collect[#collect + 1] = {
+                header = header,
+                -- Card mode drops a conditional section at BUILD time, because the
+                -- card is rebuilt whenever the tick that gates it moves. A pane
+                -- cannot be rebuilt from inside itself without closing the panel
+                -- being clicked through, so the condition rides the ROW and the
+                -- page's state pass collapses its slot.
+                hideOn = hideOn,
+                build  = function(g, paneParent, reflow)
+                    local savedParent, savedGroup = parent, curGroup
+                    parent, curGroup = paneParent, g
+                    -- The pane answers for its own re-flow: CreateBorderControls'
+                    -- refreshStates reaches for parent.dfAD_ReflowWidgets, which on
+                    -- the card was the whole-stack walk and in a pane is the kit's
+                    -- own pane reflow.
+                    if reflow then
+                        paneParent.dfAD_ReflowWidgets = reflow
+                        -- The flag ADStructuralRedraw reads to tell a pane from a
+                        -- card. Separate from the name above, which is the border
+                        -- toolkit's whole-stack walk and happens to want the same
+                        -- function here.
+                        paneParent.dfAD_ReflowInPane = reflow
+                    end
+                    buildFn(g)
+                    parent, curGroup = savedParent, savedGroup
+                end,
+            }
+            return nil
+        end
         local group = GUI:CreateSettingsGroup(parent, contentWidth - 10, {
             collapsible = true,
             showSummary = showSummary or false,
@@ -177,90 +268,97 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
 
     -- ── COPY FROM (placed indicators only: icon, square, bar) ──
+    -- ⚠ A FUNCTION IN COLLECT MODE, so the block can run inside a pane rather
+    -- than anchoring onto a card stack that does not exist there. It reads `parent`,
+    -- and collect mode re-points that local before calling it -- see AddGroup.
     if indicatorID and (typeKey == "icon" or typeKey == "square" or typeKey == "bar") then
-        local copyContainer = CreateFrame("Frame", nil, parent)
-        copyContainer:SetHeight(36)
+        local function BuildCopyFrom()
+            local copyContainer = CreateFrame("Frame", nil, parent)
+            copyContainer:SetHeight(36)
 
-        local copyLabel = copyContainer:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(copyLabel, 8, "")
-        copyLabel:SetPoint("TOPLEFT", 1, -1)
-        copyLabel:SetText(L["COPY APPEARANCE FROM"])
-        copyLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            local copyLabel = copyContainer:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(copyLabel, 8, "")
+            copyLabel:SetPoint("TOPLEFT", 1, -1)
+            copyLabel:SetText(L["COPY APPEARANCE FROM"])
+            copyLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-        local capturedAuraName = auraName
-        local capturedIndicatorID = indicatorID
-        local capturedTypeKey = typeKey
+            local capturedAuraName = auraName
+            local capturedIndicatorID = indicatorID
+            local capturedTypeKey = typeKey
 
-        -- Build the list of other placed indicators of the same type as the
-        -- dropdown's options (rebuilt on each open via optionsFunc so newly-added
-        -- indicators appear). Keyed by a synthetic id -> a captured source table;
-        -- picking one copies its appearance. The opener stays "Select indicator..."
-        -- (it's an action picker, not a value selector), achieved by a customGet
-        -- that always returns that label string (no matching option key).
-        local copySources = {}
-        local function BuildCopyFromOptions()
-            wipe(copySources)
-            local isOther = IsOtherTab()
-            local spec = (not isOther) and ResolveSpec() or nil
-            local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
-            local displayNames = {}
-            if trackable then
-                for _, info in ipairs(trackable) do
-                    displayNames[info.name] = info.display
+            -- Build the list of other placed indicators of the same type as the
+            -- dropdown's options (rebuilt on each open via optionsFunc so newly-added
+            -- indicators appear). Keyed by a synthetic id -> a captured source table;
+            -- picking one copies its appearance. The opener stays "Select indicator..."
+            -- (it's an action picker, not a value selector), achieved by a customGet
+            -- that always returns that label string (no matching option key).
+            local copySources = {}
+            local function BuildCopyFromOptions()
+                wipe(copySources)
+                local isOther = IsOtherTab()
+                local spec = (not isOther) and ResolveSpec() or nil
+                local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
+                local displayNames = {}
+                if trackable then
+                    for _, info in ipairs(trackable) do
+                        displayNames[info.name] = info.display
+                    end
                 end
-            end
 
-            -- Sources come from the SAME pool as the destination card (the
-            -- active tab's) — CopyIndicatorAppearance resolves both ends
-            -- through the pool-routed GetIndicatorByID.
-            local sources = {}
-            for srcAura, auraCfg in pairs(CurrentAuraPool(spec)) do
-                if type(auraCfg) == "table" and auraCfg.indicators then
-                    for _, ind in ipairs(auraCfg.indicators) do
-                        if ind.type == capturedTypeKey then
-                            -- Skip self
-                            if not (srcAura == capturedAuraName and ind.id == capturedIndicatorID) then
-                                tinsert(sources, {
-                                    auraName = srcAura,
-                                    displayName = isOther and OtherPoolDisplayName(srcAura)
-                                        or displayNames[srcAura] or srcAura,
-                                    indicatorID = ind.id,
-                                })
+                -- Sources come from the SAME pool as the destination card (the
+                -- active tab's) — CopyIndicatorAppearance resolves both ends
+                -- through the pool-routed GetIndicatorByID.
+                local sources = {}
+                for srcAura, auraCfg in pairs(CurrentAuraPool(spec)) do
+                    if type(auraCfg) == "table" and auraCfg.indicators then
+                        for _, ind in ipairs(auraCfg.indicators) do
+                            if ind.type == capturedTypeKey then
+                                -- Skip self
+                                if not (srcAura == capturedAuraName and ind.id == capturedIndicatorID) then
+                                    tinsert(sources, {
+                                        auraName = srcAura,
+                                        displayName = isOther and OtherPoolDisplayName(srcAura)
+                                            or displayNames[srcAura] or srcAura,
+                                        indicatorID = ind.id,
+                                    })
+                                end
                             end
                         end
                     end
                 end
-            end
-            sort(sources, function(a, b) return a.displayName < b.displayName end)
+                sort(sources, function(a, b) return a.displayName < b.displayName end)
 
-            local options = { _order = {} }
-            for i, src in ipairs(sources) do
-                local key = "src" .. i
-                copySources[key] = src
-                options[key] = { text = src.displayName }
-                options._order[i] = key
-            end
-            return options
-        end
-
-        local copyDrop = GUI:CreateDropdown(
-            copyContainer, "", BuildCopyFromOptions(),
-            nil, nil, nil,
-            function() return L["Select indicator..."] end,   -- customGet (static opener)
-            function(key)                                      -- customSet (action)
-                local src = copySources[key]
-                if src then
-                    CopyIndicatorAppearance(src.auraName, src.indicatorID, capturedAuraName, capturedIndicatorID)
-                    DF:AuraDesigner_RefreshPage()
+                local options = { _order = {} }
+                for i, src in ipairs(sources) do
+                    local key = "src" .. i
+                    copySources[key] = src
+                    options[key] = { text = src.displayName }
+                    options._order[i] = key
                 end
-            end,
-            { inline = true, optionsFunc = BuildCopyFromOptions }
-        )
-        copyDrop:SetPoint("TOPLEFT", 0, -12)
-        copyDrop:SetPoint("RIGHT", copyContainer, "RIGHT", 0, 0)
-        copyDrop:SetHeight(20)
+                return options
+            end
 
-        AddWidget(copyContainer, 38)
+            local copyDrop = GUI:CreateDropdown(
+                copyContainer, "", BuildCopyFromOptions(),
+                nil, nil, nil,
+                function() return L["Select indicator..."] end,   -- customGet (static opener)
+                function(key)                                      -- customSet (action)
+                    local src = copySources[key]
+                    if src then
+                        CopyIndicatorAppearance(src.auraName, src.indicatorID, capturedAuraName, capturedIndicatorID)
+                        ADStructuralRedraw(parent)
+                    end
+                end,
+                { inline = true, optionsFunc = BuildCopyFromOptions }
+            )
+            copyDrop:SetPoint("TOPLEFT", 0, -12)
+            copyDrop:SetPoint("RIGHT", copyContainer, "RIGHT", 0, 0)
+            copyDrop:SetHeight(20)
+
+            AddWidget(copyContainer, 38)
+        end
+        -- A row of its own in the popout layout; the card's own first block otherwise.
+        if collect then AddGroup(L["Copy Appearance"], BuildCopyFrom) else BuildCopyFrom() end
     end
 
     -- Color picker callback shorthand — refreshes both the AD preview and live frames
@@ -562,7 +660,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() ADStructuralRedraw(parent) end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -580,7 +678,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- (gated on proxy.hideIcon below) — matching the runtime, which
             -- force-disables both borders in this mode.
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon", function()
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 28)
         end)
         -- Border (Stage 5.1c — unified controls via CreateBorderControls).
@@ -594,7 +692,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- time remaining" implicitly through its own colour curve.
         -- Text-only mode hides the icon texture, so the whole Border group is
         -- hidden (the runtime force-disables the border there too).
-        if not proxy.hideIcon then
+        -- ⚠ COLLECT MODE KEEPS IT AND HIDES THE ROW INSTEAD -- see AddGroup's own
+        -- note. Dropping the section here would mean the Border row could only
+        -- appear on a page REBUILD, and the tick that gates it lives in the
+        -- Appearance pane, so the rebuild would shut the panel it was clicked in.
+        if collect or not proxy.hideIcon then
         AddGroup(L["Border"], function(g)
             GUI:CreateBorderControls(g, proxy, "", {
                 parent  = parent,
@@ -637,7 +739,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 end,
                 sizeMin = 1, sizeMax = 5, sizeStep = 1,
             })
-        end)
+        end, nil, function() return proxy.hideIcon and true or false end)
         end  -- if not proxy.hideIcon (text-only hides the Border group)
         -- Expiring (moved up next to Border — the border's expiring colour and
         -- the per-icon effects all key off the same threshold, so grouping
@@ -741,7 +843,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() ADStructuralRedraw(parent) end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -864,7 +966,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
-                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() DF:AuraDesigner_RefreshPage() end), 54)
+                g:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], OPTS.ANCHOR_OPTIONS, proxy, "anchor", function() ADStructuralRedraw(parent) end), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, proxy, "offsetX"), 54)
                 g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "offsetY"), 54)
             end
@@ -880,7 +982,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local mh = proxy.matchFrameHeight
                 proxy.matchFrameWidth = mh
                 proxy.matchFrameHeight = mw
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Width"], 0, 200, 1, proxy, "width"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 30, 1, proxy, "height"), 54)
@@ -1025,6 +1127,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Appearance."], link), {
                 width = innerW,
                 onLinkClick = function()
+                    -- ☠ IN THE POPOUT LAYOUT THERE IS NOTHING TO SCROLL TO. Appearance is a
+                    -- sibling ROW behind its own panel, not a group further down one column,
+                    -- so "scroll the card up to it" has no meaning and `texColorsGroup` is
+                    -- nil (AddGroup builds nothing in collect mode). Open the row instead --
+                    -- the same destination by the layout's own verb.
+                    if collect then
+                        if collect.openSection then collect.openSection(L["Appearance"]) end
+                        return
+                    end
                     -- Scroll the section into view, but FLASH the specific Color Mode widget
                     -- (LinkToSetting flashes target.widget — pass the group instead to flash the
                     -- whole section).
@@ -1084,7 +1195,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- ticked, letting a user enable a pandemic colour on a config the renderer
                 -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
                 -- checkbox's own callback already does this, for the same reason.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1126,7 +1237,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 -- Rebuild so the Blend % slider's hideOn re-evaluates and the
                 -- group's height recomputes for the new visible-widget set.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
@@ -1150,7 +1261,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- ticked, letting a user enable a pandemic colour on a config the renderer
                 -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
                 -- checkbox's own callback already does this, for the same reason.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1179,7 +1290,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 g:AddWidget(spacer, 6)
             end
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
@@ -1194,7 +1305,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- ticked, letting a user enable a pandemic colour on a config the renderer
                 -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
                 -- checkbox's own callback already does this, for the same reason.
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1256,14 +1367,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 if not proxy.enabled and DF.AuraDesigner.SoundEngine then
                     DF.AuraDesigner.SoundEngine:StopAura(auraName)
                 end
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 28)
 
             -- The flat sound below is the APPLIED sound (native Added trigger). This toggle
             -- silences it independently of the Buff-Dropped / Stack-Gained events below.
             if proxy.appliedEnabled == nil then proxy.appliedEnabled = true end
             g:AddWidget(GUI:CreateCheckbox(parent, L["Play when the buff is applied"], proxy, "appliedEnabled", function()
-                DF:AuraDesigner_RefreshPage()
+                ADStructuralRedraw(parent)
             end), 28)
 
             -- Sound picker (searchable scrollable dropdown)
@@ -1326,7 +1437,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 proxy[subKey] = proxy[subKey] or {}
                 local ec = proxy[subKey]
                 g:AddWidget(GUI:CreateCheckbox(parent, enableLabel, ec, "enabled", function()
-                    DF:AuraDesigner_RefreshPage()
+                    ADStructuralRedraw(parent)
                 end), 28)
                 local dd = GUI:CreateSoundDropdown(parent, L["Sound"], ec, "soundLSMKey", function()
                     local path = DF:GetSoundPath(ec.soundLSMKey)
@@ -1448,6 +1559,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         --     renders solid in game, the cause is something not yet found and the block
         --     should come back with the real reason recorded.
     end
+
+    -- Collect mode built nothing, so there is no stack to close and no host to
+    -- size; the caller wanted the section list and that is what it gets.
+    if collect then return collect end
 
     totalHeight = totalHeight + 8  -- bottom padding
     parent:SetHeight(totalHeight)

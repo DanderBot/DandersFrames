@@ -662,7 +662,18 @@ P.CreateSpecDropdown = CreateSpecDropdown
 -- and 9 anchor point dots for indicator placement
 -- ============================================================
 
-local function CreateFramePreview(parent, yOffset, rightPanelRef)
+-- opts.compact -- the BAND form of this canvas, for the popout layout's single
+-- column. The anatomy, the nine anchor dots, the drag targets and RefreshGeometry
+-- are all identical; two pieces of standing furniture are not:
+--   * the three instruction rows along the bottom become the canvas's TOOLTIP.
+--     They are 54px of secondary text, and the band the artifact specified is
+--     132px tall: label strip 28 + scale slider 30 + those rows 59 leaves 15px
+--     for a 64px-tall mock frame, so the mock would be drawn straight over them.
+--   * RefreshGeometry's vertical fit accounts for the label+slider strip, which
+--     the split-panel form could ignore because it had 400px of height to spend.
+-- Omit opts entirely and this is byte-for-byte the canvas the split panel built.
+local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
+    local compact = opts and opts.compact or false
     -- Read current frame settings for the preview
     local mode = (GUI and GUI.SelectedMode) or "party"
     local frameDB = DF:GetDB(mode) or DF.PartyDefaults
@@ -704,7 +715,10 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     -- Mock unit frame (centered in container)
     local mockFrame = CreateFrame("Frame", nil, container, "BackdropTemplate")
     mockFrame:SetSize(FRAME_W, FRAME_H)
-    mockFrame:SetPoint("CENTER", container, "CENTER", 0, -4)
+    -- -20 in the compact form: with the instruction rows gone the free space runs
+    -- from under the scale slider to the bottom edge, so the box's own centre is
+    -- 20-odd pixels above the centre of what is actually free.
+    mockFrame:SetPoint("CENTER", container, "CENTER", 0, compact and -20 or -4)
     mockFrame:SetScale(previewScale)
     ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
     container.mockFrame = mockFrame
@@ -737,7 +751,11 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
         end
         -- 16 = the container's own left/right padding; 28 = that plus the
         -- "FRAME PREVIEW" label strip along the top.
-        local fit = math.min((cw - 16) / w, (ch - 28) / h)
+        -- ⚠ 72 in the compact form, not 28: that strip is followed by the Preview
+        -- Scale slider, and in a 132px band the two together are more than half
+        -- the box. The split panel could ignore them because the slack above the
+        -- centred mock was never the binding constraint there.
+        local fit = math.min((cw - 16) / w, (ch - (compact and 72 or 28)) / h)
         mockFrame:SetScale(math.max(0.2, math.min(want, fit)))
     end
 
@@ -920,6 +938,21 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
         { key = L["Right-click"], desc = L["a placed indicator to remove it from the frame"] },
     }
 
+    -- Compact: the same three sentences, on hover instead of underfoot. They are
+    -- guidance read once, and the band has no 54px to spend saying it permanently.
+    if compact then
+        local lines = {}
+        for _, row in ipairs(instrRows) do
+            lines[#lines + 1] = row.key .. " " .. row.desc
+        end
+        container:EnableMouse(true)
+        container:SetScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, { title = L["FRAME PREVIEW"], lines = lines })
+        end)
+        container:SetScript("OnLeave", function() GUI:HideTooltip() end)
+        instrRows = {}
+    end
+
     local instrCount = #instrRows
     for i, row in ipairs(instrRows) do
         local rowBottomOffset = 10 + (instrCount - i) * 18
@@ -1069,7 +1102,12 @@ local function OpenADPicker(opts)
     S.adPickerDirty = false
     if S.tabBar then S.tabBar:Hide() end
     if S.tabScrollFrame then S.tabScrollFrame:Hide() end
-    opts.parent = S.rightPanel
+    -- ☠ THE PICKER TAKES A HOST TO COVER, AND THE POPOUT LAYOUT HAS NO RIGHT
+    -- PANEL. OpenSpellPicker anchors to this frame and reads its frame level, so a
+    -- nil here is an error rather than a degraded picker. In the row layout the
+    -- surface it should cover is the settings content area, which is what the
+    -- split panel's right half was a half of.
+    opts.parent = S.rightPanel or (GUI and GUI.contentFrame)
     opts.onClose = ADPickerClosed
     -- Row tooltips list the ID set the PLACEMENT will track, which on My Buffs
     -- is the curated set and not just what the row's canonical id implies —
@@ -1161,6 +1199,22 @@ S.SwitchTab = function(tabKey)
     if tabKey == "effects" and IsDebuffTab() then
         tabKey = "layout"
     end
+
+    -- ☠ IN THE POPOUT LAYOUT THERE IS NO TAB PANEL TO REBUILD. The row page
+    -- (AuraDesigner/UI/Rows.lua) has no S.tabBar, no S.tabScrollFrame and no
+    -- S.tabContentFrame -- its tabs are bands in the page's own column, so the
+    -- rebuild verb is the page harness's. Branching HERE rather than at the
+    -- ~60 call sites: every one of them means "the data moved, redraw the tab",
+    -- and that sentence is true in both layouts -- only the machinery differs.
+    if S.rowsMode then
+        S.activeTab = tabKey
+        S.adPickerDirty = false
+        CloseADPicker()
+        if GUI then GUI:CloseAllMenus() end
+        if S.page and S.page.Refresh then S.page:Refresh() end
+        return
+    end
+
     -- Preserve scroll position when refreshing the same tab
     local prevTab = S.activeTab
     local savedScroll = 0
@@ -1579,6 +1633,544 @@ P.OpenGroupSpellPicker = OpenGroupSpellPicker
 -- ── CREATE EFFECT CARD ──
 -- Creates a collapsible card for one effect in the effects list.
 -- Returns the new yPos after the card.
+-- ============================================================
+-- A FRAME-LEVEL EFFECT'S OWN TWO BLOCKS
+-- ------------------------------------------------------------
+-- Triggered By, and Priority with the border effect's Own Border opt-out beside
+-- it. Extracted from S.CreateEffectCard so the popout layout's row page can
+-- mount the SAME two inside popout panes: the card stacks them at running y
+-- offsets down one body, a pane hosts one each at the top of its own.
+--
+-- ☠ EXTRACTED, NOT COPIED. These are the only two blocks on an effect that are
+-- not sections of BuildTypeContent, so they are the only two the collect seam
+-- there cannot reach -- and 500 lines of trigger tags said twice is 500 lines
+-- that would drift.
+--
+-- `baseH` is where the block starts inside its host -- the card's running total,
+-- or 0 in a pane. Each returns the height it took, which is what the card
+-- advances by; the pane uses it to size its one widget.
+-- ============================================================
+
+S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
+    baseH = baseH or 0
+    local triggersH = 0
+        -- Normalised view: one group for a plain effect, N for a conditional one.
+        local condGroups = GetEffectConditionGroups(effect.auraName, effect.typeKey)
+        local condMode   = GetEffectConditionMode(effect.auraName, effect.typeKey)
+        local multiCond  = #condGroups > 1
+        -- ☠ WITHIN a group the operator is the OPPOSITE of the one BETWEEN groups, and
+        -- that is not arbitrary: ALL means every group must match, so a group is a bag
+        -- of alternatives (OR); ANY means one group must match, so its members have to
+        -- hold together (AND). An ungrouped effect is a single OR group -- the legacy
+        -- behaviour, unchanged. Drawn between the tags because pressing the mode button
+        -- otherwise reverses what every existing trigger means with no visual change.
+        local innerOp = (multiCond and condMode == "ANY") and L["AND"] or L["OR"]
+        local trigContainer = CreateFrame("Frame", nil, body)
+        trigContainer:SetPoint("TOPLEFT", 8, -(baseH + 12))
+        trigContainer:SetPoint("RIGHT", body, "RIGHT", -8, 0)
+
+        local trigLabel = trigContainer:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(trigLabel, 9, "")
+        trigLabel:SetPoint("TOPLEFT", 0, 0)
+        trigLabel:SetText(L["TRIGGERED BY"])
+        trigLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+        -- AND/OR operator toggle (only shown with 2+ triggers)
+        -- (No multi-trigger ALL/ANY operator button: evaluating every trigger together
+        --  needs a read the 12.1 aura system cannot do for secret-anchored triggers, so
+        --  it was permanently frosted. Removed 2026-07-25 -- triggerOperator was never
+        --  read by the render path either, only by this editor's own label, so the
+        --  toggle changed nothing. Triggers combine as ANY/OR. The tags stay editable.)
+
+        -- Build display name lookup for tags. Other-pool trigger names are
+        -- SpellDB names / ad-hoc keys — resolved live per tag below.
+        local isOtherCard = IsOtherTab()
+        local spec = (not isOtherCard) and ResolveSpec() or nil
+        local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
+        local displayNames = {}
+        if trackable then
+            for _, info in ipairs(trackable) do
+                displayNames[info.name] = info.display
+            end
+        end
+        if isOtherCard then
+            setmetatable(displayNames, { __index = function(_, name)
+                return OtherPoolDisplayName(name)
+            end })
+        end
+
+        -- ☠ EVERY trigger edit below must drive the LIVE frames, not just the editor.
+        -- A trigger change moves the effect's resolved spell map, which rides the
+        -- TUNING signature — so it only lands when SyncFrame next runs and compares
+        -- sigs. S.SwitchTab rebuilds this tab and RefreshPreviewEffects repaints the
+        -- mock frame; neither touches a real unit frame. Without the throttled live
+        -- refresh the edit sat in the DB doing nothing until some unrelated action
+        -- (or a reload) happened to fire ForceRefreshAllFrames — reported from the
+        -- field as "removed a trigger and the border kept showing until I reloaded".
+        -- Same class of bug AddPickedSpell's own comment already warns about.
+
+        -- Tag flow layout
+        local TAG_H = 20
+        local TAG_GAP = 4
+        local TAG_ROW_GAP = 3
+        local tagX, tagY = 0, -(14 + 6)  -- below label
+
+        for gi = 1, #condGroups do
+        local triggers = condGroups[gi].triggers or {}
+        -- A grouped effect may empty a group out (the card warns); an ungrouped one
+        -- keeps the legacy minimum of one trigger.
+        local canRemove = multiCond or #triggers > 1
+
+        -- Operator caption BETWEEN groups, so the card reads downward as
+        -- "these ... AND ... these". Only present once the effect is conditional.
+        if multiCond and gi > 1 then
+            tagY = tagY - 6
+            -- A RULE across the card, not a floating word: the previous layout put the
+            -- operator and a bare X into the same wrapping flow as the tags, so nothing
+            -- said where one group ended and the next began, or which X removed what.
+            local sep = trigContainer:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(sep, 9, "OUTLINE")
+            sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
+            sep:SetText(condMode == "ALL" and L["AND"] or L["OR"])
+            sep:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
+
+            -- Removal belongs to the group BELOW the rule, and sits at the far right so
+            -- it can never be mistaken for a tag's own X.
+            local delG = DF.GUI:CreateCloseButton(trigContainer, {
+                size = 14, tone = "danger",
+                onClick = function()
+                    RemoveEffectConditionGroup(effect.auraName, effect.typeKey, gi)
+                    S.SwitchTab("effects")
+                    RefreshPreviewEffects()
+                    RefreshLiveFramesThrottled()
+                end,
+            })
+            delG:SetPoint("TOPRIGHT", trigContainer, "TOPRIGHT", 0, tagY - 1)
+            delG.tooltip = L["Remove this condition group."]
+
+            -- ☠ The rule spans the GAP between the caption and the remove button, rather
+            -- than running the full width behind them. Masking the line under the text
+            -- needed the card's exact background colour and still clipped at whatever
+            -- width the translated word happened to be; anchoring between the two makes
+            -- overlap impossible in any language and at any font size.
+            local rule = trigContainer:CreateTexture(nil, "ARTWORK")
+            rule:SetPoint("LEFT", sep, "RIGHT", 8, 0)
+            rule:SetPoint("RIGHT", delG, "LEFT", -8, 0)
+            rule:SetHeight(1)
+            rule:SetColorTexture(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.22)
+            tagY = tagY - 22
+            tagX = 0
+        end
+
+        for ti, trigName in ipairs(triggers) do
+            local tagFrame = CreateFrame("Frame", nil, trigContainer, "BackdropTemplate")
+            tagFrame:SetHeight(TAG_H)
+
+            local tagText = tagFrame:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(tagText, 9, "")
+            tagText:SetPoint("LEFT", 6, 0)
+            -- Filter triggers name themselves from the registry; a raw
+            -- "@preset:raidBuffs" on the tag would be meaningless.
+            tagText:SetText((DF.ADFilterRefDisplayName and DF:ADFilterRefDisplayName(trigName))
+                or displayNames[trigName] or trigName)
+            tagText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+            -- A tag naming a FILTER gets a route to that filter. A tag naming a
+            -- spell does not -- there is nothing to open -- so this is per-tag,
+            -- not per-row: in "Healing OR Tank Cooldowns" only the second one
+            -- earns a pencil.
+            --
+            -- ⚠ Guarded, like every other call to it from this addon: the parser
+            -- is resident and this file is the options companion, so the symbol
+            -- is not guaranteed present at load. The neighbouring
+            -- DF.ADFilterRefDisplayName guard above does NOT cover this -- a
+            -- guard on one function tells you nothing about another.
+            local trigFKind, trigFKey
+            if DF.ParseADFilterRef then
+                trigFKind, trigFKey = DF:ParseADFilterRef(trigName)
+            end
+
+            local tagW = tagText:GetStringWidth() + 12
+            if canRemove then tagW = tagW + 16 end  -- room for × button
+            if trigFKind then tagW = tagW + 16 end  -- room for the edit pencil
+            tagW = max(tagW, 40)
+
+            -- Wrap to next row if needed
+            local containerW = trigContainer:GetWidth()
+            if containerW < 50 then containerW = bodyWidth - 16 end
+            if tagX > 0 and (tagX + tagW) > containerW then
+                tagX = 0
+                tagY = tagY - (TAG_H + TAG_ROW_GAP)
+            end
+
+            tagFrame:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
+            tagFrame:SetWidth(tagW)
+            ApplyBackdrop(tagFrame,
+                {r = 0.14, g = 0.14, b = 0.17, a = 1},
+                {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
+
+            -- Remove × button on each tag (unless it's the last one)
+            -- ☠ DECLARED OUTSIDE the branch: the edit pencil below anchors to it,
+            -- and a `local` inside the `if` is invisible out here. Read from there
+            -- it was a nil GLOBAL, and SetPoint treats a nil relativeTo as the
+            -- PARENT -- so the pencil anchored to the tag's own left edge and drew
+            -- off the frame instead of erroring. Visible with one trigger (where
+            -- canRemove is false and the else branch runs) and silently gone with
+            -- two, which is exactly how it was reported.
+            local removeBtn
+            if canRemove then
+                local capturedTrigName = trigName
+                -- Shared red-at-rest "×" (tone="danger") on each removable tag.
+                removeBtn = DF.GUI:CreateCloseButton(tagFrame, {
+                    size = 14,
+                    tone = "danger",
+                    onClick = function()
+                        RemoveEffectTriggerFromGroup(effect.auraName, effect.typeKey, gi, capturedTrigName)
+                        S.SwitchTab("effects")
+                        RefreshPreviewEffects()
+                        RefreshLiveFramesThrottled()   -- see the trigger-edit note above
+                    end,
+                })
+                removeBtn:SetPoint("RIGHT", -2, 0)
+            end
+
+            -- The pencil sits INSIDE the ×, i.e. further left, so the destructive
+            -- control keeps the corner it has always had. Moving × to make room
+            -- would retrain the muscle memory of every existing tag on the page.
+            if trigFKind then
+                local editBtn = CreateFrame("Button", nil, tagFrame)
+                editBtn:SetSize(14, 14)
+                if canRemove then
+                    editBtn:SetPoint("RIGHT", removeBtn, "LEFT", -1, 0)
+                else
+                    editBtn:SetPoint("RIGHT", -2, 0)
+                end
+                local ei = editBtn:CreateTexture(nil, "OVERLAY")
+                ei:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit")
+                ei:SetSize(11, 11)
+                ei:SetPoint("CENTER")
+                ei:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                editBtn:SetScript("OnEnter", function(self)
+                    ei:SetVertexColor(1, 1, 1)
+                    GUI:ShowTooltip(self, {
+                        title = L["Edit this filter"],
+                        lines = { L["Opens it in the Filter Designer, where you can change which auras it holds."] },
+                    })
+                end)
+                editBtn:SetScript("OnLeave", function()
+                    ei:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                    GUI:HideTooltip()
+                end)
+                local ek, eq = trigFKind, trigFKey
+                editBtn:SetScript("OnClick", function()
+                    if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner(ek, eq) end
+                end)
+            end
+
+            tagX = tagX + tagW + TAG_GAP
+
+            if ti < #triggers then
+                local OP_W = 24
+                if tagX > 0 and (tagX + OP_W) > containerW then
+                    tagX = 0
+                    tagY = tagY - (TAG_H + TAG_ROW_GAP)
+                end
+                local opTxt = trigContainer:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(opTxt, 8, "")
+                opTxt:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX + 2, tagY - 5)
+                opTxt:SetText(innerOp)
+                opTxt:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                tagX = tagX + OP_W
+            end
+        end
+
+        -- "+ Add Trigger" button
+        -- ☠ ALWAYS a fresh row. Sharing the tag flow made the add buttons wrap into the
+        -- middle of a spell list, so which group they belonged to was pure guesswork.
+        local addTrigW = 80
+        tagX = 0
+        tagY = tagY - (TAG_H + TAG_ROW_GAP)
+        local addTrigBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
+        addTrigBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
+        GUI:StyleButton(addTrigBtn, { width = addTrigW, height = TAG_H, primary = true, accent = { r = 0.25, g = 0.40, b = 0.25 }, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Trigger"] })
+        GUI:SetSettingsFont(addTrigBtn.Text, 9, "")
+        addTrigBtn.Text:SetTextColor(0.5, 0.8, 0.5)
+        addTrigBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
+
+        -- Trigger picker: the shared spell database picker, single-pick.
+        -- My Buffs locks it to the resolved spec's class; Other Buffs
+        -- offers the full database (the old plain dropdown restricted
+        -- Other-tab triggers to already-configured auras only because
+        -- the full DB was unusable without search/filters — the shared
+        -- picker has both, so the restriction is lifted). Records also
+        -- include the pool's configured ad-hoc "#<id>" auras. Rows
+        -- already in the effect's trigger list render with the dimmed
+        -- check ("already added").
+        addTrigBtn:SetScript("OnClick", function()
+            -- Pin the pool at OPEN time (pool pinning carried over from
+            -- the old floating dropdown): a pick must keep writing the
+            -- trigger into the pool this card's record lives in, no
+            -- matter how the surrounding UI state moves while the
+            -- picker is up (the record exists, so the read accessor
+            -- returns the real table, never EMPTY_POOL).
+            local capturedPool = CurrentAuraPool()
+            local isOtherTrig = IsOtherTab()
+            local trigSpec = (not isOtherTrig) and ResolveSpec() or nil
+            local trigSpecInfo = trigSpec and DF.AuraDesigner.SpecInfo[trigSpec]
+
+            -- ☠ THIS GROUP's triggers, not the flat list. GetFrameEffectTriggers returns
+            -- group 1 for a grouped effect, so a spell already in group 1 was blocked
+            -- everywhere -- which made (A and B) or (A and C) impossible to build, the
+            -- exact shape ANY mode exists for. A spell may legitimately appear in several
+            -- groups; only a duplicate WITHIN one group is meaningless.
+            local trigLookup = {}
+            for _, t in ipairs(condGroups[gi].triggers or {}) do trigLookup[t] = true end
+
+            OpenADPicker({
+                title = format(L["Select trigger for %s"], S.FRAME_LEVEL_LABELS[effect.typeKey] or effect.typeKey),
+                subtitle = effect.displayName,
+                records = function() return BuildADPickerRecords(true) end,
+                classLock = (not isOtherTrig) and trigSpecInfo and trigSpecInfo.class or nil,
+                isBlocked = function(rec)
+                    return trigLookup[rec.auraName] and true or nil
+                end,
+                rowActions = {
+                    {
+                        handler = function(rec, _, picker)
+                            AddEffectTriggerToGroup(effect.auraName, effect.typeKey, gi, rec.auraName, capturedPool)
+                            picker:Close()
+                            S.SwitchTab("effects")
+                            RefreshPreviewEffects()
+                            RefreshLiveFramesThrottled()   -- see the trigger-edit note above
+                        end,
+                    },
+                },
+            })
+        end)
+
+        -- "+ Filter" — the same trigger list, but the entry is a whole registry
+        -- filter rather than one spell. It rides the identical code path:
+        -- DF:BuildADIdentityFilters resolves an "@preset:"/"@custom:" entry exactly
+        -- as it resolves a spell name, so the effect fires on anything the filter
+        -- matches. Its own button rather than a mode on the one above, because a
+        -- hidden modifier is not a discoverable way to reach half a feature.
+        tagX = tagX + addTrigW + TAG_GAP
+        local addFilterW = 66
+        local addTrigFilterBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
+        addTrigFilterBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
+        GUI:StyleButton(addTrigFilterBtn, { width = addFilterW, height = TAG_H, primary = true,
+            accent = { r = 0.25, g = 0.40, b = 0.25 },
+            -- ☠ ".png" IS MANDATORY in the path. A .tga or .blp resolves without
+            -- its extension; a PNG does not, and a missing one fails SILENTLY --
+            -- no error, just no texture.
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list.png", size = 11 },
+            text = L["Filter"] })
+        GUI:SetSettingsFont(addTrigFilterBtn.Text, 9, "")
+        addTrigFilterBtn.Text:SetTextColor(0.5, 0.8, 0.5)
+        addTrigFilterBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
+        addTrigFilterBtn:SetScript("OnClick", function()
+            -- Pool pinned at open time, same reason as the spell picker above.
+            local capturedPool = CurrentAuraPool()
+            local existing = {}
+            for _, t in ipairs(condGroups[gi].triggers or {}) do
+                existing[t] = true
+            end
+            OpenFilterPicker({
+                anchor = addTrigFilterBtn,
+                isLinked = function(kind, key)
+                    local ref = DF:MakeADFilterRef(kind, key)
+                    return ref ~= nil and existing[ref] or false
+                end,
+                onPick = function(kind, key)
+                    local ref = DF:MakeADFilterRef(kind, key)
+                    if not ref then return end
+                    AddEffectTriggerToGroup(effect.auraName, effect.typeKey, gi, ref, capturedPool)
+                    S.SwitchTab("effects")
+                    RefreshPreviewEffects()
+                    RefreshLiveFramesThrottled()   -- see the trigger-edit note above
+                end,
+            })
+        end)
+
+        tagX = 0
+        tagY = tagY - (TAG_H + TAG_ROW_GAP + 4)
+        end  -- for gi
+
+        -- CONDITION CONTROLS. The operator flips the whole expression's shape, which
+        -- is why it is ONE switch rather than per-group: ALL means the groups are ORs
+        -- ANDed together, ANY means they are ANDs ORed together. Between them that is
+        -- every two-level expression, and the factory renders both (ANY is distributed
+        -- into ALL form so it still draws through a single chain, one visual).
+        if multiCond then
+            local modeBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
+            modeBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
+            GUI:StyleButton(modeBtn, { width = 150, height = TAG_H, primary = true,
+                accent = { r = 0.91, g = 0.66, b = 0.25 },
+                text = condMode == "ALL" and L["Match ALL groups"] or L["Match ANY group"] })
+            GUI:SetSettingsFont(modeBtn.Text, 9, "")
+            modeBtn:SetScript("OnClick", function()
+                SetEffectConditionMode(effect.auraName, effect.typeKey,
+                    condMode == "ALL" and "ANY" or "ALL", CurrentAuraPool())
+                S.SwitchTab("effects")
+                RefreshPreviewEffects()
+                RefreshLiveFramesThrottled()
+            end)
+            tagX = 154
+        end
+
+        if #condGroups < 5 then
+            local addGroupBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
+            addGroupBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
+            GUI:StyleButton(addGroupBtn, { width = 110, height = TAG_H, primary = true,
+                accent = { r = 0.25, g = 0.40, b = 0.25 },
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 },
+                text = L["Condition"] })
+            GUI:SetSettingsFont(addGroupBtn.Text, 9, "")
+            addGroupBtn.Text:SetTextColor(0.5, 0.8, 0.5)
+            addGroupBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
+            addGroupBtn:SetScript("OnClick", function()
+                AddEffectConditionGroup(effect.auraName, effect.typeKey, CurrentAuraPool())
+                S.SwitchTab("effects")
+                RefreshPreviewEffects()
+                RefreshLiveFramesThrottled()
+            end)
+        end
+        tagY = tagY - (TAG_H + TAG_ROW_GAP)
+
+        -- The factory REFUSES to render an empty group or an over-cap expansion rather
+        -- than draw a truncated conjunction, so the card has to say why nothing shows.
+        if multiCond then
+            local links = EffectChainLinkCount(effect.auraName, effect.typeKey)
+            local emptyG = false
+            for _, g in ipairs(condGroups) do
+                if #(g.triggers or {}) == 0 then emptyG = true break end
+            end
+            if emptyG or links > 9 then
+                local warn = trigContainer:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(warn, 9, "")
+                warn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
+                warn:SetPoint("RIGHT", trigContainer, "RIGHT", 0, 0)
+                warn:SetJustifyH("LEFT")
+                warn:SetText(emptyG and L["A condition group is empty and is being ignored."]
+                    or format(L["Too many combinations (%d). Simplify the conditions."], links))
+                warn:SetTextColor(0.95, 0.45, 0.35)
+                tagY = tagY - 26
+            end
+        end
+
+        triggersH = -(tagY) + TAG_H + 8  -- total height of trigger section
+        trigContainer:SetHeight(triggersH)
+    return triggersH
+end
+
+S.BuildEffectPriorityBlock = function(body, effect, proxy, bodyWidth, baseH)
+    baseH = baseH or 0
+    local h = 0
+        -- "Own border" opt-out (border effects only). BELOW Priority on purpose: this
+        -- is a border-specific override sitting next to the Border appearance controls
+        -- it belongs with.
+        --
+        -- ☠ A MEMBERSHIP choice, not a mode. It was a Priority/Stacked button PAIR,
+        -- which read as a per-aura policy and raised the obvious question: what if one
+        -- indicator says Priority and another says Stacked? (They coexist fine -- the
+        -- stacked one opts out of the contest and the priority one takes the shared
+        -- ring.) Unticked = share the frame's one border, resolve by Priority; ticked =
+        -- draw your own alongside.
+        -- ☠ THE STORED VALUE IS UNCHANGED -- nil / "custom" -- so no migration and old
+        -- profiles keep working. Do not "tidy" it to a boolean without one.
+        -- ☠ HOISTED ON PURPOSE. SyncPriorityNote (border block below) writes to
+        -- priNote, but the label isn't built until after that block. Declaring both
+        -- here makes them shared upvalues -- a `local` further down never back-fills
+        -- a closure that was already compiled, which is exactly what made this card
+        -- error out and abort the whole Effects tab build.
+        local priNote, SyncPriorityNote
+
+        if effect.typeKey == "border" then
+            local function OwnBorderOn()
+                local a = CurrentAuraPool()[effect.auraName]
+                local t = a and a[effect.typeKey]
+                return (t and t.borderMode == "custom") and true or false
+            end
+
+            -- ☠ RE-WORD THE PRIORITY NOTE, DO NOT DISABLE THE SLIDER. "Higher priority
+            -- wins" is false once this aura opts out of the contest, but the slider is
+            -- still live: priority is per-AURA, so it still resolves this aura's health
+            -- bar / background / text effects, and collectStackedBorders sorts by it so
+            -- it orders the stacked rings too.
+            SyncPriorityNote = function()
+                priNote:SetText(OwnBorderOn()
+                    and L["This aura's border always shows. Priority still applies to its other effects."]
+                    or L["Higher priority wins"])
+            end
+
+            -- customGet/customSet rather than a db key: the stored value is nil /
+            -- "custom", not a boolean, and the checkbox maps ticked -> "custom".
+            local ownBorderCb = GUI:CreateCheckbox(body, L["Give this aura its own border"],
+                nil, nil,
+                function()
+                    SyncPriorityNote()
+                    S.SwitchTab("effects")
+                    RefreshPreviewEffects()
+                    -- Live frames too: borderMode picks which container renders the
+                    -- ring, so the editor repaint alone left real frames on the old
+                    -- mode until a reload.
+                    RefreshLiveFramesThrottled()
+                end,
+                OwnBorderOn,
+                function(val)
+                    local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
+                    cfg.borderMode = val and "custom" or nil
+                end)
+            ownBorderCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(baseH + h + 10))
+            ownBorderCb:SetWidth(bodyWidth - 16)
+            ownBorderCb.tooltip = {
+                title = L["Give this aura its own border"],
+                lines = {
+                    L["Off: this aura shares the frame's single border. If two auras both want it, the higher Priority one shows."],
+                    L["On: it draws its own border alongside the others. Give them different Insets so they nest instead of covering each other."],
+                },
+            }
+            h = h + 36
+        end
+
+        -- Priority slider (frame-level effects only — resolves conflicts when
+        -- multiple auras set the same frame effect, e.g. two health bar colors)
+        local auraProxy = CreateAuraProxy(effect.auraName)
+        local priSlider = GUI:CreateSlider(body, L["Priority"], 1, 10, 1, auraProxy, "priority")
+        -- Extra gap above (was +4) so the slider isn't squished against the
+        -- triggers / Add Trigger row, plus a little breathing room below before
+        -- the effect's Appearance group (increment 54 → 68 → 84 with the note).
+        -- x=8 matches the "TRIGGERED BY" section above (Options.lua trigContainer)
+        -- so the Priority slider + note line up with the card's other elements.
+        priSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(baseH + h + 14))
+        priSlider:SetWidth(bodyWidth - 16)
+        -- Direction note in the standard GUI label style (dim, wrapped) so it
+        -- matches every other settings note: HIGHER number = higher priority.
+        priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
+        priNote:SetPoint("TOPLEFT", priSlider, "BOTTOMLEFT", 0, -2)
+        -- Only now does the label exist, so this is where the border-aware wording
+        -- gets applied. Non-border effects never assign SyncPriorityNote and keep the
+        -- default text the label was built with.
+        if SyncPriorityNote then SyncPriorityNote() end
+        h = h + 84
+    return h
+end
+
+-- What toggling Others Only costs, in one place: the card draws it as a checkbox
+-- in the body, the row page as a control row of its own, and the two must not
+-- drift on the four things a caster-filter change has to drive. `redraw` is the
+-- layout's own repaint -- the card rebuilds the page (its default), a control row
+-- hands in the page's state pass instead, because a rebuild there would retire the
+-- row being clicked.
+S.EffectOthersOnlyChanged = function(redraw)
+    if type(redraw) == "function" then redraw() else DF:AuraDesigner_RefreshPage() end
+    DF:InvalidateAuraLayout()
+    DF:UpdateAllFrames()
+    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+    end
+end
+
 S.CreateEffectCard = function(parent, yPos, effect)
     local isPlaced = (effect.source == "placed")
     -- B1 key scheme: the pool prefix rides the NAME segment, so the two
@@ -1877,502 +2469,10 @@ S.CreateEffectCard = function(parent, yPos, effect)
 
         local triggersH = 0
 
-        -- ── TRIGGER TAGS (frame-level effects only) ──
+        -- ── TRIGGER TAGS + PRIORITY (frame-level effects only) ──
         if not isPlaced then
-            -- Normalised view: one group for a plain effect, N for a conditional one.
-            local condGroups = GetEffectConditionGroups(effect.auraName, effect.typeKey)
-            local condMode   = GetEffectConditionMode(effect.auraName, effect.typeKey)
-            local multiCond  = #condGroups > 1
-            -- ☠ WITHIN a group the operator is the OPPOSITE of the one BETWEEN groups, and
-            -- that is not arbitrary: ALL means every group must match, so a group is a bag
-            -- of alternatives (OR); ANY means one group must match, so its members have to
-            -- hold together (AND). An ungrouped effect is a single OR group -- the legacy
-            -- behaviour, unchanged. Drawn between the tags because pressing the mode button
-            -- otherwise reverses what every existing trigger means with no visual change.
-            local innerOp = (multiCond and condMode == "ANY") and L["AND"] or L["OR"]
-            local trigContainer = CreateFrame("Frame", nil, body)
-            trigContainer:SetPoint("TOPLEFT", 8, -12)
-            trigContainer:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-
-            local trigLabel = trigContainer:CreateFontString(nil, "OVERLAY")
-            GUI:SetSettingsFont(trigLabel, 9, "")
-            trigLabel:SetPoint("TOPLEFT", 0, 0)
-            trigLabel:SetText(L["TRIGGERED BY"])
-            trigLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-            -- AND/OR operator toggle (only shown with 2+ triggers)
-            -- (No multi-trigger ALL/ANY operator button: evaluating every trigger together
-            --  needs a read the 12.1 aura system cannot do for secret-anchored triggers, so
-            --  it was permanently frosted. Removed 2026-07-25 -- triggerOperator was never
-            --  read by the render path either, only by this editor's own label, so the
-            --  toggle changed nothing. Triggers combine as ANY/OR. The tags stay editable.)
-
-            -- Build display name lookup for tags. Other-pool trigger names are
-            -- SpellDB names / ad-hoc keys — resolved live per tag below.
-            local isOtherCard = IsOtherTab()
-            local spec = (not isOtherCard) and ResolveSpec() or nil
-            local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
-            local displayNames = {}
-            if trackable then
-                for _, info in ipairs(trackable) do
-                    displayNames[info.name] = info.display
-                end
-            end
-            if isOtherCard then
-                setmetatable(displayNames, { __index = function(_, name)
-                    return OtherPoolDisplayName(name)
-                end })
-            end
-
-            -- ☠ EVERY trigger edit below must drive the LIVE frames, not just the editor.
-            -- A trigger change moves the effect's resolved spell map, which rides the
-            -- TUNING signature — so it only lands when SyncFrame next runs and compares
-            -- sigs. S.SwitchTab rebuilds this tab and RefreshPreviewEffects repaints the
-            -- mock frame; neither touches a real unit frame. Without the throttled live
-            -- refresh the edit sat in the DB doing nothing until some unrelated action
-            -- (or a reload) happened to fire ForceRefreshAllFrames — reported from the
-            -- field as "removed a trigger and the border kept showing until I reloaded".
-            -- Same class of bug AddPickedSpell's own comment already warns about.
-
-            -- Tag flow layout
-            local TAG_H = 20
-            local TAG_GAP = 4
-            local TAG_ROW_GAP = 3
-            local tagX, tagY = 0, -(14 + 6)  -- below label
-
-            for gi = 1, #condGroups do
-            local triggers = condGroups[gi].triggers or {}
-            -- A grouped effect may empty a group out (the card warns); an ungrouped one
-            -- keeps the legacy minimum of one trigger.
-            local canRemove = multiCond or #triggers > 1
-
-            -- Operator caption BETWEEN groups, so the card reads downward as
-            -- "these ... AND ... these". Only present once the effect is conditional.
-            if multiCond and gi > 1 then
-                tagY = tagY - 6
-                -- A RULE across the card, not a floating word: the previous layout put the
-                -- operator and a bare X into the same wrapping flow as the tags, so nothing
-                -- said where one group ended and the next began, or which X removed what.
-                local sep = trigContainer:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(sep, 9, "OUTLINE")
-                sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
-                sep:SetText(condMode == "ALL" and L["AND"] or L["OR"])
-                sep:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
-
-                -- Removal belongs to the group BELOW the rule, and sits at the far right so
-                -- it can never be mistaken for a tag's own X.
-                local delG = DF.GUI:CreateCloseButton(trigContainer, {
-                    size = 14, tone = "danger",
-                    onClick = function()
-                        RemoveEffectConditionGroup(effect.auraName, effect.typeKey, gi)
-                        S.SwitchTab("effects")
-                        RefreshPreviewEffects()
-                        RefreshLiveFramesThrottled()
-                    end,
-                })
-                delG:SetPoint("TOPRIGHT", trigContainer, "TOPRIGHT", 0, tagY - 1)
-                delG.tooltip = L["Remove this condition group."]
-
-                -- ☠ The rule spans the GAP between the caption and the remove button, rather
-                -- than running the full width behind them. Masking the line under the text
-                -- needed the card's exact background colour and still clipped at whatever
-                -- width the translated word happened to be; anchoring between the two makes
-                -- overlap impossible in any language and at any font size.
-                local rule = trigContainer:CreateTexture(nil, "ARTWORK")
-                rule:SetPoint("LEFT", sep, "RIGHT", 8, 0)
-                rule:SetPoint("RIGHT", delG, "LEFT", -8, 0)
-                rule:SetHeight(1)
-                rule:SetColorTexture(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.22)
-                tagY = tagY - 22
-                tagX = 0
-            end
-
-            for ti, trigName in ipairs(triggers) do
-                local tagFrame = CreateFrame("Frame", nil, trigContainer, "BackdropTemplate")
-                tagFrame:SetHeight(TAG_H)
-
-                local tagText = tagFrame:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(tagText, 9, "")
-                tagText:SetPoint("LEFT", 6, 0)
-                -- Filter triggers name themselves from the registry; a raw
-                -- "@preset:raidBuffs" on the tag would be meaningless.
-                tagText:SetText((DF.ADFilterRefDisplayName and DF:ADFilterRefDisplayName(trigName))
-                    or displayNames[trigName] or trigName)
-                tagText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                -- A tag naming a FILTER gets a route to that filter. A tag naming a
-                -- spell does not -- there is nothing to open -- so this is per-tag,
-                -- not per-row: in "Healing OR Tank Cooldowns" only the second one
-                -- earns a pencil.
-                --
-                -- ⚠ Guarded, like every other call to it from this addon: the parser
-                -- is resident and this file is the options companion, so the symbol
-                -- is not guaranteed present at load. The neighbouring
-                -- DF.ADFilterRefDisplayName guard above does NOT cover this -- a
-                -- guard on one function tells you nothing about another.
-                local trigFKind, trigFKey
-                if DF.ParseADFilterRef then
-                    trigFKind, trigFKey = DF:ParseADFilterRef(trigName)
-                end
-
-                local tagW = tagText:GetStringWidth() + 12
-                if canRemove then tagW = tagW + 16 end  -- room for × button
-                if trigFKind then tagW = tagW + 16 end  -- room for the edit pencil
-                tagW = max(tagW, 40)
-
-                -- Wrap to next row if needed
-                local containerW = trigContainer:GetWidth()
-                if containerW < 50 then containerW = bodyWidth - 16 end
-                if tagX > 0 and (tagX + tagW) > containerW then
-                    tagX = 0
-                    tagY = tagY - (TAG_H + TAG_ROW_GAP)
-                end
-
-                tagFrame:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
-                tagFrame:SetWidth(tagW)
-                ApplyBackdrop(tagFrame,
-                    {r = 0.14, g = 0.14, b = 0.17, a = 1},
-                    {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
-
-                -- Remove × button on each tag (unless it's the last one)
-                -- ☠ DECLARED OUTSIDE the branch: the edit pencil below anchors to it,
-                -- and a `local` inside the `if` is invisible out here. Read from there
-                -- it was a nil GLOBAL, and SetPoint treats a nil relativeTo as the
-                -- PARENT -- so the pencil anchored to the tag's own left edge and drew
-                -- off the frame instead of erroring. Visible with one trigger (where
-                -- canRemove is false and the else branch runs) and silently gone with
-                -- two, which is exactly how it was reported.
-                local removeBtn
-                if canRemove then
-                    local capturedTrigName = trigName
-                    -- Shared red-at-rest "×" (tone="danger") on each removable tag.
-                    removeBtn = DF.GUI:CreateCloseButton(tagFrame, {
-                        size = 14,
-                        tone = "danger",
-                        onClick = function()
-                            RemoveEffectTriggerFromGroup(effect.auraName, effect.typeKey, gi, capturedTrigName)
-                            S.SwitchTab("effects")
-                            RefreshPreviewEffects()
-                            RefreshLiveFramesThrottled()   -- see the trigger-edit note above
-                        end,
-                    })
-                    removeBtn:SetPoint("RIGHT", -2, 0)
-                end
-
-                -- The pencil sits INSIDE the ×, i.e. further left, so the destructive
-                -- control keeps the corner it has always had. Moving × to make room
-                -- would retrain the muscle memory of every existing tag on the page.
-                if trigFKind then
-                    local editBtn = CreateFrame("Button", nil, tagFrame)
-                    editBtn:SetSize(14, 14)
-                    if canRemove then
-                        editBtn:SetPoint("RIGHT", removeBtn, "LEFT", -1, 0)
-                    else
-                        editBtn:SetPoint("RIGHT", -2, 0)
-                    end
-                    local ei = editBtn:CreateTexture(nil, "OVERLAY")
-                    ei:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit")
-                    ei:SetSize(11, 11)
-                    ei:SetPoint("CENTER")
-                    ei:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    editBtn:SetScript("OnEnter", function(self)
-                        ei:SetVertexColor(1, 1, 1)
-                        GUI:ShowTooltip(self, {
-                            title = L["Edit this filter"],
-                            lines = { L["Opens it in the Filter Designer, where you can change which auras it holds."] },
-                        })
-                    end)
-                    editBtn:SetScript("OnLeave", function()
-                        ei:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                        GUI:HideTooltip()
-                    end)
-                    local ek, eq = trigFKind, trigFKey
-                    editBtn:SetScript("OnClick", function()
-                        if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner(ek, eq) end
-                    end)
-                end
-
-                tagX = tagX + tagW + TAG_GAP
-
-                if ti < #triggers then
-                    local OP_W = 24
-                    if tagX > 0 and (tagX + OP_W) > containerW then
-                        tagX = 0
-                        tagY = tagY - (TAG_H + TAG_ROW_GAP)
-                    end
-                    local opTxt = trigContainer:CreateFontString(nil, "OVERLAY")
-                    GUI:SetSettingsFont(opTxt, 8, "")
-                    opTxt:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX + 2, tagY - 5)
-                    opTxt:SetText(innerOp)
-                    opTxt:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    tagX = tagX + OP_W
-                end
-            end
-
-            -- "+ Add Trigger" button
-            -- ☠ ALWAYS a fresh row. Sharing the tag flow made the add buttons wrap into the
-            -- middle of a spell list, so which group they belonged to was pure guesswork.
-            local addTrigW = 80
-            tagX = 0
-            tagY = tagY - (TAG_H + TAG_ROW_GAP)
-            local addTrigBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
-            addTrigBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
-            GUI:StyleButton(addTrigBtn, { width = addTrigW, height = TAG_H, primary = true, accent = { r = 0.25, g = 0.40, b = 0.25 }, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Trigger"] })
-            GUI:SetSettingsFont(addTrigBtn.Text, 9, "")
-            addTrigBtn.Text:SetTextColor(0.5, 0.8, 0.5)
-            addTrigBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
-
-            -- Trigger picker: the shared spell database picker, single-pick.
-            -- My Buffs locks it to the resolved spec's class; Other Buffs
-            -- offers the full database (the old plain dropdown restricted
-            -- Other-tab triggers to already-configured auras only because
-            -- the full DB was unusable without search/filters — the shared
-            -- picker has both, so the restriction is lifted). Records also
-            -- include the pool's configured ad-hoc "#<id>" auras. Rows
-            -- already in the effect's trigger list render with the dimmed
-            -- check ("already added").
-            addTrigBtn:SetScript("OnClick", function()
-                -- Pin the pool at OPEN time (pool pinning carried over from
-                -- the old floating dropdown): a pick must keep writing the
-                -- trigger into the pool this card's record lives in, no
-                -- matter how the surrounding UI state moves while the
-                -- picker is up (the record exists, so the read accessor
-                -- returns the real table, never EMPTY_POOL).
-                local capturedPool = CurrentAuraPool()
-                local isOtherTrig = IsOtherTab()
-                local trigSpec = (not isOtherTrig) and ResolveSpec() or nil
-                local trigSpecInfo = trigSpec and DF.AuraDesigner.SpecInfo[trigSpec]
-
-                -- ☠ THIS GROUP's triggers, not the flat list. GetFrameEffectTriggers returns
-                -- group 1 for a grouped effect, so a spell already in group 1 was blocked
-                -- everywhere -- which made (A and B) or (A and C) impossible to build, the
-                -- exact shape ANY mode exists for. A spell may legitimately appear in several
-                -- groups; only a duplicate WITHIN one group is meaningless.
-                local trigLookup = {}
-                for _, t in ipairs(condGroups[gi].triggers or {}) do trigLookup[t] = true end
-
-                OpenADPicker({
-                    title = format(L["Select trigger for %s"], S.FRAME_LEVEL_LABELS[effect.typeKey] or effect.typeKey),
-                    subtitle = effect.displayName,
-                    records = function() return BuildADPickerRecords(true) end,
-                    classLock = (not isOtherTrig) and trigSpecInfo and trigSpecInfo.class or nil,
-                    isBlocked = function(rec)
-                        return trigLookup[rec.auraName] and true or nil
-                    end,
-                    rowActions = {
-                        {
-                            handler = function(rec, _, picker)
-                                AddEffectTriggerToGroup(effect.auraName, effect.typeKey, gi, rec.auraName, capturedPool)
-                                picker:Close()
-                                S.SwitchTab("effects")
-                                RefreshPreviewEffects()
-                                RefreshLiveFramesThrottled()   -- see the trigger-edit note above
-                            end,
-                        },
-                    },
-                })
-            end)
-
-            -- "+ Filter" — the same trigger list, but the entry is a whole registry
-            -- filter rather than one spell. It rides the identical code path:
-            -- DF:BuildADIdentityFilters resolves an "@preset:"/"@custom:" entry exactly
-            -- as it resolves a spell name, so the effect fires on anything the filter
-            -- matches. Its own button rather than a mode on the one above, because a
-            -- hidden modifier is not a discoverable way to reach half a feature.
-            tagX = tagX + addTrigW + TAG_GAP
-            local addFilterW = 66
-            local addTrigFilterBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
-            addTrigFilterBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
-            GUI:StyleButton(addTrigFilterBtn, { width = addFilterW, height = TAG_H, primary = true,
-                accent = { r = 0.25, g = 0.40, b = 0.25 },
-                -- ☠ ".png" IS MANDATORY in the path. A .tga or .blp resolves without
-                -- its extension; a PNG does not, and a missing one fails SILENTLY --
-                -- no error, just no texture.
-                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list.png", size = 11 },
-                text = L["Filter"] })
-            GUI:SetSettingsFont(addTrigFilterBtn.Text, 9, "")
-            addTrigFilterBtn.Text:SetTextColor(0.5, 0.8, 0.5)
-            addTrigFilterBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
-            addTrigFilterBtn:SetScript("OnClick", function()
-                -- Pool pinned at open time, same reason as the spell picker above.
-                local capturedPool = CurrentAuraPool()
-                local existing = {}
-                for _, t in ipairs(condGroups[gi].triggers or {}) do
-                    existing[t] = true
-                end
-                OpenFilterPicker({
-                    anchor = addTrigFilterBtn,
-                    isLinked = function(kind, key)
-                        local ref = DF:MakeADFilterRef(kind, key)
-                        return ref ~= nil and existing[ref] or false
-                    end,
-                    onPick = function(kind, key)
-                        local ref = DF:MakeADFilterRef(kind, key)
-                        if not ref then return end
-                        AddEffectTriggerToGroup(effect.auraName, effect.typeKey, gi, ref, capturedPool)
-                        S.SwitchTab("effects")
-                        RefreshPreviewEffects()
-                        RefreshLiveFramesThrottled()   -- see the trigger-edit note above
-                    end,
-                })
-            end)
-
-            tagX = 0
-            tagY = tagY - (TAG_H + TAG_ROW_GAP + 4)
-            end  -- for gi
-
-            -- CONDITION CONTROLS. The operator flips the whole expression's shape, which
-            -- is why it is ONE switch rather than per-group: ALL means the groups are ORs
-            -- ANDed together, ANY means they are ANDs ORed together. Between them that is
-            -- every two-level expression, and the factory renders both (ANY is distributed
-            -- into ALL form so it still draws through a single chain, one visual).
-            if multiCond then
-                local modeBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
-                modeBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
-                GUI:StyleButton(modeBtn, { width = 150, height = TAG_H, primary = true,
-                    accent = { r = 0.91, g = 0.66, b = 0.25 },
-                    text = condMode == "ALL" and L["Match ALL groups"] or L["Match ANY group"] })
-                GUI:SetSettingsFont(modeBtn.Text, 9, "")
-                modeBtn:SetScript("OnClick", function()
-                    SetEffectConditionMode(effect.auraName, effect.typeKey,
-                        condMode == "ALL" and "ANY" or "ALL", CurrentAuraPool())
-                    S.SwitchTab("effects")
-                    RefreshPreviewEffects()
-                    RefreshLiveFramesThrottled()
-                end)
-                tagX = 154
-            end
-
-            if #condGroups < 5 then
-                local addGroupBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
-                addGroupBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
-                GUI:StyleButton(addGroupBtn, { width = 110, height = TAG_H, primary = true,
-                    accent = { r = 0.25, g = 0.40, b = 0.25 },
-                    icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 },
-                    text = L["Condition"] })
-                GUI:SetSettingsFont(addGroupBtn.Text, 9, "")
-                addGroupBtn.Text:SetTextColor(0.5, 0.8, 0.5)
-                addGroupBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
-                addGroupBtn:SetScript("OnClick", function()
-                    AddEffectConditionGroup(effect.auraName, effect.typeKey, CurrentAuraPool())
-                    S.SwitchTab("effects")
-                    RefreshPreviewEffects()
-                    RefreshLiveFramesThrottled()
-                end)
-            end
-            tagY = tagY - (TAG_H + TAG_ROW_GAP)
-
-            -- The factory REFUSES to render an empty group or an over-cap expansion rather
-            -- than draw a truncated conjunction, so the card has to say why nothing shows.
-            if multiCond then
-                local links = EffectChainLinkCount(effect.auraName, effect.typeKey)
-                local emptyG = false
-                for _, g in ipairs(condGroups) do
-                    if #(g.triggers or {}) == 0 then emptyG = true break end
-                end
-                if emptyG or links > 9 then
-                    local warn = trigContainer:CreateFontString(nil, "OVERLAY")
-                    GUI:SetSettingsFont(warn, 9, "")
-                    warn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
-                    warn:SetPoint("RIGHT", trigContainer, "RIGHT", 0, 0)
-                    warn:SetJustifyH("LEFT")
-                    warn:SetText(emptyG and L["A condition group is empty and is being ignored."]
-                        or format(L["Too many combinations (%d). Simplify the conditions."], links))
-                    warn:SetTextColor(0.95, 0.45, 0.35)
-                    tagY = tagY - 26
-                end
-            end
-
-            triggersH = -(tagY) + TAG_H + 8  -- total height of trigger section
-            trigContainer:SetHeight(triggersH)
-
-            -- "Own border" opt-out (border effects only). BELOW Priority on purpose: this
-            -- is a border-specific override sitting next to the Border appearance controls
-            -- it belongs with.
-            --
-            -- ☠ A MEMBERSHIP choice, not a mode. It was a Priority/Stacked button PAIR,
-            -- which read as a per-aura policy and raised the obvious question: what if one
-            -- indicator says Priority and another says Stacked? (They coexist fine -- the
-            -- stacked one opts out of the contest and the priority one takes the shared
-            -- ring.) Unticked = share the frame's one border, resolve by Priority; ticked =
-            -- draw your own alongside.
-            -- ☠ THE STORED VALUE IS UNCHANGED -- nil / "custom" -- so no migration and old
-            -- profiles keep working. Do not "tidy" it to a boolean without one.
-            -- ☠ HOISTED ON PURPOSE. SyncPriorityNote (border block below) writes to
-            -- priNote, but the label isn't built until after that block. Declaring both
-            -- here makes them shared upvalues -- a `local` further down never back-fills
-            -- a closure that was already compiled, which is exactly what made this card
-            -- error out and abort the whole Effects tab build.
-            local priNote, SyncPriorityNote
-
-            if effect.typeKey == "border" then
-                local function OwnBorderOn()
-                    local a = CurrentAuraPool()[effect.auraName]
-                    local t = a and a[effect.typeKey]
-                    return (t and t.borderMode == "custom") and true or false
-                end
-
-                -- ☠ RE-WORD THE PRIORITY NOTE, DO NOT DISABLE THE SLIDER. "Higher priority
-                -- wins" is false once this aura opts out of the contest, but the slider is
-                -- still live: priority is per-AURA, so it still resolves this aura's health
-                -- bar / background / text effects, and collectStackedBorders sorts by it so
-                -- it orders the stacked rings too.
-                SyncPriorityNote = function()
-                    priNote:SetText(OwnBorderOn()
-                        and L["This aura's border always shows. Priority still applies to its other effects."]
-                        or L["Higher priority wins"])
-                end
-
-                -- customGet/customSet rather than a db key: the stored value is nil /
-                -- "custom", not a boolean, and the checkbox maps ticked -> "custom".
-                local ownBorderCb = GUI:CreateCheckbox(body, L["Give this aura its own border"],
-                    nil, nil,
-                    function()
-                        SyncPriorityNote()
-                        S.SwitchTab("effects")
-                        RefreshPreviewEffects()
-                        -- Live frames too: borderMode picks which container renders the
-                        -- ring, so the editor repaint alone left real frames on the old
-                        -- mode until a reload.
-                        RefreshLiveFramesThrottled()
-                    end,
-                    OwnBorderOn,
-                    function(val)
-                        local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
-                        cfg.borderMode = val and "custom" or nil
-                    end)
-                ownBorderCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 10))
-                ownBorderCb:SetWidth(bodyWidth - 16)
-                ownBorderCb.tooltip = {
-                    title = L["Give this aura its own border"],
-                    lines = {
-                        L["Off: this aura shares the frame's single border. If two auras both want it, the higher Priority one shows."],
-                        L["On: it draws its own border alongside the others. Give them different Insets so they nest instead of covering each other."],
-                    },
-                }
-                triggersH = triggersH + 36
-            end
-
-            -- Priority slider (frame-level effects only — resolves conflicts when
-            -- multiple auras set the same frame effect, e.g. two health bar colors)
-            local auraProxy = CreateAuraProxy(effect.auraName)
-            local priSlider = GUI:CreateSlider(body, L["Priority"], 1, 10, 1, auraProxy, "priority")
-            -- Extra gap above (was +4) so the slider isn't squished against the
-            -- triggers / Add Trigger row, plus a little breathing room below before
-            -- the effect's Appearance group (increment 54 → 68 → 84 with the note).
-            -- x=8 matches the "TRIGGERED BY" section above (Options.lua trigContainer)
-            -- so the Priority slider + note line up with the card's other elements.
-            priSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 14))
-            priSlider:SetWidth(bodyWidth - 16)
-            -- Direction note in the standard GUI label style (dim, wrapped) so it
-            -- matches every other settings note: HIGHER number = higher priority.
-            priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
-            priNote:SetPoint("TOPLEFT", priSlider, "BOTTOMLEFT", 0, -2)
-            -- Only now does the label exist, so this is where the border-aware wording
-            -- gets applied. Non-border effects never assign SyncPriorityNote and keep the
-            -- default text the label was built with.
-            if SyncPriorityNote then SyncPriorityNote() end
-            triggersH = triggersH + 84
+            triggersH = S.BuildEffectTriggersBlock(body, effect, bodyWidth, 0)
+            triggersH = triggersH + S.BuildEffectPriorityBlock(body, effect, proxy, bodyWidth, triggersH)
         end
 
         -- ── OTHERS ONLY (Other Buffs tab; placed AND frame-level effects) ──
@@ -2383,14 +2483,8 @@ S.CreateEffectCard = function(parent, yPos, effect)
         -- binds at container build, so toggling is STRUCTURAL (B1 folds it
         -- into every struct sig → the factory Rebuilds).
         if IsOtherTab() and effect.typeKey ~= "sound" then
-            local ooCb = GUI:CreateCheckbox(body, L["Others Only"], proxy, "othersOnly", function()
-                DF:AuraDesigner_RefreshPage()
-                DF:InvalidateAuraLayout()
-                DF:UpdateAllFrames()
-                if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end
-            end)
+            local ooCb = GUI:CreateCheckbox(body, L["Others Only"], proxy, "othersOnly",
+                                            S.EffectOthersOnlyChanged)
             ooCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 12))
             ooCb:SetWidth(bodyWidth - 16)
             ooCb.tooltip = L["Only show this effect for other players' casts of the buff."]
@@ -2439,10 +2533,20 @@ S.CreateEffectCard = function(parent, yPos, effect)
 end
 
 -- ── BUILD EFFECTS TAB ──
-S.BuildEffectsTab = function()
-    if not S.tabContentFrame then return end
-    local parent = S.tabContentFrame
-    local yPos = -10
+-- ── THE EFFECTS TAB'S HEAD AREA ──
+-- The add block (or, while one is open, the scope picker that takes the whole
+-- column over), the ACTIVE INDICATORS heading, the type chips and the Other
+-- Buffs hint. Everything above the list of effects, and nothing of the list.
+--
+-- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
+-- mounts exactly this furniture above its band of effect rows. The add flow is a
+-- later phase of the designer rework, and a second copy of it here would be a
+-- second place to change when that phase lands -- which is how the three
+-- duplicated FRAME_ITEMS lists below came about in the first place.
+--
+-- Returns the y the caller should continue at, and `true` when the picker has
+-- taken the column over, in which case the caller must add nothing below it.
+S.BuildEffectsHeadArea = function(parent, yPos)
     local tc = GetThemeColor()
 
     -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
@@ -2565,7 +2669,7 @@ S.BuildEffectsTab = function()
         end
 
         parent:SetHeight(max(-yPos + 20, 200))
-        return
+        return yPos, true
     end
 
     -- ── NORMAL: three pinned scope cards ──
@@ -2715,6 +2819,16 @@ S.BuildEffectsTab = function()
         obHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
         yPos = yPos - (max(obHint:GetStringHeight(), 12) + 10)
     end
+
+    return yPos, false
+end
+
+S.BuildEffectsTab = function()
+    if not S.tabContentFrame then return end
+    local parent = S.tabContentFrame
+    local yPos, pickerOpen = S.BuildEffectsHeadArea(parent, -10)
+    -- The picker sized the column itself and owns the whole of it.
+    if pickerOpen then return end
 
     -- ── EFFECTS LIST ──
     local effects = CollectAllEffects()

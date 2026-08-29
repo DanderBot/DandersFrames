@@ -1447,7 +1447,21 @@ end
 -- MAIN PAGE BUILD
 -- ============================================================
 
-function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
+-- ============================================================
+-- THE SPLIT-PANEL PAGE
+-- ------------------------------------------------------------
+-- The 50/50 layout: preview left, three-tab settings column right, everything
+-- hand-anchored inside one S.mainFrame that the page harness never sees. It is
+-- why this page had to force the window 210px wider than its own default, and it
+-- is now the CLASSIC layout's arm only -- the popout layout takes
+-- P.BuildAuraDesignerRowsPage (AuraDesigner/UI/Rows.lua), which emits bands into
+-- the harness's own column.
+--
+-- ⚠ KEPT RATHER THAN DELETED, and not out of sentiment: classic is a live
+-- layout, CreatePopoutPageTools returns nil in it, and every row, band and panel
+-- the other arm builds needs that table. This is what classic still draws.
+-- ============================================================
+local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     local prevDB = S.db  -- capture before overwrite to detect mode switch
     S.page = pageRef
     S.db = dbRef
@@ -1653,62 +1667,10 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     buffTabBar:SetHeight(BUFFTAB_H)
     buffTabBar:SetPoint("TOPLEFT", S.mainFrame, "TOPLEFT", 0, yPos)
     buffTabBar:SetPoint("TOPRIGHT", S.mainFrame, "TOPRIGHT", 0, yPos)
-
-    -- The three pools differ on two axes the labels can't carry — WHOSE casts
-    -- count, and whether the pool is per-spec — so each tab explains itself on
-    -- hover. (Any Buff is caster-agnostic by default; "Others Only" is the
-    -- per-effect opt-in that ignores your own casts.)
-    local MAIN_TAB_DEFS = {
-        { key = "my",      label = L["My Buffs"], tooltip = {
-            L["Buffs from your own class, and only when you cast them."],
-            L["Set up separately for each specialization."],
-        } },
-        { key = "debuffs", label = L["Debuffs"], tooltip = {
-            L["Groups of debuffs picked by category — boss, crowd control, dispellable and so on — rather than one spell at a time."],
-            L["Shared across all your specializations."],
-        } },
-        { key = "other",   label = L["Any Buff"], tooltip = {
-            L["Any buff in the spell database, from any caster — including your own."],
-            L["Turn on Others Only for an effect to ignore your own casts."],
-            L["Shared across all your specializations."],
-        } },
-    }
-    wipe(mainTabButtons)
-    local prevMainBtn
-    for _, def in ipairs(MAIN_TAB_DEFS) do
-        local btn = CreateFrame("Button", nil, buffTabBar, "BackdropTemplate")
-        GUI:StyleButton(btn, { height = BUFFTAB_H - 4, text = def.label, font = "DFFontHighlight" })
-        btn.Text:ClearAllPoints()
-        btn.Text:SetPoint("CENTER", 0, 0)
-        btn:SetWidth(max(btn.Text:GetStringWidth() + 28, 96))
-        if prevMainBtn then
-            btn:SetPoint("LEFT", prevMainBtn, "RIGHT", 4, 0)
-        else
-            btn:SetPoint("LEFT", buffTabBar, "LEFT", 0, 0)
-        end
-        local capturedKey = def.key
-        btn:SetScript("OnClick", function() SetMainTab(capturedKey) end)
-        -- HookScript, not SetScript: StyleButton owns OnEnter/OnLeave for the
-        -- hover wash, and replacing them would leave the tab stuck lit.
-        local tipTitle, tipLines = def.label, def.tooltip
-        btn:HookScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, { title = tipTitle, lines = tipLines })
-        end)
-        btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-        btn:SetActive(S.activeBuffTab == def.key)
-        mainTabButtons[def.key] = btn
-        prevMainBtn = btn
-    end
-
-    -- Relocated spec dropdown (right end of the strip)
-    local stripSpecLabel = buffTabBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    stripSpecLabel:SetText(L["Spec:"])
-    stripSpecLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    S.specDropdown, S.specDropdownUpdate = CreateSpecDropdown(buffTabBar)
-    S.specDropdown:SetSize(165, 22)
-    S.specDropdown:SetPoint("RIGHT", buffTabBar, "RIGHT", -5, 0)
-    stripSpecLabel:SetPoint("RIGHT", S.specDropdown, "LEFT", -4, 0)
-    UpdateSpecDropdownState()
+    -- The strip itself is shared with the popout layout's row page, which mounts
+    -- it as a band -- see S.BuildPoolStrip (AuraDesigner/UI/Rows.lua). Only the
+    -- host differs: a slice of S.mainFrame here, a band there.
+    S.BuildPoolStrip(buffTabBar)
 
     yPos = yPos - (BUFFTAB_H + SECTION_GAP)
 
@@ -1892,10 +1854,52 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 end
 
 -- ============================================================
+-- WHICH PAGE THIS IS
+-- ------------------------------------------------------------
+-- `Add` is the tell, and it is a better one than asking the layout: the popout
+-- arm emits BANDS, and a band can only be emitted through the harness's own Add.
+-- A caller that has one is on BuildPage's contract; a caller that does not (an
+-- older call site, or the preset bar's own deferred re-invoke) can only be served
+-- the island. The layout check is still made, because CreatePopoutPageTools
+-- answers nil in classic and every row the other arm builds needs its table.
+-- ============================================================
+function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
+    if Add and P.BuildAuraDesignerRowsPage and not DF:IsClassicSettingsLayout() then
+        -- A previous build's island is not in page.children -- it never went
+        -- through Add -- so DoBuild's own retire loop cannot see it, and it would
+        -- sit under the bands still showing the last mode's controls.
+        if S.mainFrame then
+            S.mainFrame:Hide()
+            S.mainFrame:SetParent(nil)
+            S.mainFrame = nil
+        end
+        return P.BuildAuraDesignerRowsPage(pageRef, dbRef, Add, AddSpace)
+    end
+    S.rowsMode = false
+    return BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
+end
+
+-- ============================================================
 -- REFRESH
 -- ============================================================
 
 function DF:AuraDesigner_RefreshPage()
+    -- ☠ IN THE POPOUT LAYOUT THERE IS NO S.mainFrame TO REFRESH. This verb means
+    -- "the data moved, redraw the page", and the page harness's own rebuild is
+    -- what that means there. Callers are unchanged: sixty-odd sites across the
+    -- editor say this sentence, and it is true in both layouts.
+    --
+    -- ⚠ CONTROLS INSIDE AN OPEN PANE MUST NOT COME HERE -- a rebuild closes every
+    -- open panel (CreatePopoutPageTools' first act), which for a tick the user
+    -- just clicked reads as the panel falling shut. Those go through
+    -- P.ADStructuralRedraw, which re-flows the pane instead.
+    if S.rowsMode then
+        if S.framePreview and S.framePreview.RefreshGeometry then
+            S.framePreview.RefreshGeometry()
+        end
+        if S.page and S.page.Refresh then S.page:Refresh() end
+        return
+    end
     if not S.mainFrame then return end
 
     -- Frame size and Preview Scale are settings like any other; re-read them here so
