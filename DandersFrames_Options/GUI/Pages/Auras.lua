@@ -4700,9 +4700,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Text > Text Designer
     -- See spec at docs/superpowers/specs/2026-05-22-text-designer-phase1-design.md
     local pageTextDesigner = CreateSubTab("text", "text_designer", L["Text Designer"])
+    -- ⚠ Add AND AddSpace GO THROUGH. The designer page has two arms: the classic
+    -- split panel, which anchors everything inside frames of its own and needs
+    -- neither, and the popout page, which emits BANDS -- and a band can only reach
+    -- the page's column through the harness's own Add. Having one is also how the
+    -- builder tells which arm it is on.
     BuildPage(pageTextDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         if DF.BuildTextDesignerPage then
-            DF.BuildTextDesignerPage(GUI, self, db)
+            DF.BuildTextDesignerPage(GUI, self, db, Add, AddSpace)
         end
     end)
 

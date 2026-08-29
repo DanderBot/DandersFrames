@@ -163,6 +163,21 @@ end
 -- naming (an explicit auto-numbered label wins, else the content-type's label).
 -- Used by the auto-layout override tooltip to label elements by name, not index.
 DF.TextDesigner = DF.TextDesigner or {}
+
+-- ============================================================
+-- WHAT THE POPOUT LAYOUT'S PAGE READS
+-- ------------------------------------------------------------
+-- This file owns the content catalog, the three section builders, the item list,
+-- the picker and the Global tab. TextDesigner/UI/Rows.lua mounts every one of
+-- them into popout rows instead of down a card body -- the SAME functions, so
+-- the two layouts cannot disagree about what a text element has.
+--
+-- Deliberately a private table rather than more DF.TextDesigner surface: nothing
+-- outside the settings panel has any business calling these, and the resident
+-- addon must keep working with the companion unloaded.
+-- ============================================================
+local P = {}
+DF.TextDesigner._priv = P
 function DF.TextDesigner.ElementDisplayName(elem)
     if type(elem) ~= "table" then return nil end
     if type(elem.label) == "string" and elem.label ~= "" then return elem.label end
@@ -228,6 +243,9 @@ end
 -- Forward-declared so BuildContentSection's group branch can reference the
 -- picker that's defined later in the file.
 local BuildPicker
+-- ...and the item list, which BuildContentSection's group branch calls and which
+-- calls BuildContentSection back for each expanded item's own fields.
+local BuildGroupItemsSection
 
 -- ============================================================
 -- DEFAULTS RECORDS
@@ -250,16 +268,61 @@ local BuildPicker
 -- So a stale elem.font with overrides.font false is not in force and must not
 -- read as modified -- which is why GetStored asks the flag first.
 --
--- ⚠ AND THE OVERRIDE SET IS ONLY THOSE FIVE FIELDS. Every other element field
--- (contentType, anchor, offsets, the per-type content options) has no override
--- marker and no shared default to fall back to, so the record answers "not a
--- setting here" for them and they report unmodified. That is the honest answer
--- for the schema as it stands, not an oversight.
+-- ⚠ THE OVERRIDE SET IS ONLY THOSE FIVE FIELDS -- and that does NOT mean every
+-- other field is unanswerable. `overrides` is what says "this element stops
+-- following the Global tab", which is a question only those five ask. Anchor,
+-- offsets and the per-type content options have no global to follow: they have a
+-- SHIPPED value, written inline by the builders below and gathered into
+-- TD_SHIPPED, and the record answers from that. Two chains, one adapter.
 -- ============================================================
 
 -- The five appearance fields the renderer resolves through overrides.
 local TD_OVERRIDABLE = {
     font = true, fontSize = true, color = true, outline = true, useClassColor = true,
+}
+
+-- ...and what the addon ships for every OTHER field an element carries.
+--
+-- ☠ NOT NEW DEFAULTS. Every value here is a literal the section builders below
+-- already write inline -- `elem.anchor = elem.anchor or "CENTER"`,
+-- `elem.nameLength or 12`, `elem.rangeOutText == nil then "OOR"` -- gathered into
+-- one place so the diff engine can be TOLD what a field falls back to. No key is
+-- added and nothing is persisted: the seeds still happen where they always did,
+-- and this is only the second reader of the same number.
+--
+-- ⚠ COMPARED BY VALUE, NEVER BY PRESENCE. Those same seed lines MATERIALISE the
+-- default onto the element as a panel builds, so "the record holds this key" is no
+-- evidence the user set anything -- the Aura Designer's copy-on-read trap in
+-- different clothing, and defused the same way (Core/Defaults.lua's ValuesEqual
+-- says a materialised default equals the default it came from).
+--
+-- ⚠ `label` IS DELIBERATELY ABSENT. The Content section seeds it to "", but
+-- CREATION writes ComputeAutoLabel's answer ("", "Health #2", "Health #3"), which
+-- is not a static value -- so a "" default here would report every auto-numbered
+-- element's own name as a user edit. GetDefault answers nil for it and it reads
+-- unmodified, which is the honest answer.
+local TD_SHIPPED = {
+    -- Content, per content type
+    abbreviate     = true,
+    hideWhenZero   = true,
+    hidePercent    = false,
+    decimals       = 0,
+    nameLength     = 12,
+    truncateMode   = "ELLIPSIS",
+    staticText     = "",
+    groupFormat    = "SUFFIX",
+    aggroText1     = "+",
+    aggroText2     = "++",
+    aggroText3     = "AGGRO",
+    rangeInText    = "",
+    rangeOutText   = "OOR",
+    groupSeparator = " / ",
+    useColor       = false,
+    -- Position
+    anchor         = "CENTER",
+    offsetX        = 0,
+    offsetY        = 0,
+    anchorTo       = "FRAME",
 }
 
 -- The globalDefaults block the addon SHIPS, taken from the resident module that
@@ -300,23 +363,45 @@ local function ElementDefaultsRecord(elem, tdDB)
     local record
     local adapter = {
         GetDefault = function(k)
-            if not TD_OVERRIDABLE[k] then return nil end
-            local bound = rawget(record, "__dfTDDB")
-            local gd = bound and bound.globalDefaults
-            if gd and gd[k] ~= nil then return gd[k] end
-            return ShippedGlobalDefaults()[k]
+            if TD_OVERRIDABLE[k] then
+                local bound = rawget(record, "__dfTDDB")
+                local gd = bound and bound.globalDefaults
+                if gd and gd[k] ~= nil then return gd[k] end
+                return ShippedGlobalDefaults()[k]
+            end
+            -- The second chain: a field with no global to follow still has a
+            -- shipped value. nil for anything that is not a setting at all
+            -- (id, contentType, groupItems, label), which reads as unmodified.
+            return TD_SHIPPED[k]
         end,
         GetStored = function(k)
-            local ovr = rawget(elem, "overrides")
-            if not ovr or not ovr[k] then return nil end
+            if TD_OVERRIDABLE[k] then
+                local ovr = rawget(elem, "overrides")
+                if not ovr or not ovr[k] then return nil end
+                return rawget(elem, k)
+            end
+            if TD_SHIPPED[k] == nil then return nil end
+            -- ⚠ RAW, and by VALUE afterwards. The builders seed these onto the
+            -- element as they run, so the key is present on an element nobody has
+            -- touched -- ValuesEqual is what makes that harmless.
             return rawget(elem, k)
         end,
-        -- Reset clears the OVERRIDE, not the value: the point of a reset here is
-        -- that the element goes back to FOLLOWING the Global tab, not that it is
-        -- pinned at whatever the Global tab happens to say today.
+        -- Reset clears the OVERRIDE, not the value: the point of a reset on one of
+        -- the five is that the element goes back to FOLLOWING the Global tab, not
+        -- that it is pinned at whatever the Global tab happens to say today.
+        --
+        -- ⚠ THE OTHER FIELDS ARE WRITTEN, NOT UNSET, and that is not the same
+        -- asymmetry. There is no global for them to follow -- the shipped literal
+        -- IS the default -- and a widget still on screen has to have something to
+        -- read: unsetting `anchor` would hand the anchor grid a nil. Every value in
+        -- TD_SHIPPED is a scalar, so no shared table escapes onto a profile.
         ClearKey = function(k)
-            local ovr = rawget(elem, "overrides")
-            if ovr then ovr[k] = nil end
+            if TD_OVERRIDABLE[k] then
+                local ovr = rawget(elem, "overrides")
+                if ovr then ovr[k] = nil end
+            elseif TD_SHIPPED[k] ~= nil then
+                elem[k] = TD_SHIPPED[k]
+            end
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end,
     }
@@ -376,13 +461,35 @@ DF.TextDesigner.GlobalDefaultsRecord = GlobalDefaultsRecord
 -- tdDB / state / page are needed by the Text Group branch so its nested
 -- add/remove callbacks can trigger a card-list re-render.
 -- `card` is the parent settings group; the Label edit box updates card.title.
+-- `group`: the popout layout's pane, when this is being built into one. See
+-- `place` below -- given a group every widget is ADDED to it instead of being
+-- anchored down `parent`, and the section's own caption is dropped because the
+-- row that opened the pane already carries the name.
 -- isGroupItem: when true this renders the per-item editor for a text-group
 -- item. It skips the "Content" section header and the element-label edit box
 -- (group items don't have their own display name), but keeps every type-specific
 -- field (abbreviate / hide-0 / hide-% / decimals / custom text / aggro & range
 -- text / name length / group-number format). Font/anchor/offset stay group-level.
-local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, yStart, isGroupItem)
+local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, yStart, isGroupItem, group)
     local y = yStart
+
+    -- ☠ TWO HOSTS, ONE BUILDER. In the split panel a section is HAND-ANCHORED down
+    -- a card body at a running y; in the popout layout it is a settings GROUP, which
+    -- lays its own children out and sizes them to the pane. `place` is the whole of
+    -- the difference -- the widgets, their db bindings and their callbacks are the
+    -- same objects either way, which is the point: a control that moved pane but
+    -- lost its binding would read the fallback and look correct while writing
+    -- nowhere.
+    --
+    -- ⚠ A FontString IS NOT A FRAME and cannot be added to a group, so anything
+    -- built with parent:CreateFontString stays on the pane's HIDDEN holder and is
+    -- never seen. Every caption below is either a section header the row's own name
+    -- replaces, or goes through a label widget in group mode.
+    local function place(w, step, x)
+        if group then group:AddWidget(w) return end
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 14, y)
+        y = y - (step or FIELD_ROW_HEIGHT)
+    end
     -- Text Designer is preset-based: a raid auto-layout overrides the whole PRESET
     -- (shown by the preset bar's Inherit/preset name), NOT individual fields. So the
     -- generic per-setting override star/reset doesn't apply here — same as the Aura
@@ -401,7 +508,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         -- row asks for the modified tick and Reset Group.
         ElementDefaultsRecord(elem, tdDB)
     end
-    if not isGroupItem then
+    if not isGroupItem and not group then
         local label = CreateSectionLabel(GUI, parent, L["Content"])
         label:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yStart)
         y = yStart - SECTION_LABEL_HEIGHT
@@ -444,9 +551,8 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end, 200)
-    labelEdit:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
     -- CreateEditBox is label-above style; row is taller than other widgets.
-    y = y - EDIT_BOX_ROW_H
+    place(labelEdit, EDIT_BOX_ROW_H)
     end  -- not isGroupItem
 
     -- Numeric types: abbreviate checkbox
@@ -461,8 +567,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         local abbrev = GUI:CreateCheckbox(parent, L["Abbreviate"], elem, "abbreviate", function()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end)
-        abbrev:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - FIELD_ROW_HEIGHT
+        place(abbrev, FIELD_ROW_HEIGHT)
 
         -- Hide-when-0 toggle (numeric amounts + deficits — defaults ON).
         -- Secret-safe zero detection happens in the resolver via MS.IsZeroAmount.
@@ -475,8 +580,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             local hideZero = GUI:CreateCheckbox(parent, L["Hide when 0"], elem, "hideWhenZero", function()
                 if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
             end)
-            hideZero:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-            y = y - FIELD_ROW_HEIGHT
+            place(hideZero, FIELD_ROW_HEIGHT)
         end
 
     -- Percent types: decimals slider
@@ -487,15 +591,13 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end
         local dec = GUI:CreateSlider(parent, L["Decimal Places"], 0, 2, 1, elem, "decimals", decCB, decCB)
-        dec:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - FIELD_ROW_HEIGHT
+        place(dec, FIELD_ROW_HEIGHT)
 
         -- Hide % Symbol toggle (defaults OFF — show the % like before).
         local hidePct = GUI:CreateCheckbox(parent, L["Hide % Symbol"], elem, "hidePercent", function()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end)
-        hidePct:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - FIELD_ROW_HEIGHT
+        place(hidePct, FIELD_ROW_HEIGHT)
 
     -- Name: length cap + truncate mode
     elseif ct.key == "name" then
@@ -504,16 +606,14 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end
         local lenSlider = GUI:CreateSlider(parent, L["Max Length (0=off)"], 0, 30, 1, elem, "nameLength", lenCB, lenCB)
-        lenSlider:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - FIELD_ROW_HEIGHT
+        place(lenSlider, FIELD_ROW_HEIGHT)
 
         elem.truncateMode = elem.truncateMode or "ELLIPSIS"
         local truncOpts = { ELLIPSIS = L["Ellipsis"], CUT = L["Cut"] }
         local truncDrop = GUI:CreateDropdown(parent, L["Truncate Mode"], truncOpts, elem, "truncateMode", function()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end)
-        truncDrop:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - FIELD_ROW_HEIGHT
+        place(truncDrop, FIELD_ROW_HEIGHT)
 
     -- Custom static text: a plain edit box
     elseif ct.key == "custom_static" then
@@ -521,11 +621,10 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         local edit = GUI:CreateEditBox(parent, L["Text"], elem, "staticText", function()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end, 240)
-        edit:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
         -- CreateEditBox renders its label ABOVE the input, so the row is
         -- taller than other widgets. Use a custom y-decrement instead of
         -- FIELD_ROW_HEIGHT.
-        y = y - EDIT_BOX_ROW_H
+        place(edit, EDIT_BOX_ROW_H)
 
     -- Group number: prefix/suffix format
     elseif ct.key == "group_number" then
@@ -538,8 +637,7 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         local fmtDrop = GUI:CreateDropdown(parent, L["Format"], opts, elem, "groupFormat", function()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end)
-        fmtDrop:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - FIELD_ROW_HEIGHT
+        place(fmtDrop, FIELD_ROW_HEIGHT)
 
     -- Aggro flag: editable text for each of the 3 threat levels.
     elseif ct.key == "aggro_flag" then
@@ -550,14 +648,11 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end
         local a1 = GUI:CreateEditBox(parent, L["Gaining Aggro Text"], elem, "aggroText1", aggroCB, 120)
-        a1:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - EDIT_BOX_ROW_H
+        place(a1, EDIT_BOX_ROW_H)
         local a2 = GUI:CreateEditBox(parent, L["Tanking Text"], elem, "aggroText2", aggroCB, 120)
-        a2:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - EDIT_BOX_ROW_H
+        place(a2, EDIT_BOX_ROW_H)
         local a3 = GUI:CreateEditBox(parent, L["Has Aggro Text"], elem, "aggroText3", aggroCB, 120)
-        a3:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - EDIT_BOX_ROW_H
+        place(a3, EDIT_BOX_ROW_H)
 
     -- Range text: editable in-range / out-of-range text.
     elseif ct.key == "range_text" then
@@ -567,11 +662,9 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end
         local rin = GUI:CreateEditBox(parent, L["In Range Text"], elem, "rangeInText", rangeCB, 120)
-        rin:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - EDIT_BOX_ROW_H
+        place(rin, EDIT_BOX_ROW_H)
         local rout = GUI:CreateEditBox(parent, L["Out of Range Text"], elem, "rangeOutText", rangeCB, 120)
-        rout:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - EDIT_BOX_ROW_H
+        place(rout, EDIT_BOX_ROW_H)
 
     -- Text Group: concatenates 2+ child content values with a user separator.
     -- Phase 1 stores groupItems / groupSeparator on the element; Phase 2 will
@@ -580,252 +673,24 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
         elem.groupItems = elem.groupItems or {}
         elem.groupSeparator = elem.groupSeparator or " / "
 
-        local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-
-        -- Helper to re-render the whole card list when items change. Uses
-        -- the full rebuild path so every other card's Anchor To dropdown
-        -- and group items list refresh in lockstep.
-        -- Deferred via C_Timer.After(0, ...) so the rebuild happens AFTER the
-        -- current click event finishes — synchronous rebuilds mid-click destroy
-        -- the frames the click is still landing on.
-        local function ReRender()
-            if state and DF.TextDesigner.FullRebuildCards then
-                C_Timer.After(0, function()
-                    DF.TextDesigner.FullRebuildCards(GUI, page, tdDB, state)
-                end)
-            end
-        end
-
         -- Separator input (CreateEditBox renders its label ABOVE the input)
         local sepEdit = GUI:CreateEditBox(parent, L["Separator"], elem, "groupSeparator", function()
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end, 120)
-        sepEdit:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - EDIT_BOX_ROW_H
+        place(sepEdit, EDIT_BOX_ROW_H)
 
         -- NOTE: Abbreviate / Hide-when-0 / Hide-% / Colour are now PER ITEM
         -- (edited by expanding each item below), not group-wide. Font, size,
         -- outline, anchor and offset remain group-level (Appearance / Position
         -- sections) since the group renders as a single FontString.
 
-        -- Items label
-        local itemsLabel = parent:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(itemsLabel, 9, "")
-        itemsLabel:SetText(L["Items"]:upper())
-        itemsLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, C_TEXT_DIM.a)
-        itemsLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        y = y - 16
-
-        -- Items list — one bar per item (mirrors AuraDesigner's layout-group
-        -- member rows: a distinct backdrop bar, up/down arrows stacked on the
-        -- left, label in the middle, remove X on the right).
-        if #elem.groupItems == 0 then
-            local emptyLbl = parent:CreateFontString(nil, "OVERLAY")
-            GUI:SetSettingsFont(emptyLbl, 10, "")
-            emptyLbl:SetText(L["No items yet"])
-            emptyLbl:SetTextColor(0.5, 0.5, 0.5)
-            emptyLbl:SetPoint("TOPLEFT", parent, "TOPLEFT", 26, y)
-            y = y - 18
-        else
-            if state then state.tdExpandedItems = state.tdExpandedItems or {} end
-            for itemIdx, rawItem in ipairs(elem.groupItems) do
-                -- Normalise to an elem-like table so per-item settings persist,
-                -- then read its type. Each item is its own mini-element.
-                local item = DF.TextDesigner.Resolver.NormalizeGroupItem(rawItem)
-                elem.groupItems[itemIdx] = item
-                local typeKey = item.contentType
-                local itemCT = FindContentType(typeKey)
-                local capturedIdx = itemIdx
-                local capturedItem = item
-                local isExpanded = state and state.tdExpandedItems[item]
-
-                local itemRow = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-                itemRow:SetHeight(28)
-                itemRow:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-                itemRow:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -14, y)
-                ApplyBackdrop(itemRow,
-                    {r = 0.11, g = 0.11, b = 0.11, a = 1},
-                    {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
-
-                -- Up/Down arrows stacked vertically on the LEFT. Only created
-                -- when the move is possible (first row has no up, last has no down).
-                -- One arrow texture serves both directions via rotation.
-                if capturedIdx > 1 then
-                    local upBtn = DF.GUI:CreateGlyphButton(itemRow, {
-                        width = 20, height = 13, iconSize = 12,
-                        texture  = mediaPath .. "expand_more",
-                        rotation = math.pi,   -- 180° = points up
-                        onClick  = function()
-                            elem.groupItems[capturedIdx], elem.groupItems[capturedIdx - 1] =
-                                elem.groupItems[capturedIdx - 1], elem.groupItems[capturedIdx]
-                            ReRender()
-                        end,
-                    })
-                    upBtn:SetPoint("TOPLEFT", 2, -1)
-                end
-                if capturedIdx < #elem.groupItems then
-                    local downBtn = DF.GUI:CreateGlyphButton(itemRow, {
-                        width = 20, height = 13, iconSize = 12,
-                        texture = mediaPath .. "expand_more",
-                        onClick = function()
-                            elem.groupItems[capturedIdx], elem.groupItems[capturedIdx + 1] =
-                                elem.groupItems[capturedIdx + 1], elem.groupItems[capturedIdx]
-                            ReRender()
-                        end,
-                    })
-                    downBtn:SetPoint("BOTTOMLEFT", 2, 1)
-                end
-
-                -- Remove button: shared red-at-rest "×" (tone="danger") on the right.
-                local removeBtn = DF.GUI:CreateCloseButton(itemRow, {
-                    size = 16,
-                    tone = "danger",
-                    onClick = function()
-                        if state and state.tdExpandedItems then state.tdExpandedItems[capturedItem] = nil end
-                        table.remove(elem.groupItems, capturedIdx)
-                        ReRender()
-                    end,
-                })
-                removeBtn:SetPoint("RIGHT", itemRow, "RIGHT", -6, 0)
-
-                -- Customise button (left of the remove X) — toggles the per-item
-                -- editor inline (AD-style). A text button instead of a chevron so
-                -- it isn't confused with the up/down move arrows.
-                -- tinted = the shared "accent is the identity" look: faint accent
-                -- fill, accent border and accent label at rest, which is what this
-                -- was hand-mixing from GetThemeColor.
-                local custBtn = CreateFrame("Button", nil, itemRow, "BackdropTemplate")
-                custBtn:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
-                GUI:StyleButton(custBtn, {
-                    width = 70, height = 18,
-                    text = isExpanded and L["Done"] or L["Customise"],
-                    tinted = true,
-                })
-                GUI:SetSettingsFont(custBtn.Text, 9, "")
-                custBtn:SetScript("OnClick", function()
-                    if not state then return end
-                    state.tdExpandedItems[capturedItem] = not state.tdExpandedItems[capturedItem]
-                    ReRender()
-                end)
-
-                -- Label — type name; for custom text show the literal text so the
-                -- item is identifiable while collapsed.
-                local labelText
-                if typeKey == "custom_static" then
-                    local t = capturedItem.staticText
-                    labelText = (t and t ~= "" and ('"' .. t .. '"')) or L["Custom Static Text"]
-                else
-                    labelText = (itemCT and itemCT.label) or typeKey
-                end
-                local itemLabel = itemRow:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(itemLabel, 10, "")
-                itemLabel:SetPoint("LEFT", itemRow, "LEFT", 26, 0)
-                itemLabel:SetPoint("RIGHT", custBtn, "LEFT", -6, 0)
-                itemLabel:SetJustifyH("LEFT")
-                itemLabel:SetWordWrap(false)
-                itemLabel:SetText(capturedIdx .. ". " .. labelText)
-                itemLabel:SetTextColor(0.9, 0.9, 0.9)
-
-                y = y - 32
-
-                -- Per-item editor (expanded): the item's own content + format
-                -- fields, plus per-item colour. Font/anchor/offset stay group-level.
-                if isExpanded then
-                    local yEnd = BuildContentSection(GUI, parent, capturedItem, tdDB, state, page, card, y, true)
-                    local colorCB = function()
-                        if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
-                    end
-                    -- Throttled refresh for the colour drag: preview updates
-                    -- every tick, live frames at most ~30/s (live but not laggy).
-                    local colorLight = function()
-                        if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshThrottled() end
-                    end
-                    -- The custom Color picker is gated by two booleans: it's only
-                    -- active when "Custom Color" is ON and "Use Class Color" is OFF
-                    -- (class colour takes precedence). When inactive it GREYS OUT
-                    -- (disabled + dimmed) but stays visible — never hidden. Forward
-                    -- declared so both checkbox callbacks can drive it.
-                    local colorPick
-                    local function UpdateItemColorGrey()
-                        if not colorPick then return end
-                        local active = capturedItem.useColor and not capturedItem.useClassColor
-                        if colorPick.SetEnabled then colorPick:SetEnabled(active) end
-                        colorPick:SetAlpha(active and 1 or 0.4)
-                    end
-                    -- Use Class Color (takes precedence over a custom colour).
-                    local useClass = GUI:CreateCheckbox(parent, L["Use Class Color"], capturedItem, "useClassColor", function()
-                        UpdateItemColorGrey()
-                        colorCB()
-                    end)
-                    useClass:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, yEnd)
-                    yEnd = yEnd - FIELD_ROW_HEIGHT
-                    local useColor = GUI:CreateCheckbox(parent, L["Custom Color"], capturedItem, "useColor", function()
-                        if capturedItem.useColor and not capturedItem.color then
-                            capturedItem.color = {r = 1, g = 1, b = 1, a = 1}
-                        end
-                        UpdateItemColorGrey()
-                        colorCB()
-                    end)
-                    useColor:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, yEnd)
-                    yEnd = yEnd - FIELD_ROW_HEIGHT
-                    capturedItem.color = capturedItem.color or {r = 1, g = 1, b = 1, a = 1}
-                    colorPick = GUI:CreateColorPicker(parent, L["Color"], capturedItem, "color", true, colorCB, colorLight, true)
-                    colorPick:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, yEnd)
-                    yEnd = yEnd - FIELD_ROW_HEIGHT
-                    -- Apply the initial grey state on build.
-                    UpdateItemColorGrey()
-                    y = yEnd - 6
-                end
-            end
+        -- ⚠ THE ITEM LIST IS ITS OWN SECTION. The split panel renders it straight
+        -- on under the separator, as it always has; the popout layout gives it a
+        -- row of its own and calls the same builder from there.
+        if not group then
+            y = BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, y)
         end
 
-        -- Add Item button — opens a picker that excludes the "group" type
-        -- (no nested groups). The picker is cached on the card so repeated
-        -- clicks reuse the same frame instead of spawning new offscreen ones.
-        local addItemBtn
-        addItemBtn = GUI:CreateButton(parent, L["Add Item"], 100, 22, function()
-            if not BuildPicker then return end
-            if card and not card._addItemPicker then
-                card._addItemPicker = BuildPicker(GUI, parent, tdDB, function(typeKey)
-                    -- Each item is its own mini-element table so per-item
-                    -- settings (text, abbreviate, hide-0, hide-%, colour) persist.
-                    table.insert(elem.groupItems, { contentType = typeKey })
-                    ReRender()
-                end, "group")
-            end
-            local picker = card and card._addItemPicker
-            if not picker then return end
-            if picker:IsShown() then
-                picker:Hide()
-            else
-                -- Anchor left-aligned: the Add Item button sits on the LEFT
-                -- of the card body, so the dropdown extends RIGHT and DOWN.
-                picker:Open(addItemBtn, "left")
-            end
-        end, "add")
-        -- Full-width CTA (matches AuraDesigner's "+ Add aura" button).
-        addItemBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-        addItemBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -14, y)
-
-        -- Theme-tint the button to match AuraDesigner's CTA pattern.
-        do
-            local tc = GUI:GetThemeColor()
-            if addItemBtn.SetBackdropColor then
-                addItemBtn:SetBackdropColor(tc.r * CTA_BG_RESTING, tc.g * CTA_BG_RESTING, tc.b * CTA_BG_RESTING, 1)
-                addItemBtn:SetBackdropBorderColor(tc.r * CTA_BORDER_RESTING, tc.g * CTA_BORDER_RESTING, tc.b * CTA_BORDER_RESTING, 1)
-                addItemBtn:HookScript("OnEnter", function(self)
-                    local c = GUI:GetThemeColor()
-                    self:SetBackdropColor(c.r * CTA_BG_HOVER, c.g * CTA_BG_HOVER, c.b * CTA_BG_HOVER, 1)
-                    self:SetBackdropBorderColor(c.r * CTA_BORDER_HOVER, c.g * CTA_BORDER_HOVER, c.b * CTA_BORDER_HOVER, 1)
-                end)
-                addItemBtn:HookScript("OnLeave", function(self)
-                    local c = GUI:GetThemeColor()
-                    self:SetBackdropColor(c.r * CTA_BG_RESTING, c.g * CTA_BG_RESTING, c.b * CTA_BG_RESTING, 1)
-                    self:SetBackdropBorderColor(c.r * CTA_BORDER_RESTING, c.g * CTA_BORDER_RESTING, c.b * CTA_BORDER_RESTING, 1)
-                end)
-            end
-        end
-        y = y - 32
     end
     -- Types with no Content-section fields fall through:
     -- class, power_type_string, level, race, faction (and the legacy
@@ -833,6 +698,279 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
     -- which is fine.
 
     return y - SECTION_GAP
+end
+
+-- ============================================================
+-- A TEXT GROUP'S ITEMS
+-- ------------------------------------------------------------
+-- The item bars, their per-item editors and the Add Item picker. Lifted out of
+-- BuildContentSection's `group` branch WITHOUT being rewritten, for one reason:
+-- in the popout layout this is the group element's own "Items" row, and a
+-- Content pane that also held the whole item list would be a pane holding
+-- another page. The split panel still renders it straight on under the
+-- separator, which is what the `group == nil` arm of every `place` below does.
+--
+-- Returns the y-offset the next section should start at, exactly as the other
+-- section builders do.
+-- ============================================================
+function BuildGroupItemsSection(GUI, parent, elem, tdDB, state, page, card, yStart, group)
+    local y = yStart
+    local function place(w, step, x)
+        if group then group:AddWidget(w) return end
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 14, y)
+        y = y - (step or FIELD_ROW_HEIGHT)
+    end
+    -- The two objects that span the body: an item bar and the Add Item CTA. A
+    -- group sizes its children to the pane, so there the width is not ours.
+    local function placeWide(w, step, h)
+        if group then group:AddWidget(w, h) return end
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
+        w:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -14, y)
+        if step and step > 0 then y = y - step end
+    end
+    local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
+    -- Helper to re-render the whole card list when items change. Uses
+    -- the full rebuild path so every other card's Anchor To dropdown
+    -- and group items list refresh in lockstep.
+    -- Deferred via C_Timer.After(0, ...) so the rebuild happens AFTER the
+    -- current click event finishes — synchronous rebuilds mid-click destroy
+    -- the frames the click is still landing on.
+    local function ReRender()
+        if state and DF.TextDesigner.FullRebuildCards then
+            C_Timer.After(0, function()
+                DF.TextDesigner.FullRebuildCards(GUI, page, tdDB, state)
+            end)
+        end
+    end
+
+    -- Items label. Dropped in a pane: the row that opened it is called Items.
+    if not group then
+        local itemsLabel = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(itemsLabel, 9, "")
+        itemsLabel:SetText(L["Items"]:upper())
+        itemsLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, C_TEXT_DIM.a)
+        place(itemsLabel, 16)
+    end
+
+    -- Items list — one bar per item (mirrors AuraDesigner's layout-group
+    -- member rows: a distinct backdrop bar, up/down arrows stacked on the
+    -- left, label in the middle, remove X on the right).
+    if #elem.groupItems == 0 then
+        -- A FontString cannot go in a group, so the pane gets the shared note
+        -- widget instead of the card's bare string.
+        if group then
+            place(GUI:CreateNote(parent, L["No items yet"], { width = 220 }))
+        else
+            local emptyLbl = parent:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(emptyLbl, 10, "")
+            emptyLbl:SetText(L["No items yet"])
+            emptyLbl:SetTextColor(0.5, 0.5, 0.5)
+            place(emptyLbl, 18, 26)
+        end
+    else
+        if state then state.tdExpandedItems = state.tdExpandedItems or {} end
+        for itemIdx, rawItem in ipairs(elem.groupItems) do
+            -- Normalise to an elem-like table so per-item settings persist,
+            -- then read its type. Each item is its own mini-element.
+            local item = DF.TextDesigner.Resolver.NormalizeGroupItem(rawItem)
+            elem.groupItems[itemIdx] = item
+            local typeKey = item.contentType
+            local itemCT = FindContentType(typeKey)
+            local capturedIdx = itemIdx
+            local capturedItem = item
+            local isExpanded = state and state.tdExpandedItems[item]
+
+            local itemRow = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+            itemRow:SetHeight(28)
+            placeWide(itemRow, 0, 28)
+            ApplyBackdrop(itemRow,
+                {r = 0.11, g = 0.11, b = 0.11, a = 1},
+                {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
+
+            -- Up/Down arrows stacked vertically on the LEFT. Only created
+            -- when the move is possible (first row has no up, last has no down).
+            -- One arrow texture serves both directions via rotation.
+            if capturedIdx > 1 then
+                local upBtn = DF.GUI:CreateGlyphButton(itemRow, {
+                    width = 20, height = 13, iconSize = 12,
+                    texture  = mediaPath .. "expand_more",
+                    rotation = math.pi,   -- 180° = points up
+                    onClick  = function()
+                        elem.groupItems[capturedIdx], elem.groupItems[capturedIdx - 1] =
+                            elem.groupItems[capturedIdx - 1], elem.groupItems[capturedIdx]
+                        ReRender()
+                    end,
+                })
+                upBtn:SetPoint("TOPLEFT", 2, -1)
+            end
+            if capturedIdx < #elem.groupItems then
+                local downBtn = DF.GUI:CreateGlyphButton(itemRow, {
+                    width = 20, height = 13, iconSize = 12,
+                    texture = mediaPath .. "expand_more",
+                    onClick = function()
+                        elem.groupItems[capturedIdx], elem.groupItems[capturedIdx + 1] =
+                            elem.groupItems[capturedIdx + 1], elem.groupItems[capturedIdx]
+                        ReRender()
+                    end,
+                })
+                downBtn:SetPoint("BOTTOMLEFT", 2, 1)
+            end
+
+            -- Remove button: shared red-at-rest "×" (tone="danger") on the right.
+            local removeBtn = DF.GUI:CreateCloseButton(itemRow, {
+                size = 16,
+                tone = "danger",
+                onClick = function()
+                    if state and state.tdExpandedItems then state.tdExpandedItems[capturedItem] = nil end
+                    table.remove(elem.groupItems, capturedIdx)
+                    ReRender()
+                end,
+            })
+            removeBtn:SetPoint("RIGHT", itemRow, "RIGHT", -6, 0)
+
+            -- Customise button (left of the remove X) — toggles the per-item
+            -- editor inline (AD-style). A text button instead of a chevron so
+            -- it isn't confused with the up/down move arrows.
+            -- tinted = the shared "accent is the identity" look: faint accent
+            -- fill, accent border and accent label at rest, which is what this
+            -- was hand-mixing from GetThemeColor.
+            local custBtn = CreateFrame("Button", nil, itemRow, "BackdropTemplate")
+            custBtn:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
+            GUI:StyleButton(custBtn, {
+                width = 70, height = 18,
+                text = isExpanded and L["Done"] or L["Customise"],
+                tinted = true,
+            })
+            GUI:SetSettingsFont(custBtn.Text, 9, "")
+            custBtn:SetScript("OnClick", function()
+                if not state then return end
+                state.tdExpandedItems[capturedItem] = not state.tdExpandedItems[capturedItem]
+                ReRender()
+            end)
+
+            -- Label — type name; for custom text show the literal text so the
+            -- item is identifiable while collapsed.
+            local labelText
+            if typeKey == "custom_static" then
+                local t = capturedItem.staticText
+                labelText = (t and t ~= "" and ('"' .. t .. '"')) or L["Custom Static Text"]
+            else
+                labelText = (itemCT and itemCT.label) or typeKey
+            end
+            local itemLabel = itemRow:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(itemLabel, 10, "")
+            itemLabel:SetPoint("LEFT", itemRow, "LEFT", 26, 0)
+            itemLabel:SetPoint("RIGHT", custBtn, "LEFT", -6, 0)
+            itemLabel:SetJustifyH("LEFT")
+            itemLabel:SetWordWrap(false)
+            itemLabel:SetText(capturedIdx .. ". " .. labelText)
+            itemLabel:SetTextColor(0.9, 0.9, 0.9)
+
+            if not group then y = y - 32 end
+
+            -- Per-item editor (expanded): the item's own content + format
+            -- fields, plus per-item colour. Font/anchor/offset stay group-level.
+            if isExpanded then
+                local yEnd = BuildContentSection(GUI, parent, capturedItem, tdDB, state, page, card, y, true, group)
+                -- The three per-item colour controls sit after that call and share
+                -- its cursor, so they need a placer of their own.
+                local function placeItem(w)
+                    if group then group:AddWidget(w) return end
+                    w:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, yEnd)
+                    yEnd = yEnd - FIELD_ROW_HEIGHT
+                end
+                local colorCB = function()
+                    if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
+                end
+                -- Throttled refresh for the colour drag: preview updates
+                -- every tick, live frames at most ~30/s (live but not laggy).
+                local colorLight = function()
+                    if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshThrottled() end
+                end
+                -- The custom Color picker is gated by two booleans: it's only
+                -- active when "Custom Color" is ON and "Use Class Color" is OFF
+                -- (class colour takes precedence). When inactive it GREYS OUT
+                -- (disabled + dimmed) but stays visible — never hidden. Forward
+                -- declared so both checkbox callbacks can drive it.
+                local colorPick
+                local function UpdateItemColorGrey()
+                    if not colorPick then return end
+                    local active = capturedItem.useColor and not capturedItem.useClassColor
+                    if colorPick.SetEnabled then colorPick:SetEnabled(active) end
+                    colorPick:SetAlpha(active and 1 or 0.4)
+                end
+                -- Use Class Color (takes precedence over a custom colour).
+                local useClass = GUI:CreateCheckbox(parent, L["Use Class Color"], capturedItem, "useClassColor", function()
+                    UpdateItemColorGrey()
+                    colorCB()
+                end)
+                placeItem(useClass)
+                local useColor = GUI:CreateCheckbox(parent, L["Custom Color"], capturedItem, "useColor", function()
+                    if capturedItem.useColor and not capturedItem.color then
+                        capturedItem.color = {r = 1, g = 1, b = 1, a = 1}
+                    end
+                    UpdateItemColorGrey()
+                    colorCB()
+                end)
+                placeItem(useColor)
+                capturedItem.color = capturedItem.color or {r = 1, g = 1, b = 1, a = 1}
+                colorPick = GUI:CreateColorPicker(parent, L["Color"], capturedItem, "color", true, colorCB, colorLight, true)
+                placeItem(colorPick)
+                -- Apply the initial grey state on build.
+                UpdateItemColorGrey()
+                if not group then y = yEnd - 6 end
+            end
+        end
+    end
+
+    -- Add Item button — opens a picker that excludes the "group" type
+    -- (no nested groups). The picker is cached on the card so repeated
+    -- clicks reuse the same frame instead of spawning new offscreen ones.
+    local addItemBtn
+    addItemBtn = GUI:CreateButton(parent, L["Add Item"], 100, 22, function()
+        if not BuildPicker then return end
+        if card and not card._addItemPicker then
+            card._addItemPicker = BuildPicker(GUI, parent, tdDB, function(typeKey)
+                -- Each item is its own mini-element table so per-item
+                -- settings (text, abbreviate, hide-0, hide-%, colour) persist.
+                table.insert(elem.groupItems, { contentType = typeKey })
+                ReRender()
+            end, "group")
+        end
+        local picker = card and card._addItemPicker
+        if not picker then return end
+        if picker:IsShown() then
+            picker:Hide()
+        else
+            -- Anchor left-aligned: the Add Item button sits on the LEFT
+            -- of the card body, so the dropdown extends RIGHT and DOWN.
+            picker:Open(addItemBtn, "left")
+        end
+    end, "add")
+    -- Full-width CTA (matches AuraDesigner's "+ Add aura" button).
+    placeWide(addItemBtn, 0, 22)
+
+    -- Theme-tint the button to match AuraDesigner's CTA pattern.
+    do
+        local tc = GUI:GetThemeColor()
+        if addItemBtn.SetBackdropColor then
+            addItemBtn:SetBackdropColor(tc.r * CTA_BG_RESTING, tc.g * CTA_BG_RESTING, tc.b * CTA_BG_RESTING, 1)
+            addItemBtn:SetBackdropBorderColor(tc.r * CTA_BORDER_RESTING, tc.g * CTA_BORDER_RESTING, tc.b * CTA_BORDER_RESTING, 1)
+            addItemBtn:HookScript("OnEnter", function(self)
+                local c = GUI:GetThemeColor()
+                self:SetBackdropColor(c.r * CTA_BG_HOVER, c.g * CTA_BG_HOVER, c.b * CTA_BG_HOVER, 1)
+                self:SetBackdropBorderColor(c.r * CTA_BORDER_HOVER, c.g * CTA_BORDER_HOVER, c.b * CTA_BORDER_HOVER, 1)
+            end)
+            addItemBtn:HookScript("OnLeave", function(self)
+                local c = GUI:GetThemeColor()
+                self:SetBackdropColor(c.r * CTA_BG_RESTING, c.g * CTA_BG_RESTING, c.b * CTA_BG_RESTING, 1)
+                self:SetBackdropBorderColor(c.r * CTA_BORDER_RESTING, c.g * CTA_BORDER_RESTING, c.b * CTA_BORDER_RESTING, 1)
+            end)
+        end
+    end
+    y = y - 32
+    return y
 end
 
 -- ============================================================
@@ -849,7 +987,12 @@ local ANCHOR_GRID = {
 
 local function CreateAnchorGrid(GUI, parent, elem, card)
     local grid = CreateFrame("Frame", nil, parent)
-    grid:SetSize(60, 60)
+    -- 60 of buttons plus the caption strip underneath. ⚠ THE CAPTION IS INSIDE THE
+    -- GRID, not a sibling on `parent`: a popout pane builds into a HIDDEN holder and
+    -- moves the FRAMES into its group, so a FontString left on the holder is simply
+    -- never seen. It is also anchored to the middle button rather than to the frame,
+    -- because a group stretches its children to the pane and the buttons do not move.
+    grid:SetSize(60, 74)
 
     local btns = {}
     -- Selection is StyleButton's :SetActive (shared accent fill + border); this
@@ -877,6 +1020,12 @@ local function CreateAnchorGrid(GUI, parent, elem, card)
         end
     end
 
+    local gridLabel = grid:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(gridLabel, 8, "")
+    gridLabel:SetText(L["Anchor"])
+    gridLabel:SetPoint("TOP", btns.BOTTOM, "BOTTOM", 0, -2)
+    gridLabel:SetTextColor(0.6, 0.6, 0.6)
+
     -- Initial state
     elem.anchor = elem.anchor or "CENTER"
     for p, b in pairs(btns) do
@@ -888,10 +1037,21 @@ end
 
 -- Returns the y-offset where the next section should start (negative, goes down).
 -- `card` is accepted for signature consistency with BuildContentSection; not used.
-local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
-    local label = CreateSectionLabel(GUI, parent, L["Appearance"])
-    label:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yStart)
-    local y = yStart - SECTION_LABEL_HEIGHT
+-- `group` is the popout layout's pane -- see BuildContentSection.
+local function BuildAppearanceSection(GUI, parent, elem, card, yStart, group)
+    local y = yStart
+    if not group then
+        local label = CreateSectionLabel(GUI, parent, L["Appearance"])
+        label:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yStart)
+        y = yStart - SECTION_LABEL_HEIGHT
+    end
+    -- The split panel's running y, or the pane's group. See BuildContentSection's
+    -- `place` for why this seam exists and what it deliberately does NOT move.
+    local function place(w, step, x)
+        if group then group:AddWidget(w) return end
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 14, y)
+        y = y - (step or FIELD_ROW_HEIGHT)
+    end
 
     -- Defaults
     elem.font = elem.font or "DF Roboto SemiBold"
@@ -919,8 +1079,7 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
             if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
         end)
     end
-    fontDrop:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(fontDrop, FIELD_ROW_HEIGHT)
 
     -- Size
     local function sizeCB()
@@ -928,8 +1087,7 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end
     local sizeSlider = GUI:CreateSlider(parent, L["Size"], 6, 40, 1, elem, "fontSize", sizeCB, sizeCB)
-    sizeSlider:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(sizeSlider, FIELD_ROW_HEIGHT)
 
     -- Outline + Shadow (both bind to the composite "outline" field, so both
     -- mark elem.overrides.outline when changed)
@@ -937,15 +1095,13 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
         elem.overrides.outline = true
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
-    outlineDrop:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(outlineDrop, FIELD_ROW_HEIGHT)
 
     local shadowCheck = GUI:CreateShadowCheckbox(parent, L["Shadow"], elem, "outline", function()
         elem.overrides.outline = true
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
-    shadowCheck:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(shadowCheck, FIELD_ROW_HEIGHT)
 
     -- Color picker + Use Class Color toggle (stacked vertically so they
     -- don't overflow the now-narrower card body).
@@ -968,8 +1124,7 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
         elem.overrides.color = true
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshThrottled() end
     end, true)
-    colorPicker:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(colorPicker, FIELD_ROW_HEIGHT)
 
     -- "Use Class Color" boolean gates the custom Color picker: when ON, the
     -- colour picker GREYS OUT (disabled + dimmed) but stays visible. Shared
@@ -984,8 +1139,7 @@ local function BuildAppearanceSection(GUI, parent, elem, card, yStart)
         UpdateColorGrey()
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
-    classColorCheck:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(classColorCheck, FIELD_ROW_HEIGHT)
 
     -- Apply initial grayed state if class color is on
     UpdateColorGrey()
@@ -1029,10 +1183,20 @@ end
 -- `card` is forwarded into CreateAnchorGrid and into each position widget's
 -- callback so the header banner ("CENTER · 0,0 · → target") can refresh live
 -- whenever the user changes anchor / offsets / anchor target.
-local function BuildPositionSection(GUI, parent, elem, tdDB, card, yStart)
-    local label = CreateSectionLabel(GUI, parent, L["Position"])
-    label:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yStart)
-    local y = yStart - SECTION_LABEL_HEIGHT
+local function BuildPositionSection(GUI, parent, elem, tdDB, card, yStart, group)
+    local y = yStart
+    if not group then
+        local label = CreateSectionLabel(GUI, parent, L["Position"])
+        label:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yStart)
+        y = yStart - SECTION_LABEL_HEIGHT
+    end
+    -- The split panel's running y, or the pane's group. See BuildContentSection's
+    -- `place` for why this seam exists and what it deliberately does NOT move.
+    local function place(w, step, x)
+        if group then group:AddWidget(w) return end
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 14, y)
+        y = y - (step or FIELD_ROW_HEIGHT)
+    end
 
     -- Defaults
     elem.anchor = elem.anchor or "CENTER"
@@ -1053,30 +1217,28 @@ local function BuildPositionSection(GUI, parent, elem, tdDB, card, yStart)
     -- ~half the page width so the previous side-by-side layout would overflow.
     -- Grid is 60×60, with a small label beneath; advance y by grid + label + gap.
     local grid = CreateAnchorGrid(GUI, parent, elem, card)
-    grid:SetPoint("TOPLEFT", parent, "TOPLEFT", 22, y - 4)
-    local gridLabel = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(gridLabel, 8, "")
-    gridLabel:SetText(L["Anchor"])
-    gridLabel:SetPoint("TOP", grid, "BOTTOM", 0, -2)
-    gridLabel:SetTextColor(0.6, 0.6, 0.6)
-    -- Grid (60) + label gap (2) + label (10) + bottom gap (8) ≈ 80
-    y = y - 80
+    if group then
+        -- The grid carries its own caption now, so it is one widget with one
+        -- height. 80 is what the card advanced by; the pane's slot is the same.
+        group:AddWidget(grid, 80)
+    else
+        grid:SetPoint("TOPLEFT", parent, "TOPLEFT", 22, y - 4)
+        -- Grid (60) + label gap (2) + label (10) + bottom gap (8) ≈ 80
+        y = y - 80
+    end
 
     -- Stacked sliders + dropdowns (full body width)
     local xSlider = GUI:CreateSlider(parent, L["Offset X"], -200, 200, 1, elem, "offsetX", metaCB, metaCB)
-    xSlider:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(xSlider, FIELD_ROW_HEIGHT)
 
     local ySlider = GUI:CreateSlider(parent, L["Offset Y"], -200, 200, 1, elem, "offsetY", metaCB, metaCB)
-    ySlider:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(ySlider, FIELD_ROW_HEIGHT)
 
     -- Anchor To: target element (or the unit frame). Options are computed
     -- dynamically and exclude self + transitive descendants to prevent cycles.
     local anchorTargets = BuildAnchorTargets(tdDB, elem)
     local anchorToDrop = GUI:CreateDropdown(parent, L["Anchor To"], anchorTargets, elem, "anchorTo", metaCB)
-    anchorToDrop:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - FIELD_ROW_HEIGHT
+    place(anchorToDrop, FIELD_ROW_HEIGHT)
 
     return y - SECTION_GAP
 end
@@ -1800,6 +1962,15 @@ DF.TextDesigner.RenderCardList = RenderCardList  -- exposed for Task 6+
 -- callers (delete button, picker onPick, label edit, group-item add/remove,
 -- mode swap teardown logic, etc.) continue to work without churn.
 local function FullRebuildCards(GUI, page, tdDB, state)
+    -- ☠ TWO LAYOUTS, ONE SENTENCE. "The element list changed, redraw it" is true
+    -- in both, and thirty-odd call sites say it; only the machinery differs, so
+    -- the branch is at the VERB rather than at every call site. In the popout
+    -- layout the list IS the page, so redrawing it is the harness's own rebuild.
+    if state and state.rowsMode then
+        if P.RowsRedraw then P.RowsRedraw(page) end
+        if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
+        return
+    end
     RenderCardList(GUI, page, tdDB, state)
     if state.groupListChild and DF.TextDesigner.RenderGroupCardList then
         DF.TextDesigner.RenderGroupCardList(GUI, page, tdDB, state)
@@ -1959,10 +2130,23 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
     return strip
 end
 
--- Texts tab content: "+ Add Text Element" hero CTA, filter chip row, and a
--- scrolling card list below. Mirrors AD's BuildEffectsTab structure
--- (AuraDesigner/Options.lua:4882+).
-local function BuildTextsTab(GUI, parent, state, tdDB, page)
+
+-- ============================================================
+-- THE TEXTS TAB'S HEAD AREA
+-- ------------------------------------------------------------
+-- The "+ Add Text Element" CTA, the ELEMENT list caption and the category filter
+-- chips -- everything above the list itself. ONE definition, two hosts: the top
+-- of the split panel's Texts tab, and a full-width band above the element rows in
+-- the popout layout. The add flow is a later phase of the designer rework; when
+-- it lands it lands for both layouts at once, because there is one copy of it.
+--
+-- `rightInset` is how far the CTA and the chip row stop short of the host's right
+-- edge: 22 inside the split panel, to clear its scrollbar, and 0 in a band, which
+-- has no scrollbar to clear. Returns the height consumed, so a band can size
+-- itself to what was actually built.
+-- ============================================================
+local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset)
+    local RIGHT_INSET = rightInset or 22
     -- ── "+ Add Text Element" hero CTA ──
     -- Shared primary CTA via the styler: accent fill + white label (matches AD's
     -- "+ Add Indicator"; previously a bespoke theme-coloured fontstring, which is
@@ -1972,7 +2156,7 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
     addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -10)
     -- Right edge aligns with the element list's scroll box (which is inset -22 for
     -- the scrollbar) so the button doesn't overhang the element rows below it.
-    addBtn:SetPoint("RIGHT", parent, "RIGHT", -22, 0)
+    addBtn:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
     GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Text Element"], font = "DFFontHighlight" })
     state.addBtn = addBtn
 
@@ -1991,7 +2175,7 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
     chipRow:SetPoint("TOPLEFT", textsCaption, "BOTTOMLEFT", 0, -4)
     -- Right edge matches the add button + element list (scroll box, inset -22) so
     -- the button / filters / rows form one aligned column (mirrors Aura Designer).
-    chipRow:SetPoint("RIGHT", parent, "RIGHT", -22, 0)
+    chipRow:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
     chipRow:SetHeight(24)
     state.chipRow = chipRow
 
@@ -2051,7 +2235,12 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
         c:SetScript("OnClick", function(self)
             state.activeFilter = self.key
             ApplyChipState()
-            if DF.TextDesigner.RenderCardList then
+            -- Same two-layout branch as FullRebuildCards, and NOT that verb: a
+            -- filter chip changes what is listed, not what any frame renders, so
+            -- it must not drag every live frame through a refresh.
+            if state.rowsMode then
+                if P.RowsRedraw then P.RowsRedraw(page) end
+            elseif DF.TextDesigner.RenderCardList then
                 DF.TextDesigner.RenderCardList(GUI, page, tdDB, state)
             end
         end)
@@ -2066,6 +2255,57 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
     LayoutChips()
     chipRow:SetScript("OnSizeChanged", LayoutChips)
     ApplyChipState()
+    -- ── Wire the Add button to the picker ──
+    -- Reuse BuildPicker (the same one used by group-item adds). Caches the
+    -- picker on state.addPicker so repeated clicks reuse the same frame.
+    addBtn:SetScript("OnClick", function(self)
+        if not BuildPicker then return end
+        if not state.addPicker then
+            state.addPicker = BuildPicker(GUI, parent, tdDB, function(typeKey)
+                local ct = FindContentType(typeKey)
+                if not ct then return end
+                tdDB.nextElementID = tdDB.nextElementID or 1
+                local id = tdDB.nextElementID
+                tdDB.nextElementID = id + 1
+                local newElem = {
+                    id          = id,
+                    contentType = typeKey,
+                    enabled     = true,
+                    label       = ComputeAutoLabel(tdDB, ct),
+                }
+                table.insert(tdDB.elements, newElem)
+
+                -- Reset filter so the new card is visible regardless of which
+                -- category chip is active.
+                state.activeFilter = "_all"
+                if state.ApplyChipState then state.ApplyChipState() end
+
+                DF:Debug("TD", "Added element id=%d type=%s", id, typeKey)
+
+                if DF.TextDesigner.FullRebuildCards then
+                    DF.TextDesigner.FullRebuildCards(GUI, page, tdDB, state)
+                end
+            end, "group")  -- exclude "group" — groups have their own tab
+        end
+        local picker = state.addPicker
+        if picker:IsShown() then
+            picker:Hide()
+        else
+            picker:Open(self, "right")
+        end
+    end)
+    -- What a band host has to reserve: the CTA's own top gap, the CTA, the gap to
+    -- the caption, the caption, and the chip row -- which WRAPS, so it is measured
+    -- rather than assumed.
+    return 10 + 32 + 10 + 12 + 4 + (chipRow:GetHeight() or 24) + 6
+end
+
+-- Texts tab content: the head area above, then the scrolling card list below.
+-- Mirrors AD's BuildEffectsTab structure (AuraDesigner/Options.lua:4882+).
+local function BuildTextsTab(GUI, parent, state, tdDB, page)
+    BuildTextsHeadArea(GUI, parent, state, tdDB, page)
+    -- The list anchors under the chip row, which the head area owns now.
+    local chipRow = state.chipRow
 
     -- ── Scrolling card list container ──
     local listContainer = CreateFrame("ScrollFrame", nil, parent, "ScrollFrameTemplate")
@@ -2106,45 +2346,6 @@ local function BuildTextsTab(GUI, parent, state, tdDB, page)
         end
     end)
 
-    -- ── Wire the Add button to the picker ──
-    -- Reuse BuildPicker (the same one used by group-item adds). Caches the
-    -- picker on state.addPicker so repeated clicks reuse the same frame.
-    addBtn:SetScript("OnClick", function(self)
-        if not BuildPicker then return end
-        if not state.addPicker then
-            state.addPicker = BuildPicker(GUI, parent, tdDB, function(typeKey)
-                local ct = FindContentType(typeKey)
-                if not ct then return end
-                tdDB.nextElementID = tdDB.nextElementID or 1
-                local id = tdDB.nextElementID
-                tdDB.nextElementID = id + 1
-                local newElem = {
-                    id          = id,
-                    contentType = typeKey,
-                    enabled     = true,
-                    label       = ComputeAutoLabel(tdDB, ct),
-                }
-                table.insert(tdDB.elements, newElem)
-
-                -- Reset filter so the new card is visible regardless of which
-                -- category chip is active.
-                state.activeFilter = "_all"
-                if state.ApplyChipState then state.ApplyChipState() end
-
-                DF:Debug("TD", "Added element id=%d type=%s", id, typeKey)
-
-                if DF.TextDesigner.FullRebuildCards then
-                    DF.TextDesigner.FullRebuildCards(GUI, page, tdDB, state)
-                end
-            end, "group")  -- exclude "group" — groups have their own tab
-        end
-        local picker = state.addPicker
-        if picker:IsShown() then
-            picker:Hide()
-        else
-            picker:Open(self, "right")
-        end
-    end)
 
     -- Initial render — RenderCardList will hide emptyMsg if there are elements.
     if DF.TextDesigner.RenderCardList then
@@ -2413,7 +2614,15 @@ DF.TextDesigner.RenderGroupCardList = RenderGroupCardList
 -- Text Groups tab: "+ Add Group" CTA top-left + scrolling list of group cards.
 -- No picker: there's only one element type on this tab ("group"), so clicking
 -- the button adds a new group element directly.
-local function BuildGroupsTab(GUI, parent, state, tdDB, page)
+
+-- ============================================================
+-- THE TEXT GROUPS TAB'S HEAD AREA
+-- ------------------------------------------------------------
+-- The "+ Add Group" CTA and the caption above the list. Same two hosts, and the
+-- same reason, as the Texts tab's head area above.
+-- ============================================================
+local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset)
+    local RIGHT_INSET = rightInset or 22
     -- "+ Add Group" hero CTA — full-width. Shared primary CTA via the styler
     -- (accent fill + white label), matching BuildTextsTab's "+ Add Text Element".
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -2421,7 +2630,7 @@ local function BuildGroupsTab(GUI, parent, state, tdDB, page)
     addBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -10)
     -- Right edge aligns with the group list's scroll box (inset -22 for the
     -- scrollbar) so the button doesn't overhang the cards below — matches Texts.
-    addBtn:SetPoint("RIGHT", parent, "RIGHT", -22, 0)
+    addBtn:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
     GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Group"], font = "DFFontHighlight" })
 
     addBtn:SetScript("OnClick", function()
@@ -2455,6 +2664,12 @@ local function BuildGroupsTab(GUI, parent, state, tdDB, page)
     groupsCaption:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     groupsCaption:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -10)
     state.groupsCaption = groupsCaption
+    return 10 + 32 + 10 + 12 + 4
+end
+
+local function BuildGroupsTab(GUI, parent, state, tdDB, page)
+    BuildGroupsHeadArea(GUI, parent, state, tdDB, page)
+    local groupsCaption = state.groupsCaption
 
     -- Scrolling list of group cards
     local listContainer = CreateFrame("ScrollFrame", nil, parent, "ScrollFrameTemplate")
@@ -2506,7 +2721,7 @@ end
 -- the corresponding Appearance field. Phase 4 only stores the defaults and
 -- the per-element overrides table; the resolver that falls back to these
 -- values lands in Phase 2 of the larger TD work.
-local function BuildGlobalTab(GUI, parent, state, tdDB, page)
+local function BuildGlobalTab(GUI, parent, state, tdDB, page, group)
     local defaults = tdDB.globalDefaults
     -- Preset-based, so no per-setting auto-layout override star/reset here either
     -- (see BuildContentSection). Matches the Aura Designer.
@@ -2514,21 +2729,37 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page)
     -- The Global tab's own defaults record, against the values the addon ships.
     GlobalDefaultsRecord(tdDB)
 
-    local label = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(label, 9, "")
-    label:SetText(L["Global Defaults"]:upper())
-    label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    label:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -14)
-
-    local desc = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(desc, 10, "")
-    desc:SetText(L["These defaults apply to all text elements that haven't been individually customized."])
-    desc:SetWidth(parent:GetWidth() - 28)
-    desc:SetJustifyH("LEFT")
-    desc:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -6)
-    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
     local y = -60
+    -- The split panel's running y, or the pane's group -- the same seam the three
+    -- section builders use, and for the same reason. See BuildContentSection.
+    local function place(w, step)
+        if group then group:AddWidget(w) return end
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
+        y = y - (step or 44)
+    end
+
+    -- The caption and the blurb. In a pane the row already carries the name, and
+    -- a FontString cannot live in a group at all (it would stay on the pane's
+    -- hidden holder), so the blurb becomes the shared note widget.
+    if group then
+        place(GUI:CreateNote(parent,
+            L["These defaults apply to all text elements that haven't been individually customized."],
+            { width = 240 }))
+    else
+        local label = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(label, 9, "")
+        label:SetText(L["Global Defaults"]:upper())
+        label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        label:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -14)
+
+        local desc = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(desc, 10, "")
+        desc:SetText(L["These defaults apply to all text elements that haven't been individually customized."])
+        desc:SetWidth(parent:GetWidth() - 28)
+        desc:SetJustifyH("LEFT")
+        desc:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -6)
+        desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    end
 
     -- Shared callback: every globalDefaults widget refreshes the preview so
     -- elements that haven't overridden the matching field reflect the new
@@ -2543,27 +2774,22 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page)
     else
         fontDrop = GUI:CreateDropdown(parent, L["Font"], {[defaults.font] = defaults.font}, defaults, "font", refreshCB)
     end
-    fontDrop:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - 44
+    place(fontDrop, 44)
 
     local sizeSlider = GUI:CreateSlider(parent, L["Size"], 6, 40, 1, defaults, "fontSize", refreshCB, refreshCB)
-    sizeSlider:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - 44
+    place(sizeSlider, 44)
 
     local outlineDrop = GUI:CreateOutlineDropdown(parent, L["Outline"], defaults, "outline", refreshCB)
-    outlineDrop:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - 44
+    place(outlineDrop, 44)
 
     local shadowCheck = GUI:CreateShadowCheckbox(parent, L["Shadow"], defaults, "outline", refreshCB)
-    shadowCheck:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - 44
+    place(shadowCheck, 44)
 
     local colorPicker = GUI:CreateColorPicker(parent, L["Color"], defaults, "color", true, refreshCB, function()
         -- Throttled refresh during the colour drag (live, not laggy).
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshThrottled() end
     end, true)
-    colorPicker:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - 44
+    place(colorPicker, 44)
 
     -- "Use Class Color" boolean gates the custom Color picker: when ON, the
     -- colour picker GREYS OUT (disabled + dimmed) but stays visible.
@@ -2576,8 +2802,7 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page)
         UpdateColorGrey()
         refreshCB()
     end)
-    classColorCheck:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    y = y - 44
+    place(classColorCheck, 44)
     -- Apply the initial grey state on build.
     UpdateColorGrey()
 
@@ -2590,14 +2815,20 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page)
     -- status text settings (force = overwrite). Lets users seed the Text
     -- Designer from their existing layout, or re-sync after tweaking the
     -- legacy text settings.
-    local importDesc = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(importDesc, 10, "")
-    importDesc:SetText(L["Rebuild the element list from your current built-in name, health, and status text. This replaces all existing Text Designer elements for this mode."])
-    importDesc:SetWidth(parent:GetWidth() - 28)
-    importDesc:SetJustifyH("LEFT")
-    importDesc:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
-    importDesc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    y = y - 36
+    if group then
+        place(GUI:CreateNote(parent,
+            L["Rebuild the element list from your current built-in name, health, and status text. This replaces all existing Text Designer elements for this mode."],
+            { width = 240 }))
+    else
+        local importDesc = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(importDesc, 10, "")
+        importDesc:SetText(L["Rebuild the element list from your current built-in name, health, and status text. This replaces all existing Text Designer elements for this mode."])
+        importDesc:SetWidth(parent:GetWidth() - 28)
+        importDesc:SetJustifyH("LEFT")
+        importDesc:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
+        importDesc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        y = y - 36
+    end
 
     local importBtn = GUI:CreateButton(parent, L["Import Current Text Settings"], 220, 24, function()
         if DF.MigrateTextDesignerFromLegacy then
@@ -2608,14 +2839,106 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page)
         end
         if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
     end)
-    importBtn:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, y)
+    place(importBtn, 30)
 end
+
+-- ============================================================
+-- THE POPOUT LAYOUT'S DOOR
+-- ------------------------------------------------------------
+-- Everything TextDesigner/UI/Rows.lua mounts. Assigned here, at the foot of the
+-- file, so each name is the one definition above rather than a second copy.
+--
+-- ⚠ CONTENT_CATEGORY_LABELS IS REASSIGNED, not mutated, every time the locale
+-- overlay lands (RefreshLocaleStrings), so it is exposed as a GETTER. A table
+-- reference captured here would freeze the picker's chips in enUS.
+-- ============================================================
+P.CONTENT_CATEGORIES        = CONTENT_CATEGORIES
+P.CategoryLabels            = function() return CONTENT_CATEGORY_LABELS end
+P.CATEGORY_COLORS           = CATEGORY_COLORS
+P.FindContentType           = FindContentType
+P.ComputeAutoLabel          = ComputeAutoLabel
+P.ElementDefaultsRecord     = ElementDefaultsRecord
+P.GlobalDefaultsRecord      = GlobalDefaultsRecord
+P.BuildContentSection       = BuildContentSection
+P.BuildGroupItemsSection    = BuildGroupItemsSection
+P.BuildAppearanceSection    = BuildAppearanceSection
+P.BuildPositionSection      = BuildPositionSection
+P.BuildGlobalTab            = BuildGlobalTab
+P.CreateEnableBanner        = CreateEnableBanner
+P.BuildTextsHeadArea        = BuildTextsHeadArea
+P.BuildGroupsHeadArea       = BuildGroupsHeadArea
+P.GetState                  = GetState
+P.FullRebuildCards          = FullRebuildCards
 
 -- ============================================================
 -- BUILD ENTRYPOINT
 -- ============================================================
 
-function DF.BuildTextDesignerPage(GUI, page, db)
+
+-- ============================================================
+-- THE ENABLE BANNER
+-- ------------------------------------------------------------
+-- The master "Enable Text Designer" switch and its subtitle, in a bordered bar.
+-- ONE definition, two hosts: the top of the split panel, and the shell's banner
+-- band in the popout layout. Extracted rather than copied for one reason -- the
+-- checkbox binds tdDB.enabled, and a second copy is a second chance to bind a
+-- second-hand table.
+--
+-- Unanchored: the caller decides where it sits and how wide it is.
+-- ============================================================
+local function CreateEnableBanner(GUI, parent, tdDB, onToggle)
+    local bar = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    bar:SetHeight(44)  -- room for the enable label + subtitle (matches AD)
+    GUI:CreatePanelBackdrop(bar, {
+        bgColor = {r = 0.14, g = 0.14, b = 0.14}, bgAlpha = 1,
+        borderColor = {r = 0.30, g = 0.30, b = 0.30, a = 0.5},
+    })
+
+    -- No Copy / Sync pair here -- see the Aura Designer's matching note. The one
+    -- key this page owns is the template NAME, which the preset bar sets
+    -- directly, so both buttons were a second way to write one value.
+    local enableCheck = GUI:CreateCheckbox(
+        bar,
+        L["Enable Text Designer"],
+        tdDB,
+        "enabled",
+        function()
+            DF:Debug("TD", "Enable Text Designer = %s", tostring(tdDB.enabled))
+            if onToggle then onToggle() end
+            if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
+        end
+    )
+    enableCheck:SetPoint("LEFT", bar, "LEFT", 10, 7)
+    -- Match Aura Designer's enable header: larger label + a subtitle beneath it.
+    if enableCheck.label then enableCheck.label:SetFontObject(DFFontNormal) end
+    local enableSub = bar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    enableSub:SetPoint("TOPLEFT", enableCheck.label or enableCheck, "BOTTOMLEFT", 0, -1)
+    enableSub:SetText(L["Custom name, health and status text"])
+    enableSub:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    bar.enableCheck = enableCheck
+    return bar
+end
+
+-- ============================================================
+-- THE SPLIT-PANEL PAGE
+-- ------------------------------------------------------------
+-- The 50/50 layout: preview left, three-tab settings column right, everything
+-- hand-anchored inside frames the page harness never sees. It is why this page
+-- had to force the settings window 210px wider than its own default, and it is
+-- now the CLASSIC layout's arm only -- the popout layout takes
+-- P.BuildTextDesignerRowsPage (TextDesigner/UI/Rows.lua), which emits bands into
+-- the harness's own column.
+--
+-- ⚠ KEPT RATHER THAN DELETED, and not out of sentiment: classic is a live
+-- layout, GUI:CreatePopoutPageTools returns nil in it, and every row, band and
+-- panel the other arm builds needs that table.
+-- ============================================================
+local function BuildTextDesignerIsland(GUI, page, db)
+    -- ⚠ AND THE FLAG THE REDRAW VERB BRANCHES ON GOES BACK. A layout flip is a
+    -- rebuild, and a stale `rowsMode` would send every "the list changed" call
+    -- site into the popout arm's page rebuild on a page that has no rows.
+    GetState(page).rowsMode = false
     -- TD is mode-tabbed: edit the preset the active mode uses (edited == used,
     -- so live frames stay in sync with the editor). EnsureDB guarantees the
     -- preset carries the full TD schema.
@@ -2802,44 +3125,18 @@ function DF.BuildTextDesignerPage(GUI, page, db)
     -- Boxed banner: master Enable toggle in its own bordered box at the TOP; the
     -- preset bar anchors BELOW it (further down) — mirrors the Aura Designer
     -- header so the two designers match.
-    local controlsBar = CreateFrame("Frame", nil, page.child, "BackdropTemplate")
-    controlsBar:SetHeight(44)  -- room for the enable label + subtitle (matches AD)
-    controlsBar:SetPoint("TOPLEFT", page.child, "TOPLEFT", 0, _tdTopY)
-    controlsBar:SetPoint("TOPRIGHT", page.child, "TOPRIGHT", 0, _tdTopY)
-    GUI:CreatePanelBackdrop(controlsBar, {
-        bgColor = {r = 0.14, g = 0.14, b = 0.14}, bgAlpha = 1,
-        borderColor = {r = 0.30, g = 0.30, b = 0.30, a = 0.5},
-    })
-    state.controlsBar = controlsBar
-
-    -- No Copy / Sync pair here — see the Aura Designer's matching note. The one
-    -- key this page owns is the template NAME, which the preset bar sets
-    -- directly, so both buttons were a second way to write one value.
-
-    -- Local refresher for the "disabled" overlay — defined after the overlay
-    -- is created below, but referenced from the master toggle's callback.
+    --
+    -- Local refresher for the "disabled" overlay -- defined after the overlay is
+    -- created below, but referenced from the master toggle's callback.
     local RefreshDisabledOverlay
 
-    -- Master "Enable Text Designer" toggle, top-left of the banner.
-    local enableCheck = GUI:CreateCheckbox(
-        controlsBar,
-        L["Enable Text Designer"],
-        tdDB,
-        "enabled",
-        function()
-            DF:Debug("TD", "Enable Text Designer = %s", tostring(tdDB.enabled))
-            if RefreshDisabledOverlay then RefreshDisabledOverlay() end
-            if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
-        end
-    )
-    enableCheck:SetPoint("LEFT", controlsBar, "LEFT", 10, 7)
-    state.enableCheck = enableCheck
-    -- Match Aura Designer's enable header: larger label + a subtitle beneath it.
-    if enableCheck.label then enableCheck.label:SetFontObject(DFFontNormal) end
-    local enableSub = controlsBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    enableSub:SetPoint("TOPLEFT", enableCheck.label or enableCheck, "BOTTOMLEFT", 0, -1)
-    enableSub:SetText(L["Custom name, health and status text"])
-    enableSub:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    local controlsBar = CreateEnableBanner(GUI, page.child, tdDB, function()
+        if RefreshDisabledOverlay then RefreshDisabledOverlay() end
+    end)
+    controlsBar:SetPoint("TOPLEFT", page.child, "TOPLEFT", 0, _tdTopY)
+    controlsBar:SetPoint("TOPRIGHT", page.child, "TOPRIGHT", 0, _tdTopY)
+    state.controlsBar = controlsBar
+    state.enableCheck = controlsBar.enableCheck
 
     -- Anchor the preset bar BELOW the controls box (done here, after the box
     -- exists). Content below the header uses headerBottom = preset bar if present,
@@ -3083,4 +3380,39 @@ function DF.BuildTextDesignerPage(GUI, page, db)
         end
     end
     RefreshDisabledOverlay()
+end
+
+-- ============================================================
+-- WHICH PAGE THIS IS
+-- ------------------------------------------------------------
+-- `Add` is the tell, and a better one than asking the layout: the popout arm
+-- emits BANDS, and a band can only reach the page's column through the harness's
+-- own Add. A caller that has one is on BuildPage's contract; a caller that does
+-- not (the preset bar's own deferred re-invoke) can only be served the island.
+-- The layout check is still made, because CreatePopoutPageTools answers nil in
+-- classic and every row the other arm builds needs its table.
+-- ============================================================
+function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
+    if Add and P.BuildTextDesignerRowsPage and not DF:IsClassicSettingsLayout() then
+        -- ☠ A PREVIOUS BUILD'S ISLAND IS NOT IN page.children -- it never went
+        -- through Add -- so DoBuild's own retire loop cannot see it, and it would
+        -- sit under the bands still showing the last mode's controls. These five
+        -- are the only frames the island parents to page.child; everything else
+        -- it builds is nested inside one of them.
+        local state = GetState(page)
+        for _, key in ipairs({ "presetBar", "controlsBar", "previewPanel",
+                               "rightAnchorFrame", "disabledOverlay", "addPicker" }) do
+            local f = state[key]
+            if f then f:Hide(); f:ClearAllPoints() end
+            state[key] = nil
+        end
+        -- ⚠ AND THE ISLAND'S OWN RefreshStates GOES WITH THEM. It REPLACES the
+        -- harness's, permanently, on the page object -- so a layout flip would
+        -- leave the band column being laid out by a verb that sizes page.child to
+        -- the viewport and then reaches for a preview panel that no longer exists.
+        page.RefreshStates = function(self) return GUI.PageRefreshStates(self) end
+        state.built = false
+        return P.BuildTextDesignerRowsPage(page, db, Add, AddSpace)
+    end
+    return BuildTextDesignerIsland(GUI, page, db)
 end
