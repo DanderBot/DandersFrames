@@ -3986,149 +3986,246 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- "defensiveBar" covers the row's Layout box (Max / Growth / Spacing / Wrap),
         -- which none of the other prefixes reached.
         Add(CreateCopyButton(self.child, {"defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar", "defensiveBar"}, L["Defensive Icon"], "auras_defensiveicon"), 25, 2)
-        
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: nine 280 boxes in two columns, in
+        -- the columns and the order they have always had.
+        --
+        -- POPOUT turns all nine into feature rows in four bands:
+        --
+        --   "Content"   Settings and Defensive Filters -- whether the icon exists
+        --               at all, and which cooldowns reach it.
+        --   "Icon"      Layout, Appearance, Position, Border -- how the icons
+        --               arrange, how big they are, where they sit, what rings them.
+        --   "Text"      Duration Text, Stack Count -- the two things WRITTEN on an
+        --               icon, which have always been tuned as a pair.
+        --   headerless  Duration Bar -- the one 12.1-factory-only extra.
+        --               ☠ NO HEADER, deliberately: the row carries the factory
+        --               gate, so a header would be a section title left standing
+        --               over nothing on a client where the row is not drawn.
+        --
+        -- ⚠ STACK COUNT CAN HIDE TOO AND STILL SITS UNDER A HEADER. Duration Text
+        -- stands under "Text" on a client with no factory row, so that header is
+        -- never left over nothing -- the Debuff Bar's reasoning for Dispel Text,
+        -- verbatim.
+        --
+        -- All three band headers are locale strings the page already ships.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box it
+        -- always built -- test_defensiveicon_page_builders.lua pins the inventory
+        -- of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which is
+        -- what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        local contentBand, iconBand, textBand, factoryBand
+        if tools then
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
+            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
+            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
+            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
+        -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
+        -- These tables used to sit inside the box that offered them. The rows print
+        -- the chosen value as their SUMMARY, and a summary is written OUTSIDE the
+        -- group's builder -- so the word has to come out of the same table the
+        -- dropdown offers, or a row could say one thing while the control behind it
+        -- says another.
+        --
+        -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure captures
+        -- the upvalue that exists when it is created -- so one declared above these
+        -- lines would see nil rather than the table or the function.
         local anchorOptions = {
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
-        
-        -- Dependent controls GREY OUT (disabled-in-place) when the feature is off.
-        local function HideDefensiveIconOptions(d)
-            return not d.defensiveIconEnabled
-        end
-
-        -- ===== SETTINGS GROUP (Column 1) =====
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows an icon when party members have a defensive cooldown active (Pain Suppression, Ironbark, etc.)."], 250), 45)
-        local defensiveEnable = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Defensive Icon"], db, "defensiveIconEnabled", function()
-            self:RefreshStates()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 30)
-        defensiveEnable.keepEnabled = true
-        settingsGroup.disableChildrenOn = HideDefensiveIconOptions
-
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "defensiveIconHideSwipe", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 30)
-        Add(settingsGroup, nil, 1)
-        
-        -- ===== LAYOUT GROUP (Column 1) =====
-        local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-        layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
-        layoutGroup:AddWidget(GUI:CreateLabel(self.child, L["Controls how multiple defensive icons are arranged."], 250), 45)
-        layoutGroup.disableChildrenOn = HideDefensiveIconOptions
-
-        layoutGroup:AddWidget(GUI:CreateGrowthControl(self.child, db, "defensiveBarGrowth", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 155)
-        layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 5, 1, db, "defensiveBarMax", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, nil, true), 55)
-
         -- Native rows only — the legacy fallback keeps its own fixed order.
         local defSortOptions = {
             DEFAULT = L["Default (Slot Order)"],
             TIME = L["Most Urgent"],
             EXTERNALS = L["Externals First"],
         }
-        local defSortDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], defSortOptions, db, "defensiveSortOrder", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 55)
-        defSortDrop.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
-        defSortDrop.tooltip = L["Externals First: defensives cast on this player by others show first, their own last. Most Urgent: soonest to expire first."]
+        -- Duration Format (PTR-7 #5): previously hardcoded NUMBER; icon-sized
+        -- formats only (see the buff page's Duration Format note). No Hide Above
+        -- on this page, so no percent-grey needed.
+        local defDurFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
+        local defBarPositionOptions = { BOTTOM = L["Bottom"], TOP = L["Top"] }
 
-        local defWrap = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, nil, true), 55)
-        -- Greys out on vertical-primary growth, where the native row-primary flow renders a
-        -- single column and there is nothing for a per-row count to do. Normal contextual
-        -- state via the grey seam, NOT a 12.1 frost — the control works horizontally, and the
-        -- blocked registry is for things the game genuinely cannot do. Mirrors the Buffs page,
-        -- including its 68914 re-verification of the flow-layout options.
-        defWrap.disableOn = function(d)
-            local g = d.defensiveBarGrowth or ""
-            -- Vertical-primary AND vertical-centred growth both render a single column.
-            return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
-                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
+        local R = DF.FilterRegistry
+
+        -- Dependent controls GREY OUT (disabled-in-place) when the feature is off.
+        local function HideDefensiveIconOptions(d)
+            return not d.defensiveIconEnabled
         end
 
-        layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], -10, 10, 1, db, "defensiveBarSpacing", function()
+        -- ☠ THE TWO 12.1-ONLY GROUPS SHARE ONE PREDICATE, NAMED FOR WHAT IT ASKS.
+        -- Stack Count (the legacy renderer draws its own hardcoded count) and the
+        -- Duration Bar (the native container drains the strip render-side) both
+        -- vanish on a client where the factory does not own this row, and the Sort
+        -- Order dropdown inside Layout asks the same question of itself. All three
+        -- used to spell the test out separately. In the popout layout it is the
+        -- ROW's hideOn on the two groups, so the band collapses the slot instead of
+        -- drawing an empty plate.
+        local function NoFactoryRow(d) return not DF:FactoryOwnsDefensiveRow(d) end
+
+        -- What every group on this page costs when it is written to: the container
+        -- drive. Named once so the rows' footers apply exactly what their controls
+        -- apply.
+        local function ApplyDefensive()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
-
-        Add(layoutGroup, nil, 1)
-
-        -- ===== APPEARANCE GROUP (Column 2) =====
-        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-        appearanceGroup.disableChildrenOn = HideDefensiveIconOptions
-
-        appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 12, 48, 1, db, "defensiveIconSize", function()
+        end
+        -- The duration TEXT is structural on the aura row (a region that exists or
+        -- does not), so its reset has to bump the layout version as well.
+        local function ApplyDefensiveDurationText()
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+            ApplyDefensive()
+        end
+        local function DefBarChanged()
             if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+        end
 
-        appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 4.0, 0.1, db, "defensiveIconScale", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+        -- Rebuild the native filter strings and re-drive the container rows
+        -- (same pair as the Aura Filters page's DirectFilterChanged — this
+        -- page has no local equivalent).
+        local function DefensiveFilterChanged()
+            if DF.RebuildDirectFilterStrings then
+                DF:RebuildDirectFilterStrings()
+            end
+            if DF.InvalidateAuraLayout then
+                DF:InvalidateAuraLayout()
+            end
+        end
 
-        appearanceGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "defensiveIconFrameLevel", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateFrameLevel("defensive") end, true)), 55)
+        -- ☠ THE PAGE GATE, ON THE ROWS. Enable Defensive Icon greys every group it
+        -- greyed in classic -- which on this page is ALL of them, the filter list
+        -- included. (That is where this page parts company with the two bar pages,
+        -- whose filter box has never dimmed with the bar.)
+        --
+        -- ⚠ THE SETTINGS ROW IS THE ONE EXCEPTION: it carries the gate's own tick,
+        -- so greying it would leave no way to switch the icon back on.
+        local function DefensiveOffRow(d) return not (d or db).defensiveIconEnabled end
 
-        Add(appearanceGroup, nil, 2)
-        
-        -- ===== POSITION GROUP (Column 1) =====
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-        positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-        positionGroup.disableChildrenOn = HideDefensiveIconOptions
+        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
+        -- DandersUI Sections' RefreshChildStates greys every child a
+        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
+        -- first child is always the header, and wrong for a popout pane, which has
+        -- no header at all. The Pet Frames / Resource Bar / Buff Bar answer,
+        -- verbatim: composed with whatever predicate the widget already carries and
+        -- applied at the MOUNT rather than inside the builder.
+        --
+        -- Only the panes that OPEN ON A GATED CONTROL need it. Settings, Layout,
+        -- Defensive Filters and Duration Bar all open on a label, which has nothing
+        -- to grey.
+        local function GatePaneFirstChild(group)
+            local entry = group and group.groupChildren and group.groupChildren[1]
+            local w = entry and entry.widget
+            if not w then return end
+            local prev = w.disableOn
+            w.disableOn = function(d) return DefensiveOffRow(d) or (prev and prev(d)) or false end
+        end
 
-        positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "defensiveIconAnchor", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 55)
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
 
-        positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "defensiveIconX", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+        -- ===== SETTINGS (a 280 box in column 1 in classic, the Content band's
+        -- first row) =====
+        -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
+        -- rather than a control row: a control row carries a SETTING rather than a
+        -- group, so it could offer neither the pair's Reset Group nor the tick that
+        -- says the pair has been touched -- and the page gate would then belong to
+        -- no row at all.
+        local function BuildDefensiveSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "defensiveIconY", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
-        Add(positionGroup, nil, 1)
-        
-        -- ===== BORDER GROUP (Column 2) =====
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            group:AddWidget(GUI:CreateLabel(parent, L["Shows an icon when party members have a defensive cooldown active (Pain Suppression, Ironbark, etc.)."], 250), 45)
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the page's only on/off control.
+            if not tools2.hoistToggle then
+                local defensiveEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Defensive Icon"], db, "defensiveIconEnabled", function()
+                    tools2.refreshStates()
+                    ApplyDefensive()
+                end), 30)
+                defensiveEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = HideDefensiveIconOptions
 
-        -- Canonical border controls via the unified helper. include opts in
-        -- inset / offset / blendMode / gradient / shadow on top of the
-        -- always-present Show / Style / Texture / Size / Colour. Inset moves
-        -- the border edges inward (positive) or outward (negative) relative
-        -- to the icon's bounds — independent of borderSize (thickness) and
-        -- independent of the artwork's own inset.
-        GUI:CreateBorderControls(borderGroup, db, "defensiveIcon", {
-            parent       = self.child,
-            -- Class/Role colour makes sense here: at a glance, the border
-            -- communicates WHO is using the defensive cooldown (their class
-            -- or role) without the user having to read the icon. (Animation is
-            -- not offered: the defensive icon is a container button, and 12.1
-            -- forbids driving its border while auras are secret — see
-            -- AuraContainer's animation chokepoint.)
-            include      = { inset = true, offset = true, blendMode = true,
-                             gradient = true, shadow = true, alpha = true,
-                             classColor = true, roleColor = true },
-            fullUpdate   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
-            lightUpdate  = function() DF:LightweightUpdateDefensiveIcons() end,
-            lightColors  = function() DF:LightweightUpdateDefensiveIconColors() end,
-            refreshStates = function() self:RefreshStates() end,
-        })
-        -- No hideWhen: the group gate below is what handles the feature being
-        -- off, and it GREYS like every other box on this page. (This call used to
-        -- pass both, so the controls vanished before the grey could show.)
-        borderGroup.disableChildrenOn = HideDefensiveIconOptions
-        Add(borderGroup, nil, 2)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], db, "defensiveIconHideSwipe", function()
+                ApplyDefensive()
+            end), 30)
+        end
 
-        -- ===== DEFENSIVE FILTERS GROUP (Column 2) =====
+        -- The one tick the row does not carry, in its own words. Silent while it is
+        -- off, which is the shipped profile.
+        local function DefensiveSettingsSummary(d)
+            if not d then return "" end
+            if not d.defensiveIconHideSwipe then return "" end
+            return L["Hide Cooldown Swipe"]
+        end
+
+        if classicLayout then
+            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+            BuildDefensiveSettingsGroup({
+                group = settingsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(settingsGroup, nil, 1)
+        else
+            -- Two: the blurb and Hide Cooldown Swipe. The Enable tick is HOISTED
+            -- onto the row.
+            local DEFENSIVE_SETTINGS_COUNT = 2
+
+            -- What the suppressed Enable checkbox ran, plus a repaint of every pane
+            -- standing open -- eight of which grey with it. Never a page rebuild:
+            -- that would retire the row being clicked through.
+            local function OnDefensiveEnableToggle()
+                self:RefreshStates()
+                ApplyDefensive()
+                tools.ReflowMounted()
+            end
+
+            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveSettingsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Settings"],
+                db       = tools.RowDB,
+                toggle   = { key = "defensiveIconEnabled" },
+                summary  = DefensiveSettingsSummary,
+                count    = DEFENSIVE_SETTINGS_COUNT,
+                onToggle = OnDefensiveEnableToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = settingsMount,
+            }))
+            tools.ClaimKeys(settingsRow, settingsContent)
+            tools.WireModifiedTick(settingsRow)
+            tools.WireFooter(settingsRow, ApplyDefensive)
+            tools.RegisterHoistedToggle(settingsRow, L["Enable Defensive Icon"], "defensiveIconEnabled", OnDefensiveEnableToggle)
+        end
+
+        -- ===== DEFENSIVE FILTERS (a 280 box in column 2 in classic, the Content
+        -- band's second row) =====
         -- Category filter selection for the defensive row (Filter Registry
         -- presets + custom filters). Mirrors the Aura Filters page's buff
         -- selection list. Each row toggles a key inside
@@ -4136,33 +4233,26 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- place (the aura pipeline holds references to them; never reassign).
         -- No Show All / Only Mine here: the defensive row resolves with
         -- showAll hard-false and has no such keys (see BuildDefensiveRowConfig).
-        do
-            local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
-            filterGroup:AddWidget(GUI:CreateHeader(self.child, L["Defensive Filters"]), 40)
-            filterGroup.disableChildrenOn = HideDefensiveIconOptions
+        --
+        -- ☠ IT READS SECOND, NOT SIXTH. In classic it is the sixth box on the page,
+        -- below Border, because the columns had to balance; in a band there is
+        -- nothing to balance, and "which cooldowns reach this icon" is the question
+        -- that follows "is there an icon" -- the order the two bar pages already
+        -- read in.
+        local function BuildDefensiveFilterGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = HideDefensiveIconOptions
 
             -- Same sentence as the Buff Bar page's filter group, from one string:
             -- the two groups now do the same job for two consumers, and wording the
             -- rule twice is how they drift apart. It also drops "enabled" — the
             -- page's word for a checked box is "selected", everywhere.
-            filterGroup:AddWidget(GUI:CreateLabel(self.child,
+            group:AddWidget(GUI:CreateLabel(parent,
                 "|cff888888" .. L["Selected filters are combined — a buff matching any of them is shown."] .. "|r", 250), 35)
 
-            -- Rebuild the native filter strings and re-drive the container rows
-            -- (same pair as the Aura Filters page's DirectFilterChanged — this
-            -- page has no local equivalent).
-            local function DefensiveFilterChanged()
-                if DF.RebuildDirectFilterStrings then
-                    DF:RebuildDirectFilterStrings()
-                end
-                if DF.InvalidateAuraLayout then
-                    DF:InvalidateAuraLayout()
-                end
-            end
-
-            local R = DF.FilterRegistry
             local function SelectionCheckbox(labelText, getSel, setSel)
-                return filterGroup:AddWidget(GUI:CreateCheckbox(self.child, labelText, nil, nil, DefensiveFilterChanged, getSel, setSel), 30)
+                return group:AddWidget(GUI:CreateCheckbox(parent, labelText, nil, nil, DefensiveFilterChanged, getSel, setSel), 30)
             end
 
             for _, cat in ipairs(R.Categories) do
@@ -4199,104 +4289,320 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 function() return db.defensiveFilterSelection.uncategorised end,
                 function(v) db.defensiveFilterSelection.uncategorised = v and true or false end)
 
-            local defManage = filterGroup:AddWidget(GUI:CreateButton(self.child, L["Manage Filters"], 140, 22, function()
+            -- ⚠ A PANE THE USER LEAVES THROUGH. Manage Filters is a tab switch, which
+            -- rebuilds the page it lands on -- and CreatePopoutPageTools' own prologue
+            -- closes every open panel on the way into that build. So the panel this
+            -- button was clicked in is taken down by the page it opens, in the one
+            -- order that is safe: the row it was wired to is still alive when it goes.
+            local defManage = group:AddWidget(GUI:CreateButton(parent, L["Manage Filters"], 140, 22, function()
                 if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
                     GUI.SelectTab("auras_filterdesigner")
                 end
             end), 30)
             defManage.disableOn = function() return not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) end
-
-            -- The page build is cached across tab switches, but preset counts and
-            -- the custom-filter list can change while this page is hidden (Filter
-            -- Designer edits). On show, invalidate the page cache when the registry
-            -- signature moved so RefreshCached() rebuilds fresh rows instead of
-            -- serving stale ones (same idiom as the Aura Filters page).
-            local function RegistrySignature()
-                local parts = {}
-                for _, cat in ipairs(R.Categories) do
-                    local enabled, total = R:PresetCounts(cat.key)
-                    parts[#parts + 1] = format("%s:%d/%d%s", cat.key, enabled, total,
-                        R:IsPresetModified(cat.key) and "*" or "")
-                end
-                for cfId, f in pairs(R:ReadStore().customFilters) do
-                    parts[#parts + 1] = cfId .. "=" .. (f.name or "")
-                end
-                table.sort(parts)
-                return table.concat(parts, ";")
-            end
-            self.dfDefFilterSignature = RegistrySignature()
-            if not self.dfDefFilterSigHooked then
-                self.dfDefFilterSigHooked = true
-                self:HookScript("OnShow", function(page)
-                    if page.dfDefFilterSignature ~= RegistrySignature() then
-                        page:Invalidate()
-                    end
-                end)
-            end
-
-            Add(filterGroup, nil, 2)
         end
 
-        -- ===== DURATION GROUP (Column 1) =====
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
-        
-        durationGroup.disableChildrenOn = HideDefensiveIconOptions
-        durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "defensiveIconShowDuration", function()
-            self:RefreshStates()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 30)
+        -- The page build is cached across tab switches, but preset counts and
+        -- the custom-filter list can change while this page is hidden (Filter
+        -- Designer edits). On show, invalidate the page cache when the registry
+        -- signature moved so RefreshCached() rebuilds fresh rows instead of
+        -- serving stale ones (same idiom as the Aura Filters page).
+        --
+        -- ⚠ AT PAGE SCOPE, OUTSIDE THE BUILDER. A pane is built once per INSTANCE
+        -- (pin a panel and open the row again and there are two), and this block is
+        -- about the PAGE -- one signature, one hook.
+        local function RegistrySignature()
+            local parts = {}
+            for _, cat in ipairs(R.Categories) do
+                local enabled, total = R:PresetCounts(cat.key)
+                parts[#parts + 1] = format("%s:%d/%d%s", cat.key, enabled, total,
+                    R:IsPresetModified(cat.key) and "*" or "")
+            end
+            for cfId, f in pairs(R:ReadStore().customFilters) do
+                parts[#parts + 1] = cfId .. "=" .. (f.name or "")
+            end
+            table.sort(parts)
+            return table.concat(parts, ";")
+        end
 
+        -- ☠ THE ONE ROW ON THE PAGE WHOSE COUNT IS DATA. The pane mounts one tick
+        -- per built-in category and one per custom filter the user has made, so the
+        -- declared number has to be COUNTED rather than written down -- a literal
+        -- would be wrong the moment somebody saves a filter.
+        local function DefensiveFilterCount()
+            local customs = 0
+            for _ in pairs(R:ReadStore().customFilters) do customs = customs + 1 end
+            -- The caption, the complement bucket and Manage Filters -- plus one row
+            -- per category and one per custom filter.
+            return 3 + #R.Categories + customs
+        end
+
+        -- What the row says with the panel shut: how much of the library is
+        -- switched on, in the "11/13" shape the Buff Bar's filter row uses. There is
+        -- no All Buffs / Only Mine on this page to qualify it with.
+        local function DefensiveFilterSummary(d)
+            if not d then return "" end
+            local sel = d.defensiveFilterSelection or {}
+            local presets, customs = sel.presets or {}, sel.customs or {}
+            local on, total = 0, #R.Categories + 1   -- + the complement bucket
+            for _, cat in ipairs(R.Categories) do
+                if presets[cat.key] then on = on + 1 end
+            end
+            for cfId in pairs(R:ReadStore().customFilters) do
+                total = total + 1
+                if customs[cfId] then on = on + 1 end
+            end
+            if sel.uncategorised then on = on + 1 end
+            return format("%d/%d", on, total)
+        end
+
+        -- ===== LAYOUT (a 280 box in column 1 in classic, the Icon band's first
+        -- row) =====
+        local function BuildDefensiveLayoutGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Controls how multiple defensive icons are arranged."], 250), 45)
+            group.disableChildrenOn = HideDefensiveIconOptions
+
+            group:AddWidget(GUI:CreateGrowthControl(parent, db, "defensiveBarGrowth", function()
+                ApplyDefensive()
+            end), 155)
+            group:AddWidget(GUI:CreateSlider(parent, L["Max Icons"], 1, 5, 1, db, "defensiveBarMax", function()
+                ApplyDefensive()
+            end, nil, true), 55)
+
+            local defSortDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], defSortOptions, db, "defensiveSortOrder", function()
+                ApplyDefensive()
+            end), 55)
+            defSortDrop.hideOn = NoFactoryRow
+            defSortDrop.tooltip = L["Externals First: defensives cast on this player by others show first, their own last. Most Urgent: soonest to expire first."]
+
+            local defWrap = group:AddWidget(GUI:CreateSlider(parent, L["Icons Per Row"], 1, 5, 1, db, "defensiveBarWrap", function()
+                ApplyDefensive()
+            end, nil, true), 55)
+            -- Greys out on vertical-primary growth, where the native row-primary flow renders a
+            -- single column and there is nothing for a per-row count to do. Normal contextual
+            -- state via the grey seam, NOT a 12.1 frost — the control works horizontally, and the
+            -- blocked registry is for things the game genuinely cannot do. Mirrors the Buffs page,
+            -- including its 68914 re-verification of the flow-layout options.
+            --
+            -- ☠ AND THE GROWTH IT READS IS SET IN THE SAME PANE, which is why nothing
+            -- extra is needed here: the growth control's own write ends in a state
+            -- pass, and in a pane that pass is the reflow.
+            defWrap.disableOn = function(d)
+                local g = d.defensiveBarGrowth or ""
+                -- Vertical-primary AND vertical-centred growth both render a single column.
+                return DF:FactoryOwnsDefensiveRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
+                    or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
+            end
+
+            group:AddWidget(GUI:CreateSlider(parent, L["Spacing"], -10, 10, 1, db, "defensiveBarSpacing", function()
+                ApplyDefensive()
+            end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+        end
+
+        -- How many icons, and in what order -- the two facts a shut row can state
+        -- about an arrangement. The sort word comes out of the same table the
+        -- dropdown offers, and is silent on a client that cannot honour it.
+        local function DefensiveLayoutSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local n = tonumber(d.defensiveBarMax)
+            if n then parts[#parts + 1] = format("%s %d", L["Max Icons"], n) end
+            local sort = defSortOptions[d.defensiveSortOrder]
+            if sort and not NoFactoryRow(d) then parts[#parts + 1] = sort end
+            return Join(parts)
+        end
+
+        -- ===== APPEARANCE (a 280 box in column 2 in classic, the Icon band's
+        -- second row) =====
+        local function BuildDefensiveAppearanceGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = HideDefensiveIconOptions
+
+            group:AddWidget(GUI:CreateSlider(parent, L["Icon Size"], 12, 48, 1, db, "defensiveIconSize", function()
+                ApplyDefensive()
+            end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+
+            group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 4.0, 0.1, db, "defensiveIconScale", function()
+                ApplyDefensive()
+            end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+
+            group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "defensiveIconFrameLevel", function()
+                ApplyDefensive()
+            end, function() DF:LightweightUpdateFrameLevel("defensive") end, true)), 55)
+        end
+
+        -- Pixels first, then the multiplier, and the multiplier only while it is
+        -- doing something -- a row reading "Scale 1.00" on every default profile is
+        -- noise. Frame Level is left out: it is a stacking-order fix, not a look.
+        local function DefensiveAppearanceSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.defensiveIconSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local scale = tonumber(d.defensiveIconScale)
+            if scale and scale ~= 1 then parts[#parts + 1] = format("%s %.2f", L["Scale"], scale) end
+            return Join(parts)
+        end
+
+        -- ===== POSITION (a 280 box in column 1 in classic, the Icon band's third
+        -- row) =====
+        local function BuildDefensivePositionGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = HideDefensiveIconOptions
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "defensiveIconAnchor", function()
+                ApplyDefensive()
+            end), 55)
+
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -100, 100, 1, db, "defensiveIconX", function()
+                ApplyDefensive()
+            end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -100, 100, 1, db, "defensiveIconY", function()
+                ApplyDefensive()
+            end, function() DF:LightweightUpdateDefensiveIcons() end, true), 55)
+        end
+
+        local function DefensivePositionSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local anchor = anchorOptions[d.defensiveIconAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            local x, y = tonumber(d.defensiveIconX) or 0, tonumber(d.defensiveIconY) or 0
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            return Join(parts)
+        end
+
+        -- ===== BORDER (a 280 box in column 2 in classic, the Icon band's fourth
+        -- row) =====
+        -- Canonical border controls via the unified helper. include opts in
+        -- inset / offset / blendMode / gradient / shadow on top of the
+        -- always-present Show / Style / Texture / Size / Colour. Inset moves
+        -- the border edges inward (positive) or outward (negative) relative
+        -- to the icon's bounds — independent of borderSize (thickness) and
+        -- independent of the artwork's own inset.
+        --
+        -- ⚠ noShowToggle IS THE HOIST -- the Pet Frames / Resource Bar / Buff Bar
+        -- border row's move, verbatim. With it the built-in Show Border checkbox is
+        -- not built and the row carries that tick instead; the show key is still
+        -- read, so it still greys the other eighteen exactly as before.
+        local function BuildDefensiveBorderGroup(tools2)
+            GUI:CreateBorderControls(tools2.group, db, "defensiveIcon", {
+                parent       = tools2.parent,
+                -- Class/Role colour makes sense here: at a glance, the border
+                -- communicates WHO is using the defensive cooldown (their class
+                -- or role) without the user having to read the icon. (Animation is
+                -- not offered: the defensive icon is a container button, and 12.1
+                -- forbids driving its border while auras are secret — see
+                -- AuraContainer's animation chokepoint.)
+                include      = { inset = true, offset = true, blendMode = true,
+                                 gradient = true, shadow = true, alpha = true,
+                                 classColor = true, roleColor = true },
+                fullUpdate   = function() ApplyDefensive() end,
+                lightUpdate  = function() DF:LightweightUpdateDefensiveIcons() end,
+                lightColors  = function() DF:LightweightUpdateDefensiveIconColors() end,
+                refreshStates = tools2.refreshStates,
+                noShowToggle = tools2.hoistToggle or nil,
+            })
+            -- No hideWhen: the group gate below is what handles the feature being
+            -- off, and it GREYS like every other box on this page. (This call used to
+            -- pass both, so the controls vanished before the grey could show.)
+            tools2.group.disableChildrenOn = HideDefensiveIconOptions
+        end
+
+        -- The Buff Bar's border summary, unchanged: thickness in pixels, the style
+        -- word, and the alpha only when it is doing something.
+        local function DefensiveBorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.defensiveIconBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local style = d.defensiveIconBorderStyle
+            parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                             or (style == "TEXTURE" and L["Texture"])
+                             or L["Solid"]
+            local c = d.defensiveIconBorderColor
+            local a = type(c) == "table" and tonumber(c.a) or nil
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        -- ===== DURATION TEXT (a 280 box in column 1 in classic, the Text band's
+        -- first row) =====
+        --
         -- Sub-controls HIDE when Show Duration is off (variant gate); they GREY
         -- via the group's disableChildrenOn when the feature itself is disabled.
         local function HideDefensiveDurationOptions(d)
             return not d.defensiveIconShowDuration
         end
 
-        -- Duration Format (PTR-7 #5): previously hardcoded NUMBER; icon-sized
-        -- formats only (see the buff page's Duration Format note). No Hide Above
-        -- on this page, so no percent-grey needed.
-        local defDurFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
-            TIMER = L["Timer"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
-        -- One widget now, so hideOn covers the example too — no second predicate to keep
-        -- in step (see CreateDurationFormatControls).
-        local defDurFormat = GUI:CreateDurationFormatControls(self.child, durationGroup, defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end)
-        defDurFormat.hideOn = HideDefensiveDurationOptions
+        local function BuildDefensiveDurationGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
-        -- offsets/justify). The offsets/anchor honor the existing defensiveIconDurationX/Y
-        -- keys (previously config-only); the static colour greys while Color-by-Time owns it.
-        GUI:CreateTextControls(durationGroup, db, "defensiveIconDuration", {
-            parent     = self.child,
-            include    = { color = true },
-            colorLabel = L["Duration Color"],
-            hideOn     = HideDefensiveDurationOptions,
-            colorDisableOn = function(d) return d.defensiveIconDurationColorByTime end,
-            onChange   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
-            onDrag     = function() DF:LightweightUpdateDefensiveIcons() end,
-        })
+            group.disableChildrenOn = HideDefensiveIconOptions
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], db, "defensiveIconShowDuration", function()
+                    tools2.refreshStates()
+                    ApplyDefensive()
+                end), 30)
+            end
 
-        local diDurColorByTime = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "defensiveIconDurationColorByTime", function()
-            self:RefreshStates()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 30)
-        diDurColorByTime.hideOn = HideDefensiveDurationOptions
-        local diColorsLink = AddColorsPageLink(durationGroup, self.child)
-        diColorsLink.hideOn = HideDefensiveDurationOptions
+            -- One widget now, so hideOn covers the example too — no second predicate to keep
+            -- in step (see CreateDurationFormatControls).
+            local defDurFormat = GUI:CreateDurationFormatControls(parent, group, defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end)
+            defDurFormat.hideOn = HideDefensiveDurationOptions
 
-        local diDurHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "defensiveIconDurationHideOnPermanent", function()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
-        end), 30)
-        diDurHidePerm.hideOn = HideDefensiveDurationOptions
+            -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
+            -- offsets/justify). The offsets/anchor honor the existing defensiveIconDurationX/Y
+            -- keys (previously config-only); the static colour greys while Color-by-Time owns it.
+            GUI:CreateTextControls(group, db, "defensiveIconDuration", {
+                parent     = parent,
+                include    = { color = true },
+                colorLabel = L["Duration Color"],
+                hideOn     = HideDefensiveDurationOptions,
+                colorDisableOn = function(d) return d.defensiveIconDurationColorByTime end,
+                onChange   = function() ApplyDefensive() end,
+                onDrag     = function() DF:LightweightUpdateDefensiveIcons() end,
+            })
 
-        Add(durationGroup, nil, 1)
+            local diDurColorByTime = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], db, "defensiveIconDurationColorByTime", function()
+                tools2.refreshStates()
+                ApplyDefensive()
+            end), 30)
+            diDurColorByTime.hideOn = HideDefensiveDurationOptions
+            local diColorsLink = AddColorsPageLink(group, parent)
+            diColorsLink.hideOn = HideDefensiveDurationOptions
+
+            local diDurHidePerm = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], db, "defensiveIconDurationHideOnPermanent", function()
+                ApplyDefensive()
+            end), 30)
+            diDurHidePerm.hideOn = HideDefensiveDurationOptions
+        end
 
         -- (The old "Duration Position" group is gone: CreateTextControls above already
         -- renders Anchor + Offset X/Y on the same defensiveIconDurationX/Y keys — the
         -- separate group was a duplicate left behind by the TextStyle conversion.)
 
-        -- ===== STACK COUNT GROUP (Column 1) =====
+        -- Which of the four icon-sized formats the text is drawn in, in the
+        -- dropdown's own words -- and the one option that takes the colour away
+        -- from the swatch behind it.
+        local function DefensiveDurationSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local fmt = defDurFormatOptions[d.defensiveIconDurationFormat]
+            if fmt then parts[#parts + 1] = fmt end
+            if d.defensiveIconDurationColorByTime then parts[#parts + 1] = L["Color by Time Remaining"] end
+            return Join(parts)
+        end
+
+        -- ===== STACK COUNT (a 280 box in column 1 in classic, the Text band's
+        -- second row) =====
         -- Directly under Duration, matching the Buffs page and the Aura Designer cards:
         -- the two text elements on an icon are tuned as a pair, so a user who finds one
         -- expects the other adjacent. Until now this page had only the duration half —
@@ -4313,53 +4619,465 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- one. A seeded default would restyle every existing profile the moment they
         -- update, and nobody has established what the untouched native colour actually is
         -- — the picker's white is its own fallback, not a measurement.
-        local defStackGroup = GUI:CreateSettingsGroup(self.child, 280)
-        defStackGroup.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
-        defStackGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
-        GUI:CreateTextControls(defStackGroup, db, "defensiveIconStack", {
-            parent     = self.child,
-            include    = { color = true },
-            colorLabel = L["Stack Text Color"],
-            onChange   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
-            onDrag     = function() DF:LightweightUpdateDefensiveIcons() end,
-        })
-        -- Grey with the feature, same as the Duration group above.
-        defStackGroup.disableChildrenOn = HideDefensiveIconOptions
-        Add(defStackGroup, nil, 1)
+        local function BuildDefensiveStackGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- ===== DURATION BAR GROUP (Column 1) ===== (12.1 factory rows only —
-        -- mirrors the Buffs page's block; UpdateAllDefensiveBars bumps the layout
-        -- version, and the sig split routes Rebuild vs in-place restyle)
-        local durBarGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durBarGroup.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
-        durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Bar"]), 40)
-        durBarGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
-        local function DefBarChanged()
-            if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end
+            GUI:CreateTextControls(group, db, "defensiveIconStack", {
+                parent     = parent,
+                include    = { color = true },
+                colorLabel = L["Stack Text Color"],
+                onChange   = function() ApplyDefensive() end,
+                onDrag     = function() DF:LightweightUpdateDefensiveIcons() end,
+            })
+            -- Grey with the feature, same as the Duration group above.
+            group.disableChildrenOn = HideDefensiveIconOptions
         end
-        local defBarEnable = durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Duration Bar"], db, "defensiveDurationBarEnabled", function()
-            self:RefreshStates()
-            DefBarChanged()
-        end), 30)
-        defBarEnable.keepEnabled = true
-        defBarEnable.disableOn = HideDefensiveIconOptions
-        durBarGroup.disableChildrenOn = function(d) return not d.defensiveIconEnabled or not d.defensiveDurationBarEnabled end
-        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "defensiveDurationBarPosition", DefBarChanged), 55)
-        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
-        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
-        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
-            self:RefreshStates()
-            DefBarChanged()
-        end), 55)
-        local defBarTex = durBarGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
-        local defBarCol = durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
-        -- A curve mode brings its own ramp texture and forces white, so these two do
-        -- nothing while it is selected - dim them rather than leave dead controls live.
-        defBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.defensiveDurationBarColorMode) end
-        defBarCol.disableOn = defBarTex.disableOn
-        durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "defensiveDurationBarBGColor", true, DefBarChanged), 30)
-        durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "defensiveDurationBarReverseFill", DefBarChanged), 30)
-        Add(durBarGroup, nil, 1)
+
+        -- Where the number sits and how big it is -- the two facts a styling row can
+        -- state without opening. The anchor word comes out of the same nine-way
+        -- table the TextStyle block's own dropdown offers.
+        local function DefensiveStackSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local anchor = anchorOptions[d.defensiveIconStackAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            local scale = tonumber(d.defensiveIconStackScale)
+            if scale and scale ~= 1 then parts[#parts + 1] = format("%s %.2f", L["Scale"], scale) end
+            return Join(parts)
+        end
+
+        -- ===== DURATION BAR (a 280 box in column 1 in classic, the headerless
+        -- band's only row) ===== (12.1 factory rows only — mirrors the Buffs page's
+        -- block; UpdateAllDefensiveBars bumps the layout version, and the sig split
+        -- routes Rebuild vs in-place restyle)
+        local function BuildDefensiveDurationBarGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
+            if not tools2.hoistToggle then
+                local defBarEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Duration Bar"], db, "defensiveDurationBarEnabled", function()
+                    tools2.refreshStates()
+                    DefBarChanged()
+                end), 30)
+                defBarEnable.keepEnabled = true
+                defBarEnable.disableOn = HideDefensiveIconOptions
+            end
+            group.disableChildrenOn = function(d) return not d.defensiveIconEnabled or not d.defensiveDurationBarEnabled end
+            group:AddWidget(GUI:CreateDropdown(parent, L["Position"], defBarPositionOptions, db, "defensiveDurationBarPosition", DefBarChanged), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "defensiveDurationBarHeight", nil, DefBarChanged, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "defensiveDurationBarGap", nil, DefBarChanged, true), 55)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "defensiveDurationBarColorMode", function()
+                tools2.refreshStates()
+                DefBarChanged()
+            end), 55)
+            local defBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "defensiveDurationBarTexture", DefBarChanged), 55)
+            local defBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "defensiveDurationBarColor", true, DefBarChanged), 30)
+            -- A curve mode brings its own ramp texture and forces white, so these two do
+            -- nothing while it is selected - dim them rather than leave dead controls live.
+            defBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.defensiveDurationBarColorMode) end
+            defBarCol.disableOn = defBarTex.disableOn
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "defensiveDurationBarBGColor", true, DefBarChanged), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Reverse Fill"], db, "defensiveDurationBarReverseFill", DefBarChanged), 30)
+        end
+
+        local function DefensiveDurationBarSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local pos = defBarPositionOptions[d.defensiveDurationBarPosition]
+            if pos then parts[#parts + 1] = pos end
+            local h = tonumber(d.defensiveDurationBarHeight)
+            if h then parts[#parts + 1] = format("%dpx", math.floor(h)) end
+            local modes = DF:GetDurationBarColorModes()
+            local mode = modes and modes[d.defensiveDurationBarColorMode]
+            if mode then parts[#parts + 1] = mode end
+            return Join(parts)
+        end
+
+        -- ===== THE MOUNTS, IN THE ORDER CLASSIC ADDS THEM =================
+        -- ⚠ THE CLASSIC ARMS RUN IN THE PAGE'S OWN Add ORDER, which is what makes
+        -- "classic is unchanged" structural: within a column the Add() order IS the
+        -- layout order. The BANDS are added at the foot, so the popout layout reads
+        -- in its own order without disturbing that.
+
+        if classicLayout then
+            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+            BuildDefensiveLayoutGroup({
+                group = layoutGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(layoutGroup, nil, 1)
+        else
+            -- Six: the blurb, the growth control (one widget, three stacked mini
+            -- dropdowns inside it), Max Icons, the sort pick, Icons Per Row and the
+            -- spacing.
+            local DEFENSIVE_LAYOUT_COUNT = 6
+
+            local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveLayoutGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local layoutRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Layout"],
+                db      = tools.RowDB,
+                summary = DefensiveLayoutSummary,
+                count   = DEFENSIVE_LAYOUT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = layoutMount,
+            }))
+            -- ⚠ defensiveBarGrowth IS NAMED, because the walk cannot see it. The
+            -- growth control is three hand-built mini dropdowns in a container -- it
+            -- registers nothing with search and carries no dbKey -- so without this
+            -- the row's tick and its Reset Group would both act as though the setting
+            -- were on another page.
+            tools.ClaimKeys(layoutRow, layoutContent, { "defensiveBarGrowth" })
+            tools.WireModifiedTick(layoutRow)
+            tools.WireFooter(layoutRow, ApplyDefensive)
+            layoutRow.disableOn = DefensiveOffRow
+        end
+
+        if classicLayout then
+            local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+            BuildDefensiveAppearanceGroup({
+                group = appearanceGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(appearanceGroup, nil, 2)
+        else
+            -- Three: size, scale and the frame level.
+            local DEFENSIVE_APPEARANCE_COUNT = 3
+
+            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveAppearanceGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Appearance"],
+                db      = tools.RowDB,
+                summary = DefensiveAppearanceSummary,
+                count   = DEFENSIVE_APPEARANCE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = appearanceMount,
+            }))
+            tools.ClaimKeys(appearanceRow, appearanceContent)
+            tools.WireModifiedTick(appearanceRow)
+            tools.WireFooter(appearanceRow, ApplyDefensive)
+            appearanceRow.disableOn = DefensiveOffRow
+        end
+
+        if classicLayout then
+            local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
+            positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
+            BuildDefensivePositionGroup({
+                group = positionGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(positionGroup, nil, 1)
+        else
+            -- Three: the anchor and the two offsets.
+            local DEFENSIVE_POSITION_COUNT = 3
+
+            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensivePositionGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Position"],
+                db      = tools.RowDB,
+                summary = DefensivePositionSummary,
+                count   = DEFENSIVE_POSITION_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = positionMount,
+            }))
+            tools.ClaimKeys(positionRow, positionContent)
+            tools.WireModifiedTick(positionRow)
+            tools.WireFooter(positionRow, ApplyDefensive)
+            positionRow.disableOn = DefensiveOffRow
+        end
+
+        if classicLayout then
+            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            BuildDefensiveBorderGroup({
+                group = borderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(borderGroup, nil, 2)
+        else
+            -- Eighteen: the nineteen CreateBorderControls builds for this include
+            -- set -- the toolkit's usual set plus the Colour Source dropdown the two
+            -- resolver opt-ins add -- less the hoisted Show Border.
+            local DEFENSIVE_BORDER_COUNT = 18
+
+            -- What the suppressed Show Border checkbox ran, and never a page
+            -- rebuild: that would retire every widget on the page including the row
+            -- being clicked through.
+            local function OnDefensiveBorderToggle()
+                self:RefreshStates()
+                ApplyDefensive()
+                tools.ReflowMounted()
+            end
+
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local borderRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = tools.RowDB,
+                toggle   = { key = "defensiveIconShowBorder" },
+                summary  = DefensiveBorderSummary,
+                count    = DEFENSIVE_BORDER_COUNT,
+                onToggle = OnDefensiveBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            tools.ClaimKeys(borderRow, borderContent)
+            tools.WireModifiedTick(borderRow)
+            tools.WireFooter(borderRow, ApplyDefensive)
+            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "defensiveIconShowBorder", OnDefensiveBorderToggle)
+            borderRow.disableOn = DefensiveOffRow
+        end
+
+        if classicLayout then
+            local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
+            filterGroup:AddWidget(GUI:CreateHeader(self.child, L["Defensive Filters"]), 40)
+            BuildDefensiveFilterGroup({
+                group = filterGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(filterGroup, nil, 2)
+        else
+            local filterMount, filterContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveFilterGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local filterRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Defensive Filters"],
+                db      = tools.RowDB,
+                summary = DefensiveFilterSummary,
+                count   = DefensiveFilterCount(),
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = filterMount,
+            }))
+            -- ⚠ THE SELECTION TABLE IS NAMED, because the walk cannot see it. Every
+            -- filter tick is a CUSTOM get/set checkbox -- it has no db binding at all,
+            -- so what it registers with search is a synthetic `custom_<label>` key and
+            -- the real setting, `defensiveFilterSelection`, is bound to nothing the
+            -- walk can find.
+            tools.ClaimKeys(filterRow, filterContent, { "defensiveFilterSelection" })
+            tools.WireModifiedTick(filterRow)
+            -- ☠ NO FOOTER ON THIS ROW, AND IT IS A REFUSAL RATHER THAN AN OMISSION.
+            -- The Buff Bar's, key for key: Reset Group writes `db[key] =
+            -- DeepCopy(default)` (GUI/GroupActions.lua), which for
+            -- defensiveFilterSelection REPLACES the table -- and the note at the top
+            -- of this group says why that cannot happen: the aura pipeline holds
+            -- references to that table and its inner tables, so a fresh one strands
+            -- every holder. Hold: Defaults is the same write twice over. This is the
+            -- Debuff Filters row's opposite: THAT group's keys are all scalars, so a
+            -- reset writes values and a footer is safe.
+            filterRow.disableOn = DefensiveOffRow
+        end
+
+        -- ⚠ ONE SIGNATURE AND ONE HOOK PER PAGE BUILD, in both layouts. The block
+        -- runs after whichever arm built the list, exactly where it ran when the
+        -- list was straight-line code inside the box.
+        self.dfDefFilterSignature = RegistrySignature()
+        if not self.dfDefFilterSigHooked then
+            self.dfDefFilterSigHooked = true
+            self:HookScript("OnShow", function(page)
+                if page.dfDefFilterSignature ~= RegistrySignature() then
+                    page:Invalidate()
+                end
+            end)
+        end
+
+        if classicLayout then
+            local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
+            durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
+            BuildDefensiveDurationGroup({
+                group = durationGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(durationGroup, nil, 1)
+        else
+            -- Twelve: the format control, the TextStyle block's eight, Color by Time
+            -- and its cross-link, and the permanent-aura tick. The Show Duration tick
+            -- is HOISTED onto the row.
+            local DEFENSIVE_DURATION_COUNT = 12
+
+            -- ☠ AND THE REFLOW IS NOT OPTIONAL ON THIS ONE. Every control behind
+            -- this row carries hideOn rather than disableOn -- which is what classic
+            -- does, and is left alone -- so switching the tick off empties the pane
+            -- and switching it on refills it. The pane is where that has to happen,
+            -- because a page rebuild would retire the row being clicked through.
+            local function OnDefensiveDurationToggle()
+                self:RefreshStates()
+                ApplyDefensive()
+                tools.ReflowMounted()
+            end
+
+            local durationMount, durationContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveDurationGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local durationRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Duration Text"],
+                db       = tools.RowDB,
+                toggle   = { key = "defensiveIconShowDuration" },
+                summary  = DefensiveDurationSummary,
+                count    = DEFENSIVE_DURATION_COUNT,
+                onToggle = OnDefensiveDurationToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = durationMount,
+            }))
+            tools.ClaimKeys(durationRow, durationContent)
+            tools.WireModifiedTick(durationRow)
+            tools.WireFooter(durationRow, ApplyDefensiveDurationText)
+            tools.RegisterHoistedToggle(durationRow, L["Show Duration"], "defensiveIconShowDuration", OnDefensiveDurationToggle)
+            durationRow.disableOn = DefensiveOffRow
+        end
+
+        if classicLayout then
+            local defStackGroup = GUI:CreateSettingsGroup(self.child, 280)
+            defStackGroup.hideOn = NoFactoryRow
+            defStackGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
+            BuildDefensiveStackGroup({
+                group = defStackGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(defStackGroup, nil, 1)
+        else
+            -- Eight: the TextStyle block's font, scale, outline, shadow, colour,
+            -- anchor and two offsets.
+            local DEFENSIVE_STACK_COUNT = 8
+
+            local stackMount, stackContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveStackGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local stackRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Stack Count"],
+                db      = tools.RowDB,
+                summary = DefensiveStackSummary,
+                count   = DEFENSIVE_STACK_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = stackMount,
+            }))
+            -- The box's own hideOn becomes the ROW's, so the band collapses the slot
+            -- rather than leaving a gap where a count the client cannot style would be.
+            stackRow.hideOn = NoFactoryRow
+            tools.ClaimKeys(stackRow, stackContent)
+            tools.WireModifiedTick(stackRow)
+            tools.WireFooter(stackRow, ApplyDefensive)
+            stackRow.disableOn = DefensiveOffRow
+        end
+
+        if classicLayout then
+            local durBarGroup = GUI:CreateSettingsGroup(self.child, 280)
+            durBarGroup.hideOn = NoFactoryRow
+            durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Bar"]), 40)
+            BuildDefensiveDurationBarGroup({
+                group = durBarGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(durBarGroup, nil, 1)
+        else
+            -- Nine: the blurb, the position pick, height, gap, the colour mode, the
+            -- texture and two colours, and Reverse Fill. The Enable tick is HOISTED.
+            local DEFENSIVE_DURBAR_COUNT = 9
+
+            local function OnDefensiveDurationBarToggle()
+                self:RefreshStates()
+                DefBarChanged()
+                tools.ReflowMounted()
+            end
+
+            local durBarMount, durBarContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDefensiveDurationBarGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local durBarRow = factoryBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Duration Bar"],
+                db       = tools.RowDB,
+                toggle   = { key = "defensiveDurationBarEnabled" },
+                summary  = DefensiveDurationBarSummary,
+                count    = DEFENSIVE_DURBAR_COUNT,
+                onToggle = OnDefensiveDurationBarToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = durBarMount,
+            }))
+            -- The box's own hideOn becomes the ROW's, so the band collapses the slot
+            -- rather than leaving a gap where a bar the client cannot draw would be.
+            durBarRow.hideOn = NoFactoryRow
+            tools.ClaimKeys(durBarRow, durBarContent)
+            tools.WireModifiedTick(durBarRow)
+            tools.WireFooter(durBarRow, DefBarChanged)
+            tools.RegisterHoistedToggle(durBarRow, L["Enable Duration Bar"], "defensiveDurationBarEnabled", OnDefensiveDurationBarToggle)
+            -- The suppressed Enable tick carried this gate itself; with the tick on
+            -- the row, the row is the only place left to say it.
+            durBarRow.disableOn = DefensiveOffRow
+        end
+
+        -- ===== THE FOUR BANDS, IN READING ORDER ===========================
+        -- Added at the foot rather than in place: every band is full width, so there
+        -- is no column flow left to unbalance and the order below is purely the
+        -- order the page reads in.
+        if not classicLayout then
+            Add(contentBand, nil, "both")
+            Add(iconBand, nil, "both")
+            Add(textBand, nil, "both")
+            Add(factoryBand, nil, "both")
+        end
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")
