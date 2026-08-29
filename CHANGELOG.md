@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* (Aura Designer) Fix debuffs appearing where buff indicators used to be — most visibly after swapping to a spec with no Aura Designer setup, where every retired indicator position showed the same debuff, live with stacks and duration, until a reload. Disabled and retired indicator slots are now switched off through a second, game-version-proof mechanism. (by Krathe)
+
 ## [5.3.1]
 
 ### New Features
