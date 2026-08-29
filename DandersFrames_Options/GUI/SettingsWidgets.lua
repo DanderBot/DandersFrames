@@ -2209,14 +2209,31 @@ function GUI:AddEditBoxIcon(editbox, texture, size)
     return icon
 end
 
+-- The shared Frame Level explanation, as a TOOLTIP SPEC -- { title, lines }, the shape
+-- ShowTooltip and a control row's `tooltip` opt both take.
+--
+-- ⚠ IT EXISTS BECAUSE A CONTROL ROW HAS NO CONTAINER TO STAMP. SetFrameLevelTooltip below
+-- writes tooltipText / tooltipSubText onto the slider container, and a control row's
+-- embedded slider hangs its tooltip on the caption the row HIDES (see DandersUI/ControlRow's
+-- interaction block) -- so a row has to be handed the spec and show it off its own plate.
+-- Two copies of the sentence would be exactly the drift this helper was written to stop, so
+-- there is one copy and both shapes read it.
+function GUI:FrameLevelTooltip()
+    return {
+        title = L["Frame Level"],
+        lines = { L["Higher numbers draw on top of lower ones. Every Frame Level in DandersFrames uses the same scale, counted up from the unit frame, so you can compare them directly."] },
+    }
+end
+
 -- Stamp the shared Frame Level explanation onto a slider. One helper rather than the same
 -- two strings at 21 call sites, and it keeps the wording in ONE place -- the old per-page
 -- label went stale the moment the scale changed (it still read "0=Auto" afterwards).
 -- Takes the CONTAINER that CreateSlider returns, which is what every call site has.
 function GUI:SetFrameLevelTooltip(container)
     if not container then return end
-    container.tooltipText    = L["Frame Level"]
-    container.tooltipSubText = L["Higher numbers draw on top of lower ones. Every Frame Level in DandersFrames uses the same scale, counted up from the unit frame, so you can compare them directly."]
+    local spec = GUI:FrameLevelTooltip()
+    container.tooltipText    = spec.title
+    container.tooltipSubText = spec.lines[1]
     return container   -- chainable, so it wraps a CreateSlider call in place
 end
 

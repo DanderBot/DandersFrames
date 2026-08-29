@@ -3861,7 +3861,7 @@ end
 --   ReflowMounted(values)
 --   RowDB()
 --   BandWidth()
---   INLINE_BOX          -- the stay-inline box's band skin
+--   INLINE_BOX          -- the full-width box's band skin
 -- ============================================================
 function GUI:CreatePopoutPageTools(page)
     if not page then return nil end
@@ -4394,16 +4394,22 @@ function GUI:CreatePopoutPageTools(page)
         ReflowMounted         = ReflowMounted,
         BandWidth             = BandWidth,
 
-        -- ☠ ONE TABLE, PASSED AT EVERY STAY-INLINE SITE. A single-option group
-        -- that stays inline beside a page of bands is speaking the other visual
+        -- ☠ ONE TABLE, PASSED AT EVERY BOX A CONVERTED PAGE STILL BUILDS. A group
+        -- standing beside a page of bands is otherwise speaking the other visual
         -- language -- a title INSIDE a faint rectangle next to accent headers
         -- over fat row plates. bandStyle (DandersUI/Sections.lua) is the skin
         -- that settles it: the title moves out of the box and is drawn as the
         -- band's own header, and the box becomes a PopoutRow plate. Nothing
         -- inside changes. Read-only to the factory, which is what makes one
-        -- shared table safe across every box on the page. Callers write
-        -- `tools and tools.INLINE_BOX or nil`, so classic gets nil -- which is
-        -- exactly what "no opts" already meant to CreateSettingsGroup.
+        -- shared table safe across every box on the page.
+        --
+        -- ⚠ THE SKIN IS HALF THE ANSWER; THE OTHER HALF IS THE WIDTH. It settles
+        -- the BORDER, and never the EDGE -- a skinned 280 box under a full-width
+        -- band still starts and ends somewhere no other object on the page does.
+        -- So every surviving box on a converted page is built at BandWidth() and
+        -- added "both", and every site that passes this flag is inside an `else`
+        -- arm where `tools` is known to exist. Classic passes no opts at all,
+        -- which is what it always did.
         INLINE_BOX            = { bandStyle = true },
     }
 end

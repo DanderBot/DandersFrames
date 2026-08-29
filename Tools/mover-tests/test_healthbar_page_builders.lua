@@ -507,7 +507,7 @@ do
 end
 
 -- ============================================================
--- 7. THE TWO GRADIENT EDITORS STAY INLINE
+-- 7. THE TWO GRADIENT EDITORS STAY BOXES -- FULL-WIDTH ONES
 -- ☠ Structural, not taste: GradRebuild ends in pageHealthBar:Refresh(), a full
 -- PAGE REBUILD, and it has to -- adding a stop, removing one and committing a
 -- threshold each change which WIDGETS the editor has. Inside a pane a rebuild
@@ -515,7 +515,7 @@ end
 -- on the way in, so the editor would slam its own panel shut on each + click.
 -- (Colors page, Color by Time: the same refusal for the same reason.)
 -- ============================================================
-print("-- Health Bar page: the two stay-inline gradient editors")
+print("-- Health Bar page: the two full-width gradient editors")
 do
     check(PAGE:find("local function BuildGradientStopBox(prefix, hideOn)", 1, true) ~= nil,
           "gradient: the one builder still serves both ramps")
@@ -529,8 +529,26 @@ do
     -- ⚠ IT DOES WEAR THE BAND SKIN, unlike Color by Time -- and the difference is
     -- what each of them IS: Color by Time is a CollapsibleSection, which the skin
     -- does not apply to, while this is an ordinary settings box with a header.
-    check(PAGE:find("local gradGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "gradient: the editor's box wears the band skin in the popout layout")
+    --
+    -- ☠ AND IN THE POPOUT LAYOUT IT IS FULL WIDTH. The skin settles the BORDER and
+    -- never the EDGE: a skinned 280 box under a full-width band still starts and
+    -- ends somewhere nothing else on the page does. So the popout arm builds it at
+    -- the band's width, and classic keeps the bare 280 box it always built.
+    check(PAGE:find("local gradGroup = classicLayout", 1, true) ~= nil,
+          "gradient: the editor's box picks its width from the layout")
+    check(PAGE:find("and GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "gradient: ...the bare 280 box in classic")
+    check(PAGE:find("or GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)", 1, true) ~= nil,
+          "gradient: ...and the band's width, wearing the band skin, in the popout layout")
+    -- ⚠ AN EXPRESSION, NOT A SECOND `if classicLayout then` ARM at the page
+    -- builder's indent: this builder is declared above the section's own arms, and
+    -- an arm here is the one their locators would find first.
+    check(PAGE:find("local function BuildGradientStopBox(prefix, hideOn)\n        local listKey", 1, true) ~= nil,
+          "gradient: ...and the builder still opens on its one local")
+    -- The Add follows the same fork: column 1 in classic, a sync point here, which
+    -- is the whole of "the editor lines up with the bands".
+    check(PAGE:find('AddToSection(gradGroup, nil, classicLayout and 1 or "both")', 1, true) ~= nil,
+          "gradient: ...and it is added to column 1 in classic, spanning both here")
     -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL. One shared table off the tools,
     -- so classic gets nil -- which is what "no opts" already meant.
     check(PAGE:find("bandStyle", 1, true) == nil,
@@ -548,10 +566,18 @@ do
     eq(health, 2, "gradient: the health ramp is built once per layout arm")
     eq(missing, 2, "gradient: ...and so is the missing-health ramp")
 
-    -- ---- five bare 280 boxes left, and they are the classic branch's own ----
+    -- ---- six bare 280 boxes left, and they are the classic branch's own ----
+    -- Five section boxes plus the gradient editor's own classic width, which is
+    -- now written out rather than shared with the popout arm.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 5, "boxes: five bare 280 boxes left -- the five classic-arm boxes")
+    eq(bare, 6, "boxes: six bare 280 boxes left -- the classic arms' own")
+    -- ☠ THE ALIGNMENT RULE, ON THIS PAGE: no box is mounted at a column's 280 with
+    -- the tools in hand. A 280 box only ever appears with NO opts, which is the
+    -- classic arm's signature.
+    local narrow = 0
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
+    eq(narrow, 0, "boxes: ...and none of them is a new-UI mount at 280")
 end
 
 -- ============================================================

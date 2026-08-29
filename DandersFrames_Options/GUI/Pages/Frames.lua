@@ -31,17 +31,26 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- CLASSIC is exactly what it always was: three 280 boxes, two in column
         -- one and the reference list in column two. POPOUT turns the two REAL
         -- groups into feature rows -- Global Font Settings, Shadow Settings --
-        -- and leaves Affected Elements inline wearing the band skin.
+        -- and keeps Affected Elements as a FULL-WIDTH box wearing the band skin.
         --
-        -- ⚠ AFFECTED ELEMENTS STAYS INLINE ON A JUDGEMENT, not on the
+        -- ⚠ AFFECTED ELEMENTS STAYS A BOX ON A JUDGEMENT, not on the
         -- single-option rule the other pages leaned on: it holds a header, a
         -- twelve-line list and a caution note, and ZERO controls. A row buys a
         -- page space by folding controls away behind a click; folding away pure
         -- reference text -- the list a user reads WHILE deciding whether to press
         -- Apply to All -- buys nothing and hides the one thing on the page that
-        -- is there to be read. Nearest precedent is the stay-inline single-option
-        -- box (Sorting's Self Position, Group Labels' Text Format): keep the box,
-        -- wear the band skin so it does not read as a second visual language.
+        -- is there to be read. And with no control in it there is nothing a
+        -- CONTROL ROW could carry either, so a box is what it stays.
+        --
+        -- ☠ WHAT IT DOES NOT STAY IS 280 WIDE. A narrower rectangle with its own
+        -- border and its own left edge, standing beside a full-width band, is the
+        -- one thing a column of plates cannot absorb -- so it is built at the
+        -- BAND's width and added as a sync point, and the page's two top-level
+        -- objects then start and end on the same two edges. That is the pet-frame
+        -- boxes' answer (Pages/Options.lua), and it comes with their warning: a
+        -- box built at the band width but added to a COLUMN would be worse than
+        -- what it replaced, because the layout pass only stretches a "both" widget
+        -- and never narrows a column one (GUI/Panel.lua's LayoutPage).
         --
         -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates }. The classic branch mounts the SAME
@@ -437,25 +446,44 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- using the Shadow outline style, and this page cannot know that.
         end
 
-        -- ===== AFFECTED ELEMENTS GROUP (Column 2) =====
-        -- STAYS INLINE in both layouts -- see the judgement at the top of the
-        -- page. It wears the band skin in the popout layout so it does not read
-        -- as a second visual language beside the rows; the opts table is nil in
-        -- classic, which is what "no opts" already meant.
-        local infoGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-        infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
-        infoGroup:AddWidget(GUI:CreateLabel(self.child, L["• Text Designer (Name, Health, Status & custom text)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• All Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)\n• Targeted List\n• Personal Targeted Spell\n• Aura Designer Indicators\n• Pinned Frames"], 250), 235)
-        infoGroup:AddWidget(GUI:CreateNote(self.child, L["Font sizes are not changed. Adjust sizes in each element's page."], {tone = "caution", prefix = "Note", width = 250}), 40)
-        -- ⚠ THE BAND IS ADDED AFTER ITS LAST ROW AND BEFORE THIS BOX, and both
-        -- halves of that are forced. `Add` resolves a widget's slot height on the
-        -- spot, so a band added before its rows would be measured empty; and
-        -- "both" is a sync point, so a full-width band dropped in BELOW the lone
-        -- column-2 box would leave a hole beside it. Classic reaches the same Add
-        -- below with no band in front of it, exactly where the box always was.
-        if not classicLayout then
+        -- ===== AFFECTED ELEMENTS GROUP (a 280 box in column 2 in classic, a
+        -- full-width box here) =====
+        -- STAYS A BOX in both layouts -- see the judgement at the top of the page.
+        -- It wears the band skin in the popout arm so it does not read as a second
+        -- visual language beside the rows; the classic arm passes no opts at all,
+        -- which is what it always did.
+        --
+        -- ⚠ THE LIST IS MEASURED, NOT PINNED, IN THE WIDE ARM. Its 235 was the
+        -- height twelve bullets wrap to AT 250; at the band's width several of
+        -- them stop wrapping, so the same number would leave a hole under the
+        -- list. CreateLabel measures itself whenever the call site does not pin
+        -- it, which is the pet blurbs' rule -- and classic keeps the pinned
+        -- number, because classic keeps the width it was measured at.
+        --
+        -- ⚠ THE NOTE KEEPS ITS 40 in both: one sentence is one line at 250 and
+        -- still one line wider, so the slot does not move.
+        local INFO_LIST = L["• Text Designer (Name, Health, Status & custom text)\n• Buff Stack & Duration\n• Debuff Stack & Duration\n• Pet Frame Text\n• Targeted Spell Duration\n• Defensive Icon Duration\n• All Icon Text (Res, Summon, etc.)\n• Group Labels (Raid)\n• Targeted List\n• Personal Targeted Spell\n• Aura Designer Indicators\n• Pinned Frames"]
+        local INFO_NOTE = L["Font sizes are not changed. Adjust sizes in each element's page."]
+        if classicLayout then
+            local infoGroup = GUI:CreateSettingsGroup(self.child, 280)
+            infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
+            infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, 250), 235)
+            infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = 250}), 40)
+            Add(infoGroup, nil, 2)
+        else
+            local infoGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
+            infoGroup:AddWidget(GUI:CreateHeader(self.child, L["Affected Elements"]), 40)
+            local infoInner = GUI:GroupInnerWidth(infoGroup)
+            infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))
+            infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)
+            -- ⚠ THE BAND IS ADDED AFTER ITS LAST ROW AND BEFORE THIS BOX. `Add`
+            -- resolves a widget's slot height on the spot, so a band added before
+            -- its rows would be measured empty. The box follows it because that is
+            -- the READING order -- with both of them "both", there is no column
+            -- flow left for a sync point to strand.
             Add(fontBand, nil, "both")
+            Add(infoGroup, nil, "both")
         end
-        Add(infoGroup, nil, 2)
     end)
     
     -- General > Group Labels (Raid only, group-based layout only)
@@ -479,9 +507,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
         -- CLASSIC is exactly what it always was: four 280 boxes in two columns.
         -- POPOUT turns the three MULTI-CONTROL groups into feature rows -- Raid
-        -- Group Labels, Font Settings, Position -- and leaves Text Format inline
-        -- wearing the band skin, because a pane holding one dropdown is a click
-        -- that buys nothing.
+        -- Group Labels, Font Settings, Position -- and gives the fourth, which is
+        -- one dropdown, a CONTROL ROW: a pane holding one dropdown is a click that
+        -- buys nothing, but a 280 box beside a full-width band is the one shape a
+        -- column of plates cannot absorb.
         --
         -- Every converted group's widgets live in a `Build<X>Group(tools2)`
         -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
@@ -572,32 +601,70 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(settingsGroup, nil, 1)
         end
 
-        -- ===== TEXT FORMAT GROUP (Column 2) =====
-        -- STAYS INLINE in both layouts: one dropdown behind a click is a click
-        -- that buys nothing. It wears the band skin in the popout layout so it
-        -- does not read as a second visual language beside the rows -- the opts
-        -- table is nil in classic, which is what "no opts" already meant.
-        --
-        -- ⚠ CONSTRUCTED HERE, ADDED IN TWO PLACES. Classic adds it at its own
-        -- slot, exactly where it always was. The popout layout cannot: `Add`
-        -- resolves a widget's slot height on the spot, so the band has to be
-        -- added AFTER the last row goes into it -- and the band must still come
-        -- FIRST, because "both" is a sync point and a full-width band dropped in
-        -- below a lone column box would leave a hole beside it. So the popout
-        -- arm at the foot does the pair in order: band, then this box.
-        local formatGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-        formatGroup:AddWidget(GUI:CreateHeader(self.child, L["Text Format"]), 40)
-
+        -- ===== TEXT FORMAT (a 280 box in column 2 in classic, a control row
+        -- here) =====
         local formatOptions = {
             ["GROUP_NUM"] = L["Group 1"],
             ["SHORT"] = L["G1"],
             ["NUM_ONLY"] = L["1"],
             ["ROMAN"] = L["I, II, III..."],
         }
-        formatGroup:AddWidget(GUI:CreateDropdown(self.child, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)
-        formatGroup.hideOn = HideGroupLabelOptions
-        formatGroup.disableChildrenOn = DisableGroupLabelOptions
-        if classicLayout then Add(formatGroup, nil, 2) end
+
+        -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT. A
+        -- pane holding one dropdown is a click that buys nothing, so this never
+        -- earned a feature row; but a 280 box beside a full-width band is a
+        -- narrower rectangle with its own border and its own left edge, in a list
+        -- whose whole argument is that every row starts at the same x. So the
+        -- dropdown wears the same plate the three rows do
+        -- (DandersUI/ControlRow.lua), in a chromeless band of its own.
+        --
+        -- ⚠ ONE NAME, AND IT IS THE CONTROL'S. "Text Format" named a SECTION; the
+        -- row IS the setting, and "Label Format" is what the dropdown has always
+        -- been called -- so the entry the kit registers off this label is the SAME
+        -- entry classic registers, rather than one setting under two spellings.
+        -- (The Self Position row on the Sorting page goes the other way for the
+        -- opposite reason: its control's caption is the bare word "Position",
+        -- which does not say whose.)
+        --
+        -- ⚠ NO HEADER ON THE BAND, for the reason the label band above it carries
+        -- none: a header naming a section directly above a single row that already
+        -- names itself is the page saying it twice.
+        --
+        -- ⚠ THE db IS THE TABLE, NOT tools.RowDB: only a TABLE binding yields the
+        -- dbRef a dropdown needs to reach the override markers and the search
+        -- index, and the page is rebuilt on a mode switch anyway. The Language
+        -- row's rule (Pages/Options.lua).
+        --
+        -- ⚠ THE BOX'S TWO GATES, ON THE ROW: hideOn is the ROW's, so the band's
+        -- own layout collapses the slot instead of drawing an empty box, and the
+        -- group's disableChildrenOn over one child is the row's own disableOn --
+        -- which is how the other three rows on this page already say it.
+        local formatBand
+        if classicLayout then
+            local formatGroup = GUI:CreateSettingsGroup(self.child, 280)
+            formatGroup:AddWidget(GUI:CreateHeader(self.child, L["Text Format"]), 40)
+            formatGroup:AddWidget(GUI:CreateDropdown(self.child, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)
+            formatGroup.hideOn = HideGroupLabelOptions
+            formatGroup.disableChildrenOn = DisableGroupLabelOptions
+            Add(formatGroup, nil, 2)
+        else
+            -- ⚠ CONSTRUCTED HERE, ADDED AT THE FOOT. `Add` resolves a widget's slot
+            -- height on the spot, so the label band has to go in AFTER its last row
+            -- -- which is why the pair is added together down there, in the order
+            -- the page reads.
+            formatBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local formatRow = formatBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Label Format"],
+                kind      = "dropdown",
+                options   = formatOptions,
+                db        = db,
+                key       = "groupLabelFormat",
+                onChanged = UpdateLabels,
+                hideOn    = HideGroupLabelOptions,
+            }))
+            formatRow.disableOn = DisableGroupLabelOptions
+            tools.RegisterControlRow(formatRow, "dropdown", "groupLabelFormat")
+        end
 
         if classicLayout then
             -- ===== FONT GROUP (Column 2) =====
@@ -781,10 +848,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             positionRow.hideOn = HideGroupLabelOptions
             positionRow.disableOn = DisableGroupLabelOptions
 
-            -- The band, then the stay-inline box -- see the Text Format note
-            -- above for why the pair is added here rather than in place.
+            -- The band, then the Text Format row's own band -- see the note up at
+            -- Text Format for why the pair is added here rather than in place.
+            -- Both are "both", so the order below is purely reading order.
             Add(labelBand, nil, "both")
-            Add(formatGroup, nil, 2)
+            Add(formatBand, nil, "both")
         end
 
         -- Party mode message
