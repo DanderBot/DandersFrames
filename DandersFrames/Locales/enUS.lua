@@ -2837,4 +2837,21 @@ L["Interrupted: %s"] = true
 -- are unique to this tooltip.
 L["Left-Click:"] = true
 L["Right-Click:"] = true
+-- /df performance (Core.lua) — the standing answer to "this addon uses a lot of CPU",
+-- which is nearly always read off an in-game profiler. Grouped, not alphabetised: the
+-- four headings and their lines are one argument and a translator needs to see them in
+-- order. ⚠ "roughly in half" is a MEASURED figure (profiling ledger, 4.x vs 12.1,
+-- addon-side Lua) — translators and future editors: do not widen it into a claim about
+-- the game's total cost, which is not what was measured.
+L["Performance"] = true
+L["Why raid frames cost more than other addons"] = true
+L["They follow up to 40 players at once: health, power, auras, range and roster changes."] = true
+L["Why in-game profilers mislead"] = true
+L["They see Lua only, add their own cost to every call, and report one running total with no scenario behind it."] = true
+L["How we measure instead"] = true
+L["Full call-graph profiling, one scenario at a time, before and after every change."] = true
+L["What 12.1 changed"] = true
+L["Aura icons are rendered by the game's own engine now, which cut our Lua work roughly in half."] = true
+L["The longer version is in the FAQ on our Discord."] = true
+L["how we measure performance, and why profilers mislead"] = true
 --@end-do-not-package@
