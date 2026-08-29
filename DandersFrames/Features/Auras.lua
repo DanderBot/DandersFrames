@@ -1068,10 +1068,17 @@ end
 -- category groups (C1). The AD factory builds a facade db table from a group's
 -- selection (directDebuffShowAll=false + the flat debuffFilter*/debuffMaxDuration*
 -- keys) and calls this — the records come out byte-identical to a row configured
--- the same way. The AD path must NEVER pass `claimed` (claims derive FROM the AD
--- groups; feeding them back would be circular — row → claims → AD groups → this
--- facade, claim-free, is the whole chain). `claimed` exists for the ROW call
--- sites in DriveDebuffFactory only.
+-- the same way.
+-- `claimed` serves TWO callers now (2026-08-29): the ROW call sites in
+-- DriveDebuffFactory (the full union from GetClaimedDebuffCategories, as always),
+-- and the AD dgroup sync's ORDERED fold — each group receives the categories of
+-- the enabled groups ABOVE it, so overlapping groups no longer repeat a debuff
+-- once per group. The old "the AD path must NEVER pass claimed" rule was about
+-- feeding the row's own derived set back in (circular); the ordered fold is not
+-- circular and reuses these exact drop-record/keep-negation semantics.
+-- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the toggle guard
+-- at the top of BuildDirectDebuffFilters cannot fire for AD calls — the dgroup
+-- sync gates on the mode db's toggle before passing claimed.
 function DF:BuildDebuffFilterRecords(dbLike, claimed)
     return BuildDirectDebuffFilters(dbLike, claimed)
 end

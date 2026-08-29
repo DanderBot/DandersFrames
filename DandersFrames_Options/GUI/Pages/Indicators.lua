@@ -1035,7 +1035,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- DebuffFilterChanged is page-scope now, above every group that needs it, so
         -- the hazard is gone and this simply calls it.
         local dfDedup = GUI:CreateCheckbox(self.child, L["Hide Duplicate Debuffs"], db, "debuffDeduplicateDesigner", DebuffFilterChanged)
-        dfDedup.tooltip = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
+        dfDedup.tooltip = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice. Also stops Aura Designer debuff groups repeating each other: a debuff matching several groups shows only in the first group in the list."]
         dedupGroup:AddWidget(dfDedup, 30)
         Add(dedupGroup, nil, 1)
 

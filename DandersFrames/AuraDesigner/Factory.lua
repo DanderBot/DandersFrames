@@ -3564,8 +3564,17 @@ end
 
 -- Facade scratch (module-level, wiped per build): BuildDebuffFilterRecords only
 -- READS flat scalar keys synchronously, so one shared table serves every group.
+-- `claimed` (2026-08-29, cross-group dedup): the union of categories selected by
+-- enabled groups EARLIER in the config order — the same claim machinery the ROW
+-- consumes, now folded group-over-group. The old "never pass a claim set — circular"
+-- rule was about feeding the row's OWN derived set back in; an ORDERED fold is not
+-- circular: group 1 resolves unclaimed, group 2 sees group 1's categories, and so on.
+-- First group in the list wins a contested category; a later group's claimed record
+-- is dropped while its negations survive in that group's remaining records — exactly
+-- the row's semantics. Field driver: one debuff rendered once per overlapping group
+-- ("the same 1 debuff x 4/5", Drasvin, 5.3.1).
 local dgroupFacade = {}
-local function buildDebuffGroupRecords(group)
+local function buildDebuffGroupRecords(group, claimed)
     local sel = group.selection
     if type(sel) ~= "table" then return nil end
     wipe(dgroupFacade)
@@ -3582,7 +3591,10 @@ local function buildDebuffGroupRecords(group)
     -- minutes -> maxDur nil, exactly as on the row (no duplicate guard here).
     dgroupFacade.debuffMaxDurationMinutes     = sel.hideLongMinutes or 5
     dgroupFacade.debuffMaxDurationKeepImportant = sel.keepImportant ~= false
-    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade) or nil
+    -- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the resolver's own
+    -- `== false` opt-out can never fire here — the CALLER gates: the sync loop passes
+    -- claimed only while the frame's mode db has the toggle on.
+    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade, claimed) or nil
 end
 
 -- Version-keyed record cache (mirror of fgroupResCache): building records walks
@@ -3594,14 +3606,39 @@ end
 -- Signed in SPLIT halves (Wave 1, the row serializers via DF): struct = record
 -- strings + keys (Rebuild), tuning = per-record candidateFilters (in-place).
 local dgroupResCache = setmetatable({}, { __mode = "k" })
-local function resolveDebuffGroup(group)
+-- Serialize a claim set for the cache context. CLAIMABLE_CATEGORIES order, so equal
+-- sets always produce equal strings. "" = no claims (dedup off, or first group).
+local function claimCtx(claimed)
+    if not claimed then return "" end
+    local s = ""
+    for i = 1, #CLAIMABLE_CATEGORIES do
+        local k = CLAIMABLE_CATEGORIES[i]
+        if claimed[k] then s = s .. k .. "," end
+    end
+    return s
+end
+local function resolveDebuffGroup(group, claimed)
     local ver = DF.auraLayoutVersion or 0
+    -- Claims join the cache key: a group's records now depend on the groups ABOVE it.
+    -- Within one auraLayoutVersion the fold is deterministic from config, so the ctx
+    -- only actually changes when an earlier group is edited (which bumps the version
+    -- anyway) or when the mode db's dedup toggle differs between synced frames — the
+    -- one case the version alone cannot see. ⚠ Party and raid dbs disagreeing on the
+    -- toggle would re-resolve on each mode's sync; accepted, only one mode's frames
+    -- are live at a time.
+    local ctx = claimCtx(claimed)
     local c = dgroupResCache[group]
-    if c and c.version == ver then return c.records, c.structSig, c.tuningSig end
-    local records = buildDebuffGroupRecords(group)
+    if c and c.version == ver and c.ctx == ctx then return c.records, c.structSig, c.tuningSig end
+    local records = buildDebuffGroupRecords(group, claimed)
+    -- ☠ EMPTY IS NOT NIL DOWNSTREAM. When claims swallow a non-empty selection the
+    -- resolver returns an EMPTY ARRAY (render nothing) — but cfg.filter = {} would be
+    -- mapped back to show-all by normalizeFilters, the exact fail-open the row parks
+    -- against (see BuildDirectDebuffFilters' header). Collapse to nil here so the sync
+    -- loop simply never marks the group live and the sweep parks its container.
+    if records and #records == 0 then records = nil end
     local structSig = records and DF.DebuffFilterRecordsStructSig and DF:DebuffFilterRecordsStructSig(records) or ""
     local tuningSig = records and DF.DebuffFilterRecordsTuningSig and DF:DebuffFilterRecordsTuningSig(records) or ""
-    dgroupResCache[group] = { version = ver, records = records, structSig = structSig, tuningSig = tuningSig }
+    dgroupResCache[group] = { version = ver, ctx = ctx, records = records, structSig = structSig, tuningSig = tuningSig }
     return records, structSig, tuningSig
 end
 
@@ -5942,9 +5979,13 @@ function Factory:SyncFrame(frame)
     -- sort fields (Wave 2) -> in-place
     -- ApplyTuning with the config.filter pre-swap (Wave 1). The layout fields and
     -- cosmetic style fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`), empty selections
-    -- (no records) and deleted groups are not marked live -> the sweep destroys their
+    -- (no records), CLAIM-EMPTIED groups (cross-group dedup swallowed the whole
+    -- selection) and deleted groups are not marked live -> the sweep destroys their
     -- handle. adDB.debuffGroups is preset-level and spec-INDEPENDENT (mirror otherAuras),
     -- but rides the same spec gate as the rest of SyncFrame (no spec -> ClearFrame).
+    -- ☠ CONFIG ORDER IS PRIORITY: with Hide Duplicate Debuffs on, a debuff matching
+    -- several groups renders in the FIRST matching group in the list (see the claim
+    -- fold below) — reordering groups moves auras between them.
     do
         local dg = store.dgroups
         if not dg then dg = {}; store.dgroups = dg end
@@ -5952,11 +5993,37 @@ function Factory:SyncFrame(frame)
 
         local groups = adDB.debuffGroups
         if groups then
+            -- ★ CROSS-GROUP DEDUP (2026-08-29): groups resolve IN CONFIG ORDER, each
+            -- receiving the categories claimed by the enabled groups above it — the
+            -- row's own claim machinery, folded group-over-group. First group in the
+            -- list wins a contested category; a debuff matching several groups renders
+            -- once instead of once per group (field: "the same 1 debuff x 4/5",
+            -- Drasvin, 5.3.1). Two identical groups leave the second one empty — the
+            -- duplicated-config case heals the same way.
+            -- Gated on the SAME toggle as the row's claims (Hide Duplicate Debuffs,
+            -- mode db) so one switch owns every dedup path; off restores the old
+            -- overlapping behaviour. The claim fold mirrors GetClaimedDebuffCategories'
+            -- criterion exactly (enabled + selection table, records not required).
+            local fdb = DF:GetFrameDB(frame) or {}
+            local dedupOn = fdb.debuffDeduplicateDesigner ~= false
+            local claimedSoFar
             for _, group in ipairs(groups) do
                 if type(group) == "table" and group.enabled ~= false then
                     -- Version-cached: within one auraLayoutVersion this is a table
                     -- lookup; the resolve + record serialization run once per version.
-                    local records, recStructSig, recTuningSig = resolveDebuffGroup(group)
+                    local records, recStructSig, recTuningSig =
+                        resolveDebuffGroup(group, dedupOn and claimedSoFar or nil)
+                    -- Fold AFTER resolving: a group is never claimed against itself.
+                    if dedupOn and type(group.selection) == "table" then
+                        local sel = group.selection
+                        for ci = 1, #CLAIMABLE_CATEGORIES do
+                            local ck = CLAIMABLE_CATEGORIES[ci]
+                            if sel[ck] then
+                                claimedSoFar = claimedSoFar or {}
+                                claimedSoFar[ck] = true
+                            end
+                        end
+                    end
                     if records then
                         local key = "dgroup:" .. tostring(group.id)
                         live[key] = true
