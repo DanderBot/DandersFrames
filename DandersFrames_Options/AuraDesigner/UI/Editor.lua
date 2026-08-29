@@ -59,29 +59,656 @@ local OpenGroupSpellPicker = P.OpenGroupSpellPicker
 local OpenFilterPicker = P.OpenFilterPicker
 local AddGroupAppearanceSection = P.AddGroupAppearanceSection
 
-S.BuildLayoutGroupsTab = function()
-    if not S.tabContentFrame then return end
-    local parent = S.tabContentFrame
-    local yPos = -10
-    local tc = GetThemeColor()
+-- ============================================================
+-- ONE GROUP'S SETTINGS, ONCE, FOR BOTH LAYOUTS
+-- ------------------------------------------------------------
+-- A layout group's card and a layout group's rows differ in WHERE a widget goes
+-- and in nothing else. Everything that decides WHICH control, on WHICH table,
+-- under WHICH key lives in the collectors below and only there: a control that
+-- changed layout and lost its binding would read the record and write nowhere,
+-- looking completely correct while doing so, which is the one failure this
+-- conversion cannot have.
+--
+-- A section is { header, caption, gap, build }. `header` is the popout row's
+-- label, `caption` the card's own small-caps caption over the same block, `gap`
+-- the blank the card leaves above it. `build` is handed an `env`:
+--
+--   env.place(widget, height, opts)  where the widget goes.
+--       opts.indent   the card's x inset (default 5); ignored in a pane
+--       opts.width    the card's width (default the body less twice the indent);
+--                     `false` leaves whatever the widget set itself
+--       opts.stretch  the card anchors BOTH edges instead of setting a width
+--       opts.gap      blank the card leaves ABOVE the widget; a pane's own
+--                     row spacing already provides it
+--   env.host        the widget parent -- the card BODY, or a popout pane's holder
+--   env.caption     the caption fontstring the loop just placed, or nil in a pane
+--                   (where the ROW's own label is the caption)
+--   env.captionY    the y that caption sits at, for the one control that shares
+--                   its row
+--   env.Rebuild()   THE LIST THIS SECTION DRAWS HAS CHANGED SHAPE. Both layouts
+--                   redraw; in the row layout that closes the panel, which is
+--                   honest -- the thing being edited is gone.
+--   env.Redraw()    a value moved and the widgets around it must re-read their
+--                   greying. The CARD can only answer that with a tab rebuild;
+--                   a PANE re-flows itself, because a rebuild would retire the
+--                   tick the user just clicked.
+--   env.Header()    the group header's own summary text is stale. A no-op on the
+--                   card, whose rebuild redraws it anyway.
+-- ============================================================
 
-    -- (Removed) a GROW_DIRECTIONS option map — never read. Also note its labels were
-    -- raw English, so wiring it up as-is would have been a localisation regression.
+-- The card's placer: the hand-run y cursor these bodies have always used, with
+-- `state.by` carried between sections so the captions and gaps land where they
+-- always did.
+local function CardPlace(body, bodyWidth, state)
+    return function(widget, height, opts)
+        opts = opts or {}
+        local indent = opts.indent or 5
+        if opts.gap then state.by = state.by - opts.gap end
+        widget:SetPoint("TOPLEFT", body, "TOPLEFT", indent, state.by)
+        if opts.stretch then
+            widget:SetPoint("RIGHT", body, "RIGHT", -indent, 0)
+        elseif opts.width ~= false and widget.SetWidth then
+            widget:SetWidth(opts.width or (bodyWidth - indent * 2))
+        end
+        state.by = state.by - height
+    end
+end
 
+-- Run a collected section list down a card body, captions and gaps included.
+-- Returns the cursor, so the caller carries on where the last section stopped.
+local function RunCardSections(body, bodyWidth, by, sections)
+    for _, sec in ipairs(sections) do
+        by = by - (sec.gap or 0)
+        local caption, captionY
+        if sec.caption then
+            captionY = by
+            caption = body:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(caption, 8, "")
+            caption:SetPoint("TOPLEFT", 8, by)
+            caption:SetText(sec.caption)
+            caption:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            by = by - 18
+        end
+        local state = { by = by }
+        sec.build({
+            place = CardPlace(body, bodyWidth, state),
+            host = body, caption = caption, captionY = captionY,
+            bodyWidth = bodyWidth,
+            Rebuild = function() S.SwitchTab("layout") end,
+            Redraw  = function() S.SwitchTab("layout") end,
+            Header  = function() end,
+        })
+        by = state.by
+    end
+    return by
+end
+
+-- Display name lookup (My Buffs: the spec's trackable pool; Other Buffs:
+-- ad-hoc/SpellDB resolution -- other-pool names aren't in a spec pool).
+-- ⚠ RESOLVED PER MEMBER rather than through a map built once per tab: the row
+-- layout has no single tab build to hang a map off, and a group's member list is
+-- a handful of names.
+local function MemberDisplayName(auraName)
+    if IsOtherTab() then return OtherPoolDisplayName(auraName) end
+    local spec = ResolveSpec()
+    local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
+    if trackable then
+        for _, info in ipairs(trackable) do
+            if info.name == auraName then return info.display end
+        end
+    end
+    return auraName
+end
+
+-- ── LINKED FILTERS (filter groups) ──
+-- One collapsed chip per linked registry filter: localized preset name (or
+-- custom filter name) + live spell count, remove ✕. Links are stable REFERENCES
+-- (preset keys / custom ids) — never copies — so filter edits propagate live.
+-- Link/unlink is structural (container rebuild + the buff-row dedup union
+-- moves), so run the full refresh path.
+local function BuildLinkedFiltersSection(env, group)
+    local place, host = env.place, env.host
+    local R = DF.FilterRegistry
+    local fsel = group.filterSelection
+    if not fsel then fsel = {}; group.filterSelection = fsel end
+    fsel.presets = fsel.presets or {}
+    fsel.customs = fsel.customs or {}
+
+    local function StructuralFilterRefresh()
+        env.Rebuild()
+        RefreshPlacedIndicators()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        end
+    end
+
+    -- The route back. A filter group USES a filter and can link or unlink one,
+    -- but it cannot change what is IN it -- that is the Aura Filters page, and
+    -- nothing here said so or pointed at it. Same reverse link the Buff Bar page
+    -- carries.
+    --
+    -- ☠ FIXED SIZE, not one measured from the label. It was
+    -- SetWidth(GetStringWidth() + 2), which is a measurement taken the instant
+    -- the fontstring is created: if the font object has not resolved yet
+    -- GetStringWidth returns 0, the button collapses to its 10px floor, and the
+    -- link renders perfectly while being almost impossible to click. A generous
+    -- fixed box with the text right-aligned inside it cannot fail that way.
+    --
+    -- ⚠ "Manage Filters", not "Edit in Filter Designer". It cannot edit anything
+    -- in particular -- it opens the library -- and each chip below carries a
+    -- pencil that opens THAT filter.
+    local LF_EDIT_W = 130
+    local lfEdit = CreateFrame("Button", nil, host)
+    lfEdit:SetSize(LF_EDIT_W, 16)
+    local lfEditText = lfEdit:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(lfEditText, 10, "")
+    lfEditText:SetPoint("RIGHT", 0, 0)
+    lfEditText:SetJustifyH("RIGHT")
+    lfEditText:SetText(L["Manage Filters"])
+    local lfTC = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+    lfEditText:SetTextColor(lfTC.r, lfTC.g, lfTC.b)
+    lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
+    lfEdit:SetScript("OnLeave", function()
+        -- Re-read the accent rather than restoring lfTC: a party/raid switch can
+        -- repaint the card while the cursor is still on this.
+        local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or lfTC
+        lfEditText:SetTextColor(c.r, c.g, c.b)
+    end)
+    lfEdit:SetScript("OnClick", function()
+        if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
+    end)
+    -- ☠ ON THE CAPTION'S OWN ROW IN THE CARD, where `by` is a hand-run cursor and
+    -- an extra row costs every measurement below it -- and a row of its own in a
+    -- PANE, which has no caption to share (the popout row's label is the caption
+    -- there). This is the cross-section coupling the rework keeps tripping over:
+    -- a widget anchored to something the other layout does not build.
+    if env.caption then
+        lfEdit:SetPoint("TOPRIGHT", host, "TOPRIGHT", -8, env.captionY + 1)
+    else
+        place(lfEdit, 20, { stretch = true })
+    end
+
+    -- Custom-filter spell count (curated spells + raw IDs)
+    local function CustomFilterCount(cf)
+        local n = 0
+        if cf then
+            for _ in pairs(cf.spells or {}) do n = n + 1 end
+            for _ in pairs(cf.rawIDs or {}) do n = n + 1 end
+        end
+        return n
+    end
+
+    -- Linked list: presets in R.Categories order, then customs name-sorted.
+    local linked = {}
+    for _, cat in ipairs(R.Categories) do
+        if fsel.presets[cat.key] then
+            local enabled, total = R:PresetCounts(cat.key)
+            tinsert(linked, { kind = "preset", key = cat.key,
+                label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
+        end
+    end
+    local linkedCustoms = {}
+    for cfId in pairs(fsel.customs) do tinsert(linkedCustoms, cfId) end
+    sort(linkedCustoms, function(a, b)
+        local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
+        local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
+        if na ~= nb then return na < nb end
+        return a < b
+    end)
+    for _, cfId in ipairs(linkedCustoms) do
+        local cf = R:GetCustomFilter(cfId)
+        tinsert(linked, { kind = "custom", key = cfId,
+            label = format("%s |cff888888(%d)|r", (cf and cf.name) or cfId, CustomFilterCount(cf)) })
+    end
+
+    if #linked > 0 then
+        for _, link in ipairs(linked) do
+            local chipRow = CreateFrame("Frame", nil, host, "BackdropTemplate")
+            chipRow:SetHeight(24)
+            ApplyBackdrop(chipRow,
+                {r = 0.11, g = 0.11, b = 0.11, a = 1},
+                {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
+
+            -- Remove ✕ (mirror the member-row remove idiom)
+            local remBtn = DF.GUI:CreateGlyphButton(chipRow, {
+                size = 18, iconSize = 12,
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                color      = { 0.55, 0.30, 0.30 },
+                hoverColor = { 1, 0.40, 0.40 },
+            })
+            remBtn:SetPoint("RIGHT", -4, 0)
+            local capturedLink = link
+            remBtn:SetScript("OnClick", function()
+                if capturedLink.kind == "preset" then
+                    fsel.presets[capturedLink.key] = nil
+                else
+                    fsel.customs[capturedLink.key] = nil
+                end
+                StructuralFilterRefresh()
+            end)
+
+            -- Edit pencil, INSIDE the ✕ so the destructive control keeps the
+            -- corner it already owns. Always drawn rather than shown on hover:
+            -- the ✕ beside it is always drawn, so a hover-only sibling reads as
+            -- the row having one action when it has two.
+            -- ⚠ tooltip and onClick go in OPTS. CreateGlyphButton reads
+            -- opts.tooltip inside the OnEnter it installs itself, so a
+            -- btn.tooltip assigned afterwards is read by nothing.
+            local editBtn = DF.GUI:CreateGlyphButton(chipRow, {
+                size = 18, iconSize = 12,
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
+                color      = { C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b },
+                hoverColor = { 1, 1, 1 },
+                tooltip    = {
+                    title = L["Edit this filter"],
+                    lines = { L["Opens it in the Filter Designer, where you can change which auras it holds."] },
+                },
+                onClick    = function()
+                    if GUI.OpenFilterInDesigner then
+                        GUI:OpenFilterInDesigner(capturedLink.kind, capturedLink.key)
+                    end
+                end,
+            })
+            editBtn:SetPoint("RIGHT", remBtn, "LEFT", -2, 0)
+
+            local chipText = chipRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            chipText:SetPoint("LEFT", 8, 0)
+            chipText:SetPoint("RIGHT", editBtn, "LEFT", -4, 0)
+            chipText:SetMaxLines(1)
+            chipText:SetJustifyH("LEFT")
+            chipText:SetText(link.label)
+            chipText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+            place(chipRow, 28, { indent = 8, stretch = true })
+        end
+    else
+        local noLinks = CreateFrame("Frame", nil, host)
+        noLinks:SetHeight(16)
+        local noLinksText = noLinks:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        noLinksText:SetPoint("TOPLEFT", 4, 0)
+        noLinksText:SetText(L["No filters linked yet"])
+        noLinksText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+        place(noLinks, 20, { indent = 8, width = false })
+    end
+
+    -- "+ Add Filter" button → mini-picker of unlinked presets + customs
+    local addFilterLinkBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    addFilterLinkBtn:SetHeight(22)
+    GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Filter"] })
+    GUI:SetSettingsFont(addFilterLinkBtn.Text, 9, "")
+    addFilterLinkBtn:SetScript("OnClick", function()
+        OpenFilterPicker({
+            anchor = addFilterLinkBtn,
+            isLinked = function(kind, key)
+                if kind == "preset" then return fsel.presets[key] and true or false end
+                return fsel.customs[key] and true or false
+            end,
+            onPick = function(kind, key)
+                if kind == "preset" then fsel.presets[key] = true
+                else fsel.customs[key] = true end
+                StructuralFilterRefresh()
+            end,
+        })
+    end)
+    place(addFilterLinkBtn, 26, { indent = 8, stretch = true, gap = 6 })
+
+    -- "Create Filter" → jump to the Filter Designer and pulse its New Filter
+    -- button, for users who arrive here without a custom filter to link yet.
+    local createFilterBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    createFilterBtn:SetHeight(22)
+    GUI:StyleButton(createFilterBtn, { height = 22, text = L["Create Filter"] })
+    GUI:SetSettingsFont(createFilterBtn.Text, 9, "")
+    createFilterBtn:SetScript("OnClick", function()
+        if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
+            GUI.SelectTab("auras_filterdesigner")
+            -- Page content builds on first show (inside SelectTab), so the button
+            -- reference exists by now. The add action is a row inside the Filter
+            -- Designer's scrolling left list, so the page scrolls it into view and
+            -- pulses it itself rather than handing back a bare widget.
+            local fdPage = GUI.Pages["auras_filterdesigner"]
+            if fdPage and fdPage._fdFocusNewFilter then
+                fdPage._fdFocusNewFilter()
+            end
+        end
+    end)
+    place(createFilterBtn, 28, { indent = 8, stretch = true })
+end
+
+-- ── MEMBERS (spell groups) ──
+local function BuildMembersSection(env, group)
+    local place, host = env.place, env.host
+    local capturedGroupID = group.id
+    local isOtherGroups = IsOtherTab()
+
+    if group.members and #group.members > 0 then
+        for mi, member in ipairs(group.members) do
+            local memberRow = CreateFrame("Frame", nil, host, "BackdropTemplate")
+            memberRow:SetHeight(34)
+            ApplyBackdrop(memberRow,
+                {r = 0.11, g = 0.11, b = 0.11, a = 1},
+                {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
+
+            -- Up/Down buttons for reordering (stacked vertically on left)
+            local canMoveUp = mi > 1
+            local canMoveDown = mi < #group.members
+            local capturedMi = mi
+
+            if canMoveUp then
+                -- One arrow texture serves both directions via rotation.
+                local upBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                    width = 20, height = 16, iconSize = 14,
+                    texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                    rotation = math.rad(180),
+                })
+                upBtn:SetPoint("TOPLEFT", 2, -1)
+                upBtn:SetScript("OnClick", function()
+                    SwapGroupMembers(capturedGroupID, capturedMi, capturedMi - 1)
+                    env.Rebuild()
+                    RefreshPlacedIndicators()
+                    -- Positions moved (member index feeds the grid) — re-arrange live frames.
+                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end)
+            end
+            if canMoveDown then
+                local downBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                    width = 20, height = 16, iconSize = 14,
+                    texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                })
+                downBtn:SetPoint("BOTTOMLEFT", 2, 1)
+                downBtn:SetScript("OnClick", function()
+                    SwapGroupMembers(capturedGroupID, capturedMi, capturedMi + 1)
+                    env.Rebuild()
+                    RefreshPlacedIndicators()
+                    -- Positions moved (member index feeds the grid) — re-arrange live frames.
+                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end)
+            end
+
+            -- Spell icon (Other: nil spec — GetAuraIcon degrades to ad-hoc
+            -- "#<id>" / SpellDB-by-name resolution)
+            local memberSpec = not isOtherGroups and ResolveSpec() or nil
+            local memberIconTex = GetAuraIcon(memberSpec, member.auraName)
+            local mSpellIcon = memberRow:CreateTexture(nil, "ARTWORK")
+            mSpellIcon:SetSize(22, 22)
+            mSpellIcon:SetPoint("LEFT", 26, 0)
+            if memberIconTex then
+                mSpellIcon:SetTexture(memberIconTex)
+                mSpellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            else
+                -- Color swatch fallback
+                local auraInfo2 = nil
+                local trackable2 = memberSpec and Adapter and Adapter:GetTrackableAuras(memberSpec)
+                if trackable2 then
+                    for _, ai in ipairs(trackable2) do
+                        if ai.name == member.auraName then auraInfo2 = ai; break end
+                    end
+                end
+                if auraInfo2 then
+                    mSpellIcon:SetColorTexture(auraInfo2.color[1] * 0.5, auraInfo2.color[2] * 0.5, auraInfo2.color[3] * 0.5, 1)
+                else
+                    mSpellIcon:SetColorTexture(0.25, 0.25, 0.25, 1)
+                end
+            end
+
+            -- Type badge (members live in the group's pool = the active tab's pool)
+            local memberType = nil
+            local memberAuraCfg = CurrentAuraPool()[member.auraName]
+            if memberAuraCfg and memberAuraCfg.indicators then
+                for _, ind in ipairs(memberAuraCfg.indicators) do
+                    if ind.id == member.indicatorID then
+                        memberType = ind.type
+                        break
+                    end
+                end
+            end
+            local mBadgeColor = BADGE_COLORS[memberType or "icon"] or BADGE_COLORS.icon
+            local mBadgeLabel = S.PLACED_TYPE_LABELS[memberType or "icon"] or "Icon"
+
+            local mBadge = CreateFrame("Frame", nil, memberRow, "BackdropTemplate")
+            mBadge:SetHeight(16)
+            mBadge:SetPoint("LEFT", mSpellIcon, "RIGHT", 4, 0)
+            ApplyBackdrop(mBadge,
+                {r = mBadgeColor.r * 0.20, g = mBadgeColor.g * 0.20, b = mBadgeColor.b * 0.20, a = 1},
+                {r = mBadgeColor.r * 0.45, g = mBadgeColor.g * 0.45, b = mBadgeColor.b * 0.45, a = 0.6})
+            local mBadgeText = mBadge:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(mBadgeText, 8, "OUTLINE")
+            mBadgeText:SetPoint("CENTER", 0, 0)
+            mBadgeText:SetText(mBadgeLabel)
+            mBadgeText:SetTextColor(1, 1, 1)
+            mBadge:SetWidth(max(mBadgeText:GetStringWidth() + 12, 32))
+
+            -- Remove button (using close icon)
+            -- Red at rest, brighter red on hover: an inline destructive remove.
+            local remBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                size = 18, iconSize = 12,
+                texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                color      = { 0.55, 0.30, 0.30 },
+                hoverColor = { 1, 0.40, 0.40 },
+            })
+            remBtn:SetPoint("RIGHT", -4, 0)
+            local capturedMember = member
+            remBtn:SetScript("OnClick", function()
+                RemoveGroupMember(capturedGroupID, capturedMember.auraName, capturedMember.indicatorID)
+                -- Also delete the placed indicator itself
+                RemoveIndicatorInstance(capturedMember.auraName, capturedMember.indicatorID)
+                env.Rebuild()
+                RefreshPlacedIndicators()
+                RefreshPreviewEffects()
+                -- Structural change: same full refresh as the effect-card ✕ /
+                -- group delete (indicator removed).
+                DF:InvalidateAuraLayout()
+                DF:UpdateAllFrames()
+                if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end
+            end)
+
+            -- Customise button (navigates to Effects tab for this indicator)
+            -- Accent-tinted action button: persistent accent fill + accent border
+            -- + accent label at rest, accent-wash hover.
+            local custBtn = CreateFrame("Button", nil, memberRow, "BackdropTemplate")
+            custBtn:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
+            GUI:StyleButton(custBtn, {
+                width = 56, height = 18,
+                text = L["Customise"],
+                tinted = true,
+                accent = GetThemeColor(),
+            })
+            local capturedAuraName = member.auraName
+            local capturedIndID = member.indicatorID
+            custBtn:SetScript("OnClick", function()
+                -- Card keys embed the B1 pool prefix in the name segment
+                -- ("placed:other:<name>#<id>" on Other)
+                local cardKey = "placed:" .. PoolKeyPrefix() .. capturedAuraName .. "#" .. capturedIndID
+                wipe(expandedCards)
+                expandedCards[cardKey] = true
+                S.activeTab = "effects"
+                DF:AuraDesigner_RefreshPage()
+            end)
+
+            -- Aura name
+            local mName = memberRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            mName:SetPoint("LEFT", mBadge, "RIGHT", 6, 0)
+            mName:SetPoint("RIGHT", custBtn, "LEFT", -4, 0)
+            mName:SetMaxLines(1)
+            mName:SetText(MemberDisplayName(member.auraName))
+            mName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+            place(memberRow, 38, { indent = 8, stretch = true })
+        end
+    else
+        local noMem = CreateFrame("Frame", nil, host)
+        noMem:SetHeight(16)
+        local noMemText = noMem:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        noMemText:SetPoint("TOPLEFT", 4, 0)
+        noMemText:SetText(L["No members yet"])
+        noMemText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
+        place(noMem, 20, { indent = 8, width = false })
+    end
+
+    -- "+ Add aura" button
+    local addMemBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    addMemBtn:SetHeight(22)
+    GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
+    GUI:SetSettingsFont(addMemBtn.Text, 9, "")
+    addMemBtn:SetScript("OnClick", function()
+        -- Shared spell picker, group context: searchable, class/category-filterable
+        -- rows + add-by-ID, each row carrying Icon/Square buttons that create the
+        -- indicator and enrol it in this group in one click.
+        OpenGroupSpellPicker(capturedGroupID)
+    end)
+    place(addMemBtn, 28, { indent = 8, stretch = true, gap = 6 })
+end
+
+-- What a layout edit costs, per group kind. The two container-backed kinds are
+-- NOT the same: a debuff group's categories feed a version-keyed record cache in
+-- the factory, so every edit to one has to bump the layout version or the cache
+-- answers from the shape the group used to have. A spell or filter group has no
+-- such cache and does not pay for the bump.
+local function GroupApply(kind)
+    if kind == "debuff" then
+        return function()
+            RefreshPlacedIndicators()
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+            if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end
+        end
+    end
+    return function()
+        RefreshPlacedIndicators()
+        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+    end
+end
+
+-- ── PLACEMENT (every group kind) ──
+-- ☠ THE CONTROLS BIND THE GROUP RECORD ITSELF, in both layouts. The popout row
+-- above them takes a VIEW of the same record (P.GroupRecordView) so its modified
+-- tick and its footer have something the defaults engine can answer for -- the
+-- record is SavedVariables and cannot carry the adapter itself.
+local function BuildGroupPlacement(env, group, kind)
+    local place, host = env.place, env.host
+    local apply = GroupApply(kind)
+    place(GUI:CreateDropdown(host, L["Anchor"], OPTS.ANCHOR_OPTIONS, group, "anchor", apply), 54)
+    place(GUI:CreateSlider(host, L["Offset X"], -150, 150, 1, group, "offsetX", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Offset Y"], -150, 150, 1, group, "offsetY", apply, RefreshPlacedIndicators), 54)
+end
+
+-- ── GROWTH (every group kind) ──
+-- `kind`: "members" | "filter" | "debuff". A member group stops after spacing;
+-- the two container-backed kinds carry the uniform styling pair and the sort
+-- block. `omitOthersOnly` is the row layout saying it draws that one itself, as
+-- a control row -- one boolean does not need a panel, and a popout row's own
+-- tick column already IS the checkbox.
+local function BuildGroupGrowth(env, group, kind, omitOthersOnly)
+    local place, host = env.place, env.host
+    local apply = GroupApply(kind)
+
+    -- Auto-migrate legacy single-direction values to new format
+    local gd = group.growDirection or "RIGHT"
+    if not gd:find("_") then
+        local LEGACY_MAP = { RIGHT = "RIGHT_DOWN", LEFT = "LEFT_DOWN", UP = "UP_RIGHT", DOWN = "DOWN_RIGHT" }
+        group.growDirection = LEGACY_MAP[gd] or "RIGHT_DOWN"
+    end
+
+    place(GUI:CreateGrowthControl(host, group, "growDirection", apply), 158)
+    place(GUI:CreateSlider(host, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow", apply, RefreshPlacedIndicators), 54)
+    place(GUI:CreateSlider(host, L["Spacing"], -5, 20, 1, group, "spacing", apply, RefreshPlacedIndicators), 54)
+    if kind == "members" then return end
+
+    -- Uniform per-group styling: one icon size + slot cap for every spell the
+    -- group matches (no per-spell styling by design).
+    place(GUI:CreateSlider(host, L["Icon Size"], 8, 64, 1, group, "iconSize", apply, RefreshPlacedIndicators), 54)
+    -- Max Icons is STRUCTURAL (slot count is declared at container build) — the
+    -- factory Rebuild path handles it (OOC-deferred).
+    place(GUI:CreateSlider(host, L["Max Icons"], 1, 20, 1, group, "maxIcons", apply, RefreshPlacedIndicators), 54)
+
+    -- ── SORT (Wave 2) ── per-group sort is TUNING: the factory re-applies it in
+    -- place via ApplyTuning (OOC-immediate; self-defers in combat) — no rebuild.
+    -- The fields are OPTIONAL on the group (othersOnly idiom): absent = the
+    -- family default, read through a customGet so legacy groups display
+    -- correctly without a write-on-open. Filter groups default to "DEFAULT"
+    -- (Blizzard slot order, the pre-Wave-2 behaviour); debuff groups to "TIME"
+    -- (soonest-to-expire first, the old hardcode).
+    local famSort = (kind == "debuff") and "TIME" or "DEFAULT"
+    local sortMineCb   -- forward capture: the dropdown greys it
+    place(GUI:CreateDropdown(host, L["Sort Order"], OPTS.SORT_OPTIONS, nil, nil, function()
+        apply()
+        if sortMineCb then sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or famSort)) end
+    end, function() return group.sortOrder or famSort end,
+       function(v) group.sortOrder = v end), 54)
+
+    sortMineCb = GUI:CreateCheckbox(host, L["My Auras First"], group, "sortMineFirst", apply)
+    sortMineCb.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
+    sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or famSort))
+    place(sortMineCb, 26, { indent = 8 })
+
+    local sortRevCb = GUI:CreateCheckbox(host, L["Reverse Order"], group, "sortReverse", apply)
+    sortRevCb.tooltip = L["Reverse the sort direction."]
+    place(sortRevCb, 30, { indent = 8 })
+
+    -- ── OTHERS ONLY (Other Buffs tab only — flat-store groups) ──
+    -- Same idiom as the effect-card checkbox: the group's filter string
+    -- ("HELPFUL|!PLAYER") binds at container build, so toggling is STRUCTURAL
+    -- (folded into the fgroup struct sig → the factory Rebuilds), and the
+    -- buff-row dedup union moves (an othersOnly group's spells keep their row icon).
+    if kind == "filter" and IsOtherTab() and not omitOthersOnly then
+        local ooCb = GUI:CreateCheckbox(host, L["Others Only"], group, "othersOnly", function()
+            env.Rebuild()
+            RefreshPlacedIndicators()
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+            if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end
+        end)
+        ooCb.tooltip = L["Only show other players' casts of these buffs."]
+        place(ooCb, 34, { indent = 8 })
+    end
+end
+
+-- The ordered section list for one layout group. `omitOthersOnly` is the row
+-- layout's flag -- see BuildGroupGrowth.
+local function CollectLayoutGroupSections(group, omitOthersOnly)
+    local isFilterGroup = (group.kind == "filter")
+    local out = {}
+    if isFilterGroup then
+        out[#out + 1] = { header = L["Filters"], caption = L["LINKED FILTERS"],
+                          build = function(env) BuildLinkedFiltersSection(env, group) end }
+    else
+        out[#out + 1] = { header = L["Members"], caption = L["MEMBERS"],
+                          build = function(env) BuildMembersSection(env, group) end }
+    end
+    out[#out + 1] = { header = L["Placement"], caption = L["PLACEMENT"], gap = 10,
+                      build = function(env) BuildGroupPlacement(env, group, isFilterGroup and "filter" or "members") end }
+    out[#out + 1] = { header = L["Growth"], caption = L["GROWTH"], gap = 10,
+                      build = function(env)
+                          BuildGroupGrowth(env, group, isFilterGroup and "filter" or "members", omitOthersOnly)
+                      end }
+    return out
+end
+P.CollectLayoutGroupSections = CollectLayoutGroupSections
+
+-- ============================================================
+-- THE LAYOUT GROUPS TAB'S HEAD AREA
+-- ------------------------------------------------------------
+-- The teaching sentence, the two choice cards and the "debuff rows live over
+-- there" hint -- everything above the list. ONE definition, two hosts: the split
+-- panel's own column and the row layout's band, exactly as S.BuildEffectsHeadArea
+-- is for the Effects tab.
+-- ============================================================
+S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
 
-    -- Active tab's groups: the spec-keyed array on My Buffs, the flat
-    -- spec-independent store on Other Buffs (read-only — visiting the tab
-    -- never creates adDB.otherLayoutGroups; the add buttons do).
-    --
     -- ⚠ Read BEFORE any chrome is built. An EMPTY tab explains the two kinds
     -- with choice cards INSTEAD of the compact add buttons and the heading, so
     -- what gets created depends on the count. A card runs ~2.5x a button's
     -- height, which this ~260px column can only spare while there is no list
     -- underneath it -- hence cards or buttons, never both.
-    local isOtherGroups = IsOtherTab()
-    local groups = CurrentLayoutGroups()
-    local hasGroups = #groups > 0
+    local hasGroups = #CurrentLayoutGroups() > 0
 
     -- Teaching prose, first visit only. The CARDS below are pinned permanently --
     -- they are the create action, so they have to be -- but this sentence is read
@@ -170,22 +797,40 @@ S.BuildLayoutGroupsTab = function()
         yPos = yPos - 22
     end
 
-    -- Display name lookup (My Buffs: the spec's trackable pool; Other Buffs:
-    -- ad-hoc/SpellDB resolution — other-pool names aren't in a spec pool)
-    local spec = ResolveSpec()
-    local trackable = not isOtherGroups and spec and Adapter and Adapter:GetTrackableAuras(spec)
-    local displayNames = {}
-    if trackable then
-        for _, info in ipairs(trackable) do
-            displayNames[info.name] = info.display
-        end
-    end
-    local function MemberDisplayName(auraName)
-        if isOtherGroups then return OtherPoolDisplayName(auraName) end
-        return displayNames[auraName] or auraName
-    end
+    return yPos
+end
 
-    if hasGroups then
+-- The collapsed header's own line: what a group is, at a glance. ONE definition,
+-- two hosts -- the card puts it in the header fontstring, the row layout splits
+-- it across the section title and its tag.
+S.LayoutGroupSummary = function(group)
+    if group.kind == "filter" then
+        local linkCount = 0
+        local fsel = group.filterSelection
+        if fsel then
+            for _ in pairs(fsel.presets or {}) do linkCount = linkCount + 1 end
+            for _ in pairs(fsel.customs or {}) do linkCount = linkCount + 1 end
+        end
+        local info = linkCount .. (linkCount ~= 1 and L[" filters"] or L[" filter"])
+        -- Collapsed-state Others Only suffix — mirror the effect-card header
+        if IsOtherTab() and group.othersOnly then
+            info = info .. "  -  " .. L["Others Only"]
+        end
+        return info
+    end
+    local memberCount = group.members and #group.members or 0
+    return memberCount .. (memberCount ~= 1 and L[" indicators"] or L[" indicator"])
+end
+
+S.BuildLayoutGroupsTab = function()
+    if not S.tabContentFrame then return end
+    local parent = S.tabContentFrame
+    local yPos = S.BuildLayoutGroupsHeadArea(parent, -10)
+    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
+
+    local groups = CurrentLayoutGroups()
+
+    if #groups > 0 then
         -- ── LAYOUT GROUPS heading — mirrors the Effects tab's ACTIVE INDICATORS
         -- caption and the Text Designer's group caption so every list tab has
         -- one. Only with a list under it: a heading over nothing reads as a
@@ -223,23 +868,7 @@ S.BuildLayoutGroupsTab = function()
             nameText:SetPoint("RIGHT", header, "RIGHT", -60, 0)
             nameText:SetMaxLines(1)
             local isFilterGroup = (group.kind == "filter")
-            if isFilterGroup then
-                local linkCount = 0
-                local fsel = group.filterSelection
-                if fsel then
-                    for _ in pairs(fsel.presets or {}) do linkCount = linkCount + 1 end
-                    for _ in pairs(fsel.customs or {}) do linkCount = linkCount + 1 end
-                end
-                local fgInfo = group.name .. "  -  " .. linkCount .. (linkCount ~= 1 and L[" filters"] or L[" filter"])
-                -- Collapsed-state Others Only suffix — mirror the effect-card header
-                if isOtherGroups and group.othersOnly then
-                    fgInfo = fgInfo .. "  -  " .. L["Others Only"]
-                end
-                nameText:SetText(fgInfo)
-            else
-                local memberCount = group.members and #group.members or 0
-                nameText:SetText(group.name .. "  -  " .. memberCount .. (memberCount ~= 1 and L[" indicators"] or L[" indicator"]))
-            end
+            nameText:SetText(group.name .. "  -  " .. S.LayoutGroupSummary(group))
             nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
             -- Delete button
@@ -357,594 +986,11 @@ S.BuildLayoutGroupsTab = function()
                 end)
                 by = by - 32
 
-                if isFilterGroup then
-                -- ── LINKED FILTERS SECTION (filter groups) ──
-                -- One collapsed chip per linked registry filter: localized preset name
-                -- (or custom filter name) + live spell count, remove ✕. Links are stable
-                -- REFERENCES (preset keys / custom ids) — never copies — so filter edits
-                -- propagate live. Link/unlink is structural (container rebuild + the
-                -- buff-row dedup union moves), so run the full refresh path.
-                local R = DF.FilterRegistry
-                local fsel = group.filterSelection
-                if not fsel then fsel = {}; group.filterSelection = fsel end
-                fsel.presets = fsel.presets or {}
-                fsel.customs = fsel.customs or {}
-
-                local function StructuralFilterRefresh()
-                    S.SwitchTab("layout")
-                    RefreshPlacedIndicators()
-                    DF:InvalidateAuraLayout()
-                    DF:UpdateAllFrames()
-                    if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
-                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                    end
-                end
-
-                local lfLabel = body:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(lfLabel, 8, "")
-                lfLabel:SetPoint("TOPLEFT", 8, by)
-                lfLabel:SetText(L["LINKED FILTERS"])
-                lfLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-                -- The route back, on the caption's own row. A filter group USES a
-                -- filter and can link or unlink one, but it cannot change what is IN
-                -- it -- that is the Aura Filters page, and nothing here said so or
-                -- pointed at it. Same reverse link the Buff Bar page now carries;
-                -- this is the Aura Designer's copy of it.
-                --
-                -- Right-aligned onto the caption row rather than given a row of its
-                -- own: `by` is a hand-run cursor down this card, so an extra row
-                -- costs every measurement below it.
-                -- ☠ FIXED SIZE, not one measured from the label. It was
-                -- SetWidth(GetStringWidth() + 2), which is a measurement taken the
-                -- instant the fontstring is created: if the font object has not
-                -- resolved yet GetStringWidth returns 0, the button collapses to its
-                -- 10px floor, and the link renders perfectly while being almost
-                -- impossible to click. A generous fixed box with the text
-                -- right-aligned inside it cannot fail that way, and the few pixels of
-                -- extra hit area to the left of the words cost nothing.
-                --
-                -- ⚠ "Manage Filters", not "Edit in Filter Designer". It cannot edit
-                -- anything in particular -- it opens the library -- and now that each
-                -- chip below carries a pencil that opens THAT filter, a link claiming
-                -- to edit would be the second thing on the card promising the same
-                -- job while doing less. Same string the Buff Bar's button uses, for
-                -- the same trip.
-                local LF_EDIT_W = 130
-                local lfEdit = CreateFrame("Button", nil, body)
-                lfEdit:SetSize(LF_EDIT_W, 16)
-                lfEdit:SetPoint("TOPRIGHT", -8, by + 1)
-                local lfEditText = lfEdit:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(lfEditText, 10, "")
-                lfEditText:SetPoint("RIGHT", 0, 0)
-                lfEditText:SetJustifyH("RIGHT")
-                lfEditText:SetText(L["Manage Filters"])
-                local lfTC = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
-                lfEditText:SetTextColor(lfTC.r, lfTC.g, lfTC.b)
-                lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
-                lfEdit:SetScript("OnLeave", function()
-                    -- Re-read the accent rather than restoring lfTC: a party/raid
-                    -- switch can repaint the card while the cursor is still on this.
-                    local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or lfTC
-                    lfEditText:SetTextColor(c.r, c.g, c.b)
-                end)
-                lfEdit:SetScript("OnClick", function()
-                    if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
-                end)
-
-                by = by - 18
-
-                -- Custom-filter spell count (curated spells + raw IDs)
-                local function CustomFilterCount(cf)
-                    local n = 0
-                    if cf then
-                        for _ in pairs(cf.spells or {}) do n = n + 1 end
-                        for _ in pairs(cf.rawIDs or {}) do n = n + 1 end
-                    end
-                    return n
-                end
-
-                -- Linked list: presets in R.Categories order, then customs name-sorted.
-                local linked = {}
-                for _, cat in ipairs(R.Categories) do
-                    if fsel.presets[cat.key] then
-                        local enabled, total = R:PresetCounts(cat.key)
-                        tinsert(linked, { kind = "preset", key = cat.key,
-                            label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
-                    end
-                end
-                local linkedCustoms = {}
-                for cfId in pairs(fsel.customs) do tinsert(linkedCustoms, cfId) end
-                sort(linkedCustoms, function(a, b)
-                    local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
-                    local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
-                    if na ~= nb then return na < nb end
-                    return a < b
-                end)
-                for _, cfId in ipairs(linkedCustoms) do
-                    local cf = R:GetCustomFilter(cfId)
-                    tinsert(linked, { kind = "custom", key = cfId,
-                        label = format("%s |cff888888(%d)|r", (cf and cf.name) or cfId, CustomFilterCount(cf)) })
-                end
-
-                if #linked > 0 then
-                    for _, link in ipairs(linked) do
-                        local chipRow = CreateFrame("Frame", nil, body, "BackdropTemplate")
-                        chipRow:SetHeight(24)
-                        chipRow:SetPoint("TOPLEFT", 8, by)
-                        chipRow:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                        ApplyBackdrop(chipRow,
-                            {r = 0.11, g = 0.11, b = 0.11, a = 1},
-                            {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
-
-                        -- Remove ✕ (mirror the member-row remove idiom)
-                        local remBtn = DF.GUI:CreateGlyphButton(chipRow, {
-                            size = 18, iconSize = 12,
-                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
-                            color      = { 0.55, 0.30, 0.30 },
-                            hoverColor = { 1, 0.40, 0.40 },
-                        })
-                        remBtn:SetPoint("RIGHT", -4, 0)
-                        local capturedLink = link
-                        remBtn:SetScript("OnClick", function()
-                            if capturedLink.kind == "preset" then
-                                fsel.presets[capturedLink.key] = nil
-                            else
-                                fsel.customs[capturedLink.key] = nil
-                            end
-                            StructuralFilterRefresh()
-                        end)
-
-                        -- Edit pencil, INSIDE the ✕ so the destructive control keeps
-                        -- the corner it already owns. Always drawn rather than shown
-                        -- on hover: the ✕ beside it is always drawn, so a hover-only
-                        -- sibling reads as the row having one action when it has two.
-                        -- ⚠ tooltip and onClick go in OPTS. CreateGlyphButton reads
-                        -- opts.tooltip inside the OnEnter it installs itself, so a
-                        -- btn.tooltip assigned afterwards is read by nothing and the
-                        -- glyph ends up silently unlabelled -- which an icon-only
-                        -- control cannot afford.
-                        local editBtn = DF.GUI:CreateGlyphButton(chipRow, {
-                            size = 18, iconSize = 12,
-                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
-                            color      = { C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b },
-                            hoverColor = { 1, 1, 1 },
-                            tooltip    = {
-                                title = L["Edit this filter"],
-                                lines = { L["Opens it in the Filter Designer, where you can change which auras it holds."] },
-                            },
-                            onClick    = function()
-                                if GUI.OpenFilterInDesigner then
-                                    GUI:OpenFilterInDesigner(capturedLink.kind, capturedLink.key)
-                                end
-                            end,
-                        })
-                        editBtn:SetPoint("RIGHT", remBtn, "LEFT", -2, 0)
-
-                        local chipText = chipRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                        chipText:SetPoint("LEFT", 8, 0)
-                        chipText:SetPoint("RIGHT", editBtn, "LEFT", -4, 0)
-                        chipText:SetMaxLines(1)
-                        chipText:SetJustifyH("LEFT")
-                        chipText:SetText(link.label)
-                        chipText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                        by = by - 28
-                    end
-                else
-                    local noLinks = body:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                    noLinks:SetPoint("TOPLEFT", 12, by)
-                    noLinks:SetText(L["No filters linked yet"])
-                    noLinks:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
-                    by = by - 20
-                end
-
-                -- "+ Add Filter" button → mini-picker of unlinked presets + customs
-                by = by - 6
-                local addFilterLinkBtn = CreateFrame("Button", nil, body, "BackdropTemplate")
-                addFilterLinkBtn:SetHeight(22)
-                addFilterLinkBtn:SetPoint("TOPLEFT", 8, by)
-                addFilterLinkBtn:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Filter"] })
-                GUI:SetSettingsFont(addFilterLinkBtn.Text, 9, "")
-                addFilterLinkBtn:SetScript("OnClick", function()
-                    OpenFilterPicker({
-                        anchor = addFilterLinkBtn,
-                        isLinked = function(kind, key)
-                            if kind == "preset" then return fsel.presets[key] and true or false end
-                            return fsel.customs[key] and true or false
-                        end,
-                        onPick = function(kind, key)
-                            if kind == "preset" then fsel.presets[key] = true
-                            else fsel.customs[key] = true end
-                            StructuralFilterRefresh()
-                        end,
-                    })
-                end)
-                by = by - 26
-
-                -- "Create Filter" → jump to the Filter Designer and pulse its
-                -- New Filter button, for users who arrive here without a custom
-                -- filter to link yet.
-                local createFilterBtn = CreateFrame("Button", nil, body, "BackdropTemplate")
-                createFilterBtn:SetHeight(22)
-                createFilterBtn:SetPoint("TOPLEFT", 8, by)
-                createFilterBtn:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                GUI:StyleButton(createFilterBtn, { height = 22, text = L["Create Filter"] })
-                GUI:SetSettingsFont(createFilterBtn.Text, 9, "")
-                createFilterBtn:SetScript("OnClick", function()
-                    if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
-                        GUI.SelectTab("auras_filterdesigner")
-                        -- Page content builds on first show (inside SelectTab), so
-                        -- the button reference exists by now.
-                        -- The add action is a row inside the Filter Designer's
-                        -- scrolling left list, so the S.page scrolls it into view and
-                        -- pulses it itself rather than handing back a bare widget.
-                        local fdPage = GUI.Pages["auras_filterdesigner"]
-                        if fdPage and fdPage._fdFocusNewFilter then
-                            fdPage._fdFocusNewFilter()
-                        end
-                    end
-                end)
-                by = by - 28
-
-                else
-                -- ── MEMBERS SECTION ──
-                local memLabel = body:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(memLabel, 8, "")
-                memLabel:SetPoint("TOPLEFT", 8, by)
-                memLabel:SetText(L["MEMBERS"])
-                memLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                by = by - 18
-
-                if group.members and #group.members > 0 then
-                    for mi, member in ipairs(group.members) do
-                        local memberRow = CreateFrame("Frame", nil, body, "BackdropTemplate")
-                        memberRow:SetHeight(34)
-                        memberRow:SetPoint("TOPLEFT", 8, by)
-                        memberRow:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                        ApplyBackdrop(memberRow,
-                            {r = 0.11, g = 0.11, b = 0.11, a = 1},
-                            {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
-
-                        -- Up/Down buttons for reordering (stacked vertically on left)
-                        local canMoveUp = mi > 1
-                        local canMoveDown = mi < #group.members
-                        local capturedMi = mi
-
-                        if canMoveUp then
-                            -- One arrow texture serves both directions via rotation.
-                            local upBtn = DF.GUI:CreateGlyphButton(memberRow, {
-                                width = 20, height = 16, iconSize = 14,
-                                texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
-                                rotation = math.rad(180),
-                            })
-                            upBtn:SetPoint("TOPLEFT", 2, -1)
-                            upBtn:SetScript("OnClick", function()
-                                SwapGroupMembers(capturedGroupID, capturedMi, capturedMi - 1)
-                                S.SwitchTab("layout")
-                                RefreshPlacedIndicators()
-                                -- Positions moved (member index feeds the grid) — re-arrange live frames.
-                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                            end)
-                        end
-                        if canMoveDown then
-                            local downBtn = DF.GUI:CreateGlyphButton(memberRow, {
-                                width = 20, height = 16, iconSize = 14,
-                                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
-                            })
-                            downBtn:SetPoint("BOTTOMLEFT", 2, 1)
-                            downBtn:SetScript("OnClick", function()
-                                SwapGroupMembers(capturedGroupID, capturedMi, capturedMi + 1)
-                                S.SwitchTab("layout")
-                                RefreshPlacedIndicators()
-                                -- Positions moved (member index feeds the grid) — re-arrange live frames.
-                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                            end)
-                        end
-
-                        -- Spell icon (Other: nil spec — GetAuraIcon degrades to
-                        -- ad-hoc "#<id>" / SpellDB-by-name resolution)
-                        local memberSpec = not isOtherGroups and ResolveSpec() or nil
-                        local memberIconTex = GetAuraIcon(memberSpec, member.auraName)
-                        local mSpellIcon = memberRow:CreateTexture(nil, "ARTWORK")
-                        mSpellIcon:SetSize(22, 22)
-                        mSpellIcon:SetPoint("LEFT", 26, 0)
-                        if memberIconTex then
-                            mSpellIcon:SetTexture(memberIconTex)
-                            mSpellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                        else
-                            -- Color swatch fallback
-                            local auraInfo2 = nil
-                            local trackable2 = memberSpec and Adapter and Adapter:GetTrackableAuras(memberSpec)
-                            if trackable2 then
-                                for _, ai in ipairs(trackable2) do
-                                    if ai.name == member.auraName then auraInfo2 = ai; break end
-                                end
-                            end
-                            if auraInfo2 then
-                                mSpellIcon:SetColorTexture(auraInfo2.color[1] * 0.5, auraInfo2.color[2] * 0.5, auraInfo2.color[3] * 0.5, 1)
-                            else
-                                mSpellIcon:SetColorTexture(0.25, 0.25, 0.25, 1)
-                            end
-                        end
-
-                        -- Type badge (members live in the group's pool = the
-                        -- active tab's pool)
-                        local memberType = nil
-                        local memberAuraCfg = CurrentAuraPool()[member.auraName]
-                        if memberAuraCfg and memberAuraCfg.indicators then
-                            for _, ind in ipairs(memberAuraCfg.indicators) do
-                                if ind.id == member.indicatorID then
-                                    memberType = ind.type
-                                    break
-                                end
-                            end
-                        end
-                        local mBadgeColor = BADGE_COLORS[memberType or "icon"] or BADGE_COLORS.icon
-                        local mBadgeLabel = S.PLACED_TYPE_LABELS[memberType or "icon"] or "Icon"
-
-                        local mBadge = CreateFrame("Frame", nil, memberRow, "BackdropTemplate")
-                        mBadge:SetHeight(16)
-                        mBadge:SetPoint("LEFT", mSpellIcon, "RIGHT", 4, 0)
-                        ApplyBackdrop(mBadge,
-                            {r = mBadgeColor.r * 0.20, g = mBadgeColor.g * 0.20, b = mBadgeColor.b * 0.20, a = 1},
-                            {r = mBadgeColor.r * 0.45, g = mBadgeColor.g * 0.45, b = mBadgeColor.b * 0.45, a = 0.6})
-                        local mBadgeText = mBadge:CreateFontString(nil, "OVERLAY")
-                        GUI:SetSettingsFont(mBadgeText, 8, "OUTLINE")
-                        mBadgeText:SetPoint("CENTER", 0, 0)
-                        mBadgeText:SetText(mBadgeLabel)
-                        mBadgeText:SetTextColor(1, 1, 1)
-                        mBadge:SetWidth(max(mBadgeText:GetStringWidth() + 12, 32))
-
-                        -- Remove button (using close icon)
-                        -- Red at rest, brighter red on hover: an inline destructive remove.
-                        local remBtn = DF.GUI:CreateGlyphButton(memberRow, {
-                            size = 18, iconSize = 12,
-                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
-                            color      = { 0.55, 0.30, 0.30 },
-                            hoverColor = { 1, 0.40, 0.40 },
-                        })
-                        remBtn:SetPoint("RIGHT", -4, 0)
-                        local capturedMember = member
-                        remBtn:SetScript("OnClick", function()
-                            RemoveGroupMember(capturedGroupID, capturedMember.auraName, capturedMember.indicatorID)
-                            -- Also delete the placed indicator itself
-                            RemoveIndicatorInstance(capturedMember.auraName, capturedMember.indicatorID)
-                            S.SwitchTab("layout")
-                            RefreshPlacedIndicators()
-                            RefreshPreviewEffects()
-                            -- Structural change: same full refresh as the
-                            -- effect-card ✕ / group delete (indicator removed).
-                            DF:InvalidateAuraLayout()
-                            DF:UpdateAllFrames()
-                            if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
-                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                            end
-                        end)
-
-                        -- Customise button (navigates to Effects tab for this indicator)
-                        -- Accent-tinted action button: persistent accent fill +
-                        -- accent border + accent label at rest, accent-wash hover.
-                        local custBtn = CreateFrame("Button", nil, memberRow, "BackdropTemplate")
-                        custBtn:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
-                        GUI:StyleButton(custBtn, {
-                            width = 56, height = 18,
-                            text = L["Customise"],
-                            tinted = true,
-                            accent = GetThemeColor(),
-                        })
-                        local capturedAuraName = member.auraName
-                        local capturedIndID = member.indicatorID
-                        custBtn:SetScript("OnClick", function()
-                            -- Card keys embed the B1 pool prefix in the name
-                            -- segment ("placed:other:<name>#<id>" on Other)
-                            local cardKey = "placed:" .. PoolKeyPrefix() .. capturedAuraName .. "#" .. capturedIndID
-                            wipe(expandedCards)
-                            expandedCards[cardKey] = true
-                            S.activeTab = "effects"
-                            DF:AuraDesigner_RefreshPage()
-                        end)
-
-                        -- Aura name
-                        local mName = memberRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                        mName:SetPoint("LEFT", mBadge, "RIGHT", 6, 0)
-                        mName:SetPoint("RIGHT", custBtn, "LEFT", -4, 0)
-                        mName:SetMaxLines(1)
-                        mName:SetText(MemberDisplayName(member.auraName))
-                        mName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                        by = by - 38
-                    end
-                else
-                    local noMem = body:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                    noMem:SetPoint("TOPLEFT", 12, by)
-                    noMem:SetText(L["No members yet"])
-                    noMem:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.6)
-                    by = by - 20
-                end
-
-                -- "+ Add aura" button
-                by = by - 6
-                local addMemBtn = CreateFrame("Button", nil, body, "BackdropTemplate")
-                addMemBtn:SetHeight(22)
-                addMemBtn:SetPoint("TOPLEFT", 8, by)
-                addMemBtn:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                GUI:StyleButton(addMemBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add aura"] })
-                GUI:SetSettingsFont(addMemBtn.Text, 9, "")
-                addMemBtn:SetScript("OnClick", function()
-                    -- Shared spell picker, group context: searchable,
-                    -- class/category-filterable rows + add-by-ID, each row
-                    -- carrying Icon/Square buttons that create the indicator
-                    -- and enrol it in this group in one click.
-                    OpenGroupSpellPicker(capturedGroupID)
-                end)
-                by = by - 28
-                end -- isFilterGroup / members branch
-
-                -- ── PLACEMENT SECTION ──
-                by = by - 10
-                local placeLabel = body:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(placeLabel, 8, "")
-                placeLabel:SetPoint("TOPLEFT", 8, by)
-                placeLabel:SetText(L["PLACEMENT"])
-                placeLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                by = by - 18
-
-                -- Use GUI widgets with the group table as the proxy
-                local anchorDrop = GUI:CreateDropdown(body, L["Anchor"], OPTS.ANCHOR_OPTIONS, group, "anchor", function()
-                    RefreshPlacedIndicators()
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end)
-                anchorDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                if anchorDrop.SetWidth then anchorDrop:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                local oxSlider = GUI:CreateSlider(body, L["Offset X"], -150, 150, 1, group, "offsetX", function()
-                    RefreshPlacedIndicators()
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end, function()
-                    RefreshPlacedIndicators()
-                end)
-                oxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                if oxSlider.SetWidth then oxSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                local oySlider = GUI:CreateSlider(body, L["Offset Y"], -150, 150, 1, group, "offsetY", function()
-                    RefreshPlacedIndicators()
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end, function()
-                    RefreshPlacedIndicators()
-                end)
-                oySlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                if oySlider.SetWidth then oySlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                -- ── GROWTH SECTION ──
-                by = by - 10
-                local growLabel = body:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(growLabel, 8, "")
-                growLabel:SetPoint("TOPLEFT", 8, by)
-                growLabel:SetText(L["GROWTH"])
-                growLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                by = by - 18
-
-                -- Auto-migrate legacy single-direction values to new format
-                local gd = group.growDirection or "RIGHT"
-                if not gd:find("_") then
-                    local LEGACY_MAP = { RIGHT = "RIGHT_DOWN", LEFT = "LEFT_DOWN", UP = "UP_RIGHT", DOWN = "DOWN_RIGHT" }
-                    group.growDirection = LEGACY_MAP[gd] or "RIGHT_DOWN"
-                end
-
-                local growthControl = GUI:CreateGrowthControl(body, group, "growDirection", function()
-                    RefreshPlacedIndicators()
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end)
-                growthControl:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                if growthControl.SetWidth then growthControl:SetWidth(bodyWidth - 10) end
-                by = by - 158
-
-                local iprSlider = GUI:CreateSlider(body, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow", function()
-                    RefreshPlacedIndicators()
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end, function()
-                    RefreshPlacedIndicators()
-                end)
-                iprSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                if iprSlider.SetWidth then iprSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                local spacingSlider = GUI:CreateSlider(body, L["Spacing"], -5, 20, 1, group, "spacing", function()
-                    RefreshPlacedIndicators()
-                    DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                end, function()
-                    RefreshPlacedIndicators()
-                end)
-                spacingSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                if spacingSlider.SetWidth then spacingSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
+                -- Members / Linked Filters, then Placement, then Growth -- the
+                -- SAME list the row layout mounts, run down the card's cursor.
+                by = RunCardSections(body, bodyWidth, by, CollectLayoutGroupSections(group))
 
                 if isFilterGroup then
-                    -- Uniform per-group styling: one icon size + slot cap for every
-                    -- spell the linked filters match (no per-spell styling by design).
-                    local sizeSlider = GUI:CreateSlider(body, L["Icon Size"], 8, 64, 1, group, "iconSize", function()
-                        RefreshPlacedIndicators()
-                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                    end, function()
-                        RefreshPlacedIndicators()
-                    end)
-                    sizeSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                    if sizeSlider.SetWidth then sizeSlider:SetWidth(bodyWidth - 10) end
-                    by = by - 54
-
-                    -- Max Icons is STRUCTURAL (slot count is declared at container
-                    -- build) — the factory Rebuild path handles it (OOC-deferred).
-                    local maxSlider = GUI:CreateSlider(body, L["Max Icons"], 1, 20, 1, group, "maxIcons", function()
-                        RefreshPlacedIndicators()
-                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                    end, function()
-                        RefreshPlacedIndicators()
-                    end)
-                    maxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                    if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
-                    by = by - 54
-
-                    -- ── SORT (Wave 2) ── per-group sort is TUNING: the factory
-                    -- re-applies it in place via ApplyTuning (OOC-immediate;
-                    -- self-defers in combat) — no rebuild. The fields are
-                    -- OPTIONAL on the group (othersOnly idiom): absent = the
-                    -- family default "DEFAULT" (Blizzard slot order, the
-                    -- pre-Wave-2 behaviour), read through a customGet so legacy
-                    -- groups display correctly without a write-on-open.
-                    local sortRefresh = function()
-                        RefreshPlacedIndicators()
-                        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                    end
-                    local sortMineCb   -- forward capture: the dropdown greys it
-                    local sortDrop = GUI:CreateDropdown(body, L["Sort Order"], OPTS.SORT_OPTIONS, nil, nil, function()
-                        sortRefresh()
-                        if sortMineCb then sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "DEFAULT")) end
-                    end, function() return group.sortOrder or "DEFAULT" end,
-                       function(v) group.sortOrder = v end)
-                    sortDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, -(-by))
-                    if sortDrop.SetWidth then sortDrop:SetWidth(bodyWidth - 10) end
-                    by = by - 54
-
-                    sortMineCb = GUI:CreateCheckbox(body, L["My Auras First"], group, "sortMineFirst", sortRefresh)
-                    sortMineCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(-by))
-                    sortMineCb:SetWidth(bodyWidth - 16)
-                    sortMineCb.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
-                    sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "DEFAULT"))
-                    by = by - 26
-
-                    local sortRevCb = GUI:CreateCheckbox(body, L["Reverse Order"], group, "sortReverse", sortRefresh)
-                    sortRevCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(-by))
-                    sortRevCb:SetWidth(bodyWidth - 16)
-                    sortRevCb.tooltip = L["Reverse the sort direction."]
-                    by = by - 30
-
-                    -- ── OTHERS ONLY (Other Buffs tab only — flat-store groups) ──
-                    -- Same idiom as the effect-card checkbox: the group's filter
-                    -- string ("HELPFUL|!PLAYER") binds at container build, so
-                    -- toggling is STRUCTURAL (folded into the fgroup struct sig →
-                    -- the factory Rebuilds), and the buff-row dedup union moves
-                    -- (an othersOnly group's spells keep their row icon).
-                    if isOtherGroups then
-                        local ooCb = GUI:CreateCheckbox(body, L["Others Only"], group, "othersOnly", function()
-                            S.SwitchTab("layout")
-                            RefreshPlacedIndicators()
-                            DF:InvalidateAuraLayout()
-                            DF:UpdateAllFrames()
-                            if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
-                                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                            end
-                        end)
-                        ooCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(-by))
-                        ooCb:SetWidth(bodyWidth - 16)
-                        ooCb.tooltip = L["Only show other players' casts of these buffs."]
-                        by = by - 34
-                    end
-
                     -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                     by = by - 10
                     by = AddGroupAppearanceSection(body, group, bodyWidth, by, expandKey)
@@ -991,16 +1037,12 @@ end
 -- prefix can never collide with them (the two id counters overlap).
 -- ============================================================
 
-S.BuildDebuffGroupsTab = function()
-    if not S.tabContentFrame then return end
-    local parent = S.tabContentFrame
-    local yPos = -10
-    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
-
-    -- Category picker rows: the Aura Filters debuff column's exact L keys +
-    -- tooltips, mapped onto group.selection's keys. Built per tab build so a
-    -- runtime locale overlay is picked up (file-scope L tables freeze enUS).
-    local CATEGORY_DEFS = {
+-- The category picker rows: the Aura Filters debuff column's exact L keys +
+-- tooltips, mapped onto group.selection's keys. Built PER CALL rather than at
+-- file scope so a runtime locale overlay is picked up (a file-scope L table
+-- freezes enUS -- see DF:RegisterLocaleRefresh).
+local function DebuffCategoryDefs()
+    return {
         { key = "boss",         label = L["Boss Debuffs"],        tooltip = L["Debuffs applied by dungeon and raid bosses."] },
         { key = "role",         label = L["Role Debuffs"],        tooltip = L["Debuffs Blizzard flags as important for your role."] },
         { key = "priority",     label = L["Priority Debuffs"],    tooltip = L["Debuffs Blizzard flags as high priority."] },
@@ -1008,12 +1050,50 @@ S.BuildDebuffGroupsTab = function()
         { key = "raid",         label = L["Raid Debuffs"],        tooltip = L["Other debuffs Blizzard flags for raid frames."] },
         { key = "dispellable",  label = L["Dispellable Debuffs"], tooltip = L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels count."] },
     }
+end
+P.DebuffCategoryDefs = DebuffCategoryDefs
 
-    -- FULL structural refresh incl. tab rebuild — discrete edits (category
-    -- checkboxes, dispel mode, hide-long controls, eye, delete, add): the
-    -- claims union moves AND the card summary / grey states must rebuild.
+-- Repair a missing selection table (hand-edited data). All categories start
+-- FALSE so an unconfigured group renders — and claims — nothing until the user
+-- picks; modifier defaults mirror CreateDebuffGroup.
+local function EnsureDebuffSelection(group)
+    local sel = group.selection
+    if not sel then
+        sel = { dispellableMode = "PLAYER", hideLongMinutes = 5, keepImportant = true }
+        group.selection = sel
+    end
+    return sel
+end
+P.EnsureDebuffSelection = EnsureDebuffSelection
+
+-- The collapsed header's own line: the selected category names (the A5 collapsed
+-- treatment, categories instead of a link count).
+S.DebuffGroupSummary = function(group)
+    local selectedNames = {}
+    local selRead = group.selection
+    if selRead then
+        for _, def in ipairs(DebuffCategoryDefs()) do
+            if selRead[def.key] then tinsert(selectedNames, def.label) end
+        end
+    end
+    if #selectedNames > 0 then return table.concat(selectedNames, ", ") end
+    return L["No categories selected"]
+end
+
+-- ── CATEGORIES (debuff groups) ──
+-- Checkbox list writing group.selection.* — every toggle is structural (records
+-- move AND the claims union moves).
+--
+-- ☠ env.Redraw, NOT env.Rebuild. In the card this is the tab rebuild it always
+-- was; in a PANE a rebuild would retire the tick the user just clicked, so the
+-- panel re-flows itself and the group header is repainted by hand.
+local function BuildDebuffCategories(env, group)
+    local place, host = env.place, env.host
+    local sel = EnsureDebuffSelection(group)
+
     local function StructuralDebuffGroupRefresh()
-        S.SwitchTab("layout")
+        env.Redraw()
+        env.Header()
         RefreshPlacedIndicators()
         DF:InvalidateAuraLayout()
         DF:UpdateAllFrames()
@@ -1021,13 +1101,8 @@ S.BuildDebuffGroupsTab = function()
             DF.AuraDesigner.Engine:ForceRefreshAllFrames()
         end
     end
-
-    -- Same structural chain WITHOUT the tab rebuild — slider/dropdown-safe
-    -- (a S.SwitchTab from inside a slider callback destroys the widget
-    -- mid-interaction). Layout edits don't move the claims union, but the
-    -- version bump keeps the factory's version-keyed dgroup record cache
-    -- honest and costs one sig-gated re-resolve (offsets → ApplyStyle,
-    -- maxIcons → Rebuild).
+    -- The same structural chain WITHOUT the redraw — slider/dropdown-safe (a
+    -- rebuild from inside a slider callback destroys the widget mid-interaction).
     local function LayoutDebuffGroupRefresh()
         RefreshPlacedIndicators()
         DF:InvalidateAuraLayout()
@@ -1037,12 +1112,84 @@ S.BuildDebuffGroupsTab = function()
         end
     end
 
+    for _, def in ipairs(DebuffCategoryDefs()) do
+        local cb = GUI:CreateCheckbox(host, def.label, sel, def.key, StructuralDebuffGroupRefresh)
+        cb.tooltip = def.tooltip
+        place(cb, 26, { indent = 8, width = false })
+
+        if def.key == "dispellable" then
+            -- Mode dropdown, indented under Dispellable Debuffs (the Aura Filters
+            -- column's control, group-scoped; back to TWO entries 2026-08-22 --
+            -- the PTR-5-era third mode "Any Dispel Type" was collapsed into All
+            -- Dispellable once both rode the DISPELLABLE token and became one
+            -- query wearing two rows).
+            --
+            -- ★ Self-heal for a stored "ANY": AD groups have no startup migration
+            -- walk, and a shared template can re-introduce the value at any time.
+            -- This is the one surface where it would show (as a blank dropdown);
+            -- the engine already treats ANY as ALL, so this write changes
+            -- presentation only, never behaviour.
+            if sel.dispellableMode == "ANY" then
+                sel.dispellableMode = "ALL"
+            end
+            local modeDrop = GUI:CreateDropdown(host, L["Mode"], {
+                PLAYER = L["Dispellable By Me"],
+                ALL = L["All Dispellable"],
+                _order = { "PLAYER", "ALL" },
+            }, sel, "dispellableMode", StructuralDebuffGroupRefresh)
+            modeDrop.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
+            modeDrop.disableOn = function() return not sel.dispellable end
+            modeDrop:SetEnabled(not not sel.dispellable)
+            place(modeDrop, 54, { indent = 24, width = env.bodyWidth and (env.bodyWidth - 30) or nil })
+        end
+    end
+
+    local hideLongCb = GUI:CreateCheckbox(host, L["Hide Long Debuffs"], sel, "hideLong", StructuralDebuffGroupRefresh)
+    hideLongCb.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
+    place(hideLongCb, 26, { indent = 8, width = false, gap = 4 })
+
+    local minSlider = GUI:CreateSlider(host, L["Hide Longer Than (minutes)"], 1, 30, 1,
+        sel, "hideLongMinutes", LayoutDebuffGroupRefresh)
+    minSlider.disableOn = function() return not sel.hideLong end
+    minSlider:SetEnabled(not not sel.hideLong)
+    place(minSlider, 54, { indent = 8, width = env.bodyWidth and (env.bodyWidth - 10) or nil })
+
+    -- Keep-important, indented under Hide Long (Aura Filters idiom)
+    local keepCb = GUI:CreateCheckbox(host, L["Keep important debuffs"], sel, "keepImportant", StructuralDebuffGroupRefresh)
+    keepCb.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
+    keepCb.disableOn = function() return not sel.hideLong end
+    keepCb:SetEnabled(not not sel.hideLong)
+    place(keepCb, 30, { indent = 24, width = false })
+end
+
+-- The ordered section list for one debuff category group.
+local function CollectDebuffGroupSections(group)
+    local out = {}
+    out[#out + 1] = { header = L["Categories"], caption = L["CATEGORIES"],
+                      build = function(env) BuildDebuffCategories(env, group) end }
+    out[#out + 1] = { header = L["Placement"], caption = L["PLACEMENT"], gap = 10,
+                      build = function(env) BuildGroupPlacement(env, group) end }
+    out[#out + 1] = { header = L["Growth"], caption = L["GROWTH"], gap = 10,
+                      build = function(env) BuildGroupGrowth(env, group, "debuff") end }
+    return out
+end
+P.CollectDebuffGroupSections = CollectDebuffGroupSections
+
+-- ============================================================
+-- THE DEBUFFS TAB'S HEAD AREA
+-- ------------------------------------------------------------
+-- The teaching sentence, the one choice card and the dedup explainer --
+-- everything above the list. ONE definition, two hosts, exactly as the Layout
+-- Groups tab's is.
+-- ============================================================
+S.BuildDebuffGroupsHeadArea = function(parent, yPos)
+    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
+
     -- READ path: visiting the tab never creates adDB.debuffGroups.
     -- Read first for the same reason as the Layout Groups tab: an empty tab
     -- swaps the compact button, the dedup explainer and the heading for a
     -- single choice card.
-    local groups = DebuffGroupsRead()
-    local hasGroups = #groups > 0
+    local hasGroups = #DebuffGroupsRead() > 0
 
     -- Teaching prose, first visit only -- see the Layout Groups tab.
     if not hasGroups then
@@ -1078,7 +1225,13 @@ S.BuildDebuffGroupsTab = function()
                         -- A new group claims Boss + Role by default, so the main
                         -- debuff bar drops them immediately: full structural
                         -- chain, not just a tab rebuild.
-                        StructuralDebuffGroupRefresh()
+                        S.SwitchTab("layout")
+                        RefreshPlacedIndicators()
+                        DF:InvalidateAuraLayout()
+                        DF:UpdateAllFrames()
+                        if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+                            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                        end
                     end
                 end,
             },
@@ -1100,7 +1253,33 @@ S.BuildDebuffGroupsTab = function()
         dedupHint:SetText(L["Categories shown here are hidden from the main debuff bar automatically."])
         dedupHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         yPos = yPos - 30
+    end
 
+    return yPos
+end
+
+S.BuildDebuffGroupsTab = function()
+    if not S.tabContentFrame then return end
+    local parent = S.tabContentFrame
+    local yPos = S.BuildDebuffGroupsHeadArea(parent, -10)
+    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
+
+    -- FULL structural refresh incl. tab rebuild — the eye, the delete and the
+    -- add: the claims union moves AND the card summary / grey states must
+    -- rebuild.
+    local function StructuralDebuffGroupRefresh()
+        S.SwitchTab("layout")
+        RefreshPlacedIndicators()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        end
+    end
+
+    local groups = DebuffGroupsRead()
+
+    if #groups > 0 then
         -- ── DEBUFF GROUPS heading — mirrors the Layout Groups tab's caption. ──
         local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
         GUI:SetSettingsFont(groupsHeader, 9, "")
@@ -1126,22 +1305,12 @@ S.BuildDebuffGroupsTab = function()
             })
             stack:Add(card)
 
-            -- Group name + collapsed summary: the selected category names
-            -- (the A5 collapsed treatment, categories instead of link count).
+            -- Group name + collapsed summary
             local nameText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
             nameText:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
             nameText:SetPoint("RIGHT", header, "RIGHT", -60, 0)
             nameText:SetMaxLines(1)
-            local selectedNames = {}
-            local selRead = group.selection
-            if selRead then
-                for _, def in ipairs(CATEGORY_DEFS) do
-                    if selRead[def.key] then tinsert(selectedNames, def.label) end
-                end
-            end
-            local summary = (#selectedNames > 0) and table.concat(selectedNames, ", ")
-                or L["No categories selected"]
-            nameText:SetText(group.name .. "  -  " .. summary)
+            nameText:SetText(group.name .. "  -  " .. S.DebuffGroupSummary(group))
             nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
             -- Delete button — full structural chain: the group's claimed
@@ -1212,15 +1381,7 @@ S.BuildDebuffGroupsTab = function()
                 local bodyWidth = (S.tabContentFrame and S.tabContentFrame:GetWidth() or 260) - 24
                 if bodyWidth < 100 then bodyWidth = 240 end
 
-                -- Repair a missing selection table (hand-edited data). All
-                -- categories start FALSE so an unconfigured group renders —
-                -- and claims — nothing until the user picks; modifier
-                -- defaults mirror CreateDebuffGroup.
-                local sel = group.selection
-                if not sel then
-                    sel = { dispellableMode = "PLAYER", hideLongMinutes = 5, keepImportant = true }
-                    group.selection = sel
-                end
+                EnsureDebuffSelection(group)
 
                 -- Group Name (editable)
                 local nameLabel = body:CreateFontString(nil, "OVERLAY")
@@ -1254,169 +1415,9 @@ S.BuildDebuffGroupsTab = function()
                 end)
                 by = by - 32
 
-                -- ── CATEGORIES SECTION ──
-                -- Checkbox list writing group.selection.* — every toggle is
-                -- structural (records move AND the claims union moves).
-                local catLabel = body:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(catLabel, 8, "")
-                catLabel:SetPoint("TOPLEFT", 8, by)
-                catLabel:SetText(L["CATEGORIES"])
-                catLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                by = by - 18
-
-                for _, def in ipairs(CATEGORY_DEFS) do
-                    local cb = GUI:CreateCheckbox(body, def.label, sel, def.key, StructuralDebuffGroupRefresh)
-                    cb:SetPoint("TOPLEFT", 8, by)
-                    cb.tooltip = def.tooltip
-                    by = by - 26
-
-                    if def.key == "dispellable" then
-                        -- Mode dropdown, indented under Dispellable Debuffs
-                        -- (the Aura Filters column's control, group-scoped;
-                        -- back to TWO entries 2026-08-22 -- the PTR-5-era
-                        -- third mode "Any Dispel Type" was collapsed into All
-                        -- Dispellable once both rode the DISPELLABLE token
-                        -- and became one query wearing two rows).
-                        --
-                        -- ★ Self-heal for a stored "ANY": AD groups have no
-                        -- startup migration walk, and a shared template can
-                        -- re-introduce the value at any time. This is the one
-                        -- surface where it would show (as a blank dropdown);
-                        -- the engine already treats ANY as ALL, so this write
-                        -- changes presentation only, never behaviour.
-                        if sel.dispellableMode == "ANY" then
-                            sel.dispellableMode = "ALL"
-                        end
-                        local modeDrop = GUI:CreateDropdown(body, L["Mode"], {
-                            PLAYER = L["Dispellable By Me"],
-                            ALL = L["All Dispellable"],
-                            _order = { "PLAYER", "ALL" },
-                        }, sel, "dispellableMode", StructuralDebuffGroupRefresh)
-                        modeDrop:SetPoint("TOPLEFT", 24, by)
-                        if modeDrop.SetWidth then modeDrop:SetWidth(bodyWidth - 30) end
-                        modeDrop.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
-                        modeDrop:SetEnabled(not not sel.dispellable)
-                        by = by - 54
-                    end
-                end
-
-                by = by - 4
-                local hideLongCb = GUI:CreateCheckbox(body, L["Hide Long Debuffs"], sel, "hideLong", StructuralDebuffGroupRefresh)
-                hideLongCb:SetPoint("TOPLEFT", 8, by)
-                hideLongCb.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
-                by = by - 26
-
-                local minSlider = GUI:CreateSlider(body, L["Hide Longer Than (minutes)"], 1, 30, 1,
-                    sel, "hideLongMinutes", LayoutDebuffGroupRefresh)
-                minSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 8, by)
-                if minSlider.SetWidth then minSlider:SetWidth(bodyWidth - 10) end
-                minSlider:SetEnabled(not not sel.hideLong)
-                by = by - 54
-
-                -- Keep-important, indented under Hide Long (Aura Filters idiom)
-                local keepCb = GUI:CreateCheckbox(body, L["Keep important debuffs"], sel, "keepImportant", StructuralDebuffGroupRefresh)
-                keepCb:SetPoint("TOPLEFT", 24, by)
-                keepCb.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
-                keepCb:SetEnabled(not not sel.hideLong)
-                by = by - 30
-
-                -- ── PLACEMENT SECTION ── (the shared filter-group layout controls)
-                by = by - 10
-                local placeLabel = body:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(placeLabel, 8, "")
-                placeLabel:SetPoint("TOPLEFT", 8, by)
-                placeLabel:SetText(L["PLACEMENT"])
-                placeLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                by = by - 18
-
-                local anchorDrop = GUI:CreateDropdown(body, L["Anchor"], OPTS.ANCHOR_OPTIONS, group, "anchor", LayoutDebuffGroupRefresh)
-                anchorDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if anchorDrop.SetWidth then anchorDrop:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                local oxSlider = GUI:CreateSlider(body, L["Offset X"], -150, 150, 1, group, "offsetX",
-                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
-                oxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if oxSlider.SetWidth then oxSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                local oySlider = GUI:CreateSlider(body, L["Offset Y"], -150, 150, 1, group, "offsetY",
-                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
-                oySlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if oySlider.SetWidth then oySlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                -- ── GROWTH SECTION ──
-                by = by - 10
-                local growLabel = body:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(growLabel, 8, "")
-                growLabel:SetPoint("TOPLEFT", 8, by)
-                growLabel:SetText(L["GROWTH"])
-                growLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                by = by - 18
-
-                local growthControl = GUI:CreateGrowthControl(body, group, "growDirection", LayoutDebuffGroupRefresh)
-                growthControl:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if growthControl.SetWidth then growthControl:SetWidth(bodyWidth - 10) end
-                by = by - 158
-
-                local iprSlider = GUI:CreateSlider(body, L["Icons Per Row"], 1, 20, 1, group, "iconsPerRow",
-                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
-                iprSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if iprSlider.SetWidth then iprSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                local spacingSlider = GUI:CreateSlider(body, L["Spacing"], -5, 20, 1, group, "spacing",
-                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
-                spacingSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if spacingSlider.SetWidth then spacingSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                -- Uniform per-group styling (filter-group idiom: one icon
-                -- size + slot cap for everything the categories match).
-                local sizeSlider = GUI:CreateSlider(body, L["Icon Size"], 8, 64, 1, group, "iconSize",
-                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
-                sizeSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if sizeSlider.SetWidth then sizeSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                -- Max Icons is STRUCTURAL (slot count is declared at container
-                -- build) — the factory Rebuild path handles it (OOC-deferred).
-                local maxSlider = GUI:CreateSlider(body, L["Max Icons"], 1, 20, 1, group, "maxIcons",
-                    LayoutDebuffGroupRefresh, RefreshPlacedIndicators)
-                maxSlider:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if maxSlider.SetWidth then maxSlider:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                -- ── SORT (Wave 2) ── per-group sort is TUNING: the factory
-                -- re-applies it in place via ApplyTuning (OOC-immediate;
-                -- self-defers in combat) — no rebuild. Fields are OPTIONAL on
-                -- the group (othersOnly idiom): absent = the family default
-                -- "TIME" (soonest-to-expire first — the old hardcode), read
-                -- through a customGet so legacy groups display correctly
-                -- without a write-on-open.
-                local sortMineCb   -- forward capture: the dropdown greys it
-                local sortDrop = GUI:CreateDropdown(body, L["Sort Order"], OPTS.SORT_OPTIONS, nil, nil, function()
-                    LayoutDebuffGroupRefresh()
-                    if sortMineCb then sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "TIME")) end
-                end, function() return group.sortOrder or "TIME" end,
-                   function(v) group.sortOrder = v end)
-                sortDrop:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
-                if sortDrop.SetWidth then sortDrop:SetWidth(bodyWidth - 10) end
-                by = by - 54
-
-                sortMineCb = GUI:CreateCheckbox(body, L["My Auras First"], group, "sortMineFirst", LayoutDebuffGroupRefresh)
-                sortMineCb:SetPoint("TOPLEFT", 8, by)
-                sortMineCb:SetWidth(bodyWidth - 16)
-                sortMineCb.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
-                sortMineCb:SetEnabled(DF:SortOrderSupportsMineFirst(group.sortOrder or "TIME"))
-                by = by - 26
-
-                local sortRevCb = GUI:CreateCheckbox(body, L["Reverse Order"], group, "sortReverse", LayoutDebuffGroupRefresh)
-                sortRevCb:SetPoint("TOPLEFT", 8, by)
-                sortRevCb:SetWidth(bodyWidth - 16)
-                sortRevCb.tooltip = L["Reverse the sort direction."]
-                by = by - 30
+                -- Categories, then Placement, then Growth -- the SAME list the
+                -- row layout mounts, run down the card's cursor.
+                by = RunCardSections(body, bodyWidth, by, CollectDebuffGroupSections(group))
 
                 -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                 by = by - 10
