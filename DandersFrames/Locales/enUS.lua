@@ -2077,6 +2077,7 @@ L["Select indicator..."] = true
 L["Select trigger for %s"] = true
 L["Show Stacks"] = true
 L["Show When Missing"] = true
+L["Showing"] = true
 L["Size & Orientation"] = true
 L["Sound"] = true
 L["Sound Alert"] = true

@@ -601,16 +601,19 @@ do
     check(SHELL:find("shell.Add(host, h, \"both\")", 1, true) ~= nil,
           "head: ...which lands in the band column at the band's edges")
 
-    -- ☠ ...AND SINCE PHASE 5, THE ROW LAYOUT ASKS FOR LESS OF IT. The add block
-    -- is a panel on this page, so the head area draws only the caption and the
-    -- chips here -- one function, one call site per layout, and the difference
-    -- between them is an argument rather than a second copy.
-    check(ROWS:find("S.BuildEffectsHeadArea(host, -4, { skipAddBlock = true })", 1, true) ~= nil,
-          "head: the Effects caption and chips are the card layout's own")
+    -- ☠ ...AND THE ROW LAYOUT ASKS FOR LESS OF IT WITH EVERY PHASE. The add block
+    -- became a panel in phase 5 and the filter chips became one in section 20, so
+    -- what is left here is the ACTIVE INDICATORS caption and the Any Buff hint --
+    -- one function, one call site per layout, and the difference between them is
+    -- an argument rather than a second copy.
+    check(ROWS:find("{ skipAddBlock = true, skipChips = true }", 1, true) ~= nil,
+          "head: the Effects caption is all the row layout still takes from it")
     check(CARDS:find("S.BuildEffectsHeadArea = function(parent, yPos, opts)", 1, true) ~= nil,
           "head: ...declared once, in the card file")
     check(CARDS:find("local skipAdd = opts and opts.skipAddBlock or false", 1, true) ~= nil,
-          "head: ...and the add block is what the argument turns off")
+          "head: ...and the add block is what the first argument turns off")
+    check(CARDS:find("local skipChips = opts and opts.skipChips or false", 1, true) ~= nil,
+          "head: ...the chips what the second one does")
     local heads = 0
     for _ in CARDS:gmatch("S%.BuildEffectsHeadArea") do heads = heads + 1 end
     eq(heads, 2, "head: ...declared once and mounted once by the card")
@@ -1234,22 +1237,180 @@ do
 end
 
 -- ============================================================
--- 11. THE POOL STRIP IS ONE DEFINITION, TWO HOSTS
+-- 11. ONE TAB STRIP ON THE PAGE -- THE POOL IS A PICKER, NOT A SECOND STRIP
+-- ------------------------------------------------------------
+-- My Buffs / Debuffs / Any Buff sat directly above Effects / Layout Groups /
+-- Global and the pair read as tabs inside tabs -- "so confusion to know that they
+-- are tabs within tabs". They are not the same kind of control: the pool picks
+-- WHICH SET is being edited, exactly as Template and Spec do; the sub-tabs pick
+-- WHICH VIEW of it. So the pool joins Spec on a scope row and the page is left
+-- with exactly one tab strip.
 -- ============================================================
-print("-- Aura Designer: the pool strip")
+print("-- Aura Designer: the scope row")
 do
+    -- The strip survives for its ONE remaining host, the split panel.
     check(ROWS:find("S.BuildPoolStrip = function(buffTabBar)", 1, true) ~= nil,
-          "strip: the pool strip is declared once")
+          "scope: the pool strip is declared once")
     check(EDIT:find("S.BuildPoolStrip(buffTabBar)", 1, true) ~= nil,
-          "strip: ...and the split panel mounts it into its own slice")
-    check(ROWS:find("build = function(host) S.BuildPoolStrip(host) end", 1, true) ~= nil,
-          "strip: ...while the row page mounts it as a band")
-    -- Decision 5: its own strip, above the sub-tabs -- which set is being edited
-    -- is a prior question to which part of it you are looking at.
+          "scope: ...and the split panel mounts it into its own slice")
+    -- ☠ THE ABSENCE IS THE ASSERTION, and it is the whole of section 20.2: the
+    -- band layout must not mount a second strip of tabs above the tab strip.
+    check(ROWS:find("build = function(host) S.BuildPoolStrip(host) end", 1, true) == nil,
+          "scope: ...but the band layout no longer mounts it as a strip of its own")
+    check(ROWS:find("build = function(host) S.BuildScopeRow(host) end", 1, true) ~= nil,
+          "scope: the band in its place holds the two scope pickers")
+    check(ROWS:find("S.BuildScopeRow = function(host)", 1, true) ~= nil,
+          "scope: ...and the scope row is declared once")
+
+    local body = ROWS:match("S%.BuildScopeRow = function%(host%)(.-)\nend\n")
+    check(body ~= nil, "scope: the scope row's body can be read")
+    body = body or ""
+    check(body:find("S.BuildPoolPicker(poolHost, defs)", 1, true) ~= nil,
+          "scope: the pool picker takes the left half")
+    check(body:find("S.BuildSpecPicker(specHost)", 1, true) ~= nil,
+          "scope: ...and Spec sits beside it, which is what makes the greying legible")
+
+    -- ☠ ONE DESCRIPTION OF THE THREE POOLS, and it is a FUNCTION: a file-scope
+    -- table of L[...] lookups freezes on whatever locale was live at load.
+    check(ROWS:find("local function PoolDefs()", 1, true) ~= nil,
+          "scope: the three pools are described once")
+    check(ROWS:find("local MAIN_TAB_DEFS = PoolDefs()", 1, true) ~= nil,
+          "scope: ...which the split panel's strip reads")
+    check(ROWS:find("defs = defs or PoolDefs()", 1, true) ~= nil,
+          "scope: ...and the picker reads the same list, not a second copy")
+
+    -- ☠ DERIVED WIDTHS, NOT SMALLER MAGIC NUMBERS. At the window's 520px minimum
+    -- this band is ~280px and two labelled pickers have to share it. The pool's
+    -- three options are short and fixed; spec names are the long ones.
+    check(body:find("StringWidth(def.label)", 1, true) ~= nil,
+          "scope: the pool half is measured from the words this client holds")
+    check(body:find("local poolW = math.min(poolWant, math.floor(w * 0.45))", 1, true) ~= nil,
+          "scope: ...capped, so a long-worded locale cannot starve Spec")
+    check(body:find("specHost:SetWidth(max(w - SCOPE_GAP - poolW, 40))", 1, true) ~= nil,
+          "scope: ...and Spec takes everything left over, which is what it needs")
+    check(body:find([[host:SetScript("OnSizeChanged", function(_, w) SizeHalves(w) end)]], 1, true) ~= nil,
+          "scope: ...re-taken whenever the band changes width")
+
+    -- No new state: the picker reads and writes exactly what the strip did.
+    local pick = ROWS:match("S%.BuildPoolPicker = function%(host, defs%)(.-)\nend\n")
+    check(pick ~= nil, "scope: the pool picker's body can be read")
+    pick = pick or ""
+    check(pick:find([[function() return S.activeBuffTab or "my" end]], 1, true) ~= nil,
+          "scope: the picker reads S.activeBuffTab -- no new key, no schema change")
+    check(pick:find("function(key) SetMainTab(key) end", 1, true) ~= nil,
+          "scope: ...and writes through SetMainTab, which owns every side effect")
+    -- SetMainTab paints the STRIP's buttons; there are none in this layout, and a
+    -- map left behind by a visit to the split panel would have it painting frames
+    -- this build has retired.
+    check(pick:find("wipe(mainTabButtons)", 1, true) ~= nil,
+          "scope: ...and clears the button map SetMainTab paints")
+    -- ⚠ SCOPED TO SetMainTab'S BODY. UpdateSpecDropdownState is DECLARED in this
+    -- file too, so a file-wide find answers "is this name anywhere" and passes
+    -- with the call deleted -- which is exactly how it first passed.
+    local setMain = CARDS:match("local function SetMainTab%\(tabKey%\)(.-)\nend\nP%\.SetMainTab")
+    check(setMain ~= nil, "scope: SetMainTab's body can be read")
+    check((setMain or ""):find("UpdateSpecDropdownState()", 1, true) ~= nil,
+          "scope: a pool change greys Spec on the spot")
+    check(ROWS:find("UpdateSpecDropdownState()", 1, true) ~= nil,
+          "scope: ...and the rebuild it triggers greys the NEW dropdown too")
+    -- Three tabs that each explained themselves on hover become one opener, so
+    -- all three explanations ride it.
+    check(pick:find("poolDrop.openerTooltip", 1, true) ~= nil,
+          "scope: the three tabs' explanations survive on the opener")
+    check(pick:find("openerTooltip", 1, true) ~= nil and pick:find(".tooltip =", 1, true) == nil,
+          "scope: ...on the opener, not on the hidden inline label nothing can hover")
+
+    -- Still above the one remaining tab strip.
     local stripAt = ROWS:find("strips = {", 1, true)
     local tabsAt  = ROWS:find("tabs = {", 1, true)
     check(stripAt ~= nil and tabsAt ~= nil and stripAt < tabsAt,
-          "strip: the pool strip sits above the tab strip")
+          "scope: the scope row sits above the tab strip")
+
+    -- ...and there is exactly ONE tab strip left on the page, which is the point.
+    check(select(2, ROWS:gsub("strips = {", "")) == 1,
+          "scope: the page declares one strip band")
+    check(select(2, ROWS:gsub("tabs = {", "")) == 1,
+          "scope: ...and one tab strip")
+end
+
+-- ============================================================
+-- 11b. THE ACTIVE INDICATORS FILTER IS A ROW
+-- ------------------------------------------------------------
+-- Eight chips loose on the page: a setting with more than one option, outside a
+-- popout, which is the all-rows rule -- and they predate it. They were also the
+-- one flowing element left in the band column (section 17, Class 1). Behind a
+-- `Showing` row the width is the popout's own content width and there is nothing
+-- below them on the page to displace, so the hazard is retired rather than moved.
+-- ============================================================
+print("-- Aura Designer: the Showing row")
+do
+    -- ONE definition of the chips, two hosts -- the split panel's wrapping row
+    -- and the pane. A second copy is how the three duplicated FRAME_ITEMS lists
+    -- in this same file came about.
+    check(CARDS:find("S.BuildFilterChips = function(host, width)", 1, true) ~= nil,
+          "showing: the chips are declared once")
+    check(CARDS:find("local function FilterChips()", 1, true) ~= nil,
+          "showing: ...from one list of the eight filters")
+    -- ⚠ A FUNCTION, not a file-scope table: a table of L[...] lookups built at
+    -- load freezes on whatever locale was live then.
+    check(CARDS:find("local FILTER_CHIPS = {", 1, true) == nil,
+          "showing: ...which is a verb, so it cannot freeze on the load-time locale")
+    check(CARDS:find("local function ActiveFilterLabel()", 1, true) ~= nil,
+          "showing: the summary is read off that same list")
+    check(CARDS:match("local function ActiveFilterLabel%(%)(.-)\nend"):find("FilterChips()", 1, true) ~= nil,
+          "showing: ...not off a second copy of the labels")
+
+    local SHOW = ROWS:match("local showBand = (.-)local pickerOpen")
+    check(SHOW ~= nil, "showing: the Showing row can be read")
+    SHOW = SHOW or ""
+    check(SHOW:find("GUI:CreatePopoutRow(page.child, {", 1, true) ~= nil,
+          "showing: it is a popout row, built from the shared factory")
+    check(SHOW:find("tools.PopoutContent(", 1, true) ~= nil,
+          "showing: ...whose pane comes from the shared page tools")
+    check(SHOW:find("tools.BandWidth()", 1, true) ~= nil,
+          "showing: ...at the band's width, like everything else in the column")
+    check(SHOW:find([[Add(showBand, nil, "both")]], 1, true) ~= nil,
+          "showing: ...added to both columns, so the page keeps one pair of edges")
+    check(SHOW:find([==[label   = L["Showing"]]==], 1, true) ~= nil,
+          "showing: the row is captioned Showing")
+    check(SHOW:find("summary = function() return ActiveFilterLabel() end", 1, true) ~= nil,
+          "showing: ...and its summary is the filter that is in force")
+    -- It holds no settings, only which of them are on screen -- so no toggle and
+    -- no footer, the same rule the Add Indicator row above it follows.
+    check(SHOW:find("toggle", 1, true) == nil,
+          "showing: no toggle -- the row holds no setting of its own")
+    check(SHOW:find("actions", 1, true) == nil,
+          "showing: ...and no footer to reset")
+    check(SHOW:find("if not ctx.adEnabled then showRow.disableOn", 1, true) ~= nil,
+          "showing: it greys with the rest of the page when the designer is off")
+
+    -- ☠ THE HIDDEN HOLDER. PopoutContent builds into a hidden holder and moves
+    -- FRAMES into the group; a FontString created on the parent is a region, stays
+    -- behind and is NEVER DRAWN. It killed five captions in phase 4.
+    check(SHOW:find("CreateFontString", 1, true) == nil,
+          "showing: the pane holds frames only, so nothing is silently left behind")
+
+    -- No schema change: the chips write the same in-memory field they always did.
+    local chips = CARDS:match("S%.BuildFilterChips = function%(host, width%)(.-)\nend\n")
+    check(chips ~= nil, "showing: the chip builder's body can be read")
+    chips = chips or ""
+    check(chips:find("S.activeFilter = capturedKey", 1, true) ~= nil,
+          "showing: a chip writes S.activeFilter -- no new key, no db write")
+    check(chips:find([[S.SwitchTab("effects")]], 1, true) ~= nil,
+          "showing: ...and redraws the page, because WHICH effects are listed changed")
+    check(chips:find("width or 260", 1, true) ~= nil,
+          "showing: the flow falls back only when it was told nothing at all")
+
+    -- The order the approved sketch draws: add, then filter, then the list.
+    local addAt  = ROWS:find("local addBand = GUI:CreateSettingsGroup", 1, true)
+    local showAt = ROWS:find("local showBand = GUI:CreateSettingsGroup", 1, true)
+    local headAt = ROWS:find("GUI:AddDesignerLegacyTab(shell, function(host)", 1, true)
+    check(addAt and showAt and headAt and addAt < showAt and showAt < headAt,
+          "showing: + Add Indicator, then Showing, then ACTIVE INDICATORS")
+
+    local EN = df_file_source("Locales/enUS.lua")
+    check(EN:find("L[\"Showing\"] = true", 1, true) ~= nil,
+          "showing: the one new string is in the source locale")
 end
 
 -- ============================================================
@@ -1330,32 +1491,50 @@ do
     check(verb:find("if host.layoutHeight == h then return end", 1, true) ~= nil,
           "narrow: ...and early-outs when nothing moved, so a re-flow cannot loop")
 
-    -- ---- class one: the effects head area ------------------------------
+    -- ---- class one: the effects head area, and the chips leaving it -----
+    -- ☠ THE CLASS-1 HAZARD IS RETIRED HERE, NOT RELOCATED. The chip row was the
+    -- flow element whose height was measured before the layout pass and then
+    -- spent to position everything below. In a popout pane the width is the
+    -- popout's own content width and there is nothing below it on the page to
+    -- displace, so the compensation is DELETED rather than carried across.
     local HEAD = CARDS:match("S%.BuildEffectsHeadArea = function.-\n    return yPos, false\nend")
     check(HEAD ~= nil, "narrow: the effects head area can be read")
     HEAD = HEAD or ""
     -- The column is the HOST's explicit width less its two insets, not a child's
-    -- unresolved one.
+    -- unresolved one. Still true for the split panel, which still flows chips.
     check(HEAD:find("local hostW = parent:GetWidth()", 1, true) ~= nil,
           "narrow: the head area derives its column from the host it was sized to")
     check(HEAD:find("local COL_W = (hostW > 40) and (hostW - 16) or nil", 1, true) ~= nil,
           "narrow: ...as the host's width less the 8px inset on each side")
-    check(HEAD:find("if maxW < 20 then maxW = COL_W or 260 end", 1, true) ~= nil,
-          "narrow: the chips wrap to that column, not to a hardcoded 260")
-    -- (X) THE ABSENCE IS THE ASSERTION. This exact line is the bug: the chips'
-    -- height read the instant the first pass ended, spent on the y cursor, and
-    -- never revisited.
-    check(HEAD:find("yPos = yPos - (chipsFrame:GetHeight() + 10)", 1, true) == nil,
-          "narrow: the chip row's height is not consumed the moment it is first measured")
-    check(HEAD:find('obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT"', 1, true) ~= nil,
+    check(HEAD:find("S.BuildFilterChips(chipsFrame, COL_W)", 1, true) ~= nil,
+          "narrow: ...and hands that column to the chips rather than letting them guess")
+    check(CARDS:find("if maxW < 20 then maxW = width or 260 end", 1, true) ~= nil,
+          "narrow: the chips wrap to the width they are TOLD, not to one they measure")
+
+    -- (X) THE ABSENCE IS THE ASSERTION, twice over.
+    check(HEAD:find("dfSetHeight", 1, true) == nil,
+          "narrow: the head area no longer re-reports a band height it cannot change")
+    check(CARDS:find("parent.dfSetHeight", 1, true) == nil,
+          "narrow: ...and the dead re-report is gone from the file, not left to rot")
+    -- The verb it fed is still there for the band host that still needs one; only
+    -- this consumer went.
+    check(SHELL:find("host.dfSetHeight = function", 1, true) ~= nil,
+          "narrow: the shell keeps the verb for any flowing block that still needs it")
+
+    -- The band layout builds no chips at all, so it has nothing to compensate for.
+    check(HEAD:find("if not skipChips then", 1, true) ~= nil,
+          "narrow: the chips are the split panel's alone")
+    check(ROWS:find("S.BuildFilterChips(pane, PopoutWidth())", 1, true) ~= nil,
+          "narrow: ...and the band layout's flow against a width known before it starts")
+
+    -- The split panel still re-flows on resize; what it no longer does is try to
+    -- move bands it does not have.
+    local reflow = HEAD:match('chipsFrame:SetScript%("OnSizeChanged", function%(_, w%)(.-)end%)')
+    check(reflow ~= nil, "narrow: the chip row still re-flows on resize")
+    check((reflow or ""):find("Relayout(w)", 1, true) ~= nil,
+          "narrow: ...at the width the resize reports")
+    check(HEAD:find([[obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT"]], 1, true) ~= nil,
           "narrow: what follows the chips is anchored TO them, so a re-wrap carries it")
-    check(HEAD:find("local function Measure()", 1, true) ~= nil,
-          "narrow: the head area's height is a verb, so it can be asked twice")
-    local reflow = HEAD:match('chipsFrame:SetScript%("OnSizeChanged", function%(%)(.-)end%)')
-    check(reflow ~= nil, "narrow: the chip row re-flows on resize")
-    reflow = reflow or ""
-    check(reflow:find("parent.dfSetHeight", 1, true) ~= nil,
-          "narrow: ...and re-reports the band's height, instead of leaving the page stale")
 
     -- ---- class one: the choice cards ------------------------------------
     -- A card's description WRAPS inside a fixed 58px card. Two lines at 850,
@@ -1618,24 +1797,29 @@ do
     check(SW:find('delBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)', 1, true) ~= nil,
           "row: a caller that asks for nothing keeps the four-button chain")
 
-    -- ...which is what buys the spec picker a place on that row.
+    -- ☠ AND SPEC HAS SINCE LEFT THAT ROW AGAIN. Section 20.2 puts the pool picker
+    -- beside Spec, and three labelled pickers do not fit one band at the window's
+    -- 520px minimum -- where the preset bar's own dropdown is already down to
+    -- ~113px. So the pair moved DOWN to the band the pool strip held, and row 2
+    -- is the template bar's alone: the overflow menu now buys the bar its own
+    -- width back rather than buying Spec a seat.
     check(ROWS:find("S.BuildSpecPicker = function(host)", 1, true) ~= nil,
           "row: the spec picker is a block, not a strip")
-    check(ROWS:find('presetBar:SetPoint("RIGHT", specHost, "LEFT", -10, 0)', 1, true) ~= nil,
-          "row: ...sharing row 2 of the banner with the template bar")
+    check(ROWS:find([[presetBar:SetPoint("RIGHT", banner, "RIGHT", -10, -18)]], 1, true) ~= nil,
+          "row: ...and row 2 of the banner is the template bar's whole width")
+    check(ROWS:find([[presetBar:SetPoint("RIGHT", specHost, "LEFT", -10, 0)]], 1, true) == nil,
+          "row: ...with nothing sharing it")
     check(ROWS:find("overflowActions = true", 1, true) ~= nil,
-          "row: ...paid for by the preset bar's overflow menu")
+          "row: the four actions are still behind one glyph")
     check(ROWS:find("SPECBAR_H", 1, true) == nil,
-          "row: ...and the 26px spec strip is gone")
+          "row: ...and the 26px spec strip is still gone")
     check(ROWS:find("S.BuildSpecStrip", 1, true) == nil,
           "row: ...along with the verb that built it")
-    -- """ + WA + """ A SHARE OF THE ROW, NOT A SMALLER MAGIC NUMBER. The band is whatever the
-    -- window is, and a fixed spec block is a third of a narrow row and a sixth of
-    -- a wide one.
-    check(ROWS:find("specHost:SetWidth(max(120, math.floor(w * 0.34)))", 1, true) ~= nil,
-          "row: the spec block takes a share of the live width")
-    check(ROWS:find('banner:HookScript("OnSizeChanged", function(_, w) SizeSpec(w) end)', 1, true) ~= nil,
-          "row: ...re-taken whenever the banner changes width")
+    -- The banner no longer sizes a block it does not hold.
+    check(ROWS:find("specHost:SetWidth(max(120, math.floor(w * 0.34)))", 1, true) == nil,
+          "row: the banner no longer sizes a spec block")
+    check(ROWS:find([[banner:HookScript("OnSizeChanged", function(_, w) SizeSpec(w) end)]], 1, true) == nil,
+          "row: ...nor re-takes a share for one")
 end
 
 print("-- Aura Designer: the canvas folds, under a literal key")
@@ -1691,34 +1875,62 @@ do
     -- restating them would only test that this file agrees with itself.
     local banner  = tonumber(ROWS:match("banner, (%d+)\n"))
                  or tonumber(ROWS:match("return banner, (%d+)"))
+    local scope   = tonumber(ROWS:match("local SCOPEROW_H = (%d+)"))
     local pool    = tonumber(ROWS:match("local BUFFTAB_H = (%d+)"))
     local tabbar  = tonumber(SHELL:match("local TABBAR_H = (%d+)"))
     local F, PAD, DY = CARDS:match("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = (%d+), (%d+), (%d+)")
     F, PAD, DY = tonumber(F), tonumber(PAD), tonumber(DY)
     local foldHeader = tonumber(SHELL:match("Add%(section, (%d+), \"both\"%)"))
-    check(banner and pool and tabbar and F and PAD and DY and foldHeader,
+    check(banner and scope and pool and tabbar and F and PAD and DY and foldHeader,
           "chrome: every band's height can be read from the source")
 
     -- The canvas at the scale the complaint was measured at.
     local fh, scale = 64, 1.5
     local canvas = math.max(132, math.ceil(math.max(2 * F - 2 * DY + fh * scale,
                                                     2 * PAD + 2 * DY + fh * scale)))
-    -- A popout row is one plate plus its gap -- the kit's own constants.
+    -- A popout row is one plate plus its gap -- the kit's own constants. There
+    -- are TWO of them above the list now: Add Indicator, and Showing.
     local THEME = ui_file_source("Theme.lua")
     local plate = tonumber(THEME:match("plate%s*= (%d+)"))
     local gap   = tonumber(THEME:match("gap%s*= (%d+)"))
     check(plate and gap, "chrome: ...including what a popout row costs")
-    local addRow = plate + gap
+    local popoutRow = plate + gap
 
-    local open   = banner + foldHeader + canvas + pool + tabbar + addRow
-    local folded = banner + foldHeader + pool + tabbar + addRow
+    -- ☠ AND THE BAND SECTION 19 NEVER COUNTED. The ACTIVE INDICATORS caption sits
+    -- between the last row and the first indicator and was left out of every
+    -- earlier sum. With the chips gone it is the caption and nothing else: the
+    -- caller starts its y cursor at -4, the caption costs 16, and the band is
+    -- -(y) + 4.
+    local startY  = tonumber(ROWS:match("S%.BuildEffectsHeadArea%(host, %-(%d+),"))
+    local caption = tonumber(CARDS:match(
+        "activeHeader:SetTextColor%(C_TEXT_DIM%.r, C_TEXT_DIM%.g, C_TEXT_DIM%.b%)\n    yPos = yPos %- (%d+)"))
+    check(startY and caption, "chrome: ...and what the caption band costs")
+    local head = (startY or 0) + (caption or 0) + 4
 
-    -- Was 542 (banner 68, canvas 160, pool 30, spec 26, tabs 28, add block 230).
-    -- The spec strip is gone entirely, so it is not in either sum.
-    check(open <= 340,
-          "chrome: the page above the first indicator is under 340px with the canvas open")
-    check(folded <= 210,
-          "chrome: ...and under 210px with it folded")
+    local open   = banner + foldHeader + canvas + scope + tabbar + 2 * popoutRow + head
+    local folded = banner + foldHeader + scope + tabbar + 2 * popoutRow + head
+
+    -- Was 542 at the start of the diet (banner 68, canvas 160, pool 30, spec 26,
+    -- tabs 28, add block 230), on a basis that counted neither the caption band
+    -- nor a filter row. On THIS basis: 68 + 28 + 132 + 26 + 28 + 50 + 50 + 24.
+    check(open <= 410,
+          "chrome: the page above the first indicator is under 410px with the canvas open")
+    check(folded <= 280,
+          "chrome: ...and under 280px with it folded")
     check(canvas <= 132,
           "chrome: the canvas at 1.5x is back to its 132px floor")
+
+    -- ⚠ SECTION 20.2 CLAIMED 30px BACK AND THERE IS NO 30px TO TAKE. The strip is
+    -- REPLACED by the scope row, not removed -- two labelled pickers need a band,
+    -- and the banner row they were supposed to join is already full at the
+    -- window's 520px minimum. What the move must not do is cost MORE than the
+    -- strip it replaced.
+    check(scope <= pool,
+          "chrome: the scope row costs no more than the pool strip it replaces")
+    -- ...and on section 19's own basis -- which stopped at the add row -- the page
+    -- above the first indicator did not grow. It was 336 open / 204 folded.
+    check(banner + foldHeader + canvas + scope + tabbar + popoutRow <= 336,
+          "chrome: on section 19's own basis the page is no taller than it was")
+    check(banner + foldHeader + scope + tabbar + popoutRow <= 204,
+          "chrome: ...folded, likewise")
 end

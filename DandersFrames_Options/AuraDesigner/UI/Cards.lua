@@ -3311,6 +3311,108 @@ S.BuildAddIndicatorPane = function(host, opts)
     return { Show = Show }
 end
 
+-- ============================================================
+-- THE FILTER CHIPS -- WHICH EFFECT TYPE THE LIST IS SHOWING
+-- ------------------------------------------------------------
+-- ONE definition, two hosts: a wrapping row inside the split panel's column,
+-- and the pane behind the popout layout's `Showing` row (AuraDesigner/UI/Rows.lua).
+-- The chips predate the all-rows rule they break -- a setting with more than one
+-- option goes in a popout -- and in a panel they also stop being a flow with
+-- nothing to flow against: the pane's width is the popout's own content width,
+-- known before a single chip is placed.
+--
+-- ⚠ A FUNCTION, NOT A FILE-SCOPE TABLE. Every label is an L[...] lookup, and a
+-- table built at load freezes whatever locale was live then -- the trap
+-- DF:RegisterLocaleRefresh exists for. Rebuilt per call, which is once per build
+-- of the surface that shows them.
+local function FilterChips()
+    return {
+        { key = "all",         label = L["All"]    },
+        { key = "icon",        label = L["Icon"]   },
+        { key = "square",      label = L["Square"] },
+        { key = "bar",         label = L["Bar"]    },
+        { key = "border",      label = L["Border"] },
+        { key = "healthbar",   label = L["Health"] },
+        { key = "nametext",    label = L["Name"]   },
+        { key = "healthtext",  label = L["HP"]     },
+    }
+end
+P.FilterChips = FilterChips
+
+-- What the `Showing` row reports. Read off the SAME list the chips are built
+-- from, so a chip added there cannot summarise as its own raw key here.
+local function ActiveFilterLabel()
+    local active = S.activeFilter or "all"
+    for _, chip in ipairs(FilterChips()) do
+        if chip.key == active then return chip.label end
+    end
+    return L["All"]
+end
+P.ActiveFilterLabel = ActiveFilterLabel
+
+local CHIP_H, CHIP_GAP, CHIP_ROW_GAP = 22, 4, 4
+
+-- Flow the chips into `host` and size it to what they took. `width` is the
+-- column they wrap against, passed IN rather than measured off the host: at
+-- build time the host's own width is a number the layout pass has not reached
+-- yet, and reading it is what made the chips flow at a hardcoded 260.
+--
+-- Returns the re-flow verb, for a host whose width can still move -- the split
+-- panel's column does, a pane's does not.
+S.BuildFilterChips = function(host, width)
+    local chipBtns = {}
+    for _, chip in ipairs(FilterChips()) do
+        local chipBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+        chipBtn:SetHeight(CHIP_H)
+
+        local chipTxt = chipBtn:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(chipTxt, 10, "OUTLINE")
+        chipTxt:SetPoint("CENTER", 0, 0)
+        chipTxt:SetText(chip.label)
+        chipTxt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+        local tw = chipTxt:GetStringWidth()
+        chipBtn:SetWidth(max(tw + 16, 32))
+
+        -- Shared styling: standard hover + an active (selected) state marked by a
+        -- prominent accent border. The surface rebuilds on click, so set active here.
+        GUI:StyleButton(chipBtn)
+        chipBtn:SetActive((S.activeFilter or "all") == chip.key)
+
+        local capturedKey = chip.key
+        chipBtn:SetScript("OnClick", function()
+            S.activeFilter = capturedKey
+            -- ⚠ THE FULL REDRAW, NOT ADStructuralRedraw, even from inside an open
+            -- pane. Which effects are listed is what just changed, and that is the
+            -- PAGE's business rather than the pane's -- so the panel falling shut
+            -- behind the answer is the right shape here, the same way a dropdown
+            -- closes on the option you picked.
+            S.SwitchTab("effects")
+        end)
+
+        tinsert(chipBtns, chipBtn)
+    end
+
+    local function LayoutChips(w)
+        local maxW = tonumber(w) or host:GetWidth() or 0
+        if maxW < 20 then maxW = width or 260 end
+        local cx, cy = 0, 0
+        for _, btn in ipairs(chipBtns) do
+            local bw = btn:GetWidth()
+            if cx > 0 and (cx + bw) > maxW then
+                cx = 0
+                cy = cy - (CHIP_H + CHIP_ROW_GAP)
+            end
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", host, "TOPLEFT", cx, cy)
+            cx = cx + bw + CHIP_GAP
+        end
+        host:SetHeight(max(-cy + CHIP_H, CHIP_H))
+    end
+    LayoutChips(width)
+    return LayoutChips
+end
+
 -- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
 -- mounts exactly this furniture above its band of effect rows. The add flow is a
 -- later phase of the designer rework, and a second copy of it here would be a
@@ -3323,11 +3425,16 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     local tc = GetThemeColor()
     -- ☠ opts.skipAddBlock: THE ROW LAYOUT HAS NO ADD BLOCK ON THE PAGE. Phase 5
     -- moved the three scope cards and the picker column they open into the panel
-    -- behind one "+ Add Indicator" row (S.BuildAddIndicatorPane above), so in that
-    -- layout this function draws only the ACTIVE INDICATORS caption and the filter
-    -- chips. The split panel still draws the block: it is the one surface with
-    -- 230px to spend on standing furniture.
+    -- behind one "+ Add Indicator" row (S.BuildAddIndicatorPane above). The split
+    -- panel still draws the block: it is the one surface with 230px to spend on
+    -- standing furniture.
     local skipAdd = opts and opts.skipAddBlock or false
+    -- ☠ opts.skipChips: THE ROW LAYOUT'S FILTER IS A ROW, NOT A CHIP FLOW. The
+    -- eight chips became the pane behind a `Showing` popout row, so in that layout
+    -- this function draws only the ACTIVE INDICATORS caption and the Any Buff hint
+    -- -- and, with the one flowing element gone, it reports a height that cannot
+    -- be wrong. See S.BuildFilterChips above for the chips themselves.
+    local skipChips = opts and opts.skipChips or false
 
     -- ☠ THE WIDTH THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED. Every
     -- object below is anchored 8px inside the host on both sides, so the column
@@ -3507,117 +3614,43 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     activeHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     yPos = yPos - 16
 
-    -- ── FILTER CHIPS (wrapping layout) ──
-    local chipsFrame = CreateFrame("Frame", nil, parent)
-    chipsFrame:SetPoint("TOPLEFT", 8, yPos)
-    chipsFrame:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-    local FILTER_CHIPS = {
-        { key = "all",         label = L["All"]    },
-        { key = "icon",        label = L["Icon"]   },
-        { key = "square",      label = L["Square"] },
-        { key = "bar",         label = L["Bar"]    },
-        { key = "border",      label = L["Border"] },
-        { key = "healthbar",   label = L["Health"] },
-        { key = "nametext",    label = L["Name"]   },
-        { key = "healthtext",  label = L["HP"]     },
-    }
-
-    local CHIP_H = 22
-    local CHIP_GAP = 4
-    local CHIP_ROW_GAP = 4
-    local chipBtns = {}
-
-    for _, chip in ipairs(FILTER_CHIPS) do
-        local chipBtn = CreateFrame("Button", nil, chipsFrame, "BackdropTemplate")
-        chipBtn:SetHeight(CHIP_H)
-
-        local chipTxt = chipBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(chipTxt, 10, "OUTLINE")
-        chipTxt:SetPoint("CENTER", 0, 0)
-        chipTxt:SetText(chip.label)
-        chipTxt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        local tw = chipTxt:GetStringWidth()
-        chipBtn:SetWidth(max(tw + 16, 32))
-
-        -- Shared styling: standard hover + an active (selected) state marked by a
-        -- prominent accent border. The row rebuilds on click, so set active here.
-        GUI:StyleButton(chipBtn)
-        chipBtn:SetActive(S.activeFilter == chip.key)
-
-        local capturedKey = chip.key
-        chipBtn:SetScript("OnClick", function()
-            S.activeFilter = capturedKey
-            S.SwitchTab("effects")
-        end)
-
-        tinsert(chipBtns, chipBtn)
+    -- ── FILTER CHIPS (wrapping layout, split panel only) ──
+    -- ☠ AND THE HEIGHT COMPENSATION IS GONE WITH THEM, NOT MOVED. Section 17's
+    -- Class 1 -- a height measured before layout and then spent -- had two halves
+    -- here: flow against a width DERIVED from the host, and re-report through the
+    -- band host's own height verb when it changed anyway. Only the BAND layout
+    -- ever carried that verb, and the band layout no longer builds chips, so the
+    -- re-report had no host left to reach. The split panel scrolls a fixed-width
+    -- column and never had the problem: it re-flows, and nothing below it moves.
+    local chipsFrame
+    if not skipChips then
+        chipsFrame = CreateFrame("Frame", nil, parent)
+        chipsFrame:SetPoint("TOPLEFT", 8, yPos)
+        chipsFrame:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        local Relayout = S.BuildFilterChips(chipsFrame, COL_W)
+        chipsFrame:SetScript("OnSizeChanged", function(_, w) Relayout(w) end)
+        yPos = yPos - (chipsFrame:GetHeight() + 10)
     end
-
-    -- ☠ A FLOW, AND THEREFORE A HEIGHT NOBODY KNOWS YET. The chips wrap to the
-    -- column, so how tall this row is depends on how wide it is -- and the
-    -- caller's y-cursor spends that height the instant the first pass finishes.
-    -- The first pass used to run against chipsFrame:GetWidth(), which is a
-    -- derived width the layout has not resolved at build time, and fell back to a
-    -- flat 260; OnSizeChanged then re-wrapped at the real width, changed the
-    -- height, and moved nothing below it.
-    --
-    -- Two halves to the repair. This one is the WIDTH: flow against the column
-    -- the host was explicitly sized to (COL_W), so the build-time shape IS the
-    -- final shape. The second is the HEIGHT, in Measure below.
-    local chipsTopY = yPos
-    local function LayoutChips()
-        local maxW = chipsFrame:GetWidth() or 0
-        if maxW < 20 then maxW = COL_W or 260 end
-        local cx, cy = 0, 0
-        for _, btn in ipairs(chipBtns) do
-            local bw = btn:GetWidth()
-            if cx > 0 and (cx + bw) > maxW then
-                cx = 0
-                cy = cy - (CHIP_H + CHIP_ROW_GAP)
-            end
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", chipsFrame, "TOPLEFT", cx, cy)
-            cx = cx + bw + CHIP_GAP
-        end
-        chipsFrame:SetHeight(max(-cy + CHIP_H, CHIP_H))
-    end
-    LayoutChips()
 
     -- ── OTHER BUFFS HINT ──
-    -- ⚠ ANCHORED UNDER THE CHIP ROW, not at a y the chips' first pass happened to
-    -- produce. It is the one thing below a wrapping element in this area, so it is
-    -- also the one thing a re-wrap would otherwise strand.
+    -- ⚠ ANCHORED UNDER THE CHIP ROW where there is one, not at a y the chips'
+    -- first pass happened to produce. It is the one thing below a wrapping element
+    -- in this area, so it is also the one thing a re-wrap would otherwise strand.
     local obHint
     if IsOtherTab() then
         obHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT", 0, -10)
+        if chipsFrame then
+            obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT", 0, -10)
+        else
+            obHint:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, yPos)
+        end
         obHint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
         obHint:SetJustifyH("LEFT")
         obHint:SetWordWrap(true)
         obHint:SetText(L["These indicators trigger no matter who casts the buff."])
         obHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+        yPos = yPos - (max(obHint:GetStringHeight(), 12) + 10)
     end
-
-    -- What this area occupies, as a verb rather than a number: everything above
-    -- the chips is fixed, the chips are not.
-    local function Measure()
-        local y = chipsTopY - (chipsFrame:GetHeight() + 10)
-        if obHint then y = y - (max(obHint:GetStringHeight(), 12) + 10) end
-        return y
-    end
-    yPos = Measure()
-
-    -- ...and the HEIGHT half. A band host carries dfSetHeight
-    -- (GUI/DesignerShell.lua): re-report and the bands below move, instead of
-    -- everything staying at the offset the first, narrower guess produced. The
-    -- split panel has no such verb and never had this problem -- it scrolls a
-    -- fixed-width column.
-    chipsFrame:SetScript("OnSizeChanged", function()
-        LayoutChips()
-        if parent.dfSetHeight then parent.dfSetHeight(-Measure() + 4) end
-    end)
 
     return yPos, false
 end
