@@ -645,6 +645,160 @@ function UI:StyleButton(btn, opts)
 end
 
 -- ============================================================
+-- A FOLDER TAB -- A TAB THAT BELONGS TO THE PANEL UNDER IT
+-- ------------------------------------------------------------
+-- StyleButton's `tab = true` draws the kit's UNDERLINE tab: a transparent cell
+-- with an accent stripe along its bottom. That is the right shape for a strip
+-- that switches which VIEW of a page you are looking at, and it is what the
+-- designers' Effects / Layout Groups / Global strip wears.
+--
+-- This is the other kind. A folder tab sits directly ON TOP of a panel and says
+-- what that panel is SHOWING, so it has to read as part of it: the selected tab
+-- is the same fill as the panel, joined to it with no seam, and the ones that
+-- are not selected are set BACK -- shorter, darker, outlined, so they read as
+-- sheets behind the front one. That is a different sentence from an underline
+-- tab, and the two can then stand on the same page without reading as "tabs
+-- inside tabs", which is the complaint that produced this helper.
+--
+-- ☠ THE SELECTED TAB HAS NO RING, and that is the whole of "joined". A ring is
+-- a closed loop -- the baked `top` shape rounds the two upper corners but still
+-- strokes all four sides -- so a selected tab wearing one draws a 1px line along
+-- exactly the edge that is supposed to have disappeared into the panel. This is
+-- the same bargain UI:ApplyRoundedStrip already strikes for a popout's title
+-- strip (`border = false`), and for the same reason: a top-rounded piece that
+-- joins something below it is a FILL, not a box.
+--
+-- ⚠ NO HIGHLIGHT TEXTURE, either. The native HIGHLIGHT layer is a rectangle and
+-- would paint square corners back over the two arcs on every mouseover. Hover is
+-- a fill/label lift applied through the surface instead, which follows the shape.
+--
+-- ⚠ HONEST LIMIT, UNVERIFIED IN GAME. The tab drops its OWN bottom edge, but a
+-- bordered panel underneath still draws its own top edge, so a hairline may
+-- remain along the join. Covering it needs either a 1px patch painted in the
+-- panel's fill -- which is translucent, so it lightens the line rather than
+-- removing it -- or raising this strip above the panel's frame level so the patch
+-- wins, which is sibling draw-order guesswork that cannot be checked headlessly.
+-- Neither was taken. If the join reads as a line in game, the fix belongs on the
+-- PANEL (drop its top edge under a joined strip), not here.
+--
+-- opts:
+--   text        the label
+--   font        font object name (default DFFontHighlightSmall)
+--   radius      corner radius, 4 | 6 | 8 (default 6)
+--   setBack     how much shorter an UNSELECTED tab is (default 6). It is
+--               anchored to the strip's BOTTOM, so this is also how far its top
+--               edge sits below the selected one's.
+--   activeFill / inactiveFill / border   {r,g,b,a}, defaulted from the theme
+--   onClick     fn(btn)
+--   tooltip     a ShowTooltip spec { title=, lines= }
+--
+-- The caller anchors it (both a TOPLEFT and a BOTTOMLEFT are re-issued by
+-- SetActive, so anchor by LEFT/RIGHT or by width and let this own the vertical)
+-- and drives it with btn:SetActive(bool) -- the same verb StyleButton's tabs
+-- take, so a strip can be swapped between the two languages without rewiring.
+function UI:StyleFolderTab(btn, opts)
+    local host = self
+    opts = opts or {}
+    local radius  = opts.radius or 6
+    local setBack = opts.setBack or 6
+
+    -- Panel colour for the selected tab so it composites to EXACTLY what the
+    -- band below it composites to -- both are C_PANEL at the same alpha over the
+    -- same page ground, so the join is invisible rather than nearly invisible.
+    local activeFill   = opts.activeFill   or { C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8 }
+    local inactiveFill = opts.inactiveFill or { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.85 }
+    local edge         = opts.border       or { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 }
+
+    if opts.text ~= nil then
+        if not btn.Text then
+            btn.Text = btn:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+            if btn.SetFontString then btn:SetFontString(btn.Text) end
+        end
+        btn.Text:SetText(opts.text)
+        btn.Text:ClearAllPoints()
+        btn.Text:SetPoint("CENTER", 0, 0)
+    end
+
+    -- ☠ THE SQUARE BACKDROP HAS TO COME DOWN, and ApplyRoundedChrome is the one
+    -- call that does it: a rounded fill lives at a NEGATIVE background sublevel,
+    -- UNDER a backdrop's bgFile, so a frame that keeps its backdrop renders the
+    -- square in front of a surface that is drawing perfectly. See Round.lua.
+    local function paint(self)
+        local on = self.dfActive
+        host:ApplyRoundedChrome(self, {
+            radius  = radius,
+            corners = { tl = true, tr = true },
+            fill    = on and activeFill or inactiveFill,
+            border  = (not on) and edge or false,
+        })
+    end
+
+    -- Selected: full height, top-anchored, so its bottom edge IS the strip's
+    -- bottom edge and therefore the top edge of whatever band follows. Not
+    -- selected: `setBack` shorter and bottom-anchored, which puts its top edge
+    -- that far down and reads as a sheet behind the front one.
+    local function reseat(self)
+        local p = self:GetParent()
+        if not p then return end
+        local x = self.dfFolderX or 0
+        self:ClearAllPoints()
+        self:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", x, 0)
+        self:SetPoint("TOPLEFT", p, "TOPLEFT", x, self.dfActive and 0 or -setBack)
+    end
+
+    -- The caller's x within the strip, remembered so reseat can re-issue both
+    -- points on every state change without the caller re-anchoring.
+    function btn:SetFolderX(x)
+        self.dfFolderX = x or 0
+        reseat(self)
+    end
+
+    function btn:SetActive(active)
+        self.dfActive = active and true or false
+        reseat(self)
+        paint(self)
+        if self.Text then
+            if self.dfActive then
+                self.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            else
+                self.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            end
+        end
+    end
+
+    btn:SetScript("OnEnter", function(self)
+        if not self.dfActive then
+            host:ApplyRoundedChrome(self, {
+                radius  = radius,
+                corners = { tl = true, tr = true },
+                fill    = { C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.9 },
+                border  = edge,
+            })
+            if self.Text then self.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b) end
+        end
+        if opts.tooltip then host:ShowTooltip(self, opts.tooltip) end
+    end)
+    local function leave(self)
+        if not self.dfActive then
+            paint(self)
+            if self.Text then self.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end
+        end
+        if opts.tooltip then host:HideTooltip() end
+    end
+    btn:SetScript("OnLeave", leave)
+    -- OnLeave does not fire for a button hidden under the cursor -- the same trap
+    -- StyleButton's own OnHide hook exists for, and a tab strip is rebuilt under
+    -- a stationary mouse every time the page refreshes.
+    btn:HookScript("OnHide", leave)
+    if opts.onClick then
+        btn:SetScript("OnClick", function(self) opts.onClick(self) end)
+    end
+
+    btn:SetActive(btn.dfActive)
+    return btn
+end
+
+-- ============================================================
 -- A GROUP'S SELECTION MARKER
 -- ------------------------------------------------------------
 -- ONE accent bar for a whole group of tabs or nav rows, which GLIDES from the
