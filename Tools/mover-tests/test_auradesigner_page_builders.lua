@@ -601,10 +601,16 @@ do
     check(SHELL:find("shell.Add(host, h, \"both\")", 1, true) ~= nil,
           "head: ...which lands in the band column at the band's edges")
 
-    check(ROWS:find("S.BuildEffectsHeadArea(host, -4)", 1, true) ~= nil,
-          "head: the Effects add block and chips are the card layout's own")
-    check(CARDS:find("S.BuildEffectsHeadArea = function(parent, yPos)", 1, true) ~= nil,
+    -- ☠ ...AND SINCE PHASE 5, THE ROW LAYOUT ASKS FOR LESS OF IT. The add block
+    -- is a panel on this page, so the head area draws only the caption and the
+    -- chips here -- one function, one call site per layout, and the difference
+    -- between them is an argument rather than a second copy.
+    check(ROWS:find("S.BuildEffectsHeadArea(host, -4, { skipAddBlock = true })", 1, true) ~= nil,
+          "head: the Effects caption and chips are the card layout's own")
+    check(CARDS:find("S.BuildEffectsHeadArea = function(parent, yPos, opts)", 1, true) ~= nil,
           "head: ...declared once, in the card file")
+    check(CARDS:find("local skipAdd = opts and opts.skipAddBlock or false", 1, true) ~= nil,
+          "head: ...and the add block is what the argument turns off")
     local heads = 0
     for _ in CARDS:gmatch("S%.BuildEffectsHeadArea") do heads = heads + 1 end
     eq(heads, 2, "head: ...declared once and mounted once by the card")
@@ -1093,7 +1099,7 @@ end
 -- ============================================================
 print("-- Aura Designer: the canvas")
 do
-    check(ROWS:find("S.framePreview = CreateFramePreview(host, 0, nil, { compact = true })", 1, true) ~= nil,
+    check(ROWS:find("S.framePreview = CreateFramePreview(host, 0, nil, { compact = true, hideLabel = true })", 1, true) ~= nil,
           "canvas: the row page mounts the SAME canvas the split panel built")
     check(CARDS:find("local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)", 1, true) ~= nil,
           "canvas: ...through one added option, so the split panel is untouched")
@@ -1416,4 +1422,303 @@ do
           "narrow: the empty-group warning wraps at a width it was TOLD, so it can be measured")
     check(CARDS:find("tagY = tagY - (max(warn:GetStringHeight() or 0, 14) + 12)", 1, true) ~= nil,
           "narrow: ...and the cursor advances by what it measured, not a one-line 26")
+end
+
+-- ============================================================
+-- 14. THE CHROME DIET  (phase 5 + the four moves, spec section 18)
+-- ------------------------------------------------------------
+-- Measured at a 600px window, 542px of chrome stood between the top of this page
+-- and the first indicator: enable banner 68, canvas 160, pool strip 30, spec
+-- strip 26, tab strip 28, add block ~230. Four moves, approved together:
+--
+--   1. the add block becomes ONE row that opens a panel (phase 5)
+--   2. Preview Scale becomes a glyph in the canvas's top-right
+--   3. Template and Spec share a row, paid for by an overflow menu
+--   4. the canvas folds, under a LITERAL key
+--
+-- Each section below says what one move IS; the numbers are pinned at the end.
+-- ============================================================
+print("-- Aura Designer: the add flow is a panel, not standing furniture")
+do
+    -- ---- move 1: the add block is one row ------------------------------
+    check(CARDS:find("S.BuildAddIndicatorPane = function(host, opts)", 1, true) ~= nil,
+          "add: the whole add flow is one builder")
+    check(ROWS:find('label  = L["Add Indicator"],', 1, true) ~= nil,
+          "add: ...behind one row on the page")
+    check(ROWS:find("build  = addMount,", 1, true) ~= nil,
+          "add: ...whose panel is that builder")
+    -- """ + SK + """ NO TICK AND NO FOOTER. The row holds no settings -- it is a verb --
+    -- and a footer that quietly wrote nothing is the failure phase 0 was blocked
+    -- on. Same rule the Members and Linked Filters rows follow.
+    local addBlock = ROWS:match("local addBand = GUI:CreateSettingsGroup(.-)Add%(addBand, nil, \"both\"%)")
+    check(addBlock ~= nil, "add: ...and that row's construction can be read")
+    addBlock = addBlock or ""
+    check(addBlock:find("WireModifiedTick", 1, true) == nil,
+          "add: the add row takes no modified tick -- it holds no settings")
+    check(addBlock:find("WireFooter", 1, true) == nil,
+          "add: ...and no footer, so nothing offers to reset what it does not own")
+    check(addBlock:find("if not ctx.adEnabled then addRow.disableOn", 1, true) ~= nil,
+          "add: ...but it greys with the designer, like every other row here")
+
+    -- """ + SK + """ SPELL FIRST. The old order was scope, then type, then spell; the panel
+    -- asks for the spell first and the scope cards are its SECOND step.
+    local pane = CARDS:match("S%.BuildAddIndicatorPane = function%(host, opts%)(.-)\nend\n")
+    check(pane ~= nil, "add: the panel builder's body can be read")
+    pane = pane or ""
+    -- The bare call appears three times -- both back routes reach it -- so this
+    -- names the builder's LAST statement, which is the one that decides which step
+    -- the panel opens on.
+    check(pane:find('Show("spell")\n    return { Show = Show }', 1, true) ~= nil,
+          "add: the panel opens on the spell step")
+    local spellAt = pane:find("local spellPane = NewPane()", 1, true)
+    local scopeAt = pane:find("local scopePane = NewPane()", 1, true)
+    local typeAt  = pane:find("local typePanes = {}", 1, true)
+    check(spellAt and scopeAt and typeAt and spellAt < scopeAt and scopeAt < typeAt,
+          "add: ...then the scope cards, then the types -- spell, scope, type")
+    check(pane:find('Crumb(scopePane, "spell")', 1, true) ~= nil,
+          "add: the scope step can go back to the spell it was given")
+
+    -- """ + WA + """ THE FILTER SCOPE IS NOT SPELL-FIRST AND DOES NOT PRETEND TO BE. It hangs
+    -- the effect off a whole filter, so it is offered on step ONE and skips the
+    -- scope step entirely -- including on the way back out.
+    check(pane:find('onClick = function() Show("type:filter") end', 1, true) ~= nil,
+          "add: the filter route is offered on the FIRST step")
+    check(pane:find('Crumb(pane, (key == "filter") and "spell" or "scope")', 1, true) ~= nil,
+          "add: ...and its back button skips the scope step it never took")
+
+    -- """ + SK + """ THE STEPS ARE BUILT ONCE AND SHOWN OR HIDDEN. Frames cannot be
+    -- garbage-collected in this client and a pane's contents are built once, so a
+    -- step that re-drew itself would leak a card set per click.
+    check(pane:find("for _, p in pairs(panes) do p:Hide() end", 1, true) ~= nil,
+          "add: changing step hides the others rather than rebuilding them")
+    -- ☠ ...AND THE FOURTEEN TYPE CARDS ARE THE ONE THING NOT BUILT EAGERLY.
+    -- A pane's contents are constructed on EVERY page build -- a tab switch, a
+    -- pool switch, a preset switch, an add -- and frames cannot be
+    -- garbage-collected here, so fourteen cards for a step most rebuilds never
+    -- reach is fourteen frames retained per rebuild. MEMOISED, not merely lazy:
+    -- at most three exist per panel, so it cannot leak per click either.
+    check(pane:find("local function TypePane(key)", 1, true) ~= nil,
+          "add: the type cards are built on demand")
+    check(pane:find("if typePanes[key] then return typePanes[key] end", 1, true) ~= nil,
+          "add: ...and kept, so a second visit builds nothing")
+    check(pane:find("if scopeKey then TypePane(scopeKey) end", 1, true) ~= nil,
+          "add: ...built by the step change that asks for them")
+    check(pane:find("if opts.SetHeight then opts.SetHeight(h) end", 1, true) ~= nil,
+          "add: ...and reports the new height instead of assuming one")
+    check(ROWS:find("SetHeight = function(h) if ready then GUI:RelayoutHost(pane, h) end end", 1, true) ~= nil,
+          "add: ...through the shared re-flow verb, which re-sizes pane and panel")
+    -- """ + WA + """ AND IT IS SILENT UNTIL THE PANE HAS JOINED ITS GROUP. The builder shows
+    -- its first step as it finishes; a height reported before AddWidget has run
+    -- would walk past the group and re-run the PAGE's state pass mid-build.
+    check(ROWS:find("ready = true", 1, true) ~= nil,
+          "add: ...armed only after the pane is in the group")
+    local addPaneAt  = ROWS:find("g:AddWidget(pane, max(pane:GetHeight() or 1, 1))", 1, true)
+    local readyAt    = ROWS:find("ready = true", 1, true)
+    check(addPaneAt and readyAt and addPaneAt < readyAt,
+          "add: ...which is what makes the flag true after the add, not before")
+
+    -- The three type lists are ONE declaration now: the panel and the split
+    -- panel's block both build their cards from it.
+    check(CARDS:find("local function AddFlowScopes()", 1, true) ~= nil,
+          "add: the scopes and their type lists are declared once")
+    check(CARDS:find("local SCOPES = AddFlowScopes()", 1, true) ~= nil,
+          "add: ...and read as a verb, so the labels are not frozen on enUS")
+    local scopeReads = 0
+    for _ in CARDS:gmatch("AddFlowScopes%(%)") do scopeReads = scopeReads + 1 end
+    eq(scopeReads, 3, "add: ...by the panel and the split panel's block, off one list")
+
+    -- The add-by-ID path survives the reordering: the half of ADAddByID that
+    -- NAMES a spell had to come out, because the flow has no type yet.
+    check(CARDS:find("local function ADResolveByID(idNum, idText)", 1, true) ~= nil,
+          "add: the naming half of add-by-ID is a verb of its own")
+    check(CARDS:find("local auraName, display, isAdHoc, blocked = ADResolveByID(idNum, idText)", 1, true) ~= nil,
+          "add: ...and ADAddByID is what is left of it")
+    check(pane:find("ADResolveByID(idNum, idText)", 1, true) ~= nil,
+          "add: ...so typing a spell ID still works on the spell step")
+
+    -- """ + WA + """ SPELL-FIRST CREATES A STATE THE OLD ORDER COULD NOT REACH: a spell that
+    -- already has THIS type of effect. The old picker greyed those rows because it
+    -- knew the type; this one cannot, so the type card says so instead of
+    -- silently doing nothing.
+    check(pane:find('DF:Say(L["Already added."])', 1, true) ~= nil,
+          "add: a duplicate is refused out loud on the type card")
+
+    -- ...and the page it came off no longer draws the block at all.
+    check(CARDS:find("if S.effectsPicker and not skipAdd then", 1, true) ~= nil,
+          "add: the row layout never enters the split panel's picker column")
+    local headBody = CARDS:match("S%.BuildEffectsHeadArea = function%(parent, yPos, opts%)(.-)\nend\n")
+    check(headBody ~= nil, "add: the head area's body can be read")
+    headBody = headBody or ""
+    check(headBody:find("if not skipAdd then", 1, true) ~= nil,
+          "add: ...and the pinned block is behind that same switch")
+end
+
+print("-- Aura Designer: Preview Scale is a glyph, not a row across the canvas")
+do
+    -- ---- move 2: the slider moves behind a glyph -----------------------
+    check(CARDS:find("local scaleBtn = GUI:CreateGlyphButton(container, {", 1, true) ~= nil,
+          "scale: the compact canvas carries a glyph, not a slider")
+    check(CARDS:find('scaleBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", -6, -2)', 1, true) ~= nil,
+          "scale: ...in the top-right of its own label strip")
+    -- """ + SK + """ EXACTLY ONE INLINE SLIDER IN THE FILE, and it is the split panel's.
+    -- If a second appears the 30px CANVAS_FURNITURE gave back is being drawn over.
+    local inline = 0
+    for _ in CARDS:gmatch("GUI:CreateSlider%(container,") do inline = inline + 1 end
+    eq(inline, 1, "scale: the canvas builds one inline slider, in the non-compact arm")
+    local compactArm = CARDS:match("local scaleBtn = GUI:CreateGlyphButton%(container,(.-)local scaleSlider = GUI:CreateSlider%(container,")
+    check(compactArm ~= nil, "scale: ...and the arm before it can be read")
+    compactArm = compactArm or ""
+    check(compactArm:find("\n    else\n", 1, true) ~= nil,
+          "scale: ...reached only when the band form did NOT take the glyph")
+
+    -- """ + SK + """ THE PANEL IS POOLED BY KEY, so its build runs once and keeps whatever
+    -- table it captured. The preview-scale table is the current PRESET's, which a
+    -- template or mode switch replaces -- so the slider binds to an indirection.
+    check(CARDS:find("local function ScaleProxy(key)", 1, true) ~= nil,
+          "scale: the panel's slider binds to a stable indirection")
+    check(CARDS:find("scaleHosts[popKey] = { db = scaleDB, apply = ApplyPreviewScale }", 1, true) ~= nil,
+          "scale: ...and whichever canvas is live registers itself behind it")
+    check(CARDS:find("ScaleProxy(popKey), \"previewScale\",", 1, true) ~= nil,
+          "scale: ...so the slider never writes the template it was built against")
+    check(CARDS:find("if pop.dfScaleSlider and pop.dfScaleSlider.RefreshValue then", 1, true) ~= nil,
+          "scale: ...and re-reads its value on every open, because opens are adopts")
+    -- Two designers, two keys: a shared key would hand the Text Designer the panel
+    -- already bound to the Aura Designer's preview scale.
+    check(CARDS:find('local popKey = (opts and opts.scaleKey) or "df.previewscale.aura"', 1, true) ~= nil,
+          "scale: the panel key is the caller's, defaulting to this designer's")
+    check(CARDS:find('if pop and not pop.closed then pop:Close("source") end', 1, true) ~= nil,
+          "scale: the panel goes when its canvas does -- a fold, a rebuild, a close")
+end
+
+print("-- Aura Designer: Template and Spec share a row")
+do
+    -- ---- move 3: four action buttons become one menu --------------------
+    local SW = options_file_source("GUI/SettingsWidgets.lua")
+    check(SW:find("if opts.overflowActions then", 1, true) ~= nil,
+          "row: the preset bar can put its four actions behind one glyph")
+    check(SW:find('overflowBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)', 1, true) ~= nil,
+          "row: ...which takes the right end the four used to chain from")
+    check(SW:find('ddBtn:SetPoint("RIGHT", overflowBtn, "LEFT", -6, 0)', 1, true) ~= nil,
+          "row: ...and the dropdown spans everything left of it")
+    -- """ + SK + """ THE MENU ITEM PRESSES THE BUTTON. Four prompts, two confirmations and
+    -- the Default-template guard live on those buttons; a second copy in the menu
+    -- is a second place for "Delete asks first" to stop being true.
+    local ov = SW:match("if opts.overflowActions then(.-)\n    end\n\n    %-%-")
+    check(ov ~= nil, "row: the overflow block can be read")
+    ov = ov or ""
+    check(ov:find("b:GetScript(\"OnClick\")(b)", 1, true) ~= nil,
+          "row: ...so an item fires the real button rather than repeating its body")
+    check(ov:find("PromptPresetName", 1, true) == nil,
+          "row: ...and no prompt is written a second time")
+    check(ov:find("ConfirmDeletePreset", 1, true) == nil,
+          "row: ...nor the delete confirmation, which is the one that must not be lost")
+    check(ov:find("item.dfOff = (b and b.IsEnabled and not b:IsEnabled()) or false", 1, true) ~= nil,
+          "row: ...and an item greys when its button is disabled, rather than vanishing")
+    -- Still labelled and chained for every caller that did not ask.
+    check(SW:find('delBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)', 1, true) ~= nil,
+          "row: a caller that asks for nothing keeps the four-button chain")
+
+    -- ...which is what buys the spec picker a place on that row.
+    check(ROWS:find("S.BuildSpecPicker = function(host)", 1, true) ~= nil,
+          "row: the spec picker is a block, not a strip")
+    check(ROWS:find('presetBar:SetPoint("RIGHT", specHost, "LEFT", -10, 0)', 1, true) ~= nil,
+          "row: ...sharing row 2 of the banner with the template bar")
+    check(ROWS:find("overflowActions = true", 1, true) ~= nil,
+          "row: ...paid for by the preset bar's overflow menu")
+    check(ROWS:find("SPECBAR_H", 1, true) == nil,
+          "row: ...and the 26px spec strip is gone")
+    check(ROWS:find("S.BuildSpecStrip", 1, true) == nil,
+          "row: ...along with the verb that built it")
+    -- """ + WA + """ A SHARE OF THE ROW, NOT A SMALLER MAGIC NUMBER. The band is whatever the
+    -- window is, and a fixed spec block is a third of a narrow row and a sixth of
+    -- a wide one.
+    check(ROWS:find("specHost:SetWidth(max(120, math.floor(w * 0.34)))", 1, true) ~= nil,
+          "row: the spec block takes a share of the live width")
+    check(ROWS:find('banner:HookScript("OnSizeChanged", function(_, w) SizeSpec(w) end)', 1, true) ~= nil,
+          "row: ...re-taken whenever the banner changes width")
+end
+
+print("-- Aura Designer: the canvas folds, under a literal key")
+do
+    -- ---- move 4: the fold ----------------------------------------------
+    check(SHELL:find("local fold = opts.canvasFold", 1, true) ~= nil,
+          "fold: the shell can put a fold header over the canvas band")
+    check(SHELL:find("if fold and fold.collapseKey then", 1, true) ~= nil,
+          "fold: ...only when the caller named a stable key for it")
+    check(SHELL:find("{ collapseKey = fold.collapseKey })", 1, true) ~= nil,
+          "fold: ...which is what the section persists under")
+    check(SHELL:find("if section then section:RegisterChild(host) end", 1, true) ~= nil,
+          "fold: the canvas band is the section's one child, so the page hides it")
+    check(SHELL:find("if section and not section.expanded then return end", 1, true) ~= nil,
+          "fold: ...and a folded canvas is not regrown by a pinned scale slider")
+
+    -- """ + SK + """ THE HAZARD THIS EXISTS FOR. CreateCollapsibleSection persists a fold
+    -- under the section's TITLE TEXT unless told otherwise -- so a localised title
+    -- writes a second profile key and a reworded one orphans the first. Section
+    -- 14's correction 7 of the rework spec is the same trap, found the hard way.
+    local SW = options_file_source("GUI/SettingsWidgets.lua")
+    check(SW:find("local stateKey = section.collapseKey or text", 1, true) ~= nil,
+          "fold: the section reads its state from the caller's key when it has one")
+    check(SW:find("local persistKey = self.collapseKey or self.sectionTitleText", 1, true) ~= nil,
+          "fold: ...and writes it back to the same slot, not to the title")
+    check(SW:find("saved[persistKey] = (not self.expanded) or nil", 1, true) ~= nil,
+          "fold: ...which is the only place the fold is stored")
+
+    check(ROWS:find('collapseKey = "ad_canvas"', 1, true) ~= nil,
+          "fold: the Aura Designer names its slot with a literal")
+    check(ROWS:find("collapseKey = L[", 1, true) == nil,
+          "fold: ...never with a localised string")
+    local TDROWS = options_file_source("TextDesigner/UI/Rows.lua")
+    check(TDROWS:find('collapseKey = "td_canvas"', 1, true) ~= nil,
+          "fold: the Text Designer names its own, DIFFERENT slot")
+    check(TDROWS:find('collapseKey = "ad_canvas"', 1, true) == nil,
+          "fold: ...so folding one designer's preview does not fold the other's")
+
+    -- One title, not two: the fold header says FRAME PREVIEW, so the canvas
+    -- underneath it must not print the same two words six pixels lower.
+    check(CARDS:find("if opts and opts.hideLabel then previewLabel:Hide() end", 1, true) ~= nil,
+          "fold: a canvas under a fold header drops its own duplicate caption")
+    check(ROWS:find("hideLabel = true", 1, true) ~= nil,
+          "fold: ...which the Aura Designer asks for")
+    check(TDROWS:find("hideLabel = true", 1, true) ~= nil,
+          "fold: ...and so does the Text Designer")
+end
+
+print("-- Aura Designer: what the chrome now costs, band by band")
+do
+    -- """ + SK + """ THE POINT OF ALL FOUR MOVES, AS A NUMBER. Every figure is READ OUT OF
+    -- THE SOURCE rather than restated here, so this fails if a band grows back --
+    -- restating them would only test that this file agrees with itself.
+    local banner  = tonumber(ROWS:match("banner, (%d+)\n"))
+                 or tonumber(ROWS:match("return banner, (%d+)"))
+    local pool    = tonumber(ROWS:match("local BUFFTAB_H = (%d+)"))
+    local tabbar  = tonumber(SHELL:match("local TABBAR_H = (%d+)"))
+    local F, PAD, DY = CARDS:match("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = (%d+), (%d+), (%d+)")
+    F, PAD, DY = tonumber(F), tonumber(PAD), tonumber(DY)
+    local foldHeader = tonumber(SHELL:match("Add%(section, (%d+), \"both\"%)"))
+    check(banner and pool and tabbar and F and PAD and DY and foldHeader,
+          "chrome: every band's height can be read from the source")
+
+    -- The canvas at the scale the complaint was measured at.
+    local fh, scale = 64, 1.5
+    local canvas = math.max(132, math.ceil(math.max(2 * F - 2 * DY + fh * scale,
+                                                    2 * PAD + 2 * DY + fh * scale)))
+    -- A popout row is one plate plus its gap -- the kit's own constants.
+    local THEME = ui_file_source("Theme.lua")
+    local plate = tonumber(THEME:match("plate%s*= (%d+)"))
+    local gap   = tonumber(THEME:match("gap%s*= (%d+)"))
+    check(plate and gap, "chrome: ...including what a popout row costs")
+    local addRow = plate + gap
+
+    local open   = banner + foldHeader + canvas + pool + tabbar + addRow
+    local folded = banner + foldHeader + pool + tabbar + addRow
+
+    -- Was 542 (banner 68, canvas 160, pool 30, spec 26, tabs 28, add block 230).
+    -- The spec strip is gone entirely, so it is not in either sum.
+    check(open <= 340,
+          "chrome: the page above the first indicator is under 340px with the canvas open")
+    check(folded <= 210,
+          "chrome: ...and under 210px with it folded")
+    check(canvas <= 132,
+          "chrome: the canvas at 1.5x is back to its 132px floor")
 end

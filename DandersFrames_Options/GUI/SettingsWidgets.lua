@@ -281,13 +281,24 @@ end
 -- Collapsed state is persisted in DandersFramesDB_v2.collapsedGroups keyed by
 -- `text` (shared store with CreateSettingsGroup's collapsible header), so the
 -- user's fold preference survives reloads.
-function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
+--
+-- ☠ opts.collapseKey NAMES THAT STORE SLOT OUTRIGHT, and anything whose title
+-- is not a hard-coded English constant must pass one. Keying on the TITLE means a
+-- localised heading writes a second slot, a reworded one orphans the old slot, and
+-- a title built from user data (a spell name, a group name) adds one PERMANENT
+-- profile key per record -- a schema change smuggled in under a re-presentation.
+-- AuraDesigner/UI/Rows.lua had to replace Toggle outright to avoid exactly that.
+function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width, opts)
     local section = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     section:SetSize(width or 500, 28)  -- Header height
+    -- The store slot: the caller's stable key when it gave one, else the title --
+    -- which is what every existing caller relies on, so none of them move.
+    section.collapseKey = opts and opts.collapseKey or nil
+    local stateKey = section.collapseKey or text
     -- Resolve initial expanded state: SavedVariables override the default.
     local savedStates = GUI:GetCollapsedGroups()
-    if text and savedStates[text] ~= nil then
-        section.expanded = not savedStates[text]
+    if stateKey and savedStates[stateKey] ~= nil then
+        section.expanded = not savedStates[stateKey]
     else
         section.expanded = defaultExpanded ~= false
     end
@@ -420,10 +431,12 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
         else
             self.arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
         end
-        -- Persist collapsed state to SavedVariables (only store true, remove when expanded)
-        if self.sectionTitleText then
+        -- Persist collapsed state to SavedVariables (only store true, remove when
+        -- expanded). The caller's stable key wins over the title -- see the header.
+        local persistKey = self.collapseKey or self.sectionTitleText
+        if persistKey then
             local saved = GUI:GetCollapsedGroups()
-            saved[self.sectionTitleText] = (not self.expanded) or nil
+            saved[persistKey] = (not self.expanded) or nil
         end
 
         -- Trigger layout refresh (RefreshStates handles show/hide based on expanded state)
@@ -874,11 +887,127 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     -- 150px dropdown the four ran to 467px in the labelled form, which the
     -- designers' old 850px island had room for and a 640px window's ~410px band
     -- does not -- Delete simply left the page.
+    -- ☠ ...OR ALL FOUR COLLAPSE INTO ONE BUTTON. opts.overflowActions puts New /
+    -- Duplicate / Rename / Delete behind a single menu glyph, which costs 22px
+    -- instead of 100 (icon form) or 250 (labelled). That is what buys the room for
+    -- the spec picker to share this row instead of standing on a strip of its own
+    -- -- the chrome diet's third move. The four buttons still exist and still carry
+    -- their own enabled state; only where they are drawn changes.
+    local overflowBtn, overflowMenu
+    if opts.overflowActions then
+        overflowBtn = GUI:CreateGlyphButton(bar, {
+            size = 22, iconSize = 14,
+            texture = "Interface\AddOns\DandersFrames\Media\Icons\menu",
+            tooltip = { title = L["Templates"],
+                        lines = { L["Create, duplicate, rename or delete a template."] } },
+        })
+        CreateElementBackdrop(overflowBtn)
+
+        overflowMenu = CreateFrame("Frame", nil, overflowBtn, "BackdropTemplate")
+        overflowMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+        GUI:RegisterMenu(overflowMenu)
+        -- Right-aligned under the glyph and given a width of its own: unlike the
+        -- template dropdown this button is 22px wide and the item labels are not.
+        overflowMenu:SetPoint("TOPRIGHT", overflowBtn, "BOTTOMRIGHT", 0, -1)
+        overflowMenu:SetWidth(130)
+        CreatePanelBackdrop(overflowMenu)
+        overflowMenu:Hide()
+
+        local overflowRows = {}
+        local ACTIONS = {
+            { label = L["New"],       btn = function() return newBtn    end },
+            { label = L["Duplicate"], btn = function() return dupBtn    end },
+            { label = L["Rename"],    btn = function() return renameBtn end },
+            { label = L["Delete"],    btn = function() return delBtn    end },
+        }
+        local function BuildOverflow()
+            local y = -4
+            for i, def in ipairs(ACTIONS) do
+                local item = overflowRows[i]
+                if not item then
+                    item = CreateFrame("Button", nil, overflowMenu)
+                    item:SetHeight(20)
+                    item.text = item:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                    item.text:SetPoint("LEFT", 6, 0)
+                    item:SetScript("OnEnter", function(s)
+                        if s.dfOff then return end
+                        s.text:SetTextColor(1, 1, 1)
+                    end)
+                    item:SetScript("OnLeave", function(s)
+                        s.text:SetTextColor(s.dfOff and 0.4 or C_TEXT.r,
+                                            s.dfOff and 0.4 or C_TEXT.g,
+                                            s.dfOff and 0.4 or C_TEXT.b)
+                    end)
+                    -- ☠ THE MENU ITEM PRESSES THE BUTTON, it does not repeat its body.
+                    -- Four prompts, two confirmations and the Default-template guard
+                    -- all live on those four buttons already; a second copy here is a
+                    -- second place for "Delete asks first" to stop being true.
+                    item:SetScript("OnClick", function(s)
+                        if s.dfOff then return end
+                        overflowMenu:Hide()
+                        local b = s.dfBtn and s.dfBtn()
+                        if b and b:GetScript("OnClick") then b:GetScript("OnClick")(b) end
+                    end)
+                    overflowRows[i] = item
+                end
+                item:ClearAllPoints()
+                item:SetPoint("TOPLEFT", 4, y)
+                item:SetPoint("TOPRIGHT", -4, y)
+                item.text:SetText(def.label)
+                item.dfBtn = def.btn
+                -- Greyed rather than absent: Rename and Delete are inert on the
+                -- Default template, and a menu that changes LENGTH depending on
+                -- which template is picked is a menu whose items move under the
+                -- cursor.
+                local b = def.btn()
+                item.dfOff = (b and b.IsEnabled and not b:IsEnabled()) or false
+                if item.dfOff then
+                    item.text:SetTextColor(0.4, 0.4, 0.4)
+                else
+                    item.text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+                end
+                item:Show()
+                y = y - 20
+            end
+            overflowMenu:SetHeight(-y + 4)
+        end
+        overflowBtn:SetScript("OnClick", function()
+            if overflowMenu:IsShown() then
+                overflowMenu:Hide()
+            else
+                BuildOverflow()
+                overflowMenu:Show()
+            end
+        end)
+
+        -- The four still exist -- they own the prompts and the guards -- but they
+        -- are never drawn. Parked off the bar rather than left unanchored: an
+        -- un-pointed frame in a BackdropTemplate still draws at 0,0.
+        for _, b in ipairs({ newBtn, dupBtn, renameBtn, delBtn }) do
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+            b:Hide()
+        end
+    end
+
+    -- ☠ THE FOUR ACTIONS CHAIN FROM THE BAR'S RIGHT EDGE INWARDS, and they are
+    -- placed here rather than at each creation because the chain runs backwards:
+    -- Delete pins to the bar, Rename to Delete, Duplicate to Rename, New to
+    -- Duplicate, and the dropdown then spans from the label to New. That is what
+    -- makes the bar cost its FIXED parts at any width. Left-to-right off a
+    -- 150px dropdown the four ran to 467px in the labelled form, which the
+    -- designers' old 850px island had room for and a 640px window's ~410px band
+    -- does not -- Delete simply left the page.
+    if overflowBtn then
+        overflowBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
+        ddBtn:SetPoint("RIGHT", overflowBtn, "LEFT", -6, 0)
+    else
     delBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
     renameBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
     dupBtn:SetPoint("RIGHT", renameBtn, "LEFT", -4, 0)
     newBtn:SetPoint("RIGHT", dupBtn, "LEFT", -4, 0)
     ddBtn:SetPoint("RIGHT", newBtn, "LEFT", -6, 0)
+    end
 
     local function SetActionEnabled(btn, on)
         if on then

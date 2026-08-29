@@ -853,11 +853,47 @@ P.CreateSpecDropdown = CreateSpecDropdown
 -- THE COMPACT CANVAS'S GEOMETRY, in screen pixels, named once because the height
 -- verb and the canvas itself must agree exactly -- they are two halves of one
 -- sum, and a literal in each is how the frame ends up cut off at the bottom.
---   FURNITURE  the label strip plus the Preview Scale slider along the top
+--   FURNITURE  the label strip along the top -- the title, and at its far end the
+--              scale glyph, both inside one 22px band. It was 52 while the Preview
+--              Scale slider stood under the title; the slider is behind the glyph
+--              now, so 30px of it came back to the frame
 --   PAD        breathing room under the mock
 --   DY         how far below the container's centre the mock is nudged, so the
---              free space under the furniture is what it is centred in
-local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = 52, 10, 20
+--              free space under the furniture is what it is centred in. 6 rather
+--              than 20 for the same reason: there is 30px less to clear
+--
+-- ☠ THESE THREE ARE THE ONLY PLACE THE NUMBERS LIVE. P.CanvasWantedHeight is
+-- built out of them, so changing one here changes the band height that goes with
+-- it -- do not re-derive that sum anywhere else.
+local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = 22, 10, 6
+
+-- ☠ THE SCALE PANEL IS POOLED BY KEY, so its `build` runs ONCE per key and
+-- whatever table it captured is what it writes forever. The preview-scale table
+-- is NOT stable: it is the current preset's config, and a preset switch, a mode
+-- switch or any page rebuild mints a different one. So the slider inside the
+-- panel binds to a stable INDIRECTION and whichever canvas is live registers
+-- itself against the key -- the same move, for the same reason, as the designers'
+-- own record views. Without it, opening the panel after switching template would
+-- silently edit the template you had just left.
+local scaleHosts   = {}
+local scaleProxies = {}
+local function ScaleProxy(key)
+    local proxy = scaleProxies[key]
+    if not proxy then
+        proxy = setmetatable({}, {
+            __index = function(_, k)
+                local h = scaleHosts[key]
+                return h and h.db and h.db[k] or nil
+            end,
+            __newindex = function(_, k, v)
+                local h = scaleHosts[key]
+                if h and h.db then h.db[k] = v end
+            end,
+        })
+        scaleProxies[key] = proxy
+    end
+    return proxy
+end
 
 local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     local compact = opts and opts.compact or false
@@ -910,6 +946,11 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     previewLabel:SetPoint("TOPLEFT", 8, -4)
     previewLabel:SetText(L["FRAME PREVIEW"])
     previewLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- ☠ opts.hideLabel: THE BAND'S FOLD HEADER ALREADY SAYS THIS. A canvas under
+    -- a collapsible FRAME PREVIEW header would print the same two words twice, six
+    -- pixels apart. The strip itself STAYS -- the scale glyph lives in it, which is
+    -- why CANVAS_FURNITURE does not move -- only the second copy of the title goes.
+    if opts and opts.hideLabel then previewLabel:Hide() end
 
     -- Mock unit frame (centered in container)
     local mockFrame = CreateFrame("Frame", nil, container, "BackdropTemplate")
@@ -967,10 +1008,6 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         end
         -- 16 = the container's own left/right padding; 28 = that plus the
         -- "FRAME PREVIEW" label strip along the top.
-        -- ⚠ 72 in the compact form, not 28: that strip is followed by the Preview
-        -- Scale slider, and in a 132px band the two together are more than half
-        -- the box. The split panel could ignore them because the slack above the
-        -- centred mock was never the binding constraint there.
         -- ⚠ THE BAND FORM CLAMPS ON WIDTH ONLY. Horizontal space is the page's
         -- and cannot be negotiated; vertical space CAN, because the band grows to
         -- fit (WantedHeight below). Clamping height here is what made the slider
@@ -1257,12 +1294,79 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         -- regrows live keeps the two in step instead of snapping on release.
         if container.onWantHeight then container.onWantHeight(container.WantedHeight()) end
     end
+    if compact then
+        -- ☠ IN THE BAND, THE SLIDER IS BEHIND A GLYPH. A 220x30 slider with a
+        -- typed value box beside it is the loudest object on a page whose whole
+        -- problem is noise, and it is a control touched once and then not again --
+        -- the same bargain the settings window's own UI-scale slider struck when it
+        -- moved behind the header's glyph. It costs 20px in the corner of the label
+        -- strip instead of a 30px row across the canvas, and that 30px goes
+        -- straight into CANVAS_FURNITURE and back to the frame.
+        local popKey = (opts and opts.scaleKey) or "df.previewscale.aura"
+        -- Registered BEFORE the panel can be built: the slider reads its value out
+        -- of the proxy, and an unregistered key answers nil to every read.
+        scaleHosts[popKey] = { db = scaleDB, apply = ApplyPreviewScale }
+
+        local scaleBtn = GUI:CreateGlyphButton(container, {
+            size = 20, iconSize = 13,
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+            tooltip = { title = L["Preview Scale"],
+                        lines = { L["How large the mock frame is drawn here. Changes nothing in game."] } },
+        })
+        scaleBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", -6, -2)
+        container.scaleButton = scaleBtn
+
+        local pop
+        scaleBtn:SetScript("OnClick", function(self)
+            -- Second click on the glyph shuts it, like any toggle.
+            if pop and not pop.closed and pop:IsShown() then
+                pop:Close("api")
+                return
+            end
+            pop = GUI:CreatePopout({
+                key   = popKey,
+                title = L["Preview Scale"],
+                icon  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
+                width = 190,
+                build = function(po, content)
+                    local sl = GUI:CreateSlider(content, L["Preview Scale"], 0.75, 2.5, 0.05,
+                        ScaleProxy(popKey), "previewScale",
+                        function() local h = scaleHosts[popKey]; if h and h.apply then h.apply() end end,
+                        function() local h = scaleHosts[popKey]; if h and h.apply then h.apply() end end)
+                    sl:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+                    sl:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+                    sl:SetHeight(30)
+                    po.dfScaleSlider = sl
+                    -- The shell derives the panel's height from what build mounted
+                    -- (Popout:_Resize), so the content strip states its own.
+                    content:SetHeight(30)
+                end,
+            })
+            -- ⚠ AND RE-READ THE VALUE ON EVERY OPEN. The panel is POOLED, so its
+            -- second open is an ADOPT rather than a build -- the thumb would still
+            -- be showing whatever scale the previous template had.
+            if pop.dfScaleSlider and pop.dfScaleSlider.RefreshValue then
+                pop.dfScaleSlider:RefreshValue()
+            end
+            pop:Follow(self, { outsideOf = DF.GUIFrame })
+            container.scalePopout = pop
+        end)
+
+        -- ☠ THE PANEL IS ABOUT THIS CANVAS, so it goes when this canvas does --
+        -- the page rebuilding, the user folding the FRAME PREVIEW header over it,
+        -- or the window closing. Left up it would be a slider docked to a frame
+        -- that is no longer on screen.
+        container:HookScript("OnHide", function()
+            if pop and not pop.closed then pop:Close("source") end
+        end)
+    else
     local scaleSlider = GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, scaleDB, "previewScale",
         ApplyPreviewScale,   -- on release
         ApplyPreviewScale    -- during drag
     )
     scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
     scaleSlider:SetSize(220, 30)
+    end
 
     -- Drag-state hint text (shows contextual guidance during drag operations).
     -- ☠ S.dragHintText IS ONE STATE FIELD -- same reason the dots are gated.
@@ -1721,11 +1825,20 @@ end
 -- added in a row. The shared picker has already validated the digits and
 -- normalized leading zeros; idText is that validated digit STRING. Returns
 -- truthy when the add landed (the picker clears its ID box on that).
-local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
+-- ☠ THE NAMING AND BLOCKING HALF, ON ITS OWN. Everything below the split is
+-- about a TYPE and a MODE -- which indicator to make, in which pool -- and the
+-- spell-first add flow (S.BuildAddIndicatorPane) has neither when the user types
+-- an ID: it is still asking WHICH SPELL. So the half that answers "what is
+-- #12345 called here, and may I use it in this pool at all" became a verb of its
+-- own, and ADAddByID is what was left.
+--
+-- Returns auraName, display, isAdHoc, blockedMessage. A blocked message means the
+-- caller must stop and echo it; nothing else in the tuple is usable.
+local function ADResolveByID(idNum, idText)
     local isOther = IsOtherTab()
     local spec = ResolveSpec()
     -- The Other Buffs pool is spec-independent — no spec required there.
-    if not spec and not isOther then return end
+    if not spec and not isOther then return nil end
 
     -- Snap. My Buffs: the spec's curated identity index first, then the SpellDB
     -- (R.ByID indexes canonical + alt ids), else ad-hoc. Other Buffs: SpellDB
@@ -1778,8 +1891,8 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
         end
     end
     if crossBlocked then
-        picker:Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Any Buff."])
-        return
+        return nil, nil, nil,
+            (isOther and L["Already tracked in My Buffs."] or L["Already tracked in Any Buff."])
     end
 
     -- Display name: the trackable pool entry when it has one (curated
@@ -1793,6 +1906,17 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
             if info then display = info.display or auraName end
         end
     end
+    return auraName, display, isAdHoc, nil
+end
+P.ADResolveByID = ADResolveByID
+
+local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
+    local auraName, display, isAdHoc, blocked = ADResolveByID(idNum, idText)
+    if blocked then
+        picker:Echo(blocked)
+        return
+    end
+    if not auraName then return end
 
     -- Group context: no already-used gate (a spell can hold several
     -- indicators in one group). AddSpellToGroup echoes and refreshes.
@@ -2857,38 +2981,37 @@ end
 -- column over), the ACTIVE INDICATORS heading, the type chips and the Other
 -- Buffs hint. Everything above the list of effects, and nothing of the list.
 --
--- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
--- mounts exactly this furniture above its band of effect rows. The add flow is a
--- later phase of the designer rework, and a second copy of it here would be a
--- second place to change when that phase lands -- which is how the three
--- duplicated FRAME_ITEMS lists below came about in the first place.
+-- ============================================================
+-- THE ADD FLOW  (designer rework, phase 5)
+-- ------------------------------------------------------------
+-- ☠ THE SCOPE CARDS ARE A STEP, NOT FURNITURE. They used to be pinned to the
+-- top of the Effects tab: a ~230px block standing in front of the list the page
+-- exists to show, on every visit, forever. Against a 600px window that block was
+-- the single largest slice of the 542px of chrome between the top of the page and
+-- the first indicator. They are questions asked once per add, so they now live
+-- where the add lives: behind one "+ Add Indicator" row, in a panel.
 --
--- Returns the y the caller should continue at, and `true` when the picker has
--- taken the column over, in which case the caller must add nothing below it.
-S.BuildEffectsHeadArea = function(parent, yPos)
-    local tc = GetThemeColor()
+-- ☠ AND THE SPELL IS ASKED FIRST. The old order was scope, then type, then
+-- spell. The approved shape is spell, then scope, then type, because the spell is
+-- what the user arrives already knowing and the other two are decisions about it.
+--
+-- ⚠ ONE SCOPE CANNOT BE SPELL-FIRST, and it is not made to pretend. "From a
+-- Filter" hangs the effect off a whole filter rather than off one aura, so there
+-- is no spell to have picked -- it is offered on the FIRST step as the other way
+-- in, and takes its own route to the same type cards.
+--
+-- ☠ EVERY STEP IS BUILT ONCE AND THEN SHOWN OR HIDDEN. The popout kit builds a
+-- pane's contents once, and frames cannot be garbage-collected in this client, so
+-- re-drawing a step on each click would leak a card set per click. What changes
+-- per step is which container is showing and how tall the pane says it is --
+-- reported through GUI:RelayoutHost, which re-flows the group, the pane and the
+-- panel around it in one call.
+-- ============================================================
 
-    -- ☠ THE WIDTH THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED. Every
-    -- object below is anchored 8px inside the host on both sides, so the column
-    -- they share is the host's own width less 16 -- and the host was given an
-    -- explicit width by the caller a line before this ran. Reading it off a CHILD
-    -- instead (the chip row's own GetWidth) asks a frame the layout pass has not
-    -- reached yet, which is what made the chips flow at a hardcoded 260 and the
-    -- head area report a height for a shape it was never going to have.
-    local hostW = parent:GetWidth() or 0
-    local COL_W = (hostW > 40) and (hostW - 16) or nil
-
-    -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
-    -- Was a "+ Add Indicator" button opening a 14-row dropdown across three
-    -- headed sections. Two problems that a flat card list would have made
-    -- WORSE, not better: fourteen entries is a long column at card height, and
-    -- the "from a filter" section repeats five labels from the section above it
-    -- word for word -- only the heading told them apart.
-    --
-    -- So the choice is split in two. Three pinned scope cards say what KIND of
-    -- change you want; picking one takes the column over with just that scope's
-    -- options, each with room for a description. No duplicate labels can appear,
-    -- because a scope is settled before any type is shown.
+-- The three scopes and the type lists behind them. A VERB rather than a file-scope
+-- table because every label in here is an L[...] lookup, and a table built at file
+-- scope freezes on whatever locale was loaded when the file parsed.
+local function AddFlowScopes()
     local PLACED_ITEMS = {
         { label = L["Icon"],   type = "icon",   desc = L["The spell's own artwork"]          },
         { label = L["Square"], type = "square", desc = L["A small coloured square"]          },
@@ -2911,8 +3034,7 @@ S.BuildEffectsHeadArea = function(parent, yPos)
         { label = L["Name Text Color"],   type = "nametext",   desc = L["Recolours the player's name"]     },
         { label = L["Health Text Color"], type = "healthtext", desc = L["Recolours the health numbers"]    },
     }
-
-    local SCOPES = {
+    return {
         placed = { items = PLACED_ITEMS,       title = L["Placed on the Frame"],
                    desc = L["An icon, square or bar, wherever you put it"] },
         frame  = { items = FRAME_ITEMS,        title = L["Frame-Level Effect"],
@@ -2920,6 +3042,317 @@ S.BuildEffectsHeadArea = function(parent, yPos)
         filter = { items = FRAME_FILTER_ITEMS, title = L["From a Filter"],
                    desc = L["The same frame changes, driven by a whole filter"] },
     }
+end
+P.AddFlowScopes = AddFlowScopes
+
+-- One "+ Add Indicator" panel, start to finish.
+--   host        the container frame the popout row's pane holds, ALREADY sized to
+--               the pane's width by the caller
+--   opts.width  that width. Fixed (GUI.PopoutContentWidth), which is why the
+--               wrapped note below can be measured at build: inside a pane there
+--               is no later width for it to re-wrap against
+--   opts.SetHeight(h)  report a step change, normally GUI:RelayoutHost
+--   opts.Close()       shut the panel once something has been added
+S.BuildAddIndicatorPane = function(host, opts)
+    opts = opts or {}
+    local W = opts.width or 260
+    local SCOPES = AddFlowScopes()
+    local tc = GetThemeColor()
+    local FILTER_GREEN = { r = 0.51, g = 0.86, b = 0.51 }
+
+    -- The spell this add is about. nil on the filter route, which has none.
+    local picked
+    local panes = {}
+    local Show   -- every step reaches every other step, so this is forward-declared
+
+    local function NewPane()
+        local p = CreateFrame("Frame", nil, host)
+        p:SetPoint("TOPLEFT", 0, 0)
+        p:SetWidth(W)
+        p:Hide()
+        return p
+    end
+
+    -- A step's back line: one click to the step before, and the answer already
+    -- given. Built as a FRAME with the string inside it, never as a bare
+    -- FontString on the pane -- a region cannot be shown and hidden with its step.
+    local function Crumb(pane, backTo)
+        local bar = CreateFrame("Frame", nil, pane)
+        bar:SetHeight(20)
+        bar:SetPoint("TOPLEFT", 0, 0)
+        bar:SetPoint("TOPRIGHT", 0, 0)
+        local back = GUI:CreateGlyphButton(bar, {
+            size = 16, iconSize = 11,
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_left",
+            tooltip = { title = L["Back"] },
+        })
+        back:SetPoint("LEFT", 0, 0)
+        back:SetScript("OnClick", function() Show(backTo) end)
+        local fs = bar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        fs:SetPoint("LEFT", back, "RIGHT", 4, 0)
+        fs:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
+        fs:SetJustifyH("LEFT")
+        fs:SetWordWrap(false)
+        fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        bar.text = fs
+        pane.crumb = bar
+        return bar
+    end
+
+    -- What a finished add costs: the same three verbs every other add path runs.
+    local function Finish()
+        if opts.Close then opts.Close() end
+        S.SwitchTab("effects")
+        RefreshPlacedIndicators()
+        RefreshPreviewEffects()
+    end
+
+    -- ── STEP 1: WHICH SPELL ──
+    local spellPane = NewPane()
+    local function OpenSpellStep()
+        local isOther = IsOtherTab()
+        local spec = (not isOther) and ResolveSpec() or nil
+        local specInfo = spec and DF.AuraDesigner.SpecInfo[spec]
+        OpenADPicker({
+            title = L["Select a spell"],
+            subtitle = L["Add Indicator"],
+            subtitleColor = tc,
+            records = function() return BuildADPickerRecords(false) end,
+            classLock = (not isOther) and specInfo and specInfo.class or nil,
+            -- ⚠ ONLY THE CROSS-POOL BLOCK CAN BE ANSWERED HERE. "Already added"
+            -- is a question about a TYPE, and no type has been chosen yet -- so it
+            -- is asked on the type cards instead, where it can be true of one card
+            -- and false of the five beside it.
+            isBlocked = ADCrossBlockText,
+            rowActions = {
+                {
+                    label = L["Select"],
+                    handler = function(rec, _, picker)
+                        picked = { auraName = rec.auraName, display = rec.display or rec.auraName }
+                        picker:Close()
+                        Show("scope")
+                    end,
+                },
+            },
+            allowAddByID = true,
+            onAddByID = function(idNum, _, picker, idText)
+                local auraName, display, _, blocked = ADResolveByID(idNum, idText)
+                if blocked then picker:Echo(blocked) return end
+                if not auraName then return end
+                picked = { auraName = auraName, display = display or auraName }
+                picker:Close()
+                Show("scope")
+                return true
+            end,
+        })
+    end
+    do
+        local note = spellPane:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        note:SetPoint("TOPLEFT", 0, 0)
+        -- ☠ AN EXPLICIT WIDTH, so the wrap is settled HERE. The height below is
+        -- spent on the next line and never re-measured; a string left to derive its
+        -- width from an anchor would wrap against a number the layout pass has not
+        -- produced yet. Inside a pane the width is a constant, so this is exact.
+        note:SetWidth(W)
+        note:SetJustifyH("LEFT")
+        note:SetWordWrap(true)
+        note:SetText(L["Pick the aura first, then choose what it does on the frame."])
+        note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
+        local noteH = max(note:GetStringHeight() or 12, 12)
+
+        local pickBtn = CreateFrame("Button", nil, spellPane, "BackdropTemplate")
+        pickBtn:SetPoint("TOPLEFT", 0, -(noteH + 8))
+        pickBtn:SetPoint("TOPRIGHT", 0, -(noteH + 8))
+        GUI:StyleButton(pickBtn, {
+            height = 30, primary = true,
+            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
+            text = L["Select a spell"], font = "DFFontHighlight",
+        })
+        pickBtn:SetScript("OnClick", OpenSpellStep)
+
+        local y = -(noteH + 8 + 30 + 10)
+        -- ...and the one scope that has no spell to pick.
+        local fcard = GUI:CreateChoiceCard(spellPane, {
+            title = SCOPES.filter.title, desc = SCOPES.filter.desc,
+            art = { kind = "border", color = { FILTER_GREEN.r, FILTER_GREEN.g, FILTER_GREEN.b } },
+            accent = FILTER_GREEN, width = W,
+            onClick = function() Show("type:filter") end,
+        })
+        fcard:SetPoint("TOPLEFT", 0, y)
+        fcard:SetPoint("RIGHT", spellPane, "RIGHT", 0, 0)
+        spellPane.paneHeight = -y + (fcard.layoutHeight or 58) + 2
+    end
+
+    -- ── STEP 2: WHICH KIND OF EFFECT ──
+    local scopePane = NewPane()
+    do
+        Crumb(scopePane, "spell")
+        local y = -24
+        for _, key in ipairs({ "placed", "frame" }) do
+            local scope = SCOPES[key]
+            local capturedKey = key
+            local card = GUI:CreateChoiceCard(scopePane, {
+                title = scope.title, desc = scope.desc,
+                art = { kind = (key == "placed") and "icon" or "border",
+                        color = { tc.r, tc.g, tc.b } },
+                accent = tc, width = W,
+                onClick = function() Show("type:" .. capturedKey) end,
+            })
+            card:SetPoint("TOPLEFT", 0, y)
+            card:SetPoint("RIGHT", scopePane, "RIGHT", 0, 0)
+            y = y - ((card.layoutHeight or 58) + 6)
+        end
+        scopePane.paneHeight = -y + 2
+    end
+
+    -- ── STEP 3: WHICH ONE ──
+    -- ☠ AND THIS STEP IS THE ONE THING BUILT ON DEMAND. The pane above it is
+    -- constructed EAGERLY, on every page build (the popout kit says why: the
+    -- settings-search registry re-runs every builder), and this step is fourteen
+    -- choice cards across three scopes -- five times the rest of the panel. A
+    -- rebuild happens on every tab switch, pool switch, preset switch and add, and
+    -- frames cannot be garbage-collected in this client, so building all fourteen
+    -- every time is fourteen cards retained per rebuild for a step most rebuilds
+    -- never reach. Memoised rather than lazy-and-forgotten: at most three ever
+    -- exist per panel instance, so this cannot leak per click either.
+    local typePanes = {}
+    local function TypePane(key)
+        if typePanes[key] then return typePanes[key] end
+        local scope = SCOPES[key]
+        local pane = NewPane()
+        -- Filter effects were never about a spell, so their back button goes all
+        -- the way out rather than to a scope step they skipped.
+        Crumb(pane, (key == "filter") and "spell" or "scope")
+        pane.crumb.text:SetText(scope.title)
+        local y = -24
+        for _, item in ipairs(scope.items) do
+            local bc = BADGE_COLORS[item.type]
+            local capturedType, capturedScope = item.type, key
+            -- Sound changes nothing on the frame, so it gets the untouched mock
+            -- frame -- which is the honest picture of what it does.
+            local art = (item.type ~= "sound")
+                and { kind = item.type, color = { bc.r, bc.g, bc.b } } or nil
+            local card = GUI:CreateChoiceCard(pane, {
+                title = item.label, desc = item.desc, art = art, accent = bc, width = W,
+                onClick = function(self)
+                    if capturedScope == "filter" then
+                        OpenFilterPicker({
+                            anchor = self,
+                            isLinked = function(kind, fkey)
+                                local ref = DF:MakeADFilterRef(kind, fkey)
+                                return ref ~= nil and HasFrameEffect(ref, capturedType) or false
+                            end,
+                            onPick = function(kind, fkey)
+                                local ref = DF:MakeADFilterRef(kind, fkey)
+                                if not ref then return end
+                                AddPickedSpell(ref, capturedType, "frame")
+                                Finish()
+                            end,
+                        })
+                        return
+                    end
+                    if not (picked and picked.auraName) then
+                        Show("spell")
+                        return
+                    end
+                    local mode = (capturedScope == "placed") and "placed" or "frame"
+                    local already
+                    if mode == "placed" then
+                        already = IsAuraTypePlaced(picked.auraName, capturedType)
+                    else
+                        already = HasFrameEffect(picked.auraName, capturedType)
+                    end
+                    -- ⚠ SAID, NOT SILENTLY SWALLOWED. The old flow could not reach
+                    -- this state -- the spell picker greyed the rows it had already
+                    -- placed -- and spell-first can, because the spell is chosen
+                    -- before the type that makes it a duplicate.
+                    if already then
+                        DF:Say(L["Already added."])
+                        return
+                    end
+                    AddPickedSpell(picked.auraName, capturedType, mode)
+                    Finish()
+                end,
+            })
+            card:SetPoint("TOPLEFT", 0, y)
+            card:SetPoint("RIGHT", pane, "RIGHT", 0, 0)
+            y = y - ((card.layoutHeight or 58) + 6)
+        end
+        pane.paneHeight = -y + 2
+        typePanes[key] = pane
+        panes["type:" .. key] = pane
+        return pane
+    end
+
+    panes = {
+        spell = spellPane,
+        scope = scopePane,
+    }
+
+    Show = function(key)
+        -- A type step is built the first time it is asked for, and kept.
+        local scopeKey = key:match("^type:(%a+)$")
+        if scopeKey then TypePane(scopeKey) end
+        local pane = panes[key] or spellPane
+        for _, p in pairs(panes) do p:Hide() end
+        -- The crumb repeats the answer already given, so it is written on the way
+        -- in rather than at build: the spell is not known until step 1 is done.
+        if key == "scope" and pane.crumb then
+            pane.crumb.text:SetText(picked and picked.display or "")
+        elseif (key == "type:placed" or key == "type:frame") and pane.crumb then
+            pane.crumb.text:SetText(picked and picked.display or "")
+        end
+        pane:Show()
+        local h = pane.paneHeight or 1
+        host:SetHeight(h)
+        if opts.SetHeight then opts.SetHeight(h) end
+    end
+    Show("spell")
+    return { Show = Show }
+end
+
+-- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
+-- mounts exactly this furniture above its band of effect rows. The add flow is a
+-- later phase of the designer rework, and a second copy of it here would be a
+-- second place to change when that phase lands -- which is how the three
+-- duplicated FRAME_ITEMS lists below came about in the first place.
+--
+-- Returns the y the caller should continue at, and `true` when the picker has
+-- taken the column over, in which case the caller must add nothing below it.
+S.BuildEffectsHeadArea = function(parent, yPos, opts)
+    local tc = GetThemeColor()
+    -- ☠ opts.skipAddBlock: THE ROW LAYOUT HAS NO ADD BLOCK ON THE PAGE. Phase 5
+    -- moved the three scope cards and the picker column they open into the panel
+    -- behind one "+ Add Indicator" row (S.BuildAddIndicatorPane above), so in that
+    -- layout this function draws only the ACTIVE INDICATORS caption and the filter
+    -- chips. The split panel still draws the block: it is the one surface with
+    -- 230px to spend on standing furniture.
+    local skipAdd = opts and opts.skipAddBlock or false
+
+    -- ☠ THE WIDTH THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED. Every
+    -- object below is anchored 8px inside the host on both sides, so the column
+    -- they share is the host's own width less 16 -- and the host was given an
+    -- explicit width by the caller a line before this ran. Reading it off a CHILD
+    -- instead (the chip row's own GetWidth) asks a frame the layout pass has not
+    -- reached yet, which is what made the chips flow at a hardcoded 260 and the
+    -- head area report a height for a shape it was never going to have.
+    local hostW = parent:GetWidth() or 0
+    local COL_W = (hostW > 40) and (hostW - 16) or nil
+
+    -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
+    -- Was a "+ Add Indicator" button opening a 14-row dropdown across three
+    -- headed sections. Two problems that a flat card list would have made
+    -- WORSE, not better: fourteen entries is a long column at card height, and
+    -- the "from a filter" section repeats five labels from the section above it
+    -- word for word -- only the heading told them apart.
+    --
+    -- So the choice is split in two. Three pinned scope cards say what KIND of
+    -- change you want; picking one takes the column over with just that scope's
+    -- options, each with room for a description. No duplicate labels can appear,
+    -- because a scope is settled before any type is shown.
+    -- ONE definition, two layouts: the panel above and this block build their
+    -- cards from the same three lists, so a type added to one appears in both.
+    local SCOPES = AddFlowScopes()
 
     -- The picker is a transient mode, so it must not outlive the thing it was
     -- opened against. Anything that changes which pool or spec is on screen
@@ -2958,7 +3391,10 @@ S.BuildEffectsHeadArea = function(parent, yPos)
     end
 
     -- ── PICKER MODE: the column belongs to one scope's options ──
-    if S.effectsPicker then
+    -- ...and the row layout never enters it. Its scope cards live in a panel, so
+    -- nothing on that page can set S.effectsPicker; the guard is belt and braces
+    -- against the flag being left set by a visit to the split panel.
+    if S.effectsPicker and not skipAdd then
         local scope = SCOPES[S.effectsPicker]
         local scopeKey = S.effectsPicker
 
@@ -3003,6 +3439,7 @@ S.BuildEffectsHeadArea = function(parent, yPos)
     end
 
     -- ── NORMAL: three pinned scope cards ──
+    if not skipAdd then
     local addBlock = GUI:CreateChoiceCardGroup(parent, {
         title    = L["ADD AN INDICATOR"],
         accent   = tc,
@@ -3060,6 +3497,7 @@ S.BuildEffectsHeadArea = function(parent, yPos)
     addBlock:SetPoint("TOPLEFT", 8, yPos)
     addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
     yPos = yPos - (addBlock.layoutHeight + 10)
+    end
 
     -- ── ACTIVE INDICATORS heading ──
     local activeHeader = parent:CreateFontString(nil, "OVERLAY")
