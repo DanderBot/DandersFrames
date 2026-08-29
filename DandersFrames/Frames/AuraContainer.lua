@@ -749,13 +749,14 @@ end
 --     All three counts are taken in one uninterrupted Lua tick, so aura churn cannot
 --     fake a violation.
 local sentinelWarned = {}
-local function auraCount(filterStr)
-    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, "player", filterStr)
+local function auraCountOn(unit, filterStr)
+    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, unit, filterStr)
     if not ok or type(ids) ~= "table" then return nil end
     local okN, n = pcall(function() return #ids end)
     if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return nil end
     return n
 end
+local function auraCount(filterStr) return auraCountOn("player", filterStr) end
 local function checkParkSentinel()
     if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
     local pf = AuraContainer.SLOT_PARK_FILTER
@@ -792,6 +793,111 @@ local function checkParkSentinel()
                 all, mine, others)
         end
     end
+end
+
+-- ★ OUT-OF-RANGE CASTER ATTRIBUTION WATCH (field prompt 2026-08-29: a Paladin's buff
+-- bar on "Only Mine" showed an aura on an OUT-OF-RANGE ally that vanished the moment
+-- they came back into range — "it looked like the only mine part had stopped").
+-- Two readings, and they need separating: a frozen stale snapshot (the server stops
+-- sending aura changes for distant units — game behaviour, no bug), or the PLAYER token
+-- FAILING OPEN because the client cannot resolve the caster at distance.
+--
+-- ☠ THE PARTITION IDENTITY ABOVE CANNOT SEE THIS, which is why it is a separate check.
+-- If PLAYER fails open it returns everything and !PLAYER returns nothing, so
+-- |PLAYER| + |!PLAYER| still equals |HELPFUL| and the identity HOLDS. The observable is
+-- the RATIO |HELPFUL,PLAYER| / |HELPFUL| — and a ratio alone means nothing (a healer
+-- legitimately owns most buffs on an ally), so it needs a CONTROL.
+--
+-- ★ THE CONTROL IS THE IN-RANGE HALF OF THE SAME GROUP, SAMPLED IN THE SAME TICK. Same
+-- client, same filter strings, same moment — the only variable is distance. If the
+-- out-of-range units sit at ~1.0 while the in-range units sit clearly below, the token
+-- is admitting auras at distance that it rejects up close. If BOTH halves are high the
+-- player is simply the one buffing everybody, and nothing is wrong — which is exactly
+-- the false positive a control exists to kill. (Methodology lesson from the profiling
+-- work: never compare a number against intuition when an untouched control is available.)
+-- Needs both halves populated before it can conclude anything, so it stays silent solo,
+-- in a fully stacked group, and in a fully spread one.
+local OOR_MIN_UNITS  = 2      -- per half, before the comparison means anything
+local OOR_MIN_AURAS  = 3      -- per half; tiny samples swing the ratio wildly
+local function checkOutOfRangeAttribution()
+    if sentinelWarned.oorAttribution then return end
+    -- ⚠ CHANNEL-GATED, unlike the park sentinel above. That one is five C calls; this
+    -- walks the whole group at two calls a unit — 80 in a full raid, every sweep, for a
+    -- verdict only a log reader will ever see. Same contract as the flow watch and the
+    -- pool-growth sampler: investigation tools cost nothing while nobody is investigating.
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    if not IsInGroup() then return end
+    local prefix, count = "party", 4
+    if IsInRaid() then prefix, count = "raid", math.min(MAX_RAID_MEMBERS or 40, 40) end
+    local inN, inAll, inMine = 0, 0, 0
+    local outN, outAll, outMine = 0, 0, 0
+    for i = 1, count do
+        local unit = prefix .. i
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
+            -- ⚠ Range from UnitInRange's SECOND return (checkedRange): a false with
+            -- checked=false means "could not test", not "out of range", and counting
+            -- those as distant would poison the out-of-range half with units that are
+            -- simply untestable. Secrecy-guarded like every other range read.
+            local okR, inRange, checked = pcall(UnitInRange, unit)
+            local readable = okR and checked
+                and not (issecretvalue and (issecretvalue(inRange) or issecretvalue(checked)))
+            if readable then
+                local all  = auraCountOn(unit, "HELPFUL")
+                local mine = auraCountOn(unit, "HELPFUL|PLAYER")
+                if all and mine and all > 0 then
+                    if inRange then
+                        inN, inAll, inMine = inN + 1, inAll + all, inMine + mine
+                    else
+                        outN, outAll, outMine = outN + 1, outAll + all, outMine + mine
+                    end
+                end
+            end
+        end
+    end
+    if inN < OOR_MIN_UNITS or outN < OOR_MIN_UNITS then return end
+    if inAll < OOR_MIN_AURAS or outAll < OOR_MIN_AURAS then return end
+    local inRatio, outRatio = inMine / inAll, outMine / outAll
+    -- Out-of-range claims (near) everything while in-range does not: that gap is the
+    -- signature. Deliberately wide thresholds — this fires once per session and is a
+    -- prompt to investigate, not a verdict.
+    if outRatio >= 0.95 and inRatio <= 0.60 then
+        sentinelWarned.oorAttribution = true
+        DF:DebugWarn(DBG,
+            "PLAYER token looks OPEN AT DISTANCE: out-of-range units report %d/%d helpful"
+            .. " auras as yours (%.2f) while in-range units report %d/%d (%.2f) in the same"
+            .. " tick. Same filter strings, same moment — distance is the only variable, so"
+            .. " \"Only Mine\" is likely admitting other casters' auras on far units."
+            .. " (If both halves were high this would be silent: that is the control.)",
+            outMine, outAll, outRatio, inMine, inAll, inRatio)
+    end
+end
+
+-- ★ RANGE-TRANSITION AURA SNAPSHOT — the direct evidence capture for the same report,
+-- and the reason it is an EVENT rather than a command: the moment worth measuring is a
+-- unit crossing the range edge mid-pull, which is precisely when nobody can type
+-- (Krathe, twice: "very hard to do commands mid raid", "hard to type commands mid
+-- pull/m+ key"). Range.lua calls this from its transition branch (the cache-MISS half,
+-- so it fires once per real crossing, not per check).
+--
+-- Reading the log: the OUT line is the baseline the frozen snapshot was showing; the IN
+-- line is the truth that replaced it. A stale snapshot shows both counts DROPPING on
+-- return (the auras had expired unseen — game behaviour, no bug). The PLAYER token
+-- failing open shows `mine` collapsing while `all` holds roughly steady — the same auras
+-- are still there, they simply stop being credited to you once the caster resolves.
+-- ⚠ Channel-gated: costs two C calls per crossing while AURACONTAINER is on, nothing
+-- otherwise. Distinguishing those two shapes is the whole question, and neither is
+-- observable after the fact.
+function AuraContainer.NoteRangeTransition(unit, inRange)
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    if type(unit) ~= "string" or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    if issecretvalue and issecretvalue(inRange) then return end
+    local all  = auraCountOn(unit, "HELPFUL")
+    local mine = auraCountOn(unit, "HELPFUL|PLAYER")
+    if not (all and mine) then return end
+    DF:Debug(DBG, "range %s unit=%s helpful=%d ofWhichMine=%d%s",
+        inRange and "IN " or "OUT", tostring(unit), all, mine,
+        (all > 0 and mine == all) and "  <-- claims ALL of them" or "")
 end
 
 -- ★ SLOT-ACCUMULATION TRIPWIRE. Add-only topology: every structural variant a slot
@@ -831,6 +937,7 @@ C_Timer.NewTicker(SWEEP_INTERVAL, function()
     if AuraContainer._testMode then return end
     if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
     checkParkSentinel()
+    checkOutOfRangeAttribution()
     checkSlotAccumulation()
     if not anyLiveContainers() then return end
     AuraContainer._kickLiveParse("safety sweep")
