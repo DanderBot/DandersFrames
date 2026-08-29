@@ -6199,15 +6199,31 @@ function AuraContainer.GetHelperExcludedRoles() return helperExcludedRoles end
 -- the exclusions, swap spec, and the container keeps the answer from before the swap. Re-push
 -- on anything that can move a role. (This makes us notice promptly when the game's answer
 -- CHANGES. It cannot make the game's answer FRESH -- see the staleness note above.)
+-- ⚠ REGISTERED ONLY WHILE A HELPER EXISTS, the same pattern the engine's watcher
+-- already uses. These five events fire for every player of the addon, and a non-user would
+-- otherwise walk both handle registries on every roster change for a feature they cannot
+-- enable. Hygiene rather than cost since the walk is narrowed to owned entries -- but the
+-- pattern was already established next door. Driven from the engine's own "does a helper
+-- exist" test, so the two registrations can never disagree.
+local PIH_REGEN_EVENTS = { "PLAYER_REGEN_ENABLED", "PLAYER_ROLES_ASSIGNED",
+                           "GROUP_ROSTER_UPDATE", "PLAYER_SPECIALIZATION_CHANGED",
+                           "ACTIVE_TALENT_GROUP_CHANGED" }
 local helperGateRegen = CreateFrame("Frame")
-helperGateRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
-helperGateRegen:RegisterEvent("PLAYER_ROLES_ASSIGNED")
-helperGateRegen:RegisterEvent("GROUP_ROSTER_UPDATE")
-helperGateRegen:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-helperGateRegen:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+local helperGateRegistered = false
 helperGateRegen:SetScript("OnEvent", function()
     AuraContainer.SetHelperGate(helperGateDark)
 end)
+
+-- Idempotent; safe to call on every settings change.
+function AuraContainer.SetHelperGateActive(active)
+    active = active and true or false
+    if active == helperGateRegistered then return end
+    helperGateRegistered = active
+    for _, ev in ipairs(PIH_REGEN_EVENTS) do
+        if active then helperGateRegen:RegisterEvent(ev)
+        else helperGateRegen:UnregisterEvent(ev) end
+    end
+end
 
 -- Force a re-scan of the container. 68569: UpdateAllAuras() is an addon-callable
 -- dirty-mark (processed on the next OnUpdate while visible) — the real refresh. Use on
@@ -7638,6 +7654,14 @@ end
 function SlotHandle:Restore()
     if not self.parked then return true end
     self.parked = false
+    -- ⚠ RE-PUSH THE CANDIDATES, not just the filter string: the helper gate skips
+    -- parked slots (see _applyHelperGate), so an edge that flipped while this one was parked
+    -- never reached the engine. Reading through _cf() means un-parking lands on the CURRENT
+    -- verdict rather than whatever was last pushed before the park.
+    local c = self.owner and self.owner.container
+    if c and self._lastCandidateFilters ~= nil and not InCombatLockdown() then
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
+    end
     local ok = self:_pushFilter()
     if not ok or InCombatLockdown() then
         self._pendingTuning = true
@@ -7995,6 +8019,12 @@ end
 -- _replayTuning drains the deferral on the way out, itself reading through _cf().
 function SlotHandle:_applyHelperGate()
     if self._lastCandidateFilters == nil then return false end
+    -- ⚠ SKIP PARKED SLOTS. A parked slot renders nothing, so pushing candidates at it
+    -- is pure work -- and it is never unregistered from the registry because Restore has to
+    -- find it again (unlike a Handle, which nils itself out on destroy). Restore re-pushes
+    -- through the accessor, so a gate edge that happened while parked is picked up there
+    -- rather than lost. Caught in Danders' PR review.
+    if self.parked then return false end
     local c = self.owner and self.owner.container
     if not c then return false end
     if InCombatLockdown() then
@@ -8694,7 +8724,13 @@ function AuraContainer.DebugDumpIdentityGate()
                     seenF[rec.f] = true
                     fParts[#fParts + 1] = rec.f
                 end
-                local cf = recordCandidateFilters(rec, cfg)
+                -- ☠ THE RAW SELECTION, NOT THE GATED ONE. This read through
+                -- recordCandidateFilters, so a helper row sitting dark reported the dead
+                -- match-nothing placeholder instead of the user's real selection -- on the
+                -- one diagnostic line most likely to be read while debugging that exact
+                -- gate. Same expression the build path's own cfOf uses. Caught in Danders'
+                -- PR review.
+                local cf = rec.candidateFilters or cfg.candidateFilters
                 if cf and cf.includeSpellIDs then inc = true end
                 if cf and cf.excludeSpellIDs then exc = true end
             end
@@ -8738,6 +8774,10 @@ function AuraContainer.DebugDumpIdentityGate()
     -- its own _applyIdentityGate and its own _gateHidden, so a dump that reports only
     -- Handles is blind to the half the AD uses -- and the AD is where the stuck-indicator
     -- reports came from.
+    -- The slot dump below already reports the RAW stash (`_lastCandidateFilters`), which
+    -- is what a diagnostic wants: the gated view is derived, and printing it would hide the
+    -- user's real selection behind the placeholder. The Handle dump above had that wrong and
+    -- is fixed.
     local sn, svuln = 0, 0
     for s in pairs(AuraContainer._slotHandles or {}) do
         sn = sn + 1
