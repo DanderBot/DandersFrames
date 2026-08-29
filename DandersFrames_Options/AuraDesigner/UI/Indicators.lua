@@ -586,12 +586,16 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Border (Stage 5.1c — unified controls via CreateBorderControls).
         -- Show / Thickness / Inset are the same widgets as before; the helper
         -- adds Style / Texture / Color / Gradient / Shadow / BlendMode /
-        -- Offset / Alpha on top.  Animation, classColor, roleColor, and the
-        -- colorByTime checkbox are deliberately omitted — animation isn't
-        -- wired through AD's expiring system yet, class/role don't fit aura
+        -- Offset / Alpha on top.  classColor, roleColor, and the colorByTime
+        -- checkbox are deliberately omitted — class/role don't fit aura
         -- indicators (the indicator's job is to show aura state, not unit
         -- identity), and AD's Expiring section already covers "colour by
         -- time remaining" implicitly through its own colour curve.
+        -- Animation RESTORED 2026-08-29 (button-mode reopening): the placed
+        -- indicator's container opts into the declarative DF border animations
+        -- (config.adBorderAnim + the AuraContainer ANIMATION FILTER), and an
+        -- animation-key edit rebuilds the container (rawBorderAnimStructTok —
+        -- the effect is creation-frozen on a restricted button).
         -- Text-only mode hides the icon texture, so the whole Border group is
         -- hidden (the runtime force-disables the border there too).
         if not proxy.hideIcon then
@@ -601,6 +605,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
+                    animate = true,
                 },
                 -- IMPORTANT: AD's per-aura proxy only triggers
                 -- RefreshLiveFramesThrottled + S.RefreshPreviewLightweight
@@ -758,7 +763,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Border (Stage 5.2 — unified controls via CreateBorderControls).
         -- Same full toolkit as the icon's base border: Style / Texture / Colour
-        -- / Gradient / Shadow / Blend / Offset / Alpha + Animation.  The
+        -- / Gradient / Shadow / Blend / Offset / Alpha + Animation (restored
+        -- 2026-08-29 with the button-mode reopening — see the icon card).  The
         -- square's expiring system tints the FILL (not the border), so the
         -- icon's expiring-border overrides are intentionally NOT added here.
         AddGroup(L["Border"], function(g)
@@ -767,6 +773,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
+                    animate = true,
                 },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
@@ -925,16 +932,18 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
         -- Full toolkit (Style / Texture / Colour / Gradient / Shadow / Blend /
-        -- Inset / Alpha + Animation).  No offset (the bar has its own X/Y) and
-        -- no class/role (it's an aura bar, not unit identity).  The bar's
-        -- expiring tints the FILL via its colour curve, so the icon/square
-        -- expiring-border overrides are intentionally not added here.
+        -- Inset / Alpha + Animation, restored 2026-08-29 — see the icon card).
+        -- No offset (the bar has its own X/Y) and no class/role (it's an aura
+        -- bar, not unit identity).  The bar's expiring tints the FILL via its
+        -- colour curve, so the icon/square expiring-border overrides are
+        -- intentionally not added here.
         AddGroup(L["Border"], function(g)
             GUI:CreateBorderControls(g, proxy, "", {
                 parent  = parent,
                 include = {
                     inset = true, blendMode = true, gradient = true,
                     shadow = true, alpha = true,
+                    animate = true,
                 },
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,

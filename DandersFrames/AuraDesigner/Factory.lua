@@ -1604,6 +1604,37 @@ local function placedBorderRawSig(indicator, borderOn)
     return tconcat(parts, ",")
 end
 
+-- ☠ ANIMATION IS STRUCTURAL ON EVERY CONTAINER BORDER, buttons included (2026-08-29,
+-- row-mode reopened) — same contract as borderAnimStructToken below, raw-config and
+-- alloc-free for the per-tick sig paths (FIX C). The declarative AnimationGroups are
+-- built once in the slot's secure init and can never be retuned on a live (restricted)
+-- button, so ANY animation key change must hand over fresh buttons via Rebuild.
+-- EMPTY when no animation is configured, so every pre-animation profile sigs
+-- byte-identically and nothing rebuilds on upgrade (the durationFmtKey removals
+-- document why that stability matters). The keys mirror what BuildSpec("") folds into
+-- spec.animation — colour included: it is baked into the anim textures at build.
+-- `t` is whichever table BuildSpec reads: the indicator (placed/bar) or the group's
+-- style table (filter/debuff groups via buildGroupBorderSpec).
+local function rawBorderAnimStructTok(t, borderOn)
+    if not borderOn then return "" end
+    local ty = t.BorderAnimationType
+    if not ty or ty == "NONE" then return "" end
+    return "|an=" .. tostring(ty)
+        .. "," .. tostring(t.BorderAnimationFrequency)
+        .. "," .. tostring(t.BorderAnimationParticles)
+        .. "," .. tostring(t.BorderAnimationLength)
+        .. "," .. tostring(t.BorderAnimationThickness)
+        .. "," .. tostring(t.BorderAnimationScale)
+        .. "," .. tostring(t.BorderAnimationInset)
+        .. "," .. tostring(t.BorderAnimationOffsetX)
+        .. "," .. tostring(t.BorderAnimationOffsetY)
+        .. "," .. tostring(t.BorderAnimationMask)
+        .. "," .. tostring(t.BorderAnimationSidesAxis)
+        .. "," .. tostring(t.BorderAnimationCornerLength)
+        .. "," .. tostring(t.BorderAnimationProcStart)
+        .. "," .. colSig(t.BorderAnimationColor)
+end
+
 -- Native stack-count TextStyle spec from the AD stack config keys (font/scale/outline/
 -- anchor/offset/colour). Read-free — the COUNT itself is filled secure-side by Blizzard's
 -- SetApplicationCount (no formatter — secret trap), shown at >1. defOX/defOY parameterize
@@ -2205,6 +2236,10 @@ local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, bor
         -- create-once, so a type change (or the master toggle) rebuilds. Everything else
         -- about it hot-applies and rides placedCoSig. "" when off.
         .. "|pd=" .. pandemicStructKey(indicator)
+        -- Border animation: creation-frozen declarative groups — see rawBorderAnimStructTok.
+        -- (The keys also stay in placedBorderRawSig's cosmetic hash, harmlessly: a change
+        -- moves both sigs and the structural branch wins.)
+        .. rawBorderAnimStructTok(indicator, borderOn)
 end
 
 -- TUNING signature: the live-mutable half of what placedStructSig used to carry. The
@@ -2977,6 +3012,7 @@ local function barStructSig(indicator, borderOn, defs)
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
         .. "|pd=" .. pandemicStructKey(indicator)   -- see placedStructSig
+        .. rawBorderAnimStructTok(indicator, borderOn)   -- creation-frozen — see the helper
 end
 
 -- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
@@ -3189,6 +3225,10 @@ local function groupStyleStructSig(group)
         -- style is absent, {}, or carries durationBarEnabled = false.
         .. "|" .. (s.durationBarEnabled == true and "bar" or "")
         -- (No pandemic entry — see buildFilterGroupStyle for why groups don't carry it yet.)
+        -- Border animation: the group border reads the SAME BorderAnimation* keys off the
+        -- group's style table (buildGroupBorderSpec -> buildPlacedBorderSpec(s)), and the
+        -- declarative groups are creation-frozen — see rawBorderAnimStructTok.
+        .. rawBorderAnimStructTok(s, s.ShowBorder == true)
 end
 
 -- EDITOR PREVIEW CONFIG for one SAMPLE slot of a filter/debuff group: the same

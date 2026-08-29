@@ -130,12 +130,12 @@ local warnedFilterString = false
 -- other two for the session. Same split, same reasoning, as the dispel pair above.
 local warnedPandemicBorder, warnedPandemicRegion, warnedPandemicCover = false, false, false
 
--- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
--- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
--- own dash / sparkle / flipbook / overlay textures on our own frames), so they
--- never re-parent anything onto a Blizzard AuraButton and never taint.
--- Any type NOT in this set (a future/unknown type) is stripped. ROW mode always
--- strips (see below).
+-- Animations SAFE to run on a container border (Aura Designer) — overlay-mode
+-- frame borders AND row-mode aura buttons (the latter reopened 2026-08-29). These
+-- render entirely on DF-owned child regions of the border (edge alpha ticks +
+-- DF_DASH's own dash / sparkle / flipbook / overlay textures on our own frames),
+-- so they never re-parent anything onto a Blizzard AuraButton and never taint.
+-- Any type NOT in this set (a future/unknown type) is stripped.
 local SAFE_OVERLAY_ANIM = {
     DF_PULSATE     = true,
     DF_DASH        = true,
@@ -1468,22 +1468,32 @@ local function styleButton_regions(slot, config)
                 -- (Border.lua's sharedAnimDriver), so the failure mode is a stopped effect,
                 -- not a log flood — which is what makes this safe to reopen at all.
                 --
-                -- Reopened for OVERLAY mode only, and only when the container opted in:
-                --   * overlay = the whole-frame presence box (the Aura Designer's frame-level
-                --     border). One ring per frame, so the per-frame cost is bounded.
-                --   * ROW mode always strips. A row holds many icons and every group
-                --     allocates its buttons up front, so a looping effect would run on
-                --     buttons no aura is even using.
-                --   * config.adBorderAnim is the opt-in. The AD factory sets it on several
-                --     ROW containers too; those stay inert because of the isRow test above,
-                --     deliberately — widening to them is a separate, measured decision.
+                -- Reopened wherever the container opted in (config.adBorderAnim):
+                --   * overlay = the whole-frame presence box (the AD frame-level border) —
+                --     the first surface reopened (2026-08-27), proven in combat.
+                --   * ROW-mode buttons too (2026-08-29, Krathe's call — "make it work for
+                --     the actual aura buttons"). The old objection was that every group
+                --     pre-allocates its 10-button batch, so a looping effect runs on
+                --     buttons no aura is using. Under the DECLARATIVE regime that is the
+                --     FEATURE, not the cost: the anims are C-side AnimationGroups built
+                --     once in the secure init, they tick invisibly on hidden buttons for
+                --     pennies, and when the engine Shows a button its effect is already
+                --     running — presence-driven animation with zero addon reads. Intro
+                --     one-shots (DF Proc's burst) play at BUILD, not at aura-appear
+                --     (presence is secret; no OnShow script runs in the subtree), so
+                --     buttons show the steady loop only.
+                --   * ☠ Animation keys are STRUCTURAL for every opted-in consumer: the
+                --     groups are creation-frozen on a restricted button, so each factory
+                --     sig folds rawBorderAnimStructTok / borderAnimStructToken and a key
+                --     change hands over fresh buttons via Rebuild. A restyle with an
+                --     UNCHANGED spec is a no-op (Border.lua's dedupe counts _declAnims).
                 -- SAFE_OVERLAY_ANIM still filters the TYPE, so a stale profile naming an
                 -- effect we no longer own renders static rather than erroring.
                 -- DF-owned frames OFF the container — unit-frame border, missing-buff badge,
                 -- targeted-spell highlight — were never affected and keep animating.
                 if spec then
                     local animType = spec.animation and spec.animation.type
-                    if isRow or not config.adBorderAnim
+                    if not config.adBorderAnim
                         or not (animType and SAFE_OVERLAY_ANIM[animType]) then
                         spec.animation = nil
                     end
