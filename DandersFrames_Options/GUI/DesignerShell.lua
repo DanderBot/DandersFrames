@@ -60,6 +60,9 @@ local TAB_GAP  = 4
 --   banner       fn(parent, shell) -> widget[, height]   omit for no banner
 --   canvas       fn(host, shell)   -> canvas frame       omit for no canvas
 --   canvasHeight default 132 (the artifact's figure; see Cards.lua's `compact`)
+--   canvasFold   { title =, collapseKey = }  make the canvas a FOLDABLE band
+--                under a header of its own. The key is the caller's, and it is
+--                REQUIRED: see the note on the band below
 --   strips       { { height = n, build = fn(host, shell) }, ... }
 --   tabs         { { key=, label=, accent=, tooltip=, disabled=fn->bool }, ... }
 --   activeTab    the key that is showing
@@ -119,16 +122,44 @@ function GUI:BuildDesignerShell(page, opts)
         local h = opts.canvasHeight
         if type(h) == "function" then h = h() end
         h = h or 132
+        -- ☠ THE CANVAS FOLDS, AND ITS FOLD IS KEYED BY A LITERAL. At the preview
+        -- scales people actually use it is the tallest thing on the page -- 160px
+        -- at 1.5 -- and it is a picture, not a control: someone who has finished
+        -- placing things wants the list, not the mock. So it gets a header of its
+        -- own and remembers.
+        --
+        -- ☠ collapseKey IS NOT OPTIONAL HERE. CreateCollapsibleSection persists
+        -- the fold under the section's TITLE TEXT unless told otherwise, and this
+        -- title is a localised string -- so a German client would write a second
+        -- profile key and a reworded heading would orphan the first. The caller
+        -- names the slot; see GUI:CreateCollapsibleSection's own header, and
+        -- section 14's correction 7 of the rework spec for what this trap already
+        -- cost once.
+        local fold = opts.canvasFold
+        local section
+        if fold and fold.collapseKey then
+            section = GUI:CreateCollapsibleSection(page.child, fold.title, true, bandW,
+                                                   { collapseKey = fold.collapseKey })
+            shell.canvasSection = section
+            Add(section, 28, "both")
+        end
         local host = Band(h)
         shell.canvasHost = host
         shell.canvas = opts.canvas(host, shell)
         Add(host, h, "both")
+        -- The band is the section's ONE child, so the page's own state pass hides
+        -- it when the header is folded and the bands below close up over it.
+        if section then section:RegisterChild(host) end
         -- Regrow in place: the layout pass reads widget.layoutHeight, so setting
         -- it and re-running the pass moves everything below without a rebuild --
         -- which matters because the caller is a slider drag.
         function shell.SetCanvasHeight(want)
             want = tonumber(want)
             if not want or not host or host.layoutHeight == want then return end
+            -- A folded canvas has no height to regrow -- the slider that would ask
+            -- lives behind the glyph ON it, so this cannot normally fire while it
+            -- is shut, but a pinned panel outlives the fold.
+            if section and not section.expanded then return end
             host.layoutHeight = want
             host:SetHeight(want)
             if page.RefreshStates then page:RefreshStates() end

@@ -506,6 +506,12 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
                     -- split panel below still passes labels -- it has the 850px the
                     -- labels were chosen for.
                     iconButtons = true,
+                    -- ☠ ...AND THEN BEHIND ONE GLYPH. Even as icons the four are
+                    -- 100px of fixed row on a ~410px band. They are verbs about
+                    -- the template as a whole, used rarely, and a menu is where
+                    -- those belong -- the same collapse the Aura Designer's own
+                    -- preset bar takes.
+                    overflowActions = true,
                     getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
                     onChange = function()
                         -- Deferred so the bar is not torn down from inside its own
@@ -545,6 +551,14 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
                 scaleDB   = tdDB,
                 placement = false,
                 unitText  = false,
+                -- ☠ ITS OWN PANEL KEY. The Preview Scale slider lives in a
+                -- POOLED popout now, and a pool is keyed by name -- sharing the
+                -- Aura Designer's key would hand this page the panel already
+                -- bound to the other designer's preview scale.
+                scaleKey  = "df.previewscale.text",
+                -- The band above this one is the fold header, and it is already
+                -- captioned FRAME PREVIEW.
+                hideLabel = true,
             })
             state.previewPanel = canvas
             state.mockFrame = canvas.mockFrame
@@ -571,6 +585,10 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
             if AD and AD.CanvasWantedHeight then return AD.CanvasWantedHeight(true, tdDB) end
             return CANVAS_H
         end,
+        -- ☠ A LITERAL KEY, NEVER THE TITLE, and a DIFFERENT one from the Aura
+        -- Designer's: the two pages share a canvas builder, not a fold. See
+        -- GUI:CreateCollapsibleSection for why the title is not the key.
+        canvasFold = { title = L["FRAME PREVIEW"], collapseKey = "td_canvas" },
 
         tabs = {
             { key = "texts",  label = L["Texts"],       accent = nil },

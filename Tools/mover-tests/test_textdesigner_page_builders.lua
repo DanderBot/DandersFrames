@@ -612,7 +612,12 @@ do
     check(CARDS:find("local scaleDB = (opts and opts.scaleDB) or adDB", 1, true) ~= nil,
           "canvas: scaleDB defaults to the Aura Designer's own config")
     check(CARDS:find('GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, scaleDB, "previewScale",', 1, true) ~= nil,
-          "canvas: ...and the slider binds to it, not to a fixed table")
+          "canvas: ...and the split panel's inline slider binds to it, not to a fixed table")
+    -- ☠ THE BAND'S SLIDER IS IN A POOLED PANEL and cannot capture the table at
+    -- all -- see the Aura Designer's census. What it captures is the KEY, and the
+    -- live canvas registers scaleDB behind it.
+    check(CARDS:find("scaleHosts[popKey] = { db = scaleDB, apply = ApplyPreviewScale }", 1, true) ~= nil,
+          "canvas: ...and the band's glyph panel reaches it through the live registration")
     check(CARDS:find("function P.CanvasWantedHeight(compact, scaleDB)", 1, true) ~= nil,
           "canvas: ...as does the band-height verb, which must read the same number")
     check(ROWS:find("AD.CanvasWantedHeight(true, tdDB)", 1, true) ~= nil,
@@ -788,4 +793,63 @@ do
           "narrow: a section header can be told what its right-hand furniture cost")
     check(ROWS:find("section:SetHeaderRightInset(56)", 1, true) ~= nil,
           "narrow: ...and an element's header declares its eye and delete")
+end
+
+-- ============================================================
+-- 13. THE CHROME DIET, WHERE IT MAPS  (spec section 18)
+-- ------------------------------------------------------------
+-- Of the four moves, two apply to this page unchanged -- it shares the canvas
+-- through those three opts -- and one applies in part:
+--
+--   2. Preview Scale behind a glyph: shared, but the panel is POOLED BY KEY, so
+--      this page must name its own or it gets the one already bound to the Aura
+--      Designer's preview scale.
+--   3. the preset bar's four actions behind one menu: applies. The row merge does
+--      not -- there is no spec picker on this page to merge with.
+--   4. the canvas folds: shared, under a key of this page's own.
+--
+-- Move 1 does NOT map. This page's add flow is already one 32px CTA opening a
+-- floating picker, not a 230px block of standing cards -- there is nothing to
+-- reclaim, and converting it would trade a working flow for a re-implemented one.
+-- ============================================================
+print("-- Text Designer: the chrome diet, where it maps")
+do
+    local SW = options_file_source("GUI/SettingsWidgets.lua")
+
+    -- ---- move 2: its own panel key --------------------------------------
+    check(ROWS:find('scaleKey  = "df.previewscale.text"', 1, true) ~= nil,
+          "diet: the scale panel is keyed to THIS designer")
+    check(ROWS:find('scaleKey  = "df.previewscale.aura"', 1, true) == nil,
+          "diet: ...never the Aura Designer's, which the pool would hand back instead")
+    check(CARDS:find('local popKey = (opts and opts.scaleKey) or "df.previewscale.aura"', 1, true) ~= nil,
+          "diet: ...and the canvas takes the key from its host")
+
+    -- ---- move 3: the four actions behind one menu -----------------------
+    local BANNER = ROWS:match("banner = function%(parent%)(.-)\n        end,")
+    check(BANNER ~= nil, "diet: the row page's banner arm can be read")
+    BANNER = BANNER or ""
+    check(BANNER:find("overflowActions = true", 1, true) ~= nil,
+          "diet: the band's preset bar puts its four actions behind one glyph")
+    check(SW:find("if opts.overflowActions then", 1, true) ~= nil,
+          "diet: ...which is the shared bar's own option, not a copy here")
+    -- ...and the split panel, which has the 850px the labels were chosen for, is
+    -- untouched: it asks for neither the icons nor the menu.
+    local ISLAND = TD:match('GUI:CreateDesignerPresetBar%(page%.child, {(.-)\n        }%)')
+    check(ISLAND ~= nil, "diet: the split panel's own preset bar can be read")
+    check((ISLAND or ""):find("overflowActions", 1, true) == nil,
+          "diet: ...and keeps its four labelled buttons")
+
+    -- ---- move 4: the fold, under a key of its own -----------------------
+    check(ROWS:find('canvasFold = { title = L["FRAME PREVIEW"], collapseKey = "td_canvas" }', 1, true) ~= nil,
+          "diet: the canvas folds under a literal key")
+    check(ROWS:find("collapseKey = L[", 1, true) == nil,
+          "diet: ...never under the localised title, which is the recorded hazard")
+    check(SHELL:find("if fold and fold.collapseKey then", 1, true) ~= nil,
+          "diet: ...and the shell refuses to fold without one")
+    check(ROWS:find("hideLabel = true", 1, true) ~= nil,
+          "diet: the canvas drops its own caption, since the fold header carries it")
+
+    -- ---- move 1 does not map, and the CTA is still there ----------------
+    check(TD:find('text = L["Add Text Element"]', 1, true) ~= nil,
+          "diet: the add CTA is untouched -- it was never the 230px block")
 end

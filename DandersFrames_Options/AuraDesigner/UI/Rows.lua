@@ -64,8 +64,6 @@ local BuildGlobalView            = P.BuildGlobalView
 --   P.EnsureDebuffSelection
 
 local BUFFTAB_H = 30
--- The spec picker's own row -- see S.BuildSpecStrip for why it has one.
-local SPECBAR_H = 26
 -- The canvas band's FLOOR. Its actual height is P.CanvasWantedHeight, which
 -- grows with the preview scale; this is what that returns at 1.0.
 local CANVAS_H  = 132
@@ -154,17 +152,19 @@ S.BuildPoolStrip = function(buffTabBar)
     end
 end
 
--- ☠ THE SPEC PICKER GETS ITS OWN ROW, and that is the narrow window's doing.
--- It was right-aligned ONTO the pool strip, which the 850px island had room for:
--- three tabs at a 96px floor is 296px, the label and dropdown are another 200,
--- and 496 fits in 850 and does not fit in a 640px window's ~410px band. It ate
--- "Debuffs" and hid "Any Buff" completely.
+-- ☠ THE SPEC PICKER RIDES THE TEMPLATE ROW, AND THAT COST SOMETHING TO ARRANGE.
+-- Template and Spec answer the same question -- WHICH SET AM I EDITING -- so they
+-- belong on one line, and they did not fit: the preset bar's four action buttons
+-- were 100px of fixed row on top of its caption and dropdown. Collapsing those
+-- four into one overflow glyph (GUI:CreateDesignerPresetBar's opts.overflowActions)
+-- freed 78px, which is what buys this its place and retires the 26px strip it used
+-- to stand on.
 --
 -- ⚠ It stays VISIBLE and greys on the pools that have no spec (Debuffs and Any
 -- Buff are shared across specs), rather than hiding -- that is the addon's
--- grey-when-disabled convention, and hiding it would change the page's height on
+-- grey-when-disabled convention, and hiding it would change the row's shape on
 -- every pool switch. UpdateSpecDropdownState owns the greying.
-S.BuildSpecStrip = function(host)
+S.BuildSpecPicker = function(host)
     local specLabel = host:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     specLabel:SetText(L["Spec:"])
     specLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
@@ -548,14 +548,51 @@ end
 local function BuildEffectsTabRows(ctx, shell)
     local page, tools, Add = ctx.page, ctx.tools, ctx.Add
 
-    -- The add block, the ACTIVE INDICATORS heading, the chips and the Other Buffs
-    -- hint -- the same furniture the card layout puts above its list, mounted as
-    -- one full-width object. The add flow is a later phase of the rework; when it
-    -- lands, it lands for both layouts at once because there is one copy of it.
+    -- ── + ADD INDICATOR ──
+    -- ☠ ONE ROW WHERE A 230px BLOCK STOOD. The three scope cards were permanent
+    -- furniture at the top of this tab; they are now the second step inside this
+    -- row's panel, behind the spell search that is the first (Cards.lua's
+    -- S.BuildAddIndicatorPane). It holds no settings, so it takes neither a
+    -- modified tick nor a footer -- the same rule the Members and Linked Filters
+    -- rows follow.
+    local addBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
+    local addRow
+    local addMount = tools.PopoutContent(function(g, holder)
+        local pane = CreateFrame("Frame", nil, holder)
+        pane:SetWidth(PopoutWidth())
+        local ready = false
+        S.BuildAddIndicatorPane(pane, {
+            width = PopoutWidth(),
+            -- ⚠ SILENT UNTIL THE PANE IS IN THE GROUP. The builder shows its
+            -- first step as it finishes, and a height reported before AddWidget
+            -- has run has no slot to land in: GUI:RelayoutHost would walk straight
+            -- past the group this has not joined yet and re-run the PAGE's state
+            -- pass in the middle of the page's own build.
+            SetHeight = function(h) if ready then GUI:RelayoutHost(pane, h) end end,
+            Close     = function()
+                if addRow and addRow.ClosePopout then addRow:ClosePopout("api") end
+            end,
+        })
+        g:AddWidget(pane, max(pane:GetHeight() or 1, 1))
+        ready = true
+    end)
+    addRow = addBand:AddWidget(GUI:CreatePopoutRow(page.child, {
+        label  = L["Add Indicator"],
+        title  = L["Add Indicator"],
+        window = DF.GUIFrame,
+        clipTo = page,
+        build  = addMount,
+    }))
+    if not ctx.adEnabled then addRow.disableOn = function() return true end end
+    Add(addBand, nil, "both")
+
+    -- The ACTIVE INDICATORS heading, the chips and the Other Buffs hint -- the
+    -- same furniture the card layout puts above its list, mounted as one
+    -- full-width object. The add BLOCK is skipped: this layout has the row above.
     local pickerOpen
     GUI:AddDesignerLegacyTab(shell, function(host)
         host:SetWidth(tools.BandWidth())
-        local yPos, taken = S.BuildEffectsHeadArea(host, -4)
+        local yPos, taken = S.BuildEffectsHeadArea(host, -4, { skipAddBlock = true })
         pickerOpen = taken
         -- ⚠ ONLY THE PICKER ARM SIZES THE HOST ITSELF. The normal arm returns its
         -- running y and leaves the sizing to the caller, because inside the split
@@ -583,7 +620,10 @@ local function BuildEffectsTabRows(ctx, shell)
         if not IsOtherTab() and (not spec or not specAuras or #specAuras == 0) then
             text = L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."]
         elseif S.activeFilter == "all" then
-            text = L["No effects configured yet.\nPick a style above to get started."]
+            -- ⚠ NOT "pick a style above" ANY MORE. That sentence pointed at the
+            -- three scope cards, which phase 5 moved into the Add Indicator row's
+            -- panel; the split panel below still has them and still says it.
+            text = L["No effects configured yet.\nUse Add Indicator above to place your first one."]
         else
             text = format(L["No %s effects configured."],
                           S.PLACED_TYPE_LABELS[S.activeFilter]
@@ -1048,12 +1088,37 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             local banner = CreateEnableBanner(parent)
             S.enableBanner = banner
             banner:SetWidth(tools.BandWidth())
+
+            -- ☠ ROW 2 CARRIES BOTH "WHICH SET" QUESTIONS. Template on the left,
+            -- Spec on the right, and the 26px strip the spec used to stand on is
+            -- gone. See S.BuildSpecPicker for what had to move to make room.
+            local specHost = CreateFrame("Frame", nil, banner)
+            specHost:SetHeight(22)
+            specHost:SetPoint("RIGHT", banner, "RIGHT", -10, -18)
+            S.BuildSpecPicker(specHost)
+            banner.specHost = specHost
+            -- A SHARE of the row rather than a fixed width: the band is whatever
+            -- the window is, and a 150px spec block is a third of a narrow row and
+            -- a sixth of a wide one. Re-taken on resize, with a floor that keeps
+            -- the caption and a readable spec name together.
+            local function SizeSpec(w)
+                w = w or banner:GetWidth() or 0
+                if w < 60 then return end
+                specHost:SetWidth(max(120, math.floor(w * 0.34)))
+            end
+            banner:HookScript("OnSizeChanged", function(_, w) SizeSpec(w) end)
+            SizeSpec()
+
             -- Which named preset this mode uses, plus library management. Rides
             -- row 2 of the banner, as it does in the split-panel layout.
             if GUI.CreateDesignerPresetBar then
                 local presetBar = GUI:CreateDesignerPresetBar(banner, {
                     kind = "aura",
                     iconButtons = true,
+                    -- ☠ THE FOUR ACTIONS BECOME ONE GLYPH. Four icon buttons are
+                    -- 100px of fixed row, and this row now has to hold the spec
+                    -- picker as well; behind one menu they are 22.
+                    overflowActions = true,
                     getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
                     onChange = function()
                         -- Deferred so the bar is not torn down from inside its own
@@ -1070,7 +1135,7 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
                     end,
                 })
                 presetBar:SetPoint("LEFT", banner, "LEFT", 10, -18)
-                presetBar:SetPoint("RIGHT", banner, "RIGHT", -10, -18)
+                presetBar:SetPoint("RIGHT", specHost, "LEFT", -10, 0)
                 banner.presetBar = presetBar
             end
             return banner, 68
@@ -1080,7 +1145,9 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             -- Lifted as-is: the same anatomy, the same nine anchor dots, the same
             -- RefreshGeometry. `compact` is about the canvas's own FURNITURE, not
             -- its content -- see CreateFramePreview.
-            S.framePreview = CreateFramePreview(host, 0, nil, { compact = true })
+            -- hideLabel: the band above this one is the fold header, and it is
+            -- already captioned FRAME PREVIEW.
+            S.framePreview = CreateFramePreview(host, 0, nil, { compact = true, hideLabel = true })
             -- ☠ WHAT THE ISLAND'S REUSE GUARD USED TO DO, AT THE RIGHT SCOPE.
             -- That guard rebuilt the whole page when the frame's size, the active
             -- auto-layout or the preview scale had moved, because a rebuild was
@@ -1110,10 +1177,15 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             return S.framePreview
         end,
         canvasHeight = function() return P.CanvasWantedHeight(true) end,
+        -- ☠ A LITERAL KEY, NEVER THE TITLE. CreateCollapsibleSection persists a
+        -- fold under the section's title text unless told otherwise, and
+        -- "FRAME PREVIEW" is a localised string -- a German client would write a
+        -- second profile key and a reworded heading would orphan the first. This
+        -- is the same trap the effect and group sections had to sidestep.
+        canvasFold = { title = L["FRAME PREVIEW"], collapseKey = "ad_canvas" },
 
         strips = {
             { height = BUFFTAB_H, build = function(host) S.BuildPoolStrip(host) end },
-            { height = SPECBAR_H, build = function(host) S.BuildSpecStrip(host) end },
         },
 
         tabs = {
