@@ -2735,8 +2735,15 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- intro off for row-mode buttons (AuraContainer's ANIMATION FILTER), so this
     -- checkbox is permanently greyed there and the tooltip explains why instead
     -- of describing a burst the user will never see.
+    -- ☠ GREY DIRECTLY at build, not only via disableOn: the AD cards never run
+    -- the RefreshChildStates pass that applies disableOn predicates (the group
+    -- card's refreshStates comment documents this on purpose), so a
+    -- predicate-only grey renders enabled there — field-caught on the AD icon
+    -- card, 2026-08-29. disableOn stays as well, so a context that DOES apply
+    -- predicates cannot re-enable it.
     if opts.introInert then
         w.animationHideIntro.disableOn = function() return true end
+        w.animationHideIntro:SetEnabled(false)
         w.animationHideIntro.tooltip = L["Aura buttons never play the intro burst: the game engine shows and hides the pooled buttons itself, and the burst can only play when the buttons are first built - not when an aura appears. Buttons go straight to the settled loop, so there is nothing to switch off here. The frame-level border keeps its intro."]
     end
 
