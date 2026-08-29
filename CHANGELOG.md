@@ -8,6 +8,7 @@
 
 ### Bug Fixes
 
+* (Aura Designer) Fix debuffs appearing where buff indicators used to be — most visibly after swapping to a spec with no Aura Designer setup, where every retired indicator position showed the same debuff, live with stacks and duration, until a reload. Disabled and retired indicator slots are now switched off through a second, game-version-proof mechanism. (by Krathe)
 * (Aura Designer) Fix layout and filter group indicators staying at full brightness on out-of-range players when element-specific fading is on — placed indicators faded, groups next to them did not. (by Krathe)
 * (Dispel) "Only Dispellable by You" now follows your talents everywhere, live. A Shaman's poison dispel appears and disappears with Poison Cleansing Totem, a Priest without Improved Purify no longer sees diseases they cannot cure, and talent changes apply to the overlay and the debuff row without a reload. (by Krathe)
 * (Dispel) Fix a Dwarf's bleed dispel lighting up on other players' frames after roster changes — Stoneform only cleanses yourself, so bleeds now show as dispellable only on your own frame. (by Krathe)
