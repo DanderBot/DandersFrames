@@ -703,6 +703,14 @@ P.CollectLayoutGroupSections = CollectLayoutGroupSections
 S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
 
+    -- The column every object below is anchored 8px inside on both sides -- the
+    -- host's own explicit width less those two insets. Derived rather than read
+    -- off a child, for the reason S.BuildEffectsHeadArea spells out: a child's
+    -- width is not resolved until the layout pass, and the choice cards need a
+    -- number NOW to wrap their descriptions against.
+    local hostW = parent:GetWidth() or 0
+    local COL_W = (hostW > 40) and (hostW - 16) or nil
+
     -- ⚠ Read BEFORE any chrome is built. An EMPTY tab explains the two kinds
     -- with choice cards INSTEAD of the compact add buttons and the heading, so
     -- what gets created depends on the count. A card runs ~2.5x a button's
@@ -744,6 +752,7 @@ S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     local addBlock = GUI:CreateChoiceCardGroup(parent, {
         title    = L["ADD A LAYOUT GROUP"],
         accent   = gc,
+        width    = COL_W,
         onToggle = function() S.SwitchTab("layout") end,
         cards = {
             {
@@ -1185,6 +1194,14 @@ P.CollectDebuffGroupSections = CollectDebuffGroupSections
 S.BuildDebuffGroupsHeadArea = function(parent, yPos)
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
 
+    -- The column every object below is anchored 8px inside on both sides -- the
+    -- host's own explicit width less those two insets. Derived rather than read
+    -- off a child, for the reason S.BuildEffectsHeadArea spells out: a child's
+    -- width is not resolved until the layout pass, and the choice cards need a
+    -- number NOW to wrap their descriptions against.
+    local hostW = parent:GetWidth() or 0
+    local COL_W = (hostW > 40) and (hostW - 16) or nil
+
     -- READ path: visiting the tab never creates adDB.debuffGroups.
     -- Read first for the same reason as the Layout Groups tab: an empty tab
     -- swaps the compact button, the dedup explainer and the heading for a
@@ -1211,6 +1228,7 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
     local addBlock = GUI:CreateChoiceCardGroup(parent, {
         title    = L["ADD A DEBUFF GROUP"],
         accent   = gc,
+        width    = COL_W,
         onToggle = function() S.SwitchTab("layout") end,
         cards = {
             {

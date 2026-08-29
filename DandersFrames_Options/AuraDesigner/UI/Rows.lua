@@ -394,6 +394,19 @@ local function MountEffect(ctx, effect, shell)
         end)
     end
 
+    -- ☠ AND NOW SAY WHAT THE RIGHT END COST. The title and the tag run rightward
+    -- from the arrow with no edge of their own, and everything above runs leftward
+    -- from the other side; on the 850px island the two never met, and on the
+    -- ~410px band a 640px window gives this page they do -- a long spell name ran
+    -- straight under the eye and the delete. This is also what keeps the header's
+    -- spell-icon swatch out from under the delete button, which it shared a right
+    -- inset with. 96 clears the warning badge (-76 plus its 16), which is the
+    -- furthest-in of the three; without one the two buttons are all there is.
+    if section.SetHeaderRightInset then
+        local badgeShown = section.dfWarningBadge and section.dfWarningBadge:IsShown()
+        section:SetHeaderRightInset(badgeShown and 96 or (delBtn and 56 or 30))
+    end
+
     Add(section, 36, "both")
 
     if not section.expanded then return end
@@ -679,6 +692,13 @@ local function MountGroup(ctx, group, spec)
             updateEyeIcon()
             spec.onEye()
         end)
+    end
+
+    -- The right end's cost -- see MountEffect. A group's title is a name the USER
+    -- typed, up to thirty characters, so this header is the one most likely to
+    -- reach the buttons.
+    if section.SetHeaderRightInset then
+        section:SetHeaderRightInset(spec.showEye and 56 or 30)
     end
 
     Add(section, 36, "both")

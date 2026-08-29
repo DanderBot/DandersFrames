@@ -366,6 +366,47 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
         end
     end
 
+    -- ☠ THE TITLE AND THE TAG HAVE NO RIGHT EDGE OF THEIR OWN. They run left to
+    -- right from the arrow and stop wherever the string stops, while anything a
+    -- caller hangs on the header -- an eye, a delete, a warning badge, the preview
+    -- swatches -- runs right to left from the other end. On an 850px header the
+    -- two never met. On the ~410px band a 640px window gives the designers they
+    -- do: a spell name like "Health Bar Color - Guardian Spirit", or any group
+    -- name a user typed up to the 30-character limit, runs straight under the
+    -- buttons.
+    --
+    -- So a caller that puts furniture on the right says how much room it took,
+    -- and the pair is BOUNDED by it. Re-applied on the header's own size change
+    -- rather than computed once, because the band is whatever the window is: the
+    -- title's share is DERIVED from the live width, not a smaller magic number.
+    --
+    -- ⚠ Opt-in. A section with a bare header is unbounded exactly as before, so
+    -- no existing page moves.
+    local TITLE_X = 26
+    section.SetHeaderRightInset = function(self, inset)
+        self.headerRightInset = tonumber(inset) or 0
+        local function apply()
+            local w = self:GetWidth() or 0
+            local free = w - TITLE_X - self.headerRightInset
+            if free < 40 then return end
+            -- 55/45: the title is the identity and wins the larger share, but the
+            -- tag ("+2 triggers", "3 indicators") has to stay readable rather than
+            -- be squeezed to nothing by a long name.
+            self.title:SetWordWrap(false)
+            self.title:SetWidth(math.max(40, math.floor(free * 0.55)))
+            self.tag:SetWordWrap(false)
+            self.tag:SetJustifyH("LEFT")
+            self.tag:ClearAllPoints()
+            self.tag:SetPoint("LEFT", self.title, "RIGHT", 8, 0)
+            self.tag:SetPoint("RIGHT", self, "RIGHT", -self.headerRightInset, 0)
+        end
+        self:HookScript("OnSizeChanged", apply)
+        apply()
+        -- Order-independent: the swatches read this inset, so if they were placed
+        -- first they are re-flowed now.
+        if self._previewIconData then self:SetPreviewIcons(self._previewIconData) end
+    end
+
     -- SEARCH: Track current section
     if DF.Search then
         DF.Search:SetCurrentSection(text)
@@ -415,9 +456,18 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     section.previewIcons = {}
     section.SetPreviewIcons = function(self, icons)
         local pool = self.previewIcons
+        -- Remembered so SetHeaderRightInset can re-flow them: the two are the same
+        -- right end, and whichever is called second has to be able to correct the
+        -- first.
+        self._previewIconData = icons
         local n = icons and #icons or 0
         local SIZE, GAP, RIGHT_INSET = 18, 4, -10
-        local x = RIGHT_INSET
+        -- ⚠ THE SWATCHES SHARE THE RIGHT END WITH THE CALLER'S OWN FURNITURE. A
+        -- section that hangs an eye and a delete on its header and ALSO previews an
+        -- icon had both starting 10px from the same edge, so the swatch was drawn
+        -- underneath the delete button. headerRightInset is what the caller already
+        -- says the buttons cost; the swatches start inside it.
+        local x = RIGHT_INSET - (self.headerRightInset or 0)
         for i = n, 1, -1 do  -- right-to-left so entry 1 ends up leftmost
             local data = icons[i]
             local slot = pool[i]
@@ -603,8 +653,17 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     -- Dropdown button + menu (rebuilt on each open so it always reflects the lib)
+    --
+    -- ☠ THE DROPDOWN TAKES WHATEVER IS LEFT, rather than a fixed 150. This bar
+    -- used to be laid out left-to-right in one chain -- label, a 150px dropdown,
+    -- then the four action buttons -- which totals 467px in the labelled form and
+    -- 317px in the icon form. Both fitted the designers' old 850px island and
+    -- neither fits the ~410px band a 640px window gives them, so Delete ran off
+    -- the page. The actions now chain from the bar's RIGHT edge inwards (see
+    -- below) and this spans the gap, so the bar costs exactly its fixed parts at
+    -- any width instead of a constant 467.
     local ddBtn = CreateFrame("Button", nil, bar, "BackdropTemplate")
-    ddBtn:SetSize(150, 22)
+    ddBtn:SetHeight(22)
     ddBtn:SetPoint("LEFT", label, "RIGHT", 6, 0)
     CreateElementBackdrop(ddBtn)
     ddBtn.text = ddBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -622,7 +681,10 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     GUI:RegisterMenu(menu)
     menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -1)
-    menu:SetWidth(150)
+    -- The menu is the button's own list, so it is the button's own width -- and
+    -- the button no longer HAS a constant one. Anchored rather than measured: a
+    -- width read here would be read before the first layout pass.
+    menu:SetPoint("TOPRIGHT", ddBtn, "BOTTOMRIGHT", 0, -1)
     CreatePanelBackdrop(menu)
     menu:Hide()
 
@@ -775,7 +837,6 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             end
         end)
     end)
-    newBtn:SetPoint("LEFT", ddBtn, "RIGHT", 6, 0)
 
     local dupBtn = CreateAction(L["Duplicate"], "content_copy", 72, function()
         local cur = CurrentName()
@@ -789,7 +850,6 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             end
         end)
     end)
-    dupBtn:SetPoint("LEFT", newBtn, "RIGHT", 4, 0)
 
     local renameBtn = CreateAction(L["Rename"], "edit", 62, function()
         local cur = CurrentName()
@@ -799,14 +859,26 @@ function GUI:CreateDesignerPresetBar(parent, opts)
             bar:Refresh(); onChange()
         end)
     end)
-    renameBtn:SetPoint("LEFT", dupBtn, "RIGHT", 4, 0)
 
     local delBtn = CreateAction(L["Delete"], "delete", 56, function()
         local cur = CurrentName()
         if cur == DF.DEFAULT_PRESET then return end
         ConfirmDeletePreset(kind, cur, function() bar:Refresh(); onChange() end)
     end)
-    delBtn:SetPoint("LEFT", renameBtn, "RIGHT", 4, 0)
+
+    -- ☠ THE FOUR ACTIONS CHAIN FROM THE BAR'S RIGHT EDGE INWARDS, and they are
+    -- placed here rather than at each creation because the chain runs backwards:
+    -- Delete pins to the bar, Rename to Delete, Duplicate to Rename, New to
+    -- Duplicate, and the dropdown then spans from the label to New. That is what
+    -- makes the bar cost its FIXED parts at any width. Left-to-right off a
+    -- 150px dropdown the four ran to 467px in the labelled form, which the
+    -- designers' old 850px island had room for and a 640px window's ~410px band
+    -- does not -- Delete simply left the page.
+    delBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
+    renameBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+    dupBtn:SetPoint("RIGHT", renameBtn, "LEFT", -4, 0)
+    newBtn:SetPoint("RIGHT", dupBtn, "LEFT", -4, 0)
+    ddBtn:SetPoint("RIGHT", newBtn, "LEFT", -6, 0)
 
     local function SetActionEnabled(btn, on)
         if on then
@@ -1154,6 +1226,15 @@ function GUI:CreateChoiceCardGroup(parent, opts)
         if opts.onToggle then opts.onToggle() end
     end)
 
+    -- ☠ THE BLOCK'S WIDTH, WHEN THE CALLER KNOWS IT. A card's description wraps,
+    -- and a wrapped description is only measurable once something has said how
+    -- wide the card is -- which its two anchors cannot answer before the layout
+    -- pass has run. The head areas that build these blocks DO know: they are
+    -- handed a host that was sized to the band a line earlier. Passed down, the
+    -- card can size its own description and grow to fit it; omitted, everything
+    -- behaves exactly as it did.
+    if opts.width and opts.width > 40 then group:SetWidth(opts.width) end
+
     local h = CHOICE_GROUP_HEADER_H
     if expanded then
         local y = -h
@@ -1164,6 +1245,7 @@ function GUI:CreateChoiceCardGroup(parent, opts)
             local card = GUI:CreateChoiceCard(group, {
                 title = def.title, desc = def.desc, art = def.art,
                 accent = accent, onClick = def.onClick, action = def.action,
+                width = opts.width,
             })
             card:SetPoint("TOPLEFT", 0, y)
             card:SetPoint("RIGHT", group, "RIGHT", 0, 0)
@@ -1185,6 +1267,10 @@ function GUI:CreateChoiceCard(parent, opts)
 
     local card = CreateFrame("Button", nil, parent, "BackdropTemplate")
     card:SetHeight(CHOICE_CARD_H)
+    -- See CreateChoiceCardGroup's note: an explicit width from the caller is what
+    -- makes the description below measurable at build time.
+    local knownW = (opts.width and opts.width > 40) and opts.width or nil
+    if knownW then card:SetWidth(knownW) end
     CreateElementBackdrop(card, {
         bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
         borderColor = idleBorder,
@@ -1307,7 +1393,31 @@ function GUI:CreateChoiceCard(parent, opts)
         card.ActionButton = actionBtn
     end
 
-    card.layoutHeight = CHOICE_CARD_H
+    -- ☠ AND THE CARD GROWS TO WHAT THE DESCRIPTION ACTUALLY TOOK. 58px held two
+    -- lines, which is all the description ever needed at the 850px width these
+    -- cards were written for. In a 640px window the text column is a little over
+    -- half that and the same sentence runs to three, out through the bottom of the
+    -- card and into the one below it.
+    --
+    -- ⚠ FLOORED AT CHOICE_CARD_H, deliberately. Without a known width the strings
+    -- cannot be measured before layout and GetStringHeight answers 0 -- so a
+    -- failed measurement lands on exactly the height this always used, and can
+    -- only ever make things better than they are.
+    local cardH = CHOICE_CARD_H
+    if knownW then
+        local textW = knownW - (8 + CHOICE_THUMB_W + 9) - textRightPad
+        if textW > 20 then
+            title:SetWidth(textW)
+            desc:SetWidth(textW)
+            -- 12 = the title's own top offset (the thumb is centred in the card and
+            -- the title starts 2px above its top); 3 = the gap the desc is anchored
+            -- at; 10 = the bottom breathing room, matching the top.
+            cardH = math.max(cardH, 12 + (title:GetStringHeight() or 0) + 3
+                                       + (desc:GetStringHeight() or 0) + 10)
+        end
+    end
+    card:SetHeight(cardH)
+    card.layoutHeight = cardH
     return card
 end
 

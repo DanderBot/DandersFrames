@@ -1252,3 +1252,147 @@ do
     check(WIDE:find("general_nicknames", 1, true) ~= nil,
           "wide: ...and Nicknames")
 end
+
+-- ============================================================
+-- 13. THE NARROW WINDOW -- WHAT 850px WAS HIDING
+-- ------------------------------------------------------------
+-- Section 12 removed the floor, so this page now renders in the 640px default
+-- window it always claimed it could: a band of roughly 410px, and as little as
+-- ~280 at the window's own minimum. Everything on this page was written when 850
+-- was guaranteed, and two whole classes of layout bug were invisible at that
+-- width.
+--
+-- CLASS ONE -- A HEIGHT MEASURED BEFORE LAYOUT, THEN SPENT. A wrapping or
+-- flowing element only knows how tall it is once something has given it a real
+-- width, which is after the builder has run; the builder measured it anyway and
+-- everything below was anchored at that number. The re-flow that followed moved
+-- nothing. The repair has two halves and both are asserted here: flow against a
+-- width DERIVED from the host (so the first pass is the final one), and re-report
+-- the height when it changes anyway (so a window resize is not a stale page).
+--
+-- CLASS TWO -- A ROW OF FIXED-WIDTH CHILDREN THAT ONLY EVER FITTED 850. Written
+-- as a left-to-right chain of literals, they simply ran off the end of a band.
+-- The repair is anchoring, not smaller literals: a row whose elastic member
+-- absorbs the slack is right at every width.
+--
+-- CLASS THREE -- TWO THINGS GROWING TOWARD EACH OTHER FROM OPPOSITE EDGES. A
+-- section header's title runs rightward from the arrow with no edge of its own,
+-- while the eye, the delete, the warning badge and the preview swatch run
+-- leftward from the other end. There was 850px of slack between them.
+--
+-- (S) Asserted against the SOURCE, like the rest of this file: neither designer
+-- can be built headlessly. What that buys is that the SHAPE is derived rather
+-- than hardcoded; that the pixels land is still an in-game check.
+-- ============================================================
+print("-- Aura Designer: the narrow window")
+do
+    local SW = options_file_source("GUI/SettingsWidgets.lua")
+
+    -- ---- class one: the shell's re-report verb -------------------------
+    -- The idiom is the canvas band's own (shell.SetCanvasHeight): set
+    -- layoutHeight, set the height, re-run the page's layout pass.
+    check(SHELL:find("host.dfSetHeight = function", 1, true) ~= nil,
+          "narrow: a legacy tab's band host carries a re-report verb")
+    local verb = SHELL:match("host%.dfSetHeight = function%(h%)(.-)\n    end")
+    check(verb ~= nil, "narrow: ...and its body can be read")
+    verb = verb or ""
+    check(verb:find("host.layoutHeight = h", 1, true) ~= nil,
+          "narrow: ...which sets layoutHeight, the number the layout pass reads")
+    check(verb:find("RefreshStates", 1, true) ~= nil,
+          "narrow: ...and re-runs the page's layout pass")
+    check(verb:find("if host.layoutHeight == h then return end", 1, true) ~= nil,
+          "narrow: ...and early-outs when nothing moved, so a re-flow cannot loop")
+
+    -- ---- class one: the effects head area ------------------------------
+    local HEAD = CARDS:match("S%.BuildEffectsHeadArea = function.-\n    return yPos, false\nend")
+    check(HEAD ~= nil, "narrow: the effects head area can be read")
+    HEAD = HEAD or ""
+    -- The column is the HOST's explicit width less its two insets, not a child's
+    -- unresolved one.
+    check(HEAD:find("local hostW = parent:GetWidth()", 1, true) ~= nil,
+          "narrow: the head area derives its column from the host it was sized to")
+    check(HEAD:find("local COL_W = (hostW > 40) and (hostW - 16) or nil", 1, true) ~= nil,
+          "narrow: ...as the host's width less the 8px inset on each side")
+    check(HEAD:find("if maxW < 20 then maxW = COL_W or 260 end", 1, true) ~= nil,
+          "narrow: the chips wrap to that column, not to a hardcoded 260")
+    -- (X) THE ABSENCE IS THE ASSERTION. This exact line is the bug: the chips'
+    -- height read the instant the first pass ended, spent on the y cursor, and
+    -- never revisited.
+    check(HEAD:find("yPos = yPos - (chipsFrame:GetHeight() + 10)", 1, true) == nil,
+          "narrow: the chip row's height is not consumed the moment it is first measured")
+    check(HEAD:find('obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT"', 1, true) ~= nil,
+          "narrow: what follows the chips is anchored TO them, so a re-wrap carries it")
+    check(HEAD:find("local function Measure()", 1, true) ~= nil,
+          "narrow: the head area's height is a verb, so it can be asked twice")
+    local reflow = HEAD:match('chipsFrame:SetScript%("OnSizeChanged", function%(%)(.-)end%)')
+    check(reflow ~= nil, "narrow: the chip row re-flows on resize")
+    reflow = reflow or ""
+    check(reflow:find("parent.dfSetHeight", 1, true) ~= nil,
+          "narrow: ...and re-reports the band's height, instead of leaving the page stale")
+
+    -- ---- class one: the choice cards ------------------------------------
+    -- A card's description WRAPS inside a fixed 58px card. Two lines at 850,
+    -- three in a 640px window -- out through the bottom and into the card below.
+    check(SW:find("if opts.width and opts.width > 40 then group:SetWidth(opts.width) end", 1, true) ~= nil,
+          "narrow: a choice-card block takes an explicit width when its caller knows one")
+    check(SW:find("cardH = math.max(cardH, 12 + (title:GetStringHeight() or 0) + 3", 1, true) ~= nil,
+          "narrow: ...and a card grows to the height its wrapped description took")
+    check(SW:find("card.layoutHeight = cardH", 1, true) ~= nil,
+          "narrow: ...reporting THAT height, not the constant, to whatever stacks it")
+    check(SW:find("card.layoutHeight = CHOICE_CARD_H", 1, true) == nil,
+          "narrow: ...and the constant is no longer what a caller advances by")
+    -- (X) THE TWO SITES SPELL IT DIFFERENTLY, AND THE TEST HAS TO. The add
+    -- block's table is aligned ("width    = COL_W") and the picker arm's card is
+    -- not ("width = COL_W"), so a search for the shorter string is satisfied by
+    -- the card and says nothing at all about the block. My first version passed
+    -- with the block's width deleted.
+    check(HEAD:find("width    = COL_W,", 1, true) ~= nil,
+          "narrow: the Effects tab's add block passes that width down")
+    check(HEAD:find("width = COL_W,", 1, true) ~= nil,
+          "narrow: ...and so does the picker arm's own card list")
+    check(EDIT:find("width    = COL_W", 1, true) ~= nil,
+          "narrow: ...and so do the two Layout Groups blocks")
+
+    -- ---- class two: the preset bar --------------------------------------
+    -- Caption + a fixed 150px dropdown + four action buttons, chained left to
+    -- right. 317px in the icon form and 467 in the labelled one, against a band
+    -- that is ~410 at the default window and ~280 at its minimum.
+    check(SW:find("ddBtn:SetSize(150, 22)", 1, true) == nil,
+          "narrow: the template dropdown is no longer a fixed 150px")
+    check(SW:find('delBtn:SetPoint("RIGHT", bar, "RIGHT", 0, 0)', 1, true) ~= nil,
+          "narrow: the preset bar's actions chain from the bar's own right edge")
+    check(SW:find('ddBtn:SetPoint("RIGHT", newBtn, "LEFT", -6, 0)', 1, true) ~= nil,
+          "narrow: ...and the dropdown spans what is left between caption and actions")
+    check(SW:find('menu:SetPoint("TOPRIGHT", ddBtn, "BOTTOMRIGHT", 0, -1)', 1, true) ~= nil,
+          "narrow: ...with the menu following the button it drops from")
+    check(SW:find("menu:SetWidth(150)", 1, true) == nil,
+          "narrow: ...rather than keeping the button's old constant")
+
+    -- ---- class three: the section header ---------------------------------
+    check(SW:find("section.SetHeaderRightInset = function", 1, true) ~= nil,
+          "narrow: a section header can be told what its right-hand furniture cost")
+    local inset = SW:match("section%.SetHeaderRightInset = function%(self, inset%)(.-)\n    end\n")
+    check(inset ~= nil, "narrow: ...and that verb's body can be read")
+    inset = inset or ""
+    check(inset:find("local w = self:GetWidth()", 1, true) ~= nil,
+          "narrow: ...taking the title's share from the LIVE width")
+    check(inset:find('self:HookScript("OnSizeChanged", apply)', 1, true) ~= nil,
+          "narrow: ...and re-taking it whenever the band changes width")
+    check(SW:find("local x = RIGHT_INSET - (self.headerRightInset or 0)", 1, true) ~= nil,
+          "narrow: the header's preview swatches start inside that same furniture")
+    check(ROWS:find("section:SetHeaderRightInset(badgeShown and 96 or (delBtn and 56 or 30))", 1, true) ~= nil,
+          "narrow: an effect's header declares its eye, delete and warning badge")
+    check(ROWS:find("section:SetHeaderRightInset(spec.showEye and 56 or 30)", 1, true) ~= nil,
+          "narrow: ...and a layout group's declares its own")
+
+    -- ---- class two: the trigger block's button pair ----------------------
+    -- 150 + 4 + 110 is 264px of row inside a popout pane's 244.
+    check(CARDS:find("local trigColW = max((bodyWidth or 260) - 16, 60)", 1, true) ~= nil,
+          "narrow: the trigger block names the column its buttons must share")
+    check(CARDS:find("if tagX > 0 and (tagX + 110) > trigColW then", 1, true) ~= nil,
+          "narrow: ...and Add Condition wraps rather than overhanging the mode button")
+    check(CARDS:find("warn:SetWidth(trigColW)", 1, true) ~= nil,
+          "narrow: the empty-group warning wraps at a width it was TOLD, so it can be measured")
+    check(CARDS:find("tagY = tagY - (max(warn:GetStringHeight() or 0, 14) + 12)", 1, true) ~= nil,
+          "narrow: ...and the cursor advances by what it measured, not a one-line 26")
+end
