@@ -229,6 +229,149 @@ end
 -- picker that's defined later in the file.
 local BuildPicker
 
+-- ============================================================
+-- DEFAULTS RECORDS
+-- What the settings-defaults engine asks when it wants to know whether one of
+-- a text element's appearance fields has been touched, and what it falls back
+-- to (DandersFrames/Core/Defaults.lua, the adapter hook). Without one the
+-- engine returns nil for a text element and every verb built on it dies
+-- silently -- a modified tick that never lights, a Reset Group that writes
+-- nothing, and no error either way.
+--
+-- ☠ THE ADAPTER GOES ON A VIEW, NEVER ON THE ELEMENT. `elem` is SavedVariables:
+-- it is deep-copied into profile exports and handed to LibSerialize, which
+-- cannot serialise a function. A record is a throwaway table that forwards to
+-- the element and carries the hook; nothing here is ever stored.
+--
+-- ⚠ `overrides` IS THE "IS SET" MARKER, NOT PRESENCE. BuildAppearanceSection
+-- seeds elem.font / fontSize / outline / color / useClassColor on every card
+-- build WITHOUT flagging them, and the renderer only honours a field whose
+-- override flag is true (DandersFrames/TextDesigner/Render.lua, resolveAppearance).
+-- So a stale elem.font with overrides.font false is not in force and must not
+-- read as modified -- which is why GetStored asks the flag first.
+--
+-- ⚠ AND THE OVERRIDE SET IS ONLY THOSE FIVE FIELDS. Every other element field
+-- (contentType, anchor, offsets, the per-type content options) has no override
+-- marker and no shared default to fall back to, so the record answers "not a
+-- setting here" for them and they report unmodified. That is the honest answer
+-- for the schema as it stands, not an oversight.
+-- ============================================================
+
+-- The five appearance fields the renderer resolves through overrides.
+local TD_OVERRIDABLE = {
+    font = true, fontSize = true, color = true, outline = true, useClassColor = true,
+}
+
+-- The globalDefaults block the addon SHIPS, taken from the resident module that
+-- seeds it rather than restated here -- a copy would be a third spelling of the
+-- same five values and the first to drift.
+--
+-- ☠ THE RETURN IS SHARED AND MUST NOT BE MUTATED. Same rule as
+-- DF.Defaults:GetDefault, for the same reason: one stray write rewrites the
+-- shipped default for the rest of the session.
+local _shippedGlobals
+local function ShippedGlobalDefaults()
+    if not _shippedGlobals then
+        local TD = DF.TextDesigner
+        if TD and TD.EnsureDB then
+            local td = TD:EnsureDB({})          -- a scratch table; nothing is kept
+            _shippedGlobals = td and td.globalDefaults
+        end
+        _shippedGlobals = _shippedGlobals or {}
+    end
+    return _shippedGlobals
+end
+
+-- One record per element, so a row that holds on to one keeps the same table
+-- across card rebuilds. Weak keys: an element that leaves the preset takes its
+-- record with it.
+local elementRecords = setmetatable({}, { __mode = "k" })
+
+-- The defaults record for one text element. `tdDB` is the preset the element
+-- lives in -- its globalDefaults is what an un-overridden field resolves to.
+local function ElementDefaultsRecord(elem, tdDB)
+    if type(elem) ~= "table" then return nil end
+    local cached = elementRecords[elem]
+    if cached then
+        rawset(cached, "__dfTDDB", tdDB)    -- the element can be re-bound to another preset
+        return cached
+    end
+
+    local record
+    local adapter = {
+        GetDefault = function(k)
+            if not TD_OVERRIDABLE[k] then return nil end
+            local bound = rawget(record, "__dfTDDB")
+            local gd = bound and bound.globalDefaults
+            if gd and gd[k] ~= nil then return gd[k] end
+            return ShippedGlobalDefaults()[k]
+        end,
+        GetStored = function(k)
+            local ovr = rawget(elem, "overrides")
+            if not ovr or not ovr[k] then return nil end
+            return rawget(elem, k)
+        end,
+        -- Reset clears the OVERRIDE, not the value: the point of a reset here is
+        -- that the element goes back to FOLLOWING the Global tab, not that it is
+        -- pinned at whatever the Global tab happens to say today.
+        ClearKey = function(k)
+            local ovr = rawget(elem, "overrides")
+            if ovr then ovr[k] = nil end
+            if DF.TextDesigner.Preview then DF.TextDesigner.Preview:RefreshAll() end
+        end,
+    }
+
+    record = setmetatable({
+        _skipOverrideIndicators = true,
+        __dfDefaultsAdapter = adapter,
+        __dfTDDB = tdDB,
+    }, {
+        __index = function(_, k) return elem[k] end,
+        -- A write through the record MARKS the override, because a value stored
+        -- without its flag is not in force -- the swatch changes and the text
+        -- refuses to, which reads as "the setting does not work". Every
+        -- hand-written callback in this file already does exactly this.
+        __newindex = function(_, k, v)
+            if TD_OVERRIDABLE[k] then
+                elem.overrides = elem.overrides or {}
+                elem.overrides[k] = true
+            end
+            elem[k] = v
+        end,
+    })
+    elementRecords[elem] = record
+    return record
+end
+
+-- ...and the same for the Global tab, whose "record" is the preset's own
+-- globalDefaults block. No ClearKey: the tab's widgets bind straight to that
+-- table, and unsetting a key there would hand them a nil to render. Reset
+-- writes the shipped value instead.
+local function GlobalDefaultsRecord(tdDB)
+    local gd = tdDB and tdDB.globalDefaults
+    if type(gd) ~= "table" then return nil end
+    local cached = elementRecords[gd]
+    if cached then return cached end
+
+    local record = setmetatable({
+        _skipOverrideIndicators = true,
+        __dfDefaultsAdapter = {
+            GetDefault = function(k) return ShippedGlobalDefaults()[k] end,
+            GetStored  = function(k) return rawget(gd, k) end,
+        },
+    }, {
+        __index = function(_, k) return gd[k] end,
+        __newindex = function(_, k, v) gd[k] = v end,
+    })
+    elementRecords[gd] = record
+    return record
+end
+
+-- Published so the page builders (and the headless suite) reach the same record
+-- the editor binds, rather than minting a second one that agrees with itself.
+DF.TextDesigner.ElementDefaultsRecord = ElementDefaultsRecord
+DF.TextDesigner.GlobalDefaultsRecord = GlobalDefaultsRecord
+
 -- Returns the y-offset where the next section should start (negative, goes down).
 -- tdDB / state / page are needed by the Text Group branch so its nested
 -- add/remove callbacks can trigger a card-list re-render.
@@ -250,7 +393,14 @@ local function BuildContentSection(GUI, parent, elem, tdDB, state, page, card, y
     -- and group items all pass through here before BuildAppearanceSection), so one
     -- flag here covers every TD field. Re-set on each card build; an underscore key,
     -- so DesignerConfigEqual / migration ignore it.
-    if elem then elem._skipOverrideIndicators = true end
+    if elem then
+        elem._skipOverrideIndicators = true
+        -- ...and mint the element's defaults record while the preset it belongs
+        -- to is in hand. Nothing is written to the element by this: the record is
+        -- a separate view (see DEFAULTS RECORDS above) and it is what a popout
+        -- row asks for the modified tick and Reset Group.
+        ElementDefaultsRecord(elem, tdDB)
+    end
     if not isGroupItem then
         local label = CreateSectionLabel(GUI, parent, L["Content"])
         label:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yStart)
@@ -2361,6 +2511,8 @@ local function BuildGlobalTab(GUI, parent, state, tdDB, page)
     -- Preset-based, so no per-setting auto-layout override star/reset here either
     -- (see BuildContentSection). Matches the Aura Designer.
     if defaults then defaults._skipOverrideIndicators = true end
+    -- The Global tab's own defaults record, against the values the addon ships.
+    GlobalDefaultsRecord(tdDB)
 
     local label = parent:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(label, 9, "")

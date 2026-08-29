@@ -35,6 +35,13 @@ local DF = DandersFrames
 --    write is an EVENT here (the auto-layout recorder is listening), and
 --    recording an edit that changed nothing would put a key into a layout's
 --    override set that the user never touched.
+-- 4. A RECORD THAT CAN UNSET A KEY IS UNSET, NOT OVERWRITTEN. The designers bind
+--    to a proxy over one record whose values FALL BACK to a shared default when
+--    the record holds none (Core/Defaults.lua, the adapter hook). Writing the
+--    resolved default into such a record pins it at today's value and it stops
+--    following the shared one -- so where the adapter offers ClearKey, reset
+--    clears. The clear still goes through the bracket (rule 1): it is a change
+--    the undo engine and the layout recorder have to see like any other.
 --
 -- AND THE UNDO ENGINE LISTENS TO THE SAME BRACKET (DF.SettingsUndo), which is
 -- why neither verb needs to build an undo of its own -- but it does mean the two
@@ -50,7 +57,7 @@ local DF = DandersFrames
 -- back a plain table; nothing is remembered between calls.
 -- ============================================================
 
-local type, pairs, ipairs = type, pairs, ipairs
+local type, pairs, ipairs, rawget = type, pairs, ipairs, rawget
 
 DF.GroupActions = DF.GroupActions or {}
 local GroupActions = DF.GroupActions
@@ -89,6 +96,17 @@ local function BracketedWrite(host, db, key, value)
     return true
 end
 
+-- A record that answers for itself (Core/Defaults.lua's adapter hook), or nil.
+-- rawget for the same reason the engine uses it: a designer proxy's __index
+-- resolves a fallback for EVERY key, so a plain read would never come back with
+-- the hook itself.
+local function AdapterFor(db)
+    if type(db) ~= "table" then return nil end
+    local a = rawget(db, "__dfDefaultsAdapter")
+    if type(a) == "table" then return a end
+    return nil
+end
+
 -- Which defaults table `db` is a side of. The caller normally KNOWS (the
 -- settings page has GUI.SelectedMode in hand at the moment it builds the
 -- action), and passing it is what keeps the two halves of a reset -- "what is
@@ -104,15 +122,43 @@ local function ResolveMode(db, mode)
     return "party"
 end
 
--- The shipped default for a key, already safe to write. nil when the mode does
--- not ship the key at all (the Targeted List family is party-only) -- those keys
+-- The shipped default for a key, already safe to write. nil when the record does
+-- not have the key at all (the Targeted List family is party-only) -- those keys
 -- are skipped rather than written as nil, which would delete a setting.
-local function DefaultFor(mode, key)
+--
+-- THE ADAPTER IS ASKED FIRST, and `mode` is not consulted when there is one: a
+-- designer record is not a side of a profile and its defaults come from its own
+-- chain (the Global tab's value, then what the type ships), which no
+-- PartyDefaults / RaidDefaults lookup can reach.
+local function DefaultFor(db, mode, key)
+    local adapter = AdapterFor(db)
+    if adapter then
+        local get = adapter.GetDefault
+        local def = get and get(key)
+        if def == nil then return nil end
+        return DeepCopy(def)               -- rule 2, and for the same reason
+    end
     local D = DF.Defaults
     if not D then return nil end
     local def = D:GetDefault(mode, key)
     if def == nil then return nil end
     return DeepCopy(def)                   -- rule 2: never the live reference
+end
+
+-- ONE clear, bracketed. The ClearKey half of rule 4, kept beside BracketedWrite
+-- so the two say the same thing about the bracket.
+--
+-- `resolved` is what the key will read as once the record's own value is gone --
+-- i.e. what the write would have written. It is what the hooks are told, because
+-- that is the value the setting ENDS at, and a hook that was told nil would
+-- record "the user deleted this setting" instead.
+local function BracketedClear(host, db, key, adapter, resolved)
+    if host and host.Call and host:Call("interceptWrite", db, key, resolved) then
+        return false                       -- redirected to the baseline; db is unchanged
+    end
+    adapter.ClearKey(key)
+    if host and host.Call then host:Call("onSettingWritten", db, key, resolved) end
+    return true
 end
 
 -- ============================================================
@@ -149,13 +195,15 @@ function GroupActions:ResetKeys(host, db, keys, mode, label, applyFn)
 
     mode = ResolveMode(db, mode)
     local D = DF.Defaults
+    local adapter = AdapterFor(db)
+    local canClear = adapter and type(adapter.ClearKey) == "function"
     -- ONE undo entry for the whole reset. Opened even when nothing turns out to
     -- be modified: the lib drops an empty group, so the cost of a reset that
     -- changed nothing is a push that never happens.
     local SU = DF.SettingsUndo
     if SU then SU:BeginGroup(label, applyFn) end
     for _, key in ipairs(keys) do
-        local def = DefaultFor(mode, key)
+        local def = DefaultFor(db, mode, key)
         if def ~= nil then
             -- Rule 3. The engine's own comparison, not `==`: a colour table at
             -- its default is a DIFFERENT table with the same numbers, and a
@@ -163,8 +211,26 @@ function GroupActions:ResetKeys(host, db, keys, mode, label, applyFn)
             -- from -- both of which `==` calls a change.
             local modified = D and D:IsModified(db, key)
             if modified then
-                local old = db[key]
-                if BracketedWrite(host, db, key, def) then
+                -- ⚠ THE RECORD'S OWN VALUE, not what the key READS as. Through a
+                -- designer proxy those differ: __index answers with the fallback
+                -- for a key the record does not hold, so `db[key]` would report a
+                -- default as the thing being replaced -- and on the Aura Designer
+                -- the read would COPY that default onto the record on its way past.
+                local old
+                if adapter then
+                    local get = adapter.GetStored
+                    old = get and get(key)
+                else
+                    old = db[key]
+                end
+                -- Rule 4: unset where the record can be unset, write otherwise.
+                local landed
+                if canClear then
+                    landed = BracketedClear(host, db, key, adapter, def)
+                else
+                    landed = BracketedWrite(host, db, key, def)
+                end
+                if landed then
                     changes[key] = { old = old, new = def }
                 end
             end
@@ -193,7 +259,7 @@ function GroupActions:BeginHold(host, db, keys, mode)
     local SU = DF.SettingsUndo
     if SU then SU:Suspend() end
     for _, key in ipairs(keys) do
-        local def = DefaultFor(mode, key)
+        local def = DefaultFor(db, mode, key)
         if def ~= nil then
             -- Copied, not referenced: the stored value may be a table, and the
             -- write below replaces db[key] outright -- but a caller mutating the

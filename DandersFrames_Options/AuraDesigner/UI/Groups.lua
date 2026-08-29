@@ -297,6 +297,35 @@ local function AddDurationColorsLink(g, parent)
 end
 P.AddDurationColorsLink = AddDurationColorsLink
 
+-- ============================================================
+-- THE INSTANCE FALLBACK CHAIN
+-- What a placed indicator's key reads as when the INSTANCE itself holds no
+-- value of its own: the Global tab's matching default (GLOBAL_DEFAULT_MAP says
+-- which key that is for this type), then what the type ships.
+--
+-- ☠ ONE CHAIN, TWO READERS. The proxy's __index resolves a key with it, and
+-- the proxy's defaults adapter answers "what would this key fall back to" with
+-- it. Restating it in the second reader is how a modified tick ends up
+-- disagreeing with the control sitting next to it -- the tick would be measuring
+-- against a default the control never resolves.
+-- ============================================================
+local function InstanceFallback(inst, k)
+    if not inst or not inst.type then return nil end
+    local gdMap = GLOBAL_DEFAULT_MAP[inst.type]
+    if gdMap then
+        local gdKey = gdMap[k]
+        if gdKey then
+            local adDB = GetAuraDesignerDB()
+            local gd = adDB and adDB.defaults
+            if gd and gd[gdKey] ~= nil then return gd[gdKey] end
+        end
+    end
+    local defaults = TYPE_DEFAULTS[inst.type]
+    if defaults then return defaults[k] end
+    return nil
+end
+P.InstanceFallback = InstanceFallback
+
 -- Create a proxy table that maps flat key access to an indicator instance
 -- Fallback chain: instance value → global defaults → TYPE_DEFAULTS
 local function CreateInstanceProxy(auraName, indicatorID)
@@ -310,31 +339,53 @@ local function CreateInstanceProxy(auraName, indicatorID)
     -- a fresh proxy, so stashing at construction time is safe.
     local _inst = GetIndicatorByID(auraName, indicatorID, pool())
     local _typeDefaults = _inst and TYPE_DEFAULTS[_inst.type] or nil
-    return setmetatable({ _skipOverrideIndicators = true, __dfDefaults = _typeDefaults }, {
+    -- What the settings-defaults engine asks when it wants to know whether one of
+    -- this record's keys has been touched (DandersFrames/Core/Defaults.lua). It
+    -- is the only way that engine can answer for a designer at all: its other
+    -- branches recognise DF.db.party / DF.db.raid by IDENTITY, and this table is
+    -- a proxy over one indicator instance.
+    --
+    -- ☠ GetStored IS A rawget, DELIBERATELY. Reading `proxy[k]` -- or even
+    -- `inst[k]` on an instance carrying a metatable -- resolves the fallback
+    -- chain, so every key would come back non-nil and the whole panel would
+    -- report as modified. Worse on this proxy than most: __index COPIES a
+    -- table-valued fallback onto the instance on its way past (see below), so a
+    -- read taken to answer "is this modified" would itself be what makes the key
+    -- present. The raw read is what makes that copy harmless -- the copy equals
+    -- what it was copied from, and the engine compares by VALUE.
+    local adapter = {
+        GetDefault = function(k)
+            return InstanceFallback(GetIndicatorByID(auraName, indicatorID, pool()), k)
+        end,
+        GetStored = function(k)
+            local inst = GetIndicatorByID(auraName, indicatorID, pool())
+            if not inst then return nil end
+            return rawget(inst, k)
+        end,
+        -- Reset unsets rather than writing the resolved value in, so an effect
+        -- goes back to FOLLOWING the Global tab instead of being pinned at
+        -- whatever the Global tab happens to say today.
+        ClearKey = function(k)
+            local inst = GetIndicatorByID(auraName, indicatorID, pool())
+            if not inst then return end
+            inst[k] = nil
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
+            RefreshLiveFramesThrottled()
+        end,
+    }
+    return setmetatable({
+        _skipOverrideIndicators = true,
+        __dfDefaults = _typeDefaults,
+        __dfDefaultsAdapter = adapter,
+    }, {
         __index = function(_, k)
             local inst = GetIndicatorByID(auraName, indicatorID, pool())
             if inst then
                 local val = inst[k]
                 if val ~= nil then return val end
             end
-            -- Fall back to global defaults for applicable keys
-            local fallback
-            if inst and inst.type then
-                local gdMap = GLOBAL_DEFAULT_MAP[inst.type]
-                if gdMap then
-                    local gdKey = gdMap[k]
-                    if gdKey then
-                        local adDB = GetAuraDesignerDB()
-                        local gd = adDB and adDB.defaults
-                        if gd and gd[gdKey] ~= nil then fallback = gd[gdKey] end
-                    end
-                end
-                -- Then fall back to TYPE_DEFAULTS
-                if fallback == nil then
-                    local defaults = TYPE_DEFAULTS[inst.type]
-                    if defaults then fallback = defaults[k] end
-                end
-            end
+            -- Fall back to global defaults for applicable keys, then TYPE_DEFAULTS
+            local fallback = InstanceFallback(inst, k)
             -- Copy-on-read: if fallback is a table, copy it into the instance
             -- so that sub-key mutations (e.g. proxy.color.r = 1) persist
             if type(fallback) == "table" and inst then
@@ -364,7 +415,34 @@ local function CreateProxy(auraName, typeKey)
     local function pool() return otherPool and GetOtherAuras() or GetSpecAuras() end
     -- Expose defaults to GUI:CreateColorPicker so its Default button can resolve
     -- AD-specific keys (color/expiringColor/etc.) that aren't in PartyDefaults.
-    return setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults }, {
+    -- The adapter is the same contract CreateInstanceProxy documents at length,
+    -- over a shorter chain: this record's fallback is TYPE_DEFAULTS and nothing
+    -- else, and the copy-on-read below is the same trap the raw read defuses.
+    local adapter = {
+        GetDefault = function(k)
+            if not defaults then return nil end
+            return defaults[k]
+        end,
+        GetStored = function(k)
+            local auraCfg = pool()[auraName]
+            local typeCfg = auraCfg and auraCfg[typeKey]
+            if not typeCfg then return nil end
+            return rawget(typeCfg, k)
+        end,
+        ClearKey = function(k)
+            local auraCfg = pool()[auraName]
+            local typeCfg = auraCfg and auraCfg[typeKey]
+            if not typeCfg then return end
+            typeCfg[k] = nil
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
+            RefreshLiveFramesThrottled()
+        end,
+    }
+    return setmetatable({
+        _skipOverrideIndicators = true,
+        __dfDefaults = defaults,
+        __dfDefaultsAdapter = adapter,
+    }, {
         __index = function(_, k)
             local auraCfg = pool()[auraName]
             if auraCfg and auraCfg[typeKey] then
