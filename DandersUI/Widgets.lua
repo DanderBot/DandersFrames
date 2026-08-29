@@ -2635,7 +2635,7 @@ local MENU_STRATA = "FULLSCREEN_DIALOG"
 -- A menu must draw over the thing it was opened from, full stop. Nailing it to
 -- FULLSCREEN_DIALOG delivered that for as long as every opener sat below
 -- FULLSCREEN_DIALOG, and that stopped being true: a popout docked OUTSIDE a
--- window takes one strata ABOVE that window's (see Popout.lua's OUTSIDE_LEVEL),
+-- window takes one strata ABOVE that window's (see Popout.lua's STACK_BASE),
 -- so a dropdown inside a popout docked off a FULLSCREEN_DIALOG window would be
 -- forced DOWN, behind the very panel it belongs to.
 --

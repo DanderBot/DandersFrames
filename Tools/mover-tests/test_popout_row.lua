@@ -2114,5 +2114,154 @@ do
     check(not row.modifiedTick:IsShown(), "bad check: ...on every refresh")
 end
 
+-- ============================================================
+-- 20. ONE PANEL PER ROW
+-- "If a popout is pinned, it shouldn't be able to open again as an unpinned
+-- popout. Only 1 of each popout." (Danders, in-game.)
+--
+-- The pool cannot promise this on its own: PINNING takes an instance out of the
+-- pool -- that is what pinning IS -- so a second click on the same row found
+-- nothing pooled for the key and built a fresh panel. Two panels, one row, the
+-- same controls in both, and no way to tell which one a write went through.
+--
+-- The open path therefore asks about the ROW, not about the key: is any live
+-- instance currently bound to me. If one is, the click raises it.
+-- ============================================================
+-- The shell's own live register, which is the only honest count of "how many
+-- panels exist right now" -- the row's `.popout` is one row's opinion, and the
+-- bug was precisely that two of them could disagree.
+local function livePanels() return #rawget(host, "_popouts").live end
+
+do
+    local win = window()
+    local function mk(name, dy)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = { on = true }, toggle = { key = "on" },
+            summary = function() return name end,
+            count = 1, build = counting("one" .. name, 50, 1), window = win,
+        }), dy)
+    end
+    local a, b = mk("OneA", 100), mk("OneB", -100)
+    local base = livePanels()
+
+    a:OpenPopout()
+    local first = a.popout
+    eq(livePanels(), base + 1, "one: the first click on a row opens a panel")
+    eq(builds["oneOneA"], 1, "one: ...and mounts the row's controls once")
+
+    -- Clicking an open row again is "show me that one", not "make me another".
+    a:OpenPopout()
+    check(a.popout == first, "one: a second click on the same row is the same panel")
+    eq(livePanels(), base + 1, "one: ...and no second panel was built")
+    eq(builds["oneOneA"], 1, "one: ...nor a second copy of its controls")
+
+    -- ☠ THE CASE THAT SHIPPED BROKEN. Pinned is still LIVE, and still about this
+    -- row -- so the row already has its panel and must not be given another.
+    first:Pin(true)
+    check(first.pinned, "one: (the panel is pinned now, and out of the pool)")
+    a:OpenPopout()
+    check(a.popout == first, "one: clicking a PINNED row's plate finds that panel, not a second one")
+    eq(livePanels(), base + 1, "one: ...so there is still exactly one panel in the world")
+    eq(builds["oneOneA"], 1, "one: ...and still one copy of the controls")
+    eq(first._boundRow, a, "one: ...and it is still about the row that was clicked")
+
+    -- ANOTHER row is a different question: it has no panel of its own, so it gets
+    -- one -- the pinned instance left the pool, so this is a fresh build.
+    b:OpenPopout()
+    local second = b.popout
+    check(second ~= first, "one: a row with no panel of its own still opens one")
+    check(second.frame:GetFrameLevel() > first.frame:GetFrameLevel(),
+          "one: (and the newer panel is on top of the pinned one)")
+
+    -- ...and NOW the raise is observable: clicking the pinned row brings its
+    -- panel forward instead of duplicating it.
+    a:OpenPopout()
+    check(a.popout == first, "one: the click still finds the pinned panel")
+    check(first.frame:GetFrameLevel() > second.frame:GetFrameLevel(),
+          "one: ...and RAISES it over the one that was in front")
+    eq(livePanels(), base + 2, "one: two rows, two panels -- and not a third")
+
+    second:Close()
+    first:Close()
+    eq(livePanels(), base, "one: (and both are gone again)")
+end
+
+-- ============================================================
+-- 21. THE ROW GOES AWAY UNDER ITS OWN PANEL
+-- "If a collapsible section collapses when something is popped out, it leaves a
+-- highlight overlapping other parts of the settings." (Danders, in-game.)
+--
+-- The panel is not a child of the row -- it hangs off UIParent so it can draw
+-- outside the window -- and neither is the accent outline it traces ON the row.
+-- So hiding the row left both exactly where they were, and the page re-flowed
+-- underneath them: an accent rectangle lying across whatever moved up.
+--
+-- The row answers the kit's layout-hidden contract (see Sections.lua, and
+-- test_sections_group for the callers). Here: what the row DOES about it.
+-- ============================================================
+do
+    local win = window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Fold", db = { on = true }, toggle = { key = "on" },
+        summary = function() return "live" end,
+        count = 1, build = counting("fold", 50, 1), window = win,
+    }), 100)
+    check(type(rawget(row, "_OnLayoutHidden")) == "function",
+          "fold: the row declares the kit's layout-hidden hook")
+
+    row:OpenPopout()
+    local po = row.popout
+    check(po and not po.closed, "fold: (a panel is up, docked to the row)")
+    check(po.srcOutline and po.srcOutline:IsShown(), "fold: (with the outline traced on the row)")
+    check(po.beam and po.beam:IsShown(), "fold: (and the beam across the gap)")
+    eq(row.plate._edge.r, ACCENT.r, "fold: (and the row painted as the open one)")
+
+    row._OnLayoutHidden(row)
+    check(po.closed, "fold: the row leaving the page closes the panel docked to it")
+    check(not po.srcOutline:IsShown(), "fold: the outline goes with it -- INSTANTLY, not on a fade")
+    check(not po.beam:IsShown(), "fold: the beam too")
+    check(not po.notch:IsShown(), "fold: and the connection point")
+    eq(row.popout, nil, "fold: the row lets go of it")
+    eq(row.plate._edge.r, UI.Colors.border.r, "fold: ...and stops painting itself as the open one")
+end
+
+-- A PINNED panel survives. Pinning is the gesture that detaches a panel from the
+-- row it came out of, and a detached panel does not care where that row went --
+-- it carries no beam and no outline, so there is nothing left to orphan.
+do
+    local win = window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "FoldPin", db = { on = true }, toggle = { key = "on" },
+        count = 1, build = counting("foldpin", 50, 1), window = win,
+    }), 100)
+    row:OpenPopout()
+    local po = row.popout
+    po:Pin(true)
+    row._OnLayoutHidden(row)
+    check(not po.closed, "fold: a pinned panel is detached, and survives its row going away")
+    po:Close()
+end
+
+-- One row's fold is not another row's. The hook walks the panels bound to THIS
+-- row, and the shared instance is only ever about one row at a time.
+do
+    local win = window()
+    local function mk(name, dy)
+        return place(host:CreatePopoutRow(FakeUIFrame(), {
+            label = name, db = { on = true }, toggle = { key = "on" },
+            count = 1, build = counting("fold" .. name, 50, 1), window = win,
+        }), dy)
+    end
+    local a, b = mk("FA", 100), mk("FB", -100)
+    a:OpenPopout()
+    b:OpenPopout()                      -- the shared panel glides across to b
+    local po = b.popout
+    a._OnLayoutHidden(a)
+    check(not po.closed, "fold: folding the row the panel LEFT does not close it")
+    eq(po._boundRow, b, "fold: ...it is still about the row it moved to")
+    b._OnLayoutHidden(b)
+    check(po.closed, "fold: folding the row it is about does")
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit
