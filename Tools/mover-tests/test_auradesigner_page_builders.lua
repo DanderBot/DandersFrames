@@ -1226,16 +1226,29 @@ do
 end
 
 -- ============================================================
--- 12. WIDE_PAGES IS NOT TOUCHED YET
--- Phase 6 drops the floor, and it must not land before Layout Groups, Global and
--- the Text Designer convert -- or the window shrinks around a layout that still
--- needs the width.
+-- 12. THE WIDE-PAGE FLOOR IS GONE -- THE ACCEPTANCE TEST FOR THE WHOLE REWORK
+-- Both designers were 50/50 split panels that forced a 640-wide window to 850 and
+-- would not let it back down. That floor is what the conversion was FOR, so its
+-- removal is the one assertion that says the rework achieved its purpose rather
+-- than merely rearranging itself.
 -- ============================================================
-print("-- Aura Designer: the wide-page floor stands until phase 6")
+print("-- Aura Designer: the wide-page floor is gone")
 do
     local PANEL = options_file_source("GUI/Panel.lua")
-    check(PANEL:find("auras_auradesigner   = true", 1, true) ~= nil,
-          "wide: the Aura Designer is still a wide page")
-    check(PANEL:find("text_designer", 1, true) ~= nil,
-          "wide: ...and so is the Text Designer")
+    -- ⚠ THE TABLE'S BODY, NOT THE FILE. Both page ids also appear in the
+    -- slash-command alias map (Panel.lua:977, :998), so a file-wide find answers
+    -- "is this string anywhere" and never "is this page still a wide page".
+    local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
+    check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
+    check(WIDE:find("auras_auradesigner", 1, true) == nil,
+          "wide: the Aura Designer no longer forces the window to 850")
+    check(WIDE:find("text_designer", 1, true) == nil,
+          "wide: ...and neither does the Text Designer")
+    -- ⚠ The ones that are still islands must NOT have been swept out with them.
+    check(WIDE:find("auras_filterdesigner", 1, true) ~= nil,
+          "wide: the Filter Designer keeps its floor -- it is still a two-column list")
+    check(WIDE:find("general_pinnedframes", 1, true) ~= nil,
+          "wide: ...as does Pinned Frames")
+    check(WIDE:find("general_nicknames", 1, true) ~= nil,
+          "wide: ...and Nicknames")
 end

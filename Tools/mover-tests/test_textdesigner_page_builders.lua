@@ -708,16 +708,21 @@ do
 end
 
 -- ============================================================
--- 11. WIDE_PAGES IS NOT TOUCHED YET
--- Phase 6 drops the floor, and it must not land before the Aura Designer's
--- remaining tabs convert -- or the window shrinks around a layout that still
--- needs the width.
+-- 11. THE WIDE-PAGE FLOOR IS GONE
+-- The Text Designer's half of the acceptance test; the Aura Designer's census
+-- asserts the same thing from its own side, deliberately, because either page
+-- regressing to a split layout would need its floor back.
 -- ============================================================
-print("-- Text Designer: the wide-page floor stands until phase 6")
+print("-- Text Designer: the wide-page floor is gone")
 do
     local PANEL = options_file_source("GUI/Panel.lua")
-    check(PANEL:find("text_designer", 1, true) ~= nil,
-          "wide: the Text Designer is still a wide page")
-    check(PANEL:find("auras_auradesigner   = true", 1, true) ~= nil,
-          "wide: ...and so is the Aura Designer")
+    -- ⚠ THE TABLE'S BODY, NOT THE FILE. Both page ids also appear in the
+    -- slash-command alias map (Panel.lua:977, :998), so a file-wide find answers
+    -- "is this string anywhere" and never "is this page still a wide page".
+    local WIDE = PANEL:match("local WIDE_PAGES = {(.-)}")
+    check(WIDE ~= nil, "wide: the WIDE_PAGES table can be found")
+    check(WIDE:find("text_designer", 1, true) == nil,
+          "wide: the Text Designer no longer forces the window to 850")
+    check(WIDE:find("auras_auradesigner", 1, true) == nil,
+          "wide: ...and neither does the Aura Designer")
 end

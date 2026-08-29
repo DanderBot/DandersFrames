@@ -2587,10 +2587,18 @@ function DF:CreateGUI()
     -- so returning from BINDS to PARTY/RAID reset the minimum to 520 while a wide page was
     -- still the visible one, and it could then be dragged narrow. Any new consumer of the
     -- wide-page rule reads THIS table; do not re-declare a local copy.
+    -- ☠ THE AURA AND TEXT DESIGNERS ARE NO LONGER HERE, and that is the whole
+    -- point of the popout rework rather than a side effect of it. Both were
+    -- 50/50 split panels that could not be read below 850, so opening either one
+    -- yanked a 640-wide window 210px wider and refused to let it back down. They
+    -- are now a single column of bands like every other converted page and fit
+    -- the default width, so the floor they needed is gone with the layout that
+    -- needed it. See docs/superpowers/specs/2026-08-29-designer-rework.md.
+    --
+    -- ⚠ The FILTER Designer is still here on purpose -- it is a genuine
+    -- two-column list and has not been converted.
     local WIDE_PAGES = {
-        auras_auradesigner   = true,  -- two-panel preview + controls
         auras_filterdesigner = true,  -- Aura Filters: two-column preset list + spell list
-        text_designer        = true,  -- two-panel preview + controls
         general_pinnedframes = true,  -- tab strip + active-set meter
         general_nicknames    = true,  -- wide add-row (Match+Char+Nick+Add) + list columns
     }
