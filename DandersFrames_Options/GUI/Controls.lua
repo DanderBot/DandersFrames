@@ -310,16 +310,25 @@ function GUI:CreatePandemicControls(group, dbTable, opts)
     local w = {}
     local noteW = GUI:GroupInnerWidth(group)
 
-    w.enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], dbTable,
-        K("Enabled"), onStructural), 28)
-    -- keepEnabled spares this toggle from the GROUP gate below (so "Enable off" doesn't grey
-    -- the switch you need to turn it back on) — it does NOT spare it from its own disableOn,
-    -- which is why the two compose here rather than fight.
-    w.enable.keepEnabled = true
-    -- On a client without the registrar the toggle itself must go dead, or a user can switch
-    -- on a feature that provably cannot render (the silent-capability-skip rule). The page's
-    -- master switch greys it too — nothing above it being on means nothing below it applies.
-    w.enable.disableOn = function(db) return not supported or gated(db) end
+    -- opts.noEnableToggle: suppress the built-in "Enable" checkbox, for a consumer
+    -- that carries the tick itself — a popout feature row hoists it onto the row and
+    -- would otherwise draw the same switch twice. CreateBorderControls' noShowToggle,
+    -- for the section that owns THIS one. The Enabled key is still read: the group
+    -- gate at the foot of this function folds it in, so everything under the toggle
+    -- greys exactly as it did. The consumer inherits the toggle's own disableOn with
+    -- it — an unsupported client must not be switchable from the row either.
+    if not opts.noEnableToggle then
+        w.enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], dbTable,
+            K("Enabled"), onStructural), 28)
+        -- keepEnabled spares this toggle from the GROUP gate below (so "Enable off" doesn't grey
+        -- the switch you need to turn it back on) — it does NOT spare it from its own disableOn,
+        -- which is why the two compose here rather than fight.
+        w.enable.keepEnabled = true
+        -- On a client without the registrar the toggle itself must go dead, or a user can switch
+        -- on a feature that provably cannot render (the silent-capability-skip rule). The page's
+        -- master switch greys it too — nothing above it being on means nothing below it applies.
+        w.enable.disableOn = function(db) return not supported or gated(db) end
+    end
 
     -- Says why there is no threshold, and why a given spell may never light. Sits directly
     -- under Enable, where the Alert Below slider lives in the Expiration section —
@@ -3821,6 +3830,18 @@ function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey
     RefreshExample()
 
     group:AddWidget(dd)
+
+    -- ⚠ AND UNDER THE GROUP-WIDE VALUE SWEEP'S NAME AS WELL. A dropdown's own
+    -- refreshValue repaints the CAPTION (DandersUI Sections' RefreshChildValues) and
+    -- knows nothing about the example this function bolted onto it afterwards — so a
+    -- write the widget could not have seen (a popout row's Reset Group, its
+    -- Hold: Defaults, the undo of either) left the example describing a format the
+    -- user no longer has. Chained rather than replaced, so the caption still repaints.
+    local ddRefreshValue = dd.refreshValue
+    dd.refreshValue = function()
+        if ddRefreshValue then ddRefreshValue() end
+        RefreshExample()
+    end
 
     dd.dfExampleText = example
     dd.dfRefreshExample = RefreshExample
