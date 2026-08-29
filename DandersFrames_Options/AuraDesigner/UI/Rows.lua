@@ -44,6 +44,24 @@ local UpdateSpecDropdownState  = P.UpdateSpecDropdownState
 local PoolKeyPrefix            = P.PoolKeyPrefix
 local expandedCards            = P.expandedCards
 local mainTabButtons           = P.mainTabButtons
+-- ...and the Layout Groups / Global halves, which phase 3 brought over.
+local CurrentLayoutGroups        = P.CurrentLayoutGroups
+local DebuffGroupsRead           = P.DebuffGroupsRead
+local GroupExpandKey             = P.GroupExpandKey
+local expandedGroups             = P.expandedGroups
+local DeleteLayoutGroup          = P.DeleteLayoutGroup
+local DeleteDebuffGroup          = P.DeleteDebuffGroup
+local GroupRecordView            = P.GroupRecordView
+local DebuffGroupRecordView      = P.DebuffGroupRecordView
+local DebuffSelectionView        = P.DebuffSelectionView
+local AddGroupAppearanceSection  = P.AddGroupAppearanceSection
+local BuildGlobalView            = P.BuildGlobalView
+-- ☠ NOT ALIASED, READ AT CALL TIME. Editor.lua declares these and it loads AFTER
+-- this file (see the companion's TOC), so a load-time local would freeze nil --
+-- silently, because a nil upvalue only errors when the tab is opened. Everything
+-- above comes from Options.lua / Groups.lua / Cards.lua, all of which load first.
+--   P.CollectLayoutGroupSections   P.CollectDebuffGroupSections
+--   P.EnsureDebuffSelection
 
 local BUFFTAB_H = 30
 -- The canvas band's FLOOR. Its actual height is P.CanvasWantedHeight, which
@@ -528,6 +546,399 @@ local function BuildEffectsTabRows(ctx, shell)
 end
 
 -- ============================================================
+-- ONE LAYOUT GROUP'S ROWS
+-- ------------------------------------------------------------
+-- The same shape a placed effect takes (see MountEffect): the GROUP is a
+-- collapsible SECTION whose header carries the identity -- its name, its
+-- one-line summary, the eye and the delete -- and the rows in the band under it
+-- each own one panel. The group itself is expand-only for the same reason an
+-- effect is: it is a way in to five or ten groups, not a group, and the popout
+-- system is deliberately ONE level deep.
+--
+-- ⚠ THE FOLD STATE IS expandedGroups, NOT collapsedGroups, and Toggle is
+-- REPLACED rather than hooked. CreateCollapsibleSection persists its fold under
+-- the section's TITLE TEXT, and these titles are USER-TYPED GROUP NAMES -- one
+-- permanent profile key per group, forever, which is a schema change smuggled in
+-- under "pure re-presentation". The state stays in the same in-memory table the
+-- card layout used. Same trap MountEffect documents; the section factory has it
+-- by default for anything with a user-derived title.
+-- ============================================================
+
+-- The pane's own env, the other half of Editor.lua's `place` seam: a card runs a
+-- y cursor down its body, and a pane hands each widget to the pane's settings
+-- group, which sizes and anchors it. Nothing else about a section body differs.
+local function PaneEnv(g, holder, verbs)
+    return {
+        place = function(widget, height) g:AddWidget(widget, height) end,
+        host  = holder,
+        -- caption / bodyWidth are deliberately ABSENT: in a pane the popout row's
+        -- own label is the caption, and the group owns the width.
+        Rebuild = verbs.Rebuild,
+        Redraw  = verbs.Redraw,
+        Header  = verbs.Header,
+    }
+end
+
+-- Everything a group's rows are built from, for both group stores. The two
+-- differ in which sections they collect, which record their rows measure against
+-- and what their headers say; the machinery below is one copy.
+local function MountGroup(ctx, group, spec)
+    local page, tools, Add = ctx.page, ctx.tools, ctx.Add
+    local bandW = tools.BandWidth()
+    local cardKey = spec.cardKey
+    local record = spec.record
+
+    local section = GUI:CreateCollapsibleSection(page.child, group.name, false, bandW)
+    section.expanded = expandedGroups[cardKey] and true or false
+    section.arrow:SetTexture(section.expanded
+        and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
+        or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+    section.Toggle = function(self)
+        expandedGroups[cardKey] = not self.expanded or nil
+        -- A rebuild, not a state pass: the rows under a collapsed group are not
+        -- BUILT, so there is nothing for RefreshStates to reveal.
+        if page.Refresh then page:Refresh() end
+    end
+
+    local function RefreshHeader()
+        section.sectionTitleText = group.name
+        section.title:SetText(group.name)
+        section:SetTag(spec.Summary())
+    end
+    RefreshHeader()
+    -- The header greys with the feature, exactly as every other converted page's
+    -- section headers do.
+    if not ctx.adEnabled and section.SetPreviewDimmed then section:SetPreviewDimmed(true) end
+
+    -- ── THE HEADER'S TWO ACTIONS ── the card's own delete and eye.
+    local delBtn = GUI:CreateCloseButton(section, { size = 22, onClick = spec.onDelete })
+    delBtn:SetPoint("RIGHT", -6, 0)
+    delBtn:SetFrameLevel(section:GetFrameLevel() + 2)
+
+    if spec.showEye then
+        local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+        local eyeBtn = GUI:CreateGlyphButton(section, { size = 18 })
+        eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+        eyeBtn:SetFrameLevel(section:GetFrameLevel() + 2)
+        local function shown() return group.enabled ~= false end
+        local function updateEyeIcon()
+            if shown() then
+                eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
+            else
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
+            end
+            eyeBtn:SetGlyphHover(shown())
+        end
+        updateEyeIcon()
+        eyeBtn:RegisterForClicks("LeftButtonUp")
+        eyeBtn:SetScript("OnClick", function()
+            group.enabled = (group.enabled == false) and true or false
+            updateEyeIcon()
+            spec.onEye()
+        end)
+    end
+
+    Add(section, 36, "both")
+
+    if not section.expanded then return end
+
+    -- ── THE BAND OF ROWS ──
+    -- Headerless: the section's own header is this group's name, which is the
+    -- Modules page's rule for a band inside a section.
+    local band = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
+    section:RegisterChild(band)
+
+    -- ☠ THE ROW'S db IS A VIEW OF THE GROUP RECORD, NOT DF.db[mode]. Everything
+    -- behind these rows lives on ONE group record, and the view is what carries
+    -- the defaults adapter (AuraDesigner/UI/Groups.lua) that lets the diff engine
+    -- answer "is this modified" for a table it otherwise knows nothing about.
+    -- Handed the page db instead, every row's amber tick would be permanently
+    -- dark and Reset Group would write nothing while saying it had.
+    local function RowRecord() return record end
+    local function AlwaysOff() return true end
+
+    local function AddRow(label, build, rowDB, extra)
+        local mount, content = tools.PopoutContent(build)
+        local row = band:AddWidget(GUI:CreatePopoutRow(page.child, {
+            label   = label,
+            title   = format("%s \226\128\148 %s", group.name, label),
+            db      = rowDB or RowRecord,
+            -- Derived, never declared: the pane is built eagerly a line above, so
+            -- the badge counts the controls actually in it.
+            count   = content and content.groupChildren and #content.groupChildren or nil,
+            window  = DF.GUIFrame,
+            clipTo  = page,
+            build   = mount,
+        }))
+        if not ctx.adEnabled then row.disableOn = AlwaysOff end
+        tools.ClaimKeys(row, content, extra)
+        -- ⚠ NO TICK AND NO FOOTER WHERE THE ROW HOLDS NO SETTINGS. Members,
+        -- Linked Filters and the Global tab's three action groups are lists of
+        -- VERBS -- there is nothing for a modified tick to report and nothing for
+        -- Reset Group to reset, and a footer that quietly wrote nothing is the
+        -- exact failure this phase was blocked on.
+        if rowDB ~= false then
+            tools.WireModifiedTick(row)
+            tools.WireFooter(row, spec.Apply, rowDB or RowRecord)
+        end
+        return row
+    end
+
+    -- ── THE GROUP'S NAME ──
+    -- ☠ A CONTROL ROW, NOT A PANEL. One edit box, and the Modules page's rule for
+    -- a group with nothing in it but the control is a plate of its own. The card
+    -- draws it as a captioned edit box at the top of its body; here the header
+    -- above already shows the name, and this is where it is changed.
+    local nameRow = band:AddWidget(GUI:CreateControlRow(page.child, {
+        label      = L["Name"],
+        kind       = "editbox",
+        db         = RowRecord,
+        key        = "name",
+        maxLetters = 30,
+        onChanged  = function()
+            RefreshHeader()
+            RefreshPlacedIndicators()
+        end,
+    }))
+    if not ctx.adEnabled then nameRow.disableOn = AlwaysOff end
+    -- `custom` is true: the value does not live in DF.db[key] but on one group
+    -- record behind the view, which is what the registry has to be told or an
+    -- inline search result would read and write the mode's profile.
+    tools.RegisterControlRow(nameRow, "editbox", "name", true)
+
+    -- ── ONE ROW PER SECTION ──
+    -- The list is NOT declared here: it is whatever the collector returns, which
+    -- is the SAME list the card runs down its own cursor, so the two layouts
+    -- cannot disagree about which blocks a group has.
+    local verbs = {
+        -- A LIST moved. Both layouts redraw the page; the panel goes with it,
+        -- which is honest -- what was being edited is gone.
+        Rebuild = function() S.SwitchTab("layout") end,
+        -- A VALUE moved and the widgets around it must re-read their greying. A
+        -- rebuild here would retire the tick the user just clicked, so the page's
+        -- STATE pass runs instead and the panes re-flow themselves.
+        Redraw  = function()
+            tools.ReflowMounted()
+            page:RefreshStates()
+        end,
+        Header  = RefreshHeader,
+    }
+    for _, sec in ipairs(spec.sections) do
+        AddRow(sec.header, function(g, holder)
+            sec.build(PaneEnv(g, holder, verbs))
+        end, sec.rowDB)
+    end
+
+    -- ── OTHERS ONLY ──
+    -- ☠ A CONTROL ROW, NOT A PANEL, for the reason the effect rows' copy is: one
+    -- boolean, and a popout row's own tick column already IS that checkbox.
+    if spec.othersOnly then
+        local function OnOthersOnly()
+            RefreshHeader()
+            RefreshPlacedIndicators()
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+            local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+            if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+            page:RefreshStates()
+        end
+        local ooRow = band:AddWidget(GUI:CreateControlRow(page.child, {
+            label     = L["Others Only"],
+            kind      = "checkbox",
+            db        = RowRecord,
+            key       = "othersOnly",
+            tooltip   = L["Only show other players' casts of these buffs."],
+            onChanged = OnOthersOnly,
+        }))
+        if not ctx.adEnabled then ooRow.disableOn = AlwaysOff end
+        tools.RegisterControlRow(ooRow, "checkbox", "othersOnly", true, OnOthersOnly)
+    end
+
+    -- ── APPEARANCE ──
+    -- ⚠ FIVE SIBLING ROWS, NOT A NESTED SECTION. The card draws Appearance /
+    -- Border / Duration Text / Stack Count / Duration Bar as five collapsible
+    -- boxes inside its body; a second collapsible section inside this one would
+    -- be two levels of fold, and RegisterChild carries exactly one -- collapsing
+    -- the outer would hide the inner header and leave its band on the page. So
+    -- the five arrive as five rows in the same band, which is what an effect's
+    -- ten sections already do.
+    if spec.appearance then
+        local styleSections = AddGroupAppearanceSection(page.child, group, PopoutWidth(), 0,
+                                                        cardKey, {})
+        local styleProxy = styleSections.proxy
+        local function StyleDB() return styleProxy end
+        for _, sec in ipairs(styleSections) do
+            AddRow(sec.header, function(g, holder, reflow)
+                sec.build(g, holder, reflow)
+            end, StyleDB)
+        end
+    end
+
+    Add(band, nil, "both")
+end
+
+-- ── THE LAYOUT GROUPS TAB ──
+local function BuildLayoutTabRows(ctx, shell)
+    local page, tools, Add = ctx.page, ctx.tools, ctx.Add
+    local isDebuffs = IsDebuffTab()
+
+    -- The intro, the choice cards and the dedup hint -- the same furniture the
+    -- card layout puts above its list, mounted as one full-width object. One
+    -- definition, two hosts, exactly as the Effects tab's head area is.
+    GUI:AddDesignerLegacyTab(shell, function(host)
+        host:SetWidth(tools.BandWidth())
+        local yPos
+        if isDebuffs then
+            yPos = S.BuildDebuffGroupsHeadArea(host, -4)
+        else
+            yPos = S.BuildLayoutGroupsHeadArea(host, -4)
+        end
+        host:SetHeight(max(-(yPos or 0) + 4, 1))
+    end)
+
+    local groups = isDebuffs and DebuffGroupsRead() or CurrentLayoutGroups()
+
+    -- ⚠ NO SEPARATE EMPTY STATE. The head area above already IS one when the
+    -- list is empty: it swaps in the teaching sentence and the choice cards that
+    -- create the first group, which is what an empty state is for. A banner under
+    -- it would repeat the same sentence twice on the same screen.
+    if #groups == 0 then return end
+
+    for _, group in ipairs(groups) do
+        if isDebuffs then
+            local cardKey = "dgroup:" .. group.id
+            P.EnsureDebuffSelection(group)
+            local sections = P.CollectDebuffGroupSections(group)
+            -- The Categories row measures itself against the SELECTION block,
+            -- which is its own record with its own controls; Placement and Growth
+            -- against the group.
+            local selView = DebuffSelectionView(group.selection)
+            sections[1].rowDB = function() return selView end
+            local function StructuralDebuffGroupRefresh()
+                S.SwitchTab("layout")
+                RefreshPlacedIndicators()
+                DF:InvalidateAuraLayout()
+                DF:UpdateAllFrames()
+                local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+                if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+            end
+            MountGroup(ctx, group, {
+                cardKey    = cardKey,
+                record     = DebuffGroupRecordView(group),
+                sections   = sections,
+                appearance = true,
+                showEye    = true,
+                Summary    = function() return S.DebuffGroupSummary(group) end,
+                Apply      = function()
+                    RefreshPlacedIndicators()
+                    DF:InvalidateAuraLayout()
+                    DF:UpdateAllFrames()
+                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+                end,
+                onDelete = function()
+                    DeleteDebuffGroup(group.id)
+                    StructuralDebuffGroupRefresh()
+                end,
+                onEye = StructuralDebuffGroupRefresh,
+            })
+        else
+            local isFilterGroup = (group.kind == "filter")
+            MountGroup(ctx, group, {
+                cardKey    = GroupExpandKey(group.id),
+                record     = GroupRecordView(group),
+                -- `true`: the row layout draws Others Only itself, as a control
+                -- row, so the Growth section must not draw it as well.
+                sections   = P.CollectLayoutGroupSections(group, true),
+                appearance = isFilterGroup,
+                showEye    = isFilterGroup,
+                othersOnly = isFilterGroup and IsOtherTab(),
+                Summary    = function() return S.LayoutGroupSummary(group) end,
+                Apply      = function()
+                    RefreshPlacedIndicators()
+                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+                end,
+                onDelete = function()
+                    DeleteLayoutGroup(group.id)
+                    S.SwitchTab("layout")
+                    RefreshPlacedIndicators()
+                    -- Deleting a group deletes its member indicators -- the same
+                    -- structural refresh as the effect row's delete.
+                    DF:InvalidateAuraLayout()
+                    DF:UpdateAllFrames()
+                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+                end,
+                onEye = function()
+                    S.SwitchTab("layout")
+                    RefreshPlacedIndicators()
+                    DF:InvalidateAuraLayout()
+                    DF:UpdateAllFrames()
+                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+                end,
+            })
+        end
+    end
+end
+
+-- ── THE GLOBAL TAB ──
+-- Seven rows, one per block the split panel drew as a captioned box. Four of
+-- them hold settings and take a tick and a footer; three hold ACTIONS -- an
+-- import, a link out, a copy and a reset -- and deliberately take neither.
+local function BuildGlobalTabRows(ctx, shell)
+    local page, tools, Add = ctx.page, ctx.tools, ctx.Add
+
+    -- ☠ page.child AS THE HOST, AND IT IS NEVER TOUCHED. Collect mode builds
+    -- nothing, sizes nothing and stamps nothing onto the host it is handed; the
+    -- argument exists only because the section bodies read it, and each of them
+    -- is re-pointed at its own pane before it runs.
+    local sections = BuildGlobalView(page.child, {})
+
+    local band = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
+
+    -- What a write behind any of these rows costs. Global defaults reach EVERY
+    -- indicator, so this is the full teardown the card's own proxy writes run.
+    local function ApplyGlobalGroup()
+        RefreshPlacedIndicators()
+        RefreshPreviewEffects()
+        RefreshLiveFramesThrottled()
+        local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+        if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+    end
+
+    local function AlwaysOff() return true end
+
+    for _, sec in ipairs(sections) do
+        local mount, content = tools.PopoutContent(function(g, holder)
+            sec.build(g, holder)
+        end)
+        local row = band:AddWidget(GUI:CreatePopoutRow(page.child, {
+            label   = sec.header,
+            title   = format("%s \226\128\148 %s", L["Global"], sec.header),
+            db      = sec.db and function() return sec.db end or nil,
+            count   = content and content.groupChildren and #content.groupChildren or nil,
+            window  = DF.GUIFrame,
+            clipTo  = page,
+            build   = mount,
+        }))
+        if not ctx.adEnabled then row.disableOn = AlwaysOff end
+        -- ⚠ `extra` IS NOT A CONVENIENCE HERE. The Sound Alerts pair is bound
+        -- through custom get/set, so ClaimKeys' walk cannot see either key -- and
+        -- a row that claimed nothing would have a dark tick and a Reset Group that
+        -- wrote nothing while saying it had.
+        tools.ClaimKeys(row, content, sec.extra)
+        if sec.db then
+            tools.WireModifiedTick(row)
+            tools.WireFooter(row, ApplyGlobalGroup, function() return sec.db end)
+        end
+    end
+
+    Add(band, nil, "both")
+end
+
+-- ============================================================
 -- DF.BuildAuraDesignerPage's POPOUT ARM
 -- ------------------------------------------------------------
 -- The whole page, as bands in the harness's own column: banner, canvas, pool
@@ -658,22 +1069,9 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             if key == "effects" then
                 BuildEffectsTabRows(ctx, shell)
             elseif key == "layout" then
-                -- ⚠ STILL THE SPLIT PANEL'S OWN CONTENT, as one full-width object.
-                -- Layout Groups and Global convert in the next phase; until then the
-                -- page has to be fully usable, so they render exactly what they
-                -- rendered before. S.tabContentFrame is what those builders write
-                -- into, so the host stands in for it.
-                GUI:AddDesignerLegacyTab(shell, function(host)
-                    host:SetWidth(tools.BandWidth())
-                    S.tabContentFrame = host
-                    if IsDebuffTab() then S.BuildDebuffGroupsTab() else S.BuildLayoutGroupsTab() end
-                end)
+                BuildLayoutTabRows(ctx, shell)
             elseif key == "global" then
-                GUI:AddDesignerLegacyTab(shell, function(host)
-                    host:SetWidth(tools.BandWidth())
-                    S.tabContentFrame = host
-                    S.BuildGlobalTab()
-                end)
+                BuildGlobalTabRows(ctx, shell)
             end
         end,
     })

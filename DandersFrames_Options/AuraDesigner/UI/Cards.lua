@@ -91,28 +91,154 @@ local GLOBAL_DEFAULTS_FALLBACK = {
     stackColor = {r = 1, g = 1, b = 1, a = 1},
     iconBorderEnabled = true, iconBorderThickness = 1,
     hideSwipe = false, hideIcon = false,
+    -- ⚠ THE FRAME LEVEL HAD NO ENTRY HERE, and the General group has bound a
+    -- slider to it since it was wired. Every other control in that group resolves
+    -- through this table; this one fell through to nil on any profile whose
+    -- auraDesigner block predates the setting. It survived because a shipped
+    -- profile IS seeded with it (Config.lua's auraDesigner.defaults) -- but the
+    -- diff engine reads "no default" as "not a setting in this record", so the
+    -- General row's modified tick could not have answered for the key and Reset
+    -- Group would have skipped it.
+    --
+    -- ☠ 40, NOT 0. The stored number is an ABSOLUTE offset from the unit frame and
+    -- the render uses it as-is; 40 is the no-op. Config.lua says so at length.
+    -- ⚠ EVERY VALUE IN THIS TABLE MUST AGREE WITH Config.lua's
+    -- auraDesigner.defaults for the keys both name -- this one is what the tick
+    -- measures against and that one is what a profile is seeded with, so a
+    -- disagreement is a control that reports modified the day it is created.
+    indicatorFrameLevel = 40,
 }
+P.GLOBAL_DEFAULTS_FALLBACK = GLOBAL_DEFAULTS_FALLBACK
 
-local function BuildGlobalView(parent)
-    local adDB = GetAuraDesignerDB()
-    local rawDefaults = adDB.defaults
-    -- Proxy so every write triggers a full preview rebuild
-    -- (global defaults affect ALL indicators, need full teardown/rebuild)
-    -- Falls back to GLOBAL_DEFAULTS_FALLBACK for keys missing from existing profiles.
+-- ============================================================
+-- THE GLOBAL TAB'S RECORD
+-- ------------------------------------------------------------
+-- One proxy over `adDB.defaults`, so every write triggers the full preview
+-- rebuild (a global default affects ALL indicators) and every read falls back to
+-- GLOBAL_DEFAULTS_FALLBACK for keys an older profile is missing.
+--
+-- ☠ AND IT CARRIES THE DEFAULTS ADAPTER, which is what a popout row on this tab
+-- needs before it can say anything true. The diff engine recognises DF.db.party /
+-- DF.db.raid BY IDENTITY and answers nil for everything else, so a row handed
+-- this proxy without an adapter would have a permanently dark modified tick and a
+-- Reset Group that wrote nothing while saying it had -- silently, with no error on
+-- either. See DandersFrames/Core/Defaults.lua's header for the contract.
+--
+-- ☠ GetStored IS A rawget ON THE STORED BLOCK, never a read through this proxy:
+-- __index answers with the fallback for an unset key, so an adapter reading back
+-- through itself would find every key set and light the whole tab up. Same rule
+-- CreateInstanceProxy documents at length (AuraDesigner/UI/Groups.lua).
+--
+-- ClearKey UNSETS rather than writing the fallback in, because the proxy resolves
+-- through GLOBAL_DEFAULTS_FALLBACK anyway -- so a reset leaves the profile
+-- FOLLOWING the shipped value instead of pinning it at today's copy of it. The
+-- Text Designer's Global tab cannot do this (its widgets bind the stored block
+-- directly and would be handed a nil); this one can, because nothing reads the
+-- block except through here and the factory's own defaults resolution.
+--
+-- ⚠ THE BLOCK IS RE-RESOLVED PER ACCESS, not captured once at build. The card
+-- layout captured `adDB.defaults` in a local, which was correct only because the
+-- page is rebuilt on every mode and preset switch; a row's footer verbs run long
+-- after the build that made them.
+-- ============================================================
+local function CreateGlobalDefaultsProxy()
+    local function stored()
+        local adDB = GetAuraDesignerDB()
+        return adDB and adDB.defaults
+    end
+    local function refresh()
+        RefreshPlacedIndicators()
+        RefreshPreviewEffects()
+        RefreshLiveFramesThrottled()
+    end
+    local adapter = {
+        GetDefault = function(k) return GLOBAL_DEFAULTS_FALLBACK[k] end,
+        GetStored  = function(k)
+            local t = stored()
+            if not t then return nil end
+            return rawget(t, k)
+        end,
+        ClearKey = function(k)
+            local t = stored()
+            if not t then return end
+            t[k] = nil
+            refresh()
+        end,
+    }
     -- __dfDefaults exposes the fallback table to GUI:CreateColorPicker's Default button.
-    local defaults = setmetatable({ _skipOverrideIndicators = true, __dfDefaults = GLOBAL_DEFAULTS_FALLBACK }, {
+    return setmetatable({ _skipOverrideIndicators = true,
+                          __dfDefaults = GLOBAL_DEFAULTS_FALLBACK,
+                          __dfDefaultsAdapter = adapter }, {
         __index = function(_, k)
-            local v = rawDefaults[k]
+            local t = stored()
+            local v = t and t[k]
             if v ~= nil then return v end
             return GLOBAL_DEFAULTS_FALLBACK[k]
         end,
         __newindex = function(_, k, v)
-            rawDefaults[k] = v
-            RefreshPlacedIndicators()
-            RefreshPreviewEffects()
-            RefreshLiveFramesThrottled()
+            local t = stored()
+            if not t then return end
+            t[k] = v
+            refresh()
         end,
     })
+end
+P.CreateGlobalDefaultsProxy = CreateGlobalDefaultsProxy
+
+-- ============================================================
+-- THE GLOBAL TAB'S SOUND BLOCK
+-- ------------------------------------------------------------
+-- soundEnabled and soundChannel are the two settings on this tab that do NOT
+-- live in `adDB.defaults` -- they sit on the Aura Designer block itself, and the
+-- two controls bound to them use custom get/set rather than a db table and key.
+-- That is fine for the controls and useless to a row, which needs SOMETHING that
+-- can answer "is either of these not the shipped value".
+--
+-- So the row takes this record and names the two keys through ClaimKeys' `extra`
+-- door, which exists for exactly this shape. Absent means enabled and Master, so
+-- ClearKey unsets and the pair goes back to following the shipped answer.
+-- ============================================================
+local SOUND_DEFAULTS = { soundEnabled = true, soundChannel = "Master" }
+P.SOUND_DEFAULTS = SOUND_DEFAULTS
+
+local function CreateSoundSettingsProxy()
+    local adapter = {
+        GetDefault = function(k) return SOUND_DEFAULTS[k] end,
+        GetStored  = function(k)
+            local adDB = GetAuraDesignerDB()
+            if not adDB then return nil end
+            return rawget(adDB, k)
+        end,
+        ClearKey = function(k)
+            local adDB = GetAuraDesignerDB()
+            if not adDB then return end
+            adDB[k] = nil
+        end,
+    }
+    return setmetatable({ _skipOverrideIndicators = true,
+                          __dfDefaults = SOUND_DEFAULTS,
+                          __dfDefaultsAdapter = adapter }, {
+        __index = function(_, k)
+            local adDB = GetAuraDesignerDB()
+            local v = adDB and adDB[k]
+            if v ~= nil then return v end
+            return SOUND_DEFAULTS[k]
+        end,
+        __newindex = function(_, k, v)
+            local adDB = GetAuraDesignerDB()
+            if adDB then adDB[k] = v end
+        end,
+    })
+end
+P.CreateSoundSettingsProxy = CreateSoundSettingsProxy
+
+-- `collect`: COLLECT MODE, the same seam BuildTypeContent carries
+-- (AuraDesigner/UI/Indicators.lua). With a table here nothing is built: each
+-- AddGroup records its header and its body, unrun, for the row layout to mount
+-- one per popout pane. Without one this is the split panel's own column, byte for
+-- byte what it always drew.
+local function BuildGlobalView(parent, collect)
+    local defaults = CreateGlobalDefaultsProxy()
 
     local parentW = parent:GetWidth()
     if parentW < 50 then parentW = 280 end
@@ -128,7 +254,35 @@ local function BuildGlobalView(parent)
         totalHeight = totalHeight + (height or 30)
     end
 
-    local function AddGroup(header, buildFn)
+    -- `rowDB` and `extraKeys` are the ROW layout's business and the card ignores
+    -- them: which record a group's popout row measures itself against, and any
+    -- key bound through a custom get/set that ClaimKeys' walk therefore cannot
+    -- see. `rowDB == false` says the group holds ACTIONS rather than settings --
+    -- no modified tick, no Reset Group, because there would be nothing for either
+    -- to be about and a footer that reset nothing would be a footer that lied.
+    local function AddGroup(header, buildFn, rowDB, extraKeys)
+        if collect then
+            collect[#collect + 1] = {
+                header = header,
+                db = (rowDB == nil) and defaults or rowDB,
+                extra = extraKeys,
+                -- ☠ `parent` IS RE-POINTED AND RESTORED. It is this function's own
+                -- local, so re-pointing it re-points every widget the body creates
+                -- -- and NOT restoring it would leave the next body building onto
+                -- the previous pane's holder. Verbatim from BuildTypeContent's
+                -- collect seam, for the same reason.
+                --
+                -- NO HEADER WIDGET in a pane: the row's own label is this group's
+                -- name, and a header inside the panel would say it twice.
+                build = function(g, paneParent)
+                    local savedParent = parent
+                    parent = paneParent
+                    buildFn(g)
+                    parent = savedParent
+                end,
+            }
+            return
+        end
         local group = GUI:CreateSettingsGroup(parent, contentWidth - 10)
         group.padding = 10   -- match the main Options groups' inner padding (airier scale)
         group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
@@ -192,7 +346,7 @@ local function BuildGlobalView(parent)
             nil, nil, nil,
             function() return (GetAuraDesignerDB().soundChannel) or "Master" end,  -- customGet
             function(key) GetAuraDesignerDB().soundChannel = key end), 50)         -- customSet
-    end)
+    end, CreateSoundSettingsProxy(), { "soundEnabled", "soundChannel" })
 
     -- ── DURATION TEXT ──
     AddGroup(L["Duration Text"], function(g)
@@ -296,7 +450,7 @@ local function BuildGlobalView(parent)
             end
         end)
         g:AddWidget(importBtn, 32)
-    end)
+    end, false)
 
     -- ── STANDARD BUFFS ──
     -- Replaces the old coexistence banner's "Disable Buffs" shortcut: standard
@@ -323,7 +477,7 @@ local function BuildGlobalView(parent)
             filtersBtn.Text:SetTextColor(0.4, 0.4, 0.4)
         end
         g:AddWidget(filtersBtn, 28)
-    end)
+    end, false)
 
     -- ── ACTIONS ──
     AddGroup(L["Actions"], function(g)
@@ -393,10 +547,15 @@ local function BuildGlobalView(parent)
             })
         end)
         g:AddWidget(resetBtn, 32)
-    end)
+    end, false)
+
+    -- Collect mode builds nothing and sizes nothing: the section list is the
+    -- whole return, and the host it was handed is untouched.
+    if collect then return collect end
 
     parent:SetHeight(totalHeight + 10)
 end
+P.BuildGlobalView = BuildGlobalView
 
 -- BuildPerAuraView + RefreshRightPanel removed in v4 redesign
 -- Per-aura configuration is now done via flat effect cards in the Effects tab
@@ -2953,29 +3112,15 @@ S.BuildGlobalTab = function()
     BuildGlobalView(S.tabContentFrame)
 end
 
--- ── BUILD LAYOUT GROUPS TAB ──
 -- ============================================================
--- GROUP APPEARANCE SECTION (filter-group + debuff-group cards)
--- Collapsible "Appearance" SettingsGroup (the effect-card section idiom)
--- holding the per-group icon styling the container genuinely supports:
--- cooldown swipe, border (full CreateBorderControls set incl. the DF-owned
--- animations), duration text (show / font / scale / outline / anchor /
--- offsets / colour-by-time / colour / hide-above) and stack count (show +
--- text styling). Controls bind to group.style via a defaults proxy
--- (CreateInstanceProxy's idiom): nil keys read the pre-style defaults, so
--- an untouched section changes nothing — the factory renders a style-less
--- (or all-default) group byte-identically to before. Omitted vs the placed
--- effect card, by capability: Min Stacks (no formatter on the native stack
--- path — secret trap), Hide Icon / size / scale / alpha / frame level
--- (group-level layout already owns size; the rest are per-indicator
--- concepts), Expiring / Show When Missing (remaining-time / presence reads).
--- Structural fields (show toggles, colour-by-time, hide-above, border
--- on/off) move the group struct sig -> the factory Rebuilds; everything
--- else hot-applies via the cosmetic sig. Collapse state persists PER CARD
--- under "adGroupStyle:<cardKey>" — cardKey is the caller's expand-key form
--- (raw id / "othergroup:<id>" / "dgroup:<id>"), so the three stores' keys
--- stay disjoint from each other and from the effect cards' header keys.
-local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
+-- ONE GROUP'S STYLE RECORD
+-- ------------------------------------------------------------
+-- The uniform per-group styling a filter or debuff group renders with, over
+-- group.style. Minted here rather than inline in AddGroupAppearanceSection for
+-- the reason the Global tab's record is: it is a RECORD, testable on its own,
+-- and the section builder around it cannot be run without a frame.
+-- ============================================================
+local function CreateGroupStyleProxy(group)
     local s = group.style
     if type(s) ~= "table" then s = {}; group.style = s end
 
@@ -3015,7 +3160,28 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- through to the defaults (table fallbacks copy-on-read so colour sub-key edits
     -- persist); writes land in group.style and refresh the live frames. The factory
     -- reads the RAW style table with the same defaults, so UI and render agree.
-    local proxy = setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults }, {
+    --
+    -- ☠ AND THE DEFAULTS ADAPTER, which is what a popout row on this section needs
+    -- before its modified tick or its Reset Group can say anything true -- see the
+    -- Global tab's record above, and Core/Defaults.lua's header, for the contract.
+    -- GetStored is a rawget on group.style for the reason it always is here: this
+    -- proxy COPIES a table-valued default onto the style on the way past, so a read
+    -- taken to answer "is this modified" would itself be what made the key present.
+    -- Value equality is what makes that copy harmless.
+    local styleAdapter = {
+        GetDefault = function(k) return defaults[k] end,
+        GetStored  = function(k) return rawget(s, k) end,
+        -- Unset, never write the default in: a style-less group renders
+        -- byte-identically to one pinned at every default, and unsetting is what
+        -- keeps it that way if a default ever moves.
+        ClearKey   = function(k)
+            s[k] = nil
+            RefreshPlacedIndicators()
+            RefreshLiveFramesThrottled()
+        end,
+    }
+    local proxy = setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults,
+                                 __dfDefaultsAdapter = styleAdapter }, {
         __index = function(_, k)
             local val = s[k]
             if val ~= nil then return val end
@@ -3034,6 +3200,39 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             RefreshLiveFramesThrottled()
         end,
     })
+    return proxy
+end
+P.CreateGroupStyleProxy = CreateGroupStyleProxy
+
+-- ============================================================
+-- GROUP APPEARANCE SECTION (filter-group + debuff-group cards)
+-- Collapsible "Appearance" SettingsGroup (the effect-card section idiom)
+-- holding the per-group icon styling the container genuinely supports:
+-- cooldown swipe, border (full CreateBorderControls set incl. the DF-owned
+-- animations), duration text (show / font / scale / outline / anchor /
+-- offsets / colour-by-time / colour / hide-above) and stack count (show +
+-- text styling). Controls bind to group.style via a defaults proxy
+-- (CreateInstanceProxy's idiom): nil keys read the pre-style defaults, so
+-- an untouched section changes nothing — the factory renders a style-less
+-- (or all-default) group byte-identically to before. Omitted vs the placed
+-- effect card, by capability: Min Stacks (no formatter on the native stack
+-- path — secret trap), Hide Icon / size / scale / alpha / frame level
+-- (group-level layout already owns size; the rest are per-indicator
+-- concepts), Expiring / Show When Missing (remaining-time / presence reads).
+-- Structural fields (show toggles, colour-by-time, hide-above, border
+-- on/off) move the group struct sig -> the factory Rebuilds; everything
+-- else hot-applies via the cosmetic sig. Collapse state persists PER CARD
+-- under "adGroupStyle:<cardKey>" — cardKey is the caller's expand-key form
+-- (raw id / "othergroup:<id>" / "dgroup:<id>"), so the three stores' keys
+-- stay disjoint from each other and from the effect cards' header keys.
+--
+-- `collect`: COLLECT MODE, the same seam BuildTypeContent and BuildGlobalView
+-- carry. With a table here nothing is built and nothing is anchored: each
+-- AddSection records its header and its body, unrun, and the row layout mounts
+-- one popout row per entry. Without one this is the card's own section stack,
+-- byte for byte what it always drew.
+local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, collect)
+    local proxy = CreateGroupStyleProxy(group)
 
     -- Cosmetic edits hot-apply (coSig -> ApplyStyle); structural toggles move the
     -- struct sig -> Rebuild. Both ride the same throttled factory re-sync. The
@@ -3063,6 +3262,10 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- that hook too, or the body will size short.
     local sections = {}
     local sectionsStartBy = by
+    -- The pane's own reflow while a collected body runs, so the border toolkit's
+    -- refreshStates re-flows the PANEL it is inside instead of a card stack that
+    -- does not exist there. Set by the collect wrapper below; nil on the card.
+    local curReflow
 
     local function ReflowSections()
         local y = sectionsStartBy
@@ -3077,7 +3280,9 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- Published under the name the toolkit looks for: SettingsWidgets' measured-label
     -- converge walks up from a resized widget for exactly this key, so a wrapped note
     -- inside one of these sections now re-flows the card instead of walking past it.
-    body.dfAD_ReflowWidgets = ReflowSections
+    -- Not in collect mode: there is no stack to walk, and stamping this would put a
+    -- card's reflow onto whatever host the collector happened to hand in.
+    if not collect then body.dfAD_ReflowWidgets = ReflowSections end
 
     -- One collapsible box PER CATEGORY — the expanded effect card's section
     -- structure (Appearance / Border / Duration Text / Stack Count, same names
@@ -3087,6 +3292,26 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- so each section toggles independently; the toggle rides the widget's
     -- built-in AuraDesigner_RefreshPage rebuild like the effect cards'.
     local function AddSection(header, sectionKey, buildFn)
+        if collect then
+            collect[#collect + 1] = {
+                header = header,
+                -- ☠ `body` IS RE-POINTED AND RESTORED, for the reason BuildTypeContent's
+                -- seam re-points `parent`: it is this function's own local, so every
+                -- widget the body creates follows it, and not restoring it would leave
+                -- the next body building onto the previous pane's holder.
+                build = function(g, paneParent, reflow)
+                    local savedBody, savedReflow = body, curReflow
+                    body, curReflow = paneParent, reflow
+                    if reflow then
+                        paneParent.dfAD_ReflowWidgets = reflow
+                        paneParent.dfAD_ReflowInPane = reflow
+                    end
+                    buildFn(g)
+                    body, curReflow = savedBody, savedReflow
+                end,
+            }
+            return
+        end
         local g = GUI:CreateSettingsGroup(body, bodyWidth - 10, {
             collapsible = true,
             collapseKey = "adGroupStyle:" .. tostring(cardKey) .. ":" .. sectionKey,
@@ -3161,7 +3386,9 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             -- next rebuild. Matches the placed icon card's border exactly.
             refreshStates = function()
                 g:LayoutChildren()
-                ReflowSections()
+                -- In a pane the stack below this section is a stack of ROWS the
+                -- panel knows nothing about, so the panel re-flows itself instead.
+                if curReflow then curReflow() else ReflowSections() end
             end,
             sizeMin = 1, sizeMax = 5, sizeStep = 1,
         })
@@ -3276,6 +3503,15 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         barChild(GUI:CreateCheckbox(body, L["Reverse Fill"], proxy, "durationBarReverseFill", refresh), 28)
         UpdateBarGrey()
     end)
+
+    -- Collect mode anchored nothing, so there is no cursor to hand back: the
+    -- section list IS the return -- carrying the style proxy, which is the record
+    -- every one of these rows binds and therefore the one its modified tick and
+    -- its Reset Group have to be measured against.
+    if collect then
+        collect.proxy = proxy
+        return collect
+    end
 
     return by
 end

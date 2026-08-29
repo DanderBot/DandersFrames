@@ -44,6 +44,7 @@ local SHELL = options_file_source("GUI/DesignerShell.lua")
 local CARDS = options_file_source("AuraDesigner/UI/Cards.lua")
 local AURAS = options_file_source("GUI/Pages/Auras.lua")
 local EDIT  = options_file_source("AuraDesigner/UI/Editor.lua")
+local GROUPS = options_file_source("AuraDesigner/UI/Groups.lua")
 
 -- ---- the census reader ----------------------------------------------
 -- The Frame page's, with one addition: a designer control's db table is the
@@ -588,33 +589,501 @@ do
 end
 
 -- ============================================================
--- 8. THE TABS THAT HAVE NOT CONVERTED YET STILL RENDER
--- Phase 3 converts Layout Groups and Global. Until then the page has to be fully
--- usable, so they render exactly what they rendered inside the split panel -- as
--- one full-width object in the band column.
+-- 8. THE HEAD AREAS ARE THE CARD LAYOUT'S OWN
+-- Every tab's furniture above the list -- the add block, the chips, the choice
+-- cards, the teaching prose -- is declared ONCE and mounted by both layouts. Two
+-- copies would be two edits every time the add flow moves, which is phase 5.
 -- ============================================================
-print("-- Aura Designer: Layout Groups and Global still render")
+print("-- Aura Designer: one head area per tab, two hosts")
 do
     check(SHELL:find("function GUI:AddDesignerLegacyTab(shell, build)", 1, true) ~= nil,
-          "legacy: the shell has a door for an unconverted tab")
+          "head: the shell has a door for a hand-anchored block")
     check(SHELL:find("shell.Add(host, h, \"both\")", 1, true) ~= nil,
-          "legacy: ...which still lands in the band column at the band's edges")
-    check(ROWS:find("S.BuildLayoutGroupsTab()", 1, true) ~= nil,
-          "legacy: Layout Groups builds its existing content")
-    check(ROWS:find("S.BuildGlobalTab()", 1, true) ~= nil,
-          "legacy: ...and so does Global")
-    check(ROWS:find("S.tabContentFrame = host", 1, true) ~= nil,
-          "legacy: ...into the host that stands in for the split panel's scroll child")
+          "head: ...which lands in the band column at the band's edges")
 
-    -- The Effects tab's own furniture is the card layout's, extracted rather than
-    -- copied: the add flow is a later phase and two copies would be two edits.
     check(ROWS:find("S.BuildEffectsHeadArea(host, -4)", 1, true) ~= nil,
-          "legacy: the add block and the chips are the card layout's own")
+          "head: the Effects add block and chips are the card layout's own")
     check(CARDS:find("S.BuildEffectsHeadArea = function(parent, yPos)", 1, true) ~= nil,
-          "legacy: ...declared once, in the card file")
+          "head: ...declared once, in the card file")
     local heads = 0
     for _ in CARDS:gmatch("S%.BuildEffectsHeadArea") do heads = heads + 1 end
-    eq(heads, 2, "legacy: ...declared once and mounted once by the card")
+    eq(heads, 2, "head: ...declared once and mounted once by the card")
+
+    -- Phase 3's two: the Layout Groups and Debuffs choice-card blocks, lifted out
+    -- of the tab builders they used to be welded into.
+    for _, name in ipairs({ "BuildLayoutGroupsHeadArea", "BuildDebuffGroupsHeadArea" }) do
+        check(EDIT:find("S." .. name .. " = function(parent, yPos)", 1, true) ~= nil,
+              "head: " .. name .. " is declared once")
+        check(ROWS:find("S." .. name .. "(host, -4)", 1, true) ~= nil,
+              "head: ...and the row page mounts it as a band")
+        local n = 0
+        for _ in EDIT:gmatch("S%." .. name) do n = n + 1 end
+        eq(n, 2, "head: ...declared once and mounted once by the card (" .. name .. ")")
+    end
+
+    -- ☠ AND THE LEGACY DOOR IS SHUT ON THESE TWO TABS. Phase 2 rendered them by
+    -- calling the split panel's own builders into a stand-in scroll child; that is
+    -- what this phase replaces, and leaving either call behind would render the
+    -- tab twice.
+    check(ROWS:find("S.BuildLayoutGroupsTab()", 1, true) == nil,
+          "head: the row page no longer renders the split panel's Layout Groups tab")
+    check(ROWS:find("S.BuildDebuffGroupsTab()", 1, true) == nil,
+          "head: ...nor its Debuffs tab")
+    check(ROWS:find("S.BuildGlobalTab()", 1, true) == nil,
+          "head: ...nor its Global tab")
+    check(ROWS:find("S.tabContentFrame = host", 1, true) == nil,
+          "head: ...and nothing stands in for the split panel's scroll child any more")
+    check(ROWS:find("BuildLayoutTabRows(ctx, shell)", 1, true) ~= nil,
+          "head: Layout Groups is built as rows")
+    check(ROWS:find("BuildGlobalTabRows(ctx, shell)", 1, true) ~= nil,
+          "head: ...and so is Global")
+end
+
+-- ============================================================
+-- 8b. A GROUP IS A SECTION; ITS BLOCKS ARE THE ROWS
+-- The placed effect's shape, applied to a layout group. Decision 3: one level of
+-- popout, ever -- a group is a way in to five or ten blocks, so a panel on it
+-- would be a panel that had to contain five more.
+-- ============================================================
+print("-- Aura Designer: a layout group is a section, its blocks are the rows")
+do
+    check(ROWS:find("local section = GUI:CreateCollapsibleSection(page.child, group.name, false, bandW)", 1, true) ~= nil,
+          "group: a group is a collapsible section at the band's width")
+    check(ROWS:find("section:RegisterChild(band)", 1, true) ~= nil,
+          "group: ...and its band is a section child, so the fold collapses the rows with it")
+    check(ROWS:find("if not section.expanded then return end", 1, true) ~= nil,
+          "group: a collapsed group builds no rows at all")
+
+    -- ☠ NO NEW DB KEYS. CreateCollapsibleSection persists its fold under the
+    -- section TITLE, and a group's title is a name the USER TYPED -- one permanent
+    -- profile key per group, forever, which is a schema change smuggled in under
+    -- "pure re-presentation". Same trap the effect rows document.
+    check(ROWS:find("section.expanded = expandedGroups[cardKey] and true or false", 1, true) ~= nil,
+          "group: the fold state is read from the card layout's own in-memory table")
+    check(ROWS:find("expandedGroups[cardKey] = not self.expanded or nil", 1, true) ~= nil,
+          "group: ...and Toggle is REPLACED, so the factory's own write never runs")
+    check(ROWS:find("GUI:GetCollapsedGroups", 1, true) == nil,
+          "group: ...no user-typed group name reaches the persisted collapsed-groups store")
+    -- ☠ REPLACED, NOT HOOKED, AND THE DIFFERENCE IS INVISIBLE FROM THE OUTSIDE.
+    -- A Toggle that captured the factory's own and called it would still keep the
+    -- in-memory state -- and would ALSO run the factory's write into
+    -- DandersFramesDB_v2.collapsedGroups, adding one permanent profile key per
+    -- group per pool. The page would look and behave identically. So the check is
+    -- that the original is never captured at all, on EITHER of this file's two
+    -- collapsible sections.
+    check(ROWS:find("= section.Toggle", 1, true) == nil,
+          "group: ...and the factory's own Toggle is never captured and re-called")
+    check(ROWS:find("section:HookScript", 1, true) == nil,
+          "group: ...nor hooked")
+
+    -- The two single-setting rows: one control, one plate, no panel.
+    check(ROWS:find('label      = L["Name"],', 1, true) ~= nil,
+          "group: the group's name is a control row")
+    check(ROWS:find('kind       = "editbox",', 1, true) ~= nil,
+          "group: ...an edit box")
+    check(ROWS:find('tools.RegisterControlRow(nameRow, "editbox", "name", true)', 1, true) ~= nil,
+          "group: ...registered with search as a CUSTOM binding, not a profile key")
+    check(ROWS:find('tools.RegisterControlRow(ooRow, "checkbox", "othersOnly", true, OnOthersOnly)', 1, true) ~= nil,
+          "group: Others Only is a control row too")
+    -- ...and because the row layout draws it, the shared Growth block must not.
+    check(ROWS:find("sections   = P.CollectLayoutGroupSections(group, true),", 1, true) ~= nil,
+          "group: ...so the collector is told to leave it out of Growth")
+    check(EDIT:find("if kind == \"filter\" and IsOtherTab() and not omitOthersOnly then", 1, true) ~= nil,
+          "group: ...which is the flag Growth reads")
+
+    -- The row list is NOT declared by the row page: it is whatever the collector
+    -- returns, which is the same list the card runs down its own cursor.
+    check(ROWS:find("for _, sec in ipairs(spec.sections) do", 1, true) ~= nil,
+          "group: the rows come from the collector, never from a literal list")
+    check(EDIT:find("by = RunCardSections(body, bodyWidth, by, CollectLayoutGroupSections(group))", 1, true) ~= nil,
+          "group: ...and the card runs the SAME list")
+    check(EDIT:find("by = RunCardSections(body, bodyWidth, by, CollectDebuffGroupSections(group))", 1, true) ~= nil,
+          "group: ...on the Debuffs tab too")
+
+    -- ⚠ FIVE SIBLING ROWS, NOT A NESTED SECTION. RegisterChild carries exactly one
+    -- section per widget, so a collapsible inside a collapsible would hide the
+    -- inner header and leave its band on the page.
+    check(ROWS:find("local styleSections = AddGroupAppearanceSection(page.child, group, PopoutWidth(), 0,", 1, true) ~= nil,
+          "group: the appearance sections are collected, not re-declared")
+    check(ROWS:find("for _, sec in ipairs(styleSections) do", 1, true) ~= nil,
+          "group: ...and mounted as sibling rows in the same band")
+    check(CARDS:find("collect.proxy = proxy", 1, true) ~= nil,
+          "group: ...carrying the style proxy those rows have to be measured against")
+end
+
+-- ============================================================
+-- 8c. THE SECTION LIST, PER GROUP KIND
+-- Which blocks a group has is decided in ONE place for both layouts.
+-- ============================================================
+print("-- Aura Designer: the section list per group kind")
+do
+    -- The collectors' bodies, by their own two ends.
+    local function collector(name, tail)
+        local a = EDIT:find("local function " .. name .. "(", 1, true)
+        check(a ~= nil, "sections: " .. name .. " exists")
+        if not a then return "" end
+        local b = EDIT:find(tail, a, true)
+        check(b ~= nil and b > a, "sections: ...and it closes")
+        return EDIT:sub(a, b or a)
+    end
+    local LG = collector("CollectLayoutGroupSections", "P.CollectLayoutGroupSections =")
+    local DG = collector("CollectDebuffGroupSections", "P.CollectDebuffGroupSections =")
+
+    local function headers(src)
+        local out = {}
+        for h in src:gmatch('header = L%["([^"]+)"%]') do out[#out + 1] = h end
+        return out
+    end
+    -- A spell group lists Members; a filter group lists Filters instead. Both then
+    -- take the shared layout pair.
+    eqList(headers(LG), { "Filters", "Members", "Placement", "Growth" },
+           "sections: a layout group")
+    eqList(headers(DG), { "Categories", "Placement", "Growth" },
+           "sections: a debuff group")
+    -- The branch that chooses between the first two.
+    check(LG:find("if isFilterGroup then", 1, true) ~= nil,
+          "sections: ...and the first is chosen by the group's kind")
+
+    -- The card's small-caps caption over each block, so the two layouts name the
+    -- same thing.
+    local function captions(src)
+        local out = {}
+        for c in src:gmatch('caption = L%["([^"]+)"%]') do out[#out + 1] = c end
+        return out
+    end
+    eqList(captions(LG), { "LINKED FILTERS", "MEMBERS", "PLACEMENT", "GROWTH" },
+           "sections: the card's captions, layout group")
+    eqList(captions(DG), { "CATEGORIES", "PLACEMENT", "GROWTH" },
+           "sections: ...and debuff group")
+end
+
+-- ============================================================
+-- 8d. WHAT EACH SECTION BINDS
+-- ☠ THE FAILURE THIS WHOLE FILE EXISTS FOR, on the phase-3 half. A layout
+-- group's controls bind the GROUP RECORD; a debuff group's category controls
+-- bind its SELECTION block. A control that changed layout and lost that binding
+-- would read the record and write nowhere, looking completely correct.
+-- ============================================================
+print("-- Aura Designer: the layout-group controls and their db keys")
+do
+    -- The census reader, for a body whose db table is named rather than `proxy`.
+    -- Three shapes, and the third is not decoration: the sort dropdown binds
+    -- through a custom get/set, so its key appears only as an assignment.
+    local function bodyCensus(src, tbl)
+        local flat = src:gsub("%s+", " ")
+        local starts = {}
+        local i = 1
+        while true do
+            local s, e, kind = flat:find("GUI:(Create%a+)%(", i)
+            if not s then break end
+            if KIND[kind] or kind == "CreateGrowthControl" then
+                starts[#starts + 1] = { s = s, kind = KIND[kind] or "growth" }
+            end
+            i = e
+        end
+        local out = {}
+        for n, at in ipairs(starts) do
+            local stop = starts[n + 1] and (starts[n + 1].s - 1) or #flat
+            local chunk = flat:sub(at.s, stop)
+            local label = chunk:match('GUI:Create%a+%(%s*[%w_%.]+%s*,%s*L%["([^"]+)"%]') or "(none)"
+            local key = chunk:match('%f[%w]' .. tbl .. ',%s*"([%w_]+)"')
+                     or chunk:match('%f[%w]' .. tbl .. ',%s*([%w_]+%.[%w_]+)%s*,')
+                     or chunk:match('%f[%w]' .. tbl .. '%.([%w_]+)%s*=')
+                     or "(none)"
+            out[#out + 1] = { kind = at.kind, label = label, key = key }
+        end
+        return out
+    end
+
+    local function fnBody(src, name, tail)
+        local a = src:find("local function " .. name .. "(", 1, true)
+        check(a ~= nil, "binding: " .. name .. " exists")
+        if not a then return "" end
+        local b = src:find(tail, a, true)
+        check(b ~= nil and b > a, "binding: ...and " .. name .. " closes")
+        return src:sub(a, b or a)
+    end
+
+    checkCensus(bodyCensus(fnBody(EDIT, "BuildGroupPlacement", "-- ── GROWTH"), "group"), {
+        { "dropdown", "Anchor",   "anchor"  },
+        { "slider",   "Offset X", "offsetX" },
+        { "slider",   "Offset Y", "offsetY" },
+    }, "layout/Placement")
+
+    checkCensus(bodyCensus(fnBody(EDIT, "BuildGroupGrowth", "-- The ordered section list for one layout group"), "group"), {
+        { "growth",   "(none)",        "growDirection" },
+        { "slider",   "Icons Per Row", "iconsPerRow"   },
+        { "slider",   "Spacing",       "spacing"       },
+        { "slider",   "Icon Size",     "iconSize"      },
+        { "slider",   "Max Icons",     "maxIcons"      },
+        { "dropdown", "Sort Order",    "sortOrder"     },
+        { "checkbox", "My Auras First","sortMineFirst" },
+        { "checkbox", "Reverse Order", "sortReverse"   },
+        { "checkbox", "Others Only",   "othersOnly"    },
+    }, "layout/Growth")
+
+    -- ⚠ THE SIX CATEGORY CHECKBOXES ARE ONE LOOP, so the census sees one entry
+    -- bound to `sel, def.key`. Which six they are is asserted off the defs table
+    -- below, which is the only place that decides.
+    checkCensus(bodyCensus(fnBody(EDIT, "BuildDebuffCategories", "-- The ordered section list for one debuff"), "sel"), {
+        { "checkbox", "(none)",                      "def.key"         },
+        { "dropdown", "Mode",                        "dispellableMode" },
+        { "checkbox", "Hide Long Debuffs",           "hideLong"        },
+        { "slider",   "Hide Longer Than (minutes)",  "hideLongMinutes" },
+        { "checkbox", "Keep important debuffs",      "keepImportant"   },
+    }, "debuff/Categories")
+
+    local defs = fnBody(EDIT, "DebuffCategoryDefs", "P.DebuffCategoryDefs =")
+    local catKeys = {}
+    for k in defs:gmatch('key = "([%w_]+)"') do catKeys[#catKeys + 1] = k end
+    eqList(catKeys, { "boss", "role", "priority", "crowdControl", "raid", "dispellable" },
+           "debuff/Categories: the six category keys")
+
+    -- ☠ THE SWEEP. Nothing in the shared section bodies reaches for the page db.
+    local shared = EDIT:sub(EDIT:find("-- ── LINKED FILTERS (filter groups) ──", 1, true),
+                            EDIT:find("S.BuildLayoutGroupsHeadArea = function", 1, true))
+    local flat = shared:gsub("%s+", " ")
+    local bad = 0
+    for kind in flat:gmatch("GUI:(Create%a+)%(%s*host%s*,[^)]-%f[%w]db,%s*\"") do
+        if KIND[kind] then bad = bad + 1 end
+    end
+    eq(bad, 0, "binding: no layout-group control is bound to the page db")
+
+    -- The greying that used to be imperative-only has to survive a pane's own
+    -- re-flow, which re-runs disableOn and knows nothing about a SetEnabled call
+    -- made once at build.
+    local dis = 0
+    for _ in EDIT:gmatch("%.disableOn = function%(%) return not sel%.") do dis = dis + 1 end
+    eq(dis, 3, "binding: the three gated debuff controls carry a disableOn, not just a build-time grey")
+
+    -- ☠ TWO HALVES OF ONE NUMBER. sortOrder is OPTIONAL on a group record, so the
+    -- dropdown reads it through a customGet with a family fallback -- and the row's
+    -- modified tick measures the same key against the record view's default. If
+    -- those two disagree the control displays one answer and the tick reports the
+    -- other, with nothing on screen to say which is right. The families genuinely
+    -- differ: a filter group's pre-Wave-2 behaviour was Blizzard slot order, a
+    -- debuff group's was soonest-to-expire.
+    check(EDIT:find('local famSort = (kind == "debuff") and "TIME" or "DEFAULT"', 1, true) ~= nil,
+          "binding: the sort dropdown's family fallback names both families")
+    check(GROUPS:find('sortOrder = "TIME", sortMineFirst = false, sortReverse = false,', 1, true) ~= nil,
+          "binding: ...and the debuff record's default is the same TIME")
+    check(GROUPS:find('sortOrder = "DEFAULT", sortMineFirst = false, sortReverse = false,', 1, true) ~= nil,
+          "binding: ...and the filter record's is the same DEFAULT")
+end
+
+-- ============================================================
+-- 8e. THE GLOBAL TAB'S ROWS
+-- Seven blocks, four of which hold settings. The three that hold ACTIONS take no
+-- modified tick and no Reset Group -- a footer that reset nothing would be a
+-- footer that lied, which is the failure this phase was blocked on.
+-- ============================================================
+print("-- Aura Designer: the Global tab's rows")
+do
+    local GV = CARDS:sub(CARDS:find("local function BuildGlobalView(parent, collect)", 1, true),
+                         CARDS:find("P.BuildGlobalView = BuildGlobalView", 1, true))
+    check(#GV > 100, "global: BuildGlobalView's body was found")
+
+    check(GV:find("if collect then", 1, true) ~= nil,
+          "global: AddGroup carries the collect seam")
+    check(GV:find("local savedParent = parent", 1, true) ~= nil,
+          "global: ...which saves the host before it re-points it")
+    check(GV:find("parent = savedParent", 1, true) ~= nil,
+          "global: ...and restores it after the body runs")
+    check(GV:find("if collect then return collect end", 1, true) ~= nil,
+          "global: ...and the tail sizes no host")
+
+    -- The blocks, in order, and which of them is a settings group.
+    local order, dbs = {}, {}
+    for header in GV:gmatch('AddGroup%(L%["([^"]+)"%]') do order[#order + 1] = header end
+    eqList(order, { "General", "Sound Alerts", "Duration Text", "Stack Text",
+                    "Import from Buffs Tab", "Standard Buffs", "Actions" },
+           "global: the blocks, in the order the split panel drew them")
+
+    -- The action groups close with `end, false)`, which is the "no tick, no
+    -- footer" flag. Read from the whole block -- start of its AddGroup to the
+    -- start of the next one -- because the flag sits OUTSIDE the body's own
+    -- closing paren and a %b() match stops short of it.
+    local function blockText(name)
+        local at = GV:find("AddGroup(L[\"" .. name .. "\"]", 1, true)
+        check(at ~= nil, 'global: a block is declared for "' .. name .. '"')
+        if not at then return "" end
+        local nxt = GV:find("AddGroup(L[\"", at + 12, true) or #GV
+        return GV:sub(at, nxt)
+    end
+    for _, name in ipairs({ "Import from Buffs Tab", "Standard Buffs", "Actions" }) do
+        check(blockText(name):find("end, false)", 1, true) ~= nil,
+              "global: " .. name .. " is an action group -- no tick, no footer")
+        dbs[#dbs + 1] = name
+    end
+    eq(#dbs, 3, "global: three action groups")
+    -- ...and the four that DO hold settings take the default record.
+    for _, name in ipairs({ "General", "Duration Text", "Stack Text" }) do
+        check(blockText(name):find("end, false)", 1, true) == nil,
+              "global: " .. name .. " is a settings group -- it keeps both verbs")
+    end
+
+    -- ...and the one settings group whose keys the walk cannot see.
+    check(GV:find('end, CreateSoundSettingsProxy(), { "soundEnabled", "soundChannel" })', 1, true) ~= nil,
+          "global: Sound Alerts names its two custom-bound keys through ClaimKeys' extra door")
+    check(ROWS:find("tools.ClaimKeys(row, content, sec.extra)", 1, true) ~= nil,
+          "global: ...and the row passes them")
+
+    -- The census of each settings block. The Global tab's table is the defaults
+    -- PROXY (`defaults`), and the two sound controls bind through a custom get/set
+    -- onto the Aura Designer block itself -- which the third pattern reads.
+    local function globalCensus(src)
+        local flat = src:gsub("%s+", " ")
+        local starts = {}
+        local i = 1
+        while true do
+            local s, e, kind = flat:find("GUI:(Create%a+)%(", i)
+            if not s then break end
+            if KIND[kind] then starts[#starts + 1] = { s = s, kind = KIND[kind] } end
+            i = e
+        end
+        local out = {}
+        for n, at in ipairs(starts) do
+            local stop = starts[n + 1] and (starts[n + 1].s - 1) or #flat
+            local chunk = flat:sub(at.s, stop)
+            local label = chunk:match('GUI:Create%a+%(%s*[%w_%.]+%s*,%s*L%["([^"]+)"%]') or "(none)"
+            local key = chunk:match('%f[%w]defaults,%s*"([%w_]+)"')
+                     or chunk:match('%f[%w]adDB%.([%w_]+)%s*=')
+                     or chunk:match('GetAuraDesignerDB%(%)%.([%w_]+)%s*=')
+                     or "(none)"
+            out[#out + 1] = { kind = at.kind, label = label, key = key }
+        end
+        return out
+    end
+    local function globalBody(header)
+        local a = GV:find('AddGroup(L["' .. header .. '"]', 1, true)
+        check(a ~= nil, 'global: a block is declared for "' .. header .. '"')
+        if not a then return "" end
+        return GV:match("AddGroup%b()", a) or ""
+    end
+
+    checkCensus(globalCensus(globalBody("General")), {
+        { "slider",   "Default Icon Size",     "iconSize"            },
+        { "slider",   "Default Scale",         "iconScale"           },
+        { "slider",   "Default Frame Level",   "indicatorFrameLevel" },
+        { "checkbox", "Show Duration",         "showDuration"        },
+        { "checkbox", "Show Stacks",           "showStacks"          },
+        { "checkbox", "Hide Cooldown Swipe",   "hideSwipe"           },
+        { "checkbox", "Hide Icon (Text Only)", "hideIcon"            },
+    }, "global/General")
+
+    checkCensus(globalCensus(globalBody("Sound Alerts")), {
+        { "checkbox", "Enabled", "soundEnabled" },
+        { "dropdown", "Channel", "soundChannel" },
+    }, "global/Sound Alerts")
+
+    checkCensus(globalCensus(globalBody("Duration Text")), {
+        { "fontdropdown",    "Font",                           "durationFont"               },
+        { "slider",          "Scale",                          "durationScale"              },
+        { "outlinedropdown", "Outline",                        "durationOutline"            },
+        { "shadowcheckbox",  "Shadow",                         "durationOutline"            },
+        { "dropdown",        "Anchor",                         "durationAnchor"             },
+        { "slider",          "Offset X",                       "durationX"                  },
+        { "slider",          "Offset Y",                       "durationY"                  },
+        { "checkbox",        "Color by Time Remaining",        "durationColorByTime"        },
+        { "colorpicker",     "Duration Text Color",            "durationColor"              },
+        { "checkbox",        "Hide Duration Above Threshold",  "durationHideAboveEnabled"   },
+        { "slider",          "Hide Above (seconds)",           "durationHideAboveThreshold" },
+    }, "global/Duration Text")
+    -- ⚠ THE COLOURS LINK IS NOT A GUI:Create CALL, so the census cannot see it.
+    -- It is the one cross-page link on this block and it goes to the Colours page,
+    -- not to a sibling widget -- so unlike the bar's Expiration note it survives
+    -- the move to a pane untouched.
+    check(globalBody("Duration Text"):find("AddDurationColorsLink(g, parent)", 1, true) ~= nil,
+          "global/Duration Text: ...and the Color by Time link rides with it")
+
+    checkCensus(globalCensus(globalBody("Stack Text")), {
+        { "fontdropdown",    "Font",             "stackFont"    },
+        { "slider",          "Scale",            "stackScale"   },
+        { "outlinedropdown", "Outline",          "stackOutline" },
+        { "shadowcheckbox",  "Shadow",           "stackOutline" },
+        { "dropdown",        "Anchor",           "stackAnchor"  },
+        { "slider",          "Offset X",         "stackX"       },
+        { "slider",          "Offset Y",         "stackY"       },
+        { "colorpicker",     "Stack Text Color", "stackColor"   },
+    }, "global/Stack Text")
+end
+
+-- ============================================================
+-- 8f. EVERY PHASE-3 ROW ANSWERS THROUGH A RECORD THAT CARRIES AN ADAPTER
+-- Phase 0 gave the defaults engine an adapter hook so a designer record can
+-- answer "is this modified" for itself. It only ever sees one if the ROW hands it
+-- a table that has one -- and until this phase the Global tab's proxy, the group
+-- style proxy and the group records had none, so every row on these two tabs
+-- would have had a permanently dark tick and a Reset Group that wrote nothing.
+-- Silently, with no error either way.
+-- ============================================================
+print("-- Aura Designer: the phase-3 records carry the defaults adapter")
+do
+    for _, name in ipairs({ "CreateGlobalDefaultsProxy", "CreateSoundSettingsProxy" }) do
+        check(CARDS:find("local function " .. name .. "()", 1, true) ~= nil,
+              "record: " .. name .. " exists")
+        check(CARDS:find("P." .. name .. " = " .. name, 1, true) ~= nil,
+              "record: ...and is published")
+    end
+    check(GROUPS:find("local function CreateRecordView(target, defaults)", 1, true) ~= nil,
+          "record: the group records get a VIEW, not an adapter of their own")
+    -- ☠ AND IT HAS TO BE A VIEW. A layout group IS SavedVariables and goes through
+    -- LibSerialize on profile export, which cannot carry a function -- the same
+    -- wall the Text Designer's elements hit in phase 0.
+    check(GROUPS:find("__dfDefaultsAdapter = adapter,", 1, true) ~= nil,
+          "record: ...whose view carries the hook")
+    for _, name in ipairs({ "GroupRecordView", "DebuffGroupRecordView", "DebuffSelectionView" }) do
+        check(GROUPS:find("P." .. name .. " = " .. name, 1, true) ~= nil,
+              "record: " .. name .. " is published")
+    end
+
+    -- ☠ GetStored IS A rawget EVERYWHERE. Through any of these proxies __index
+    -- answers with the fallback for an unset key, so an adapter reading back
+    -- through its own proxy would find every key set and light the whole tab up.
+    local rawgets = 0
+    for _ in CARDS:gmatch("GetStored%s*=%s*function") do rawgets = rawgets + 1 end
+    eq(rawgets, 3, "record: the card file mints three adapters")
+    check(CARDS:find("return rawget(t, k)", 1, true) ~= nil,
+          "record: the Global tab's GetStored reads the stored block RAW")
+    check(CARDS:find("return rawget(adDB, k)", 1, true) ~= nil,
+          "record: ...the sound block's too")
+    check(CARDS:find("GetStored  = function(k) return rawget(s, k) end", 1, true) ~= nil,
+          "record: ...and the group style's, which is the one with copy-on-read")
+    check(GROUPS:find("GetStored  = function(k) return rawget(target, k) end", 1, true) ~= nil,
+          "record: ...and the group record view's")
+
+    -- ⚠ AND THE FRAME LEVEL FINALLY HAS A DEFAULT. The General block has bound a
+    -- slider to indicatorFrameLevel since it was wired, with no entry in the
+    -- fallback table -- so the diff engine read "no default" as "not a setting
+    -- here" and the row's tick could not have answered for it.
+    check(CARDS:find("indicatorFrameLevel = 40,", 1, true) ~= nil,
+          "record: the Global tab's frame-level default is named -- and it is 40, the render's no-op")
+
+    -- The rows themselves: the record, never DF.db[mode].
+    check(ROWS:find("local function RowRecord() return record end", 1, true) ~= nil,
+          "record: a group's rows resolve their db to the group's own view")
+    check(ROWS:find("db      = rowDB or RowRecord,", 1, true) ~= nil,
+          "record: ...and every row takes it")
+    check(ROWS:find("tools.WireFooter(row, spec.Apply, rowDB or RowRecord)", 1, true) ~= nil,
+          "record: ...including the footer, whose verbs write through it")
+    check(ROWS:find("tools.WireFooter(row, ApplyGlobalGroup, function() return sec.db end)", 1, true) ~= nil,
+          "record: the Global tab's rows write through the record their block declared")
+    check(ROWS:find("tools.RowDB", 1, true) == nil,
+          "record: no designer row anywhere is wired to DF.db[mode]")
+
+    -- The Categories row measures itself against the SELECTION block, which is a
+    -- record of its own -- the group's own view answers for anchor and spacing and
+    -- has never heard of `boss`.
+    check(ROWS:find("local selView = DebuffSelectionView(group.selection)", 1, true) ~= nil,
+          "record: the Categories row takes the selection block's own view")
+    check(ROWS:find("sections[1].rowDB = function() return selView end", 1, true) ~= nil,
+          "record: ...as its row db")
+
+    -- ...and a row with nothing to reset gets neither verb.
+    check(ROWS:find("if rowDB ~= false then", 1, true) ~= nil,
+          "record: an action-only row takes no tick and no footer")
+    check(ROWS:find("if sec.db then", 1, true) ~= nil,
+          "record: ...and neither does an action-only Global block")
 end
 
 -- ============================================================
@@ -660,9 +1129,9 @@ do
     -- ☠ AND WHAT STILL DOES NOT FIT IS MASKED, NEVER DRAWN OVER THE PAGE. A
     -- placed indicator anchored outside the frame (a TOP icon) overhangs at every
     -- scale, and below this band sit the pool strip and the tabs.
-    check(CARDS:find("container:SetClipsChildren(true)", 1, true) ~= nil,
-          "canvas: the canvas masks its own contents")
-
+    check(CARDS:find("container:SetClipsChildren(true)", 1, true) ~= nil,
+          "canvas: the canvas masks its own contents")
+
     -- ☠ THE MOCK'S CENTRE OFFSET IS IN THE MOCK'S OWN UNITS, SO IT SCALES.
     -- At 2.5 the intended 20px nudge became 50 on screen, dropping the frame 30px
     -- further than the band height allowed for and cutting it off along the bottom

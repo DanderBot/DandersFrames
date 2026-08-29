@@ -1165,6 +1165,116 @@ local function CreateLayoutGroup(name, kind)
 end
 P.CreateLayoutGroup = CreateLayoutGroup
 
+-- ============================================================
+-- A GROUP RECORD ANSWERS FOR ITSELF
+-- ------------------------------------------------------------
+-- The Placement and Growth controls bind the layout-group RECORD directly --
+-- `group.anchor`, `group.iconsPerRow` -- which is right, and which the diff
+-- engine cannot see: it recognises DF.db.party / DF.db.raid BY IDENTITY and
+-- answers nil for everything else, so a popout row handed one of these records
+-- would have a permanently dark modified tick and a Reset Group that wrote
+-- nothing while saying it had. Silently, with no error on either side.
+--
+-- ☠ AND THE ADAPTER CANNOT GO ON THE RECORD. A layout group IS SavedVariables
+-- and goes through LibSerialize on profile export, which cannot carry a function
+-- -- the same wall the Text Designer's elements hit (see the spec's phase-0
+-- outcome). So this is a VIEW: the controls keep binding the group, and only the
+-- ROW takes the view, for its tick and its footer.
+--
+-- ⚠ NO ClearKey, deliberately, and the Text Designer's Global tab record is the
+-- precedent. The factory and every control read these fields off the record
+-- directly, so an unset `anchor` is a nil where a string is expected rather than
+-- a field that resolves to a default. Reset therefore WRITES the shipped value,
+-- which is what GroupActions does when an adapter offers no clear.
+--
+-- ☠ THE DEFAULTS MIRROR THE CONSTRUCTORS AND ARE NOT THE CONSTRUCTORS.
+-- CreateLayoutGroup is directly above; CreateDebuffGroup is in Options.lua
+-- (the two stores were built at different times). A value changed in one of
+-- those without being changed here makes the tick lie -- which is the one thing
+-- worth knowing about this table.
+local GROUP_DEFAULTS = {
+    -- A member group: the shared 8-per-row arrangement, no per-group styling.
+    members = {
+        anchor = "TOPLEFT", offsetX = 0, offsetY = 0,
+        growDirection = "RIGHT_DOWN", iconsPerRow = 8, spacing = 2,
+    },
+    -- A filter group: compact 4x4 at creation, plus the uniform styling pair.
+    -- sortOrder / sortMineFirst / sortReverse are OPTIONAL on the record (the
+    -- othersOnly idiom) -- absent means the family default, which is what these
+    -- name so the tick measures against the value the control displays.
+    filter = {
+        anchor = "TOPLEFT", offsetX = 0, offsetY = 0,
+        growDirection = "RIGHT_DOWN", iconsPerRow = 4, spacing = 2,
+        iconSize = 24, maxIcons = 4,
+        sortOrder = "DEFAULT", sortMineFirst = false, sortReverse = false,
+        othersOnly = false,
+    },
+    -- A debuff category group. Same layout block; the family sort default is
+    -- TIME (soonest-to-expire first, the old hardcode) rather than DEFAULT.
+    debuff = {
+        anchor = "TOPLEFT", offsetX = 0, offsetY = 0,
+        growDirection = "RIGHT_DOWN", iconsPerRow = 4, spacing = 2,
+        iconSize = 24, maxIcons = 4,
+        sortOrder = "TIME", sortMineFirst = false, sortReverse = false,
+    },
+}
+P.GROUP_DEFAULTS = GROUP_DEFAULTS
+
+-- The debuff group's category block (group.selection), which is its own record
+-- with its own controls -- so its row needs its own view. Mirrors
+-- CreateDebuffGroup's seed: Boss + Role on, everything else off, Hide Long
+-- staged at 5 minutes with Keep Important on.
+local DEBUFF_SELECTION_DEFAULTS = {
+    boss = true, role = true, priority = false, crowdControl = false,
+    raid = false, dispellable = false, dispellableMode = "PLAYER",
+    hideLong = false, hideLongMinutes = 5, keepImportant = true,
+}
+P.DEBUFF_SELECTION_DEFAULTS = DEBUFF_SELECTION_DEFAULTS
+
+-- One view over one record. `target` is the stored table the controls are bound
+-- to; `defaults` is what its fields ship as.
+--
+-- ☠ GetStored IS A rawget ON THE TARGET, never a read through the view -- the
+-- rule every adapter in this addon follows. __index answers with the default for
+-- an absent key, so a view reading back through itself would find every key set
+-- and light the whole row up.
+local function CreateRecordView(target, defaults)
+    local adapter = {
+        GetDefault = function(k) return defaults[k] end,
+        GetStored  = function(k) return rawget(target, k) end,
+    }
+    return setmetatable({ _skipOverrideIndicators = true,
+                          __dfDefaults = defaults,
+                          __dfDefaultsAdapter = adapter }, {
+        __index = function(_, k)
+            local v = rawget(target, k)
+            if v ~= nil then return v end
+            return defaults[k]
+        end,
+        __newindex = function(_, k, v) target[k] = v end,
+    })
+end
+
+-- Which defaults a layout group answers to. A record with no `kind` is the
+-- original member arranger; "filter" is the container-backed one.
+local function GroupRecordView(group)
+    if not group then return nil end
+    return CreateRecordView(group, GROUP_DEFAULTS[group.kind == "filter" and "filter" or "members"])
+end
+P.GroupRecordView = GroupRecordView
+
+local function DebuffGroupRecordView(group)
+    if not group then return nil end
+    return CreateRecordView(group, GROUP_DEFAULTS.debuff)
+end
+P.DebuffGroupRecordView = DebuffGroupRecordView
+
+local function DebuffSelectionView(sel)
+    if not sel then return nil end
+    return CreateRecordView(sel, DEBUFF_SELECTION_DEFAULTS)
+end
+P.DebuffSelectionView = DebuffSelectionView
+
 -- Delete a layout group by ID (from the ACTIVE tab's store; the member-
 -- indicator cascade removes from the active pool via RemoveIndicatorInstance's
 -- CurrentAuraPool routing — members always live in their group's pool)
