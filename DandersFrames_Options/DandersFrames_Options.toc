@@ -70,6 +70,11 @@ Features\Search.lua
 Features\ChangedSettings.lua
 GUI\Sections.lua
 GUI\Controls.lua
+# The shared shell both designer pages are built on -- banner, canvas, strips,
+# tab strip, then the active tab, all as bands in the harness's own column.
+# AFTER Controls.lua (it is handed that file's CreatePopoutPageTools table) and
+# before the designers, which call it.
+GUI\DesignerShell.lua
 GUI\Panel.lua
 GUI\ColorPicker.lua
 # The write half of the popout footer's group verbs (Reset Group / Hold:
@@ -92,6 +97,9 @@ AuraDesigner\UI\Options.lua
 AuraDesigner\UI\Groups.lua
 AuraDesigner\UI\Indicators.lua
 AuraDesigner\UI\Cards.lua
+# The popout layout's page (bands and rows). AFTER Cards.lua, whose helpers it
+# aliases at load; BEFORE Editor.lua, which calls S.BuildPoolStrip from here.
+AuraDesigner\UI\Rows.lua
 AuraDesigner\UI\Editor.lua
 
 # Text Designer editor

@@ -4268,8 +4268,16 @@ function GUI:CreatePopoutPageTools(page)
     -- close over row._claimedKeys BY REFERENCE rather than reading it now:
     -- ClaimKeys fills that table after the row is built, and a copy taken here
     -- would be the empty one.
-    local function WireFooter(row, apply)
+    -- ⚠ `rowDB` OVERRIDES WHERE THE VERBS WRITE, and exactly one kind of page
+    -- needs it. Everywhere else a row's keys live in DF.db[mode], which RowDB
+    -- answers for; a DESIGNER row's keys live on one indicator record, reached
+    -- through the metatable proxy that record's controls are bound to. Handed the
+    -- page's db instead, Reset Group would resolve nothing (the keys are not in
+    -- it) and Hold: Defaults would snapshot the wrong table -- while still saying
+    -- it had done both. Defaults to RowDB, which is every existing caller.
+    local function WireFooter(row, apply, rowDB)
         if not (row and row.SetActions) then return end
+        rowDB = rowDB or RowDB
         local held                    -- the hold's snapshot, between the two halves
 
         -- THE GROUP'S APPLY, named once. Every verb runs it after it writes --
@@ -4293,7 +4301,7 @@ function GUI:CreatePopoutPageTools(page)
                     -- The row's own heading names the collapsed undo entry: a
                     -- reset is one thing the user did to THIS group, and the
                     -- group is what they will look for.
-                    GA:ResetKeys(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode,
+                    GA:ResetKeys(GUI, rowDB(), row._claimedKeys or {}, GUI.SelectedMode,
                                  row._title or row._label, ApplyGroup)
                     ApplyGroup()
                 end,
@@ -4306,13 +4314,13 @@ function GUI:CreatePopoutPageTools(page)
                 onHoldStart = function()
                     local GA = DF.GroupActions
                     if not GA then return end
-                    held = GA:BeginHold(GUI, RowDB(), row._claimedKeys or {}, GUI.SelectedMode)
+                    held = GA:BeginHold(GUI, rowDB(), row._claimedKeys or {}, GUI.SelectedMode)
                     ApplyGroup()
                 end,
                 onHoldEnd   = function()
                     local GA = DF.GroupActions
                     if not (GA and held) then return end
-                    GA:EndHold(GUI, RowDB(), row._claimedKeys or {}, held)
+                    GA:EndHold(GUI, rowDB(), row._claimedKeys or {}, held)
                     held = nil
                     -- The UNTHROTTLED apply on the way back, unlike the
                     -- coalescing one used going in: a release is the moment the

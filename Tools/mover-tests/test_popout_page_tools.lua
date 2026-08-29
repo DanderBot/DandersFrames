@@ -152,11 +152,26 @@ do
     -- ---- claimed BY REFERENCE ---------------------------------------
     -- ClaimKeys fills row._claimedKeys AFTER the row is built, so a copy taken
     -- inside WireFooter would be the empty one.
-    local footer = BODY:match("local function WireFooter%(row, apply%)(.-)\n    end")
+    local footer = BODY:match("local function WireFooter%(row, apply, rowDB%)(.-)\n    end")
     check(footer ~= nil, "semantics: the footer is locatable")
     if footer then
         check(footer:find("local claimed", 1, true) == nil,
               "semantics: the footer never copies the claimed keys")
+
+        -- ☠ THE VERBS WRITE WHERE THE ROW'S KEYS LIVE, WHICH IS NOT ALWAYS DF.db.
+        -- A designer row's keys live on one indicator record behind a metatable
+        -- proxy; handed the page db, Reset Group would resolve nothing and Hold:
+        -- Defaults would snapshot the wrong table, both while reporting success.
+        -- The override defaults to RowDB, which is every other caller, and there
+        -- must be NO RowDB() left inside the verbs or one of the three would
+        -- silently keep writing to the page.
+        check(footer:find("rowDB = rowDB or RowDB", 1, true) ~= nil,
+              "semantics: the footer's db defaults to the page's, and can be overridden")
+        local rowDBcalls = 0
+        for _ in footer:gmatch("rowDB%(%)") do rowDBcalls = rowDBcalls + 1 end
+        eq(rowDBcalls, 3, "semantics: ...and all three verbs go through it")
+        check(footer:find("RowDB()", 1, true) == nil,
+              "semantics: ...with no verb left reading the page db directly")
         local refs = 0
         for _ in footer:gmatch("row%._claimedKeys or {}") do refs = refs + 1 end
         eq(refs, 3, "semantics: ...it re-reads them by reference at each verb")
