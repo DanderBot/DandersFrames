@@ -144,6 +144,35 @@ for _f in sorted((HERE.parent.parent / "DandersUI").glob("*.lua")):
         _c = _line.split("--", 1)[0]
         if _ban.search(_c) and not _defn.search(_c) and "Native" not in _c:
             _viol.append(f"{_f.name}:{_n}: {_line.strip()}")
+# ============================================================
+# STATIC BAN: a texture path must escape its backslashes.
+# Lua 5.1 passes an UNRECOGNISED escape through as the bare character, so
+# "Interface\AddOns\..." written with SINGLE backslashes is not a syntax error and
+# is not the path it looks like -- \A, \D, \M and \I are simply dropped and the
+# client is handed "InterfaceAddOnsDandersFramesMediaIconsmenu", a path to
+# nothing, which it draws as an EMPTY SQUARE. Nothing errors and no test fails,
+# which is exactly how it shipped: the template overflow button rendered as a
+# blank square in the settings window with the suite green (2026-08-29).
+# ============================================================
+_tex = _re.compile(r'"Interface\\[^\\\\"]')
+_texviol = []
+for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
+    _base = HERE.parents[1] / _root
+    if not _base.is_dir():
+        continue
+    for _f in sorted(_base.rglob("*.lua")):
+        if "Libs" in _f.parts:
+            continue
+        for _n, _line in enumerate(_f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            _c = _line.split("--", 1)[0]
+            if _tex.search(_c):
+                _texviol.append(f"{_f.relative_to(HERE.parents[1])}:{_n}: {_line.strip()[:96]}")
+if _texviol:
+    print("TEXTURE PATH BAN: single-backslash Interface paths resolve to nothing:")
+    for _v in _texviol:
+        print("  " + _v)
+    raise SystemExit(1)
+
 if _viol:
     print("SHIM-SHADOW BAN: lib code must call the *Native factory aliases:")
     for _v in _viol:

@@ -897,7 +897,11 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     if opts.overflowActions then
         overflowBtn = GUI:CreateGlyphButton(bar, {
             size = 22, iconSize = 14,
-            texture = "Interface\AddOns\DandersFrames\Media\Icons\menu",
+            -- ☠ DOUBLE BACKSLASHES. Lua 5.1 passes an unrecognised escape through as the
+            -- bare character, so "Interface\AddOns\..." silently becomes
+            -- "InterfaceAddOns..." -- a path to nothing, which the client draws as an
+            -- empty square. It does not error, which is why it shipped.
+            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu",
             tooltip = { title = L["Templates"],
                         lines = { L["Create, duplicate, rename or delete a template."] } },
         })
