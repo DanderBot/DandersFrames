@@ -941,11 +941,28 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         mockFrame:SetSize(w, h)
 
         local want = (scaleDB or {}).previewScale or 1.0
+
+        -- ☠ THE ANCHOR IS PART OF THE SCALE, so both exits set both. A SetPoint
+        -- offset on a scaled frame is in that frame's OWN units, so the nudge has
+        -- to be divided by the scale to stay a constant number of SCREEN pixels
+        -- (see the note below). The early exit used to set the scale and leave the
+        -- anchor at its construction value -- and the early exit is the one a
+        -- RELOAD takes, so the preview came back 20*(scale-1) pixels too low and
+        -- stayed there until the slider was touched.
+        local function place(scale)
+            mockFrame:SetScale(scale)
+            if compact then
+                mockFrame:ClearAllPoints()
+                mockFrame:SetPoint("CENTER", container, "CENTER", 0, -CANVAS_DY / scale)
+            end
+        end
+
         -- Before the first layout pass the container has no size yet; honour the
         -- user's scale rather than clamping against a zero and collapsing the mock.
+        -- OnSizeChanged below re-runs this the moment it has one.
         local cw, ch = container:GetWidth() or 0, container:GetHeight() or 0
         if cw < 2 or ch < 2 then
-            mockFrame:SetScale(want)
+            place(want)
             return
         end
         -- 16 = the container's own left/right padding; 28 = that plus the
@@ -960,21 +977,25 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         -- lie -- it read 1.6 while the mock stayed at whatever fitted 132px.
         local fit = compact and ((cw - 16) / w)
                             or math.min((cw - 16) / w, (ch - 28) / h)
-        local scale = math.max(0.2, math.min(want, fit))
-        mockFrame:SetScale(scale)
-
         -- ☠ A SETPOINT OFFSET ON A SCALED FRAME IS IN THAT FRAME'S OWN UNITS.
         -- The mock is nudged CANVAS_DY below the container's centre to sit clear of
         -- the label and slider -- but under SetScale(2.5) that 20 became 50 on
         -- screen, dropping the mock 30px further than the band height allowed for
         -- and cutting it off along the bottom edge. Dividing by the scale keeps the
         -- nudge a constant number of SCREEN pixels, which is what
-        -- P.CanvasWantedHeight's arithmetic assumes.
-        if compact then
-            mockFrame:ClearAllPoints()
-            mockFrame:SetPoint("CENTER", container, "CENTER", 0, -CANVAS_DY / scale)
-        end
+        -- P.CanvasWantedHeight's arithmetic assumes. See `place` above.
+        place(math.max(0.2, math.min(want, fit)))
     end
+
+    -- ⚠ RE-RUN WHEN THE BAND IS FINALLY SIZED. Every other caller of
+    -- RefreshGeometry is an EVENT -- the slider moved, the page was shown -- and
+    -- on a fresh build all of them can fire before the layout pass has given the
+    -- container a width, which sends every one of them down the early exit. This
+    -- is the only hook that fires BECAUSE the size arrived.
+    --
+    -- No loop: the mock is a child, so scaling it and re-anchoring it cannot
+    -- resize the container, which takes its height from the band.
+    container:SetScript("OnSizeChanged", function() container.RefreshGeometry() end)
 
     -- What the host band must be for the mock to clear the furniture above it and
     -- the padding below. Derived from the mock's own anchor: it is centred at

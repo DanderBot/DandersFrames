@@ -1142,6 +1142,27 @@ do
     -- is what makes the height arithmetic below true.
     check(CARDS:find("mockFrame:SetPoint(\"CENTER\", container, \"CENTER\", 0, -CANVAS_DY / scale)", 1, true) ~= nil,
           "canvas: the centre nudge is compensated for scale, so it stays screen pixels")
+
+    -- ☠ BOTH EXITS OF RefreshGeometry SET BOTH THE SCALE AND THE ANCHOR. The
+    -- early exit -- taken whenever the container has no size yet, which is what a
+    -- RELOAD does -- used to set the scale and leave the anchor at its
+    -- construction value, so the preview came back 20*(scale-1) pixels too low and
+    -- stayed there until the slider was touched. Reported in-game as "on reload
+    -- the preview frame isnt in the correct spot".
+    check(CARDS:find("local function place(scale)", 1, true) ~= nil,
+          "canvas: the scale and the anchor are set together, by one verb")
+    check(CARDS:find("            place(want)", 1, true) ~= nil,
+          "canvas: ...so the early exit anchors too, not just scales")
+    check(CARDS:find("place(math.max(0.2, math.min(want, fit)))", 1, true) ~= nil,
+          "canvas: ...and so does the measured path")
+    -- The bare call is what the early exit used to make. `place` is now the only
+    -- way the scale is set, so the bare form must not appear at all.
+    check(CARDS:find("mockFrame:SetScale(want)", 1, true) == nil,
+          "canvas: nothing sets the scale WITHOUT the anchor any more")
+    -- The only hook that fires BECAUSE the size arrived, rather than on an event
+    -- that can precede it.
+    check(CARDS:find("container:SetScript(\"OnSizeChanged\", function() container.RefreshGeometry() end)", 1, true) ~= nil,
+          "canvas: the geometry re-runs when the band is finally sized")
     check(CARDS:find("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY", 1, true) ~= nil,
           "canvas: the geometry is named ONCE -- the height verb and the canvas are one sum")
 
