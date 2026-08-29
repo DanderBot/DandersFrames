@@ -190,7 +190,19 @@ local function PageRefreshStates(self)
             end
             
             if shouldHide then
+                -- ...and the box is TOLD it is going, because hiding a subtree
+                -- tells nothing inside it. A popout docked to a row in this box
+                -- is not a child of the box (it hangs off UIParent so it can
+                -- draw outside the window) and neither is the accent outline it
+                -- traces on that row, so both would stay exactly where they are
+                -- over whatever the re-flow moves up. The group forwards this to
+                -- its children; see DandersUI/Sections.lua's LAYOUT-HIDDEN
+                -- CONTRACT.
+                local wasShown = widget:IsShown()
                 widget:Hide()
+                if wasShown and GUI.NotifyLayoutHidden then
+                    GUI:NotifyLayoutHidden(widget)
+                end
             else
                 widget:Show()
             end
@@ -217,7 +229,14 @@ local function PageRefreshStates(self)
             end
             
             if shouldHide then
+                -- Same announcement as the group branch above, and for the same
+                -- reason: a popout row laid straight on the page (rather than in
+                -- a box) is hidden here, and it has a panel to take down with it.
+                local wasShown = widget:IsShown()
                 widget:Hide()
+                if wasShown and GUI.NotifyLayoutHidden then
+                    GUI:NotifyLayoutHidden(widget)
+                end
             else
                 widget:Show()
                 -- Call refreshContent hook for dynamic content updates

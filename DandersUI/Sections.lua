@@ -92,6 +92,48 @@ local function ContentInsetX(group)
     return pad
 end
 
+-- ============================================================
+-- THE LAYOUT-HIDDEN CONTRACT
+-- ------------------------------------------------------------
+-- A widget can be taken off the page WITHOUT being destroyed, and there are
+-- several ways to do it: a section folds, a hideOn flips, a consumer's own page
+-- pass shuts a whole box. Every one of them ends in `widget:Hide()`, and Hide
+-- says nothing to anything the widget is CONNECTED to.
+--
+-- Which is how a docked popout got orphaned. The popout is not a child of the
+-- row -- it hangs off UIParent so it can draw outside the window -- and neither
+-- is the accent outline it traces ON the row. Hide the row and both stayed
+-- exactly where they were, over whatever the re-flow moved up into the gap.
+--
+-- So hiding a widget as part of a layout SAYS SO, and the widget decides what
+-- that means. `widget._OnLayoutHidden(widget)` is the whole contract: optional,
+-- called only on the transition from shown to hidden, and free for the
+-- overwhelming majority of widgets that declare none.
+--
+-- ⚠ THE CALLERS ARE THE LAYOUTS, NOT THE HIDERS. LayoutChildren below is one
+-- (it is where a fold and a hideOn both land); a consumer that runs its own page
+-- layout is the other, and reaches this by the published name. Anything that
+-- hides a widget for its own reasons -- a drag, a combat suspend -- is not a
+-- layout and does not announce one.
+--
+-- Published as a HOST method so a consumer can call it (`GUI:NotifyLayoutHidden
+-- (w)`), and written to take any value at all: the pack's own callers hand it
+-- whatever is in a child slot, which on a malformed one is nil.
+function UI:NotifyLayoutHidden(widget)
+    if type(widget) ~= "table" then return end
+    -- rawget, the convention every private-field read in this pack follows: on a
+    -- widget that declares none the key is simply absent, and this has to see
+    -- that rather than whatever an __index might invent for it.
+    local fn = rawget(widget, "_OnLayoutHidden")
+    if type(fn) == "function" then fn(widget) end
+end
+
+-- ...and the file-local shorthand, because LayoutChildren calls it per child and
+-- the group's own forwarder calls it per child again.
+local function notifyHidden(widget)
+    UI.NotifyLayoutHidden(UI, widget)
+end
+
 function UI:CreateSettingsGroup(parent, width, opts)
     -- opts can be a boolean (legacy: collapsible) or a table
     -- { collapsible, showSummary, collapseKey, chromeless, bandStyle, padding,
@@ -345,6 +387,26 @@ function UI:CreateSettingsGroup(parent, width, opts)
 
         collapseBar:Hide()
         group.collapseBar = collapseBar
+    end
+
+    -- A GROUP KNOWS ITS CHILDREN, so hiding the group is hiding every one of
+    -- them -- see THE LAYOUT-HIDDEN CONTRACT. The client hides a subtree by
+    -- hiding its root and tells no one below it, and this is the group's half of
+    -- putting that right: a consumer's page pass that shuts a whole box (a
+    -- collapsible SECTION folding over it, the box's own hideOn) announces it to
+    -- the box, and the box passes it on.
+    --
+    -- Recursive by construction: a child that is itself a group answers this same
+    -- hook and forwards it again, so nesting needs nothing extra.
+    --
+    -- Announced to every child, not only to the ones that happened to be showing:
+    -- the group's own children were never individually hidden here (the group
+    -- above them was), so their shown flags say nothing about it. The recipients
+    -- are idempotent, which is what makes that safe.
+    group._OnLayoutHidden = function(self)
+        for _, entry in ipairs(self.groupChildren) do
+            notifyHidden(entry and entry.widget)
+        end
     end
 
     -- Add a widget to this group
@@ -670,7 +732,19 @@ function UI:CreateSettingsGroup(parent, width, opts)
                 widget:Show()
                 visibleCount = visibleCount + 1
             else
+                -- ONE PLACE, TWO REASONS, and that is why the announcement goes
+                -- here rather than beside the fold. entryVisible answers false
+                -- for a COLLAPSED section's children and for a hideOn that just
+                -- flipped, so both arrive at this same Hide -- and both leave the
+                -- same orphan behind if nothing says so. See THE LAYOUT-HIDDEN
+                -- CONTRACT.
+                --
+                -- On the TRANSITION only. This pass runs on every refresh and
+                -- re-hides what was already hidden, and a widget cannot lose the
+                -- same panel twice.
+                local wasShown = widget.IsShown and widget:IsShown()
                 widget:Hide()
+                if wasShown then notifyHidden(widget) end
             end
         end
 

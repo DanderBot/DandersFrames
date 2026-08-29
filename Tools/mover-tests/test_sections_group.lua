@@ -865,4 +865,150 @@ do
     eq(painted, 1, "states: ...only the value sweep does")
 end
 
+-- ============================================================
+-- THE LAYOUT-HIDDEN CONTRACT
+-- ------------------------------------------------------------
+-- A widget can be taken off the page without being destroyed, and nothing
+-- CONNECTED to it is told: `Hide()` says nothing to anything that is not a
+-- child. That is how a docked popout was orphaned by a section folding -- the
+-- panel hangs off UIParent, the accent outline it traces on the row is not a
+-- child of the row either, and both stayed exactly where they were while the
+-- page re-flowed under them.
+--
+-- So a LAYOUT that hides a widget announces it, and the widget decides what that
+-- means. The claims below are the announcement's: who makes it, when, and how
+-- often. What a popout row DOES about it is test_popout_row's.
+-- ============================================================
+-- A collapsible group's first child is its HEADER, and the constructor wires the
+-- fold onto it: a caption to read the state key off, and a ThemeListeners list on
+-- the PARENT for the arrow to register in.
+--
+-- ⚠ Both are spelled out because the stub answers EVERY unset key with a no-op
+-- FUNCTION, which is truthy -- so `parent.ThemeListeners or {}` keeps that
+-- function and table.insert errors on it. The collapsed-summary field is cleared
+-- to false for the same reason: a real frame answers nil there and the layout's
+-- `if self.collapseSummary then ... :Hide()` skips it, where the stub hands back
+-- a function to call Hide on.
+local function foldable(parent, group)
+    parent.ThemeListeners = {}
+    group.collapseSummary = false
+    local head = control(20)
+    head.text = FakeUIFrame()
+    head.text:SetText("Foldable")
+    return head
+end
+
+print("-- Group: a fold announces the children it just took off the page")
+do
+    local parent = FakeUIFrame()
+    local g = host:CreateSettingsGroup(parent, 280, { collapsible = true })
+    g:SetWidth(280)
+    local head, row = foldable(parent, g), control(30)
+    local told, seen = 0, nil
+    row._OnLayoutHidden = function(w) told = told + 1; seen = w end
+    g:AddWidget(head, 20)
+    g:AddWidget(row, 30)
+    check(g.headerWidget == head, "hidden: (the first child is wired as the fold's header)")
+
+    g:LayoutChildren()
+    eq(told, 0, "hidden: an expanded section announces nothing")
+    check(row:IsShown(), "hidden: (the row is on the page to start with)")
+
+    -- THE REAL GESTURE: a click on the header. It flips `collapsed` and re-runs
+    -- the layout, and the layout is where the announcement belongs -- one place,
+    -- however the fold was asked for (the bottom collapse bar takes the same
+    -- route).
+    head:GetScript("OnMouseDown")()
+    check(g.collapsed, "hidden: (clicking the header folds the section)")
+    g:LayoutChildren()
+    check(not row:IsShown(), "hidden: the fold takes the row off the page")
+    eq(told, 1, "hidden: ...and says so, exactly once")
+    eq(seen, row, "hidden: ...handing over the widget itself, so one hook can serve many")
+
+    -- ON THE TRANSITION ONLY. This pass runs on every page refresh and re-hides
+    -- whatever is already hidden; a widget cannot lose the same panel twice.
+    g:LayoutChildren()
+    g:LayoutChildren()
+    eq(told, 1, "hidden: passes over an already-hidden row announce nothing")
+
+    g.collapsed = false
+    g:LayoutChildren()
+    check(row:IsShown(), "hidden: expanding puts it back")
+    g.collapsed = true
+    g:LayoutChildren()
+    eq(told, 2, "hidden: ...and folding again is a fresh announcement")
+end
+
+-- ...and a hideOn flip is the SAME announcement, because it is the same Hide. A
+-- row that vanishes because a predicate went true orphans a panel exactly as a
+-- fold does, and the two must not need two fixes.
+print("-- Group: a hideOn flip announces itself the same way a fold does")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g:SetWidth(280)
+    local row = control(30)
+    local told = 0
+    row._OnLayoutHidden = function() told = told + 1 end
+    row.hideOn = function(db) return db.foldTest == true end
+    g:AddWidget(row, 30)
+
+    g:LayoutChildren()
+    eq(told, 0, "hideOn: nothing while the predicate says show it")
+    settingsDB.foldTest = true
+    g:LayoutChildren()
+    check(not row:IsShown(), "hideOn: the predicate takes it off the page")
+    eq(told, 1, "hideOn: ...through the one announcement the fold uses")
+    settingsDB.foldTest = nil
+end
+
+-- A GROUP KNOWS ITS CHILDREN. The client hides a subtree by hiding its root and
+-- tells nothing below it, so a consumer's page pass that shuts a whole box hands
+-- the announcement to the box and the box passes it on.
+print("-- Group: hiding a whole box reaches what is inside it")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    local a, b = control(20), control(20)
+    local hits = {}
+    a._OnLayoutHidden = function() hits[#hits + 1] = "a" end
+    b._OnLayoutHidden = function() hits[#hits + 1] = "b" end
+    g:AddWidget(a, 20)
+    g:AddWidget(b, 20)
+
+    check(type(rawget(g, "_OnLayoutHidden")) == "function",
+          "box: a group answers the contract itself")
+    host:NotifyLayoutHidden(g)
+    eq(#hits, 2, "box: and forwards it to every child it owns")
+
+    -- Recursive by construction: a child that is itself a group forwards again,
+    -- so nesting needs nothing extra.
+    local inner = host:CreateSettingsGroup(FakeUIFrame(), 260, { chromeless = true })
+    local deep = control(20)
+    local deepHits = 0
+    deep._OnLayoutHidden = function() deepHits = deepHits + 1 end
+    inner:AddWidget(deep, 20)
+    local outer = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    outer:AddWidget(inner, 40)
+    host:NotifyLayoutHidden(outer)
+    eq(deepHits, 1, "box: ...and a box inside a box passes it on again")
+end
+
+-- The contract is OPTIONAL, and the lookup that decides is a rawget: a stub (or
+-- any surface with a catch-all __index) must not be mistaken for a widget that
+-- declared a hook.
+print("-- Group: the layout-hidden hook is optional")
+do
+    local calls = 0
+    local probe = setmetatable({}, {
+        __index = function() calls = calls + 1; return function() end end,
+    })
+    host:NotifyLayoutHidden(probe)
+    eq(calls, 0, "contract: a catch-all __index is not a declared hook")
+
+    -- ...and nothing that is not a widget takes the layout down with it.
+    host:NotifyLayoutHidden(nil)
+    host:NotifyLayoutHidden("a string")
+    host:NotifyLayoutHidden(control(20))
+    check(true, "contract: nil, a non-table and a plain widget are all no-ops")
+end
+
 CreateFrame = prevCreateFrame
