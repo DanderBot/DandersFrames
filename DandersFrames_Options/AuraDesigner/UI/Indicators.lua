@@ -607,6 +607,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
+                animIntroInert = true,   -- pooled buttons never see the intro burst
                 -- IMPORTANT: AD's per-aura proxy only triggers
                 -- RefreshLiveFramesThrottled + S.RefreshPreviewLightweight
                 -- on direct key assignment (proxy.X = v) via __newindex.
@@ -775,6 +776,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                     animate = true,
                 },
+                animIntroInert = true,   -- pooled buttons never see the intro burst
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
@@ -945,6 +947,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     shadow = true, alpha = true,
                     animate = true,
                 },
+                animIntroInert = true,   -- pooled buttons never see the intro burst
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
