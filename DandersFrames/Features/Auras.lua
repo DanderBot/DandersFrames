@@ -2461,33 +2461,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- friendly frames (the assist/attack gate).
     local candidateFilters
     if prefix == "buff" then
-        -- ☠☠ SECOND LOCK FOR "ONLY MY BUFFS" — the filter-string token FAILS OPEN.
-        -- BuildDirectBuffFilters expresses the setting as "HELPFUL|PLAYER", a token the
-        -- game evaluates in C where we cannot read it, and on 2026-08-29 it was caught
-        -- admitting four auras the player had not cast (Krathe, Paladin, live: a shaman's
-        -- Earth Shield / Skyfury / Lightning Shield on an ally's frame, corrected only by
-        -- walking back into range). The API said so outright — every one of those four
-        -- reported `isFromPlayerOrPlayerPet = false` while HELPFUL|PLAYER still returned
-        -- them, so the token and the aura data flatly disagree. Third invisible-C-token
-        -- failure this month; see SLOT_PARK_FILTER for the other two.
-        --
-        -- ★ The lock is the same doctrine as the slot park's: move the load-bearing claim
-        -- onto something evaluated in READABLE Blizzard Lua. `isFromPlayerOrPlayerPet` is
-        -- checked in DoesAuraPassCandidateFilters (Blizzard_AuraContainerUtil.lua:95),
-        -- OUTSIDE the identity gate (that block closes ~45 lines earlier, so no gate state
-        -- can skip it), as a strict equality — `auraData.isFromPlayerOrPlayerPet ~= true`
-        -- REJECTS. So on missing or unresolved caster data it fails CLOSED, which for a
-        -- setting named "Only My Buffs" is the right direction: briefly hide one of yours
-        -- rather than show somebody else's.
-        -- ⚠ ANDed with the string, never replacing it: the field also admits the player's
-        -- PET, so the intersection is what the token alone was supposed to mean. Dropping
-        -- "|PLAYER" would silently widen the setting to pet-cast auras.
-        -- ⚠ Precedent, not invention: Blizzard's own target frame filters on this same
-        -- field for its equivalent decision (TargetFrameAuraContainer.lua:406).
-        if db.directBuffOnlyMine then
-            candidateFilters = candidateFilters or {}
-            candidateFilters.isFromPlayerOrPlayerPet = true
-        end
+        -- ("Only My Buffs" needs no candidate filter here. The PLAYER token it rides was
+        -- caught failing open on 2026-08-29, and the second lock that fixes it —
+        -- isFromPlayerOrPlayerPet — is applied for EVERY consumer at the one place a
+        -- record's filter string and candidate filters meet: recordCandidateFilters in
+        -- Frames/AuraContainer.lua, which carries the whole account. This row had its own
+        -- copy for one commit; two mechanisms doing one job is how they drift apart.)
         -- Native max-TOTAL-duration filter (candidateFilters.maxDuration, seconds).
         -- Blizzard-side semantics: auras with duration > max OR duration == 0 are
         -- filtered — i.e. permanent auras are IMPLICITLY always hidden while this

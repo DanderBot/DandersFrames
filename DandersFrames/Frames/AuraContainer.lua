@@ -1185,8 +1185,67 @@ end
 
 -- A record's candidateFilters REPLACES the config-wide set for that group/slot
 -- (the dispel overlay's per-type slots) — see normalizeFilters.
+-- ☠☠ THE PLAYER TOKEN FAILS OPEN — SECOND LOCK, APPLIED HERE FOR EVERY CONSUMER.
+-- Field-proven 2026-08-29 (Krathe, Paladin, buff bar on "Only My Buffs", an ally in
+-- ANOTHER INSTANCE): a shaman's Earth Shield / Skyfury / Lightning Shield rendered on
+-- that ally's row and corrected only on walking back into range. The API named the fault
+-- outright — `GetUnitAuraInstanceIDs(unit, "HELPFUL|PLAYER")` returned four auras and
+-- every one of them reported `isFromPlayerOrPlayerPet = false`. The token and the aura
+-- data flatly disagree, so "only mine" rested entirely on a token the game evaluates in C
+-- where we cannot read it. Third invisible-C-token failure this month (SLOT_PARK_FILTER
+-- accounts for the other two), and the same cure: move the load-bearing claim onto
+-- something evaluated in READABLE Blizzard Lua.
+--
+-- `isFromPlayerOrPlayerPet` is checked in DoesAuraPassCandidateFilters
+-- (Blizzard_AuraContainerUtil.lua:95) — OUTSIDE the identity-gate block (which closes ~45
+-- lines earlier, so no gate state can skip it), as a strict equality: a nil or false
+-- REJECTS. That fails CLOSED, which for "only mine" is the right direction — briefly hide
+-- one of yours rather than show somebody else's. Blizzard's own target frame filters on
+-- this same field for its equivalent decision (TargetFrameAuraContainer.lua:406).
+--
+-- ★ WHY HERE AND NOT AT THE CONSUMERS. This resolver is the ONE place every record's
+-- filter string and candidate filters meet, on BOTH the build path and the live-tuning
+-- path — so the lock cannot drift from the token, and a future consumer that emits
+-- "|PLAYER" gets it for free instead of re-learning this the hard way. The buff row had
+-- its own copy of this for one commit; a second mechanism doing the same job is exactly
+-- the drift hazard this file keeps warning about, so it was removed in favour of this.
+--
+-- ☠ EXACT COMPONENT MATCH, never a substring: "HELPFUL|!PLAYER" (othersOnly) CONTAINS
+-- "PLAYER" and means the precise opposite. Filter strings are "|"-separated, so the test
+-- is per component.
+-- ☠ AND THE AURA DESIGNER'S SELF_ONLY POOL MUST NOT BE CAUGHT. A few buffs sit on the
+-- caster but are credited to the linked ally (Symbiotic Relationship — sourceUnit is the
+-- ally), so that pool deliberately drops to a bare "HELPFUL" with no PLAYER token; its
+-- aura genuinely is not from the player and this lock would hide it outright. Keying off
+-- the token rather than off a "is this a mine pool" flag is what keeps that safe — the
+-- pool already says what it means in the string.
+local function filterHasPlayerToken(f)
+    if type(f) ~= "string" then return false end
+    for component in f:gmatch("[^|]+") do
+        if component == "PLAYER" then return true end
+    end
+    return false
+end
+
 local function recordCandidateFilters(rec, config)
-    return rec.candidateFilters or config.candidateFilters
+    local cf = rec.candidateFilters or config.candidateFilters
+    if not filterHasPlayerToken(rec.f) then return cf end
+    -- ☠ NEVER OVERRIDE AN EXPLICIT VALUE. The debuff row's "nonplayer" record sets
+    -- isFromPlayerOrPlayerPet = FALSE on purpose (it is the only way to say "debuffs
+    -- somebody else applied"), and silently flipping that to true would invert its
+    -- meaning. Its filter carries no bare PLAYER token today so it never reaches here —
+    -- but a record that sets the field explicitly has already answered this question,
+    -- and the day one gains a PLAYER token this guard is what stops a silent inversion.
+    if cf and cf.isFromPlayerOrPlayerPet ~= nil then return cf end
+    -- ☠ COPY, NEVER MUTATE. The table reached here can be shared: config-level
+    -- candidateFilters serve every record on the row, and the debuff GROUP records are
+    -- cached and shared across frames within an auraLayoutVersion ("immutable" by
+    -- contract). Stamping the flag in place would leak it onto pools that never asked
+    -- for it and would outlive this build.
+    local out = {}
+    if cf then for k, v in pairs(cf) do out[k] = v end end
+    out.isFromPlayerOrPlayerPet = true
+    return out
 end
 
 -- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17, widened 2026-07-18).
