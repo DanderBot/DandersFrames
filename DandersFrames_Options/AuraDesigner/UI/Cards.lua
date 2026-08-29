@@ -672,6 +672,15 @@ P.CreateSpecDropdown = CreateSpecDropdown
 --   * RefreshGeometry's vertical fit accounts for the label+slider strip, which
 --     the split-panel form could ignore because it had 400px of height to spend.
 -- Omit opts entirely and this is byte-for-byte the canvas the split panel built.
+-- THE COMPACT CANVAS'S GEOMETRY, in screen pixels, named once because the height
+-- verb and the canvas itself must agree exactly -- they are two halves of one
+-- sum, and a literal in each is how the frame ends up cut off at the bottom.
+--   FURNITURE  the label strip plus the Preview Scale slider along the top
+--   PAD        breathing room under the mock
+--   DY         how far below the container's centre the mock is nudged, so the
+--              free space under the furniture is what it is centred in
+local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = 52, 10, 20
+
 local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     local compact = opts and opts.compact or false
     -- Read current frame settings for the preview
@@ -726,7 +735,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- -20 in the compact form: with the instruction rows gone the free space runs
     -- from under the scale slider to the bottom edge, so the box's own centre is
     -- 20-odd pixels above the centre of what is actually free.
-    mockFrame:SetPoint("CENTER", container, "CENTER", 0, compact and -20 or -4)
+    mockFrame:SetPoint("CENTER", container, "CENTER", 0, compact and -CANVAS_DY or -4)
     mockFrame:SetScale(previewScale)
     ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
     container.mockFrame = mockFrame
@@ -769,7 +778,20 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         -- lie -- it read 1.6 while the mock stayed at whatever fitted 132px.
         local fit = compact and ((cw - 16) / w)
                             or math.min((cw - 16) / w, (ch - 28) / h)
-        mockFrame:SetScale(math.max(0.2, math.min(want, fit)))
+        local scale = math.max(0.2, math.min(want, fit))
+        mockFrame:SetScale(scale)
+
+        -- ☠ A SETPOINT OFFSET ON A SCALED FRAME IS IN THAT FRAME'S OWN UNITS.
+        -- The mock is nudged CANVAS_DY below the container's centre to sit clear of
+        -- the label and slider -- but under SetScale(2.5) that 20 became 50 on
+        -- screen, dropping the mock 30px further than the band height allowed for
+        -- and cutting it off along the bottom edge. Dividing by the scale keeps the
+        -- nudge a constant number of SCREEN pixels, which is what
+        -- P.CanvasWantedHeight's arithmetic assumes.
+        if compact then
+            mockFrame:ClearAllPoints()
+            mockFrame:SetPoint("CENTER", container, "CENTER", 0, -CANVAS_DY / scale)
+        end
     end
 
     -- What the host band must be for the mock to clear the furniture above it and
@@ -1045,7 +1067,22 @@ function P.CanvasWantedHeight(compact)
     local fdb  = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
     local fh   = fdb.frameHeight or 64
     local want = (GetAuraDesignerDB() or {}).previewScale or 1.0
-    return math.max(132, math.ceil(64 + fh * want))
+
+    -- The mock is centred at (0, -CANVAS_DY) in SCREEN pixels -- RefreshGeometry
+    -- divides the offset by the scale to keep it so. Its top edge therefore sits
+    -- H/2 + CANVAS_DY - (fh*scale)/2 below the container's top, and that has to
+    -- clear the furniture; its bottom edge has to leave CANVAS_PAD. Both
+    -- rearranged for H, and the larger wins:
+    --
+    --   top     H >= 2*CANVAS_FURNITURE - 2*CANVAS_DY + fh*scale
+    --   bottom  H >= 2*CANVAS_PAD       + 2*CANVAS_DY + fh*scale
+    --
+    -- Taken as a max rather than assuming which binds, because CANVAS_DY moves
+    -- the frame TOWARDS one of them: raise it and the bottom binds, lower it and
+    -- the top does.
+    local top    = 2 * CANVAS_FURNITURE - 2 * CANVAS_DY + fh * want
+    local bottom = 2 * CANVAS_PAD       + 2 * CANVAS_DY + fh * want
+    return math.max(132, math.ceil(math.max(top, bottom)))
 end
 
 P.CreateFramePreview = CreateFramePreview

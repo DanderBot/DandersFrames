@@ -660,8 +660,48 @@ do
     -- ☠ AND WHAT STILL DOES NOT FIT IS MASKED, NEVER DRAWN OVER THE PAGE. A
     -- placed indicator anchored outside the frame (a TOP icon) overhangs at every
     -- scale, and below this band sit the pool strip and the tabs.
-    check(CARDS:find("container:SetClipsChildren(true)", 1, true) ~= nil,
-          "canvas: the canvas masks its own contents")
+    check(CARDS:find("container:SetClipsChildren(true)", 1, true) ~= nil,
+          "canvas: the canvas masks its own contents")
+
+    -- ☠ THE MOCK'S CENTRE OFFSET IS IN THE MOCK'S OWN UNITS, SO IT SCALES.
+    -- At 2.5 the intended 20px nudge became 50 on screen, dropping the frame 30px
+    -- further than the band height allowed for and cutting it off along the bottom
+    -- ("at max scale it doesnt quite fit the whole frame"). Dividing by the scale
+    -- is what makes the height arithmetic below true.
+    check(CARDS:find("mockFrame:SetPoint(\"CENTER\", container, \"CENTER\", 0, -CANVAS_DY / scale)", 1, true) ~= nil,
+          "canvas: the centre nudge is compensated for scale, so it stays screen pixels")
+    check(CARDS:find("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY", 1, true) ~= nil,
+          "canvas: the geometry is named ONCE -- the height verb and the canvas are one sum")
+
+    -- The arithmetic itself, over the slider's whole range and every frame height
+    -- the addon allows. The constants are READ OUT OF THE SOURCE rather than
+    -- restated here, so this fails if one of them is changed to a bad value --
+    -- restating them would only test that this file agrees with itself.
+    do
+        local F, P_, DY = CARDS:match("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = (%d+), (%d+), (%d+)")
+        check(F ~= nil, "canvas: the geometry constants can be read from the source")
+        F, P_, DY = tonumber(F), tonumber(P_), tonumber(DY)
+
+        local worstTop, worstBottom = math.huge, math.huge
+        for _, fh in ipairs({ 40, 64, 80, 100, 120, 160 }) do
+            local scale = 0.75
+            while scale <= 2.5001 do
+                local h = math.max(132, math.ceil(math.max(
+                    2 * F  - 2 * DY + fh * scale,
+                    2 * P_ + 2 * DY + fh * scale)))
+                -- Where the mock's edges land, given a nudge that no longer scales.
+                local top    = h / 2 + DY - (fh * scale) / 2
+                local bottom = h / 2 - DY - (fh * scale) / 2
+                worstTop    = math.min(worstTop, top - F)
+                worstBottom = math.min(worstBottom, bottom - P_)
+                scale = scale + 0.05
+            end
+        end
+        check(worstTop >= -0.001,
+              "canvas: the frame clears the label and slider at every scale and frame height")
+        check(worstBottom >= -0.001,
+              "canvas: ...and is never cut off along the bottom, which is the reported bug")
+    end
     check(ROWS:find("local CANVAS_H  = 132", 1, true) ~= nil,
           "canvas: ...and it is the artifact's 132")
 
