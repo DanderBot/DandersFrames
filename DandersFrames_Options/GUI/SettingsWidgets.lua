@@ -2744,7 +2744,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     if opts.introInert then
         w.animationHideIntro.disableOn = function() return true end
         w.animationHideIntro:SetEnabled(false)
-        w.animationHideIntro.tooltip = L["Aura buttons never play the intro burst: the game engine shows and hides the pooled buttons itself, and the burst can only play when the buttons are first built - not when an aura appears. Buttons go straight to the settled loop, so there is nothing to switch off here. The frame-level border keeps its intro."]
+        w.animationHideIntro.tooltip = L["Aura icons can't play the intro flash, so the effect always starts on its loop. Only the frame-level border can show the intro."]
     end
 
     w.animationCornerLength = group:AddWidget(GUI:CreateSlider(parent, L["Corner Length"],
