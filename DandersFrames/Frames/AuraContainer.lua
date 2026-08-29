@@ -7309,6 +7309,10 @@ local function registerOwnerRegen(owner)
                 if u and o.container and o.unit ~= u then
                     o.unit = u
                     pcall(o.container.SetUnit, o.container, u)
+                    -- The deferred retarget needs the same partition kick the immediate one
+                    -- does, for the same reason. We are here on PLAYER_REGEN_ENABLED, so
+                    -- reparseContainer takes its OOC branch and the bounce is real.
+                    if not AuraContainer._testMode then reparseContainer(o.container) end
                 end
             end
         end)
@@ -7341,6 +7345,25 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     for _, h in pairs(owner.slots) do
         pcall(function() h:_setDeathLatch(latched) end)
     end
+    -- ☠ SetUnit ALONE DOES NOT RENDER THE RETARGET — it writes the token and marks
+    -- FullAuraRebuild, but it cannot ARM the private-side dirty processor, so the
+    -- container keeps PAINTING THE PREVIOUS OCCUPANT'S PARSE. NativeBackend:setUnit has
+    -- carried the Hide/Show bounce for exactly this since 2026-07-09; the slot path was
+    -- given GetUnit/SetUnit (see the retarget-contract note above) but never the kick, so
+    -- every Aura Designer PLACED indicator, bar and alert could still show another
+    -- player's auras after roster churn. Combat traffic usually masked it — out of combat,
+    -- a long-lived buff nobody re-casts (Earth Shield, Fortitude, Atonement) fires no
+    -- UNIT_AURA on the new unit, so nothing ever corrected it short of a reload.
+    -- ★ reparseContainer carries the combat contract already (OOC bounce, mark-only
+    -- UpdateAllAuras under lockdown) and this site is OOC anyway — lockdown returned above.
+    -- ⚠ One bounce per ACTUAL unit change: the equality guard at the top of this function
+    -- means the Factory's per-pass retarget walk cannot re-enter it.
+    -- ⚠ AFTER the latch re-seed, mirroring Handle:SetUnit's own order (latch first,
+    -- then backend:setUnit does the bounce) — the parse should land on a latch state
+    -- that already belongs to the NEW unit. Skipped in test mode for the same reason
+    -- NativeBackend:setUnit returns early there: the provider is on the sample source,
+    -- so a bounce would only re-arm a parse of sample data.
+    if not AuraContainer._testMode then reparseContainer(owner.container) end
     return ok
 end
 
