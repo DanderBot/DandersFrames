@@ -646,7 +646,10 @@ do
           "canvas: the compact fit clamps on width only")
     check(CARDS:find("or math.min((cw - 16) / w, (ch - 28) / h)", 1, true) ~= nil,
           "canvas: ...while the split panel, whose half is fixed, still clamps both")
-    check(CARDS:find("function P.CanvasWantedHeight(compact)", 1, true) ~= nil,
+    -- The second parameter arrived with the Text Designer (phase 4): the canvas
+    -- and the height verb must read the SAME preview-scale table, and the two
+    -- designers keep that key in different places.
+    check(CARDS:find("function P.CanvasWantedHeight(compact, scaleDB)", 1, true) ~= nil,
           "canvas: the wanted height is a verb the host can call BEFORE the canvas exists")
     check(ROWS:find("canvasHeight = function() return P.CanvasWantedHeight(true) end", 1, true) ~= nil,
           "canvas: ...and the band asks it rather than naming a constant")
