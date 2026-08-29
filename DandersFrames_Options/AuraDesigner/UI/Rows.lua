@@ -64,6 +64,8 @@ local BuildGlobalView            = P.BuildGlobalView
 --   P.EnsureDebuffSelection
 
 local BUFFTAB_H = 30
+-- The spec picker's own row -- see S.BuildSpecStrip for why it has one.
+local SPECBAR_H = 26
 -- The canvas band's FLOOR. Its actual height is P.CanvasWantedHeight, which
 -- grows with the preview scale; this is what that returns at 1.0.
 local CANVAS_H  = 132
@@ -106,7 +108,9 @@ S.BuildPoolStrip = function(buffTabBar)
         GUI:StyleButton(btn, { height = BUFFTAB_H - 4, text = def.label, font = "DFFontHighlight" })
         btn.Text:ClearAllPoints()
         btn.Text:SetPoint("CENTER", 0, 0)
-        btn:SetWidth(max(btn.Text:GetStringWidth() + 28, 96))
+        -- Width comes from the strip, not from the label -- see the OnSizeChanged
+        -- below. A build-time width of max(text+28, 96) needed 296px for three
+        -- tabs, which the 850px island always had and a 640px window does not.
         if prevMainBtn then
             btn:SetPoint("LEFT", prevMainBtn, "RIGHT", 4, 0)
         else
@@ -126,14 +130,53 @@ S.BuildPoolStrip = function(buffTabBar)
         prevMainBtn = btn
     end
 
-    -- Relocated spec dropdown (right end of the strip)
-    local stripSpecLabel = buffTabBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    stripSpecLabel:SetText(L["Spec:"])
-    stripSpecLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    S.specDropdown, S.specDropdownUpdate = CreateSpecDropdown(buffTabBar)
-    S.specDropdown:SetSize(165, 22)
-    S.specDropdown:SetPoint("RIGHT", buffTabBar, "RIGHT", -5, 0)
-    stripSpecLabel:SetPoint("RIGHT", S.specDropdown, "LEFT", -4, 0)
+    -- ☠ EQUAL WIDTH, DIVIDED FROM THE STRIP, exactly as the sub-tab strip below
+    -- does it (GUI/DesignerShell.lua). The three tabs are one control -- a
+    -- three-way switch -- so they should read as three equal halves of the band
+    -- rather than three labels of whatever width their words happen to be, and
+    -- at the 640px default their words do not fit any other way.
+    local nTabs = #MAIN_TAB_DEFS
+    buffTabBar:SetScript("OnSizeChanged", function(self, w)
+        if not w or w < 10 then return end
+        local tabW = (w - (nTabs - 1) * 4) / nTabs
+        for i = 1, nTabs do
+            local b = mainTabButtons[MAIN_TAB_DEFS[i].key]
+            if b then b:SetWidth(tabW) end
+        end
+    end)
+    local w0 = buffTabBar:GetWidth()
+    if w0 and w0 > 10 then
+        local tabW = (w0 - (nTabs - 1) * 4) / nTabs
+        for i = 1, nTabs do
+            local b = mainTabButtons[MAIN_TAB_DEFS[i].key]
+            if b then b:SetWidth(tabW) end
+        end
+    end
+end
+
+-- ☠ THE SPEC PICKER GETS ITS OWN ROW, and that is the narrow window's doing.
+-- It was right-aligned ONTO the pool strip, which the 850px island had room for:
+-- three tabs at a 96px floor is 296px, the label and dropdown are another 200,
+-- and 496 fits in 850 and does not fit in a 640px window's ~410px band. It ate
+-- "Debuffs" and hid "Any Buff" completely.
+--
+-- ⚠ It stays VISIBLE and greys on the pools that have no spec (Debuffs and Any
+-- Buff are shared across specs), rather than hiding -- that is the addon's
+-- grey-when-disabled convention, and hiding it would change the page's height on
+-- every pool switch. UpdateSpecDropdownState owns the greying.
+S.BuildSpecStrip = function(host)
+    local specLabel = host:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    specLabel:SetText(L["Spec:"])
+    specLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    specLabel:SetPoint("LEFT", host, "LEFT", 2, 0)
+
+    S.specDropdown, S.specDropdownUpdate = CreateSpecDropdown(host)
+    S.specDropdown:SetHeight(22)
+    -- Anchored to BOTH edges rather than given a width: the band is whatever the
+    -- window is, and a 165px dropdown floating in the middle of it reads as a
+    -- stray control instead of a row.
+    S.specDropdown:SetPoint("LEFT", specLabel, "RIGHT", 8, 0)
+    S.specDropdown:SetPoint("RIGHT", host, "RIGHT", -2, 0)
     UpdateSpecDropdownState()
 end
 
@@ -1050,6 +1093,7 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
 
         strips = {
             { height = BUFFTAB_H, build = function(host) S.BuildPoolStrip(host) end },
+            { height = SPECBAR_H, build = function(host) S.BuildSpecStrip(host) end },
         },
 
         tabs = {
