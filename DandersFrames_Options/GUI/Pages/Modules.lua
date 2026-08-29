@@ -748,18 +748,28 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageHighlights, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, L["Highlights"], "indicators_highlights"), 25, 2)
-        
-        
+
+
         local currentSection = nil
-        
+
         local function AddToSection(widget, height, col)
             Add(widget, height, col)
             if currentSection then currentSection:RegisterChild(widget) end
             return widget
         end
-        
+
         local highlightModes = {
             ["NONE"] = L["Hidden"],
+            ["SOLID"] = L["Solid Border"],
+            ["ANIMATED"] = L["Animated Border"],
+            ["DASHED"] = L["Dashed Border"],
+            ["GLOW"] = L["Glow"],
+            ["CORNERS"] = L["Corners Only"],
+        }
+
+        local aggroModes = {
+            ["NONE"] = L["Hidden"],
+            ["HEALTH_COLOR"] = L["Health Bar Color"],
             ["SOLID"] = L["Solid Border"],
             ["ANIMATED"] = L["Animated Border"],
             ["DASHED"] = L["Dashed Border"],
@@ -772,158 +782,444 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- they say what they are; Inset is the one that reads as jargon, and here
         -- the label is a bare "Inset" with not even "Border" in front of it.
         local TIP_HL_INSET = L["How far inside the frame edge the highlight sits. Negative values push it outward, so it rings the frame instead of hugging it — useful when the highlight would otherwise sit under auras or text."]
-        
-        -- ========================================
-        -- SELECTION HIGHLIGHT SECTION
-        -- ========================================
-        local selectionSection = Add(GUI:CreateCollapsibleSection(self.child, L["Selection Highlight"], true), 36, "both")
-        currentSection = selectionSection
-        
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: three collapsible sections, one
+        -- per highlight, wrapping four 280 boxes in the columns they always had.
+        --
+        -- POPOUT turns all four boxes into feature rows, and the three SECTIONS
+        -- into the three bands over them:
+        --
+        --   "Selection Highlight"  Selection Settings
+        --   "Hover Highlight"      Hover Settings
+        --   "Aggro Highlight"      Aggro Settings and Threat Colors
+        --
+        -- ☠ THE SECTIONS BECOME BANDS RATHER THAN SURVIVING AS SECTIONS. A
+        -- collapsible section is kept where it holds several boxes that are worth
+        -- folding away together (the Health Bar page's precedent, and the Icons
+        -- page's, whose section headers also draw a live preview). Here each one
+        -- wraps a single group -- and a row IS a fold, so keeping the section
+        -- would put a fold inside a fold with one thing in it. The band header is
+        -- the section header, minus the disclosure triangle; every name is the
+        -- locale string the section already used.
+        --
+        -- ☠ AND NOTHING ON THIS PAGE HOISTS A TICK. Each highlight's master
+        -- control is its MODE -- a dropdown whose "Hidden" entry is the off
+        -- switch -- not a boolean, so there is nothing a row's tick column could
+        -- carry. Threat Colors' "Use Custom Colors" looks like a candidate and is
+        -- not one: with it off the group still does something (the game's own
+        -- threat palette), so it is a MODE rather than an enable, and hoisting it
+        -- would have printed "Off" over a group that was still colouring frames.
+        -- Left in the pane it also rides that row's Reset Group, which a hoisted
+        -- tick never does.
+        --
+        -- There is no page-wide gate here at all: the three highlights are three
+        -- independent features, so no row greys another.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates }. The classic branch mounts the SAME
+        -- builder into the box it always built -- test_highlights_page_builders.lua
+        -- pins the inventory of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults and the
+        -- band width. nil in classic, which is what every `if classicLayout then`
+        -- arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        local selectionBand, hoverBand, aggroBand
+        if tools then
+            selectionBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            selectionBand:AddWidget(GUI:CreateHeader(self.child, L["Selection Highlight"]), 40)
+            hoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            hoverBand:AddWidget(GUI:CreateHeader(self.child, L["Hover Highlight"]), 40)
+            aggroBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            aggroBand:AddWidget(GUI:CreateHeader(self.child, L["Aggro Highlight"]), 40)
+        end
+
+        -- ===== THE PAGE'S GATES AND APPLIES, AT PAGE SCOPE ================
+        -- ⚠ ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure captures
+        -- the upvalue that exists when it is created -- so one declared above
+        -- these lines would see nil rather than the function.
+        --
+        -- Every gate here is a VARIANT gate on a dropdown pick, which is exactly
+        -- the case the addon-wide convention leaves as a hide -- so unlike the
+        -- Dispel Overlay page these read the same in both layouts and are handed
+        -- to the widgets unchanged.
         local function HideSelectionOptions(d) return d.selectionHighlightMode == "NONE" end
-        
-        local selGroup = GUI:CreateSettingsGroup(self.child, 280)
-        selGroup:AddWidget(GUI:CreateHeader(self.child, L["Selection Settings"]), 40)
-        selGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], highlightModes, db, "selectionHighlightMode", function()
-            self:RefreshStates()
-        end), 55)
-        local selThick = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 10, 1, db, "selectionHighlightThickness", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
-        selThick.hideOn = HideSelectionOptions
-        local selInset = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "selectionHighlightInset", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
-        selInset.hideOn = HideSelectionOptions
-        selInset.tooltip = TIP_HL_INSET
-
-        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
-        -- to reach them. The old answer was "raise the element above the highlight", which
-        -- only works in one direction and cannot reorder the three against each other.
-        -- Defaults keep the pinned values, so nothing moves until someone drags this.
-        local selLevel = selGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "selectionHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("selection") end, true)), 55)
-        selLevel.hideOn = HideSelectionOptions
-        local selAlpha = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "selectionHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
-        selAlpha.hideOn = HideSelectionOptions
-        local selCol = selGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "selectionHighlightColor", false, nil, function() DF:LightweightUpdateSelectionHighlightColor() end, true), 35)
-        selCol.hideOn = HideSelectionOptions
-        AddToSection(selGroup, nil, 1)
-        
-        currentSection = nil
-        AddSpace(GUI.Space.section, "both")
-        
-        -- ========================================
-        -- HOVER HIGHLIGHT SECTION
-        -- ========================================
-        local hoverSection = Add(GUI:CreateCollapsibleSection(self.child, L["Hover Highlight"], true), 36, "both")
-        currentSection = hoverSection
-        
         local function HideHoverOptions(d) return d.hoverHighlightMode == "NONE" end
-        
-        local hoverGroup = GUI:CreateSettingsGroup(self.child, 280)
-        hoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Hover Settings"]), 40)
-        hoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], highlightModes, db, "hoverHighlightMode", function()
-            self:RefreshStates()
-        end), 55)
-        local hoverThick = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 10, 1, db, "hoverHighlightThickness", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
-        hoverThick.hideOn = HideHoverOptions
-        local hoverInset = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "hoverHighlightInset", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
-        hoverInset.hideOn = HideHoverOptions
-        hoverInset.tooltip = TIP_HL_INSET
-
-        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
-        -- to reach them. The old answer was "raise the element above the highlight", which
-        -- only works in one direction and cannot reorder the three against each other.
-        -- Defaults keep the pinned values, so nothing moves until someone drags this.
-        local hoverLevel = hoverGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "hoverHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("hover") end, true)), 55)
-        hoverLevel.hideOn = HideHoverOptions
-        local hoverAlpha = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "hoverHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
-        hoverAlpha.hideOn = HideHoverOptions
-        local hoverCol = hoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "hoverHighlightColor", false, nil, function() DF:LightweightUpdateHighlight("hover") end, true), 35)
-        hoverCol.hideOn = HideHoverOptions
-        AddToSection(hoverGroup, nil, 1)
-        
-        currentSection = nil
-        AddSpace(GUI.Space.section, "both")
-        
-        -- ========================================
-        -- AGGRO HIGHLIGHT SECTION
-        -- ========================================
-        local aggroSection = Add(GUI:CreateCollapsibleSection(self.child, L["Aggro Highlight"], true), 36, "both")
-        currentSection = aggroSection
-        
         local function HideAggroOptions(d) return d.aggroHighlightMode == "NONE" or d.aggroHighlightMode == "HEALTH_COLOR" end
         local function HideAggroModeNone(d) return d.aggroHighlightMode == "NONE" end
         local function HideCustomColorOptions(d) return d.aggroHighlightMode == "NONE" or not d.aggroUseCustomColors end
         local function HideNonTankingColors(d) return d.aggroHighlightMode == "NONE" or not d.aggroUseCustomColors or d.aggroOnlyTanking end
-        
-        local aggroModes = {
-            ["NONE"] = L["Hidden"],
-            ["HEALTH_COLOR"] = L["Health Bar Color"],
-            ["SOLID"] = L["Solid Border"],
-            ["ANIMATED"] = L["Animated Border"],
-            ["DASHED"] = L["Dashed Border"],
-            ["GLOW"] = L["Glow"],
-            ["CORNERS"] = L["Corners Only"],
-        }
-        
-        -- Aggro Settings Group (col1)
-        local aggroGroup = GUI:CreateSettingsGroup(self.child, 280)
-        aggroGroup:AddWidget(GUI:CreateHeader(self.child, L["Aggro Settings"]), 40)
-        aggroGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], aggroModes, db, "aggroHighlightMode", function()
-            self:RefreshStates()
-            if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 55)
-        local aggroOnlyTanking = aggroGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Only Show When Tanking"], db, "aggroOnlyTanking", function()
-            self:RefreshStates()
-            if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 28)
-        aggroOnlyTanking.hideOn = HideAggroModeNone
-        -- These two sound like the same thing and are not: one is about YOUR
-        -- role, the other about the unit's. Both say which, from their side.
-        aggroOnlyTanking.tooltip = L["Only highlight threat while YOU are tanking. As a healer or damage dealer the highlight stays off entirely."]
-        local aggroHideOnTanks = aggroGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide on Tanks"], db, "aggroHideOnTanks", function()
-            if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 28)
-        aggroHideOnTanks.hideOn = HideAggroModeNone
-        aggroHideOnTanks.tooltip = L["Skip the highlight on tanks in your group — they are supposed to have threat, so lighting them up is noise. Everyone else still shows."]
-        local aggroThick = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 10, 1, db, "aggroHighlightThickness", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
-        aggroThick.hideOn = HideAggroOptions
-        local aggroInset = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "aggroHighlightInset", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
-        aggroInset.hideOn = HideAggroOptions
-        aggroInset.tooltip = TIP_HL_INSET
 
-        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
-        -- to reach them. The old answer was "raise the element above the highlight", which
-        -- only works in one direction and cannot reorder the three against each other.
-        -- Defaults keep the pinned values, so nothing moves until someone drags this.
-        local aggroLevel = aggroGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "aggroHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("aggro") end, true)), 55)
-        aggroLevel.hideOn = HideAggroOptions
-        local aggroAlpha = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "aggroHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
-        aggroAlpha.hideOn = HideAggroOptions
-        AddToSection(aggroGroup, nil, 1)
-        
-        -- Threat Colors Group (col2)
-        local threatGroup = GUI:CreateSettingsGroup(self.child, 280)
-        threatGroup:AddWidget(GUI:CreateHeader(self.child, L["Threat Colors"]), 40)
-        local useCustomColors = threatGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Custom Colors"], db, "aggroUseCustomColors", function()
-            self:RefreshStates()
+        -- What a write to each family costs, named once so a row's footer applies
+        -- exactly what that row's own controls apply.
+        local function ApplySelectionHighlight()
+            DF:LightweightUpdateHighlight("selection")
+            DF:LightweightUpdateSelectionHighlightColor()
+        end
+        local function ApplyHoverHighlight()
+            DF:LightweightUpdateHighlight("hover")
+        end
+        local function ApplyAggroHighlight()
+            DF:LightweightUpdateHighlight("aggro")
             if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 28)
-        useCustomColors.hideOn = HideAggroModeNone
-        local colorHighThreat = threatGroup:AddWidget(GUI:CreateColorPicker(self.child, L["High Threat (Yellow)"], db, "aggroColorHighThreat", false, nil, function()
-            DF:LightweightUpdateHighlight("aggro")
-        end, true), 30)
-        colorHighThreat.hideOn = HideNonTankingColors
-        local colorHighestThreat = threatGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Highest Threat (Orange)"], db, "aggroColorHighestThreat", false, nil, function()
-            DF:LightweightUpdateHighlight("aggro")
-        end, true), 30)
-        colorHighestThreat.hideOn = HideNonTankingColors
-        local colorTanking = threatGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Tanking (Red)"], db, "aggroColorTanking", false, nil, function()
-            DF:LightweightUpdateHighlight("aggro")
-        end, true), 30)
-        colorTanking.hideOn = HideCustomColorOptions
-        threatGroup:AddWidget(GUI:CreateLabel(self.child, L["Yellow=high, Orange=highest, Red=tanking."], 230), 25)
-        threatGroup.hideOn = HideAggroModeNone
-        AddToSection(threatGroup, nil, 2)
-        
-        currentSection = nil
-        
+        end
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these
+        -- keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- Selection and Hover are the SAME four facts about the same four keys,
+        -- so the summary is written once and given the prefix. The mode word
+        -- first, because it is the one that decides whether the rest exists at
+        -- all -- with it on Hidden there is no thickness, inset or alpha behind
+        -- the row, and classic hides those controls outright.
+        local function HighlightSummary(d, prefix)
+            if not d then return "" end
+            local parts = {}
+            local mode = d[prefix .. "HighlightMode"]
+            local word = highlightModes[mode]
+            if word then parts[#parts + 1] = word end
+            if mode == "NONE" then return Join(parts) end
+            local t = tonumber(d[prefix .. "HighlightThickness"])
+            if t then parts[#parts + 1] = format("%dpx", math.floor(t)) end
+            local inset = tonumber(d[prefix .. "HighlightInset"])
+            if inset and inset ~= 0 then parts[#parts + 1] = format("%s %d", L["Inset"], inset) end
+            local a = tonumber(d[prefix .. "HighlightAlpha"])
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+        local function SelectionSettingsSummary(d) return HighlightSummary(d, "selection") end
+        local function HoverSettingsSummary(d) return HighlightSummary(d, "hover") end
+
+        -- Aggro is the same shape plus the two questions that are only about
+        -- aggro -- and it has a SECOND mode with nothing to report:
+        -- HEALTH_COLOR tints the bar rather than drawing a border, so there is no
+        -- thickness behind it either. Inset and alpha are dropped to keep the
+        -- four-item budget for the two flags, which are what people come to this
+        -- row for.
+        local function AggroSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = d.aggroHighlightMode
+            local word = aggroModes[mode]
+            if word then parts[#parts + 1] = word end
+            if mode == "NONE" then return Join(parts) end
+            if mode ~= "HEALTH_COLOR" then
+                local t = tonumber(d.aggroHighlightThickness)
+                if t then parts[#parts + 1] = format("%dpx", math.floor(t)) end
+            end
+            if d.aggroOnlyTanking then parts[#parts + 1] = L["Only Show When Tanking"] end
+            if d.aggroHideOnTanks then parts[#parts + 1] = L["Hide on Tanks"] end
+            return Join(parts)
+        end
+
+        -- The one thing three swatches cannot say for themselves: whether they
+        -- are being used at all. Silent on the shipped profile, which takes the
+        -- game's own threat palette.
+        local function ThreatColorsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if d.aggroUseCustomColors then
+                parts[#parts + 1] = L["Use Custom Colors"]
+                -- With Only Show When Tanking on, two of the three swatches are
+                -- out of reach -- the highlight only ever appears at tanking
+                -- threat -- so the row names the one that is left.
+                if d.aggroOnlyTanking then parts[#parts + 1] = L["Tanking (Red)"] end
+            end
+            return Join(parts)
+        end
+
+        -- ========================================
+        -- SELECTION HIGHLIGHT SECTION
+        -- ========================================
+        -- ★ Frame Level (all three groups). Highlights were pinned at 75/76/77 in
+        -- Highlights.lua with no way to reach them. The old answer was "raise the
+        -- element above the highlight", which only works in one direction and
+        -- cannot reorder the three against each other. Defaults keep the pinned
+        -- values, so nothing moves until someone drags this.
+        local function BuildSelectionHighlightGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Mode"], highlightModes, db, "selectionHighlightMode", function()
+                tools2.refreshStates()
+            end), 55)
+            local selThick = group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 10, 1, db, "selectionHighlightThickness", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
+            selThick.hideOn = HideSelectionOptions
+            local selInset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, db, "selectionHighlightInset", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
+            selInset.hideOn = HideSelectionOptions
+            selInset.tooltip = TIP_HL_INSET
+            local selLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "selectionHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("selection") end, true)), 55)
+            selLevel.hideOn = HideSelectionOptions
+            local selAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, "selectionHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
+            selAlpha.hideOn = HideSelectionOptions
+            local selCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "selectionHighlightColor", false, nil, function() DF:LightweightUpdateSelectionHighlightColor() end, true), 35)
+            selCol.hideOn = HideSelectionOptions
+        end
+
+        if classicLayout then
+            local selectionSection = Add(GUI:CreateCollapsibleSection(self.child, L["Selection Highlight"], true), 36, "both")
+            currentSection = selectionSection
+
+            local selGroup = GUI:CreateSettingsGroup(self.child, 280)
+            selGroup:AddWidget(GUI:CreateHeader(self.child, L["Selection Settings"]), 40)
+            BuildSelectionHighlightGroup({
+                group = selGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(selGroup, nil, 1)
+
+            currentSection = nil
+            AddSpace(GUI.Space.section, "both")
+        else
+            -- Six: the mode, thickness, inset, frame level, alpha and the colour.
+            local SELECTION_COUNT = 6
+
+            local selectionMount, selectionContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildSelectionHighlightGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local selectionRow = selectionBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Selection Settings"],
+                db      = tools.RowDB,
+                summary = SelectionSettingsSummary,
+                count   = SELECTION_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = selectionMount,
+            }))
+            tools.ClaimKeys(selectionRow, selectionContent)
+            tools.WireModifiedTick(selectionRow)
+            tools.WireFooter(selectionRow, ApplySelectionHighlight)
+        end
+
+        -- ========================================
+        -- HOVER HIGHLIGHT SECTION
+        -- ========================================
+        local function BuildHoverHighlightGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Mode"], highlightModes, db, "hoverHighlightMode", function()
+                tools2.refreshStates()
+            end), 55)
+            local hoverThick = group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 10, 1, db, "hoverHighlightThickness", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
+            hoverThick.hideOn = HideHoverOptions
+            local hoverInset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, db, "hoverHighlightInset", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
+            hoverInset.hideOn = HideHoverOptions
+            hoverInset.tooltip = TIP_HL_INSET
+            local hoverLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "hoverHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("hover") end, true)), 55)
+            hoverLevel.hideOn = HideHoverOptions
+            local hoverAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, "hoverHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
+            hoverAlpha.hideOn = HideHoverOptions
+            local hoverCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "hoverHighlightColor", false, nil, function() DF:LightweightUpdateHighlight("hover") end, true), 35)
+            hoverCol.hideOn = HideHoverOptions
+        end
+
+        if classicLayout then
+            local hoverSection = Add(GUI:CreateCollapsibleSection(self.child, L["Hover Highlight"], true), 36, "both")
+            currentSection = hoverSection
+
+            local hoverGroup = GUI:CreateSettingsGroup(self.child, 280)
+            hoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Hover Settings"]), 40)
+            BuildHoverHighlightGroup({
+                group = hoverGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(hoverGroup, nil, 1)
+
+            currentSection = nil
+            AddSpace(GUI.Space.section, "both")
+        else
+            -- Six: the same set the Selection row carries.
+            local HOVER_COUNT = 6
+
+            local hoverMount, hoverContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHoverHighlightGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local hoverRow = hoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Hover Settings"],
+                db      = tools.RowDB,
+                summary = HoverSettingsSummary,
+                count   = HOVER_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = hoverMount,
+            }))
+            tools.ClaimKeys(hoverRow, hoverContent)
+            tools.WireModifiedTick(hoverRow)
+            tools.WireFooter(hoverRow, ApplyHoverHighlight)
+        end
+
+        -- ========================================
+        -- AGGRO HIGHLIGHT SECTION
+        -- ========================================
+        -- Aggro Settings Group (col1)
+        local function BuildAggroHighlightGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Mode"], aggroModes, db, "aggroHighlightMode", function()
+                -- ⚠ THIS ONE MOVES THE OTHER ROW. Hidden takes the Threat Colors
+                -- row out of the band entirely, exactly as it took the box out of
+                -- the column -- and the state pass is what does it, in both
+                -- layouts, through the same door.
+                tools2.refreshStates()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 55)
+            local aggroOnlyTanking = group:AddWidget(GUI:CreateCheckbox(parent, L["Only Show When Tanking"], db, "aggroOnlyTanking", function()
+                -- ⚠ AND SO DOES THIS ONE, one level down: with it on, two of the
+                -- three swatches on the Threat Colors row are out of reach.
+                tools2.refreshStates()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 28)
+            aggroOnlyTanking.hideOn = HideAggroModeNone
+            -- These two sound like the same thing and are not: one is about YOUR
+            -- role, the other about the unit's. Both say which, from their side.
+            aggroOnlyTanking.tooltip = L["Only highlight threat while YOU are tanking. As a healer or damage dealer the highlight stays off entirely."]
+            local aggroHideOnTanks = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide on Tanks"], db, "aggroHideOnTanks", function()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 28)
+            aggroHideOnTanks.hideOn = HideAggroModeNone
+            aggroHideOnTanks.tooltip = L["Skip the highlight on tanks in your group — they are supposed to have threat, so lighting them up is noise. Everyone else still shows."]
+            local aggroThick = group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 10, 1, db, "aggroHighlightThickness", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
+            aggroThick.hideOn = HideAggroOptions
+            local aggroInset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, db, "aggroHighlightInset", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
+            aggroInset.hideOn = HideAggroOptions
+            aggroInset.tooltip = TIP_HL_INSET
+            local aggroLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "aggroHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("aggro") end, true)), 55)
+            aggroLevel.hideOn = HideAggroOptions
+            local aggroAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, "aggroHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
+            aggroAlpha.hideOn = HideAggroOptions
+        end
+
+        -- Threat Colors Group (col2)
+        local function BuildThreatColorsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            local useCustomColors = group:AddWidget(GUI:CreateCheckbox(parent, L["Use Custom Colors"], db, "aggroUseCustomColors", function()
+                tools2.refreshStates()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 28)
+            useCustomColors.hideOn = HideAggroModeNone
+            local colorHighThreat = group:AddWidget(GUI:CreateColorPicker(parent, L["High Threat (Yellow)"], db, "aggroColorHighThreat", false, nil, function()
+                DF:LightweightUpdateHighlight("aggro")
+            end, true), 30)
+            colorHighThreat.hideOn = HideNonTankingColors
+            local colorHighestThreat = group:AddWidget(GUI:CreateColorPicker(parent, L["Highest Threat (Orange)"], db, "aggroColorHighestThreat", false, nil, function()
+                DF:LightweightUpdateHighlight("aggro")
+            end, true), 30)
+            colorHighestThreat.hideOn = HideNonTankingColors
+            local colorTanking = group:AddWidget(GUI:CreateColorPicker(parent, L["Tanking (Red)"], db, "aggroColorTanking", false, nil, function()
+                DF:LightweightUpdateHighlight("aggro")
+            end, true), 30)
+            colorTanking.hideOn = HideCustomColorOptions
+            group:AddWidget(GUI:CreateLabel(parent, L["Yellow=high, Orange=highest, Red=tanking."], 230), 25)
+        end
+
+        if classicLayout then
+            local aggroSection = Add(GUI:CreateCollapsibleSection(self.child, L["Aggro Highlight"], true), 36, "both")
+            currentSection = aggroSection
+
+            local aggroGroup = GUI:CreateSettingsGroup(self.child, 280)
+            aggroGroup:AddWidget(GUI:CreateHeader(self.child, L["Aggro Settings"]), 40)
+            BuildAggroHighlightGroup({
+                group = aggroGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(aggroGroup, nil, 1)
+
+            local threatGroup = GUI:CreateSettingsGroup(self.child, 280)
+            threatGroup:AddWidget(GUI:CreateHeader(self.child, L["Threat Colors"]), 40)
+            BuildThreatColorsGroup({
+                group = threatGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            threatGroup.hideOn = HideAggroModeNone
+            AddToSection(threatGroup, nil, 2)
+
+            currentSection = nil
+        else
+            -- Seven: the mode, the two tanking questions, thickness, inset, frame
+            -- level and alpha.
+            local AGGRO_COUNT = 7
+            -- Five: the custom-colours tick, the three swatches and the legend.
+            local THREAT_COUNT = 5
+
+            local aggroMount, aggroContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildAggroHighlightGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local aggroRow = aggroBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Aggro Settings"],
+                db      = tools.RowDB,
+                summary = AggroSettingsSummary,
+                count   = AGGRO_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = aggroMount,
+            }))
+            tools.ClaimKeys(aggroRow, aggroContent)
+            tools.WireModifiedTick(aggroRow)
+            tools.WireFooter(aggroRow, ApplyAggroHighlight)
+
+            local threatMount, threatContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildThreatColorsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local threatRow = aggroBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Threat Colors"],
+                db      = tools.RowDB,
+                summary = ThreatColorsSummary,
+                count   = THREAT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = threatMount,
+            }))
+            -- The box's own gate becomes the ROW's, so the band collapses the slot
+            -- instead of drawing a plate for a palette no highlight will use.
+            -- ⚠ The band header stays over something either way: Aggro Settings
+            -- carries the mode that hides this one, and never hides itself.
+            threatRow.hideOn = HideAggroModeNone
+            tools.ClaimKeys(threatRow, threatContent)
+            tools.WireModifiedTick(threatRow)
+            -- ⚠ A FOOTER IS SAFE HERE, and that is a decision about the KEYS
+            -- rather than the shape. Three colour tables and a boolean, all of
+            -- them plain profile settings the defaults engine can write; the
+            -- swatches re-read their table on every value sweep, so a reset that
+            -- replaces one is repainted rather than detached.
+            tools.WireFooter(threatRow, ApplyAggroHighlight)
+        end
+
+        -- ===== THE THREE BANDS, IN READING ORDER ==========================
+        -- Added at the foot rather than in place: all three are full width, so
+        -- there is no column flow left to unbalance and the order below is purely
+        -- the order the page reads in -- the order the three sections had.
+        if not classicLayout then
+            Add(selectionBand, nil, "both")
+            Add(hoverBand, nil, "both")
+            Add(aggroBand, nil, "both")
+        end
+
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
