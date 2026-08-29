@@ -15,7 +15,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- omission, so the Combat icon's seven settings were skipped by Copy, Sync
         -- and Reset while every other icon on the same page travelled.
         Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "pingIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, L["Icons"], "indicators_icons"), 25, 2)
-        
+
         local anchorOptions = {
             CENTER = L["Center"],
             TOP = L["Top"],
@@ -27,40 +27,213 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             BOTTOMLEFT = L["Bottom Left"],
             BOTTOMRIGHT = L["Bottom Right"],
         }
-        
+
         local roleStyleOptions = {
             BLIZZARD = L["Blizzard"],
             CUSTOM = "DF Icons",
             EXTERNAL = L["External"],
         }
-        
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- This is the biggest page in the addon and the LAST of the sweep: one
+        -- shared typography block plus THIRTEEN status icons, each carrying the
+        -- same Settings / Appearance / Position trio (AFK adds a fourth box for
+        -- its timer). Forty-one groups, ~215 widgets, and every icon says the
+        -- same three things with a different prefix.
+        --
+        -- ☠ SO THE SHAPE IS WRITTEN ONCE AND PARAMETERISED, NOT THIRTEEN TIMES.
+        -- BuildIconSettingsGroup / BuildIconAppearanceGroup /
+        -- BuildIconPositionGroup take a SPEC -- key prefix, enable key and label,
+        -- which callbacks the icon's own render path wants, and the handful of
+        -- extras that are genuinely per-icon -- and MountIcon drives both layouts
+        -- from it. Thirteen copies of a builder would drift, and the first thing
+        -- to drift would be one of the callbacks: eleven icons repaint through
+        -- DF:LightweightUpdateIcon*(tag) and two through
+        -- DF:UpdateAllFramesStatusIcons, which is exactly the kind of difference
+        -- a copy-paste pass flattens by accident.
+        --
+        -- ☠ AND THE THIRTEEN COLLAPSIBLE SECTIONS ARE KEPT, IN BOTH LAYOUTS.
+        -- The Highlights page (this same file) dissolved its sections into bands
+        -- because each wrapped ONE group and a row is already a fold. These do
+        -- two things a band cannot: they carry the LIVE HEADER PREVIEW of the
+        -- icon they control (SetPreviewIcons, desaturated when the icon is off --
+        -- a popout row has no preview slot, which is what the Debuff Bar page's
+        -- Important Debuffs row flagged), and they fold 41 plates down to 14
+        -- headers on a page that would otherwise be the longest in the addon.
+        -- So the popout mounts a headerless chromeless BAND inside each section
+        -- and puts that section's rows in it -- the Health Bar precedent
+        -- (rows inside sections), at thirteen times the scale.
+        --
+        -- ⚠ ICON TEXT SETTINGS IS THE ONE SECTION THAT DOES DISSOLVE. It has no
+        -- preview and wraps a single block of shared typography, so in the popout
+        -- it is one row in a headerless band at the top of the page; classic
+        -- keeps the section and its loose widgets exactly as they were.
+        --
+        -- ⚠ EVERY ROW'S PLATE READS "Settings" / "Appearance" / "Position", and
+        -- its TITLE reads "<Icon> -- <that>". The plate name is short because the
+        -- section header above it already says which icon it is; the title is not
+        -- decoration but a requirement -- ClaimKeys stamps the row's title as the
+        -- search breadcrumb AND as the anchor ScrollToSection finds the row by,
+        -- so thirteen rows called "Settings" would send every jump to the first
+        -- one. `title` is also what the open panel's header and the Reset Group
+        -- undo entry read, both of which want the long form.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults and the
+        -- band width. nil in classic, which is what every `if classicLayout then`
+        -- arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- The long form of a row's name -- see the essay above for why it is not
+        -- optional. Composed rather than added as thirty-nine locale strings:
+        -- both halves are already translated, and a translator asked for
+        -- "Role Icon -- Settings" thirty-nine times would be doing the join by hand.
+        local function RowTitle(section, part) return format("%s \226\128\148 %s", section, part) end
+
+        -- The section, in whichever shape the layout wants it. Classic keeps the
+        -- 280 header in column 1 it always had; the popout builds the same header
+        -- at the band's width and adds it "both", so the fold, its preview and the
+        -- plates under it share one left and one right edge.
+        local function AddSection(label)
+            if classicLayout then
+                return Add(GUI:CreateCollapsibleSection(self.child, label, false, 280), 36, 1)
+            end
+            return Add(GUI:CreateCollapsibleSection(self.child, label, false, tools.BandWidth()), 36, "both")
+        end
+
+        -- A section's band: headerless, because the section's own header is the
+        -- name. Registered as a section CHILD, which is what makes the fold
+        -- collapse the plates with it (Panel.lua's RefreshStates hides a group
+        -- whose collapsibleSection is shut).
+        local function SectionBand(section)
+            local band = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            section:RegisterChild(band)
+            return band
+        end
+
+        -- ☠ THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
+        -- DandersUI Sections' RefreshChildStates greys every child a
+        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
+        -- first child is always the header, and wrong for a popout pane, which has
+        -- no header at all. The Resource Bar page's answer, verbatim: spelled onto
+        -- the widget itself, composed with whatever predicate it already carries,
+        -- and applied at the MOUNT rather than inside the builder. Never runs in
+        -- classic, where the box's own header is index 1.
+        --
+        -- ⚠ ONLY THE TICKLESS PANES NEED IT. A pane whose row carries a hoisted
+        -- toggle is greyed WHOLE by the kit's own syncGate (DandersUI/PopoutRow),
+        -- so those builders drop the group gate in the popout arm rather than
+        -- saying the same thing twice -- the Dispel Overlay page's rule.
+        local function GatePaneFirstChild(group, gate)
+            if not gate then return end
+            local entry = group and group.groupChildren and group.groupChildren[1]
+            local w = entry and entry.widget
+            if not w then return end
+            local prev = w.disableOn
+            w.disableOn = function(d) return gate(d) or (prev and prev(d)) or false end
+        end
+
+        -- What a write to any icon's keys costs. One apply for every row on the
+        -- page: a Reset Group can move an enable, a scale, a status string and a
+        -- colour in one press, and those are three different render paths -- the
+        -- full sweep, the status-icon pass and the test frames. Cheap enough for a
+        -- verb the user pressed on purpose, and wrong if it misses one.
+        local function ApplyIconGroup()
+            DF:UpdateAllFrames()
+            DF:UpdateAllFramesStatusIcons()
+            DF:RefreshTestFrames()
+        end
+
+        -- The two callback families this page has, named once. Eleven icons
+        -- repaint through the lightweight per-tag helpers; BG Carrier and Combat
+        -- have no lightweight path and go through the status-icon pass.
+        local function StatusIconsCB() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end
+        -- The status TEXT boxes are the one control that does NOT refresh the test
+        -- frames -- they never did, and typing into an edit box is not a moment to
+        -- rebuild them.
+        local function StatusTextCB() DF:UpdateAllFramesStatusIcons() end
+
         -- ============================================
         -- ICON TEXT SETTINGS (Collapsible, at top)
         -- ============================================
-        local textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Icon Text Settings"], false, 280), 36, 1)
-        
-        local textLabel = Add(GUI:CreateLabel(self.child, L["Font settings for icons displayed as text (Summon, Res, AFK, etc.)"], 240), 30, 1)
-        textSection:RegisterChild(textLabel)
-        
-        local textFont = Add(GUI:CreateFontDropdown(self.child, L["Font"], db, "statusIconFont", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55, 1)
-        textSection:RegisterChild(textFont)
-        
-        local textSize = Add(GUI:CreateSlider(self.child, L["Font Size"], 8, 24, 1, db, "statusIconFontSize", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55, 1)
-        textSection:RegisterChild(textSize)
-        
-        local textOutline = Add(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55, 1)
-        textSection:RegisterChild(textOutline)
+        -- ⚠ THIS SECTION'S WIDGETS ARE NOT IN A GROUP IN CLASSIC -- they are Add'd
+        -- loose and registered to the section one at a time -- so its builder takes
+        -- an `add` rather than a group: classic hands it Add + RegisterChild, the
+        -- popout hands it the pane group's AddWidget. Every other builder on the
+        -- page takes a group, because every other block on the page already was one.
+        local textSection
+        local function BuildIconTextGroup(tools2)
+            local parent, add = tools2.parent, tools2.add
 
-        local textShadow = Add(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30, 1)
-        textSection:RegisterChild(textShadow)
+            add(GUI:CreateLabel(parent, L["Font settings for icons displayed as text (Summon, Res, AFK, etc.)"], 240), 30)
+            add(GUI:CreateFontDropdown(parent, L["Font"], db, "statusIconFont", StatusIconsCB), 55)
+            add(GUI:CreateSlider(parent, L["Font Size"], 8, 24, 1, db, "statusIconFontSize", StatusIconsCB, StatusIconsCB, true), 55)
+            add(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "statusIconFontOutline", StatusIconsCB), 55)
+            add(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "statusIconFontOutline", StatusIconsCB), 30)
 
-        -- ⚠ Fixed-layout link (GUI:CreateLink) — it flows once at build and reports its own
-        -- height, so it must be Add'd at note.layoutHeight rather than a guessed row.
-        local shadowNote = GUI:CreateGlobalFontsShadowLink(self.child, 240)
-        Add(shadowNote, shadowNote.layoutHeight, 1)
-        textSection:RegisterChild(shadowNote)
-        shadowNote.hideOn = function(d) return not DF:OutlineHasShadow(d.statusIconFontOutline) end
-        
+            -- ⚠ Fixed-layout link (GUI:CreateLink) — it flows once at build and reports its own
+            -- height, so it must be Add'd at note.layoutHeight rather than a guessed row.
+            local shadowNote = GUI:CreateGlobalFontsShadowLink(parent, 240)
+            add(shadowNote, shadowNote.layoutHeight)
+            shadowNote.hideOn = function(d) return not DF:OutlineHasShadow(d.statusIconFontOutline) end
+        end
+
+        -- The two facts a font block has that are worth reading off a shut plate.
+        local function IconTextSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if type(d.statusIconFont) == "string" and d.statusIconFont ~= "" then
+                parts[#parts + 1] = d.statusIconFont
+            end
+            local size = tonumber(d.statusIconFontSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Icon Text Settings"], false, 280), 36, 1)
+            BuildIconTextGroup({
+                parent = self.child,
+                add = function(widget, height)
+                    Add(widget, height, 1)
+                    textSection:RegisterChild(widget)
+                    return widget
+                end,
+            })
+        else
+            -- Six: the explanation, the font, the size, the outline, the shadow tick
+            -- and the shadow link.
+            local ICON_TEXT_COUNT = 6
+
+            local textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local textMount, textContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildIconTextGroup({
+                    parent = holder,
+                    add = function(widget, height) return group:AddWidget(widget, height) end,
+                    popout = true,
+                    refreshStates = reflow,
+                })
+            end)
+            local textRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Icon Text Settings"],
+                db      = tools.RowDB,
+                summary = IconTextSummary,
+                count   = ICON_TEXT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = textMount,
+            }))
+            tools.ClaimKeys(textRow, textContent)
+            tools.WireModifiedTick(textRow)
+            tools.WireFooter(textRow, ApplyIconGroup)
+            Add(textBand, nil, "both")
+        end
+
         -- ★ THE PER-ICON TEXT COLOURS USED TO LIVE HERE, as a flat list of seven pickers
         -- ("Summon", "Resurrection", "AFK", …) divorced from the icons they colour
         -- (Krathe, 2026-08-08: "odd having the text settings separate from each indicator
@@ -77,9 +250,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- of throwaway handles is a real cost here, not a style preference.
         -- Hidden unless that icon is in text mode -- an icon-mode colour picker controls
         -- nothing visible.
-        local function AddTextColor(group, label, key, showKey)
-            local w = group:AddWidget(GUI:CreateColorPicker(self.child, label, db, key, false, nil,
-                function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30)
+        local function AddTextColor(group, parent, label, key, showKey)
+            local w = group:AddWidget(GUI:CreateColorPicker(parent, label, db, key, false, nil,
+                StatusIconsCB, true), 30)
             w.hideOn = function(d) return not d[showKey] end
             return w
         end
@@ -87,7 +260,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ============================================
         -- ROLE ICON (Collapsible)
         -- ============================================
-        local roleSection = Add(GUI:CreateCollapsibleSection(self.child, L["Role Icon"], false, 280), 36, 1)
+        -- ☠ THE ONE ICON WITH NO ENABLE. Role has three per-role Show toggles and
+        -- no master boolean, so its Settings row hoists NOTHING and its Appearance
+        -- and Position rows grey with nothing -- there is no page gate here and no
+        -- per-icon gate either. (The third distinct reason a row refuses a tick,
+        -- after Highlights' "the master is a MODE" and Personal Targeted's "not
+        -- everything in the group depends on it": here there is no single master
+        -- at all.)
+        local roleSection
 
         -- Header preview: the Tank/Healer/DPS icons in the currently selected
         -- style. Rebuilt live whenever the style, an external path, or a
@@ -96,7 +276,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the whole preview dims only when all three roles are off.
         local roleShowKeys = { TANK = "roleIconShowTank", HEALER = "roleIconShowHealer", DAMAGER = "roleIconShowDPS" }
         local function UpdateRolePreview()
-            if not roleSection.SetPreviewIcons then return end
+            if not (roleSection and roleSection.SetPreviewIcons) then return end
             local icons = {}
             local anyShown = false
             for _, role in ipairs({ "TANK", "HEALER", "DAMAGER" }) do
@@ -112,47 +292,49 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if roleSection.SetPreviewDimmed then roleSection:SetPreviewDimmed(not anyShown) end
         end
 
-        -- Settings
-        local roleSettings = GUI:CreateSettingsGroup(self.child, 280)
-        roleSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        roleSettings:AddWidget(GUI:CreateDropdown(self.child, L["Icon Style"], roleStyleOptions, db, "roleIconStyle", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 55)
-        local roleExtTank = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["Tank Icon Path"], db, "roleIconExternalTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\Tank.tga"), 55)
-        roleExtTank.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        local roleExtHealer = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["Healer Icon Path"], db, "roleIconExternalHealer", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\Healer.tga"), 55)
-        roleExtHealer.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        local roleExtDPS = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["DPS Icon Path"], db, "roleIconExternalDPS", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\DPS.tga"), 55)
-        roleExtDPS.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        local roleExtNote = roleSettings:AddWidget(GUI:CreateLabel(self.child, L["Paths are relative to your WoW folder and must start with Interface\\. Pasting a full path works — anything before 'Interface' is stripped. Leave empty for DF Icons."], 250), 70)
-        roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        -- Per-role filters: which roles ever show an icon (global — apply in and
-        -- out of combat). The Hide In Combat toggle (Appearance) is an independent gate.
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
-        Add(roleSettings, nil, 1)
-        roleSection:RegisterChild(roleSettings)
+        local function RoleSettingsCB() DF:UpdateAllRoleIcons(); UpdateRolePreview() end
 
-        -- Appearance
-        local roleAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        roleAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "roleIconScale", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
-        roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "roleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("role") end, true), 55)
-        roleAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "roleIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("role") end, true)), 55)
-        roleAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide In Combat"], db, "roleIconHideInCombat", function() DF:UpdateAllRoleIcons() end), 30)
-        Add(roleAppearance, nil, 1)
-        roleSection:RegisterChild(roleAppearance)
+        local function BuildRoleSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- Position
-        local rolePosition = GUI:CreateSettingsGroup(self.child, 280)
-        rolePosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rolePosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "roleIconAnchor", function() DF:LightweightUpdateIconPosition("role") end), 55)
-        rolePosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "roleIconX", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
-        rolePosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "roleIconY", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
-        Add(rolePosition, nil, 1)
-        roleSection:RegisterChild(rolePosition)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Icon Style"], roleStyleOptions, db, "roleIconStyle", RoleSettingsCB), 55)
+            local roleExtTank = group:AddWidget(GUI:CreateEditBox(parent, L["Tank Icon Path"], db, "roleIconExternalTank", RoleSettingsCB, nil, "Interface\\MyIcons\\Tank.tga"), 55)
+            roleExtTank.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            local roleExtHealer = group:AddWidget(GUI:CreateEditBox(parent, L["Healer Icon Path"], db, "roleIconExternalHealer", RoleSettingsCB, nil, "Interface\\MyIcons\\Healer.tga"), 55)
+            roleExtHealer.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            local roleExtDPS = group:AddWidget(GUI:CreateEditBox(parent, L["DPS Icon Path"], db, "roleIconExternalDPS", RoleSettingsCB, nil, "Interface\\MyIcons\\DPS.tga"), 55)
+            roleExtDPS.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            local roleExtNote = group:AddWidget(GUI:CreateLabel(parent, L["Paths are relative to your WoW folder and must start with Interface\\. Pasting a full path works — anything before 'Interface' is stripped. Leave empty for DF Icons."], 250), 70)
+            roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            -- Per-role filters: which roles ever show an icon (global — apply in and
+            -- out of combat). The Hide In Combat toggle (Appearance) is an independent gate.
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Tank"], db, "roleIconShowTank", RoleSettingsCB), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Healer"], db, "roleIconShowHealer", RoleSettingsCB), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show DPS"], db, "roleIconShowDPS", RoleSettingsCB), 30)
+        end
 
-        -- Initial header preview for the current style.
-        UpdateRolePreview()
+        -- The style, and which roles are LEFT ON -- named the way Personal Targeted's
+        -- Content Types row names them: all three ship on, so the row is silent about
+        -- them on a default profile rather than reciting the default back, and the
+        -- moment one is off there are at most two left to name. Style plus two roles
+        -- is inside the four-item budget; three roles can only be printed when none
+        -- has been switched off, which is the case that prints none of them.
+        local function RoleSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local style = roleStyleOptions[d.roleIconStyle]
+            if style then parts[#parts + 1] = style end
+            local tank, healer, dps = d.roleIconShowTank ~= false, d.roleIconShowHealer ~= false, d.roleIconShowDPS ~= false
+            if not (tank and healer and dps) then
+                if tank then parts[#parts + 1] = L["Tank"] end
+                if healer then parts[#parts + 1] = L["Healer"] end
+                if dps then parts[#parts + 1] = L["DPS"] end
+                -- Every role switched off: the icon is enabled and draws nothing,
+                -- and the row has to say so rather than read as a default.
+                if not (tank or healer or dps) then parts[#parts + 1] = L["None"] end
+            end
+            return Join(parts)
+        end
 
         -- ============================================
         -- STATUS-ICON HEADER PREVIEWS
@@ -161,6 +343,12 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- when the section is disabled. Refreshers are registered globally and
         -- re-run by hooked frame-update functions, so previews track live
         -- enable/text changes without touching every control's callback.
+        --
+        -- ⚠ THIS BLOCK MOVED UP THE FILE, ahead of the sections rather than between
+        -- Role and Leader. It has to be above MountIcon, which is what wires every
+        -- section's preview now; it depends on nothing built before it, and it runs
+        -- at the same moment in the build it always did -- before the first
+        -- WireStatusPreview call.
         -- ============================================
         if not DF._iconPreviewHooked then
             DF._iconPreviewHooked = true
@@ -225,202 +413,432 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ============================================
+        -- ONE ICON'S OPTION SHAPE, SAID ONCE
+        -- --------------------------------------------
+        -- The three builders below are what all thirteen icons are made of. A
+        -- spec names the key prefix, the enable, the extras and which callback
+        -- family the icon repaints through; everything else is identical, and
+        -- proving that is the whole point -- test_icons_page_builders.lua pins the
+        -- builders control by control AND pins every spec field, so the pair
+        -- together pin all ~215 widgets against the census taken before the move.
+        --
+        -- Spec fields, all optional except `key` and `section`:
+        --   key             db prefix ("summonIcon")
+        --   section         the collapsible section's name, and the rows' title prefix
+        --   id              the lightweight render tag ("summon"); absent = this icon
+        --                   repaints through the status-icon pass instead
+        --   enableKey/enableLabel/enableTooltip/onEnable   the master switch
+        --   note/noteHeight                                one explanatory label
+        --   showTextKey/texts                              the Show as Text block
+        --   before/after    per-icon widgets around that block, in classic's order
+        --   hideInCombatLabel/onHideInCombat               the Appearance extra
+        --   controlRow      the Settings box holds ONE setting, so it is a plate
+        --   summaryExtra    what this icon's Settings row says beyond the shared part
+        --   preview         WireStatusPreview's opts
+        -- ============================================
+        local function BuildIconSettingsGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is this icon's only on/off control -- and with it the box's
+            -- own gate, which the popout does not repeat because the kit's syncGate
+            -- already greys a pane whose row toggle is off.
+            if spec.enableKey and not tools2.hoistToggle then
+                group.disableChildrenOn = spec.gate
+                local enableCb = group:AddWidget(GUI:CreateCheckbox(parent, spec.enableLabel, db, spec.enableKey, spec.onEnable), 30)
+                enableCb.keepEnabled = true
+                if spec.enableTooltip then enableCb.tooltip = spec.enableTooltip end
+            end
+            if spec.note then group:AddWidget(GUI:CreateLabel(parent, spec.note, 240), spec.noteHeight) end
+            if spec.before then spec.before(group, parent) end
+            if spec.showTextKey then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show as Text"], db, spec.showTextKey, StatusIconsCB), 30)
+                for _, t in ipairs(spec.texts) do
+                    group:AddWidget(GUI:CreateEditBox(parent, t.label, db, t.key, StatusTextCB, 120), 55)
+                end
+                AddTextColor(group, parent, L["Text Color"], spec.key .. "TextColor", spec.showTextKey)
+            end
+            if spec.after then spec.after(group, parent) end
+        end
+
+        local function BuildIconAppearanceGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = spec.gate
+            group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.5, 0.1, db, spec.key .. "Scale", nil, spec.cbPosition, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, spec.key .. "Alpha", nil, spec.cbAlpha, true), 55)
+            group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, spec.key .. "FrameLevel", nil, spec.cbFrameLevel, true)), 55)
+            if spec.hideInCombatLabel then
+                group:AddWidget(GUI:CreateCheckbox(parent, spec.hideInCombatLabel, db, spec.key .. "HideInCombat", spec.onHideInCombat), 30)
+            end
+        end
+
+        local function BuildIconPositionGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = spec.gate
+            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, spec.key .. "Anchor", spec.cbPosition), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, spec.key .. "X", nil, spec.cbPosition, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, spec.key .. "Y", nil, spec.cbPosition, true), 55)
+        end
+
+        -- The three summaries, also once. Every one is silent on a default profile
+        -- and says only what has been changed -- with thirteen icons on one page,
+        -- a row that recited its defaults would be thirteen lines of noise.
+        local function IconSettingsSummary(spec)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                if spec.showTextKey and d[spec.showTextKey] then
+                    parts[#parts + 1] = L["Show as Text"]
+                    local first = spec.texts and spec.texts[1]
+                    local text = first and d[first.key]
+                    if type(text) == "string" and text ~= "" then parts[#parts + 1] = text end
+                end
+                if spec.summaryExtra then spec.summaryExtra(d, parts) end
+                return Join(parts)
+            end
+        end
+
+        local function IconAppearanceSummary(spec)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                local scale = tonumber(d[spec.key .. "Scale"])
+                if scale and scale ~= 1 then parts[#parts + 1] = format("%.1fx", scale) end
+                local alpha = tonumber(d[spec.key .. "Alpha"])
+                if alpha and alpha < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], alpha) end
+                if spec.hideInCombatLabel and d[spec.key .. "HideInCombat"] then
+                    parts[#parts + 1] = spec.hideInCombatLabel
+                end
+                return Join(parts)
+            end
+        end
+
+        local function IconPositionSummary(spec)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                local anchor = anchorOptions[d[spec.key .. "Anchor"]]
+                if anchor then parts[#parts + 1] = anchor end
+                local x = tonumber(d[spec.key .. "X"]) or 0
+                local y = tonumber(d[spec.key .. "Y"]) or 0
+                if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+                return Join(parts)
+            end
+        end
+
+        -- ============================================
+        -- ONE ICON'S PLATES, ALSO SAID ONCE
+        -- --------------------------------------------
+        -- Both layouts, driven off the same spec. Classic builds the boxes it
+        -- always built, in column 1, registered to the section; the popout builds
+        -- the section's band and hangs the same builders off rows in it.
+        --
+        -- ⚠ THE ROWS' ORDER IS THE BOXES' ORDER, including AFK's fourth box, which
+        -- has always sat between Settings and Appearance.
+        -- ============================================
+        local function MountIcon(spec)
+            spec.gate = spec.enableKey and function(d) return not (d or db)[spec.enableKey] end or nil
+            if spec.id then
+                spec.cbPosition   = function() DF:LightweightUpdateIconPosition(spec.id) end
+                spec.cbAlpha      = function() DF:LightweightUpdateIconAlpha(spec.id) end
+                spec.cbFrameLevel = function() DF:LightweightUpdateFrameLevel(spec.id) end
+            else
+                spec.cbPosition, spec.cbAlpha, spec.cbFrameLevel = StatusIconsCB, StatusIconsCB, StatusIconsCB
+            end
+
+            local section = AddSection(spec.section)
+            if spec.onSection then spec.onSection(section) end
+            if spec.preview then WireStatusPreview(section, spec.preview) end
+
+            local settingsBuild = spec.settings or BuildIconSettingsGroup
+
+            if classicLayout then
+                -- ⚠ EVERY ICON TAKES THE SAME CLASSIC ARM, `controlRow` included:
+                -- a one-setting box is still a BOX in classic, and the shared
+                -- builder already draws exactly what it held -- the header, the
+                -- tick and, where there is one, the sentence under it.
+                local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+                settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
+                settingsBuild({ group = settingsGroup, parent = self.child,
+                                refreshStates = function() self:RefreshStates() end }, spec)
+                Add(settingsGroup, nil, 1)
+                section:RegisterChild(settingsGroup)
+
+                if spec.extraGroup then
+                    local extraGroup = GUI:CreateSettingsGroup(self.child, 280)
+                    extraGroup:AddWidget(GUI:CreateHeader(self.child, spec.extraGroup.label), GUI.RowHeight.sectionHeader)
+                    spec.extraGroup.build({ group = extraGroup, parent = self.child,
+                                            refreshStates = function() self:RefreshStates() end }, spec)
+                    Add(extraGroup, nil, 1)
+                    section:RegisterChild(extraGroup)
+                    extraGroup.hideOn = spec.extraGroup.hideOn
+                end
+
+                local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+                appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
+                BuildIconAppearanceGroup({ group = appearanceGroup, parent = self.child,
+                                           refreshStates = function() self:RefreshStates() end }, spec)
+                Add(appearanceGroup, nil, 1)
+                section:RegisterChild(appearanceGroup)
+
+                local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
+                positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
+                BuildIconPositionGroup({ group = positionGroup, parent = self.child,
+                                         refreshStates = function() self:RefreshStates() end }, spec)
+                Add(positionGroup, nil, 1)
+                section:RegisterChild(positionGroup)
+
+                if spec.afterMount then spec.afterMount() end
+                return
+            end
+
+            local band = SectionBand(section)
+
+            -- What the suppressed Enable checkbox ran, minus any page rebuild: the
+            -- two rows that grey with it are repainted by the page's own state pass,
+            -- and the panes standing open by the reflow. The header preview follows
+            -- for free -- DF:UpdateAllFrames_Now is hooked to refresh it.
+            local function OnEnableToggle()
+                if spec.onEnable then spec.onEnable() end
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            if spec.controlRow then
+                -- ☠ ONE SETTING, SO A CONTROL ROW RATHER THAN A WAY IN. Four icons
+                -- (Leader, Target Marker, Ping, Combat) have nothing in their
+                -- Settings box but the switch, so a popout row here would be a panel
+                -- holding a single checkbox and the row's own tick column already IS
+                -- that checkbox. The trade is the group's two verbs -- no Reset Group
+                -- and no amber tick -- which for one boolean the modified dot on the
+                -- control itself already covers.
+                --
+                -- ⚠ COMBAT'S EXPLANATION BECOMES THE PLATE'S TOOLTIP. Its box holds
+                -- the tick and one sentence; the sentence is not a setting, so it
+                -- cannot keep a plate of its own, and a control row's tooltip is
+                -- where a sentence about the control belongs. Classic still draws it
+                -- as a label, exactly as before.
+                local enableRow = band:AddWidget(GUI:CreateControlRow(self.child, {
+                    label     = spec.enableLabel,
+                    kind      = "checkbox",
+                    -- The FUNCTION form: the table is re-resolved on each read, so a
+                    -- mode switch is followed rather than frozen at whichever table
+                    -- this build captured.
+                    db        = tools.RowDB,
+                    key       = spec.enableKey,
+                    tooltip   = spec.enableTooltip or spec.note,
+                    onChanged = OnEnableToggle,
+                }))
+                tools.RegisterControlRow(enableRow, "checkbox", spec.enableKey, false, OnEnableToggle)
+            else
+                -- ⚠ NO GatePaneFirstChild ON A SETTINGS PANE. Where the row carries
+                -- a hoisted tick the kit's syncGate greys the pane whole, so the
+                -- builder drops the group gate rather than saying it twice; and
+                -- Role, the one Settings row with no tick, has no gate to apply.
+                local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                    settingsBuild({ group = group, parent = holder, refreshStates = reflow,
+                                    popout = true, hoistToggle = spec.enableKey ~= nil }, spec)
+                end)
+                local settingsRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label    = L["Settings"],
+                    title    = RowTitle(spec.section, L["Settings"]),
+                    db       = tools.RowDB,
+                    toggle   = spec.enableKey and { key = spec.enableKey } or nil,
+                    summary  = spec.summary or IconSettingsSummary(spec),
+                    count    = spec.settingsCount,
+                    onToggle = spec.enableKey and OnEnableToggle or nil,
+                    window   = DF.GUIFrame,
+                    clipTo   = self,
+                    build    = settingsMount,
+                }))
+                tools.ClaimKeys(settingsRow, settingsContent)
+                tools.WireModifiedTick(settingsRow)
+                tools.WireFooter(settingsRow, ApplyIconGroup)
+                if spec.enableKey then
+                    tools.RegisterHoistedToggle(settingsRow, spec.enableLabel, spec.enableKey, OnEnableToggle)
+                end
+                -- ⚠ AND NO disableOn ON THIS ONE. It carries this icon's own tick;
+                -- greying it would leave no way to switch the icon back on.
+            end
+
+            if spec.extraGroup then
+                local extraMount, extraContent = tools.PopoutContent(function(group, holder, reflow)
+                    spec.extraGroup.build({ group = group, parent = holder, refreshStates = reflow,
+                                            popout = true }, spec)
+                    GatePaneFirstChild(group, spec.gate)
+                end)
+                local extraRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = spec.extraGroup.label,
+                    title   = RowTitle(spec.section, spec.extraGroup.label),
+                    db      = tools.RowDB,
+                    summary = spec.extraGroup.summary,
+                    count   = spec.extraGroup.count,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = extraMount,
+                }))
+                -- The box's own gate becomes the ROW's, so the band collapses the slot
+                -- instead of drawing a plate for a timer that is not being drawn.
+                extraRow.hideOn = spec.extraGroup.hideOn
+                extraRow.disableOn = spec.gate
+                tools.ClaimKeys(extraRow, extraContent)
+                tools.WireModifiedTick(extraRow)
+                tools.WireFooter(extraRow, ApplyIconGroup)
+            end
+
+            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildIconAppearanceGroup({ group = group, parent = holder, refreshStates = reflow,
+                                           popout = true }, spec)
+                GatePaneFirstChild(group, spec.gate)
+            end)
+            local appearanceRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Appearance"],
+                title   = RowTitle(spec.section, L["Appearance"]),
+                db      = tools.RowDB,
+                summary = IconAppearanceSummary(spec),
+                count   = spec.hideInCombatLabel and 4 or 3,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = appearanceMount,
+            }))
+            -- ☠ THE ICON'S GATE REACHES THE ROW ITSELF, not only the pane. In
+            -- classic the whole section visibly dims while the icon is off; two
+            -- bright plates over two grey panes would be the popout layout saying
+            -- something classic does not. A dimmed row still OPENS -- the kit's grey
+            -- is alpha and a disabled toggle, not a dead frame -- so the settings
+            -- stay readable while they are switched off. The Resource Bar rule.
+            appearanceRow.disableOn = spec.gate
+            tools.ClaimKeys(appearanceRow, appearanceContent)
+            tools.WireModifiedTick(appearanceRow)
+            tools.WireFooter(appearanceRow, ApplyIconGroup)
+
+            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildIconPositionGroup({ group = group, parent = holder, refreshStates = reflow,
+                                         popout = true }, spec)
+                GatePaneFirstChild(group, spec.gate)
+            end)
+            local positionRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Position"],
+                title   = RowTitle(spec.section, L["Position"]),
+                db      = tools.RowDB,
+                summary = IconPositionSummary(spec),
+                count   = 3,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = positionMount,
+            }))
+            positionRow.disableOn = spec.gate
+            tools.ClaimKeys(positionRow, positionContent)
+            tools.WireModifiedTick(positionRow)
+            tools.WireFooter(positionRow, ApplyIconGroup)
+
+            Add(band, nil, "both")
+            if spec.afterMount then spec.afterMount() end
+        end
+
+        -- The shared enable callback: eleven of the twelve switchable icons run
+        -- exactly this, and Ping runs it after its own mirror wiring.
+        local function OnIconEnabled() DF:UpdateAllFrames() end
+
+        -- ============================================
+        -- ROLE ICON (Collapsible)
+        -- ============================================
+        MountIcon({
+            key = "roleIcon", id = "role", section = L["Role Icon"],
+            onSection = function(section) roleSection = section end,
+            settings = BuildRoleSettingsGroup,
+            settingsCount = 8,
+            summary = RoleSettingsSummary,
+            hideInCombatLabel = L["Hide In Combat"],
+            onHideInCombat = function() DF:UpdateAllRoleIcons() end,
+            -- Initial header preview for the current style.
+            afterMount = UpdateRolePreview,
+        })
+
+        -- ============================================
         -- LEADER ICON (Collapsible)
         -- ============================================
-        local leaderSection = Add(GUI:CreateCollapsibleSection(self.child, L["Leader Icon"], false, 280), 36, 1)
-        WireStatusPreview(leaderSection, { enableKey = "leaderIconEnabled", icons = { "Interface\\GroupFrame\\UI-Group-LeaderIcon" } })
-        
-        -- Settings
-        local leaderSettings = GUI:CreateSettingsGroup(self.child, 280)
-        leaderSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        leaderSettings.disableChildrenOn = function(d) return not d.leaderIconEnabled end
-        local leaderIconEnableCb = leaderSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Leader Icon"], db, "leaderIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        leaderIconEnableCb.keepEnabled = true
-        Add(leaderSettings, nil, 1)
-        leaderSection:RegisterChild(leaderSettings)
+        MountIcon({
+            key = "leaderIcon", id = "leader", section = L["Leader Icon"],
+            enableKey = "leaderIconEnabled", enableLabel = L["Enable Leader Icon"],
+            onEnable = OnIconEnabled, controlRow = true,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "leaderIconEnabled", icons = { "Interface\\GroupFrame\\UI-Group-LeaderIcon" } },
+        })
 
-        -- Appearance
-        local leaderAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        leaderAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        leaderAppearance.disableChildrenOn = function(d) return not d.leaderIconEnabled end
-        leaderAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "leaderIconScale", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
-        leaderAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "leaderIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("leader") end, true), 55)
-        leaderAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "leaderIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("leader") end, true)), 55)
-        leaderAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "leaderIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(leaderAppearance, nil, 1)
-        leaderSection:RegisterChild(leaderAppearance)
-
-        -- Position
-        local leaderPosition = GUI:CreateSettingsGroup(self.child, 280)
-        leaderPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        leaderPosition.disableChildrenOn = function(d) return not d.leaderIconEnabled end
-        leaderPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "leaderIconAnchor", function() DF:LightweightUpdateIconPosition("leader") end), 55)
-        leaderPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "leaderIconX", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
-        leaderPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "leaderIconY", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
-        Add(leaderPosition, nil, 1)
-        leaderSection:RegisterChild(leaderPosition)
-        
         -- ============================================
         -- RAID TARGET ICON (Collapsible)
         -- ============================================
-        local raidTargetSection = Add(GUI:CreateCollapsibleSection(self.child, L["Target Marker Icon"], false, 280), 36, 1)
-        -- Header preview: the four most-used markers (square / cross / triangle / circle),
-        -- sliced from the classic raid-target sheet via texcoords (the atlas form won't render here).
-        WireStatusPreview(raidTargetSection, { enableKey = "raidTargetIconEnabled", icons = {
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 2 },  -- square   (6)
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 2 },  -- cross    (7)
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 2 },  -- triangle (4)
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 2 },  -- circle   (2)
-        } })
-        
-        -- Settings
-        local rtSettings = GUI:CreateSettingsGroup(self.child, 280)
-        rtSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        rtSettings.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
-        local raidTargetIconEnableCb = rtSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Target Marker Icon"], db, "raidTargetIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        raidTargetIconEnableCb.keepEnabled = true
-        Add(rtSettings, nil, 1)
-        raidTargetSection:RegisterChild(rtSettings)
+        MountIcon({
+            key = "raidTargetIcon", id = "raidTarget", section = L["Target Marker Icon"],
+            enableKey = "raidTargetIconEnabled", enableLabel = L["Enable Target Marker Icon"],
+            onEnable = OnIconEnabled, controlRow = true,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            -- Header preview: the four most-used markers (square / cross / triangle / circle),
+            -- sliced from the classic raid-target sheet via texcoords (the atlas form won't render here).
+            preview = { enableKey = "raidTargetIconEnabled", icons = {
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 2 },  -- square   (6)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 2 },  -- cross    (7)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 2 },  -- triangle (4)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 2 },  -- circle   (2)
+            } },
+        })
 
-        -- Appearance
-        local rtAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        rtAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        rtAppearance.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
-        rtAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidTargetIconScale", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
-        rtAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "raidTargetIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("raidTarget") end, true), 55)
-        rtAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "raidTargetIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("raidTarget") end, true)), 55)
-        rtAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "raidTargetIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(rtAppearance, nil, 1)
-        raidTargetSection:RegisterChild(rtAppearance)
-
-        -- Position
-        local rtPosition = GUI:CreateSettingsGroup(self.child, 280)
-        rtPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rtPosition.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
-        rtPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidTargetIconAnchor", function() DF:LightweightUpdateIconPosition("raidTarget") end), 55)
-        rtPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "raidTargetIconX", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
-        rtPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "raidTargetIconY", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
-        Add(rtPosition, nil, 1)
-        raidTargetSection:RegisterChild(rtPosition)
-        
         -- ============================================
         -- READY CHECK ICON (Collapsible)
         -- ============================================
-        local readySection = Add(GUI:CreateCollapsibleSection(self.child, L["Ready Check Icon"], false, 280), 36, 1)
-        WireStatusPreview(readySection, { enableKey = "readyCheckIconEnabled", icons = { "UI-LFG-ReadyMark-Raid" } })
-        
-        -- Settings
-        local rcSettings = GUI:CreateSettingsGroup(self.child, 280)
-        rcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        rcSettings.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
-        local readyCheckIconEnableCb = rcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Ready Check Icon"], db, "readyCheckIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        readyCheckIconEnableCb.keepEnabled = true
-        rcSettings:AddWidget(GUI:CreateSlider(self.child, L["Persist (seconds)"], 0, 15, 1, db, "readyCheckIconPersist"), 55)
-        Add(rcSettings, nil, 1)
-        readySection:RegisterChild(rcSettings)
+        MountIcon({
+            key = "readyCheckIcon", id = "readyCheck", section = L["Ready Check Icon"],
+            enableKey = "readyCheckIconEnabled", enableLabel = L["Enable Ready Check Icon"],
+            onEnable = OnIconEnabled,
+            after = function(group, parent)
+                group:AddWidget(GUI:CreateSlider(parent, L["Persist (seconds)"], 0, 15, 1, db, "readyCheckIconPersist"), 55)
+            end,
+            settingsCount = 1,
+            summaryExtra = function(d, parts)
+                local persist = tonumber(d.readyCheckIconPersist)
+                if persist then parts[#parts + 1] = format("%ds", math.floor(persist)) end
+            end,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "readyCheckIconEnabled", icons = { "UI-LFG-ReadyMark-Raid" } },
+        })
 
-        -- Appearance
-        local rcAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        rcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        rcAppearance.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
-        rcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "readyCheckIconScale", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
-        rcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "readyCheckIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("readyCheck") end, true), 55)
-        rcAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "readyCheckIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("readyCheck") end, true)), 55)
-        rcAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "readyCheckIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(rcAppearance, nil, 1)
-        readySection:RegisterChild(rcAppearance)
-
-        -- Position
-        local rcPosition = GUI:CreateSettingsGroup(self.child, 280)
-        rcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rcPosition.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
-        rcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "readyCheckIconAnchor", function() DF:LightweightUpdateIconPosition("readyCheck") end), 55)
-        rcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "readyCheckIconX", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
-        rcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "readyCheckIconY", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
-        Add(rcPosition, nil, 1)
-        readySection:RegisterChild(rcPosition)
-        
         -- ============================================
         -- PING ICON (Collapsible)
         -- Mirrors Blizzard's 12.1 frame pings; see Features/PingMirror.lua.
         -- ============================================
-        local pingSection = Add(GUI:CreateCollapsibleSection(self.child, L["Ping Icon"], false, 280), 36, 1)
-        WireStatusPreview(pingSection, { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } })
-
-        -- Settings
-        local pingSettings = GUI:CreateSettingsGroup(self.child, 280)
-        pingSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        pingSettings.disableChildrenOn = function(d) return not d.pingIconEnabled end
-        local pingIconEnableCb = pingSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Ping Icon"], db, "pingIconEnabled", function()
-            if DF.OnPingIconToggled then DF:OnPingIconToggled() end
-            DF:UpdateAllFrames()
-        end), 30)
-        pingIconEnableCb.keepEnabled = true
-        pingIconEnableCb.tooltip = L["Shows a group member's ping on the frame of the unit they pinged."]
-        Add(pingSettings, nil, 1)
-        pingSection:RegisterChild(pingSettings)
-
-        -- Appearance
-        local pingAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        pingAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        pingAppearance.disableChildrenOn = function(d) return not d.pingIconEnabled end
-        pingAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "pingIconScale", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
-        pingAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "pingIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("ping") end, true), 55)
-        pingAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "pingIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("ping") end, true)), 55)
-        pingAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "pingIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(pingAppearance, nil, 1)
-        pingSection:RegisterChild(pingAppearance)
-
-        -- Position
-        local pingPosition = GUI:CreateSettingsGroup(self.child, 280)
-        pingPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        pingPosition.disableChildrenOn = function(d) return not d.pingIconEnabled end
-        pingPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "pingIconAnchor", function() DF:LightweightUpdateIconPosition("ping") end), 55)
-        pingPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "pingIconX", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
-        pingPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "pingIconY", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
-        Add(pingPosition, nil, 1)
-        pingSection:RegisterChild(pingPosition)
+        MountIcon({
+            key = "pingIcon", id = "ping", section = L["Ping Icon"],
+            enableKey = "pingIconEnabled", enableLabel = L["Enable Ping Icon"],
+            enableTooltip = L["Shows a group member's ping on the frame of the unit they pinged."],
+            onEnable = function()
+                if DF.OnPingIconToggled then DF:OnPingIconToggled() end
+                DF:UpdateAllFrames()
+            end,
+            controlRow = true,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } },
+        })
 
         -- ============================================
         -- SUMMON ICON (Collapsible)
         -- ============================================
-        local summonSection = Add(GUI:CreateCollapsibleSection(self.child, L["Summon Icon"], false, 280), 36, 1)
-        WireStatusPreview(summonSection, { enableKey = "summonIconEnabled", showTextKey = "summonIconShowText", icons = { "RaidFrame-Icon-SummonPending" }, texts = { "summonIconTextPending" } })
-        
-        -- Settings
-        local sumSettings = GUI:CreateSettingsGroup(self.child, 280)
-        sumSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        sumSettings.disableChildrenOn = function(d) return not d.summonIconEnabled end
-        local summonIconEnableCb = sumSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Summon Icon"], db, "summonIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        summonIconEnableCb.keepEnabled = true
-        sumSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "summonIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Pending Text"], db, "summonIconTextPending", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Accepted Text"], db, "summonIconTextAccepted", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Declined Text"], db, "summonIconTextDeclined", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(sumSettings, L["Text Color"], "summonIconTextColor", "summonIconShowText")
-        Add(sumSettings, nil, 1)
-        summonSection:RegisterChild(sumSettings)
-
-        -- Appearance
-        local sumAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        sumAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        sumAppearance.disableChildrenOn = function(d) return not d.summonIconEnabled end
-        sumAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "summonIconScale", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
-        sumAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "summonIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("summon") end, true), 55)
-        sumAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "summonIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("summon") end, true)), 55)
-        sumAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "summonIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(sumAppearance, nil, 1)
-        summonSection:RegisterChild(sumAppearance)
-
-        -- Position
-        local sumPosition = GUI:CreateSettingsGroup(self.child, 280)
-        sumPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        sumPosition.disableChildrenOn = function(d) return not d.summonIconEnabled end
-        sumPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "summonIconAnchor", function() DF:LightweightUpdateIconPosition("summon") end), 55)
-        sumPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "summonIconX", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
-        sumPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "summonIconY", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
-        Add(sumPosition, nil, 1)
-        summonSection:RegisterChild(sumPosition)
+        MountIcon({
+            key = "summonIcon", id = "summon", section = L["Summon Icon"],
+            enableKey = "summonIconEnabled", enableLabel = L["Enable Summon Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "summonIconShowText",
+            texts = {
+                { label = L["Pending Text"],  key = "summonIconTextPending" },
+                { label = L["Accepted Text"], key = "summonIconTextAccepted" },
+                { label = L["Declined Text"], key = "summonIconTextDeclined" },
+            },
+            settingsCount = 5,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "summonIconEnabled", showTextKey = "summonIconShowText", icons = { "RaidFrame-Icon-SummonPending" }, texts = { "summonIconTextPending" } },
+        })
 
         -- ============================================
         -- BG OBJECTIVE CARRIER ICON (Collapsible)
@@ -428,319 +846,185 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- (flag / orb). Detection is UnitPvpClassification, so it
         -- works with Blizzard raid frames fully disabled.
         -- ============================================
-        local bgCarrierSection = Add(GUI:CreateCollapsibleSection(self.child, L["BG Carrier Icon"], false, 280), 36, 1)
-        WireStatusPreview(bgCarrierSection, { enableKey = "bgCarrierIconEnabled", showTextKey = "bgCarrierIconShowText", icons = { "Interface\\Icons\\inv_bannerpvp_02" }, texts = { "bgCarrierIconText" } })
-
-        -- Settings
-        local bgcSettings = GUI:CreateSettingsGroup(self.child, 280)
-        bgcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        bgcSettings.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
-        local bgCarrierIconEnableCb = bgcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable BG Carrier Icon"], db, "bgCarrierIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        bgCarrierIconEnableCb.keepEnabled = true
-        bgcSettings:AddWidget(GUI:CreateLabel(self.child, L["Shows on a friendly party/raid member carrying a battleground objective (flag, orb). Only active inside battlegrounds."], 240), 44)
-        bgcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "bgCarrierIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        bgcSettings:AddWidget(GUI:CreateEditBox(self.child, L["Carrier Text"], db, "bgCarrierIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(bgcSettings, L["Text Color"], "bgCarrierIconTextColor", "bgCarrierIconShowText")
-        Add(bgcSettings, nil, 1)
-        bgCarrierSection:RegisterChild(bgcSettings)
-
-        -- Appearance
-        local bgcAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        bgcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        bgcAppearance.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
-        bgcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "bgCarrierIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        bgcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "bgCarrierIconAlpha", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        bgcAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "bgCarrierIconFrameLevel", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true)), 55)
-        Add(bgcAppearance, nil, 1)
-        bgCarrierSection:RegisterChild(bgcAppearance)
-
-        -- Position
-        local bgcPosition = GUI:CreateSettingsGroup(self.child, 280)
-        bgcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        bgcPosition.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
-        bgcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "bgCarrierIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
-        bgcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "bgCarrierIconX", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        bgcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "bgCarrierIconY", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        Add(bgcPosition, nil, 1)
-        bgCarrierSection:RegisterChild(bgcPosition)
+        MountIcon({
+            key = "bgCarrierIcon", section = L["BG Carrier Icon"],
+            enableKey = "bgCarrierIconEnabled", enableLabel = L["Enable BG Carrier Icon"],
+            onEnable = OnIconEnabled,
+            note = L["Shows on a friendly party/raid member carrying a battleground objective (flag, orb). Only active inside battlegrounds."],
+            noteHeight = 44,
+            showTextKey = "bgCarrierIconShowText",
+            texts = { { label = L["Carrier Text"], key = "bgCarrierIconText" } },
+            settingsCount = 4,
+            preview = { enableKey = "bgCarrierIconEnabled", showTextKey = "bgCarrierIconShowText", icons = { "Interface\\Icons\\inv_bannerpvp_02" }, texts = { "bgCarrierIconText" } },
+        })
 
         -- ============================================
         -- COMBAT ICON (Collapsible)
         -- ============================================
-        local combatSection = Add(GUI:CreateCollapsibleSection(self.child, L["Combat Icon"], false, 280), 36, 1)
-        -- Preview the swords quadrant of the UI-StateIcon sheet (texcoord slice); also
-        -- greys the section header when the icon is disabled.
-        WireStatusPreview(combatSection, { enableKey = "combatIconEnabled", icons = { { texture = "Interface\\CharacterFrame\\UI-StateIcon", coords = {0.5, 1.0, 0, 0.49} } } })
-
-        -- Settings
-        local combatSettings = GUI:CreateSettingsGroup(self.child, 280)
-        combatSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        combatSettings.disableChildrenOn = function(d) return not d.combatIconEnabled end
-        local combatIconEnableCb = combatSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Combat Icon"], db, "combatIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        combatIconEnableCb.keepEnabled = true
-        combatSettings:AddWidget(GUI:CreateLabel(self.child, L["Shows crossed swords on a party/raid member who is in combat."], 240), 44)
-        Add(combatSettings, nil, 1)
-        combatSection:RegisterChild(combatSettings)
-
-        -- Appearance
-        local combatAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        combatAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        combatAppearance.disableChildrenOn = function(d) return not d.combatIconEnabled end
-        combatAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "combatIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        combatAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "combatIconAlpha", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        combatAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "combatIconFrameLevel", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true)), 55)
-        Add(combatAppearance, nil, 1)
-        combatSection:RegisterChild(combatAppearance)
-
-        -- Position
-        local combatPosition = GUI:CreateSettingsGroup(self.child, 280)
-        combatPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        combatPosition.disableChildrenOn = function(d) return not d.combatIconEnabled end
-        combatPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "combatIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
-        combatPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "combatIconX", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        combatPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "combatIconY", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        Add(combatPosition, nil, 1)
-        combatSection:RegisterChild(combatPosition)
+        MountIcon({
+            key = "combatIcon", section = L["Combat Icon"],
+            enableKey = "combatIconEnabled", enableLabel = L["Enable Combat Icon"],
+            onEnable = OnIconEnabled, controlRow = true,
+            note = L["Shows crossed swords on a party/raid member who is in combat."],
+            noteHeight = 44,
+            -- Preview the swords quadrant of the UI-StateIcon sheet (texcoord slice); also
+            -- greys the section header when the icon is disabled.
+            preview = { enableKey = "combatIconEnabled", icons = { { texture = "Interface\\CharacterFrame\\UI-StateIcon", coords = {0.5, 1.0, 0, 0.49} } } },
+        })
 
         -- ============================================
         -- RESURRECTION ICON (Collapsible)
         -- ============================================
-        local resSection = Add(GUI:CreateCollapsibleSection(self.child, L["Resurrection Icon"], false, 280), 36, 1)
-        WireStatusPreview(resSection, { enableKey = "resurrectionIconEnabled", showTextKey = "resurrectionIconShowText", icons = { "RaidFrame-Icon-Rez" }, texts = { "resurrectionIconTextCasting" } })
-        
-        -- Settings
-        local resSettings = GUI:CreateSettingsGroup(self.child, 280)
-        resSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        resSettings.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
-        local resurrectionIconEnableCb = resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon"], db, "resurrectionIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        resurrectionIconEnableCb.keepEnabled = true
-        resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "resurrectionIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        resSettings:AddWidget(GUI:CreateEditBox(self.child, L["Casting Text"], db, "resurrectionIconTextCasting", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(resSettings, L["Text Color"], "resurrectionIconTextColor", "resurrectionIconShowText")
-        -- ("Pending Text" removed: resurrectionIconTextPending was never read by
-        -- any render path — live or test — since inception. The pending state
-        -- renders as the yellow icon tint.)
-        Add(resSettings, nil, 1)
-        resSection:RegisterChild(resSettings)
+        MountIcon({
+            key = "resurrectionIcon", id = "resurrection", section = L["Resurrection Icon"],
+            enableKey = "resurrectionIconEnabled", enableLabel = L["Enable Resurrection Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "resurrectionIconShowText",
+            texts = { { label = L["Casting Text"], key = "resurrectionIconTextCasting" } },
+            -- ("Pending Text" removed: resurrectionIconTextPending was never read by
+            -- any render path — live or test — since inception. The pending state
+            -- renders as the yellow icon tint.)
+            settingsCount = 3,
+            preview = { enableKey = "resurrectionIconEnabled", showTextKey = "resurrectionIconShowText", icons = { "RaidFrame-Icon-Rez" }, texts = { "resurrectionIconTextCasting" } },
+        })
 
-        -- Appearance
-        local resAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        resAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        resAppearance.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
-        resAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "resurrectionIconScale", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
-        resAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "resurrectionIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("resurrection") end, true), 55)
-        resAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resurrectionIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("resurrection") end, true)), 55)
-        Add(resAppearance, nil, 1)
-        resSection:RegisterChild(resAppearance)
-
-        -- Position
-        local resPosition = GUI:CreateSettingsGroup(self.child, 280)
-        resPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        resPosition.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
-        resPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "resurrectionIconAnchor", function() DF:LightweightUpdateIconPosition("resurrection") end), 55)
-        resPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "resurrectionIconX", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
-        resPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "resurrectionIconY", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
-        Add(resPosition, nil, 1)
-        resSection:RegisterChild(resPosition)
-        
         -- ============================================
         -- PHASED ICON (Collapsible)
         -- ============================================
-        local phasedSection = Add(GUI:CreateCollapsibleSection(self.child, L["Phased Icon"], false, 280), 36, 1)
-        WireStatusPreview(phasedSection, { enableKey = "phasedIconEnabled", showTextKey = "phasedIconShowText", icons = { "RaidFrame-Icon-Phasing" }, texts = { "phasedIconText" } })
-        
-        -- Settings
-        local phSettings = GUI:CreateSettingsGroup(self.child, 280)
-        phSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        phSettings.disableChildrenOn = function(d) return not d.phasedIconEnabled end
-        local phasedIconEnableCb = phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Phased Icon"], db, "phasedIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        phasedIconEnableCb.keepEnabled = true
-        phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "phasedIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        phSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "phasedIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(phSettings, L["Text Color"], "phasedIconTextColor", "phasedIconShowText")
-        phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", function() DF:UpdateAllFrames() end), 30)
-        Add(phSettings, nil, 1)
-        phasedSection:RegisterChild(phSettings)
+        MountIcon({
+            key = "phasedIcon", id = "phased", section = L["Phased Icon"],
+            enableKey = "phasedIconEnabled", enableLabel = L["Enable Phased Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "phasedIconShowText",
+            texts = { { label = L["Status Text"], key = "phasedIconText" } },
+            after = function(group, parent)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", OnIconEnabled), 30)
+            end,
+            settingsCount = 4,
+            summaryExtra = function(d, parts)
+                if d.phasedIconShowLFGEye then parts[#parts + 1] = L["Show LFG Eye for Cross-Instance"] end
+            end,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "phasedIconEnabled", showTextKey = "phasedIconShowText", icons = { "RaidFrame-Icon-Phasing" }, texts = { "phasedIconText" } },
+        })
 
-        -- Appearance
-        local phAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        phAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        phAppearance.disableChildrenOn = function(d) return not d.phasedIconEnabled end
-        phAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "phasedIconScale", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
-        phAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "phasedIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("phased") end, true), 55)
-        phAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "phasedIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("phased") end, true)), 55)
-        phAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "phasedIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(phAppearance, nil, 1)
-        phasedSection:RegisterChild(phAppearance)
-
-        -- Position
-        local phPosition = GUI:CreateSettingsGroup(self.child, 280)
-        phPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        phPosition.disableChildrenOn = function(d) return not d.phasedIconEnabled end
-        phPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "phasedIconAnchor", function() DF:LightweightUpdateIconPosition("phased") end), 55)
-        phPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "phasedIconX", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
-        phPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "phasedIconY", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
-        Add(phPosition, nil, 1)
-        phasedSection:RegisterChild(phPosition)
-        
         -- ============================================
         -- AFK ICON (Collapsible)
-        -- ============================================
-        local afkSection = Add(GUI:CreateCollapsibleSection(self.child, L["AFK Icon"], false, 280), 36, 1)
-        WireStatusPreview(afkSection, { enableKey = "afkIconEnabled", showTextKey = "afkIconShowText", icons = { "characterupdate_clock-icon" }, texts = { "afkIconText" } })
-        
         -- AFK is the one icon with a fourth box (Timer Text) on top of the
         -- standard Settings / Appearance / Position trio.
+        -- ============================================
         local afkTimerCB = function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end
-
-        -- Settings
-        local afkSettings = GUI:CreateSettingsGroup(self.child, 280)
-        afkSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        afkSettings.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        local afkIconEnableCb = afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable AFK Icon"], db, "afkIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        afkIconEnableCb.keepEnabled = true
-        afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "afkIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        afkSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "afkIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(afkSettings, L["Text Color"], "afkIconTextColor", "afkIconShowText")
-        afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Timer"], db, "afkIconShowTimer", function() DF:UpdateAllFramesStatusIcons() end), 30)
-        -- In text mode the timer is merged into the status text, so the Timer
-        -- Text box is hidden; explain it inherits the main text styling.
-        local afkTimerInheritNote = afkSettings:AddWidget(GUI:CreateLabel(self.child, L["In Text mode the timer joins the status text and uses its font, colour and position."], 230), 40)
-        afkTimerInheritNote.hideOn = function(d) return not d.afkIconShowText or not d.afkIconShowTimer end
-        Add(afkSettings, nil, 1)
-        afkSection:RegisterChild(afkSettings)
-
         -- Timer Text — elapsed-time text under the icon. Icon mode only (Show as
         -- Text off) with Show Timer on, so the whole box is gated.
-        local afkTimerGroup = GUI:CreateSettingsGroup(self.child, 280)
-        afkTimerGroup:AddWidget(GUI:CreateHeader(self.child, L["Timer Text"]), GUI.RowHeight.sectionHeader)
-        afkTimerGroup.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        afkTimerGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
-        afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Size"], 6, 24, 1, db, "afkIconTimerFontSize", afkTimerCB, afkTimerCB, true), 55)
-        afkTimerGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 55)
-        -- ⚠ SHADOW LIVES INSIDE THE OUTLINE STRING, so this checkbox writes the SAME key as
-        -- the dropdown above — hence the matching inheritKey. afkIconTimerOutline ships
-        -- UNSET so the timer follows the shared status-icon outline; without the fallback
-        -- the box would read unchecked while inheriting a shadow, and ticking it would pin
-        -- the outline to NONE, throwing the inherited style away.
-        afkTimerGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 30)
-        -- Same note the shared Icon Text Settings box carries: only WHETHER there is a
-        -- shadow is per-timer. Its offset and colour are global (fontShadow* keys) because
-        -- on 12.0.7 the shadow rides the font OBJECT — fontstring SetShadow* is a silent
-        -- no-op — and font objects are shared. Shown only while a shadow is actually on.
-        local afkTimerShadowLink = GUI:CreateGlobalFontsShadowLink(self.child, 230)
-        local afkTimerShadowNote = afkTimerGroup:AddWidget(afkTimerShadowLink, afkTimerShadowLink.layoutHeight)
-        afkTimerShadowNote.hideOn = function(d)
-            return not DF:OutlineHasShadow(d.afkIconTimerOutline or d.statusIconFontOutline)
+        local function AFKTimerHidden(d) return not d.afkIconShowTimer or d.afkIconShowText end
+        local function BuildAFKTimerGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = spec.gate
+            group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Size"], 6, 24, 1, db, "afkIconTimerFontSize", afkTimerCB, afkTimerCB, true), 55)
+            group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 55)
+            -- ⚠ SHADOW LIVES INSIDE THE OUTLINE STRING, so this checkbox writes the SAME key as
+            -- the dropdown above — hence the matching inheritKey. afkIconTimerOutline ships
+            -- UNSET so the timer follows the shared status-icon outline; without the fallback
+            -- the box would read unchecked while inheriting a shadow, and ticking it would pin
+            -- the outline to NONE, throwing the inherited style away.
+            group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 30)
+            -- Same note the shared Icon Text Settings box carries: only WHETHER there is a
+            -- shadow is per-timer. Its offset and colour are global (fontShadow* keys) because
+            -- on 12.0.7 the shadow rides the font OBJECT — fontstring SetShadow* is a silent
+            -- no-op — and font objects are shared. Shown only while a shadow is actually on.
+            local afkTimerShadowLink = GUI:CreateGlobalFontsShadowLink(parent, 230)
+            local afkTimerShadowNote = group:AddWidget(afkTimerShadowLink, afkTimerShadowLink.layoutHeight)
+            afkTimerShadowNote.hideOn = function(d)
+                return not DF:OutlineHasShadow(d.afkIconTimerOutline or d.statusIconFontOutline)
+            end
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
         end
-        afkTimerGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
-        afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
-        afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
-        Add(afkTimerGroup, nil, 1)
-        afkSection:RegisterChild(afkTimerGroup)
-        afkTimerGroup.hideOn = function(d) return not d.afkIconShowTimer or d.afkIconShowText end
 
-        -- Appearance
-        local afkAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        afkAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        afkAppearance.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        afkAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "afkIconScale", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
-        afkAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "afkIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("afk") end, true), 55)
-        afkAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "afkIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("afk") end, true)), 55)
-        afkAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "afkIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(afkAppearance, nil, 1)
-        afkSection:RegisterChild(afkAppearance)
+        local function AFKTimerSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.afkIconTimerFontSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local x = tonumber(d.afkIconTimerX) or 0
+            local y = tonumber(d.afkIconTimerY) or 0
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            return Join(parts)
+        end
 
-        -- Position
-        local afkPosition = GUI:CreateSettingsGroup(self.child, 280)
-        afkPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        afkPosition.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        afkPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "afkIconAnchor", function() DF:LightweightUpdateIconPosition("afk") end), 55)
-        afkPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "afkIconX", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
-        afkPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "afkIconY", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
-        Add(afkPosition, nil, 1)
-        afkSection:RegisterChild(afkPosition)
-        
+        MountIcon({
+            key = "afkIcon", id = "afk", section = L["AFK Icon"],
+            enableKey = "afkIconEnabled", enableLabel = L["Enable AFK Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "afkIconShowText",
+            texts = { { label = L["Status Text"], key = "afkIconText" } },
+            after = function(group, parent)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Timer"], db, "afkIconShowTimer", StatusTextCB), 30)
+                -- In text mode the timer is merged into the status text, so the Timer
+                -- Text box is hidden; explain it inherits the main text styling.
+                local afkTimerInheritNote = group:AddWidget(GUI:CreateLabel(parent, L["In Text mode the timer joins the status text and uses its font, colour and position."], 230), 40)
+                afkTimerInheritNote.hideOn = function(d) return not d.afkIconShowText or not d.afkIconShowTimer end
+            end,
+            settingsCount = 5,
+            summaryExtra = function(d, parts)
+                if d.afkIconShowTimer then parts[#parts + 1] = L["Show Timer"] end
+            end,
+            extraGroup = {
+                label = L["Timer Text"], build = BuildAFKTimerGroup, count = 8,
+                summary = AFKTimerSummary, hideOn = AFKTimerHidden,
+            },
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "afkIconEnabled", showTextKey = "afkIconShowText", icons = { "characterupdate_clock-icon" }, texts = { "afkIconText" } },
+        })
+
         -- ============================================
         -- VEHICLE ICON (Collapsible)
         -- ============================================
-        local vehSection = Add(GUI:CreateCollapsibleSection(self.child, L["Vehicle Icon"], false, 280), 36, 1)
-        WireStatusPreview(vehSection, { enableKey = "vehicleIconEnabled", showTextKey = "vehicleIconShowText", icons = { "RaidFrame-Icon-Vehicle" }, texts = { "vehicleIconText" } })
-        
-        -- Settings
-        local vehSettings = GUI:CreateSettingsGroup(self.child, 280)
-        vehSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        vehSettings.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
-        local vehicleIconEnableCb = vehSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Vehicle Icon"], db, "vehicleIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        vehicleIconEnableCb.keepEnabled = true
-        vehSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "vehicleIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        vehSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "vehicleIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(vehSettings, L["Text Color"], "vehicleIconTextColor", "vehicleIconShowText")
-        Add(vehSettings, nil, 1)
-        vehSection:RegisterChild(vehSettings)
+        MountIcon({
+            key = "vehicleIcon", id = "vehicle", section = L["Vehicle Icon"],
+            enableKey = "vehicleIconEnabled", enableLabel = L["Enable Vehicle Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "vehicleIconShowText",
+            texts = { { label = L["Status Text"], key = "vehicleIconText" } },
+            settingsCount = 3,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "vehicleIconEnabled", showTextKey = "vehicleIconShowText", icons = { "RaidFrame-Icon-Vehicle" }, texts = { "vehicleIconText" } },
+        })
 
-        -- Appearance
-        local vehAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        vehAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        vehAppearance.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
-        vehAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "vehicleIconScale", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
-        vehAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "vehicleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("vehicle") end, true), 55)
-        vehAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "vehicleIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("vehicle") end, true)), 55)
-        vehAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "vehicleIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(vehAppearance, nil, 1)
-        vehSection:RegisterChild(vehAppearance)
-
-        -- Position
-        local vehPosition = GUI:CreateSettingsGroup(self.child, 280)
-        vehPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        vehPosition.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
-        vehPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "vehicleIconAnchor", function() DF:LightweightUpdateIconPosition("vehicle") end), 55)
-        vehPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "vehicleIconX", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
-        vehPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "vehicleIconY", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
-        Add(vehPosition, nil, 1)
-        vehSection:RegisterChild(vehPosition)
-        
         -- ============================================
         -- RAID ROLE ICON (Collapsible)
         -- ============================================
-        local rrSection = Add(GUI:CreateCollapsibleSection(self.child, L["Raid Role Icon (MT/MA)"], false, 280), 36, 1)
-        WireStatusPreview(rrSection, { enableKey = "raidRoleIconEnabled", showTextKey = "raidRoleIconShowText", icons = { "RaidFrame-Icon-MainTank", "RaidFrame-Icon-MainAssist" }, texts = { "raidRoleIconTextTank", "raidRoleIconTextAssist" } })
-        
-        -- Settings
-        local rrSettings = GUI:CreateSettingsGroup(self.child, 280)
-        rrSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        rrSettings.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
-        local raidRoleIconEnableCb = rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Raid Role Icon"], db, "raidRoleIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        raidRoleIconEnableCb.keepEnabled = true
-        rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Main Tank"], db, "raidRoleIconShowTank", function() DF:UpdateAllFrames() end), 30)
-        rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Main Assist"], db, "raidRoleIconShowAssist", function() DF:UpdateAllFrames() end), 30)
-        rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "raidRoleIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        rrSettings:AddWidget(GUI:CreateEditBox(self.child, L["Tank Text"], db, "raidRoleIconTextTank", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        rrSettings:AddWidget(GUI:CreateEditBox(self.child, L["Assist Text"], db, "raidRoleIconTextAssist", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(rrSettings, L["Text Color"], "raidRoleIconTextColor", "raidRoleIconShowText")
-        Add(rrSettings, nil, 1)
-        rrSection:RegisterChild(rrSettings)
-
-        -- Appearance
-        local rrAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        rrAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        rrAppearance.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
-        rrAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidRoleIconScale", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
-        rrAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "raidRoleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("raidRole") end, true), 55)
-        rrAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "raidRoleIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("raidRole") end, true)), 55)
-        rrAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "raidRoleIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(rrAppearance, nil, 1)
-        rrSection:RegisterChild(rrAppearance)
-
-        -- Position
-        local rrPosition = GUI:CreateSettingsGroup(self.child, 280)
-        rrPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rrPosition.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
-        rrPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidRoleIconAnchor", function() DF:LightweightUpdateIconPosition("raidRole") end), 55)
-        rrPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "raidRoleIconX", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
-        rrPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "raidRoleIconY", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
-        Add(rrPosition, nil, 1)
-        rrSection:RegisterChild(rrPosition)
+        MountIcon({
+            key = "raidRoleIcon", id = "raidRole", section = L["Raid Role Icon (MT/MA)"],
+            enableKey = "raidRoleIconEnabled", enableLabel = L["Enable Raid Role Icon"],
+            onEnable = OnIconEnabled,
+            before = function(group, parent)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Main Tank"], db, "raidRoleIconShowTank", OnIconEnabled), 30)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Main Assist"], db, "raidRoleIconShowAssist", OnIconEnabled), 30)
+            end,
+            showTextKey = "raidRoleIconShowText",
+            texts = {
+                { label = L["Tank Text"],   key = "raidRoleIconTextTank" },
+                { label = L["Assist Text"], key = "raidRoleIconTextAssist" },
+            },
+            settingsCount = 6,
+            summaryExtra = function(d, parts)
+                -- Both ship on, so the row is silent about them until one is off --
+                -- and then it names the one still showing. With both off the icon
+                -- draws nothing, which the row says outright.
+                local tank, assist = d.raidRoleIconShowTank ~= false, d.raidRoleIconShowAssist ~= false
+                if not (tank and assist) then
+                    if tank then parts[#parts + 1] = L["Show Main Tank"] end
+                    if assist then parts[#parts + 1] = L["Show Main Assist"] end
+                    if not (tank or assist) then parts[#parts + 1] = L["None"] end
+                end
+            end,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "raidRoleIconEnabled", showTextKey = "raidRoleIconShowText", icons = { "RaidFrame-Icon-MainTank", "RaidFrame-Icon-MainAssist" }, texts = { "raidRoleIconTextTank", "raidRoleIconTextAssist" } },
+        })
     end)
     
     -- Indicators > Highlights
@@ -748,18 +1032,28 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageHighlights, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, L["Highlights"], "indicators_highlights"), 25, 2)
-        
-        
+
+
         local currentSection = nil
-        
+
         local function AddToSection(widget, height, col)
             Add(widget, height, col)
             if currentSection then currentSection:RegisterChild(widget) end
             return widget
         end
-        
+
         local highlightModes = {
             ["NONE"] = L["Hidden"],
+            ["SOLID"] = L["Solid Border"],
+            ["ANIMATED"] = L["Animated Border"],
+            ["DASHED"] = L["Dashed Border"],
+            ["GLOW"] = L["Glow"],
+            ["CORNERS"] = L["Corners Only"],
+        }
+
+        local aggroModes = {
+            ["NONE"] = L["Hidden"],
+            ["HEALTH_COLOR"] = L["Health Bar Color"],
             ["SOLID"] = L["Solid Border"],
             ["ANIMATED"] = L["Animated Border"],
             ["DASHED"] = L["Dashed Border"],
@@ -772,158 +1066,444 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- they say what they are; Inset is the one that reads as jargon, and here
         -- the label is a bare "Inset" with not even "Border" in front of it.
         local TIP_HL_INSET = L["How far inside the frame edge the highlight sits. Negative values push it outward, so it rings the frame instead of hugging it — useful when the highlight would otherwise sit under auras or text."]
-        
-        -- ========================================
-        -- SELECTION HIGHLIGHT SECTION
-        -- ========================================
-        local selectionSection = Add(GUI:CreateCollapsibleSection(self.child, L["Selection Highlight"], true), 36, "both")
-        currentSection = selectionSection
-        
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: three collapsible sections, one
+        -- per highlight, wrapping four 280 boxes in the columns they always had.
+        --
+        -- POPOUT turns all four boxes into feature rows, and the three SECTIONS
+        -- into the three bands over them:
+        --
+        --   "Selection Highlight"  Selection Settings
+        --   "Hover Highlight"      Hover Settings
+        --   "Aggro Highlight"      Aggro Settings and Threat Colors
+        --
+        -- ☠ THE SECTIONS BECOME BANDS RATHER THAN SURVIVING AS SECTIONS. A
+        -- collapsible section is kept where it holds several boxes that are worth
+        -- folding away together (the Health Bar page's precedent, and the Icons
+        -- page's, whose section headers also draw a live preview). Here each one
+        -- wraps a single group -- and a row IS a fold, so keeping the section
+        -- would put a fold inside a fold with one thing in it. The band header is
+        -- the section header, minus the disclosure triangle; every name is the
+        -- locale string the section already used.
+        --
+        -- ☠ AND NOTHING ON THIS PAGE HOISTS A TICK. Each highlight's master
+        -- control is its MODE -- a dropdown whose "Hidden" entry is the off
+        -- switch -- not a boolean, so there is nothing a row's tick column could
+        -- carry. Threat Colors' "Use Custom Colors" looks like a candidate and is
+        -- not one: with it off the group still does something (the game's own
+        -- threat palette), so it is a MODE rather than an enable, and hoisting it
+        -- would have printed "Off" over a group that was still colouring frames.
+        -- Left in the pane it also rides that row's Reset Group, which a hoisted
+        -- tick never does.
+        --
+        -- There is no page-wide gate here at all: the three highlights are three
+        -- independent features, so no row greys another.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates }. The classic branch mounts the SAME
+        -- builder into the box it always built -- test_highlights_page_builders.lua
+        -- pins the inventory of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults and the
+        -- band width. nil in classic, which is what every `if classicLayout then`
+        -- arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        local selectionBand, hoverBand, aggroBand
+        if tools then
+            selectionBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            selectionBand:AddWidget(GUI:CreateHeader(self.child, L["Selection Highlight"]), 40)
+            hoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            hoverBand:AddWidget(GUI:CreateHeader(self.child, L["Hover Highlight"]), 40)
+            aggroBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            aggroBand:AddWidget(GUI:CreateHeader(self.child, L["Aggro Highlight"]), 40)
+        end
+
+        -- ===== THE PAGE'S GATES AND APPLIES, AT PAGE SCOPE ================
+        -- ⚠ ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure captures
+        -- the upvalue that exists when it is created -- so one declared above
+        -- these lines would see nil rather than the function.
+        --
+        -- Every gate here is a VARIANT gate on a dropdown pick, which is exactly
+        -- the case the addon-wide convention leaves as a hide -- so unlike the
+        -- Dispel Overlay page these read the same in both layouts and are handed
+        -- to the widgets unchanged.
         local function HideSelectionOptions(d) return d.selectionHighlightMode == "NONE" end
-        
-        local selGroup = GUI:CreateSettingsGroup(self.child, 280)
-        selGroup:AddWidget(GUI:CreateHeader(self.child, L["Selection Settings"]), 40)
-        selGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], highlightModes, db, "selectionHighlightMode", function()
-            self:RefreshStates()
-        end), 55)
-        local selThick = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 10, 1, db, "selectionHighlightThickness", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
-        selThick.hideOn = HideSelectionOptions
-        local selInset = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "selectionHighlightInset", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
-        selInset.hideOn = HideSelectionOptions
-        selInset.tooltip = TIP_HL_INSET
-
-        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
-        -- to reach them. The old answer was "raise the element above the highlight", which
-        -- only works in one direction and cannot reorder the three against each other.
-        -- Defaults keep the pinned values, so nothing moves until someone drags this.
-        local selLevel = selGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "selectionHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("selection") end, true)), 55)
-        selLevel.hideOn = HideSelectionOptions
-        local selAlpha = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "selectionHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
-        selAlpha.hideOn = HideSelectionOptions
-        local selCol = selGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "selectionHighlightColor", false, nil, function() DF:LightweightUpdateSelectionHighlightColor() end, true), 35)
-        selCol.hideOn = HideSelectionOptions
-        AddToSection(selGroup, nil, 1)
-        
-        currentSection = nil
-        AddSpace(GUI.Space.section, "both")
-        
-        -- ========================================
-        -- HOVER HIGHLIGHT SECTION
-        -- ========================================
-        local hoverSection = Add(GUI:CreateCollapsibleSection(self.child, L["Hover Highlight"], true), 36, "both")
-        currentSection = hoverSection
-        
         local function HideHoverOptions(d) return d.hoverHighlightMode == "NONE" end
-        
-        local hoverGroup = GUI:CreateSettingsGroup(self.child, 280)
-        hoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Hover Settings"]), 40)
-        hoverGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], highlightModes, db, "hoverHighlightMode", function()
-            self:RefreshStates()
-        end), 55)
-        local hoverThick = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 10, 1, db, "hoverHighlightThickness", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
-        hoverThick.hideOn = HideHoverOptions
-        local hoverInset = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "hoverHighlightInset", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
-        hoverInset.hideOn = HideHoverOptions
-        hoverInset.tooltip = TIP_HL_INSET
-
-        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
-        -- to reach them. The old answer was "raise the element above the highlight", which
-        -- only works in one direction and cannot reorder the three against each other.
-        -- Defaults keep the pinned values, so nothing moves until someone drags this.
-        local hoverLevel = hoverGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "hoverHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("hover") end, true)), 55)
-        hoverLevel.hideOn = HideHoverOptions
-        local hoverAlpha = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "hoverHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
-        hoverAlpha.hideOn = HideHoverOptions
-        local hoverCol = hoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "hoverHighlightColor", false, nil, function() DF:LightweightUpdateHighlight("hover") end, true), 35)
-        hoverCol.hideOn = HideHoverOptions
-        AddToSection(hoverGroup, nil, 1)
-        
-        currentSection = nil
-        AddSpace(GUI.Space.section, "both")
-        
-        -- ========================================
-        -- AGGRO HIGHLIGHT SECTION
-        -- ========================================
-        local aggroSection = Add(GUI:CreateCollapsibleSection(self.child, L["Aggro Highlight"], true), 36, "both")
-        currentSection = aggroSection
-        
         local function HideAggroOptions(d) return d.aggroHighlightMode == "NONE" or d.aggroHighlightMode == "HEALTH_COLOR" end
         local function HideAggroModeNone(d) return d.aggroHighlightMode == "NONE" end
         local function HideCustomColorOptions(d) return d.aggroHighlightMode == "NONE" or not d.aggroUseCustomColors end
         local function HideNonTankingColors(d) return d.aggroHighlightMode == "NONE" or not d.aggroUseCustomColors or d.aggroOnlyTanking end
-        
-        local aggroModes = {
-            ["NONE"] = L["Hidden"],
-            ["HEALTH_COLOR"] = L["Health Bar Color"],
-            ["SOLID"] = L["Solid Border"],
-            ["ANIMATED"] = L["Animated Border"],
-            ["DASHED"] = L["Dashed Border"],
-            ["GLOW"] = L["Glow"],
-            ["CORNERS"] = L["Corners Only"],
-        }
-        
-        -- Aggro Settings Group (col1)
-        local aggroGroup = GUI:CreateSettingsGroup(self.child, 280)
-        aggroGroup:AddWidget(GUI:CreateHeader(self.child, L["Aggro Settings"]), 40)
-        aggroGroup:AddWidget(GUI:CreateDropdown(self.child, L["Mode"], aggroModes, db, "aggroHighlightMode", function()
-            self:RefreshStates()
-            if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 55)
-        local aggroOnlyTanking = aggroGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Only Show When Tanking"], db, "aggroOnlyTanking", function()
-            self:RefreshStates()
-            if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 28)
-        aggroOnlyTanking.hideOn = HideAggroModeNone
-        -- These two sound like the same thing and are not: one is about YOUR
-        -- role, the other about the unit's. Both say which, from their side.
-        aggroOnlyTanking.tooltip = L["Only highlight threat while YOU are tanking. As a healer or damage dealer the highlight stays off entirely."]
-        local aggroHideOnTanks = aggroGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide on Tanks"], db, "aggroHideOnTanks", function()
-            if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 28)
-        aggroHideOnTanks.hideOn = HideAggroModeNone
-        aggroHideOnTanks.tooltip = L["Skip the highlight on tanks in your group — they are supposed to have threat, so lighting them up is noise. Everyone else still shows."]
-        local aggroThick = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 10, 1, db, "aggroHighlightThickness", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
-        aggroThick.hideOn = HideAggroOptions
-        local aggroInset = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "aggroHighlightInset", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
-        aggroInset.hideOn = HideAggroOptions
-        aggroInset.tooltip = TIP_HL_INSET
 
-        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
-        -- to reach them. The old answer was "raise the element above the highlight", which
-        -- only works in one direction and cannot reorder the three against each other.
-        -- Defaults keep the pinned values, so nothing moves until someone drags this.
-        local aggroLevel = aggroGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "aggroHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("aggro") end, true)), 55)
-        aggroLevel.hideOn = HideAggroOptions
-        local aggroAlpha = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "aggroHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
-        aggroAlpha.hideOn = HideAggroOptions
-        AddToSection(aggroGroup, nil, 1)
-        
-        -- Threat Colors Group (col2)
-        local threatGroup = GUI:CreateSettingsGroup(self.child, 280)
-        threatGroup:AddWidget(GUI:CreateHeader(self.child, L["Threat Colors"]), 40)
-        local useCustomColors = threatGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Custom Colors"], db, "aggroUseCustomColors", function()
-            self:RefreshStates()
+        -- What a write to each family costs, named once so a row's footer applies
+        -- exactly what that row's own controls apply.
+        local function ApplySelectionHighlight()
+            DF:LightweightUpdateHighlight("selection")
+            DF:LightweightUpdateSelectionHighlightColor()
+        end
+        local function ApplyHoverHighlight()
+            DF:LightweightUpdateHighlight("hover")
+        end
+        local function ApplyAggroHighlight()
+            DF:LightweightUpdateHighlight("aggro")
             if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
-        end), 28)
-        useCustomColors.hideOn = HideAggroModeNone
-        local colorHighThreat = threatGroup:AddWidget(GUI:CreateColorPicker(self.child, L["High Threat (Yellow)"], db, "aggroColorHighThreat", false, nil, function()
-            DF:LightweightUpdateHighlight("aggro")
-        end, true), 30)
-        colorHighThreat.hideOn = HideNonTankingColors
-        local colorHighestThreat = threatGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Highest Threat (Orange)"], db, "aggroColorHighestThreat", false, nil, function()
-            DF:LightweightUpdateHighlight("aggro")
-        end, true), 30)
-        colorHighestThreat.hideOn = HideNonTankingColors
-        local colorTanking = threatGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Tanking (Red)"], db, "aggroColorTanking", false, nil, function()
-            DF:LightweightUpdateHighlight("aggro")
-        end, true), 30)
-        colorTanking.hideOn = HideCustomColorOptions
-        threatGroup:AddWidget(GUI:CreateLabel(self.child, L["Yellow=high, Orange=highest, Red=tanking."], 230), 25)
-        threatGroup.hideOn = HideAggroModeNone
-        AddToSection(threatGroup, nil, 2)
-        
-        currentSection = nil
-        
+        end
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these
+        -- keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- Selection and Hover are the SAME four facts about the same four keys,
+        -- so the summary is written once and given the prefix. The mode word
+        -- first, because it is the one that decides whether the rest exists at
+        -- all -- with it on Hidden there is no thickness, inset or alpha behind
+        -- the row, and classic hides those controls outright.
+        local function HighlightSummary(d, prefix)
+            if not d then return "" end
+            local parts = {}
+            local mode = d[prefix .. "HighlightMode"]
+            local word = highlightModes[mode]
+            if word then parts[#parts + 1] = word end
+            if mode == "NONE" then return Join(parts) end
+            local t = tonumber(d[prefix .. "HighlightThickness"])
+            if t then parts[#parts + 1] = format("%dpx", math.floor(t)) end
+            local inset = tonumber(d[prefix .. "HighlightInset"])
+            if inset and inset ~= 0 then parts[#parts + 1] = format("%s %d", L["Inset"], inset) end
+            local a = tonumber(d[prefix .. "HighlightAlpha"])
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+        local function SelectionSettingsSummary(d) return HighlightSummary(d, "selection") end
+        local function HoverSettingsSummary(d) return HighlightSummary(d, "hover") end
+
+        -- Aggro is the same shape plus the two questions that are only about
+        -- aggro -- and it has a SECOND mode with nothing to report:
+        -- HEALTH_COLOR tints the bar rather than drawing a border, so there is no
+        -- thickness behind it either. Inset and alpha are dropped to keep the
+        -- four-item budget for the two flags, which are what people come to this
+        -- row for.
+        local function AggroSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local mode = d.aggroHighlightMode
+            local word = aggroModes[mode]
+            if word then parts[#parts + 1] = word end
+            if mode == "NONE" then return Join(parts) end
+            if mode ~= "HEALTH_COLOR" then
+                local t = tonumber(d.aggroHighlightThickness)
+                if t then parts[#parts + 1] = format("%dpx", math.floor(t)) end
+            end
+            if d.aggroOnlyTanking then parts[#parts + 1] = L["Only Show When Tanking"] end
+            if d.aggroHideOnTanks then parts[#parts + 1] = L["Hide on Tanks"] end
+            return Join(parts)
+        end
+
+        -- The one thing three swatches cannot say for themselves: whether they
+        -- are being used at all. Silent on the shipped profile, which takes the
+        -- game's own threat palette.
+        local function ThreatColorsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if d.aggroUseCustomColors then
+                parts[#parts + 1] = L["Use Custom Colors"]
+                -- With Only Show When Tanking on, two of the three swatches are
+                -- out of reach -- the highlight only ever appears at tanking
+                -- threat -- so the row names the one that is left.
+                if d.aggroOnlyTanking then parts[#parts + 1] = L["Tanking (Red)"] end
+            end
+            return Join(parts)
+        end
+
+        -- ========================================
+        -- SELECTION HIGHLIGHT SECTION
+        -- ========================================
+        -- ★ Frame Level (all three groups). Highlights were pinned at 75/76/77 in
+        -- Highlights.lua with no way to reach them. The old answer was "raise the
+        -- element above the highlight", which only works in one direction and
+        -- cannot reorder the three against each other. Defaults keep the pinned
+        -- values, so nothing moves until someone drags this.
+        local function BuildSelectionHighlightGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Mode"], highlightModes, db, "selectionHighlightMode", function()
+                tools2.refreshStates()
+            end), 55)
+            local selThick = group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 10, 1, db, "selectionHighlightThickness", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
+            selThick.hideOn = HideSelectionOptions
+            local selInset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, db, "selectionHighlightInset", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
+            selInset.hideOn = HideSelectionOptions
+            selInset.tooltip = TIP_HL_INSET
+            local selLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "selectionHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("selection") end, true)), 55)
+            selLevel.hideOn = HideSelectionOptions
+            local selAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, "selectionHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
+            selAlpha.hideOn = HideSelectionOptions
+            local selCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "selectionHighlightColor", false, nil, function() DF:LightweightUpdateSelectionHighlightColor() end, true), 35)
+            selCol.hideOn = HideSelectionOptions
+        end
+
+        if classicLayout then
+            local selectionSection = Add(GUI:CreateCollapsibleSection(self.child, L["Selection Highlight"], true), 36, "both")
+            currentSection = selectionSection
+
+            local selGroup = GUI:CreateSettingsGroup(self.child, 280)
+            selGroup:AddWidget(GUI:CreateHeader(self.child, L["Selection Settings"]), 40)
+            BuildSelectionHighlightGroup({
+                group = selGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(selGroup, nil, 1)
+
+            currentSection = nil
+            AddSpace(GUI.Space.section, "both")
+        else
+            -- Six: the mode, thickness, inset, frame level, alpha and the colour.
+            local SELECTION_COUNT = 6
+
+            local selectionMount, selectionContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildSelectionHighlightGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local selectionRow = selectionBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Selection Settings"],
+                db      = tools.RowDB,
+                summary = SelectionSettingsSummary,
+                count   = SELECTION_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = selectionMount,
+            }))
+            tools.ClaimKeys(selectionRow, selectionContent)
+            tools.WireModifiedTick(selectionRow)
+            tools.WireFooter(selectionRow, ApplySelectionHighlight)
+        end
+
+        -- ========================================
+        -- HOVER HIGHLIGHT SECTION
+        -- ========================================
+        local function BuildHoverHighlightGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Mode"], highlightModes, db, "hoverHighlightMode", function()
+                tools2.refreshStates()
+            end), 55)
+            local hoverThick = group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 10, 1, db, "hoverHighlightThickness", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
+            hoverThick.hideOn = HideHoverOptions
+            local hoverInset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, db, "hoverHighlightInset", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
+            hoverInset.hideOn = HideHoverOptions
+            hoverInset.tooltip = TIP_HL_INSET
+            local hoverLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "hoverHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("hover") end, true)), 55)
+            hoverLevel.hideOn = HideHoverOptions
+            local hoverAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, "hoverHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
+            hoverAlpha.hideOn = HideHoverOptions
+            local hoverCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "hoverHighlightColor", false, nil, function() DF:LightweightUpdateHighlight("hover") end, true), 35)
+            hoverCol.hideOn = HideHoverOptions
+        end
+
+        if classicLayout then
+            local hoverSection = Add(GUI:CreateCollapsibleSection(self.child, L["Hover Highlight"], true), 36, "both")
+            currentSection = hoverSection
+
+            local hoverGroup = GUI:CreateSettingsGroup(self.child, 280)
+            hoverGroup:AddWidget(GUI:CreateHeader(self.child, L["Hover Settings"]), 40)
+            BuildHoverHighlightGroup({
+                group = hoverGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(hoverGroup, nil, 1)
+
+            currentSection = nil
+            AddSpace(GUI.Space.section, "both")
+        else
+            -- Six: the same set the Selection row carries.
+            local HOVER_COUNT = 6
+
+            local hoverMount, hoverContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildHoverHighlightGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local hoverRow = hoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Hover Settings"],
+                db      = tools.RowDB,
+                summary = HoverSettingsSummary,
+                count   = HOVER_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = hoverMount,
+            }))
+            tools.ClaimKeys(hoverRow, hoverContent)
+            tools.WireModifiedTick(hoverRow)
+            tools.WireFooter(hoverRow, ApplyHoverHighlight)
+        end
+
+        -- ========================================
+        -- AGGRO HIGHLIGHT SECTION
+        -- ========================================
+        -- Aggro Settings Group (col1)
+        local function BuildAggroHighlightGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Mode"], aggroModes, db, "aggroHighlightMode", function()
+                -- ⚠ THIS ONE MOVES THE OTHER ROW. Hidden takes the Threat Colors
+                -- row out of the band entirely, exactly as it took the box out of
+                -- the column -- and the state pass is what does it, in both
+                -- layouts, through the same door.
+                tools2.refreshStates()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 55)
+            local aggroOnlyTanking = group:AddWidget(GUI:CreateCheckbox(parent, L["Only Show When Tanking"], db, "aggroOnlyTanking", function()
+                -- ⚠ AND SO DOES THIS ONE, one level down: with it on, two of the
+                -- three swatches on the Threat Colors row are out of reach.
+                tools2.refreshStates()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 28)
+            aggroOnlyTanking.hideOn = HideAggroModeNone
+            -- These two sound like the same thing and are not: one is about YOUR
+            -- role, the other about the unit's. Both say which, from their side.
+            aggroOnlyTanking.tooltip = L["Only highlight threat while YOU are tanking. As a healer or damage dealer the highlight stays off entirely."]
+            local aggroHideOnTanks = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide on Tanks"], db, "aggroHideOnTanks", function()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 28)
+            aggroHideOnTanks.hideOn = HideAggroModeNone
+            aggroHideOnTanks.tooltip = L["Skip the highlight on tanks in your group — they are supposed to have threat, so lighting them up is noise. Everyone else still shows."]
+            local aggroThick = group:AddWidget(GUI:CreateSlider(parent, L["Thickness"], 1, 10, 1, db, "aggroHighlightThickness", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
+            aggroThick.hideOn = HideAggroOptions
+            local aggroInset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, db, "aggroHighlightInset", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
+            aggroInset.hideOn = HideAggroOptions
+            aggroInset.tooltip = TIP_HL_INSET
+            local aggroLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "aggroHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("aggro") end, true)), 55)
+            aggroLevel.hideOn = HideAggroOptions
+            local aggroAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, "aggroHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
+            aggroAlpha.hideOn = HideAggroOptions
+        end
+
+        -- Threat Colors Group (col2)
+        local function BuildThreatColorsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            local useCustomColors = group:AddWidget(GUI:CreateCheckbox(parent, L["Use Custom Colors"], db, "aggroUseCustomColors", function()
+                tools2.refreshStates()
+                if DF.UpdateAllHighlights then DF:UpdateAllHighlights() end
+            end), 28)
+            useCustomColors.hideOn = HideAggroModeNone
+            local colorHighThreat = group:AddWidget(GUI:CreateColorPicker(parent, L["High Threat (Yellow)"], db, "aggroColorHighThreat", false, nil, function()
+                DF:LightweightUpdateHighlight("aggro")
+            end, true), 30)
+            colorHighThreat.hideOn = HideNonTankingColors
+            local colorHighestThreat = group:AddWidget(GUI:CreateColorPicker(parent, L["Highest Threat (Orange)"], db, "aggroColorHighestThreat", false, nil, function()
+                DF:LightweightUpdateHighlight("aggro")
+            end, true), 30)
+            colorHighestThreat.hideOn = HideNonTankingColors
+            local colorTanking = group:AddWidget(GUI:CreateColorPicker(parent, L["Tanking (Red)"], db, "aggroColorTanking", false, nil, function()
+                DF:LightweightUpdateHighlight("aggro")
+            end, true), 30)
+            colorTanking.hideOn = HideCustomColorOptions
+            group:AddWidget(GUI:CreateLabel(parent, L["Yellow=high, Orange=highest, Red=tanking."], 230), 25)
+        end
+
+        if classicLayout then
+            local aggroSection = Add(GUI:CreateCollapsibleSection(self.child, L["Aggro Highlight"], true), 36, "both")
+            currentSection = aggroSection
+
+            local aggroGroup = GUI:CreateSettingsGroup(self.child, 280)
+            aggroGroup:AddWidget(GUI:CreateHeader(self.child, L["Aggro Settings"]), 40)
+            BuildAggroHighlightGroup({
+                group = aggroGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            AddToSection(aggroGroup, nil, 1)
+
+            local threatGroup = GUI:CreateSettingsGroup(self.child, 280)
+            threatGroup:AddWidget(GUI:CreateHeader(self.child, L["Threat Colors"]), 40)
+            BuildThreatColorsGroup({
+                group = threatGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            threatGroup.hideOn = HideAggroModeNone
+            AddToSection(threatGroup, nil, 2)
+
+            currentSection = nil
+        else
+            -- Seven: the mode, the two tanking questions, thickness, inset, frame
+            -- level and alpha.
+            local AGGRO_COUNT = 7
+            -- Five: the custom-colours tick, the three swatches and the legend.
+            local THREAT_COUNT = 5
+
+            local aggroMount, aggroContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildAggroHighlightGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local aggroRow = aggroBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Aggro Settings"],
+                db      = tools.RowDB,
+                summary = AggroSettingsSummary,
+                count   = AGGRO_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = aggroMount,
+            }))
+            tools.ClaimKeys(aggroRow, aggroContent)
+            tools.WireModifiedTick(aggroRow)
+            tools.WireFooter(aggroRow, ApplyAggroHighlight)
+
+            local threatMount, threatContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildThreatColorsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local threatRow = aggroBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Threat Colors"],
+                db      = tools.RowDB,
+                summary = ThreatColorsSummary,
+                count   = THREAT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = threatMount,
+            }))
+            -- The box's own gate becomes the ROW's, so the band collapses the slot
+            -- instead of drawing a plate for a palette no highlight will use.
+            -- ⚠ The band header stays over something either way: Aggro Settings
+            -- carries the mode that hides this one, and never hides itself.
+            threatRow.hideOn = HideAggroModeNone
+            tools.ClaimKeys(threatRow, threatContent)
+            tools.WireModifiedTick(threatRow)
+            -- ⚠ A FOOTER IS SAFE HERE, and that is a decision about the KEYS
+            -- rather than the shape. Three colour tables and a boolean, all of
+            -- them plain profile settings the defaults engine can write; the
+            -- swatches re-read their table on every value sweep, so a reset that
+            -- replaces one is repainted rather than detached.
+            tools.WireFooter(threatRow, ApplyAggroHighlight)
+        end
+
+        -- ===== THE THREE BANDS, IN READING ORDER ==========================
+        -- Added at the foot rather than in place: all three are full width, so
+        -- there is no column flow left to unbalance and the order below is purely
+        -- the order the page reads in -- the order the three sections had.
+        if not classicLayout then
+            Add(selectionBand, nil, "both")
+            Add(hoverBand, nil, "both")
+            Add(aggroBand, nil, "both")
+        end
+
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
@@ -969,32 +1549,222 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             InvalidateCurves()
         end
 
-        -- ===== ENABLE + SHARED SETTINGS =====
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: five 280 boxes in two columns,
+        -- in the columns and the order they have always had.
+        --
+        -- POPOUT turns four of them into feature rows and the fifth — Display,
+        -- which holds one checkbox — into a CONTROL ROW, in two bands:
+        --
+        --   "Content"      Settings — whether the overlay exists at all, which
+        --                  dispels light it up, and where its colours come from.
+        --   "Appearance"   Pulse Overlay (the control row), Dispel Symbol,
+        --                  Border, Gradient — the four things drawn.
+        --
+        -- ⚠ THE CONTROL ROW IS NAMED FOR ITS SETTING, NOT FOR ITS BOX. A control
+        -- row draws ONE name and that name is the setting's, so the plate reads
+        -- "Pulse Overlay" and the box's own "Display" header is freed to become
+        -- the band it always described.
+        --
+        -- Both band headers are locale strings the page already ships, and
+        -- neither can strand: the Content band's row carries the page's own gate
+        -- and is never hidden, and nothing in the Appearance band can hide.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
+        -- it always built — test_dispel_page_builders.lua pins the inventory of
+        -- each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which is
+        -- what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        local contentBand, appearanceBand
+        if tools then
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
+            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        end
+
+        -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
+        -- These tables used to sit inside the box that offered them. The rows
+        -- print the chosen value as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder — so the word has to come out of the same
+        -- table the dropdown offers, or a row could say one thing while the
+        -- control behind it says another.
+        --
+        -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure
+        -- captures the upvalue that exists when it is created — so one declared
+        -- above these lines would see nil rather than the table.
+        local dispelIndicatorOptions = { [1]= L["Dispellable By Me"], [2]= L["All Dispellable"] }
+        local iconPositions = {
+            ["CENTER"]= L["Center"], ["TOP"]= L["Top"], ["BOTTOM"]= L["Bottom"],
+            ["LEFT"]= L["Left"], ["RIGHT"]= L["Right"],
+            ["TOPLEFT"]= L["Top Left"], ["TOPRIGHT"]= L["Top Right"],
+            ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOMRIGHT"]= L["Bottom Right"],
+        }
+        local gradientStyles = {
+            ["FULL"]= L["Full Frame"], ["TOP"]= L["Top Edge"], ["BOTTOM"]= L["Bottom Edge"],
+            ["LEFT"]= L["Left Edge"], ["RIGHT"]= L["Right Edge"], ["EDGE"]= L["Edge Glow (All Sides)"],
+        }
+        local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
+
+        -- Boolean toggles GREY their dependent controls in place (addon-wide
+        -- convention); hideOn stays for the feature/variant switches only.
+        local DisableIfNoGradient = function(d) return d.dispelShowGradient == false end
+        local DisableIfNoBorder = function(d) return d.dispelShowBorder == false end
+        local DisableIfNoIcon = function(d) return d.dispelShowIcon == false end
+
+        -- ☠ THE PAGE GATE IS SAID TWICE, BECAUSE THE TWO LAYOUTS CANNOT SAY IT
+        -- THE SAME WAY. In classic every dependent control HIDES with the overlay
+        -- — a hideOn on each widget and on four of the five boxes — and that is
+        -- left exactly as it was.
+        --
+        -- A pane cannot do that. Hiding a row's whole contents leaves a live row
+        -- over an EMPTY panel, and hiding the rows themselves leaves the band
+        -- header standing over nothing — which is the header the Defensive Icon
+        -- page refused to build for exactly that reason. So the popout layout
+        -- says the gate ONCE, where every other converted page says it: as a
+        -- GREY, on the row (row.disableOn = DispelOffRow) — plus, on the Settings
+        -- row, the kit's own toggle gate, which greys that pane and its footer
+        -- whenever the row's tick is off.
+        --
+        -- ⚠ AND IT IS THE CONVENTION THIS PAGE'S OWN SOURCE STATES four lines up:
+        -- a boolean toggle greys in place. Classic's whole-group hide is the odd
+        -- one out, and it is not disturbed.
+        --
+        -- ⚠ THE SETTINGS ROW IS THE EXCEPTION, for the Buff Bar's reason: it
+        -- holds the gate's own tick, so greying it would leave no way to switch
+        -- the overlay back on.
+        local function DispelOffRow(d) return not (d or db).dispelOverlayEnabled end
+
+        -- `also` is a widget's OWN variant gate, which survives in both layouts;
+        -- only the page gate is dropped from the pane.
+        local function GateHide(tools2, w, also)
+            if tools2.popout then
+                if also then w.hideOn = also end
+            elseif also then
+                w.hideOn = function(d) return HideIfDisabled(d) or also(d) end
+            else
+                w.hideOn = HideDispelOptions
+            end
+            return w
+        end
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these
+        -- keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- ===== ENABLE + SHARED SETTINGS (a 280 box in column 1 in classic, the
+        -- Content band's only row) =====
         -- 12.1 unified overlay: ONE container-slot-driven system (Features/
         -- Dispel.lua factory path) covering normal AND private-aura dispels
         -- natively. The old Off / DandersFrames / Blizzard / Hybrid source
         -- selector collapsed into this single toggle when the Blizzard wrapper
         -- retired (settings migrate: any non-Off source = enabled).
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-            GUI:RefreshCurrentPage()
-        end), 30)
-        local dispelIndicatorOptions = { [1]= L["Dispellable By Me"], [2]= L["All Dispellable"] }
-        local dispelIndicatorDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
-            OnDispelTypeChanged()
-        end), 55)
-        dispelIndicatorDropdown.hideOn = HideIfDisabled
-        dispelIndicatorDropdown.tooltip = L["Dispellable By Me only lights up debuffs your current spec can actually remove. All Dispellable lights up every removable debuff, including ones for someone else to handle."]
-        -- Dispel-type colours come from the shared account palette on the Colors page
-        -- (defaults = the game palette; Reset restores it). The overlay always follows
-        -- it — no game-vs-custom toggle — so this is just a link to where you edit them.
-        local overlayColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
-        settingsGroup:AddWidget(overlayColorsLink, (overlayColorsLink.layoutHeight or 16) + 2)
-        overlayColorsLink.hideOn = HideIfDisabled
-        Add(settingsGroup, nil, 1)
+        --
+        -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
+        -- rather than two control rows: a control row carries a SETTING rather
+        -- than a group, so it can offer neither the group's Reset Group nor the
+        -- tick that says the group has been touched — and the page gate would
+        -- then belong to no row at all.
+        local function BuildDispelSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the page's only on/off control.
+            --
+            -- ⚠ AND THE PAGE REBUILD LIVES AND DIES IN HERE. Classic has always
+            -- paid for the gate with a whole-page rebuild and keeps doing exactly
+            -- that; the popout's commit (OnDispelEnableToggle) is a state pass
+            -- and a reflow, because a rebuild retires the row being clicked.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                    GUI:RefreshCurrentPage()
+                end), 30)
+            end
+            local dispelIndicatorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
+                OnDispelTypeChanged()
+            end), 55)
+            GateHide(tools2, dispelIndicatorDropdown)
+            dispelIndicatorDropdown.tooltip = L["Dispellable By Me only lights up debuffs your current spec can actually remove. All Dispellable lights up every removable debuff, including ones for someone else to handle."]
+            -- Dispel-type colours come from the shared account palette on the Colors page
+            -- (defaults = the game palette; Reset restores it). The overlay always follows
+            -- it — no game-vs-custom toggle — so this is just a link to where you edit them.
+            local overlayColorsLink = GUI:CreateDispelColorsPageLink(parent, 260)
+            group:AddWidget(overlayColorsLink, (overlayColorsLink.layoutHeight or 16) + 2)
+            GateHide(tools2, overlayColorsLink)
+        end
+
+        -- The one thing the row does not already say with its tick: WHICH dispels
+        -- light the overlay up. Always printed — it is the row's whole substance,
+        -- and the shipped profile's answer (All Dispellable) is the one people
+        -- most often want to change.
+        local function DispelSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local which = dispelIndicatorOptions[d.dispelOverlayDispelType]
+            if which then parts[#parts + 1] = which end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+            BuildDispelSettingsGroup({
+                group = settingsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(settingsGroup, nil, 1)
+        else
+            -- Two: the Show Overlay For dropdown and the Colors-page link. The
+            -- Enable tick is HOISTED onto the row.
+            local DISPEL_SETTINGS_COUNT = 2
+
+            -- What the suppressed Enable checkbox ran, minus the page rebuild:
+            -- that would retire every widget on the page including the row being
+            -- clicked through. The four rows that grey with it are repainted by
+            -- the page's own state pass, and the panes standing open by the
+            -- reflow.
+            local function OnDispelEnableToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelSettingsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Settings"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelOverlayEnabled" },
+                summary  = DispelSettingsSummary,
+                count    = DISPEL_SETTINGS_COUNT,
+                onToggle = OnDispelEnableToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = settingsMount,
+            }))
+            tools.ClaimKeys(settingsRow, settingsContent)
+            tools.WireModifiedTick(settingsRow)
+            tools.WireFooter(settingsRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(settingsRow, L["Enable Dispel Overlay"], "dispelOverlayEnabled", OnDispelEnableToggle)
+        end
 
         -- The four boxes below used to sit under an "Appearance" collapsible
         -- header -- the last section in the addon named for a CATEGORY rather
@@ -1004,174 +1774,411 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- It costs nothing to remove: every box already declares the same
         -- hideOn it was inheriting from the section, so the whole block still
         -- disappears when the overlay is off.
+        --
+        -- ⚠ AND THE POPOUT LAYOUT'S "Appearance" BAND IS NOT THAT HEADER COMING
+        -- BACK. A band is the page's own top-level grouping — the shape "Content
+        -- / Icon / Text" takes on every converted page — not a collapsible
+        -- section the user has to open to reach a box that was already visible.
 
-        -- Display group (quick toggles) — Column 1
-        local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
-        displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
-        -- Show Border / Show Gradient are the master toggles for their features, so
-        -- each one now HEADS its own group below (Border / Gradient) — mirroring the
-        -- Show Dispel Symbol toggle that heads the Symbol group. Keeps every group's
-        -- on/off switch at the top of that group.
-        -- Boolean toggles GREY their dependent controls in place (addon-wide
-        -- convention); hideOn stays for the feature/variant switches only.
-        local DisableIfNoGradient = function(d) return d.dispelShowGradient == false end
-        local DisableIfNoBorder = function(d) return d.dispelShowBorder == false end
-        local DisableIfNoIcon = function(d) return d.dispelShowIcon == false end
-        local animate = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Overlay"], db, "dispelAnimate", function()
-            ApplyDispelSettings()
-        end), 30)
-        animate.hideOn = HideDispelOptions
-        -- (Color Name Text removed 2026-07-25 — see Features/Dispel.lua. Its only render
-        -- path was the legacy test-mode show, so it tinted the preview and did nothing
-        -- live; a real version needs an occlusion-safe name tint on the slot overlay.)
-        displayGroup.hideOn = HideDispelOptions
-        Add(displayGroup, nil, 1)
+        -- ===== DISPLAY (a 280 box in column 1 in classic, the Appearance band's
+        -- first plate) =====
+        -- ☠ ONE SETTING, SO A CONTROL ROW RATHER THAN A WAY IN. There is nothing
+        -- behind this plate to open: a popout row here would be a panel holding a
+        -- single checkbox, and the row's own tick column already IS that
+        -- checkbox. The trade is the group's two verbs — a control row offers no
+        -- Reset Group and no amber tick — which for one boolean the modified dot
+        -- on the control itself already covers.
+        if classicLayout then
+            local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
+            displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
+            -- Show Border / Show Gradient are the master toggles for their features, so
+            -- each one now HEADS its own group below (Border / Gradient) — mirroring the
+            -- Show Dispel Symbol toggle that heads the Symbol group. Keeps every group's
+            -- on/off switch at the top of that group.
+            local animate = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Overlay"], db, "dispelAnimate", function()
+                ApplyDispelSettings()
+            end), 30)
+            animate.hideOn = HideDispelOptions
+            -- (Color Name Text removed 2026-07-25 — see Features/Dispel.lua. Its only render
+            -- path was the legacy test-mode show, so it tinted the preview and did nothing
+            -- live; a real version needs an occlusion-safe name tint on the slot overlay.)
+            displayGroup.hideOn = HideDispelOptions
+            Add(displayGroup, nil, 1)
+        else
+            local animateRow = appearanceBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Pulse Overlay"],
+                kind      = "checkbox",
+                -- The FUNCTION form: the table is re-resolved on each read, so a
+                -- mode switch is followed rather than frozen at whichever table
+                -- this build captured.
+                db        = tools.RowDB,
+                key       = "dispelAnimate",
+                onChanged = ApplyDispelSettings,
+            }))
+            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
+            -- are the popout row's own slot), which is what makes a control row and
+            -- a feature row share one rhythm in a band.
+            --
+            -- The page gate, as a GREY rather than the box's hide -- see the essay
+            -- at DispelOffRow.
+            animateRow.disableOn = DispelOffRow
+            tools.RegisterControlRow(animateRow, "checkbox", "dispelAnimate", false, ApplyDispelSettings)
+        end
 
-        -- ===== ICON GROUP (Column 2) =====
-        local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
-        iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
-        local showIcon = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showIcon.hideOn = HideDispelOptions
-        local iconSize = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Symbol Size"], 10, 40, 1, db, "dispelIconSize", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconSize.hideOn = HideDispelOptions
-        iconSize.disableOn = DisableIfNoIcon
-        local iconAlpha = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Symbol Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
-            InvalidateCurves()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconAlpha.hideOn = HideDispelOptions
-        iconAlpha.disableOn = DisableIfNoIcon
-        local iconPositions = {
-            ["CENTER"]= L["Center"], ["TOP"]= L["Top"], ["BOTTOM"]= L["Bottom"],
-            ["LEFT"]= L["Left"], ["RIGHT"]= L["Right"],
-            ["TOPLEFT"]= L["Top Left"], ["TOPRIGHT"]= L["Top Right"],
-            ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOMRIGHT"]= L["Bottom Right"],
-        }
-        local iconPos = iconGroup:AddWidget(GUI:CreateDropdown(self.child, L["Symbol Position"], iconPositions, db, "dispelIconPosition", function()
-            ApplyDispelSettings()
-        end), 55)
-        iconPos.hideOn = HideDispelOptions
-        iconPos.disableOn = DisableIfNoIcon
-        local iconOffsetX = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "dispelIconOffsetX", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconOffsetX.hideOn = HideDispelOptions
-        iconOffsetX.disableOn = DisableIfNoIcon
-        local iconOffsetY = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "dispelIconOffsetY", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconOffsetY.hideOn = HideDispelOptions
-        iconOffsetY.disableOn = DisableIfNoIcon
-        iconGroup.hideOn = HideDispelOptions
-        Add(iconGroup, nil, 2)
+        -- ===== ICON GROUP (a 280 box in column 2 in classic, the Appearance
+        -- band's second row) =====
+        local function BuildDispelIconGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- ===== BORDER GROUP (Column 1) =====
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local showBorder = borderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Border"], db, "dispelShowBorder", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showBorder.hideOn = HideDispelOptions
-        local borderSize = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Thickness"], 1, 6, 1, db, "dispelBorderSize", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        borderSize.hideOn = HideDispelOptions
-        borderSize.disableOn = DisableIfNoBorder
-        local borderInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Inset"], -4, 4, 1, db, "dispelBorderInset", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        borderInset.hideOn = HideDispelOptions
-        borderInset.disableOn = DisableIfNoBorder
-        borderInset.tooltip = L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."]
-        local borderAlpha = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Opacity"], 0.1, 1.0, 0.1, db, "dispelBorderAlpha", function()
-            InvalidateCurves()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        borderAlpha.hideOn = HideDispelOptions
-        borderAlpha.disableOn = DisableIfNoBorder
-        borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
-        Add(borderGroup, nil, 2)
+            -- Suppressed when the ROW carries this tick; still the group's own
+            -- head in classic.
+            if not tools2.hoistToggle then
+                local showIcon = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                end), 30)
+                GateHide(tools2, showIcon)
+            end
+            local iconSize = group:AddWidget(GUI:CreateSlider(parent, L["Symbol Size"], 10, 40, 1, db, "dispelIconSize", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconSize)
+            iconSize.disableOn = DisableIfNoIcon
+            local iconAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Symbol Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
+                InvalidateCurves()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconAlpha)
+            iconAlpha.disableOn = DisableIfNoIcon
+            local iconPos = group:AddWidget(GUI:CreateDropdown(parent, L["Symbol Position"], iconPositions, db, "dispelIconPosition", function()
+                ApplyDispelSettings()
+            end), 55)
+            GateHide(tools2, iconPos)
+            iconPos.disableOn = DisableIfNoIcon
+            local iconOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "dispelIconOffsetX", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconOffsetX)
+            iconOffsetX.disableOn = DisableIfNoIcon
+            local iconOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "dispelIconOffsetY", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconOffsetY)
+            iconOffsetY.disableOn = DisableIfNoIcon
+        end
 
-        -- ===== GRADIENT GROUP (Column 1) =====
+        -- Size in pixels, then where it sits, then the two things that are only
+        -- worth naming while they are doing something — the offsets and the
+        -- opacity (a row reading "1.00" on every default profile is noise, the
+        -- Buff Bar's appearance rule).
+        local function DispelIconSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.dispelIconSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local pos = iconPositions[d.dispelIconPosition]
+            if pos then parts[#parts + 1] = pos end
+            local x, y = tonumber(d.dispelIconOffsetX) or 0, tonumber(d.dispelIconOffsetY) or 0
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            local a = tonumber(d.dispelIconAlpha)
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
+            iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
+            BuildDispelIconGroup({
+                group = iconGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            iconGroup.hideOn = HideDispelOptions
+            Add(iconGroup, nil, 2)
+        else
+            -- Five: size, opacity, position and the two offsets. The Show Dispel
+            -- Symbol tick is HOISTED onto the row.
+            local DISPEL_ICON_COUNT = 5
+
+            -- What the suppressed Show Dispel Symbol checkbox ran, and never a
+            -- page rebuild.
+            local function OnDispelIconToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local iconMount, iconContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelIconGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local iconRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Dispel Symbol"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelShowIcon" },
+                summary  = DispelIconSummary,
+                count    = DISPEL_ICON_COUNT,
+                onToggle = OnDispelIconToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = iconMount,
+            }))
+            tools.ClaimKeys(iconRow, iconContent)
+            tools.WireModifiedTick(iconRow)
+            tools.WireFooter(iconRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(iconRow, L["Show Dispel Symbol"], "dispelShowIcon", OnDispelIconToggle)
+            iconRow.disableOn = DispelOffRow
+        end
+
+        -- ===== BORDER GROUP (a 280 box in column 2 in classic, the Appearance
+        -- band's third row) =====
+        local function BuildDispelBorderGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local showBorder = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Border"], db, "dispelShowBorder", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                end), 30)
+                GateHide(tools2, showBorder)
+            end
+            local borderSize = group:AddWidget(GUI:CreateSlider(parent, L["Border Thickness"], 1, 6, 1, db, "dispelBorderSize", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, borderSize)
+            borderSize.disableOn = DisableIfNoBorder
+            local borderInset = group:AddWidget(GUI:CreateSlider(parent, L["Border Inset"], -4, 4, 1, db, "dispelBorderInset", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, borderInset)
+            borderInset.disableOn = DisableIfNoBorder
+            borderInset.tooltip = L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."]
+            local borderAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Border Opacity"], 0.1, 1.0, 0.1, db, "dispelBorderAlpha", function()
+                InvalidateCurves()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, borderAlpha)
+            borderAlpha.disableOn = DisableIfNoBorder
+        end
+
+        -- The sweep's border summary, for a hand-rolled border rather than the
+        -- shared toolkit's: thickness in pixels, then the inset and the opacity
+        -- only while they are doing something. There is no style word to print —
+        -- this ring is always the one shape.
+        local function DispelBorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.dispelBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local inset = tonumber(d.dispelBorderInset)
+            if inset and inset ~= 0 then parts[#parts + 1] = format("%s %d", L["Inset"], inset) end
+            local a = tonumber(d.dispelBorderAlpha)
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            BuildDispelBorderGroup({
+                group = borderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
+            Add(borderGroup, nil, 2)
+        else
+            -- Three: thickness, inset and opacity. The Show Border tick is
+            -- HOISTED onto the row.
+            local DISPEL_BORDER_COUNT = 3
+
+            local function OnDispelBorderToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local borderRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelShowBorder" },
+                summary  = DispelBorderSummary,
+                count    = DISPEL_BORDER_COUNT,
+                onToggle = OnDispelBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            tools.ClaimKeys(borderRow, borderContent)
+            tools.WireModifiedTick(borderRow)
+            tools.WireFooter(borderRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "dispelShowBorder", OnDispelBorderToggle)
+            borderRow.disableOn = DispelOffRow
+        end
+
+        -- ===== GRADIENT GROUP (a 280 box in column 1 in classic, the Appearance
+        -- band's fourth row) =====
         -- Column 1 with Display, not column 2 with Border: this is the OVERLAY's
         -- own gradient (Full Frame / Top Edge / Edge Glow), so it belongs with
         -- the overlay's display mode rather than with the border drawn over it.
-        local gradientGroup = GUI:CreateSettingsGroup(self.child, 280)
-        gradientGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
-        local showGradient = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Gradient"], db, "dispelShowGradient", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showGradient.hideOn = HideDispelOptions
-        local gradientStyles = {
-            ["FULL"]= L["Full Frame"], ["TOP"]= L["Top Edge"], ["BOTTOM"]= L["Bottom Edge"],
-            ["LEFT"]= L["Left Edge"], ["RIGHT"]= L["Right Edge"], ["EDGE"]= L["Edge Glow (All Sides)"],
-        }
-        local gradStyle = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Gradient Position"], gradientStyles, db, "dispelGradientStyle", function()
-            self:RefreshStates()
-            ApplyDispelSettings()
-        end), 55)
-        gradStyle.hideOn = HideDispelOptions
-        gradStyle.disableOn = DisableIfNoGradient
-        gradStyle.tooltip = L["Where the coloured wash sits on the frame. Full covers the whole bar; the edge options leave the middle clear so you can still read health and text underneath."]
-        local onHealthCheck = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show On Current Health Only"], db, "dispelGradientOnCurrentHealth", function()
-            ApplyDispelSettings()
-        end), 30)
-        onHealthCheck.hideOn = function(d) return HideIfDisabled(d) or d.dispelGradientStyle ~= "FULL" end
-        onHealthCheck.disableOn = DisableIfNoGradient
-        onHealthCheck.tooltip = L["Keeps the wash inside the filled part of the health bar, so it shrinks as the unit takes damage instead of covering the empty section too."]
-        local gradSize = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Size"], 0.1, 1.0, 0.1, db, "dispelGradientSize", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        gradSize.hideOn = HideDispelOptions
-        gradSize.disableOn = DisableIfNoGradient
-        local gradAlpha = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
-            InvalidateCurves()
-        end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
-        gradAlpha.hideOn = HideDispelOptions
+        --
+        -- ⚠ CLASSIC ONLY, now. In the popout layout there are no columns to
+        -- balance: two full-width bands in reading order, and the gradient sits
+        -- last because it is the widest of the four things drawn.
+        local function BuildDispelGradientGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- ★ Frame Level. The dispel widget was the only element in the health band with
-        -- no way to reach it, and it is the one that generated a day of "the wash is
-        -- covering X" reports. Moves the ring, the icons and the FULL-FRAME wash together.
-        -- ⚠ NOT hidden behind DisableIfNoGradient: it positions the ring and icons too,
-        -- which exist with no gradient at all.
-        local dispelLevel = gradientGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "dispelOverlayFrameLevel", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true)), 55)
-        dispelLevel.hideOn = HideDispelOptions
-        dispelLevel.tooltip = L["Where the dispel display sits against the other frame elements. Raise it to draw over absorbs and heal prediction, lower it to sit beneath them. Show On Current Health Only ignores this and always stays below them."]
-        gradAlpha.disableOn = DisableIfNoGradient
-        local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
-        local blendDropdown = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()
-            ApplyDispelSettings()
-        end), 55)
-        blendDropdown.hideOn = HideDispelOptions
-        blendDropdown.disableOn = DisableIfNoGradient
-        -- Darken effect lives at the bottom of the Gradient group (it only
-        -- renders behind the gradient).
-        local darkenCheck = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()
-            self:RefreshStates()
-            ApplyDispelSettings()
-        end), 30)
-        darkenCheck.hideOn = HideDispelOptions
-        darkenCheck.disableOn = DisableIfNoGradient
-        darkenCheck.tooltip = L["Dims the frame underneath the wash so the dispel colour reads cleanly over a bright class colour or a busy health bar."]
-        local darkenAlpha = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Darken Amount"], 0.1, 1.0, 0.05, db, "dispelGradientDarkenAlpha", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        -- HIDE when the dispel feature is off (variant); GREY when the boolean
-        -- toggles it depends on are off (disabled-in-place).
-        darkenAlpha.hideOn = HideIfDisabled
-        darkenAlpha.disableOn = function(d)
-            return d.dispelShowGradient == false or not d.dispelGradientDarkenEnabled
+            if not tools2.hoistToggle then
+                local showGradient = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Gradient"], db, "dispelShowGradient", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                end), 30)
+                GateHide(tools2, showGradient)
+            end
+            local gradStyle = group:AddWidget(GUI:CreateDropdown(parent, L["Gradient Position"], gradientStyles, db, "dispelGradientStyle", function()
+                tools2.refreshStates()
+                ApplyDispelSettings()
+            end), 55)
+            GateHide(tools2, gradStyle)
+            gradStyle.disableOn = DisableIfNoGradient
+            gradStyle.tooltip = L["Where the coloured wash sits on the frame. Full covers the whole bar; the edge options leave the middle clear so you can still read health and text underneath."]
+            local onHealthCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["Show On Current Health Only"], db, "dispelGradientOnCurrentHealth", function()
+                ApplyDispelSettings()
+            end), 30)
+            -- The one widget on the page whose hideOn is TWO gates: the page's,
+            -- which the pane drops, and its own variant gate on the gradient
+            -- style, which survives in both layouts.
+            GateHide(tools2, onHealthCheck, function(d) return d.dispelGradientStyle ~= "FULL" end)
+            onHealthCheck.disableOn = DisableIfNoGradient
+            onHealthCheck.tooltip = L["Keeps the wash inside the filled part of the health bar, so it shrinks as the unit takes damage instead of covering the empty section too."]
+            local gradSize = group:AddWidget(GUI:CreateSlider(parent, L["Gradient Size"], 0.1, 1.0, 0.1, db, "dispelGradientSize", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, gradSize)
+            gradSize.disableOn = DisableIfNoGradient
+            local gradAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
+                InvalidateCurves()
+            end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, gradAlpha)
+
+            -- ★ Frame Level. The dispel widget was the only element in the health band with
+            -- no way to reach it, and it is the one that generated a day of "the wash is
+            -- covering X" reports. Moves the ring, the icons and the FULL-FRAME wash together.
+            -- ⚠ NOT hidden behind DisableIfNoGradient: it positions the ring and icons too,
+            -- which exist with no gradient at all.
+            local dispelLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "dispelOverlayFrameLevel", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true)), 55)
+            GateHide(tools2, dispelLevel)
+            dispelLevel.tooltip = L["Where the dispel display sits against the other frame elements. Raise it to draw over absorbs and heal prediction, lower it to sit beneath them. Show On Current Health Only ignores this and always stays below them."]
+            gradAlpha.disableOn = DisableIfNoGradient
+            local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()
+                ApplyDispelSettings()
+            end), 55)
+            GateHide(tools2, blendDropdown)
+            blendDropdown.disableOn = DisableIfNoGradient
+            -- Darken effect lives at the bottom of the Gradient group (it only
+            -- renders behind the gradient).
+            local darkenCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()
+                tools2.refreshStates()
+                ApplyDispelSettings()
+            end), 30)
+            GateHide(tools2, darkenCheck)
+            darkenCheck.disableOn = DisableIfNoGradient
+            darkenCheck.tooltip = L["Dims the frame underneath the wash so the dispel colour reads cleanly over a bright class colour or a busy health bar."]
+            local darkenAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Darken Amount"], 0.1, 1.0, 0.05, db, "dispelGradientDarkenAlpha", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            -- HIDE when the dispel feature is off (variant); GREY when the boolean
+            -- toggles it depends on are off (disabled-in-place).
+            GateHide(tools2, darkenAlpha)
+            darkenAlpha.disableOn = function(d)
+                return d.dispelShowGradient == false or not d.dispelGradientDarkenEnabled
+            end
         end
-        gradientGroup.hideOn = HideDispelOptions
-        Add(gradientGroup, nil, 1)
 
+        -- Where the wash sits, then the three things worth naming only while they
+        -- are doing something: the opacity, the non-default blend, and the darken
+        -- pass. Gradient Size is left out — it means nothing without the style
+        -- word beside it, and the style word is already the first item.
+        local function DispelGradientSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local style = gradientStyles[d.dispelGradientStyle]
+            if style then parts[#parts + 1] = style end
+            local a = tonumber(d.dispelGradientAlpha)
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            if d.dispelGradientBlendMode == "ADD" then parts[#parts + 1] = L["Glow (ADD)"] end
+            if d.dispelGradientDarkenEnabled then parts[#parts + 1] = L["Darken Behind Gradient"] end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local gradientGroup = GUI:CreateSettingsGroup(self.child, 280)
+            gradientGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
+            BuildDispelGradientGroup({
+                group = gradientGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            gradientGroup.hideOn = HideDispelOptions
+            Add(gradientGroup, nil, 1)
+        else
+            -- Eight: the position, the current-health variant, size, opacity, the
+            -- frame level, the blend mode and the darken pair. The Show Gradient
+            -- tick is HOISTED onto the row.
+            local DISPEL_GRADIENT_COUNT = 8
+
+            local function OnDispelGradientToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local gradientMount, gradientContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelGradientGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local gradientRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Gradient"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelShowGradient" },
+                summary  = DispelGradientSummary,
+                count    = DISPEL_GRADIENT_COUNT,
+                onToggle = OnDispelGradientToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = gradientMount,
+            }))
+            tools.ClaimKeys(gradientRow, gradientContent)
+            tools.WireModifiedTick(gradientRow)
+            tools.WireFooter(gradientRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(gradientRow, L["Show Gradient"], "dispelShowGradient", OnDispelGradientToggle)
+            gradientRow.disableOn = DispelOffRow
+        end
+
+        -- ===== THE TWO BANDS, IN READING ORDER ============================
+        -- Added at the foot rather than in place: both bands are full width, so
+        -- there is no column flow left to unbalance and the order below is purely
+        -- the order the page reads in.
+        if not classicLayout then
+            Add(contentBand, nil, "both")
+            Add(appearanceBand, nil, "both")
+        end
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")

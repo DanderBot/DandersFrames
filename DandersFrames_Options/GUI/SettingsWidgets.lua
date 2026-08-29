@@ -82,6 +82,19 @@ function GUI:RelayoutHost(widget, slotHeight)
             p.dfAD_ReflowWidgets()
             return
         end
+        -- ☠ A POPOUT PANE NEXT, for the card's reason one host along. A pane is not a
+        -- page: the walk would run straight past it to the settings WINDOW, which
+        -- knows nothing about the panel, so the group's own LayoutChildren above
+        -- would be the only thing that happened -- the group knows its new height and
+        -- the PANEL around it still has the one it was given at mount, clipping the
+        -- bottom of the pane by exactly what the widget grew.
+        -- GUI:CreatePopoutPageTools stamps this on the pane it mounts a group into,
+        -- and it is the same ReflowPane the toolkit runs after a hideOn change: the
+        -- group re-flows, the pane is re-sized to it, and the panel re-syncs.
+        if type(p.dfReflowPane) == "function" then
+            p.dfReflowPane()
+            return
+        end
         if type(p.RefreshStates) == "function" and p.children then
             p:RefreshStates()
             return
@@ -2163,7 +2176,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     end
 
     -- Refresh override indicators on show
-    frame:SetScript("OnShow", function()
+    local function RefreshDisplay()
         if dbTable and dbKey then
             editbox:SetText(dbTable[dbKey] or "")
         end
@@ -2171,7 +2184,19 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
             frame:UpdateOverrideIndicators(dbTable and dbTable[dbKey])
         end
         if editbox.UpdatePlaceholder then editbox.UpdatePlaceholder() end
-    end)
+    end
+    frame:SetScript("OnShow", RefreshDisplay)
+
+    -- ☠ AND UNDER THE GROUP-WIDE VALUE SWEEP'S NAME. OnShow alone was enough while
+    -- an edit box only ever sat on a page: a write it could not have seen (a popout
+    -- row's Reset Group, its Hold: Defaults, the undo of either) reaches every other
+    -- control through DandersUI Sections' RefreshChildValues, which calls
+    -- widget.refreshValue -- and this widget had none, so the box went on showing the
+    -- string the user had typed while the profile already held the default. The
+    -- Icons page is the first to mount edit boxes inside a pane (thirteen status
+    -- texts and three role icon paths), which is what surfaced it. Same repair as
+    -- the font button's (GUI/Controls.lua), and a no-op on a page.
+    frame.refreshValue = RefreshDisplay
 
     -- Grey-when-disabled: the grey loop (RefreshChildStates) calls widget:SetEnabled,
     -- but this frame had none, so a disabled group left the input full-bright AND
