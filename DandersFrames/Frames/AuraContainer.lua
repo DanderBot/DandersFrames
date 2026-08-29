@@ -598,22 +598,62 @@ end
 -- next tick). Detection needs the player to be carrying SOME aura the failed reading
 -- matches — buffs cover a helpful-drift instantly, a harmful-drift catches on the
 -- first rez sickness / dungeon debuff.
-local parkSentinelWarned = false
-C_Timer.NewTicker(30, function()
-    if parkSentinelWarned or InCombatLockdown() then return end
-    local pf = AuraContainer.SLOT_PARK_FILTER
-    if not pf or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
-    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, "player", pf)
-    if not ok or type(ids) ~= "table" then return end
+--
+-- ★ GENERALIZED: the park string is one instance of a CLASS — filter-string semantics
+-- we depend on but cannot read, which the C parser can change per build. The probe
+-- checks every convention the codebase leans on, each with its own once-per-session
+-- latch so one drift cannot mask another:
+--   * both polarity contradictions must match NOTHING (the park string is the helpful
+--     one; the harmful twin is the same drift seen from the other side);
+--   * the PLAYER-token partition must be exact: every helpful aura is cast by the
+--     player or it is not, so |HELPFUL| = |HELPFUL,PLAYER| + |HELPFUL,!PLAYER|. This
+--     one identity guards the '!' negation machinery every dedup lattice rides — the
+--     debuff row's neg() chain, othersOnly, the dispel gap slot. All three counts are
+--     taken in one uninterrupted Lua tick, so aura churn cannot fake a violation.
+local sentinelWarned = {}
+local function auraCount(filterStr)
+    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, "player", filterStr)
+    if not ok or type(ids) ~= "table" then return nil end
     local okN, n = pcall(function() return #ids end)
-    if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return end
-    if n > 0 then
-        parkSentinelWarned = true
-        DF:DebugWarn(DBG,
-            "PARK STRING FAILED OPEN: %q matched %d aura(s) on the player — the engine's"
-            .. " parser has drifted again (this would be the THIRD convention). The CF lock"
-            .. " (maxDuration = 0) is what is keeping parked slots dark; the string needs"
-            .. " replacing, not trusting.", tostring(pf), n)
+    if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return nil end
+    return n
+end
+C_Timer.NewTicker(30, function()
+    if InCombatLockdown() then return end
+    if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    local pf = AuraContainer.SLOT_PARK_FILTER
+    if pf and not sentinelWarned.park then
+        local n = auraCount(pf)
+        if n and n > 0 then
+            sentinelWarned.park = true
+            DF:DebugWarn(DBG,
+                "PARK STRING FAILED OPEN: %q matched %d aura(s) on the player — the engine's"
+                .. " parser has drifted again (this would be the THIRD convention). The CF lock"
+                .. " (maxDuration = 0) is what is keeping parked slots dark; the string needs"
+                .. " replacing, not trusting.", tostring(pf), n)
+        end
+    end
+    if not sentinelWarned.harmfulPark then
+        local n = auraCount("HARMFUL|!HARMFUL")
+        if n and n > 0 then
+            sentinelWarned.harmfulPark = true
+            DF:DebugWarn(DBG,
+                "HARMFUL-side contradiction matched %d aura(s) on the player — the polarity"
+                .. " axis has drifted (mirror of the park-string failure).", n)
+        end
+    end
+    if not sentinelWarned.partition then
+        local all = auraCount("HELPFUL")
+        local mine = auraCount("HELPFUL|PLAYER")
+        local others = auraCount("HELPFUL|!PLAYER")
+        if all and mine and others and (mine + others ~= all) then
+            sentinelWarned.partition = true
+            DF:DebugWarn(DBG,
+                "PLAYER-token partition broken: HELPFUL=%d but PLAYER=%d + !PLAYER=%d —"
+                .. " the '!' negation machinery has drifted; every negation-token dedup"
+                .. " lattice (debuff row, othersOnly, dispel gap) is suspect.",
+                all, mine, others)
+        end
     end
 end)
 -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
