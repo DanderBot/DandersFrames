@@ -831,6 +831,25 @@ P.CreateSpecDropdown = CreateSpecDropdown
 --   * RefreshGeometry's vertical fit accounts for the label+slider strip, which
 --     the split-panel form could ignore because it had 400px of height to spend.
 -- Omit opts entirely and this is byte-for-byte the canvas the split panel built.
+--
+-- ☠ AND THREE KNOBS THAT MAKE IT HOST-AGNOSTIC (designer rework phase 4, when the
+-- Text Designer replaced its own inferior copy of this canvas with this one). Every
+-- one DEFAULTS to what the Aura Designer has always built, so no AD call site moves:
+--   opts.scaleDB    the table the Preview Scale slider's value lives on. AD keeps it
+--                   on the designer config; the Text Designer has its own key on its
+--                   own preset, and a canvas that wrote AD's would be one designer
+--                   silently editing the other's setting.
+--   opts.placement  the nine anchor dots, the drag hint and the three drag
+--                   instructions -- the machinery for PLACING something on the frame.
+--                   ☠ IT WRITES SHARED STATE: P.anchorDots is ONE module-level table
+--                   and S.dragHintText ONE state field, so a second canvas building
+--                   them re-points AD's own drop targets at the other page's mock.
+--                   The settings search builds its registry by re-running EVERY
+--                   page's builder, so that is not hypothetical. A host with nothing
+--                   to place passes false.
+--   opts.unitText   the mock's own name and health strings. A host that draws its
+--                   OWN text onto the mock (TextDesigner/Preview.lua) would
+--                   otherwise get both, overlapping.
 -- THE COMPACT CANVAS'S GEOMETRY, in screen pixels, named once because the height
 -- verb and the canvas itself must agree exactly -- they are two halves of one
 -- sum, and a literal in each is how the frame ends up cut off at the bottom.
@@ -842,6 +861,9 @@ local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = 52, 10, 20
 
 local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     local compact = opts and opts.compact or false
+    -- See the header: each defaults to the Aura Designer's own canvas.
+    local placement = not (opts and opts.placement == false)
+    local unitText  = not (opts and opts.unitText == false)
     -- Read current frame settings for the preview
     local mode = (GUI and GUI.SelectedMode) or "party"
     local frameDB = DF:GetDB(mode) or DF.PartyDefaults
@@ -850,9 +872,10 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     local POWER_H = frameDB.powerBarHeight or 4
     local showPower = frameDB.showPowerBar
 
-    -- Preview scale from AD settings
+    -- Preview scale, from whichever designer's config this canvas belongs to.
     local adDB = GetAuraDesignerDB()
-    local previewScale = adDB.previewScale or 1.0
+    local scaleDB = (opts and opts.scaleDB) or adDB
+    local previewScale = scaleDB.previewScale or 1.0
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -917,7 +940,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         local h = fdb.frameHeight or 64
         mockFrame:SetSize(w, h)
 
-        local want = (GetAuraDesignerDB() or {}).previewScale or 1.0
+        local want = (scaleDB or {}).previewScale or 1.0
         -- Before the first layout pass the container has no size yet; honour the
         -- user's scale rather than clamping against a zero and collapsing the mock.
         local cw, ch = container:GetWidth() or 0, container:GetHeight() or 0
@@ -963,7 +986,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- they are what SetClipsChildren is for. Sizing the band to the widest
     -- possible indicator overhang would make an empty frame reserve space for
     -- icons that may never be placed.
-    container.WantedHeight = function() return P.CanvasWantedHeight(compact) end
+    container.WantedHeight = function() return P.CanvasWantedHeight(compact, scaleDB) end
 
     -- Resolve health texture
     local healthTexPath = frameDB.healthTexture or DF.STOCK_BAR_TEXTURE
@@ -1030,6 +1053,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         powerBorder:SetColorTexture(0.2, 0.2, 0.2, 1)
     end
 
+    -- The mock's OWN name and health strings. A host that draws its own text
+    -- onto the mock turns them off -- see opts.unitText in the header.
+    if unitText then
     -- Resolve fonts from settings
     local nameFontPath = DF:GetFontPath(frameDB.nameFont) or "Fonts\\FRIZQT__.TTF"
     local nameFontSize = frameDB.nameFontSize or 11
@@ -1061,6 +1087,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         hpText:SetTextColor(0.87, 0.87, 0.87, 1)
         container.hpText = hpText
     end
+    end  -- unitText
 
     -- Border overlay (used when border effect is active) — Stage 5.4: a
     -- DF.Border widget covering the mock frame, mirroring the runtime.
@@ -1075,6 +1102,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- ========================================
     -- 9 ANCHOR POINT DOTS
     -- ========================================
+    -- ☠ anchorDots IS ONE MODULE-LEVEL TABLE, shared by every canvas ever built.
+    -- A host with nothing to place must not wipe it -- see opts.placement.
+    if placement then
     wipe(anchorDots)
     for anchorName, pos in pairs(ANCHOR_POSITIONS) do
         local dotFrame = CreateFrame("Frame", nil, mockFrame)
@@ -1136,6 +1166,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         dotFrame:Hide()  -- Only visible during active drags
         anchorDots[anchorName] = dotFrame
     end
+    end  -- placement
 
     -- Instructions with keyboard badge styling
     local instrRows = {
@@ -1144,9 +1175,12 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         { key = L["Right-click"], desc = L["a placed indicator to remove it from the frame"] },
     }
 
+    -- ...and a host with nothing to place has no drag instructions to give.
+    if not placement then instrRows = {} end
+
     -- Compact: the same three sentences, on hover instead of underfoot. They are
     -- guidance read once, and the band has no 54px to spend saying it permanently.
-    if compact then
+    if compact and placement then
         local lines = {}
         for _, row in ipairs(instrRows) do
             lines[#lines + 1] = row.key .. " " .. row.desc
@@ -1202,30 +1236,35 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         -- regrows live keeps the two in step instead of snapping on release.
         if container.onWantHeight then container.onWantHeight(container.WantedHeight()) end
     end
-    local scaleSlider = GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, adDB, "previewScale",
+    local scaleSlider = GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, scaleDB, "previewScale",
         ApplyPreviewScale,   -- on release
         ApplyPreviewScale    -- during drag
     )
     scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
     scaleSlider:SetSize(220, 30)
 
-    -- Drag-state hint text (shows contextual guidance during drag operations)
+    -- Drag-state hint text (shows contextual guidance during drag operations).
+    -- ☠ S.dragHintText IS ONE STATE FIELD -- same reason the dots are gated.
+    if placement then
     S.dragHintText = container:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(S.dragHintText, 9, "OUTLINE")
     S.dragHintText:SetPoint("TOP", mockFrame, "BOTTOM", 0, -6)
     S.dragHintText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
     S.dragHintText:SetText("")
+    end  -- placement
 
     return container
 end
 -- The band height the compact canvas needs at the CURRENT preview scale. Split
 -- out of the canvas because the host must size the band BEFORE calling the
 -- builder that creates it -- see GUI:BuildDesignerShell's canvasHeight.
-function P.CanvasWantedHeight(compact)
+function P.CanvasWantedHeight(compact, scaleDB)
     if not compact then return 132 end
     local fdb  = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
     local fh   = fdb.frameHeight or 64
-    local want = (GetAuraDesignerDB() or {}).previewScale or 1.0
+    -- The SAME table the canvas's slider writes -- the host passes it, defaulting
+    -- to the Aura Designer's config for every caller that names none.
+    local want = ((scaleDB or GetAuraDesignerDB()) or {}).previewScale or 1.0
 
     -- The mock is centred at (0, -CANVAS_DY) in SCREEN pixels -- RefreshGeometry
     -- divides the offset by the scale to keep it so. Its top edge therefore sits

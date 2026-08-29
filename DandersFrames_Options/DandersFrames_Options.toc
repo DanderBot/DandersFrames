@@ -104,6 +104,11 @@ AuraDesigner\UI\Editor.lua
 
 # Text Designer editor
 TextDesigner\UI\Options.lua
+# The popout layout's page (bands and rows). AFTER Options.lua, whose private
+# table it aliases at load, and AFTER AuraDesigner\UI\Cards.lua, whose frame
+# canvas it borrows (designer rework decision 4 -- one description of the frame's
+# anatomy, not two).
+TextDesigner\UI\Rows.lua
 
 # Filter Registry UI
 FilterRegistry\UI\Options.lua

@@ -51,6 +51,11 @@ end
 for name in TOC:gmatch("AuraDesigner\\(UI\\Rows%.lua)") do
     PAGES[#PAGES + 1] = "AuraDesigner/" .. name:gsub("\\", "/")
 end
+-- ...and the Text Designer's, which sits with its own editor for the same
+-- reason and is the same kind of page.
+for name in TOC:gmatch("TextDesigner\\(UI\\Rows%.lua)") do
+    PAGES[#PAGES + 1] = "TextDesigner/" .. name:gsub("\\", "/")
+end
 
 print("-- All-rows rule: every settings page shares two edges")
 do
