@@ -726,3 +726,66 @@ do
     check(WIDE:find("auras_auradesigner", 1, true) == nil,
           "wide: ...and neither does the Aura Designer")
 end
+
+-- ============================================================
+-- 12. THE NARROW WINDOW -- WHAT 850px WAS HIDING
+-- ------------------------------------------------------------
+-- Section 11 removed the floor, so this page now renders in the 640px default
+-- window: a band of roughly 410px, and as little as ~280 at the window's own
+-- minimum. The Aura Designer's census documents the three classes of layout bug
+-- that width exposed; this is the Text Designer's half of the same sweep, because
+-- the two pages share the shell, the preset bar and the section header and would
+-- regress independently.
+-- ============================================================
+print("-- Text Designer: the narrow window")
+do
+    local SW = options_file_source("GUI/SettingsWidgets.lua")
+
+    -- ---- class one: the Texts head area's chip row ----------------------
+    local HEAD = TD:match("local function BuildTextsHeadArea.-\n    return Measure%(%)\nend")
+    check(HEAD ~= nil, "narrow: the Texts head area can be read")
+    HEAD = HEAD or ""
+    check(HEAD:find("local hostW = parent:GetWidth()", 1, true) ~= nil,
+          "narrow: the head area derives its column from the host it was sized to")
+    check(HEAD:find("local COL_W = (hostW > 40) and (hostW - 8 - RIGHT_INSET) or nil", 1, true) ~= nil,
+          "narrow: ...as the host's width less the left inset and the caller's right one")
+    check(HEAD:find("if maxW <= 0 then maxW = COL_W or 260 end", 1, true) ~= nil,
+          "narrow: the chips wrap to that column, not to a hardcoded 260")
+    check(HEAD:find("local function Measure()", 1, true) ~= nil,
+          "narrow: the head area's height is a verb, so it can be asked twice")
+    -- (X) THE ABSENCE IS THE ASSERTION. The old shape computed the same sum in
+    -- the `return`, once, off a chip row that had not been laid out yet.
+    check(HEAD:find('chipRow:SetScript("OnSizeChanged", LayoutChips)', 1, true) == nil,
+          "narrow: a re-wrap does more than re-wrap -- it does not stop at LayoutChips")
+    local reflow = HEAD:match('chipRow:SetScript%("OnSizeChanged", function%(%)(.-)end%)')
+    check(reflow ~= nil, "narrow: the chip row re-flows on resize")
+    reflow = reflow or ""
+    check(reflow:find("parent.dfSetHeight(Measure())", 1, true) ~= nil,
+          "narrow: ...and re-reports the band's height through the shell's verb")
+    check(SHELL:find("host.dfSetHeight = function", 1, true) ~= nil,
+          "narrow: ...which the shell is what provides")
+
+    -- ---- class two: the preset bar --------------------------------------
+    -- New + Duplicate + Rename + Delete is 250px of labelled buttons; with the
+    -- caption and the template dropdown that is 467, against a ~410px band. The
+    -- Aura Designer's band already used the icon form.
+    local BANNER = ROWS:match("banner = function%(parent%)(.-)\n        end,")
+    check(BANNER ~= nil, "narrow: the row page's banner arm can be read")
+    BANNER = BANNER or ""
+    check(BANNER:find("iconButtons = true", 1, true) ~= nil,
+          "narrow: the band's preset bar takes the compact icon actions")
+    -- ...and the split panel, which still has the 850px the labels were chosen
+    -- for, still gets them.
+    local ISLAND = TD:match('GUI:CreateDesignerPresetBar%(page%.child, {(.-)\n        }%)')
+    check(ISLAND ~= nil, "narrow: the split panel's own preset bar can be read")
+    check((ISLAND or ""):find("iconButtons", 1, true) == nil,
+          "narrow: ...and it is untouched -- it keeps the labelled actions")
+
+    -- ---- class three: the section header ---------------------------------
+    -- An element's title is a label the user typed, and it ran rightward under
+    -- the eye and the delete coming the other way.
+    check(SW:find("section.SetHeaderRightInset = function", 1, true) ~= nil,
+          "narrow: a section header can be told what its right-hand furniture cost")
+    check(ROWS:find("section:SetHeaderRightInset(56)", 1, true) ~= nil,
+          "narrow: ...and an element's header declares its eye and delete")
+end

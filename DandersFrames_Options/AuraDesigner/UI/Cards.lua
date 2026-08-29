@@ -2278,6 +2278,12 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
         -- ANDed together, ANY means they are ANDs ORed together. Between them that is
         -- every two-level expression, and the factory renders both (ANY is distributed
         -- into ALL form so it still draws through a single chain, one visual).
+        -- The column these two lay out in: what the caller said the body is, less
+        -- the container's own two 8px insets. Named because BOTH the mode button
+        -- and the Add Condition button below have to fit inside it, and at 150 +
+        -- 4 + 110 they do not fit a popout pane's 244 -- which the 850px island
+        -- never made them share.
+        local trigColW = max((bodyWidth or 260) - 16, 60)
         if multiCond then
             local modeBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
             modeBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
@@ -2296,6 +2302,14 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
         end
 
         if #condGroups < 5 then
+            -- ⚠ WRAPS RATHER THAN OVERHANGING. Beside a 150px mode button this is
+            -- 264px of row, and the pane it now lives in is 244 -- so when the two
+            -- do not share a line, this takes the next one. Same rule the tags
+            -- above already flow by.
+            if tagX > 0 and (tagX + 110) > trigColW then
+                tagX = 0
+                tagY = tagY - (TAG_H + TAG_ROW_GAP)
+            end
             local addGroupBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
             addGroupBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
             GUI:StyleButton(addGroupBtn, { width = 110, height = TAG_H, primary = true,
@@ -2326,12 +2340,19 @@ S.BuildEffectTriggersBlock = function(body, effect, bodyWidth, baseH)
                 local warn = trigContainer:CreateFontString(nil, "OVERLAY")
                 GUI:SetSettingsFont(warn, 9, "")
                 warn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
-                warn:SetPoint("RIGHT", trigContainer, "RIGHT", 0, 0)
+                -- ☠ AN EXPLICIT WIDTH, NOT A RIGHT ANCHOR, because the line below
+                -- has to MEASURE this. A wrap width that comes from an anchor is
+                -- not resolved until the layout pass; set here it is the number
+                -- the caller already told us the body is.
+                warn:SetWidth(trigColW)
                 warn:SetJustifyH("LEFT")
+                warn:SetWordWrap(true)
                 warn:SetText(emptyG and L["A condition group is empty and is being ignored."]
                     or format(L["Too many combinations (%d). Simplify the conditions."], links))
                 warn:SetTextColor(0.95, 0.45, 0.35)
-                tagY = tagY - 26
+                -- 26 was one line plus its gap, which is all this sentence needed
+                -- across an 850px card. In a 244px pane it is two.
+                tagY = tagY - (max(warn:GetStringHeight() or 0, 14) + 12)
             end
         end
 
@@ -2826,6 +2847,16 @@ end
 S.BuildEffectsHeadArea = function(parent, yPos)
     local tc = GetThemeColor()
 
+    -- ☠ THE WIDTH THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED. Every
+    -- object below is anchored 8px inside the host on both sides, so the column
+    -- they share is the host's own width less 16 -- and the host was given an
+    -- explicit width by the caller a line before this ran. Reading it off a CHILD
+    -- instead (the chip row's own GetWidth) asks a frame the layout pass has not
+    -- reached yet, which is what made the chips flow at a hardcoded 260 and the
+    -- head area report a height for a shape it was never going to have.
+    local hostW = parent:GetWidth() or 0
+    local COL_W = (hostW > 40) and (hostW - 16) or nil
+
     -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
     -- Was a "+ Add Indicator" button opening a 14-row dropdown across three
     -- headed sections. Two problems that a flat card list would have made
@@ -2938,6 +2969,7 @@ S.BuildEffectsHeadArea = function(parent, yPos)
                 and { kind = item.type, color = { bc.r, bc.g, bc.b } } or nil
             local card = GUI:CreateChoiceCard(parent, {
                 title = item.label, desc = item.desc, art = art, accent = bc,
+                width = COL_W,
                 onClick = function(self) StartType(capturedType, scopeKey, self) end,
             })
             card:SetPoint("TOPLEFT", 8, yPos)
@@ -2953,6 +2985,7 @@ S.BuildEffectsHeadArea = function(parent, yPos)
     local addBlock = GUI:CreateChoiceCardGroup(parent, {
         title    = L["ADD AN INDICATOR"],
         accent   = tc,
+        width    = COL_W,
         onToggle = function() S.SwitchTab("effects") end,
         cards = {
             {
@@ -3063,10 +3096,21 @@ S.BuildEffectsHeadArea = function(parent, yPos)
         tinsert(chipBtns, chipBtn)
     end
 
-    -- Flow-layout: position chips with wrapping on parent resize
+    -- ☠ A FLOW, AND THEREFORE A HEIGHT NOBODY KNOWS YET. The chips wrap to the
+    -- column, so how tall this row is depends on how wide it is -- and the
+    -- caller's y-cursor spends that height the instant the first pass finishes.
+    -- The first pass used to run against chipsFrame:GetWidth(), which is a
+    -- derived width the layout has not resolved at build time, and fell back to a
+    -- flat 260; OnSizeChanged then re-wrapped at the real width, changed the
+    -- height, and moved nothing below it.
+    --
+    -- Two halves to the repair. This one is the WIDTH: flow against the column
+    -- the host was explicitly sized to (COL_W), so the build-time shape IS the
+    -- final shape. The second is the HEIGHT, in Measure below.
+    local chipsTopY = yPos
     local function LayoutChips()
-        local maxW = chipsFrame:GetWidth()
-        if maxW < 20 then maxW = 260 end
+        local maxW = chipsFrame:GetWidth() or 0
+        if maxW < 20 then maxW = COL_W or 260 end
         local cx, cy = 0, 0
         for _, btn in ipairs(chipBtns) do
             local bw = btn:GetWidth()
@@ -3081,21 +3125,40 @@ S.BuildEffectsHeadArea = function(parent, yPos)
         chipsFrame:SetHeight(max(-cy + CHIP_H, CHIP_H))
     end
     LayoutChips()
-    chipsFrame:SetScript("OnSizeChanged", LayoutChips)
-
-    yPos = yPos - (chipsFrame:GetHeight() + 10)
 
     -- ── OTHER BUFFS HINT ──
+    -- ⚠ ANCHORED UNDER THE CHIP ROW, not at a y the chips' first pass happened to
+    -- produce. It is the one thing below a wrapping element in this area, so it is
+    -- also the one thing a re-wrap would otherwise strand.
+    local obHint
     if IsOtherTab() then
-        local obHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        obHint:SetPoint("TOPLEFT", 8, yPos)
+        obHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        obHint:SetPoint("TOPLEFT", chipsFrame, "BOTTOMLEFT", 0, -10)
         obHint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
         obHint:SetJustifyH("LEFT")
         obHint:SetWordWrap(true)
         obHint:SetText(L["These indicators trigger no matter who casts the buff."])
         obHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
-        yPos = yPos - (max(obHint:GetStringHeight(), 12) + 10)
     end
+
+    -- What this area occupies, as a verb rather than a number: everything above
+    -- the chips is fixed, the chips are not.
+    local function Measure()
+        local y = chipsTopY - (chipsFrame:GetHeight() + 10)
+        if obHint then y = y - (max(obHint:GetStringHeight(), 12) + 10) end
+        return y
+    end
+    yPos = Measure()
+
+    -- ...and the HEIGHT half. A band host carries dfSetHeight
+    -- (GUI/DesignerShell.lua): re-report and the bands below move, instead of
+    -- everything staying at the offset the first, narrower guess produced. The
+    -- split panel has no such verb and never had this problem -- it scrolls a
+    -- fixed-width column.
+    chipsFrame:SetScript("OnSizeChanged", function()
+        LayoutChips()
+        if parent.dfSetHeight then parent.dfSetHeight(-Measure() + 4) end
+    end)
 
     return yPos, false
 end

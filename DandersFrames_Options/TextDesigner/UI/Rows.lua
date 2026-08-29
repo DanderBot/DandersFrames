@@ -227,6 +227,14 @@ local function MountElement(ctx, elem)
         end)
     end
 
+    -- ☠ AND NOW SAY WHAT THE RIGHT END COST. The title and the meta tag run
+    -- rightward from the arrow with no edge of their own, and the eye and the
+    -- delete run leftward from the other side; on the 850px island the two never
+    -- met, and on the ~410px band a 640px window gives this page they do -- and
+    -- an element's title is a label the user typed. 56 = the delete (22 at -6)
+    -- plus the eye (18, 4 to its left).
+    if section.SetHeaderRightInset then section:SetHeaderRightInset(56) end
+
     Add(section, 36, "both")
 
     if not section.expanded then return end
@@ -491,6 +499,13 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
             if GUI.CreateDesignerPresetBar then
                 local presetBar = GUI:CreateDesignerPresetBar(host, {
                     kind = "text",
+                    -- ☠ ICON BUTTONS, as the Aura Designer's band already uses. The
+                    -- labelled four are New + Duplicate + Rename + Delete = 250px of
+                    -- fixed row; with the caption and the template dropdown that is
+                    -- 467, and the band a 640px window gives this page is ~410. The
+                    -- split panel below still passes labels -- it has the 850px the
+                    -- labels were chosen for.
+                    iconButtons = true,
                     getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
                     onChange = function()
                         -- Deferred so the bar is not torn down from inside its own

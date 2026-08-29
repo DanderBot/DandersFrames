@@ -2147,6 +2147,14 @@ end
 -- ============================================================
 local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset)
     local RIGHT_INSET = rightInset or 22
+    -- ☠ THE COLUMN THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED --
+    -- see the Aura Designer's matching note in AuraDesigner/UI/Cards.lua. The
+    -- host was given an explicit width by the caller a line before this ran; a
+    -- CHILD's GetWidth is a derived number the layout pass has not resolved yet,
+    -- which is what made the chips flow at a hardcoded 260 and this function
+    -- report a height for a shape it was never going to have.
+    local hostW = parent:GetWidth() or 0
+    local COL_W = (hostW > 40) and (hostW - 8 - RIGHT_INSET) or nil
     -- ── "+ Add Text Element" hero CTA ──
     -- Shared primary CTA via the styler: accent fill + white label (matches AD's
     -- "+ Add Indicator"; previously a bespoke theme-coloured fontstring, which is
@@ -2212,9 +2220,13 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset)
     end
     state.ApplyChipState = ApplyChipState
 
+    -- ☠ A FLOW, AND THEREFORE A HEIGHT NOBODY KNOWS YET -- see the Aura
+    -- Designer's LayoutChips. Flow against the column the host was explicitly
+    -- sized to, so the build-time shape IS the final shape; the height half is
+    -- Remeasure at the end of this function.
     local function LayoutChips()
-        local maxW = chipRow:GetWidth()
-        if maxW <= 0 then maxW = 260 end
+        local maxW = chipRow:GetWidth() or 0
+        if maxW <= 0 then maxW = COL_W or 260 end
         local cx, cy = 0, 0
         for _, c in ipairs(chips) do
             local bw = c:GetWidth()
@@ -2253,7 +2265,20 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset)
         end
     end
     LayoutChips()
-    chipRow:SetScript("OnSizeChanged", LayoutChips)
+    -- What a band host has to reserve, as a verb rather than a number:
+    -- the CTA's own top gap, the CTA, the gap to the caption, the caption, and
+    -- the chip row -- which WRAPS, so it is measured rather than assumed.
+    local function Measure()
+        return 10 + 32 + 10 + 12 + 4 + (chipRow:GetHeight() or 24) + 6
+    end
+    -- ...and re-reported when the flow changes. A band host carries dfSetHeight
+    -- (GUI/DesignerShell.lua): without it the height below is spent once, on the
+    -- first pass, and a re-wrap moves nothing. The split panel has no such verb
+    -- and never needed one -- it scrolls a fixed-width column.
+    chipRow:SetScript("OnSizeChanged", function()
+        LayoutChips()
+        if parent.dfSetHeight then parent.dfSetHeight(Measure()) end
+    end)
     ApplyChipState()
     -- ── Wire the Add button to the picker ──
     -- Reuse BuildPicker (the same one used by group-item adds). Caches the
@@ -2294,10 +2319,7 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset)
             picker:Open(self, "right")
         end
     end)
-    -- What a band host has to reserve: the CTA's own top gap, the CTA, the gap to
-    -- the caption, the caption, and the chip row -- which WRAPS, so it is measured
-    -- rather than assumed.
-    return 10 + 32 + 10 + 12 + 4 + (chipRow:GetHeight() or 24) + 6
+    return Measure()
 end
 
 -- Texts tab content: the head area above, then the scrolling card list below.

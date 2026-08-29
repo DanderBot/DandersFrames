@@ -238,9 +238,31 @@ end
 -- so does this.
 function GUI:AddDesignerLegacyTab(shell, build)
     local host = shell.Band(1)
+    -- ☠ A HEIGHT MEASURED AT BUILD TIME IS A GUESS, AND THIS IS WHERE THE GUESS
+    -- IS SPENT. Anything in here that FLOWS -- a wrapping chip row, a word-wrapped
+    -- hint -- only learns how tall it is once the layout pass has given it its
+    -- real width, which is after this. The builder reports a height anyway,
+    -- everything below is anchored at that offset, and the later re-flow moves
+    -- nothing: at 850px the chips fitted one row either way and it never showed;
+    -- in a 640px window it does.
+    --
+    -- So the host carries the same verb the canvas band has (shell.SetCanvasHeight
+    -- above): set widget.layoutHeight, set the height, re-run the page's layout
+    -- pass. A flowing child calls it when its own flow changes, and the bands
+    -- below move instead of staying at the stale offset.
+    host.dfSetHeight = function(h)
+        h = max(tonumber(h) or 1, 1)
+        if host.layoutHeight == h then return end
+        host.layoutHeight = h
+        host:SetHeight(h)
+        if shell.page and shell.page.RefreshStates then shell.page:RefreshStates() end
+    end
     build(host, shell)
     local h = max(host:GetHeight() or 1, 1)
     host:SetHeight(h)
+    -- Add stamps layoutHeight itself (ResolveRowHeight), so it is NOT set here:
+    -- one writer, or dfSetHeight's "already this tall" early-out is comparing
+    -- against a number the layout pass never agreed to.
     shell.Add(host, h, "both")
     return host
 end
