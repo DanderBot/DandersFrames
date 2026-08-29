@@ -6883,6 +6883,10 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     handle._idGateVulnerable    = filterVulnerableToIdentityGate(filter, spec.candidateFilters)
     handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
     handle._lastCandidateFilters = spec.candidateFilters
+    -- CF-lock seed: AddAuraSlot just declared these candidates engine-side, so the
+    -- value-tracked push in _pushFilter must not redundantly re-push (and reparse)
+    -- them on the first live pass. See SLOT_PARK_CF.
+    handle._cfPushed = spec.candidateFilters
     -- ☠ SEED THE DEATH LATCH — it is edge-driven, and a slot born AFTER the edge hears
     -- nothing. SetUnitDeathLatched loops the registries at the transition; a slot
     -- created later (indicator re-enabled beside a ghost) starts unlatched and renders
@@ -6997,12 +7001,29 @@ end
 -- ⚠ Deliberately not HARMFUL-flavoured for harmful slots. The contradiction is what parks
 -- it, not the polarity, so one constant serves every slot and there is no branch to get
 -- wrong.
+-- ☠☠ "CANNOT MATCH" ABOVE WAS FALSIFIED IN THE FIELD, 2026-08-29 (Drasvin, live 5.3.1,
+-- then reproduced on Krathe's own frames after a profile swap left imported slots
+-- parked): parked slots rendered the unit's TOP DEBUFF live at their anchors — the
+-- engine's C-side parser evidently resolves the contradiction with the negation winning
+-- the polarity axis, reading the park as ~HARMFUL. Same failure class as the retired
+-- empty string: ANY filter-string park rests on invisible C semantics that a build can
+-- change silently. Hence the SECOND LOCK below.
 local SLOT_PARK_FILTER = "HELPFUL|!HELPFUL"
 -- ⚠ Also on the module table: NativeBackend:ApplyTuning pushes the park string for
 -- slot-backed rows and sits EARLIER in this file, where the local is not yet in scope. The
 -- field resolves at call time, so both writers park with the identical string -- which they
 -- must, or whichever runs last decides and one of them is the retired convention.
 AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
+-- ★ THE SECOND LOCK — candidate-filter park, and the one that is PROVABLE. maxDuration
+-- excludes every aura unconditionally at 0: a timed aura fails `duration > 0`, a
+-- permanent one fails `duration == 0` (Blizzard_AuraContainerUtil.lua,
+-- DoesAuraPassCandidateFilters — readable LUA in the secure env, not invisible C, and
+-- evaluated OUTSIDE CanApplyIdentityCandidateFilters, so no identity-gate state can skip
+-- it). A parked slot pushes BOTH locks; either alone parks, and the CF lock's semantics
+-- can be re-verified against dumped source on every build. One shared constant — the
+-- inbound securecopies it, so no aliasing.
+local SLOT_PARK_CF = { maxDuration = 0 }
+AuraContainer.SLOT_PARK_CF = SLOT_PARK_CF
 
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
@@ -7019,14 +7040,30 @@ function SlotHandle:_pushFilter()
     local unitHidden = self._deathLatched and true or false
     local anchor = self.owner.anchor
     if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
-    local want = (self.parked or unitHidden)
-        and SLOT_PARK_FILTER or self.liveFilter
+    local dark = (self.parked or unitHidden) and true or false
+    local want = dark and SLOT_PARK_FILTER or self.liveFilter
     local ok = pcall(c.SetAuraSlotFilterString, c, self.key, want)
     -- ☠ RECORD WHAT WAS ACTUALLY PUSHED, AND WHETHER IT TOOK. liveFilter is the STORED
     -- filter and never changes when a park or latch darkens a slot; diagnosing an
     -- indicator that renders while believed dark needs the pushed value.
     self._pushedFilter = want
     self._pushOK = ok and true or false
+    -- ★ THE SECOND LOCK (see SLOT_PARK_CF). Dark pushes the CF park; live restores the
+    -- stored live candidates (nil clears — a slot with no live CFs must not keep the
+    -- park). Value-tracked because SetAuraSlotCandidateFilters has NO engine-side
+    -- equality guard — every call clears the slot's candidates and reparses — so this
+    -- pushes only on a real transition. _cfPushed is recorded only out of lockdown: a
+    -- secure setter can refuse QUIETLY in combat, and the regen replay (which clears
+    -- _cfPushed) must re-push then. The dark->live push doubles as the unlatch BOUNCE
+    -- the death-latch clear wants (the standing parse predates the death): dark always
+    -- records the non-nil park constant, so the transition can never compare equal and
+    -- skip.
+    local cfWant = dark and SLOT_PARK_CF or self._lastCandidateFilters
+    if self._cfPushed ~= cfWant then
+        local okCF = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfWant)
+        if okCF and not InCombatLockdown() then self._cfPushed = cfWant end
+        ok = ok and okCF
+    end
     return ok
 end
 
@@ -7066,12 +7103,12 @@ function SlotHandle:Restore()
 end
 
 -- DEATH LATCH, slot half (#1043) — see Handle:_setDeathLatch for the mechanism
--- and the tradeoff. Actuates through _pushFilter (owner anchor + park string);
--- the CLEAR also re-pushes candidates (the standard replay covers it in
--- lockdown), because the death window produced no aura events and the standing
--- parse predates the death. SetAuraSlotCandidateFilters has NO engine-side
--- equality check — every call clears the slot's candidates and reparses — which
--- is precisely the bounce wanted here.
+-- and the tradeoff. Actuates through _pushFilter (owner anchor + park string +
+-- the CF park lock). The CLEAR's candidate re-push — the bounce the death window
+-- needs, because it produced no aura events and the standing parse predates the
+-- death — now lives INSIDE _pushFilter's dark->live transition (which always
+-- fires: dark records the non-nil park constant), so the explicit re-push that
+-- used to sit here is gone rather than doubled.
 function SlotHandle:_setDeathLatch(on)
     on = on or nil
     if self._deathLatched == on then return end
@@ -7080,11 +7117,6 @@ function SlotHandle:_setDeathLatch(on)
     if not ok or InCombatLockdown() then
         self._pendingTuning = true
         registerSlotRegen(self)
-        return
-    end
-    if not on and self._lastCandidateFilters ~= nil then
-        local c = self.owner and self.owner.container
-        if c then pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters) end
     end
 end
 
@@ -7131,15 +7163,21 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
         registerSlotRegen(self)
         return false
     end
-    if candidatesChanged then
+    -- ☠ DARK-AWARE: a parked/latched slot stores the new candidates (above) but must
+    -- NOT push them — that would overwrite the CF park lock with live filters while the
+    -- slot is meant to be dark. _pushFilter's dark->live transition pushes the stored
+    -- value on wake. Live pushes record _cfPushed (out of lockdown) so _pushFilter's
+    -- value-tracked lock doesn't immediately re-push the same table.
+    if candidatesChanged and not (self.parked or self._deathLatched) then
         pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
+        if not InCombatLockdown() then self._cfPushed = candidateFilters end
     end
     -- ☠ UNCONDITIONAL. What must reach the engine is the park/latch state, and a pass
     -- where neither the filter nor the candidates moved would otherwise push nothing --
     -- while SetAuraSlotCandidateFilters immediately above has no equality guard and
     -- reparses the slot on every call, clearing engine-side state the push re-asserts.
     -- Free to do every pass: SetAuraSlotFilterString carries its own equality guard
-    -- engine-side.
+    -- engine-side (and the CF half of _pushFilter is value-tracked).
     self:_pushFilter()
     if sortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
@@ -7157,9 +7195,14 @@ end
 function SlotHandle:_replayTuning()
     local c = self.owner and self.owner.container
     if not c then return end
-    if self._lastCandidateFilters ~= nil then
-        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
-    end
+    -- ☠ CANDIDATES GO THROUGH _pushFilter, NOT A DIRECT PUSH. The old direct
+    -- re-push of _lastCandidateFilters was dark-blind: on a slot parked or
+    -- death-latched at drain time it overwrote the CF park lock with live
+    -- filters — exactly the leak class this lock exists to stop. Clearing
+    -- _cfPushed makes _pushFilter's value-tracked CF half push FRESH, choosing
+    -- park or live from the state at drain time (the same collapse-to-one-push
+    -- rule the filter string already follows).
+    self._cfPushed = nil
     self:_pushFilter()
     if self._lastSortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, self._lastSortMethod,
