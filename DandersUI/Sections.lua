@@ -65,6 +65,33 @@ local math, table = math, table
 -- banners -- they just do not persist or bubble a re-flow.
 -- ============================================================
 
+-- ============================================================
+-- THE GROUP'S CONTENT INSET -- one number, two readers
+-- ------------------------------------------------------------
+-- How far in from a group's OWN left and right edge its children are laid
+-- out. LayoutChildren places against it and GroupInnerWidth measures against
+-- it, and the two have to be the SAME expression: a wrapping note is built at
+-- the width the helper reports and then re-sized by the layout, so a
+-- disagreement shows up as text that wraps at one width and is drawn at
+-- another.
+--
+-- An ordinary group's is simply its padding. A BAND-STYLED one takes a second
+-- inset, because its content does not sit on the group -- it sits inside a
+-- PLATE, and that plate is itself pulled in by the padding so its edges land
+-- on the row plates of the band above it (see the plate's anchoring in
+-- LayoutChildren). The second number is the ROW's own padX: a popout row's
+-- label is inset from its plate by exactly that, so the box's first control
+-- and the row's label share a column instead of the control sitting flush
+-- against the plate's border.
+local function ContentInsetX(group)
+    -- `and` rather than a bare index so a nil group answers the default, and
+    -- `or` on the field for the reason the constructor's branches exist: 0 is a
+    -- legal inset and Lua reads it as true, so this falls through only on nil.
+    local pad = (group and group.padding) or UI.SettingsBox.pad
+    if group and group.bandStyle then return pad + PLATE.padX end
+    return pad
+end
+
 function UI:CreateSettingsGroup(parent, width, opts)
     -- opts can be a boolean (legacy: collapsible) or a table
     -- { collapsible, showSummary, collapseKey, chromeless, bandStyle, padding,
@@ -429,23 +456,44 @@ function UI:CreateSettingsGroup(parent, width, opts)
         -- Skip the sizing instead and let the next pass, with a real width, do it. That
         -- matches the old behaviour, where a negative SetWidth was silently a no-op.
         local innerWidth = SnapLen(self, (self:GetWidth() or 0) - (padding * 2))
-        local canSize = innerWidth > 0
+
+        -- ---- the band plate's inset, and the content's inside it ---------
+        -- A BAND-STYLED box's plate is pulled in by the group's own padding so
+        -- its left and right edges land exactly where the ROW PLATES in the band
+        -- above it do: those rows are the children of a chromeless group at this
+        -- same inset, and a control row's plate spans its whole slot (it is
+        -- anchored TOPLEFT/TOPRIGHT at 0 -- see ControlRow.lua). Left at the
+        -- group's own edges the plate overhung every row on the page by one
+        -- padding on each side, which is the width mismatch this inset settles.
+        --
+        -- Its CONTENT then takes a second inset inside the plate, and the two
+        -- together are ContentInsetX. Every other kind of group has contentInset
+        -- equal to its padding and contentWidth equal to innerWidth, which is
+        -- what keeps the classic box byte-identical.
+        local plateInset = self.bandStyle and padding or 0
+        local contentInset = SnapLen(self, ContentInsetX(self))
+        local contentWidth = SnapLen(self, (self:GetWidth() or 0) - (contentInset * 2))
+        local canSize = contentWidth > 0
 
         -- ---- the interior grid's tracks (see opts.innerColumns) ----------
         -- ONE track is the single column every group has always been, and every
         -- number below collapses to the old arithmetic at that count: no gutter,
-        -- a track the full inner width, every child spanning it, and each row
+        -- a track the full content width, every child spanning it, and each row
         -- holding exactly one child. That is what keeps the hundred-odd call
         -- sites that ask for nothing byte-identical.
+        -- ⚠ THE TRACKS COME OFF contentWidth, NOT innerWidth. On a band-styled
+        -- box the interior is the PLATE's, not the group's, and a track measured
+        -- against the wider number would put track two's controls out through the
+        -- plate's right border.
         -- rawget, the convention every private-field read in this pack follows:
         -- on a group that never asked for the grid the key is simply absent, and
         -- this has to see that rather than whatever an __index might invent.
         local columns = rawget(self, "innerColumns") or 1
         if columns < 1 then columns = 1 end
         local colGap = (columns > 1) and SnapLen(self, UI.SettingsBox.innerGap) or 0
-        local colWidth = innerWidth
+        local colWidth = contentWidth
         if columns > 1 then
-            colWidth = SnapLen(self, (innerWidth - colGap * (columns - 1)) / columns)
+            colWidth = SnapLen(self, (contentWidth - colGap * (columns - 1)) / columns)
         end
 
         -- Will this entry be laid out on this pass? Factored out of the passes
@@ -604,11 +652,21 @@ function UI:CreateSettingsGroup(parent, width, opts)
                 widget:ClearAllPoints()
                 -- Snap y at USE, not as it accumulates: rounding each row height
                 -- in turn would let the error compound down a long column.
-                local x = padding
-                if p.col > 1 then x = SnapLen(self, padding + (p.col - 1) * (colWidth + colGap)) end
+                -- The one child a band-styled box draws OUTSIDE its plate is the
+                -- TITLE, and it keeps the group's own inset: a band's header is a
+                -- chromeless group's first child at that same x, and those two
+                -- titles landing on one column is the whole of "the sections
+                -- speak one language". Everything from the plate's opening row
+                -- down is inside it and takes the content inset instead. On every
+                -- other kind of group the two are the same number.
+                local outside = self.bandStyle and p.row <= plateAfterRow
+                local originX = outside and padding or contentInset
+                local fullWidth = outside and innerWidth or contentWidth
+                local x = originX
+                if p.col > 1 then x = SnapLen(self, originX + (p.col - 1) * (colWidth + colGap)) end
                 widget:SetPoint("TOPLEFT", self, "TOPLEFT", x, SnapLen(self, rowY[p.row]))
                 -- Set width to fit within group padding (only once the group has one)
-                if canSize then widget:SetWidth(p.full and innerWidth or colWidth) end
+                if canSize then widget:SetWidth(p.full and fullWidth or colWidth) end
                 widget:Show()
                 visibleCount = visibleCount + 1
             else
@@ -626,8 +684,12 @@ function UI:CreateSettingsGroup(parent, width, opts)
         if plate then
             plate:ClearAllPoints()
             if plateTop then
-                plate:SetPoint("TOPLEFT", self, "TOPLEFT", 0, SnapLen(self, plateTop))
-                plate:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, 0)
+                -- Inset horizontally, flush vertically: the x edges are the
+                -- alignment claim (they have to equal a band row plate's), and
+                -- the y ends are the rhythm the header and the height arithmetic
+                -- already fixed -- neither of those moves here.
+                plate:SetPoint("TOPLEFT", self, "TOPLEFT", plateInset, SnapLen(self, plateTop))
+                plate:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -plateInset, 0)
                 plate:Show()
             else
                 plate:Hide()
@@ -787,10 +849,15 @@ end
 -- covers a group asked for its width before layout has run (cards build their contents
 -- before the card is sized); the floor keeps a mid-relayout zero from producing a negative
 -- wrap width, which renders as a single unwrapped line running off the panel.
+--
+-- ⚠ ContentInsetX, NOT the padding: on a BAND-STYLED group the content sits
+-- inside a plate that is itself inset, so this reports the PLATE's interior.
+-- The layout lays the same children out against that same helper -- a note
+-- measured here and re-sized there must not be told two different widths.
 function UI:GroupInnerWidth(group)
     local fallback = UI.PopoutContentWidth
     if not group then return fallback end
-    return math.max(40, (group:GetWidth() or fallback) - 2 * (group.padding or UI.SettingsBox.pad))
+    return math.max(40, (group:GetWidth() or fallback) - 2 * ContentInsetX(group))
 end
 
 -- Shared link HOVER colour: the rest colour (the host accent) LIGHTENED toward white. Keeps
