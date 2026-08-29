@@ -6866,28 +6866,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 else
                     DF:Say("Auto profiles module not loaded.")
                 end
-            elseif msg == "performance" or msg == "perf" then
-                -- ★ THE ANSWER TO A RECURRING QUESTION, in the client where it gets
-                -- asked. The prompt is almost always a profiler screenshot showing a
-                -- raid frame addon near the top of an addon CPU list, and the reply is
-                -- the same four points every time — so it is a command rather than a
-                -- paste. Deliberately SHORT: the long-form version is the Discord FAQ;
-                -- this is the half that fits in chat without scrolling itself away.
-                -- ☠ Figures come from the profiling ledger (wow-perf-tools/traces/
-                -- RESULTS.md, round 5: −52% memory and −52% CPU across all five
-                -- scenarios, 4.x vs 12.1), NOT from the earlier published set, which
-                -- was a measurement artefact and is retracted there. Quote nothing
-                -- here that is not in that file.
-                local o = DF:Out(L["Performance"])
-                o:Section(L["Why raid frames cost more than other addons"])
-                o:Line(L["They follow up to 40 players at once: health, power, auras, range and roster changes."])
-                o:Section(L["Why in-game profilers mislead"])
-                o:Line(L["They see Lua only, add their own cost to every call, and report one running total with no scenario behind it."])
-                o:Section(L["How we measure instead"])
-                o:Line(L["Full call-graph profiling, one scenario at a time, before and after every change."])
-                o:Section(L["What 12.1 changed"])
-                o:Line(L["Aura icons are rendered by the game's own engine now, which cut our Lua work roughly in half."])
-                o:Line(L["The longer version is in the FAQ on our Discord."], "NEUTRAL")
             elseif msg == "help" then
                 -- The index wears the same header as every other command. Typeable
                 -- commands carry O.CMD, the one tone reserved for "you can type this".
@@ -6902,7 +6880,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 cmd("/df test", L["toggle the test mode panel"])
                 cmd("/df hide", L["hide test frames"])
                 cmd("/df users", L["show DandersFrames users in your group"])
-                cmd("/df performance", L["how we measure performance, and why profilers mislead"])
                 cmd("/df clearoverride <key|all>", L["clear stuck auto-layout overrides"])
                 cmd("/df resetgui", L["reset settings window size/position"])
                 -- The only destructive entry in the list, so it is the only BAD one.
