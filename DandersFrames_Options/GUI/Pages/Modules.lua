@@ -15,7 +15,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- omission, so the Combat icon's seven settings were skipped by Copy, Sync
         -- and Reset while every other icon on the same page travelled.
         Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "pingIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, L["Icons"], "indicators_icons"), 25, 2)
-        
+
         local anchorOptions = {
             CENTER = L["Center"],
             TOP = L["Top"],
@@ -27,40 +27,213 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             BOTTOMLEFT = L["Bottom Left"],
             BOTTOMRIGHT = L["Bottom Right"],
         }
-        
+
         local roleStyleOptions = {
             BLIZZARD = L["Blizzard"],
             CUSTOM = "DF Icons",
             EXTERNAL = L["External"],
         }
-        
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- This is the biggest page in the addon and the LAST of the sweep: one
+        -- shared typography block plus THIRTEEN status icons, each carrying the
+        -- same Settings / Appearance / Position trio (AFK adds a fourth box for
+        -- its timer). Forty-one groups, ~215 widgets, and every icon says the
+        -- same three things with a different prefix.
+        --
+        -- ☠ SO THE SHAPE IS WRITTEN ONCE AND PARAMETERISED, NOT THIRTEEN TIMES.
+        -- BuildIconSettingsGroup / BuildIconAppearanceGroup /
+        -- BuildIconPositionGroup take a SPEC -- key prefix, enable key and label,
+        -- which callbacks the icon's own render path wants, and the handful of
+        -- extras that are genuinely per-icon -- and MountIcon drives both layouts
+        -- from it. Thirteen copies of a builder would drift, and the first thing
+        -- to drift would be one of the callbacks: eleven icons repaint through
+        -- DF:LightweightUpdateIcon*(tag) and two through
+        -- DF:UpdateAllFramesStatusIcons, which is exactly the kind of difference
+        -- a copy-paste pass flattens by accident.
+        --
+        -- ☠ AND THE THIRTEEN COLLAPSIBLE SECTIONS ARE KEPT, IN BOTH LAYOUTS.
+        -- The Highlights page (this same file) dissolved its sections into bands
+        -- because each wrapped ONE group and a row is already a fold. These do
+        -- two things a band cannot: they carry the LIVE HEADER PREVIEW of the
+        -- icon they control (SetPreviewIcons, desaturated when the icon is off --
+        -- a popout row has no preview slot, which is what the Debuff Bar page's
+        -- Important Debuffs row flagged), and they fold 41 plates down to 14
+        -- headers on a page that would otherwise be the longest in the addon.
+        -- So the popout mounts a headerless chromeless BAND inside each section
+        -- and puts that section's rows in it -- the Health Bar precedent
+        -- (rows inside sections), at thirteen times the scale.
+        --
+        -- ⚠ ICON TEXT SETTINGS IS THE ONE SECTION THAT DOES DISSOLVE. It has no
+        -- preview and wraps a single block of shared typography, so in the popout
+        -- it is one row in a headerless band at the top of the page; classic
+        -- keeps the section and its loose widgets exactly as they were.
+        --
+        -- ⚠ EVERY ROW'S PLATE READS "Settings" / "Appearance" / "Position", and
+        -- its TITLE reads "<Icon> -- <that>". The plate name is short because the
+        -- section header above it already says which icon it is; the title is not
+        -- decoration but a requirement -- ClaimKeys stamps the row's title as the
+        -- search breadcrumb AND as the anchor ScrollToSection finds the row by,
+        -- so thirteen rows called "Settings" would send every jump to the first
+        -- one. `title` is also what the open panel's header and the Reset Group
+        -- undo entry read, both of which want the long form.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults and the
+        -- band width. nil in classic, which is what every `if classicLayout then`
+        -- arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- The long form of a row's name -- see the essay above for why it is not
+        -- optional. Composed rather than added as thirty-nine locale strings:
+        -- both halves are already translated, and a translator asked for
+        -- "Role Icon -- Settings" thirty-nine times would be doing the join by hand.
+        local function RowTitle(section, part) return format("%s \226\128\148 %s", section, part) end
+
+        -- The section, in whichever shape the layout wants it. Classic keeps the
+        -- 280 header in column 1 it always had; the popout builds the same header
+        -- at the band's width and adds it "both", so the fold, its preview and the
+        -- plates under it share one left and one right edge.
+        local function AddSection(label)
+            if classicLayout then
+                return Add(GUI:CreateCollapsibleSection(self.child, label, false, 280), 36, 1)
+            end
+            return Add(GUI:CreateCollapsibleSection(self.child, label, false, tools.BandWidth()), 36, "both")
+        end
+
+        -- A section's band: headerless, because the section's own header is the
+        -- name. Registered as a section CHILD, which is what makes the fold
+        -- collapse the plates with it (Panel.lua's RefreshStates hides a group
+        -- whose collapsibleSection is shut).
+        local function SectionBand(section)
+            local band = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            section:RegisterChild(band)
+            return band
+        end
+
+        -- ☠ THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
+        -- DandersUI Sections' RefreshChildStates greys every child a
+        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
+        -- first child is always the header, and wrong for a popout pane, which has
+        -- no header at all. The Resource Bar page's answer, verbatim: spelled onto
+        -- the widget itself, composed with whatever predicate it already carries,
+        -- and applied at the MOUNT rather than inside the builder. Never runs in
+        -- classic, where the box's own header is index 1.
+        --
+        -- ⚠ ONLY THE TICKLESS PANES NEED IT. A pane whose row carries a hoisted
+        -- toggle is greyed WHOLE by the kit's own syncGate (DandersUI/PopoutRow),
+        -- so those builders drop the group gate in the popout arm rather than
+        -- saying the same thing twice -- the Dispel Overlay page's rule.
+        local function GatePaneFirstChild(group, gate)
+            if not gate then return end
+            local entry = group and group.groupChildren and group.groupChildren[1]
+            local w = entry and entry.widget
+            if not w then return end
+            local prev = w.disableOn
+            w.disableOn = function(d) return gate(d) or (prev and prev(d)) or false end
+        end
+
+        -- What a write to any icon's keys costs. One apply for every row on the
+        -- page: a Reset Group can move an enable, a scale, a status string and a
+        -- colour in one press, and those are three different render paths -- the
+        -- full sweep, the status-icon pass and the test frames. Cheap enough for a
+        -- verb the user pressed on purpose, and wrong if it misses one.
+        local function ApplyIconGroup()
+            DF:UpdateAllFrames()
+            DF:UpdateAllFramesStatusIcons()
+            DF:RefreshTestFrames()
+        end
+
+        -- The two callback families this page has, named once. Eleven icons
+        -- repaint through the lightweight per-tag helpers; BG Carrier and Combat
+        -- have no lightweight path and go through the status-icon pass.
+        local function StatusIconsCB() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end
+        -- The status TEXT boxes are the one control that does NOT refresh the test
+        -- frames -- they never did, and typing into an edit box is not a moment to
+        -- rebuild them.
+        local function StatusTextCB() DF:UpdateAllFramesStatusIcons() end
+
         -- ============================================
         -- ICON TEXT SETTINGS (Collapsible, at top)
         -- ============================================
-        local textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Icon Text Settings"], false, 280), 36, 1)
-        
-        local textLabel = Add(GUI:CreateLabel(self.child, L["Font settings for icons displayed as text (Summon, Res, AFK, etc.)"], 240), 30, 1)
-        textSection:RegisterChild(textLabel)
-        
-        local textFont = Add(GUI:CreateFontDropdown(self.child, L["Font"], db, "statusIconFont", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55, 1)
-        textSection:RegisterChild(textFont)
-        
-        local textSize = Add(GUI:CreateSlider(self.child, L["Font Size"], 8, 24, 1, db, "statusIconFontSize", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55, 1)
-        textSection:RegisterChild(textSize)
-        
-        local textOutline = Add(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55, 1)
-        textSection:RegisterChild(textOutline)
+        -- ⚠ THIS SECTION'S WIDGETS ARE NOT IN A GROUP IN CLASSIC -- they are Add'd
+        -- loose and registered to the section one at a time -- so its builder takes
+        -- an `add` rather than a group: classic hands it Add + RegisterChild, the
+        -- popout hands it the pane group's AddWidget. Every other builder on the
+        -- page takes a group, because every other block on the page already was one.
+        local textSection
+        local function BuildIconTextGroup(tools2)
+            local parent, add = tools2.parent, tools2.add
 
-        local textShadow = Add(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30, 1)
-        textSection:RegisterChild(textShadow)
+            add(GUI:CreateLabel(parent, L["Font settings for icons displayed as text (Summon, Res, AFK, etc.)"], 240), 30)
+            add(GUI:CreateFontDropdown(parent, L["Font"], db, "statusIconFont", StatusIconsCB), 55)
+            add(GUI:CreateSlider(parent, L["Font Size"], 8, 24, 1, db, "statusIconFontSize", StatusIconsCB, StatusIconsCB, true), 55)
+            add(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "statusIconFontOutline", StatusIconsCB), 55)
+            add(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "statusIconFontOutline", StatusIconsCB), 30)
 
-        -- ⚠ Fixed-layout link (GUI:CreateLink) — it flows once at build and reports its own
-        -- height, so it must be Add'd at note.layoutHeight rather than a guessed row.
-        local shadowNote = GUI:CreateGlobalFontsShadowLink(self.child, 240)
-        Add(shadowNote, shadowNote.layoutHeight, 1)
-        textSection:RegisterChild(shadowNote)
-        shadowNote.hideOn = function(d) return not DF:OutlineHasShadow(d.statusIconFontOutline) end
-        
+            -- ⚠ Fixed-layout link (GUI:CreateLink) — it flows once at build and reports its own
+            -- height, so it must be Add'd at note.layoutHeight rather than a guessed row.
+            local shadowNote = GUI:CreateGlobalFontsShadowLink(parent, 240)
+            add(shadowNote, shadowNote.layoutHeight)
+            shadowNote.hideOn = function(d) return not DF:OutlineHasShadow(d.statusIconFontOutline) end
+        end
+
+        -- The two facts a font block has that are worth reading off a shut plate.
+        local function IconTextSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if type(d.statusIconFont) == "string" and d.statusIconFont ~= "" then
+                parts[#parts + 1] = d.statusIconFont
+            end
+            local size = tonumber(d.statusIconFontSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            textSection = Add(GUI:CreateCollapsibleSection(self.child, L["Icon Text Settings"], false, 280), 36, 1)
+            BuildIconTextGroup({
+                parent = self.child,
+                add = function(widget, height)
+                    Add(widget, height, 1)
+                    textSection:RegisterChild(widget)
+                    return widget
+                end,
+            })
+        else
+            -- Six: the explanation, the font, the size, the outline, the shadow tick
+            -- and the shadow link.
+            local ICON_TEXT_COUNT = 6
+
+            local textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local textMount, textContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildIconTextGroup({
+                    parent = holder,
+                    add = function(widget, height) return group:AddWidget(widget, height) end,
+                    popout = true,
+                    refreshStates = reflow,
+                })
+            end)
+            local textRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Icon Text Settings"],
+                db      = tools.RowDB,
+                summary = IconTextSummary,
+                count   = ICON_TEXT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = textMount,
+            }))
+            tools.ClaimKeys(textRow, textContent)
+            tools.WireModifiedTick(textRow)
+            tools.WireFooter(textRow, ApplyIconGroup)
+            Add(textBand, nil, "both")
+        end
+
         -- ★ THE PER-ICON TEXT COLOURS USED TO LIVE HERE, as a flat list of seven pickers
         -- ("Summon", "Resurrection", "AFK", …) divorced from the icons they colour
         -- (Krathe, 2026-08-08: "odd having the text settings separate from each indicator
@@ -77,9 +250,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- of throwaway handles is a real cost here, not a style preference.
         -- Hidden unless that icon is in text mode -- an icon-mode colour picker controls
         -- nothing visible.
-        local function AddTextColor(group, label, key, showKey)
-            local w = group:AddWidget(GUI:CreateColorPicker(self.child, label, db, key, false, nil,
-                function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30)
+        local function AddTextColor(group, parent, label, key, showKey)
+            local w = group:AddWidget(GUI:CreateColorPicker(parent, label, db, key, false, nil,
+                StatusIconsCB, true), 30)
             w.hideOn = function(d) return not d[showKey] end
             return w
         end
@@ -87,7 +260,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ============================================
         -- ROLE ICON (Collapsible)
         -- ============================================
-        local roleSection = Add(GUI:CreateCollapsibleSection(self.child, L["Role Icon"], false, 280), 36, 1)
+        -- ☠ THE ONE ICON WITH NO ENABLE. Role has three per-role Show toggles and
+        -- no master boolean, so its Settings row hoists NOTHING and its Appearance
+        -- and Position rows grey with nothing -- there is no page gate here and no
+        -- per-icon gate either. (The third distinct reason a row refuses a tick,
+        -- after Highlights' "the master is a MODE" and Personal Targeted's "not
+        -- everything in the group depends on it": here there is no single master
+        -- at all.)
+        local roleSection
 
         -- Header preview: the Tank/Healer/DPS icons in the currently selected
         -- style. Rebuilt live whenever the style, an external path, or a
@@ -96,7 +276,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the whole preview dims only when all three roles are off.
         local roleShowKeys = { TANK = "roleIconShowTank", HEALER = "roleIconShowHealer", DAMAGER = "roleIconShowDPS" }
         local function UpdateRolePreview()
-            if not roleSection.SetPreviewIcons then return end
+            if not (roleSection and roleSection.SetPreviewIcons) then return end
             local icons = {}
             local anyShown = false
             for _, role in ipairs({ "TANK", "HEALER", "DAMAGER" }) do
@@ -112,47 +292,49 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if roleSection.SetPreviewDimmed then roleSection:SetPreviewDimmed(not anyShown) end
         end
 
-        -- Settings
-        local roleSettings = GUI:CreateSettingsGroup(self.child, 280)
-        roleSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        roleSettings:AddWidget(GUI:CreateDropdown(self.child, L["Icon Style"], roleStyleOptions, db, "roleIconStyle", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 55)
-        local roleExtTank = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["Tank Icon Path"], db, "roleIconExternalTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\Tank.tga"), 55)
-        roleExtTank.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        local roleExtHealer = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["Healer Icon Path"], db, "roleIconExternalHealer", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\Healer.tga"), 55)
-        roleExtHealer.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        local roleExtDPS = roleSettings:AddWidget(GUI:CreateEditBox(self.child, L["DPS Icon Path"], db, "roleIconExternalDPS", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end, nil, "Interface\\MyIcons\\DPS.tga"), 55)
-        roleExtDPS.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        local roleExtNote = roleSettings:AddWidget(GUI:CreateLabel(self.child, L["Paths are relative to your WoW folder and must start with Interface\\. Pasting a full path works — anything before 'Interface' is stripped. Leave empty for DF Icons."], 250), 70)
-        roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
-        -- Per-role filters: which roles ever show an icon (global — apply in and
-        -- out of combat). The Hide In Combat toggle (Appearance) is an independent gate.
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Tank"], db, "roleIconShowTank", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Healer"], db, "roleIconShowHealer", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
-        roleSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show DPS"], db, "roleIconShowDPS", function() DF:UpdateAllRoleIcons(); UpdateRolePreview() end), 30)
-        Add(roleSettings, nil, 1)
-        roleSection:RegisterChild(roleSettings)
+        local function RoleSettingsCB() DF:UpdateAllRoleIcons(); UpdateRolePreview() end
 
-        -- Appearance
-        local roleAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        roleAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "roleIconScale", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
-        roleAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "roleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("role") end, true), 55)
-        roleAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "roleIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("role") end, true)), 55)
-        roleAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide In Combat"], db, "roleIconHideInCombat", function() DF:UpdateAllRoleIcons() end), 30)
-        Add(roleAppearance, nil, 1)
-        roleSection:RegisterChild(roleAppearance)
+        local function BuildRoleSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- Position
-        local rolePosition = GUI:CreateSettingsGroup(self.child, 280)
-        rolePosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rolePosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "roleIconAnchor", function() DF:LightweightUpdateIconPosition("role") end), 55)
-        rolePosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "roleIconX", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
-        rolePosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "roleIconY", nil, function() DF:LightweightUpdateIconPosition("role") end, true), 55)
-        Add(rolePosition, nil, 1)
-        roleSection:RegisterChild(rolePosition)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Icon Style"], roleStyleOptions, db, "roleIconStyle", RoleSettingsCB), 55)
+            local roleExtTank = group:AddWidget(GUI:CreateEditBox(parent, L["Tank Icon Path"], db, "roleIconExternalTank", RoleSettingsCB, nil, "Interface\\MyIcons\\Tank.tga"), 55)
+            roleExtTank.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            local roleExtHealer = group:AddWidget(GUI:CreateEditBox(parent, L["Healer Icon Path"], db, "roleIconExternalHealer", RoleSettingsCB, nil, "Interface\\MyIcons\\Healer.tga"), 55)
+            roleExtHealer.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            local roleExtDPS = group:AddWidget(GUI:CreateEditBox(parent, L["DPS Icon Path"], db, "roleIconExternalDPS", RoleSettingsCB, nil, "Interface\\MyIcons\\DPS.tga"), 55)
+            roleExtDPS.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            local roleExtNote = group:AddWidget(GUI:CreateLabel(parent, L["Paths are relative to your WoW folder and must start with Interface\\. Pasting a full path works — anything before 'Interface' is stripped. Leave empty for DF Icons."], 250), 70)
+            roleExtNote.hideOn = function(d) return d.roleIconStyle ~= "EXTERNAL" end
+            -- Per-role filters: which roles ever show an icon (global — apply in and
+            -- out of combat). The Hide In Combat toggle (Appearance) is an independent gate.
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Tank"], db, "roleIconShowTank", RoleSettingsCB), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show Healer"], db, "roleIconShowHealer", RoleSettingsCB), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Show DPS"], db, "roleIconShowDPS", RoleSettingsCB), 30)
+        end
 
-        -- Initial header preview for the current style.
-        UpdateRolePreview()
+        -- The style, and which roles are LEFT ON -- named the way Personal Targeted's
+        -- Content Types row names them: all three ship on, so the row is silent about
+        -- them on a default profile rather than reciting the default back, and the
+        -- moment one is off there are at most two left to name. Style plus two roles
+        -- is inside the four-item budget; three roles can only be printed when none
+        -- has been switched off, which is the case that prints none of them.
+        local function RoleSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local style = roleStyleOptions[d.roleIconStyle]
+            if style then parts[#parts + 1] = style end
+            local tank, healer, dps = d.roleIconShowTank ~= false, d.roleIconShowHealer ~= false, d.roleIconShowDPS ~= false
+            if not (tank and healer and dps) then
+                if tank then parts[#parts + 1] = L["Tank"] end
+                if healer then parts[#parts + 1] = L["Healer"] end
+                if dps then parts[#parts + 1] = L["DPS"] end
+                -- Every role switched off: the icon is enabled and draws nothing,
+                -- and the row has to say so rather than read as a default.
+                if not (tank or healer or dps) then parts[#parts + 1] = L["None"] end
+            end
+            return Join(parts)
+        end
 
         -- ============================================
         -- STATUS-ICON HEADER PREVIEWS
@@ -161,6 +343,12 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- when the section is disabled. Refreshers are registered globally and
         -- re-run by hooked frame-update functions, so previews track live
         -- enable/text changes without touching every control's callback.
+        --
+        -- ⚠ THIS BLOCK MOVED UP THE FILE, ahead of the sections rather than between
+        -- Role and Leader. It has to be above MountIcon, which is what wires every
+        -- section's preview now; it depends on nothing built before it, and it runs
+        -- at the same moment in the build it always did -- before the first
+        -- WireStatusPreview call.
         -- ============================================
         if not DF._iconPreviewHooked then
             DF._iconPreviewHooked = true
@@ -225,202 +413,432 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ============================================
+        -- ONE ICON'S OPTION SHAPE, SAID ONCE
+        -- --------------------------------------------
+        -- The three builders below are what all thirteen icons are made of. A
+        -- spec names the key prefix, the enable, the extras and which callback
+        -- family the icon repaints through; everything else is identical, and
+        -- proving that is the whole point -- test_icons_page_builders.lua pins the
+        -- builders control by control AND pins every spec field, so the pair
+        -- together pin all ~215 widgets against the census taken before the move.
+        --
+        -- Spec fields, all optional except `key` and `section`:
+        --   key             db prefix ("summonIcon")
+        --   section         the collapsible section's name, and the rows' title prefix
+        --   id              the lightweight render tag ("summon"); absent = this icon
+        --                   repaints through the status-icon pass instead
+        --   enableKey/enableLabel/enableTooltip/onEnable   the master switch
+        --   note/noteHeight                                one explanatory label
+        --   showTextKey/texts                              the Show as Text block
+        --   before/after    per-icon widgets around that block, in classic's order
+        --   hideInCombatLabel/onHideInCombat               the Appearance extra
+        --   controlRow      the Settings box holds ONE setting, so it is a plate
+        --   summaryExtra    what this icon's Settings row says beyond the shared part
+        --   preview         WireStatusPreview's opts
+        -- ============================================
+        local function BuildIconSettingsGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is this icon's only on/off control -- and with it the box's
+            -- own gate, which the popout does not repeat because the kit's syncGate
+            -- already greys a pane whose row toggle is off.
+            if spec.enableKey and not tools2.hoistToggle then
+                group.disableChildrenOn = spec.gate
+                local enableCb = group:AddWidget(GUI:CreateCheckbox(parent, spec.enableLabel, db, spec.enableKey, spec.onEnable), 30)
+                enableCb.keepEnabled = true
+                if spec.enableTooltip then enableCb.tooltip = spec.enableTooltip end
+            end
+            if spec.note then group:AddWidget(GUI:CreateLabel(parent, spec.note, 240), spec.noteHeight) end
+            if spec.before then spec.before(group, parent) end
+            if spec.showTextKey then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show as Text"], db, spec.showTextKey, StatusIconsCB), 30)
+                for _, t in ipairs(spec.texts) do
+                    group:AddWidget(GUI:CreateEditBox(parent, t.label, db, t.key, StatusTextCB, 120), 55)
+                end
+                AddTextColor(group, parent, L["Text Color"], spec.key .. "TextColor", spec.showTextKey)
+            end
+            if spec.after then spec.after(group, parent) end
+        end
+
+        local function BuildIconAppearanceGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = spec.gate
+            group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.5, 0.1, db, spec.key .. "Scale", nil, spec.cbPosition, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.1, 1.0, 0.05, db, spec.key .. "Alpha", nil, spec.cbAlpha, true), 55)
+            group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, spec.key .. "FrameLevel", nil, spec.cbFrameLevel, true)), 55)
+            if spec.hideInCombatLabel then
+                group:AddWidget(GUI:CreateCheckbox(parent, spec.hideInCombatLabel, db, spec.key .. "HideInCombat", spec.onHideInCombat), 30)
+            end
+        end
+
+        local function BuildIconPositionGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = spec.gate
+            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, spec.key .. "Anchor", spec.cbPosition), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, spec.key .. "X", nil, spec.cbPosition, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, spec.key .. "Y", nil, spec.cbPosition, true), 55)
+        end
+
+        -- The three summaries, also once. Every one is silent on a default profile
+        -- and says only what has been changed -- with thirteen icons on one page,
+        -- a row that recited its defaults would be thirteen lines of noise.
+        local function IconSettingsSummary(spec)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                if spec.showTextKey and d[spec.showTextKey] then
+                    parts[#parts + 1] = L["Show as Text"]
+                    local first = spec.texts and spec.texts[1]
+                    local text = first and d[first.key]
+                    if type(text) == "string" and text ~= "" then parts[#parts + 1] = text end
+                end
+                if spec.summaryExtra then spec.summaryExtra(d, parts) end
+                return Join(parts)
+            end
+        end
+
+        local function IconAppearanceSummary(spec)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                local scale = tonumber(d[spec.key .. "Scale"])
+                if scale and scale ~= 1 then parts[#parts + 1] = format("%.1fx", scale) end
+                local alpha = tonumber(d[spec.key .. "Alpha"])
+                if alpha and alpha < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], alpha) end
+                if spec.hideInCombatLabel and d[spec.key .. "HideInCombat"] then
+                    parts[#parts + 1] = spec.hideInCombatLabel
+                end
+                return Join(parts)
+            end
+        end
+
+        local function IconPositionSummary(spec)
+            return function(d)
+                if not d then return "" end
+                local parts = {}
+                local anchor = anchorOptions[d[spec.key .. "Anchor"]]
+                if anchor then parts[#parts + 1] = anchor end
+                local x = tonumber(d[spec.key .. "X"]) or 0
+                local y = tonumber(d[spec.key .. "Y"]) or 0
+                if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+                return Join(parts)
+            end
+        end
+
+        -- ============================================
+        -- ONE ICON'S PLATES, ALSO SAID ONCE
+        -- --------------------------------------------
+        -- Both layouts, driven off the same spec. Classic builds the boxes it
+        -- always built, in column 1, registered to the section; the popout builds
+        -- the section's band and hangs the same builders off rows in it.
+        --
+        -- ⚠ THE ROWS' ORDER IS THE BOXES' ORDER, including AFK's fourth box, which
+        -- has always sat between Settings and Appearance.
+        -- ============================================
+        local function MountIcon(spec)
+            spec.gate = spec.enableKey and function(d) return not (d or db)[spec.enableKey] end or nil
+            if spec.id then
+                spec.cbPosition   = function() DF:LightweightUpdateIconPosition(spec.id) end
+                spec.cbAlpha      = function() DF:LightweightUpdateIconAlpha(spec.id) end
+                spec.cbFrameLevel = function() DF:LightweightUpdateFrameLevel(spec.id) end
+            else
+                spec.cbPosition, spec.cbAlpha, spec.cbFrameLevel = StatusIconsCB, StatusIconsCB, StatusIconsCB
+            end
+
+            local section = AddSection(spec.section)
+            if spec.onSection then spec.onSection(section) end
+            if spec.preview then WireStatusPreview(section, spec.preview) end
+
+            local settingsBuild = spec.settings or BuildIconSettingsGroup
+
+            if classicLayout then
+                -- ⚠ EVERY ICON TAKES THE SAME CLASSIC ARM, `controlRow` included:
+                -- a one-setting box is still a BOX in classic, and the shared
+                -- builder already draws exactly what it held -- the header, the
+                -- tick and, where there is one, the sentence under it.
+                local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+                settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
+                settingsBuild({ group = settingsGroup, parent = self.child,
+                                refreshStates = function() self:RefreshStates() end }, spec)
+                Add(settingsGroup, nil, 1)
+                section:RegisterChild(settingsGroup)
+
+                if spec.extraGroup then
+                    local extraGroup = GUI:CreateSettingsGroup(self.child, 280)
+                    extraGroup:AddWidget(GUI:CreateHeader(self.child, spec.extraGroup.label), GUI.RowHeight.sectionHeader)
+                    spec.extraGroup.build({ group = extraGroup, parent = self.child,
+                                            refreshStates = function() self:RefreshStates() end }, spec)
+                    Add(extraGroup, nil, 1)
+                    section:RegisterChild(extraGroup)
+                    extraGroup.hideOn = spec.extraGroup.hideOn
+                end
+
+                local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+                appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
+                BuildIconAppearanceGroup({ group = appearanceGroup, parent = self.child,
+                                           refreshStates = function() self:RefreshStates() end }, spec)
+                Add(appearanceGroup, nil, 1)
+                section:RegisterChild(appearanceGroup)
+
+                local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
+                positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
+                BuildIconPositionGroup({ group = positionGroup, parent = self.child,
+                                         refreshStates = function() self:RefreshStates() end }, spec)
+                Add(positionGroup, nil, 1)
+                section:RegisterChild(positionGroup)
+
+                if spec.afterMount then spec.afterMount() end
+                return
+            end
+
+            local band = SectionBand(section)
+
+            -- What the suppressed Enable checkbox ran, minus any page rebuild: the
+            -- two rows that grey with it are repainted by the page's own state pass,
+            -- and the panes standing open by the reflow. The header preview follows
+            -- for free -- DF:UpdateAllFrames_Now is hooked to refresh it.
+            local function OnEnableToggle()
+                if spec.onEnable then spec.onEnable() end
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            if spec.controlRow then
+                -- ☠ ONE SETTING, SO A CONTROL ROW RATHER THAN A WAY IN. Four icons
+                -- (Leader, Target Marker, Ping, Combat) have nothing in their
+                -- Settings box but the switch, so a popout row here would be a panel
+                -- holding a single checkbox and the row's own tick column already IS
+                -- that checkbox. The trade is the group's two verbs -- no Reset Group
+                -- and no amber tick -- which for one boolean the modified dot on the
+                -- control itself already covers.
+                --
+                -- ⚠ COMBAT'S EXPLANATION BECOMES THE PLATE'S TOOLTIP. Its box holds
+                -- the tick and one sentence; the sentence is not a setting, so it
+                -- cannot keep a plate of its own, and a control row's tooltip is
+                -- where a sentence about the control belongs. Classic still draws it
+                -- as a label, exactly as before.
+                local enableRow = band:AddWidget(GUI:CreateControlRow(self.child, {
+                    label     = spec.enableLabel,
+                    kind      = "checkbox",
+                    -- The FUNCTION form: the table is re-resolved on each read, so a
+                    -- mode switch is followed rather than frozen at whichever table
+                    -- this build captured.
+                    db        = tools.RowDB,
+                    key       = spec.enableKey,
+                    tooltip   = spec.enableTooltip or spec.note,
+                    onChanged = OnEnableToggle,
+                }))
+                tools.RegisterControlRow(enableRow, "checkbox", spec.enableKey, false, OnEnableToggle)
+            else
+                -- ⚠ NO GatePaneFirstChild ON A SETTINGS PANE. Where the row carries
+                -- a hoisted tick the kit's syncGate greys the pane whole, so the
+                -- builder drops the group gate rather than saying it twice; and
+                -- Role, the one Settings row with no tick, has no gate to apply.
+                local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                    settingsBuild({ group = group, parent = holder, refreshStates = reflow,
+                                    popout = true, hoistToggle = spec.enableKey ~= nil }, spec)
+                end)
+                local settingsRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label    = L["Settings"],
+                    title    = RowTitle(spec.section, L["Settings"]),
+                    db       = tools.RowDB,
+                    toggle   = spec.enableKey and { key = spec.enableKey } or nil,
+                    summary  = spec.summary or IconSettingsSummary(spec),
+                    count    = spec.settingsCount,
+                    onToggle = spec.enableKey and OnEnableToggle or nil,
+                    window   = DF.GUIFrame,
+                    clipTo   = self,
+                    build    = settingsMount,
+                }))
+                tools.ClaimKeys(settingsRow, settingsContent)
+                tools.WireModifiedTick(settingsRow)
+                tools.WireFooter(settingsRow, ApplyIconGroup)
+                if spec.enableKey then
+                    tools.RegisterHoistedToggle(settingsRow, spec.enableLabel, spec.enableKey, OnEnableToggle)
+                end
+                -- ⚠ AND NO disableOn ON THIS ONE. It carries this icon's own tick;
+                -- greying it would leave no way to switch the icon back on.
+            end
+
+            if spec.extraGroup then
+                local extraMount, extraContent = tools.PopoutContent(function(group, holder, reflow)
+                    spec.extraGroup.build({ group = group, parent = holder, refreshStates = reflow,
+                                            popout = true }, spec)
+                    GatePaneFirstChild(group, spec.gate)
+                end)
+                local extraRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = spec.extraGroup.label,
+                    title   = RowTitle(spec.section, spec.extraGroup.label),
+                    db      = tools.RowDB,
+                    summary = spec.extraGroup.summary,
+                    count   = spec.extraGroup.count,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = extraMount,
+                }))
+                -- The box's own gate becomes the ROW's, so the band collapses the slot
+                -- instead of drawing a plate for a timer that is not being drawn.
+                extraRow.hideOn = spec.extraGroup.hideOn
+                extraRow.disableOn = spec.gate
+                tools.ClaimKeys(extraRow, extraContent)
+                tools.WireModifiedTick(extraRow)
+                tools.WireFooter(extraRow, ApplyIconGroup)
+            end
+
+            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildIconAppearanceGroup({ group = group, parent = holder, refreshStates = reflow,
+                                           popout = true }, spec)
+                GatePaneFirstChild(group, spec.gate)
+            end)
+            local appearanceRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Appearance"],
+                title   = RowTitle(spec.section, L["Appearance"]),
+                db      = tools.RowDB,
+                summary = IconAppearanceSummary(spec),
+                count   = spec.hideInCombatLabel and 4 or 3,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = appearanceMount,
+            }))
+            -- ☠ THE ICON'S GATE REACHES THE ROW ITSELF, not only the pane. In
+            -- classic the whole section visibly dims while the icon is off; two
+            -- bright plates over two grey panes would be the popout layout saying
+            -- something classic does not. A dimmed row still OPENS -- the kit's grey
+            -- is alpha and a disabled toggle, not a dead frame -- so the settings
+            -- stay readable while they are switched off. The Resource Bar rule.
+            appearanceRow.disableOn = spec.gate
+            tools.ClaimKeys(appearanceRow, appearanceContent)
+            tools.WireModifiedTick(appearanceRow)
+            tools.WireFooter(appearanceRow, ApplyIconGroup)
+
+            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildIconPositionGroup({ group = group, parent = holder, refreshStates = reflow,
+                                         popout = true }, spec)
+                GatePaneFirstChild(group, spec.gate)
+            end)
+            local positionRow = band:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Position"],
+                title   = RowTitle(spec.section, L["Position"]),
+                db      = tools.RowDB,
+                summary = IconPositionSummary(spec),
+                count   = 3,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = positionMount,
+            }))
+            positionRow.disableOn = spec.gate
+            tools.ClaimKeys(positionRow, positionContent)
+            tools.WireModifiedTick(positionRow)
+            tools.WireFooter(positionRow, ApplyIconGroup)
+
+            Add(band, nil, "both")
+            if spec.afterMount then spec.afterMount() end
+        end
+
+        -- The shared enable callback: eleven of the twelve switchable icons run
+        -- exactly this, and Ping runs it after its own mirror wiring.
+        local function OnIconEnabled() DF:UpdateAllFrames() end
+
+        -- ============================================
+        -- ROLE ICON (Collapsible)
+        -- ============================================
+        MountIcon({
+            key = "roleIcon", id = "role", section = L["Role Icon"],
+            onSection = function(section) roleSection = section end,
+            settings = BuildRoleSettingsGroup,
+            settingsCount = 8,
+            summary = RoleSettingsSummary,
+            hideInCombatLabel = L["Hide In Combat"],
+            onHideInCombat = function() DF:UpdateAllRoleIcons() end,
+            -- Initial header preview for the current style.
+            afterMount = UpdateRolePreview,
+        })
+
+        -- ============================================
         -- LEADER ICON (Collapsible)
         -- ============================================
-        local leaderSection = Add(GUI:CreateCollapsibleSection(self.child, L["Leader Icon"], false, 280), 36, 1)
-        WireStatusPreview(leaderSection, { enableKey = "leaderIconEnabled", icons = { "Interface\\GroupFrame\\UI-Group-LeaderIcon" } })
-        
-        -- Settings
-        local leaderSettings = GUI:CreateSettingsGroup(self.child, 280)
-        leaderSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        leaderSettings.disableChildrenOn = function(d) return not d.leaderIconEnabled end
-        local leaderIconEnableCb = leaderSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Leader Icon"], db, "leaderIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        leaderIconEnableCb.keepEnabled = true
-        Add(leaderSettings, nil, 1)
-        leaderSection:RegisterChild(leaderSettings)
+        MountIcon({
+            key = "leaderIcon", id = "leader", section = L["Leader Icon"],
+            enableKey = "leaderIconEnabled", enableLabel = L["Enable Leader Icon"],
+            onEnable = OnIconEnabled, controlRow = true,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "leaderIconEnabled", icons = { "Interface\\GroupFrame\\UI-Group-LeaderIcon" } },
+        })
 
-        -- Appearance
-        local leaderAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        leaderAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        leaderAppearance.disableChildrenOn = function(d) return not d.leaderIconEnabled end
-        leaderAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "leaderIconScale", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
-        leaderAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "leaderIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("leader") end, true), 55)
-        leaderAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "leaderIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("leader") end, true)), 55)
-        leaderAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "leaderIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(leaderAppearance, nil, 1)
-        leaderSection:RegisterChild(leaderAppearance)
-
-        -- Position
-        local leaderPosition = GUI:CreateSettingsGroup(self.child, 280)
-        leaderPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        leaderPosition.disableChildrenOn = function(d) return not d.leaderIconEnabled end
-        leaderPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "leaderIconAnchor", function() DF:LightweightUpdateIconPosition("leader") end), 55)
-        leaderPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "leaderIconX", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
-        leaderPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "leaderIconY", nil, function() DF:LightweightUpdateIconPosition("leader") end, true), 55)
-        Add(leaderPosition, nil, 1)
-        leaderSection:RegisterChild(leaderPosition)
-        
         -- ============================================
         -- RAID TARGET ICON (Collapsible)
         -- ============================================
-        local raidTargetSection = Add(GUI:CreateCollapsibleSection(self.child, L["Target Marker Icon"], false, 280), 36, 1)
-        -- Header preview: the four most-used markers (square / cross / triangle / circle),
-        -- sliced from the classic raid-target sheet via texcoords (the atlas form won't render here).
-        WireStatusPreview(raidTargetSection, { enableKey = "raidTargetIconEnabled", icons = {
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 2 },  -- square   (6)
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 2 },  -- cross    (7)
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 2 },  -- triangle (4)
-            { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 2 },  -- circle   (2)
-        } })
-        
-        -- Settings
-        local rtSettings = GUI:CreateSettingsGroup(self.child, 280)
-        rtSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        rtSettings.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
-        local raidTargetIconEnableCb = rtSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Target Marker Icon"], db, "raidTargetIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        raidTargetIconEnableCb.keepEnabled = true
-        Add(rtSettings, nil, 1)
-        raidTargetSection:RegisterChild(rtSettings)
+        MountIcon({
+            key = "raidTargetIcon", id = "raidTarget", section = L["Target Marker Icon"],
+            enableKey = "raidTargetIconEnabled", enableLabel = L["Enable Target Marker Icon"],
+            onEnable = OnIconEnabled, controlRow = true,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            -- Header preview: the four most-used markers (square / cross / triangle / circle),
+            -- sliced from the classic raid-target sheet via texcoords (the atlas form won't render here).
+            preview = { enableKey = "raidTargetIconEnabled", icons = {
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.25, 0.5  }, inset = 2 },  -- square   (6)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.5,  0.75, 0.25, 0.5  }, inset = 2 },  -- cross    (7)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.75, 1.0,  0.0,  0.25 }, inset = 2 },  -- triangle (4)
+                { texture = "Interface\\TargetingFrame\\UI-RaidTargetingIcons", coords = { 0.25, 0.5,  0.0,  0.25 }, inset = 2 },  -- circle   (2)
+            } },
+        })
 
-        -- Appearance
-        local rtAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        rtAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        rtAppearance.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
-        rtAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidTargetIconScale", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
-        rtAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "raidTargetIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("raidTarget") end, true), 55)
-        rtAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "raidTargetIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("raidTarget") end, true)), 55)
-        rtAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "raidTargetIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(rtAppearance, nil, 1)
-        raidTargetSection:RegisterChild(rtAppearance)
-
-        -- Position
-        local rtPosition = GUI:CreateSettingsGroup(self.child, 280)
-        rtPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rtPosition.disableChildrenOn = function(d) return not d.raidTargetIconEnabled end
-        rtPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidTargetIconAnchor", function() DF:LightweightUpdateIconPosition("raidTarget") end), 55)
-        rtPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "raidTargetIconX", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
-        rtPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "raidTargetIconY", nil, function() DF:LightweightUpdateIconPosition("raidTarget") end, true), 55)
-        Add(rtPosition, nil, 1)
-        raidTargetSection:RegisterChild(rtPosition)
-        
         -- ============================================
         -- READY CHECK ICON (Collapsible)
         -- ============================================
-        local readySection = Add(GUI:CreateCollapsibleSection(self.child, L["Ready Check Icon"], false, 280), 36, 1)
-        WireStatusPreview(readySection, { enableKey = "readyCheckIconEnabled", icons = { "UI-LFG-ReadyMark-Raid" } })
-        
-        -- Settings
-        local rcSettings = GUI:CreateSettingsGroup(self.child, 280)
-        rcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        rcSettings.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
-        local readyCheckIconEnableCb = rcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Ready Check Icon"], db, "readyCheckIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        readyCheckIconEnableCb.keepEnabled = true
-        rcSettings:AddWidget(GUI:CreateSlider(self.child, L["Persist (seconds)"], 0, 15, 1, db, "readyCheckIconPersist"), 55)
-        Add(rcSettings, nil, 1)
-        readySection:RegisterChild(rcSettings)
+        MountIcon({
+            key = "readyCheckIcon", id = "readyCheck", section = L["Ready Check Icon"],
+            enableKey = "readyCheckIconEnabled", enableLabel = L["Enable Ready Check Icon"],
+            onEnable = OnIconEnabled,
+            after = function(group, parent)
+                group:AddWidget(GUI:CreateSlider(parent, L["Persist (seconds)"], 0, 15, 1, db, "readyCheckIconPersist"), 55)
+            end,
+            settingsCount = 1,
+            summaryExtra = function(d, parts)
+                local persist = tonumber(d.readyCheckIconPersist)
+                if persist then parts[#parts + 1] = format("%ds", math.floor(persist)) end
+            end,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "readyCheckIconEnabled", icons = { "UI-LFG-ReadyMark-Raid" } },
+        })
 
-        -- Appearance
-        local rcAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        rcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        rcAppearance.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
-        rcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "readyCheckIconScale", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
-        rcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "readyCheckIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("readyCheck") end, true), 55)
-        rcAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "readyCheckIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("readyCheck") end, true)), 55)
-        rcAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "readyCheckIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(rcAppearance, nil, 1)
-        readySection:RegisterChild(rcAppearance)
-
-        -- Position
-        local rcPosition = GUI:CreateSettingsGroup(self.child, 280)
-        rcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rcPosition.disableChildrenOn = function(d) return not d.readyCheckIconEnabled end
-        rcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "readyCheckIconAnchor", function() DF:LightweightUpdateIconPosition("readyCheck") end), 55)
-        rcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "readyCheckIconX", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
-        rcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "readyCheckIconY", nil, function() DF:LightweightUpdateIconPosition("readyCheck") end, true), 55)
-        Add(rcPosition, nil, 1)
-        readySection:RegisterChild(rcPosition)
-        
         -- ============================================
         -- PING ICON (Collapsible)
         -- Mirrors Blizzard's 12.1 frame pings; see Features/PingMirror.lua.
         -- ============================================
-        local pingSection = Add(GUI:CreateCollapsibleSection(self.child, L["Ping Icon"], false, 280), 36, 1)
-        WireStatusPreview(pingSection, { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } })
-
-        -- Settings
-        local pingSettings = GUI:CreateSettingsGroup(self.child, 280)
-        pingSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        pingSettings.disableChildrenOn = function(d) return not d.pingIconEnabled end
-        local pingIconEnableCb = pingSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Ping Icon"], db, "pingIconEnabled", function()
-            if DF.OnPingIconToggled then DF:OnPingIconToggled() end
-            DF:UpdateAllFrames()
-        end), 30)
-        pingIconEnableCb.keepEnabled = true
-        pingIconEnableCb.tooltip = L["Shows a group member's ping on the frame of the unit they pinged."]
-        Add(pingSettings, nil, 1)
-        pingSection:RegisterChild(pingSettings)
-
-        -- Appearance
-        local pingAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        pingAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        pingAppearance.disableChildrenOn = function(d) return not d.pingIconEnabled end
-        pingAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "pingIconScale", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
-        pingAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "pingIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("ping") end, true), 55)
-        pingAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "pingIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("ping") end, true)), 55)
-        pingAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "pingIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(pingAppearance, nil, 1)
-        pingSection:RegisterChild(pingAppearance)
-
-        -- Position
-        local pingPosition = GUI:CreateSettingsGroup(self.child, 280)
-        pingPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        pingPosition.disableChildrenOn = function(d) return not d.pingIconEnabled end
-        pingPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "pingIconAnchor", function() DF:LightweightUpdateIconPosition("ping") end), 55)
-        pingPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "pingIconX", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
-        pingPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "pingIconY", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
-        Add(pingPosition, nil, 1)
-        pingSection:RegisterChild(pingPosition)
+        MountIcon({
+            key = "pingIcon", id = "ping", section = L["Ping Icon"],
+            enableKey = "pingIconEnabled", enableLabel = L["Enable Ping Icon"],
+            enableTooltip = L["Shows a group member's ping on the frame of the unit they pinged."],
+            onEnable = function()
+                if DF.OnPingIconToggled then DF:OnPingIconToggled() end
+                DF:UpdateAllFrames()
+            end,
+            controlRow = true,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } },
+        })
 
         -- ============================================
         -- SUMMON ICON (Collapsible)
         -- ============================================
-        local summonSection = Add(GUI:CreateCollapsibleSection(self.child, L["Summon Icon"], false, 280), 36, 1)
-        WireStatusPreview(summonSection, { enableKey = "summonIconEnabled", showTextKey = "summonIconShowText", icons = { "RaidFrame-Icon-SummonPending" }, texts = { "summonIconTextPending" } })
-        
-        -- Settings
-        local sumSettings = GUI:CreateSettingsGroup(self.child, 280)
-        sumSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        sumSettings.disableChildrenOn = function(d) return not d.summonIconEnabled end
-        local summonIconEnableCb = sumSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Summon Icon"], db, "summonIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        summonIconEnableCb.keepEnabled = true
-        sumSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "summonIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Pending Text"], db, "summonIconTextPending", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Accepted Text"], db, "summonIconTextAccepted", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Declined Text"], db, "summonIconTextDeclined", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(sumSettings, L["Text Color"], "summonIconTextColor", "summonIconShowText")
-        Add(sumSettings, nil, 1)
-        summonSection:RegisterChild(sumSettings)
-
-        -- Appearance
-        local sumAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        sumAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        sumAppearance.disableChildrenOn = function(d) return not d.summonIconEnabled end
-        sumAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "summonIconScale", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
-        sumAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "summonIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("summon") end, true), 55)
-        sumAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "summonIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("summon") end, true)), 55)
-        sumAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "summonIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(sumAppearance, nil, 1)
-        summonSection:RegisterChild(sumAppearance)
-
-        -- Position
-        local sumPosition = GUI:CreateSettingsGroup(self.child, 280)
-        sumPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        sumPosition.disableChildrenOn = function(d) return not d.summonIconEnabled end
-        sumPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "summonIconAnchor", function() DF:LightweightUpdateIconPosition("summon") end), 55)
-        sumPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "summonIconX", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
-        sumPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "summonIconY", nil, function() DF:LightweightUpdateIconPosition("summon") end, true), 55)
-        Add(sumPosition, nil, 1)
-        summonSection:RegisterChild(sumPosition)
+        MountIcon({
+            key = "summonIcon", id = "summon", section = L["Summon Icon"],
+            enableKey = "summonIconEnabled", enableLabel = L["Enable Summon Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "summonIconShowText",
+            texts = {
+                { label = L["Pending Text"],  key = "summonIconTextPending" },
+                { label = L["Accepted Text"], key = "summonIconTextAccepted" },
+                { label = L["Declined Text"], key = "summonIconTextDeclined" },
+            },
+            settingsCount = 5,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "summonIconEnabled", showTextKey = "summonIconShowText", icons = { "RaidFrame-Icon-SummonPending" }, texts = { "summonIconTextPending" } },
+        })
 
         -- ============================================
         -- BG OBJECTIVE CARRIER ICON (Collapsible)
@@ -428,319 +846,185 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- (flag / orb). Detection is UnitPvpClassification, so it
         -- works with Blizzard raid frames fully disabled.
         -- ============================================
-        local bgCarrierSection = Add(GUI:CreateCollapsibleSection(self.child, L["BG Carrier Icon"], false, 280), 36, 1)
-        WireStatusPreview(bgCarrierSection, { enableKey = "bgCarrierIconEnabled", showTextKey = "bgCarrierIconShowText", icons = { "Interface\\Icons\\inv_bannerpvp_02" }, texts = { "bgCarrierIconText" } })
-
-        -- Settings
-        local bgcSettings = GUI:CreateSettingsGroup(self.child, 280)
-        bgcSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        bgcSettings.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
-        local bgCarrierIconEnableCb = bgcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable BG Carrier Icon"], db, "bgCarrierIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        bgCarrierIconEnableCb.keepEnabled = true
-        bgcSettings:AddWidget(GUI:CreateLabel(self.child, L["Shows on a friendly party/raid member carrying a battleground objective (flag, orb). Only active inside battlegrounds."], 240), 44)
-        bgcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "bgCarrierIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        bgcSettings:AddWidget(GUI:CreateEditBox(self.child, L["Carrier Text"], db, "bgCarrierIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(bgcSettings, L["Text Color"], "bgCarrierIconTextColor", "bgCarrierIconShowText")
-        Add(bgcSettings, nil, 1)
-        bgCarrierSection:RegisterChild(bgcSettings)
-
-        -- Appearance
-        local bgcAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        bgcAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        bgcAppearance.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
-        bgcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "bgCarrierIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        bgcAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "bgCarrierIconAlpha", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        bgcAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "bgCarrierIconFrameLevel", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true)), 55)
-        Add(bgcAppearance, nil, 1)
-        bgCarrierSection:RegisterChild(bgcAppearance)
-
-        -- Position
-        local bgcPosition = GUI:CreateSettingsGroup(self.child, 280)
-        bgcPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        bgcPosition.disableChildrenOn = function(d) return not d.bgCarrierIconEnabled end
-        bgcPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "bgCarrierIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
-        bgcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "bgCarrierIconX", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        bgcPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "bgCarrierIconY", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        Add(bgcPosition, nil, 1)
-        bgCarrierSection:RegisterChild(bgcPosition)
+        MountIcon({
+            key = "bgCarrierIcon", section = L["BG Carrier Icon"],
+            enableKey = "bgCarrierIconEnabled", enableLabel = L["Enable BG Carrier Icon"],
+            onEnable = OnIconEnabled,
+            note = L["Shows on a friendly party/raid member carrying a battleground objective (flag, orb). Only active inside battlegrounds."],
+            noteHeight = 44,
+            showTextKey = "bgCarrierIconShowText",
+            texts = { { label = L["Carrier Text"], key = "bgCarrierIconText" } },
+            settingsCount = 4,
+            preview = { enableKey = "bgCarrierIconEnabled", showTextKey = "bgCarrierIconShowText", icons = { "Interface\\Icons\\inv_bannerpvp_02" }, texts = { "bgCarrierIconText" } },
+        })
 
         -- ============================================
         -- COMBAT ICON (Collapsible)
         -- ============================================
-        local combatSection = Add(GUI:CreateCollapsibleSection(self.child, L["Combat Icon"], false, 280), 36, 1)
-        -- Preview the swords quadrant of the UI-StateIcon sheet (texcoord slice); also
-        -- greys the section header when the icon is disabled.
-        WireStatusPreview(combatSection, { enableKey = "combatIconEnabled", icons = { { texture = "Interface\\CharacterFrame\\UI-StateIcon", coords = {0.5, 1.0, 0, 0.49} } } })
-
-        -- Settings
-        local combatSettings = GUI:CreateSettingsGroup(self.child, 280)
-        combatSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        combatSettings.disableChildrenOn = function(d) return not d.combatIconEnabled end
-        local combatIconEnableCb = combatSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Combat Icon"], db, "combatIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        combatIconEnableCb.keepEnabled = true
-        combatSettings:AddWidget(GUI:CreateLabel(self.child, L["Shows crossed swords on a party/raid member who is in combat."], 240), 44)
-        Add(combatSettings, nil, 1)
-        combatSection:RegisterChild(combatSettings)
-
-        -- Appearance
-        local combatAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        combatAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        combatAppearance.disableChildrenOn = function(d) return not d.combatIconEnabled end
-        combatAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "combatIconScale", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        combatAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "combatIconAlpha", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        combatAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "combatIconFrameLevel", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true)), 55)
-        Add(combatAppearance, nil, 1)
-        combatSection:RegisterChild(combatAppearance)
-
-        -- Position
-        local combatPosition = GUI:CreateSettingsGroup(self.child, 280)
-        combatPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        combatPosition.disableChildrenOn = function(d) return not d.combatIconEnabled end
-        combatPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "combatIconAnchor", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 55)
-        combatPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "combatIconX", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        combatPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "combatIconY", nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 55)
-        Add(combatPosition, nil, 1)
-        combatSection:RegisterChild(combatPosition)
+        MountIcon({
+            key = "combatIcon", section = L["Combat Icon"],
+            enableKey = "combatIconEnabled", enableLabel = L["Enable Combat Icon"],
+            onEnable = OnIconEnabled, controlRow = true,
+            note = L["Shows crossed swords on a party/raid member who is in combat."],
+            noteHeight = 44,
+            -- Preview the swords quadrant of the UI-StateIcon sheet (texcoord slice); also
+            -- greys the section header when the icon is disabled.
+            preview = { enableKey = "combatIconEnabled", icons = { { texture = "Interface\\CharacterFrame\\UI-StateIcon", coords = {0.5, 1.0, 0, 0.49} } } },
+        })
 
         -- ============================================
         -- RESURRECTION ICON (Collapsible)
         -- ============================================
-        local resSection = Add(GUI:CreateCollapsibleSection(self.child, L["Resurrection Icon"], false, 280), 36, 1)
-        WireStatusPreview(resSection, { enableKey = "resurrectionIconEnabled", showTextKey = "resurrectionIconShowText", icons = { "RaidFrame-Icon-Rez" }, texts = { "resurrectionIconTextCasting" } })
-        
-        -- Settings
-        local resSettings = GUI:CreateSettingsGroup(self.child, 280)
-        resSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        resSettings.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
-        local resurrectionIconEnableCb = resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon"], db, "resurrectionIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        resurrectionIconEnableCb.keepEnabled = true
-        resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "resurrectionIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        resSettings:AddWidget(GUI:CreateEditBox(self.child, L["Casting Text"], db, "resurrectionIconTextCasting", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(resSettings, L["Text Color"], "resurrectionIconTextColor", "resurrectionIconShowText")
-        -- ("Pending Text" removed: resurrectionIconTextPending was never read by
-        -- any render path — live or test — since inception. The pending state
-        -- renders as the yellow icon tint.)
-        Add(resSettings, nil, 1)
-        resSection:RegisterChild(resSettings)
+        MountIcon({
+            key = "resurrectionIcon", id = "resurrection", section = L["Resurrection Icon"],
+            enableKey = "resurrectionIconEnabled", enableLabel = L["Enable Resurrection Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "resurrectionIconShowText",
+            texts = { { label = L["Casting Text"], key = "resurrectionIconTextCasting" } },
+            -- ("Pending Text" removed: resurrectionIconTextPending was never read by
+            -- any render path — live or test — since inception. The pending state
+            -- renders as the yellow icon tint.)
+            settingsCount = 3,
+            preview = { enableKey = "resurrectionIconEnabled", showTextKey = "resurrectionIconShowText", icons = { "RaidFrame-Icon-Rez" }, texts = { "resurrectionIconTextCasting" } },
+        })
 
-        -- Appearance
-        local resAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        resAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        resAppearance.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
-        resAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "resurrectionIconScale", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
-        resAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "resurrectionIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("resurrection") end, true), 55)
-        resAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resurrectionIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("resurrection") end, true)), 55)
-        Add(resAppearance, nil, 1)
-        resSection:RegisterChild(resAppearance)
-
-        -- Position
-        local resPosition = GUI:CreateSettingsGroup(self.child, 280)
-        resPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        resPosition.disableChildrenOn = function(d) return not d.resurrectionIconEnabled end
-        resPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "resurrectionIconAnchor", function() DF:LightweightUpdateIconPosition("resurrection") end), 55)
-        resPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "resurrectionIconX", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
-        resPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "resurrectionIconY", nil, function() DF:LightweightUpdateIconPosition("resurrection") end, true), 55)
-        Add(resPosition, nil, 1)
-        resSection:RegisterChild(resPosition)
-        
         -- ============================================
         -- PHASED ICON (Collapsible)
         -- ============================================
-        local phasedSection = Add(GUI:CreateCollapsibleSection(self.child, L["Phased Icon"], false, 280), 36, 1)
-        WireStatusPreview(phasedSection, { enableKey = "phasedIconEnabled", showTextKey = "phasedIconShowText", icons = { "RaidFrame-Icon-Phasing" }, texts = { "phasedIconText" } })
-        
-        -- Settings
-        local phSettings = GUI:CreateSettingsGroup(self.child, 280)
-        phSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        phSettings.disableChildrenOn = function(d) return not d.phasedIconEnabled end
-        local phasedIconEnableCb = phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Phased Icon"], db, "phasedIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        phasedIconEnableCb.keepEnabled = true
-        phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "phasedIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        phSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "phasedIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(phSettings, L["Text Color"], "phasedIconTextColor", "phasedIconShowText")
-        phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", function() DF:UpdateAllFrames() end), 30)
-        Add(phSettings, nil, 1)
-        phasedSection:RegisterChild(phSettings)
+        MountIcon({
+            key = "phasedIcon", id = "phased", section = L["Phased Icon"],
+            enableKey = "phasedIconEnabled", enableLabel = L["Enable Phased Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "phasedIconShowText",
+            texts = { { label = L["Status Text"], key = "phasedIconText" } },
+            after = function(group, parent)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", OnIconEnabled), 30)
+            end,
+            settingsCount = 4,
+            summaryExtra = function(d, parts)
+                if d.phasedIconShowLFGEye then parts[#parts + 1] = L["Show LFG Eye for Cross-Instance"] end
+            end,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "phasedIconEnabled", showTextKey = "phasedIconShowText", icons = { "RaidFrame-Icon-Phasing" }, texts = { "phasedIconText" } },
+        })
 
-        -- Appearance
-        local phAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        phAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        phAppearance.disableChildrenOn = function(d) return not d.phasedIconEnabled end
-        phAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "phasedIconScale", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
-        phAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "phasedIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("phased") end, true), 55)
-        phAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "phasedIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("phased") end, true)), 55)
-        phAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "phasedIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(phAppearance, nil, 1)
-        phasedSection:RegisterChild(phAppearance)
-
-        -- Position
-        local phPosition = GUI:CreateSettingsGroup(self.child, 280)
-        phPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        phPosition.disableChildrenOn = function(d) return not d.phasedIconEnabled end
-        phPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "phasedIconAnchor", function() DF:LightweightUpdateIconPosition("phased") end), 55)
-        phPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "phasedIconX", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
-        phPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "phasedIconY", nil, function() DF:LightweightUpdateIconPosition("phased") end, true), 55)
-        Add(phPosition, nil, 1)
-        phasedSection:RegisterChild(phPosition)
-        
         -- ============================================
         -- AFK ICON (Collapsible)
-        -- ============================================
-        local afkSection = Add(GUI:CreateCollapsibleSection(self.child, L["AFK Icon"], false, 280), 36, 1)
-        WireStatusPreview(afkSection, { enableKey = "afkIconEnabled", showTextKey = "afkIconShowText", icons = { "characterupdate_clock-icon" }, texts = { "afkIconText" } })
-        
         -- AFK is the one icon with a fourth box (Timer Text) on top of the
         -- standard Settings / Appearance / Position trio.
+        -- ============================================
         local afkTimerCB = function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end
-
-        -- Settings
-        local afkSettings = GUI:CreateSettingsGroup(self.child, 280)
-        afkSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        afkSettings.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        local afkIconEnableCb = afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable AFK Icon"], db, "afkIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        afkIconEnableCb.keepEnabled = true
-        afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "afkIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        afkSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "afkIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(afkSettings, L["Text Color"], "afkIconTextColor", "afkIconShowText")
-        afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Timer"], db, "afkIconShowTimer", function() DF:UpdateAllFramesStatusIcons() end), 30)
-        -- In text mode the timer is merged into the status text, so the Timer
-        -- Text box is hidden; explain it inherits the main text styling.
-        local afkTimerInheritNote = afkSettings:AddWidget(GUI:CreateLabel(self.child, L["In Text mode the timer joins the status text and uses its font, colour and position."], 230), 40)
-        afkTimerInheritNote.hideOn = function(d) return not d.afkIconShowText or not d.afkIconShowTimer end
-        Add(afkSettings, nil, 1)
-        afkSection:RegisterChild(afkSettings)
-
         -- Timer Text — elapsed-time text under the icon. Icon mode only (Show as
         -- Text off) with Show Timer on, so the whole box is gated.
-        local afkTimerGroup = GUI:CreateSettingsGroup(self.child, 280)
-        afkTimerGroup:AddWidget(GUI:CreateHeader(self.child, L["Timer Text"]), GUI.RowHeight.sectionHeader)
-        afkTimerGroup.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        afkTimerGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
-        afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Size"], 6, 24, 1, db, "afkIconTimerFontSize", afkTimerCB, afkTimerCB, true), 55)
-        afkTimerGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 55)
-        -- ⚠ SHADOW LIVES INSIDE THE OUTLINE STRING, so this checkbox writes the SAME key as
-        -- the dropdown above — hence the matching inheritKey. afkIconTimerOutline ships
-        -- UNSET so the timer follows the shared status-icon outline; without the fallback
-        -- the box would read unchecked while inheriting a shadow, and ticking it would pin
-        -- the outline to NONE, throwing the inherited style away.
-        afkTimerGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 30)
-        -- Same note the shared Icon Text Settings box carries: only WHETHER there is a
-        -- shadow is per-timer. Its offset and colour are global (fontShadow* keys) because
-        -- on 12.0.7 the shadow rides the font OBJECT — fontstring SetShadow* is a silent
-        -- no-op — and font objects are shared. Shown only while a shadow is actually on.
-        local afkTimerShadowLink = GUI:CreateGlobalFontsShadowLink(self.child, 230)
-        local afkTimerShadowNote = afkTimerGroup:AddWidget(afkTimerShadowLink, afkTimerShadowLink.layoutHeight)
-        afkTimerShadowNote.hideOn = function(d)
-            return not DF:OutlineHasShadow(d.afkIconTimerOutline or d.statusIconFontOutline)
+        local function AFKTimerHidden(d) return not d.afkIconShowTimer or d.afkIconShowText end
+        local function BuildAFKTimerGroup(tools2, spec)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = spec.gate
+            group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Size"], 6, 24, 1, db, "afkIconTimerFontSize", afkTimerCB, afkTimerCB, true), 55)
+            group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 55)
+            -- ⚠ SHADOW LIVES INSIDE THE OUTLINE STRING, so this checkbox writes the SAME key as
+            -- the dropdown above — hence the matching inheritKey. afkIconTimerOutline ships
+            -- UNSET so the timer follows the shared status-icon outline; without the fallback
+            -- the box would read unchecked while inheriting a shadow, and ticking it would pin
+            -- the outline to NONE, throwing the inherited style away.
+            group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 30)
+            -- Same note the shared Icon Text Settings box carries: only WHETHER there is a
+            -- shadow is per-timer. Its offset and colour are global (fontShadow* keys) because
+            -- on 12.0.7 the shadow rides the font OBJECT — fontstring SetShadow* is a silent
+            -- no-op — and font objects are shared. Shown only while a shadow is actually on.
+            local afkTimerShadowLink = GUI:CreateGlobalFontsShadowLink(parent, 230)
+            local afkTimerShadowNote = group:AddWidget(afkTimerShadowLink, afkTimerShadowLink.layoutHeight)
+            afkTimerShadowNote.hideOn = function(d)
+                return not DF:OutlineHasShadow(d.afkIconTimerOutline or d.statusIconFontOutline)
+            end
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
         end
-        afkTimerGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
-        afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
-        afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
-        Add(afkTimerGroup, nil, 1)
-        afkSection:RegisterChild(afkTimerGroup)
-        afkTimerGroup.hideOn = function(d) return not d.afkIconShowTimer or d.afkIconShowText end
 
-        -- Appearance
-        local afkAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        afkAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        afkAppearance.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        afkAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "afkIconScale", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
-        afkAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "afkIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("afk") end, true), 55)
-        afkAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "afkIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("afk") end, true)), 55)
-        afkAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "afkIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(afkAppearance, nil, 1)
-        afkSection:RegisterChild(afkAppearance)
+        local function AFKTimerSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.afkIconTimerFontSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local x = tonumber(d.afkIconTimerX) or 0
+            local y = tonumber(d.afkIconTimerY) or 0
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            return Join(parts)
+        end
 
-        -- Position
-        local afkPosition = GUI:CreateSettingsGroup(self.child, 280)
-        afkPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        afkPosition.disableChildrenOn = function(d) return not d.afkIconEnabled end
-        afkPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "afkIconAnchor", function() DF:LightweightUpdateIconPosition("afk") end), 55)
-        afkPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "afkIconX", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
-        afkPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "afkIconY", nil, function() DF:LightweightUpdateIconPosition("afk") end, true), 55)
-        Add(afkPosition, nil, 1)
-        afkSection:RegisterChild(afkPosition)
-        
+        MountIcon({
+            key = "afkIcon", id = "afk", section = L["AFK Icon"],
+            enableKey = "afkIconEnabled", enableLabel = L["Enable AFK Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "afkIconShowText",
+            texts = { { label = L["Status Text"], key = "afkIconText" } },
+            after = function(group, parent)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Timer"], db, "afkIconShowTimer", StatusTextCB), 30)
+                -- In text mode the timer is merged into the status text, so the Timer
+                -- Text box is hidden; explain it inherits the main text styling.
+                local afkTimerInheritNote = group:AddWidget(GUI:CreateLabel(parent, L["In Text mode the timer joins the status text and uses its font, colour and position."], 230), 40)
+                afkTimerInheritNote.hideOn = function(d) return not d.afkIconShowText or not d.afkIconShowTimer end
+            end,
+            settingsCount = 5,
+            summaryExtra = function(d, parts)
+                if d.afkIconShowTimer then parts[#parts + 1] = L["Show Timer"] end
+            end,
+            extraGroup = {
+                label = L["Timer Text"], build = BuildAFKTimerGroup, count = 8,
+                summary = AFKTimerSummary, hideOn = AFKTimerHidden,
+            },
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "afkIconEnabled", showTextKey = "afkIconShowText", icons = { "characterupdate_clock-icon" }, texts = { "afkIconText" } },
+        })
+
         -- ============================================
         -- VEHICLE ICON (Collapsible)
         -- ============================================
-        local vehSection = Add(GUI:CreateCollapsibleSection(self.child, L["Vehicle Icon"], false, 280), 36, 1)
-        WireStatusPreview(vehSection, { enableKey = "vehicleIconEnabled", showTextKey = "vehicleIconShowText", icons = { "RaidFrame-Icon-Vehicle" }, texts = { "vehicleIconText" } })
-        
-        -- Settings
-        local vehSettings = GUI:CreateSettingsGroup(self.child, 280)
-        vehSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        vehSettings.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
-        local vehicleIconEnableCb = vehSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Vehicle Icon"], db, "vehicleIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        vehicleIconEnableCb.keepEnabled = true
-        vehSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "vehicleIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        vehSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "vehicleIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(vehSettings, L["Text Color"], "vehicleIconTextColor", "vehicleIconShowText")
-        Add(vehSettings, nil, 1)
-        vehSection:RegisterChild(vehSettings)
+        MountIcon({
+            key = "vehicleIcon", id = "vehicle", section = L["Vehicle Icon"],
+            enableKey = "vehicleIconEnabled", enableLabel = L["Enable Vehicle Icon"],
+            onEnable = OnIconEnabled,
+            showTextKey = "vehicleIconShowText",
+            texts = { { label = L["Status Text"], key = "vehicleIconText" } },
+            settingsCount = 3,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "vehicleIconEnabled", showTextKey = "vehicleIconShowText", icons = { "RaidFrame-Icon-Vehicle" }, texts = { "vehicleIconText" } },
+        })
 
-        -- Appearance
-        local vehAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        vehAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        vehAppearance.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
-        vehAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "vehicleIconScale", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
-        vehAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "vehicleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("vehicle") end, true), 55)
-        vehAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "vehicleIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("vehicle") end, true)), 55)
-        vehAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "vehicleIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(vehAppearance, nil, 1)
-        vehSection:RegisterChild(vehAppearance)
-
-        -- Position
-        local vehPosition = GUI:CreateSettingsGroup(self.child, 280)
-        vehPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        vehPosition.disableChildrenOn = function(d) return not d.vehicleIconEnabled end
-        vehPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "vehicleIconAnchor", function() DF:LightweightUpdateIconPosition("vehicle") end), 55)
-        vehPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "vehicleIconX", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
-        vehPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "vehicleIconY", nil, function() DF:LightweightUpdateIconPosition("vehicle") end, true), 55)
-        Add(vehPosition, nil, 1)
-        vehSection:RegisterChild(vehPosition)
-        
         -- ============================================
         -- RAID ROLE ICON (Collapsible)
         -- ============================================
-        local rrSection = Add(GUI:CreateCollapsibleSection(self.child, L["Raid Role Icon (MT/MA)"], false, 280), 36, 1)
-        WireStatusPreview(rrSection, { enableKey = "raidRoleIconEnabled", showTextKey = "raidRoleIconShowText", icons = { "RaidFrame-Icon-MainTank", "RaidFrame-Icon-MainAssist" }, texts = { "raidRoleIconTextTank", "raidRoleIconTextAssist" } })
-        
-        -- Settings
-        local rrSettings = GUI:CreateSettingsGroup(self.child, 280)
-        rrSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
-        rrSettings.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
-        local raidRoleIconEnableCb = rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Raid Role Icon"], db, "raidRoleIconEnabled", function() DF:UpdateAllFrames() end), 30)
-        raidRoleIconEnableCb.keepEnabled = true
-        rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Main Tank"], db, "raidRoleIconShowTank", function() DF:UpdateAllFrames() end), 30)
-        rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Main Assist"], db, "raidRoleIconShowAssist", function() DF:UpdateAllFrames() end), 30)
-        rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "raidRoleIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
-        rrSettings:AddWidget(GUI:CreateEditBox(self.child, L["Tank Text"], db, "raidRoleIconTextTank", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        rrSettings:AddWidget(GUI:CreateEditBox(self.child, L["Assist Text"], db, "raidRoleIconTextAssist", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
-        AddTextColor(rrSettings, L["Text Color"], "raidRoleIconTextColor", "raidRoleIconShowText")
-        Add(rrSettings, nil, 1)
-        rrSection:RegisterChild(rrSettings)
-
-        -- Appearance
-        local rrAppearance = GUI:CreateSettingsGroup(self.child, 280)
-        rrAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
-        rrAppearance.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
-        rrAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "raidRoleIconScale", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
-        rrAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "raidRoleIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("raidRole") end, true), 55)
-        rrAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "raidRoleIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("raidRole") end, true)), 55)
-        rrAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "raidRoleIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
-        Add(rrAppearance, nil, 1)
-        rrSection:RegisterChild(rrAppearance)
-
-        -- Position
-        local rrPosition = GUI:CreateSettingsGroup(self.child, 280)
-        rrPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
-        rrPosition.disableChildrenOn = function(d) return not d.raidRoleIconEnabled end
-        rrPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "raidRoleIconAnchor", function() DF:LightweightUpdateIconPosition("raidRole") end), 55)
-        rrPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "raidRoleIconX", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
-        rrPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "raidRoleIconY", nil, function() DF:LightweightUpdateIconPosition("raidRole") end, true), 55)
-        Add(rrPosition, nil, 1)
-        rrSection:RegisterChild(rrPosition)
+        MountIcon({
+            key = "raidRoleIcon", id = "raidRole", section = L["Raid Role Icon (MT/MA)"],
+            enableKey = "raidRoleIconEnabled", enableLabel = L["Enable Raid Role Icon"],
+            onEnable = OnIconEnabled,
+            before = function(group, parent)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Main Tank"], db, "raidRoleIconShowTank", OnIconEnabled), 30)
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Main Assist"], db, "raidRoleIconShowAssist", OnIconEnabled), 30)
+            end,
+            showTextKey = "raidRoleIconShowText",
+            texts = {
+                { label = L["Tank Text"],   key = "raidRoleIconTextTank" },
+                { label = L["Assist Text"], key = "raidRoleIconTextAssist" },
+            },
+            settingsCount = 6,
+            summaryExtra = function(d, parts)
+                -- Both ship on, so the row is silent about them until one is off --
+                -- and then it names the one still showing. With both off the icon
+                -- draws nothing, which the row says outright.
+                local tank, assist = d.raidRoleIconShowTank ~= false, d.raidRoleIconShowAssist ~= false
+                if not (tank and assist) then
+                    if tank then parts[#parts + 1] = L["Show Main Tank"] end
+                    if assist then parts[#parts + 1] = L["Show Main Assist"] end
+                    if not (tank or assist) then parts[#parts + 1] = L["None"] end
+                end
+            end,
+            hideInCombatLabel = L["Hide in Combat"], onHideInCombat = OnIconEnabled,
+            preview = { enableKey = "raidRoleIconEnabled", showTextKey = "raidRoleIconShowText", icons = { "RaidFrame-Icon-MainTank", "RaidFrame-Icon-MainAssist" }, texts = { "raidRoleIconTextTank", "raidRoleIconTextAssist" } },
+        })
     end)
     
     -- Indicators > Highlights
