@@ -2664,6 +2664,7 @@ local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset)
     groupsCaption:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     groupsCaption:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -10)
     state.groupsCaption = groupsCaption
+    state.groupAddBtn = addBtn
     return 10 + 32 + 10 + 12 + 4
 end
 
@@ -2686,7 +2687,6 @@ local function BuildGroupsTab(GUI, parent, state, tdDB, page)
     listChild:SetSize(listContainer:GetWidth() > 1 and listContainer:GetWidth() or 300, 1)
     listContainer:SetScrollChild(listChild)
 
-    state.groupAddBtn = addBtn
     state.groupListContainer = listContainer
     state.groupListChild = listChild
     state.groupCardFrames = state.groupCardFrames or {}
@@ -3401,11 +3401,17 @@ function DF.BuildTextDesignerPage(GUI, page, db, Add, AddSpace)
         -- it builds is nested inside one of them.
         local state = GetState(page)
         for _, key in ipairs({ "presetBar", "controlsBar", "previewPanel",
-                               "rightAnchorFrame", "disabledOverlay", "addPicker" }) do
+                               "rightAnchorFrame", "disabledOverlay" }) do
             local f = state[key]
             if f then f:Hide(); f:ClearAllPoints() end
             state[key] = nil
         end
+        -- ⚠ THE ADD PICKER IS HIDDEN, NOT DROPPED. It is parented to UIParent so
+        -- that it can float outside the panel, which also means it survives a page
+        -- rebuild by design and is cached for reuse -- and this runs on EVERY
+        -- rebuild, so nilling it would mint a fresh UIParent frame per tab click
+        -- and WoW cannot free the old one. Hiding is what a rebuild owes it.
+        if state.addPicker then state.addPicker:Hide() end
         -- ⚠ AND THE ISLAND'S OWN RefreshStates GOES WITH THEM. It REPLACES the
         -- harness's, permanently, on the page object -- so a layout flip would
         -- leave the band column being laid out by a verb that sizes page.child to
