@@ -4035,6 +4035,26 @@ function GUI:CreatePopoutPageTools(page)
             st.group:ClearAllPoints()
             st.group:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
             st.group:SetWidth(POPOUT_W)
+            -- ☠ THE PANE ANSWERS FOR ITS OWN RE-FLOW, because GUI:RelayoutHost's
+            -- walk has nothing else up here to find. A widget that only learns its
+            -- height AFTER construction -- a measured label, an info banner -- sets
+            -- its slot height a frame late and calls that helper, which re-lays the
+            -- GROUP out and then walks up for something that can re-anchor the
+            -- group's neighbours. On a page that is the page; above a pane it is the
+            -- settings WINDOW, which knows nothing about this panel -- so the group
+            -- grew and the panel around it kept the height it was given right here,
+            -- clipping whatever the widget had just gained.
+            --
+            -- The AD indicator card's dfAD_ReflowWidgets is the same repair for the
+            -- same walk, one host earlier. Stamped at the MOUNT rather than in
+            -- fresh(): `pane` is what the walk passes through, and it does not exist
+            -- until a panel opens.
+            --
+            -- ⚠ A measured label with an EXPLICIT slot height never reaches this
+            -- (_slotHeightExplicit suppresses its converge). A banner has no such
+            -- opt-out -- only opts.staticHeight silences it, and that would change
+            -- what the classic page draws -- which is what made this necessary.
+            pane.dfReflowPane = function() ReflowPane(st) end
             st.group:Show()
             ReflowPane(st)
         end, pending.group

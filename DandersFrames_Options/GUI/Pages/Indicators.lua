@@ -1630,33 +1630,263 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ownership is stated rather than inferred.
         Add(CreateCopyButton(self.child, {"debuff", "showDebuffs", "directDebuff", "debuffBlacklist"}, L["Debuff Bar"], "auras_debuffs"), 25, 2)
 
-        -- ===== VISIBILITY (Column 1, FIRST) =====
-        -- Leads the page for the same reason it does on Buff Bar: Show Debuffs is the
-        -- master switch everything else greys out under, so it must not be the fourth
-        -- box down. Same name as its twin — the two pages are read as a pair, and a
-        -- box holding the same two controls must not be called two different things.
-        local visibilityGroup = GUI:CreateSettingsGroup(self.child, 280)
-        visibilityGroup:AddWidget(GUI:CreateHeader(self.child, L["Visibility"]), 40)
-        visibilityGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Debuffs"], db, "showDebuffs", function()
-            self:RefreshStates()
-            -- See Show Buffs above: re-scan auras on visible frames so a static
-            -- debuff hides/shows immediately instead of waiting for the next aura event.
-            DF:RefreshAllVisibleFrames()
-        end), 30)
-        local debuffMax = visibilityGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        debuffMax.disableOn = function(d) return not d.showDebuffs end
-        Add(visibilityGroup, nil, 1)
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: fourteen 280 boxes in two columns, in
+        -- the columns and the order they have always had -- including the Important
+        -- Debuffs crossing the column notes below argue for.
+        --
+        -- POPOUT turns THIRTEEN of them into feature rows in four bands, and the one
+        -- single-setting group into a CONTROL ROW on the same plate:
+        --
+        --   "Content"   Visibility, Debuff Filters, Debuff Blacklist, Order & Limits
+        --               and the Hide Duplicate Debuffs control row -- whether the bar
+        --               exists, which debuffs reach it, which are struck back out
+        --               again, how many of them and in what order.
+        --   "Icon"      Appearance, Layout, Position, Border, Important Debuffs --
+        --               the icon itself: how big, how they grid, where they sit, what
+        --               rings them, and the one treatment applied to a SUBSET of them.
+        --   "Text"      Duration Text, Stack Count, Dispel Text -- the three things
+        --               WRITTEN on an icon.
+        --   headerless  Duration Bar -- the 12.1-factory-only extra.
+        --               ☠ NO HEADER, deliberately, and for the same reason the Buff
+        --               Bar's fourth band has none: the row carries a hideOn, so a
+        --               header would be a section title left standing over nothing on
+        --               a client with no factory row. Debuffs have no Pandemic box to
+        --               stand beside it (see the note at the foot of the page), so
+        --               this band holds one row rather than two.
+        --
+        -- All three band headers are locale strings the page already ships.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box it
+        -- always built, which is what makes "classic is unchanged" structural rather
+        -- than a promise -- test_debuffbar_page_builders.lua pins the inventory of
+        -- each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key claim,
+        -- the amber tick, the footer's Reset Group / Hold: Defaults, the hoisted-toggle
+        -- search repair, the control-row registration and the band width. nil in
+        -- classic, which is what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
 
-        -- Shared by both groups below: rebuild the native filter strings and re-drive
-        -- the container rows. The blacklist rides the same refresh because the debuff
-        -- row's excludeSpellIDs merge reacts to exactly this pair
+        local contentBand, iconBand, textBand, factoryBand
+        if tools then
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
+            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
+            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
+            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+        end
+
+        -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
+        -- These tables used to sit inside the box that offered them. The rows print
+        -- the chosen value as their SUMMARY, and a summary is written OUTSIDE the
+        -- group's builder -- so the word has to come out of the same table the
+        -- dropdown offers, or a row could say one thing while the control behind it
+        -- says another. (The Buff Bar page hoisted its four for exactly this.)
+        --
+        -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure captures
+        -- the upvalue that exists when it is created -- so one declared above these
+        -- lines would see nil rather than the table or the function.
+        local anchorOptions = {
+            CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
+            TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
+        }
+        local debuffSortOptions = {
+            DEFAULT = L["Default (Slot Order)"],
+            TIME = L["Time Remaining"],
+            NAME = L["Alphabetical"],
+            APPLIED = L["Order Applied"],
+            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
+        }
+        -- Icon-sized formats only (see the buff page's Duration Format note).
+        local debuffDurationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
+        local durBarPositionOptions = { BOTTOM = L["Bottom"], TOP = L["Top"] }
+        -- Corner + nudge. Offsets are ADDED to a built-in overhang that pushes the badge
+        -- out of whichever corner is picked, so 0/0 is already a sensible resting place.
+        local badgePoints = { TOPRIGHT = L["Top Right"], TOPLEFT = L["Top Left"],
+                              BOTTOMRIGHT = L["Bottom Right"], BOTTOMLEFT = L["Bottom Left"] }
+        -- ★ TWO ENTRIES, NOT THREE. "Any Dispel Type" (ANY) was collapsed into
+        -- "All Dispellable" (2026-08-22): the two were one query wearing two rows
+        -- -- ANY was added when the PTR-5 DISPELLABLE token appeared, beside the
+        -- old map-based ALL instead of underneath it, and once ALL moved onto the
+        -- token (the secrecy fix in Features/Auras.lua) they were byte-identical.
+        -- Every peer offers exactly two modes, as does DF's own dispel overlay.
+        local dispelModeOptions = {
+            PLAYER = L["Dispellable By Me"],
+            ALL    = L["All Dispellable"],
+            _order = { "PLAYER", "ALL" },
+        }
+        -- Blizzard's fixed categories, in the order the old page listed them.
+        local DEBUFF_CATEGORIES = {
+            { key = "debuffFilterBoss",         name = "Boss Debuffs",        desc = "Debuffs applied by dungeon and raid bosses." },
+            { key = "debuffFilterRole",         name = "Role Debuffs",        desc = "Debuffs Blizzard flags as important for your role." },
+            { key = "debuffFilterPriority",     name = "Priority Debuffs",    desc = "Debuffs Blizzard flags as high priority." },
+            { key = "debuffFilterCrowdControl", name = "Crowd Control",       desc = "CC effects like stuns, roots, and incapacitates." },
+            { key = "debuffFilterRaid",         name = "Raid Debuffs",        desc = "Other debuffs Blizzard flags for raid frames." },
+            -- ⚠ Inserted BEFORE Dispellable, not appended: the entry below claims the
+            -- dispel-mode dropdown is "just below", which is only true while it is the
+            -- last row in this group.
+            { key = "debuffFilterNonPlayer",    name = "Non-Player Debuffs",  desc = "Debuffs applied by enemies and the environment, never by a player or their pet. Use it to keep boss and trash effects while dropping player-cast clutter such as Sated or Forbearance." },
+            -- ⚠ "just below" stays true on this page: the dispel-mode dropdown
+            -- is the next widget in this same group.
+            { key = "debuffFilterDispellable",  name = "Dispellable Debuffs", desc = "Debuffs that can be dispelled. Which dispels count is set just below." },
+        }
+        -- The blacklist's catalog, read once for the page: the row's COUNT and its
+        -- summary are both arithmetic over it, and both are written outside the
+        -- builder that lists it.
+        local blacklistCatalog = (DF.AuraBlacklist and DF.AuraBlacklist.DebuffSpells) or {}
+
+        -- Shared by both filter groups below: rebuild the native filter strings and
+        -- re-drive the container rows. The blacklist rides the same refresh because
+        -- the debuff row's excludeSpellIDs merge reacts to exactly this pair
         -- (Features/Auras.lua applyDebuffBlacklist).
         local function DebuffFilterChanged()
             if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
         end
+        -- Every bar edit routes through the factory drive: the sig split decides
+        -- Rebuild (enable/position/height/gap — layout reservation) vs in-place
+        -- restyle (texture/colours) — same callback either way.
+        local function DebuffBarChanged() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end
+        -- ☠ THE TWO 12.1-ONLY GROUPS SHARE ONE PREDICATE, NAMED FOR WHAT IT ASKS.
+        -- The Duration Bar (the native container drains the strip render-side; the
+        -- legacy renderer has no bar) and the Dispel Text letters (the legacy
+        -- renderer has no source for them) both vanish on a client where the factory
+        -- does not own this row, and both used to spell the same test out for
+        -- themselves -- one as a named HideDurationBar, one as an inline closure on
+        -- the box. In the popout layout it is the ROW's hideOn on both, so the band
+        -- collapses the slot instead of drawing an empty plate.
+        local function NoFactoryRow(d) return not DF:FactoryOwnsDebuffRow(d) end
 
-        -- ===== DEBUFF FILTERS (Column 1, first) =====
+        -- ☠ THE PAGE GATE, ON THE ROWS. Show Debuffs greys every group it greyed in
+        -- classic -- and ONLY those: the Debuff Filters box, the Debuff Blacklist box
+        -- and the Hide Duplicate Debuffs box have never dimmed with it (you can pick
+        -- what the bar would show before you switch it on), so their rows do not
+        -- either.
+        --
+        -- ⚠ THE VISIBILITY ROW IS THE ONE EXCEPTION among the gated groups: it
+        -- carries the gate's own tick, so greying it would leave no way to turn the
+        -- bar back on.
+        local function DebuffsOffRow(d) return not (d or db).showDebuffs end
+
+        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
+        -- DandersUI Sections' RefreshChildStates greys every child a
+        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
+        -- first child is always the header, and wrong for a popout pane, which has no
+        -- header at all. The Pet Frames / Resource Bar answer, verbatim: spelled onto
+        -- the widget itself, composed with whatever predicate it already carries, and
+        -- applied at the MOUNT rather than inside the builder. Never runs in classic,
+        -- where the box's own header is index 1.
+        --
+        -- Only the four panes whose first child is a GATED CONTROL need it. A pane
+        -- opening on a label (Debuff Filters, Debuff Blacklist, Important Debuffs,
+        -- Duration Bar) or on a control carrying the page gate itself (Visibility,
+        -- Appearance, Layout, Position, Border) already greys.
+        local function GatePaneFirstChild(group)
+            local entry = group and group.groupChildren and group.groupChildren[1]
+            local w = entry and entry.widget
+            if not w then return end
+            local prev = w.disableOn
+            w.disableOn = function(d) return DebuffsOffRow(d) or (prev and prev(d)) or false end
+        end
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- ===== VISIBILITY (a 280 box in column 1 in classic, the Content band's
+        -- first row) =====
+        -- Leads the page for the same reason it does on Buff Bar: Show Debuffs is the
+        -- master switch everything else greys out under, so it must not be the fourth
+        -- box down. Same name as its twin — the two pages are read as a pair, and a
+        -- box holding the same two controls must not be called two different things.
+        --
+        -- ☠ ONE CONTROL BEHIND THE TICK, AND IT IS STILL A ROW RATHER THAN TWO
+        -- CONTROL ROWS -- the Buff Bar's reasoning, verbatim: the row is where the
+        -- page's master switch lives, and a control row carries a setting rather than
+        -- a group, so it can offer neither the pair's Reset Group nor the tick that
+        -- says the pair has been touched.
+        local function BuildDebuffVisibilityGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the page's only on/off control.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Debuffs"], db, "showDebuffs", function()
+                    tools2.refreshStates()
+                    -- See Show Buffs above: re-scan auras on visible frames so a static
+                    -- debuff hides/shows immediately instead of waiting for the next aura event.
+                    DF:RefreshAllVisibleFrames()
+                end), 30)
+            end
+            local debuffMax = group:AddWidget(GUI:CreateSlider(parent, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            debuffMax.disableOn = function(d) return not d.showDebuffs end
+        end
+
+        -- What the whole page's gate costs when it moves, named once: the state pass,
+        -- the aura re-scan the suppressed checkbox ran, and a repaint of every pane
+        -- standing open -- ten of which grey with it.
+        local function OnShowDebuffsToggle()
+            self:RefreshStates()
+            DF:RefreshAllVisibleFrames()
+            if tools then tools.ReflowMounted() end
+        end
+
+        local function DebuffVisibilitySummary(d)
+            if not d then return "" end
+            local n = tonumber(d.debuffMax)
+            if not n then return "" end
+            return format("%s %d", L["Max Debuffs"], n)
+        end
+
+        if classicLayout then
+            local visibilityGroup = GUI:CreateSettingsGroup(self.child, 280)
+            visibilityGroup:AddWidget(GUI:CreateHeader(self.child, L["Visibility"]), 40)
+            BuildDebuffVisibilityGroup({
+                group = visibilityGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(visibilityGroup, nil, 1)
+        else
+            -- One: Max Debuffs. The Show Debuffs tick is HOISTED onto the row, so it
+            -- is not one of them.
+            local DEBUFF_VISIBILITY_COUNT = 1
+
+            local visMount, visContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffVisibilityGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local visRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Visibility"],
+                db       = tools.RowDB,
+                toggle   = { key = "showDebuffs" },
+                summary  = DebuffVisibilitySummary,
+                count    = DEBUFF_VISIBILITY_COUNT,
+                onToggle = OnShowDebuffsToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = visMount,
+            }))
+            tools.ClaimKeys(visRow, visContent)
+            tools.WireModifiedTick(visRow)
+            tools.WireFooter(visRow, function() DF:RefreshAllVisibleFrames() end)
+            tools.RegisterHoistedToggle(visRow, L["Show Debuffs"], "showDebuffs", OnShowDebuffsToggle)
+        end
+
+        -- ===== DEBUFF FILTERS (a 280 box in column 1 in classic, the Content band's
+        -- second row) =====
         -- WHICH debuffs reach this bar, moved here from the Aura Filters page.
         --
         -- ☠ These are NOT filters in the registry sense and there is no Manage
@@ -1665,14 +1895,18 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- is the single most misleading thing about the old shared page, where these
         -- switches sat under the same tab strip as the editable buff library and
         -- looked identical to it. Here they are simply this bar's own controls.
-        do
-            local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
-            filterGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
-            filterGroup:AddWidget(GUI:CreateLabel(self.child,
+        --
+        -- ☠ NO TICK TO HOIST, and All Debuffs is NOT one. It does not switch the
+        -- group off -- it switches the group's list off and shows MORE, which is the
+        -- opposite of what a row's tick means. This is a WAY IN.
+        local function BuildDebuffFilterGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent,
                 "|cff888888" .. L["These categories are Blizzard's and cannot be edited."] .. "|r", 250), 35)
 
-            local showAllCb = filterGroup:AddWidget(GUI:CreateCheckbox(self.child, L["All Debuffs"], db, "directDebuffShowAll", function()
-                self:RefreshStates()
+            local showAllCb = group:AddWidget(GUI:CreateCheckbox(parent, L["All Debuffs"], db, "directDebuffShowAll", function()
+                tools2.refreshStates()
                 DebuffFilterChanged()
             end), 30)
             showAllCb.tooltip = L["Show every debuff with no filtering."]
@@ -1704,7 +1938,17 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- SetText/SetHTML is driven from a refresh can feed the refreshContent
             -- loop that froze the GUI once before, so this one only ever gets hideOn.
             -- Do not add a refreshContent to it.
-            local catCaution = GUI:CreateInfoBanner(self.child, {
+            --
+            -- ☠ AND IT IS THE FIRST BANNER THE SWEEP HAS PUT INSIDE A PANE, which is
+            -- why GUI:CreatePopoutPageTools now stamps `dfReflowPane` on the pane it
+            -- mounts a group into. A banner measures its wrapped text a frame AFTER it
+            -- is shown and then calls GUI:RelayoutHost -- and that walk had nothing to
+            -- find above a pane, so the group re-laid out while the PANEL around it
+            -- kept the height it was given at mount, clipping whatever the banner had
+            -- just grown by. Unlike a measured label this cannot be opted out of with
+            -- an explicit slot height (only opts.staticHeight silences it, and that
+            -- would change what CLASSIC draws).
+            local catCaution = GUI:CreateInfoBanner(parent, {
                 tone = "caution",
                 text = L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."],
                 minHeight = 30,
@@ -1714,26 +1958,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- child collapses to nothing (LayoutChildren's entryVisible), so the rows
             -- below close up rather than leaving a hole where it would have been.
             catCaution.hideOn = function(d) return (d.directDebuffShowAll and true) or false end
-            filterGroup:AddWidget(catCaution, catCaution.layoutHeight or 45)
+            group:AddWidget(catCaution, catCaution.layoutHeight or 45)
 
-            -- Blizzard's fixed categories, in the order the old page listed them.
-            local DEBUFF_CATEGORIES = {
-                { key = "debuffFilterBoss",         name = "Boss Debuffs",        desc = "Debuffs applied by dungeon and raid bosses." },
-                { key = "debuffFilterRole",         name = "Role Debuffs",        desc = "Debuffs Blizzard flags as important for your role." },
-                { key = "debuffFilterPriority",     name = "Priority Debuffs",    desc = "Debuffs Blizzard flags as high priority." },
-                { key = "debuffFilterCrowdControl", name = "Crowd Control",       desc = "CC effects like stuns, roots, and incapacitates." },
-                { key = "debuffFilterRaid",         name = "Raid Debuffs",        desc = "Other debuffs Blizzard flags for raid frames." },
-                -- ⚠ Inserted BEFORE Dispellable, not appended: the entry below claims the
-                -- dispel-mode dropdown is "just below", which is only true while it is the
-                -- last row in this group.
-                { key = "debuffFilterNonPlayer",    name = "Non-Player Debuffs",  desc = "Debuffs applied by enemies and the environment, never by a player or their pet. Use it to keep boss and trash effects while dropping player-cast clutter such as Sated or Forbearance." },
-                -- ⚠ "just below" stays true on this page: the dispel-mode dropdown
-                -- is the next widget in this same group.
-                { key = "debuffFilterDispellable",  name = "Dispellable Debuffs", desc = "Debuffs that can be dispelled. Which dispels count is set just below." },
-            }
             for _, cat in ipairs(DEBUFF_CATEGORIES) do
-                local cb = filterGroup:AddWidget(GUI:CreateCheckbox(self.child, L[cat.name], db, cat.key, function()
-                    self:RefreshStates()
+                local cb = group:AddWidget(GUI:CreateCheckbox(parent, L[cat.name], db, cat.key, function()
+                    tools2.refreshStates()
                     DebuffFilterChanged()
                 end), 30)
                 -- Body only; the title comes from the checkbox label automatically.
@@ -1746,37 +1975,100 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- ⚠ BOTH its gates live in this group now, so unlike its previous home it
             -- can never be greyed with nothing on the page able to lift it.
             --
-            -- ★ TWO ENTRIES, NOT THREE. "Any Dispel Type" (ANY) was collapsed into
-            -- "All Dispellable" (2026-08-22): the two were one query wearing two rows
-            -- -- ANY was added when the PTR-5 DISPELLABLE token appeared, beside the
-            -- old map-based ALL instead of underneath it, and once ALL moved onto the
-            -- token (the secrecy fix in Features/Auras.lua) they were byte-identical.
-            -- Every peer offers exactly two modes, as does DF's own dispel overlay.
-            --
             -- Self-heal, not just startup migration: the Core.lua one-shot rewrites
             -- every profile at login, but a profile or template IMPORTED mid-session
             -- can carry "ANY" back in, and this page is the only surface where the
             -- stale value would show (as a blank dropdown). Equality-gated and
             -- identical to the migration, so the two can never diverge.
+            --
+            -- ⚠ INSIDE THE BUILDER, not hoisted to page scope with the vocabulary. It
+            -- has to run before the dropdown that would show the stale value is built,
+            -- and a SECOND pane instance (pin one, open the row again) builds its own
+            -- dropdown after an import could have put "ANY" back. It is equality-gated
+            -- and idempotent, so running it once per instance costs nothing.
             if db.directDebuffDispellableMode == "ANY" then
                 db.directDebuffDispellableMode = "ALL"
             end
-            local dispelDD = filterGroup:AddWidget(GUI:CreateDropdown(self.child, L["Dispellable Debuffs"], {
-                PLAYER = L["Dispellable By Me"],
-                ALL    = L["All Dispellable"],
-                _order = { "PLAYER", "ALL" },
-            }, db, "directDebuffDispellableMode", function()
+            local dispelDD = group:AddWidget(GUI:CreateDropdown(parent, L["Dispellable Debuffs"], dispelModeOptions, db, "directDebuffDispellableMode", function()
                 DebuffFilterChanged()
             end), 55)
             dispelDD.disableOn = function(d)
                 return d.directDebuffShowAll or not d.debuffFilterDispellable
             end
             dispelDD.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
-
-            Add(filterGroup, nil, 1)
         end
 
-        -- ===== DEBUFF BLACKLIST (Column 2) =====
+        -- ☠ THE COUNT IS ARITHMETIC OVER THE CATEGORY TABLE, not a literal. The pane
+        -- mounts one tick per category, so a number written down here would be wrong
+        -- the moment Blizzard's list gains or loses one -- which it did as recently as
+        -- Non-Player Debuffs.
+        local function DebuffFilterCount()
+            -- The caption, the All Debuffs switch, the caution banner and the
+            -- dispel-mode dropdown, plus one row per category.
+            return 4 + #DEBUFF_CATEGORIES
+        end
+
+        -- What the row says with the panel shut: how much of Blizzard's list is
+        -- switched on, in the "3/7" shape the Buff Filters row uses, plus which
+        -- dispels count while that category is one of them. All Debuffs overrides the
+        -- list outright, so it is named instead of the fraction rather than beside it.
+        local function DebuffFilterSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if d.directDebuffShowAll then
+                parts[#parts + 1] = L["All Debuffs"]
+            else
+                local on = 0
+                for _, cat in ipairs(DEBUFF_CATEGORIES) do
+                    if d[cat.key] then on = on + 1 end
+                end
+                parts[#parts + 1] = format("%d/%d", on, #DEBUFF_CATEGORIES)
+                local mode = d.debuffFilterDispellable and dispelModeOptions[d.directDebuffDispellableMode]
+                if mode then parts[#parts + 1] = mode end
+            end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local filterGroup = GUI:CreateSettingsGroup(self.child, 280)
+            filterGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Filters"]), 40)
+            BuildDebuffFilterGroup({
+                group = filterGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(filterGroup, nil, 1)
+        else
+            local filterMount, filterContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffFilterGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local filterRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Debuff Filters"],
+                db      = tools.RowDB,
+                summary = DebuffFilterSummary,
+                count   = DebuffFilterCount(),
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = filterMount,
+            }))
+            tools.ClaimKeys(filterRow, filterContent)
+            tools.WireModifiedTick(filterRow)
+            -- ✓ A FOOTER HERE, unlike the Buff Bar's filter row, and the difference is
+            -- checked rather than assumed: every key behind this group is a SCALAR --
+            -- seven booleans, All Debuffs and one string -- so Reset Group's
+            -- `db[key] = DeepCopy(default)` writes numbers and words rather than
+            -- replacing a table the aura pipeline is holding. The buff row's refusal
+            -- was about buffFilterSelection specifically; nothing of that shape is in
+            -- here.
+            tools.WireFooter(filterRow, DebuffFilterChanged)
+        end
+
+        -- ===== DEBUFF BLACKLIST (a 280 box in column 1 in classic, the Content
+        -- band's third row) =====
         -- The one debuff thing on this page that IS yours: a short fixed catalog of
         -- nuisance debuffs the game leaves non-secret, so they can be hidden
         -- (Sated/Exhaustion, the Deserters, Ride Along, Challenger's Burden).
@@ -1792,63 +2084,142 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- whose ticks meant the opposite. Krathe's call, 2026-08-10: name it what it
         -- is and let the tick match the name. Storage is unchanged; only the
         -- presentation flipped, so existing profiles keep hiding what they hid.
-        do
-            local catalog = (DF.AuraBlacklist and DF.AuraBlacklist.DebuffSpells) or {}
-            if #catalog > 0 then
+        --
+        -- ☠ A ROW, NOT A FULL-WIDTH BOX, AND THAT IS AN ARGUED CALL. This is a
+        -- spell-list editor, and the sweep's standing verdict on those is "structural
+        -- rebuild, leave it a box" -- the Color-by-Time list and the Filter Designer's
+        -- own editors add and remove rows and rebuild the page under themselves. This
+        -- one does neither: the CATALOG IS A CONSTANT (DF.AuraBlacklist.DebuffSpells,
+        -- a shipped table with no add, no remove and no rename), so the widget list is
+        -- fixed at build; every tick is a custom get/set over one entry in
+        -- db.debuffBlacklist; and the group's only GUI call is the Reset button's
+        -- state pass, which in a pane is the pane's own reflow. Nothing here rebuilds
+        -- a page, so nothing here needs to stay a box.
+        local function BuildDebuffBlacklistGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent,
+                "|cff888888" .. L["Select a debuff to hide it from this bar. These are the only debuffs the game lets us hide."] .. "|r", 250), 45)
+
+            local function BlacklistSet()
+                db.debuffBlacklist = db.debuffBlacklist or {}
+                return db.debuffBlacklist
+            end
+
+            for _, e in ipairs(blacklistCatalog) do
+                local id = e.spellId
+                -- Resolve the live client name so the row localises like the rest
+                -- of the UI; the catalog's English display is the fallback.
+                local name = e.display
+                if C_Spell and C_Spell.GetSpellName then
+                    local ok, v = pcall(C_Spell.GetSpellName, id)
+                    if ok and type(v) == "string" and v ~= "" then name = v end
+                end
+                -- Direct binding, no negation on either side: ticked == blacklisted.
+                group:AddWidget(GUI:CreateCheckbox(parent, name, nil, nil, DebuffFilterChanged,
+                    function() return BlacklistSet()[id] and true or false end,
+                    function(v)
+                        local s = BlacklistSet()
+                        s[id] = v or nil
+                    end), 30)
+            end
+
+            -- Restore the shipped set. Mutated IN PLACE for the same reason the
+            -- selection tables are: the aura pipeline holds a reference to this
+            -- table and a fresh one would strand it.
+            local resetBtn = group:AddWidget(GUI:CreateButton(parent, L["Reset"], 140, 22, function()
+                local defaults = (db == DF.db.raid) and DF.RaidDefaults or DF.PartyDefaults
+                local def = defaults and defaults.debuffBlacklist
+                local s = BlacklistSet()
+                for id in pairs(s) do s[id] = nil end
+                if type(def) == "table" then
+                    for id, on in pairs(def) do s[id] = on or nil end
+                end
+                tools2.refreshStates()
+                DebuffFilterChanged()
+            end), 30)
+            resetBtn.tooltip = L["Debuff Blacklist"]
+        end
+
+        -- ☠ ARITHMETIC OVER THE CATALOG, not a literal: the shipped list has grown
+        -- twice already (Ride Along, Challenger's Burden) and a written-down number
+        -- would be wrong the next time it does.
+        local function DebuffBlacklistCount()
+            -- The caption, one tick per catalog entry, and Reset.
+            return 2 + #blacklistCatalog
+        end
+
+        -- How much of the catalog is struck out, in the same fraction shape the two
+        -- filter rows use. No word for it: "hidden" and "blacklisted" are both new
+        -- locale strings for something the number already says beside a row called
+        -- Debuff Blacklist.
+        local function DebuffBlacklistSummary(d)
+            if not d then return "" end
+            local set = d.debuffBlacklist or {}
+            local on = 0
+            for _, e in ipairs(blacklistCatalog) do
+                if set[e.spellId] then on = on + 1 end
+            end
+            return format("%d/%d", on, #blacklistCatalog)
+        end
+
+        -- ⚠ THE WHOLE SITE IS GUARDED ON THE CATALOG, in both layouts. An empty
+        -- shipped list means there is nothing to blacklist, and the box has always
+        -- been skipped outright rather than drawn empty; the row is skipped for the
+        -- same reason, so the band closes over the slot.
+        if #blacklistCatalog > 0 then
+            if classicLayout then
                 local blGroup = GUI:CreateSettingsGroup(self.child, 280)
                 blGroup:AddWidget(GUI:CreateHeader(self.child, L["Debuff Blacklist"]), 40)
-                blGroup:AddWidget(GUI:CreateLabel(self.child,
-                    "|cff888888" .. L["Select a debuff to hide it from this bar. These are the only debuffs the game lets us hide."] .. "|r", 250), 45)
-
-                local function BlacklistSet()
-                    db.debuffBlacklist = db.debuffBlacklist or {}
-                    return db.debuffBlacklist
-                end
-
-                for _, e in ipairs(catalog) do
-                    local id = e.spellId
-                    -- Resolve the live client name so the row localises like the rest
-                    -- of the UI; the catalog's English display is the fallback.
-                    local name = e.display
-                    if C_Spell and C_Spell.GetSpellName then
-                        local ok, v = pcall(C_Spell.GetSpellName, id)
-                        if ok and type(v) == "string" and v ~= "" then name = v end
-                    end
-                    -- Direct binding, no negation on either side: ticked == blacklisted.
-                    blGroup:AddWidget(GUI:CreateCheckbox(self.child, name, nil, nil, DebuffFilterChanged,
-                        function() return BlacklistSet()[id] and true or false end,
-                        function(v)
-                            local s = BlacklistSet()
-                            s[id] = v or nil
-                        end), 30)
-                end
-
-                -- Restore the shipped set. Mutated IN PLACE for the same reason the
-                -- selection tables are: the aura pipeline holds a reference to this
-                -- table and a fresh one would strand it.
-                local resetBtn = blGroup:AddWidget(GUI:CreateButton(self.child, L["Reset"], 140, 22, function()
-                    local defaults = (db == DF.db.raid) and DF.RaidDefaults or DF.PartyDefaults
-                    local def = defaults and defaults.debuffBlacklist
-                    local s = BlacklistSet()
-                    for id in pairs(s) do s[id] = nil end
-                    if type(def) == "table" then
-                        for id, on in pairs(def) do s[id] = on or nil end
-                    end
-                    self:RefreshStates()
-                    DebuffFilterChanged()
-                end), 30)
-                resetBtn.tooltip = L["Debuff Blacklist"]
-
+                BuildDebuffBlacklistGroup({
+                    group = blGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
                 -- ⚠ Column 1, with the filters, not column 2. It is a CONTENT
                 -- decision -- which debuffs reach the bar -- and column 2 on this
                 -- page is styling. It also helps the balance, since column 2 carries
                 -- Duration Text, Stack Count, Dispel Text and Duration Bar; but the
                 -- reason is that it belongs beside the categories it narrows.
                 Add(blGroup, nil, 1)
+            else
+                local blMount, blContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildDebuffBlacklistGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local blacklistRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Debuff Blacklist"],
+                    db      = tools.RowDB,
+                    summary = DebuffBlacklistSummary,
+                    count   = DebuffBlacklistCount(),
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = blMount,
+                }))
+                -- ⚠ THE STORED SET IS NAMED, because the walk cannot see it. Every
+                -- tick here is a CUSTOM get/set checkbox -- no db binding at all -- so
+                -- what it registers with search is a synthetic per-entry key and the
+                -- real setting, `debuffBlacklist`, is bound to nothing the walk can
+                -- find. Named through `extra`, the amber tick asks about the table the
+                -- user is actually editing.
+                tools.ClaimKeys(blacklistRow, blContent, { "debuffBlacklist" })
+                tools.WireModifiedTick(blacklistRow)
+                -- ☠ NO FOOTER ON THIS ROW, AND IT IS A REFUSAL RATHER THAN AN
+                -- OMISSION -- for a reason of its own, not the Buff Filters one.
+                -- THIS GROUP ALREADY SHIPS A RESET, inside the pane, and the two do
+                -- not do the same thing: the button above mutates the stored set IN
+                -- PLACE (see the note on it), while Reset Group writes
+                -- `db[key] = DeepCopy(default)` and REPLACES the table. Two buttons
+                -- called Reset, four inches apart, one of which is the one the group
+                -- was written to use -- the footer is the one that goes.
             end
         end
 
-        -- ===== ORDER & LIMITS (Column 1, under the filters) =====
+        -- ===== ORDER & LIMITS (a 280 box in column 1 in classic, the Content band's
+        -- fourth row) =====
         -- ⚠ MOVED UP FROM THE FOOT OF THE PAGE. Within a column the Add() order IS
         -- the layout order, so this block had to move bodily -- there is no insert-at.
         --
@@ -1859,41 +2230,19 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         --
         -- Neither of these IS a filter in the Filter Designer's sense, which is why
         -- they live with the bar rather than in the library.
-        local debuffOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        debuffOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Order & Limits"]), GUI.RowHeight.sectionHeader)
-        -- ⚠ The four sibling boxes on this page (Duration Text, Stack Count, Dispel Symbol,
-        -- Duration Bar) all gate on showDebuffs; this one was simply missed, so it stayed
-        -- live while the row it orders was switched off (Krathe, 2026-08-09).
-        debuffOrderGroup.disableChildrenOn = function(d) return not d.showDebuffs end
-
-        local debuffSortOptions = {
-            DEFAULT = L["Default (Slot Order)"],
-            TIME = L["Time Remaining"],
-            NAME = L["Alphabetical"],
-            APPLIED = L["Order Applied"],
-            _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
-        }
-        debuffOrderGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
-            DebuffFilterChanged()
-            self:RefreshStates()
-        end), 55)
-
-        local dfSortMine = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["My Auras First"], db, "directDebuffSortMineFirst", DebuffFilterChanged), 30)
-        dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        dfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directDebuffSortOrder) end
-        dfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
-        local dfSortRev = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Order"], db, "directDebuffSortReverse", DebuffFilterChanged), 30)
-        dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        dfSortRev.tooltip = L["Reverse the sort direction."]
-
-        -- ☠ "Dispellable Debuffs" (directDebuffDispellableMode) MOVED to Auras > Aura
-        -- Filters > Debuffs, under the category row it belongs to. It lived here gated on
-        -- `directDebuffShowAll or not debuffFilterDispellable` — and BOTH of those are set
-        -- on the Filters page, so with All Debuffs on by default it was permanently greyed
-        -- and nothing on this page could lift it (Krathe, 2026-08-09).
-        -- ⚠ Do not re-add it here. The storage is unchanged (same per-mode key); only the
-        -- control moved, and its sync/reset ownership moved with it — see
-        -- DF.SECTION_PREFIXES, where auras_filterdesigner now claims the key.
+        --
+        -- ☠ NO TICK TO HOIST. Nothing here is the group's on/off: Hide Long Debuffs
+        -- gates two controls and nothing else, and Sort Order is a pick rather than a
+        -- switch. This is a WAY IN.
+        --
+        -- ☠ "Dispellable Debuffs" (directDebuffDispellableMode) MOVED to the Debuff
+        -- Filters group above, under the category row it belongs to. It lived here
+        -- gated on `directDebuffShowAll or not debuffFilterDispellable` — and BOTH of
+        -- those were set on another page, so with All Debuffs on by default it was
+        -- permanently greyed and nothing on this page could lift it (Krathe,
+        -- 2026-08-09).
+        -- ⚠ Do not re-add it here. The storage is unchanged (same per-mode key); only
+        -- the control moved, and its sync/reset ownership moved with it.
 
         -- Works in ALL-debuffs mode too (single maxDuration record) — only Keep
         -- Important needs the category filters (boolean flags can't be negated on
@@ -1901,213 +2250,345 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function HideDebuffMaxDurControls(d)
             return not DF:FactoryOwnsDebuffRow(d)
         end
-        local dfMaxDur = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Long Debuffs"], db, "debuffMaxDurationEnabled", function()
-            DebuffFilterChanged()
-            self:RefreshStates()
-        end), 30)
-        dfMaxDur.hideOn = HideDebuffMaxDurControls
-        dfMaxDur.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
-        local dfMaxDurSlider = debuffOrderGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "debuffMaxDurationMinutes", nil, DebuffFilterChanged), 55)
-        dfMaxDurSlider.hideOn = HideDebuffMaxDurControls
-        dfMaxDurSlider.disableOn = function(d) return not d.debuffMaxDurationEnabled end
 
-        local dfKeepImportant = debuffOrderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Keep important debuffs"], db, "debuffMaxDurationKeepImportant", DebuffFilterChanged), 30)
-        dfKeepImportant.hideOn = HideDebuffMaxDurControls
-        dfKeepImportant.disableOn = function(d)
-            return d.directDebuffShowAll or not d.debuffMaxDurationEnabled
+        local function BuildDebuffOrderGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- ⚠ The four sibling boxes on this page (Duration Text, Stack Count, Dispel
+            -- Text, Duration Bar) all gate on showDebuffs; this one was simply missed, so
+            -- it stayed live while the row it orders was switched off (Krathe, 2026-08-09).
+            group.disableChildrenOn = function(d) return not d.showDebuffs end
+
+            group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
+                DebuffFilterChanged()
+                tools2.refreshStates()   -- My Auras First greys while Sort Order = Default
+            end), 55)
+
+            local dfSortMine = group:AddWidget(GUI:CreateCheckbox(parent, L["My Auras First"], db, "directDebuffSortMineFirst", DebuffFilterChanged), 30)
+            dfSortMine.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+            dfSortMine.disableOn = function(d) return not DF:SortOrderSupportsMineFirst(d.directDebuffSortOrder) end
+            dfSortMine.tooltip = L["Sort your own auras before other players'. Unavailable on Default (which already shows yours first) and on Order Applied (which keeps one fixed order)."]
+            local dfSortRev = group:AddWidget(GUI:CreateCheckbox(parent, L["Reverse Order"], db, "directDebuffSortReverse", DebuffFilterChanged), 30)
+            dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+            dfSortRev.tooltip = L["Reverse the sort direction."]
+
+            local dfMaxDur = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Long Debuffs"], db, "debuffMaxDurationEnabled", function()
+                DebuffFilterChanged()
+                tools2.refreshStates()
+            end), 30)
+            dfMaxDur.hideOn = HideDebuffMaxDurControls
+            dfMaxDur.tooltip = L["Hide debuffs whose total duration is longer than the threshold. Debuffs with no duration (permanent auras) are also hidden while this is on."]
+            local dfMaxDurSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Longer Than (minutes)"], 1, 30, 1, db, "debuffMaxDurationMinutes", nil, DebuffFilterChanged), 55)
+            dfMaxDurSlider.hideOn = HideDebuffMaxDurControls
+            dfMaxDurSlider.disableOn = function(d) return not d.debuffMaxDurationEnabled end
+
+            local dfKeepImportant = group:AddWidget(GUI:CreateCheckbox(parent, L["Keep important debuffs"], db, "debuffMaxDurationKeepImportant", DebuffFilterChanged), 30)
+            dfKeepImportant.hideOn = HideDebuffMaxDurControls
+            dfKeepImportant.disableOn = function(d)
+                return d.directDebuffShowAll or not d.debuffMaxDurationEnabled
+            end
+            dfKeepImportant.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
         end
-        dfKeepImportant.tooltip = L["Boss, Role, and Priority debuffs stay visible even when their duration is over the threshold."]
-        Add(debuffOrderGroup, nil, 1)
 
-        
-        
-        local anchorOptions = {
-            CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
-            TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
-        }
+        -- What sorting is doing, in the dropdown's own words, plus the one refinement
+        -- that reverses everything it just said.
+        local function DebuffOrderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local sort = debuffSortOptions[d.directDebuffSortOrder]
+            if sort then parts[#parts + 1] = sort end
+            if d.directDebuffSortReverse then parts[#parts + 1] = L["Reverse Order"] end
+            return Join(parts)
+        end
 
-        -- ===== DEDUPLICATION =====
+        if classicLayout then
+            local debuffOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            debuffOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Order & Limits"]), GUI.RowHeight.sectionHeader)
+            BuildDebuffOrderGroup({
+                group = debuffOrderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(debuffOrderGroup, nil, 1)
+        else
+            -- Six: the sort pick, its two refinements, the long-debuff pair and the
+            -- keep-important tick.
+            local DEBUFF_ORDER_COUNT = 6
+
+            local orderMount, orderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffOrderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local orderRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Order & Limits"],
+                db      = tools.RowDB,
+                summary = DebuffOrderSummary,
+                count   = DEBUFF_ORDER_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = orderMount,
+            }))
+            tools.ClaimKeys(orderRow, orderContent)
+            tools.WireModifiedTick(orderRow)
+            tools.WireFooter(orderRow, DebuffFilterChanged)
+            orderRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== DEDUPLICATION (a 280 box in column 1 in classic, a CONTROL ROW in the
+        -- Content band here) =====
         -- Same section, same position as the Buffs page: its own box at the top
-        -- of column 1, ahead of Settings. The two pages' dedupe toggles must be
+        -- of column 1, ahead of the styling. The two pages' dedupe toggles must be
         -- findable in the same place.
-        local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
-        dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
+        --
+        -- ⚠ ONE SETTING IS A CONTROL ROW -- not a pane, which would be a click that
+        -- buys one tick, and not a 280 box either, which is the one shape a column of
+        -- full-width plates cannot absorb.
+        --
+        -- ⚠ AND THE ROW IS NAMED FOR THE SETTING, NOT FOR THE BOX -- the Buff Bar's
+        -- rule, and for its reason: of "Deduplication" and "Hide Duplicate Debuffs",
+        -- the one that survives standing alone on a plate is the sentence, not the
+        -- jargon, and naming it that keeps the search result identical in both
+        -- layouts because it is the caption the classic checkbox registers.
+        --
         -- This was inlined because the only refresh helper used to be declared with
         -- the Order & Limits box FURTHER DOWN the function, so naming it here would
         -- have been a nil global — legal Lua, parses clean, silently dead checkbox.
         -- DebuffFilterChanged is page-scope now, above every group that needs it, so
         -- the hazard is gone and this simply calls it.
-        local dfDedup = GUI:CreateCheckbox(self.child, L["Hide Duplicate Debuffs"], db, "debuffDeduplicateDesigner", DebuffFilterChanged)
-        dfDedup.tooltip = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
-        dedupGroup:AddWidget(dfDedup, 30)
-        Add(dedupGroup, nil, 1)
+        local DEDUP_TIP = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
 
-        -- Appearance Group (col2) -- mirrors Buffs; see the note there.
-        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-        local debuffSize = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 40, 1, db, "debuffSize", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffSize.disableOn = function(d) return not d.showDebuffs end
-        local debuffScale = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffScale", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffScale.disableOn = function(d) return not d.showDebuffs end
-        local debuffAlpha = appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.0, 1.0, 0.05, db, "debuffAlpha", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffAlpha.disableOn = function(d) return not d.showDebuffs end
-        Add(appearanceGroup, nil, 2)
-
-        -- ===== IMPORTANT DEBUFFS (col2) =====
-        -- Boss/role and priority debuffs already render as their OWN aura groups, and
-        -- those groups are declared first — so they already lead the row. Everything
-        -- here styles them so they also LOOK different without moving to a separate
-        -- placement. Every change is STRUCTURAL (region presence / group layout cell /
-        -- the group's init closure), so each callback must invalidate rather than
-        -- lightweight-reposition — same pair the Hide Duplicate Debuffs toggle uses.
-        local UpdateImportantSwatch   -- assigned below, once the header exists
-        local function ImportantChanged()
-            if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
-            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
-            -- The marker's own colour pickers change nothing structural on this page,
-            -- so nothing else would repaint the swatch.
-            if UpdateImportantSwatch then UpdateImportantSwatch() end
+        if classicLayout then
+            local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
+            dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
+            local dfDedup = GUI:CreateCheckbox(self.child, L["Hide Duplicate Debuffs"], db, "debuffDeduplicateDesigner", DebuffFilterChanged)
+            dfDedup.tooltip = DEDUP_TIP
+            dedupGroup:AddWidget(dfDedup, 30)
+            Add(dedupGroup, nil, 1)
+        else
+            local dedupRow = contentBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Hide Duplicate Debuffs"],
+                kind      = "checkbox",
+                -- The FUNCTION form: the table is re-resolved on each read, so a mode
+                -- switch is followed rather than frozen at whichever table this build
+                -- captured.
+                db        = tools.RowDB,
+                key       = "debuffDeduplicateDesigner",
+                onChanged = DebuffFilterChanged,
+                tooltip   = DEDUP_TIP,
+            }))
+            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
+            -- are the popout row's own slot), which is what makes a control row and a
+            -- feature row share one rhythm in a band.
+            tools.RegisterControlRow(dedupRow, "checkbox", "debuffDeduplicateDesigner", false, DebuffFilterChanged)
         end
-        local function ImportantOff(d) return not d.showDebuffs or not d.debuffImportantHighlight end
 
-        local impGroup = GUI:CreateSettingsGroup(self.child, 280)
-        -- Header carries a live preview of the corner marker itself (asked for in the
-        -- field: the section names a feature whose art you otherwise cannot see without
-        -- pulling a mob). Greys out — like the icon sections' previews — whenever the
-        -- marker is not actually rendering: debuffs off, highlight off, or marker off.
-        local impHeader = GUI:CreateHeader(self.child, L["Important Debuffs"])
-        impGroup:AddWidget(impHeader, 40)
-        -- 13px: the marker art is a filled disc, so it reads heavier than the padded
-        -- icon atlases the section previews use — matched to the header text rather
-        -- than to the other swatches' 16.
-        local impSwatch = GUI:AttachHeaderSwatch(impHeader, 13, 2)
-        UpdateImportantSwatch = function(d)
-            if not impSwatch then return end
-            d = d or DF.db[GUI.SelectedMode]
-            if not d then return end
-            impSwatch:SetSwatch({
-                { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertBadge",
-                  color = d.debuffImportantBadgeColor },
-                { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertMark",
-                  color = d.debuffImportantMarkColor },
-            }, not d.showDebuffs or not d.debuffImportantHighlight or d.debuffImportantBadge == false)
+        -- ===== APPEARANCE (a 280 box in column 2 in classic, the Icon band's first
+        -- row) ===== -- mirrors Buffs; see the note there.
+        local function ApplyDebuffPosition() DF:LightweightUpdateAuraPosition("debuff") end
+
+        local function BuildDebuffAppearanceGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local debuffSize = group:AddWidget(GUI:CreateSlider(parent, L["Icon Size"], 10, 40, 1, db, "debuffSize", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            debuffSize.disableOn = function(d) return not d.showDebuffs end
+            local debuffScale = group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.05, db, "debuffScale", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            debuffScale.disableOn = function(d) return not d.showDebuffs end
+            local debuffAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.0, 1.0, 0.05, db, "debuffAlpha", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            debuffAlpha.disableOn = function(d) return not d.showDebuffs end
         end
-        -- RefreshChildStates calls refreshContent(db) on every shown child, so the
-        -- swatch follows a mode switch / profile load without its own event.
-        impHeader.refreshContent = function(_, d) UpdateImportantSwatch(d) end
-        UpdateImportantSwatch(db)
-        impGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["Makes boss, role and priority debuffs stand out in the normal debuff row."], 250), 30)
-        local impOn = impGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Debuffs"],
-            db, "debuffImportantHighlight", ImportantChanged), 30)
-        impOn.disableOn = function(d) return not d.showDebuffs end
-        impOn.tooltip = L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."]
 
-        -- CreateSlider(parent, label, min, max, step, db, key, callback, lightweightUpdate,
-        -- usePreviewMode, ...) — arg 8 is the release callback, arg 9 the per-drag-tick one
-        -- and arg 10 the boolean that arms it.
-        --
-        -- ☠ NO LIGHTWEIGHT PATH ON ANY OF THE FOUR SLIDERS IN THIS SECTION, and it must
-        -- stay that way. Every key here feeds recStyleSig (Features/Auras.lua), which is
-        -- part of the STRUCTURAL signature — so each new value forces h:Rebuild: a
-        -- NativeBackend:teardown plus a fresh container and fresh buttons, per rendered
-        -- frame per visible unit. applyRecordStyle then creates a badge host frame and two
-        -- textures per styled button, and WoW never frees a frame. Wired to the drag tick,
-        -- a few seconds of dragging in a 20-man leaked frames by the thousand. The
-        -- "documented frame-leak case" note in AuraContainer.lua is about this path.
-        --
-        -- The cost is that the preview moves on release rather than under the cursor. That
-        -- is the deliberate trade: one rebuild per adjustment is the price every other
-        -- structural setting pays, and it is bounded.
-        --
-        -- ⚠ The better fix is to let badge geometry ride ApplyStyle instead of forcing a
-        -- rebuild — applyRecordStyle is already idempotent and safe to re-run — but the
-        -- record style is captured as an upvalue in the secure initializeFrame closure, so
-        -- a live read has to be plumbed through first. That is engine work, not a slider
-        -- change, and narrowing the signature WITHOUT it would leave these sliders writing
-        -- to the DB while nothing on screen moves.
-        local impScale = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Size Step"], 1.0, 2.0, 0.05,
-            db, "debuffImportantScale", ImportantChanged), 55)
-        impScale.disableOn = ImportantOff
-        impScale.tooltip = L["How much larger an important debuff renders. 1.00 keeps it the same size as the rest of the row."]
-
-        local impBadge = impGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Corner Marker"],
-            db, "debuffImportantBadge", ImportantChanged), 30)
-        impBadge.disableOn = ImportantOff
-        impBadge.tooltip = L["A small marker on the corner of the icon. It survives being shrunk better than a colour change, and it does not compete with the dispel border."]
-
-        local impBadgeSize = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Size"], 6, 20, 1,
-            db, "debuffImportantBadgeSize", ImportantChanged), 55)
-        impBadgeSize.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
-
-        -- hasAlpha=false, and NO lightweight path: a colour change here rebuilds the
-        -- group (the tint is baked at initializeFrame), so there is nothing cheaper to
-        -- run on drag. Signature is (parent, label, db, key, hasAlpha, cb, lightCb, useLight).
-        -- Corner + nudge. Offsets are ADDED to a built-in overhang that pushes the badge
-        -- out of whichever corner is picked, so 0/0 is already a sensible resting place.
-        local badgePoints = { TOPRIGHT = L["Top Right"], TOPLEFT = L["Top Left"],
-                              BOTTOMRIGHT = L["Bottom Right"], BOTTOMLEFT = L["Bottom Left"] }
-        local impBadgePt = impGroup:AddWidget(GUI:CreateDropdown(self.child, L["Marker Corner"],
-            badgePoints, db, "debuffImportantBadgePoint", ImportantChanged), 55)
-        impBadgePt.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
-
-        local impBadgeX = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset X"], -20, 20, 1,
-            db, "debuffImportantBadgeX", ImportantChanged), 55)
-        impBadgeX.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
-
-        local impBadgeY = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset Y"], -20, 20, 1,
-            db, "debuffImportantBadgeY", ImportantChanged), 55)
-        impBadgeY.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
-
-        local impBadgeCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Color"],
-            db, "debuffImportantBadgeColor", false, ImportantChanged, nil, false), 35)
-        impBadgeCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
-
-        local impMarkCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Symbol Color"],
-            db, "debuffImportantMarkColor", false, ImportantChanged, nil, false), 35)
-        impMarkCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
-        -- ☠ NO Add() HERE — this box is placed further down, immediately after Border, so it
-        -- lands in column 1 UNDER Border rather than third from the top. Placement follows
-        -- Add() call order within a column, and the group has to be built before it can be
-        -- placed; the block stays here (it is long, and moving it buys nothing) while the
-        -- Add sits at the position it actually occupies. See the note at that Add.
-
-        -- Layout Group (col1)
-        local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
-        gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
-        local debuffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "debuffWrap", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        -- ☠ THE SAME VERTICAL-GROWTH GUARD ITS TWO SIBLINGS CARRY. Both layout paths ignore
-        -- the wrap count outright under vertical-primary growth (the row renders a single
-        -- column), so without this the slider stayed live-looking and did nothing — in test
-        -- mode AND in game. The buff row has carried the guard since the factory rows landed
-        -- and the defensive row copies it; the debuff row never got one, which is what
-        -- "Icons Per Row doesn't preview" is once Growth Direction is vertical. (Aphoex 7.2.)
-        -- Kept term-for-term identical to the buff version rather than rephrased, so the
-        -- three read as one rule.
-        debuffWrap.disableOn = function(d)
-            if not d.showDebuffs then return true end
-            local g = d.debuffGrowth or ""
-            -- Vertical-primary AND vertical-centred growth both render a single column.
-            return DF:FactoryOwnsDebuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
-                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
+        -- Pixels first, then the two multipliers, and each only while it is doing
+        -- something -- a row reading "Scale 1.00 · Alpha 1.00" on every default
+        -- profile is noise (the Resource Bar border row's rule).
+        local function DebuffAppearanceSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.debuffSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local scale = tonumber(d.debuffScale)
+            if scale and scale ~= 1 then parts[#parts + 1] = format("%s %.2f", L["Scale"], scale) end
+            local alpha = tonumber(d.debuffAlpha)
+            if alpha and alpha < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], alpha) end
+            return Join(parts)
         end
-        local debuffPaddingX = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing X"], -5, 10, 1, db, "debuffPaddingX", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffPaddingX.disableOn = function(d) return not d.showDebuffs end
-        local debuffPaddingY = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing Y"], -5, 10, 1, db, "debuffPaddingY", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffPaddingY.disableOn = function(d) return not d.showDebuffs end
-        Add(gridGroup, nil, 1)
-        -- Position Group (col2)
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-        positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-        local debuffAnchor = positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffAnchor", nil), 55)
-        debuffAnchor.disableOn = function(d) return not d.showDebuffs end
-        local debuffGrowth = positionGroup:AddWidget(GUI:CreateGrowthControl(self.child, db, "debuffGrowth", nil), 155)
-        debuffGrowth.disableOn = function(d) return not d.showDebuffs end
-        local debuffOffsetX = positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffOffsetX", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffOffsetX.disableOn = function(d) return not d.showDebuffs end
-        local debuffOffsetY = positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffOffsetY", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffOffsetY.disableOn = function(d) return not d.showDebuffs end
-        Add(positionGroup, nil, 1)
+
+        if classicLayout then
+            local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+            BuildDebuffAppearanceGroup({
+                group = appearanceGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(appearanceGroup, nil, 2)
+        else
+            -- Three: size, scale, alpha.
+            local DEBUFF_APPEARANCE_COUNT = 3
+
+            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffAppearanceGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Appearance"],
+                db      = tools.RowDB,
+                summary = DebuffAppearanceSummary,
+                count   = DEBUFF_APPEARANCE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = appearanceMount,
+            }))
+            tools.ClaimKeys(appearanceRow, appearanceContent)
+            tools.WireModifiedTick(appearanceRow)
+            tools.WireFooter(appearanceRow, ApplyDebuffPosition)
+            appearanceRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== LAYOUT (a 280 box in column 1 in classic, the Icon band's second
+        -- row) =====
+        local function BuildDebuffLayoutGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local debuffWrap = group:AddWidget(GUI:CreateSlider(parent, L["Icons Per Row"], 1, 8, 1, db, "debuffWrap", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            -- ☠ THE SAME VERTICAL-GROWTH GUARD ITS TWO SIBLINGS CARRY. Both layout paths ignore
+            -- the wrap count outright under vertical-primary growth (the row renders a single
+            -- column), so without this the slider stayed live-looking and did nothing — in test
+            -- mode AND in game. The buff row has carried the guard since the factory rows landed
+            -- and the defensive row copies it; the debuff row never got one, which is what
+            -- "Icons Per Row doesn't preview" is once Growth Direction is vertical. (Aphoex 7.2.)
+            -- Kept term-for-term identical to the buff version rather than rephrased, so the
+            -- three read as one rule.
+            --
+            -- ☠ AND THE GROWTH IT READS IS SET IN ANOTHER PANE. Position owns debuffGrowth;
+            -- the growth control's own write ends in a page state pass, and ReflowMounted
+            -- carries that to every pane standing open, so this slider re-gates from the
+            -- next row down exactly as it did from the next box across.
+            debuffWrap.disableOn = function(d)
+                if not d.showDebuffs then return true end
+                local g = d.debuffGrowth or ""
+                -- Vertical-primary AND vertical-centred growth both render a single column.
+                return DF:FactoryOwnsDebuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
+                    or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
+            end
+            local debuffPaddingX = group:AddWidget(GUI:CreateSlider(parent, L["Spacing X"], -5, 10, 1, db, "debuffPaddingX", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            debuffPaddingX.disableOn = function(d) return not d.showDebuffs end
+            local debuffPaddingY = group:AddWidget(GUI:CreateSlider(parent, L["Spacing Y"], -5, 10, 1, db, "debuffPaddingY", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            debuffPaddingY.disableOn = function(d) return not d.showDebuffs end
+        end
+
+        local function DebuffLayoutSummary(d)
+            if not d then return "" end
+            local n = tonumber(d.debuffWrap)
+            if not n then return "" end
+            return format("%s %d", L["Icons Per Row"], n)
+        end
+
+        if classicLayout then
+            local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
+            gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
+            BuildDebuffLayoutGroup({
+                group = gridGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(gridGroup, nil, 1)
+        else
+            -- Three: icons per row and the two spacings.
+            local DEBUFF_LAYOUT_COUNT = 3
+
+            local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffLayoutGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local layoutRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Layout"],
+                db      = tools.RowDB,
+                summary = DebuffLayoutSummary,
+                count   = DEBUFF_LAYOUT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = layoutMount,
+            }))
+            tools.ClaimKeys(layoutRow, layoutContent)
+            tools.WireModifiedTick(layoutRow)
+            tools.WireFooter(layoutRow, ApplyDebuffPosition)
+            layoutRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== POSITION (a 280 box in column 1 in classic, the Icon band's third
+        -- row) =====
+        local function BuildDebuffPositionGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            local debuffAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "debuffAnchor", nil), 55)
+            debuffAnchor.disableOn = function(d) return not d.showDebuffs end
+            local debuffGrowth = group:AddWidget(GUI:CreateGrowthControl(parent, db, "debuffGrowth", nil), 155)
+            debuffGrowth.disableOn = function(d) return not d.showDebuffs end
+            local debuffOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "debuffOffsetX", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            debuffOffsetX.disableOn = function(d) return not d.showDebuffs end
+            local debuffOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "debuffOffsetY", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
+            debuffOffsetY.disableOn = function(d) return not d.showDebuffs end
+        end
+
+        local function DebuffPositionSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local anchor = anchorOptions[d.debuffAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            local x, y = tonumber(d.debuffOffsetX) or 0, tonumber(d.debuffOffsetY) or 0
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
+            positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
+            BuildDebuffPositionGroup({
+                group = positionGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(positionGroup, nil, 1)
+        else
+            -- Four: the anchor, the growth control (one widget, three stacked mini
+            -- dropdowns inside it) and the two offsets.
+            local DEBUFF_POSITION_COUNT = 4
+
+            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffPositionGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Position"],
+                db      = tools.RowDB,
+                summary = DebuffPositionSummary,
+                count   = DEBUFF_POSITION_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = positionMount,
+            }))
+            -- ⚠ debuffGrowth IS NAMED, because the walk cannot see it. The growth
+            -- control is three hand-built mini dropdowns in a container -- it registers
+            -- nothing with search and carries no dbKey -- so without this the row's tick
+            -- and its Reset Group would both act as though the setting were on another
+            -- page. (Its repaint after a reset is covered: the container's
+            -- refreshContent re-decomposes the stored value, and RefreshChildStates runs
+            -- it on every reflow.)
+            tools.ClaimKeys(positionRow, positionContent, { "debuffGrowth" })
+            tools.WireModifiedTick(positionRow)
+            tools.WireFooter(positionRow, function() DF:UpdateAll() end)
+            positionRow.disableOn = DebuffsOffRow
+        end
 
         -- ☠ A SECOND, DRIFTED COPY OF THE INVALIDATION CONTRACT. This nilled the curve by
         -- hand and stopped there: it left DF.dispelColorMap cached and never bumped
@@ -2123,211 +2604,790 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
             DF:UpdateAllFrames()
         end
-        
-        -- Border Group (col1)
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+
+        -- ===== BORDER (a 280 box in column 1 in classic, the Icon band's fourth
+        -- row) =====
         -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  When
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
         -- recoloured per dispel type, so Style/Colour/Gradient here only take
         -- effect when it's OFF (Size/Inset always apply).  Border Animation is
         -- intentionally omitted (same FPS rationale as the buff row).
-        GUI:CreateBorderControls(borderGroup, db, "debuff", {
-            parent        = self.child,
-            include       = { inset = true, offset = true, blendMode = true,
-                              gradient = true, shadow = true, alpha = true },
-            sizeMin = 0, sizeMax = 8, sizeStep = 1,
-            -- Structural, exactly as on the buff row above — see the note there.
-            fullUpdate    = function()
-                if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
-                if DF.UpdateAllFrames then DF:UpdateAllFrames() end
-            end,
-            lightUpdate   = function() DF:LightweightUpdateAuraBorder("debuff") end,
-            lightColors   = function() DF:LightweightUpdateAuraBorder("debuff") end,
-            refreshStates = function() self:RefreshStates() end,
-            disableWhen   = function(d) return not d.showDebuffs end,
-        })
-        -- These two are added to the box BY HAND, so the toolkit's disableWhen
-        -- doesn't reach them — they carry the Debuffs-off grey themselves or the
-        -- box would half-grey.
-        local colorByType = borderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Dispel Type"], db, "debuffBorderColorByType", InvalidateAndUpdate), 30)
-        colorByType.disableOn = function(d) return not d.showDebuffs or not d.debuffShowBorder end
-        -- 12.1 rows: the native dispel ring's inset (+ inward / - outward halo; the
-        -- ring geometry is ours even though Blizzard tints it). Live via restyle.
-        local dispelInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Dispel Border Inset"], -8, 8, 1, db, "debuffDispelBorderInset", nil, function() DF:LightweightUpdateAuraBorder("debuff") end, true), 55)
-        dispelInset.disableOn = function(d) return not d.showDebuffs or not d.debuffBorderColorByType end
-        dispelInset.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        dispelInset.tooltip = L["How far the dispel-type ring sits inside the icon edge. Negative values push it outward into a halo around the icon instead."]
-        -- Colors-page link right under "Color by Dispel Type": the dispel-type palette
-        -- lives on the account-wide Colors page (one shared set, also used by the Dispel
-        -- Overlay). Co-located with its toggle so it's obvious where to edit the colours.
-        local dispelColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
-        borderGroup:AddWidget(dispelColorsLink, (dispelColorsLink.layoutHeight or 16) + 2)
-        -- ☠ COLUMN 1 — same call as the Buffs page, same reasoning, see the note there.
-        -- This page is even more lopsided (939 of layout against 3229 of styling). Border
-        -- lands under Position, which is where its size/inset/offset controls belong anyway.
-        Add(borderGroup, nil, 1)
+        --
+        -- ⚠ noShowToggle IS THE HOIST -- the Buff Bar border row's move, verbatim.
+        -- With it the built-in Show Border checkbox is not built and the row carries
+        -- that tick instead; the show key is still read, so it still greys Color by
+        -- Dispel Type exactly as before.
+        local function ApplyDebuffBorder()
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+            DF:LightweightUpdateAuraBorder("debuff")
+        end
 
-        -- Important Debuffs, built ~150 lines above. COLUMN 1, directly under Border: it is
-        -- the OTHER whole-icon treatment on this page (a size step plus a corner marker),
-        -- and it is the counterweight that lets Stack Count cross right to sit with Duration
-        -- (458 out vs 413 in). Same seven-group column 1 as Buffs, which carries Pandemic in
-        -- this slot. Column 2 is then purely the elements drawn on the icon.
-        -- ⚠ Crossed to column 2. It sat in column 1 as this page's counterweight to the
-        -- styling boxes on the right (same reasoning as the buff page's Border note) --
-        -- but column 1 has since gained Debuff Filters, Debuff Blacklist and Order &
-        -- Limits, so the imbalance it was correcting now runs the other way. Important
-        -- Debuffs is a mark drawn ON the icon, so column 2 is also where this page's
-        -- own doctrine puts it: the crossing was the exception, and it is no longer
-        -- needed to buy anything.
-        Add(impGroup, nil, 2)
+        local function BuildDebuffBorderGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            GUI:CreateBorderControls(group, db, "debuff", {
+                parent        = parent,
+                include       = { inset = true, offset = true, blendMode = true,
+                                  gradient = true, shadow = true, alpha = true },
+                sizeMin = 0, sizeMax = 8, sizeStep = 1,
+                -- Structural, exactly as on the buff row above — see the note there.
+                fullUpdate    = function()
+                    if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+                    if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+                end,
+                lightUpdate   = function() DF:LightweightUpdateAuraBorder("debuff") end,
+                lightColors   = function() DF:LightweightUpdateAuraBorder("debuff") end,
+                refreshStates = tools2.refreshStates,
+                -- The page gate goes in as the CONSUMER gate it has always been: this
+                -- factory owns its own eighteen and writes disableOn onto each of them
+                -- itself, so there is no group.disableChildrenOn here to skip index 1 --
+                -- and therefore no GatePaneFirstChild either.
+                disableWhen   = function(d) return not d.showDebuffs end,
+                noShowToggle  = tools2.hoistToggle or nil,
+            })
+            -- These three are added to the group BY HAND, so the toolkit's disableWhen
+            -- doesn't reach them — they carry the Debuffs-off grey themselves or the
+            -- box would half-grey.
+            local colorByType = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Dispel Type"], db, "debuffBorderColorByType", InvalidateAndUpdate), 30)
+            colorByType.disableOn = function(d) return not d.showDebuffs or not d.debuffShowBorder end
+            -- 12.1 rows: the native dispel ring's inset (+ inward / - outward halo; the
+            -- ring geometry is ours even though Blizzard tints it). Live via restyle.
+            local dispelInset = group:AddWidget(GUI:CreateSlider(parent, L["Dispel Border Inset"], -8, 8, 1, db, "debuffDispelBorderInset", nil, function() DF:LightweightUpdateAuraBorder("debuff") end, true), 55)
+            dispelInset.disableOn = function(d) return not d.showDebuffs or not d.debuffBorderColorByType end
+            dispelInset.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+            dispelInset.tooltip = L["How far the dispel-type ring sits inside the icon edge. Negative values push it outward into a halo around the icon instead."]
+            -- Colors-page link right under "Color by Dispel Type": the dispel-type palette
+            -- lives on the account-wide Colors page (one shared set, also used by the Dispel
+            -- Overlay). Co-located with its toggle so it's obvious where to edit the colours.
+            local dispelColorsLink = GUI:CreateDispelColorsPageLink(parent, 260)
+            group:AddWidget(dispelColorsLink, (dispelColorsLink.layoutHeight or 16) + 2)
+        end
 
-        -- Duration Text Group (col2) — "Duration Text" for the same reason as Buffs.
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
-        durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "debuffShowDuration", function()
-            self:RefreshStates()
+        -- The Buff Bar border summary minus nothing: same include set, same three
+        -- facts -- thickness in pixels, the style word, and the alpha only when it is
+        -- doing something.
+        local function DebuffBorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.debuffBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local style = d.debuffBorderStyle
+            parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                             or (style == "TEXTURE" and L["Texture"])
+                             or L["Solid"]
+            local c = d.debuffBorderColor
+            local a = type(c) == "table" and tonumber(c.a) or nil
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            BuildDebuffBorderGroup({
+                group = borderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            -- ☠ COLUMN 1 — same call as the Buffs page, same reasoning, see the note there.
+            -- This page is even more lopsided (939 of layout against 3229 of styling). Border
+            -- lands under Position, which is where its size/inset/offset controls belong anyway.
+            --
+            -- ⚠ CLASSIC ONLY, now. In the popout layout there are no columns to balance:
+            -- four full-width bands in reading order, and Border sits where it reads --
+            -- after Position, still with the geometry.
+            Add(borderGroup, nil, 1)
+        else
+            -- Twenty: the eighteen CreateBorderControls builds for this include set
+            -- less the hoisted Show Border, plus the three this group adds by hand.
+            local DEBUFF_BORDER_COUNT = 20
+
+            -- What the suppressed Show Border checkbox ran, and never a page rebuild:
+            -- that would retire every widget on the page including the row being
+            -- clicked, and the row's write path calls row.Refresh() after this returns.
+            local function OnDebuffBorderToggle()
+                ApplyDebuffBorder()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local borderRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = tools.RowDB,
+                toggle   = { key = "debuffShowBorder" },
+                summary  = DebuffBorderSummary,
+                count    = DEBUFF_BORDER_COUNT,
+                onToggle = OnDebuffBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            tools.ClaimKeys(borderRow, borderContent)
+            tools.WireModifiedTick(borderRow)
+            tools.WireFooter(borderRow, ApplyDebuffBorder)
+            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "debuffShowBorder", OnDebuffBorderToggle)
+            borderRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== IMPORTANT DEBUFFS (a 280 box in column 2 in classic, the Icon band's
+        -- fifth row) =====
+        -- Boss/role and priority debuffs already render as their OWN aura groups, and
+        -- those groups are declared first — so they already lead the row. Everything
+        -- here styles them so they also LOOK different without moving to a separate
+        -- placement. Every change is STRUCTURAL (region presence / group layout cell /
+        -- the group's init closure), so each callback must invalidate rather than
+        -- lightweight-reposition — same pair the Hide Duplicate Debuffs toggle uses.
+        --
+        -- ⚠ IT SITS LAST IN THE ICON BAND, after Border rather than after Appearance.
+        -- The classic note below already calls it "the OTHER whole-icon treatment on
+        -- this page"; with no columns left to balance, the two whole-icon treatments
+        -- read as a pair at the foot of the band.
+        --
+        -- ☠ THE HEADER SWATCH IS CLASSIC-ONLY, and that is a LOSS rather than a
+        -- decision the popout layout gets for free. The box's header carries a live
+        -- preview of the corner marker (GUI:AttachHeaderSwatch), and a popout row has
+        -- no header to hang it on -- the kit's PopoutRow has no preview slot, and
+        -- inventing one for a single consumer is a kit feature, not a page's business.
+        -- Mounting a header INSIDE the pane was the other option and is worse: every
+        -- other pane on every converted page opens straight onto its first control,
+        -- and this one would open onto a 40px repeat of the row's own name. The row's
+        -- summary carries the two facts the swatch showed in words instead (the size
+        -- step and which corner the marker sits in), and the marker's own colour
+        -- pickers are three rows into the pane. Raised for the sweep's owner rather
+        -- than solved here.
+        local UpdateImportantSwatch   -- assigned below in classic, once the header exists
+        local function ImportantChanged()
+            if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            -- The marker's own colour pickers change nothing structural on this page,
+            -- so nothing else would repaint the swatch.
+            if UpdateImportantSwatch then UpdateImportantSwatch() end
+        end
+        local function ImportantOff(d) return not d.showDebuffs or not d.debuffImportantHighlight end
+
+        local function BuildImportantDebuffsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent,
+                L["Makes boss, role and priority debuffs stand out in the normal debuff row."], 250), 30)
+
+            -- Suppressed when the ROW carries this tick. Still built in classic, where
+            -- it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local impOn = group:AddWidget(GUI:CreateCheckbox(parent, L["Highlight Important Debuffs"],
+                    db, "debuffImportantHighlight", ImportantChanged), 30)
+                impOn.disableOn = function(d) return not d.showDebuffs end
+                impOn.tooltip = L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."]
+            end
+
+            -- CreateSlider(parent, label, min, max, step, db, key, callback, lightweightUpdate,
+            -- usePreviewMode, ...) — arg 8 is the release callback, arg 9 the per-drag-tick one
+            -- and arg 10 the boolean that arms it.
+            --
+            -- ☠ NO LIGHTWEIGHT PATH ON ANY OF THE FOUR SLIDERS IN THIS SECTION, and it must
+            -- stay that way. Every key here feeds recStyleSig (Features/Auras.lua), which is
+            -- part of the STRUCTURAL signature — so each new value forces h:Rebuild: a
+            -- NativeBackend:teardown plus a fresh container and fresh buttons, per rendered
+            -- frame per visible unit. applyRecordStyle then creates a badge host frame and two
+            -- textures per styled button, and WoW never frees a frame. Wired to the drag tick,
+            -- a few seconds of dragging in a 20-man leaked frames by the thousand. The
+            -- "documented frame-leak case" note in AuraContainer.lua is about this path.
+            --
+            -- The cost is that the preview moves on release rather than under the cursor. That
+            -- is the deliberate trade: one rebuild per adjustment is the price every other
+            -- structural setting pays, and it is bounded.
+            --
+            -- ⚠ The better fix is to let badge geometry ride ApplyStyle instead of forcing a
+            -- rebuild — applyRecordStyle is already idempotent and safe to re-run — but the
+            -- record style is captured as an upvalue in the secure initializeFrame closure, so
+            -- a live read has to be plumbed through first. That is engine work, not a slider
+            -- change, and narrowing the signature WITHOUT it would leave these sliders writing
+            -- to the DB while nothing on screen moves.
+            local impScale = group:AddWidget(GUI:CreateSlider(parent, L["Size Step"], 1.0, 2.0, 0.05,
+                db, "debuffImportantScale", ImportantChanged), 55)
+            impScale.disableOn = ImportantOff
+            impScale.tooltip = L["How much larger an important debuff renders. 1.00 keeps it the same size as the rest of the row."]
+
+            local impBadge = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Corner Marker"],
+                db, "debuffImportantBadge", ImportantChanged), 30)
+            impBadge.disableOn = ImportantOff
+            impBadge.tooltip = L["A small marker on the corner of the icon. It survives being shrunk better than a colour change, and it does not compete with the dispel border."]
+
+            local impBadgeSize = group:AddWidget(GUI:CreateSlider(parent, L["Marker Size"], 6, 20, 1,
+                db, "debuffImportantBadgeSize", ImportantChanged), 55)
+            impBadgeSize.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+            -- hasAlpha=false, and NO lightweight path: a colour change here rebuilds the
+            -- group (the tint is baked at initializeFrame), so there is nothing cheaper to
+            -- run on drag. Signature is (parent, label, db, key, hasAlpha, cb, lightCb, useLight).
+            local impBadgePt = group:AddWidget(GUI:CreateDropdown(parent, L["Marker Corner"],
+                badgePoints, db, "debuffImportantBadgePoint", ImportantChanged), 55)
+            impBadgePt.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+            local impBadgeX = group:AddWidget(GUI:CreateSlider(parent, L["Marker Offset X"], -20, 20, 1,
+                db, "debuffImportantBadgeX", ImportantChanged), 55)
+            impBadgeX.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+            local impBadgeY = group:AddWidget(GUI:CreateSlider(parent, L["Marker Offset Y"], -20, 20, 1,
+                db, "debuffImportantBadgeY", ImportantChanged), 55)
+            impBadgeY.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+            local impBadgeCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Marker Color"],
+                db, "debuffImportantBadgeColor", false, ImportantChanged, nil, false), 35)
+            impBadgeCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+            local impMarkCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Marker Symbol Color"],
+                db, "debuffImportantMarkColor", false, ImportantChanged, nil, false), 35)
+            impMarkCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+        end
+
+        -- Silent while the feature is off -- the row's tick already says that. On:
+        -- how much bigger, and where the marker sits, in the corner dropdown's own
+        -- words. The size step is skipped at 1.00, which is "no larger".
+        local function ImportantDebuffsSummary(d)
+            if not d then return "" end
+            if not d.debuffImportantHighlight then return "" end
+            local parts = {}
+            local step = tonumber(d.debuffImportantScale)
+            if step and step ~= 1 then parts[#parts + 1] = format("%s %.2f", L["Size Step"], step) end
+            if d.debuffImportantBadge then
+                local corner = badgePoints[d.debuffImportantBadgePoint]
+                if corner then parts[#parts + 1] = corner end
+            end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local impGroup = GUI:CreateSettingsGroup(self.child, 280)
+            -- Header carries a live preview of the corner marker itself (asked for in the
+            -- field: the section names a feature whose art you otherwise cannot see without
+            -- pulling a mob). Greys out — like the icon sections' previews — whenever the
+            -- marker is not actually rendering: debuffs off, highlight off, or marker off.
+            local impHeader = GUI:CreateHeader(self.child, L["Important Debuffs"])
+            impGroup:AddWidget(impHeader, 40)
+            -- 13px: the marker art is a filled disc, so it reads heavier than the padded
+            -- icon atlases the section previews use — matched to the header text rather
+            -- than to the other swatches' 16.
+            local impSwatch = GUI:AttachHeaderSwatch(impHeader, 13, 2)
+            UpdateImportantSwatch = function(d)
+                if not impSwatch then return end
+                d = d or DF.db[GUI.SelectedMode]
+                if not d then return end
+                impSwatch:SetSwatch({
+                    { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertBadge",
+                      color = d.debuffImportantBadgeColor },
+                    { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertMark",
+                      color = d.debuffImportantMarkColor },
+                }, not d.showDebuffs or not d.debuffImportantHighlight or d.debuffImportantBadge == false)
+            end
+            -- RefreshChildStates calls refreshContent(db) on every shown child, so the
+            -- swatch follows a mode switch / profile load without its own event.
+            impHeader.refreshContent = function(_, d) UpdateImportantSwatch(d) end
+            UpdateImportantSwatch(db)
+            BuildImportantDebuffsGroup({
+                group = impGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            -- ⚠ Crossed to column 2. It sat in column 1 as this page's counterweight to the
+            -- styling boxes on the right (same reasoning as the buff page's Border note) --
+            -- but column 1 has since gained Debuff Filters, Debuff Blacklist and Order &
+            -- Limits, so the imbalance it was correcting now runs the other way. Important
+            -- Debuffs is a mark drawn ON the icon, so column 2 is also where this page's
+            -- own doctrine puts it: the crossing was the exception, and it is no longer
+            -- needed to buy anything.
+            Add(impGroup, nil, 2)
+        else
+            -- Nine: the blurb, the size step, the marker tick, its size, corner, two
+            -- offsets and two colours. The Highlight tick is HOISTED onto the row.
+            local DEBUFF_IMPORTANT_COUNT = 9
+
+            -- What the suppressed Highlight checkbox ran, plus the two passes the row's
+            -- tick owes the pane behind it. ⚠ THE STATE PASS IS NEW: ImportantChanged
+            -- alone never re-ran one, so in classic the eight sub-controls kept their
+            -- previous grey until something else refreshed the page. The row's tick
+            -- cannot leave the pane it just gated in that state, and the fix is
+            -- popout-only -- classic's checkbox is untouched.
+            local function OnImportantToggle()
+                self:RefreshStates()
+                ImportantChanged()
+                tools.ReflowMounted()
+            end
+
+            local impMount, impContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildImportantDebuffsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local importantRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Important Debuffs"],
+                db       = tools.RowDB,
+                toggle   = { key = "debuffImportantHighlight" },
+                summary  = ImportantDebuffsSummary,
+                count    = DEBUFF_IMPORTANT_COUNT,
+                onToggle = OnImportantToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = impMount,
+            }))
+            tools.ClaimKeys(importantRow, impContent)
+            tools.WireModifiedTick(importantRow)
+            tools.WireFooter(importantRow, ImportantChanged)
+            tools.RegisterHoistedToggle(importantRow, L["Highlight Important Debuffs"], "debuffImportantHighlight", OnImportantToggle)
+            importantRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== DURATION TEXT (a 280 box in column 2 in classic, the Text band's
+        -- first row) ===== — "Duration Text" for the same reason as Buffs.
+        local function ApplyDebuffDurationText()
+            DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
-        end), 30)
-        -- Cooldown swipe (radial time-remaining) lives with Duration Text, not Border.
-        durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "debuffHideSwipe", nil), 30)
-        -- Icon-sized formats only (see the buff page's Duration Format note).
-        local debuffDurationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
-            TIMER = L["Timer"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
-        local durFormat = GUI:CreateDurationFormatControls(self.child, durationGroup, debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end)
-        durFormat.disableOn = function(d) return not d.debuffShowDuration end
-        local durFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffDurationFont", nil), 55)
-        durFont.disableOn = function(d) return not d.debuffShowDuration end
-        local durScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffDurationScale", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
-        durScale.disableOn = function(d) return not d.debuffShowDuration end
-        local durOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "debuffDurationOutline", function() DF:LightweightUpdateAuraDurationText("debuff") end), 55)
-        durOutline.disableOn = function(d) return not d.debuffShowDuration end
-        local durShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "debuffDurationOutline", function() DF:LightweightUpdateAuraDurationText("debuff") end), 30)
-        durShadow.disableOn = function(d) return not d.debuffShowDuration end
-        local durAnchor = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffDurationAnchor", function() DF:LightweightUpdateAuraDurationText("debuff") end), 55)
-        durAnchor.disableOn = function(d) return not d.debuffShowDuration end
-        local durX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffDurationX", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
-        durX.disableOn = function(d) return not d.debuffShowDuration end
-        local durY = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffDurationY", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
-        durY.disableOn = function(d) return not d.debuffShowDuration end
-        local durColorPick = durationGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Duration Color"], db, "debuffDurationColor", false, function() DF:LightweightUpdateAuraDurationText("debuff") end, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 30)
-        durColorPick.disableOn = function(d) return not d.debuffShowDuration or d.debuffDurationColorByTime end
-        local durColor = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() self:RefreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
-        durColor.disableOn = function(d) return not d.debuffShowDuration end
-        AddColorsPageLink(durationGroup, self.child)
-        -- Hide Above can't compose with the Percent format (see the buff page).
-        local durHideAbove = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
-        durHideAbove.disableOn = function(d) return not d.debuffShowDuration or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
-        local durHideAboveSlider = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
-        durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
-        local durHidePerm = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Duration on Permanent Auras"], db, "debuffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
-        durHidePerm.disableOn = function(d) return not d.debuffShowDuration end
-        -- Grey the whole group when Debuffs are off (composes with the per-control
-        -- debuffShowDuration gates), matching Settings/Position/Grid.
-        durationGroup.disableChildrenOn = function(d) return not d.showDebuffs end
-        Add(durationGroup, nil, 2)
+            DF:LightweightUpdateAuraDurationText("debuff")
+        end
 
-        -- Stack Count Group (col2) — directly under Duration, and in that order on every
-        -- surface that has both: they are the two text elements on an icon and are tuned as
-        -- a pair, so a user looking for one expects the other adjacent. Matches Buffs and
+        -- ☠ WHAT A DURATION FORMAT CHANGE COSTS, AND WHY IT IS NOT THE SAME IN BOTH
+        -- LAYOUTS. Picking a format re-gates the two Hide Above controls (neither can
+        -- compose with Percent), and classic has always paid for that with a whole
+        -- page REBUILD. It keeps doing exactly that.
+        --
+        -- The pane must not. A rebuild retires every widget on the page including the
+        -- row the user is clicking through, and the helper's own prologue closes every
+        -- open panel on the way in -- so the dropdown they just used would slam shut
+        -- under their hand. What the rebuild was buying is the hideOn/disableOn
+        -- passes, and that is precisely what the pane's own refresh does.
+        local function DurationFormatRefresh(tools2)
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+            if tools2.popout then
+                tools2.refreshStates()
+            else
+                GUI:RefreshCurrentPage()
+            end
+        end
+
+        local function BuildDebuffDurationGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic, where
+            -- it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], db, "debuffShowDuration", function()
+                    tools2.refreshStates()
+                    DF:UpdateAllFrames()
+                end), 30)
+            end
+            -- Cooldown swipe (radial time-remaining) lives with Duration Text, not Border.
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], db, "debuffHideSwipe", nil), 30)
+            local durFormat = GUI:CreateDurationFormatControls(parent, group, debuffDurationFormatOptions, db, "debuffDurationFormat", function() DurationFormatRefresh(tools2) end)
+            durFormat.disableOn = function(d) return not d.debuffShowDuration end
+            local durFont = group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "debuffDurationFont", nil), 55)
+            durFont.disableOn = function(d) return not d.debuffShowDuration end
+            local durScale = group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.05, db, "debuffDurationScale", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
+            durScale.disableOn = function(d) return not d.debuffShowDuration end
+            local durOutline = group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "debuffDurationOutline", function() DF:LightweightUpdateAuraDurationText("debuff") end), 55)
+            durOutline.disableOn = function(d) return not d.debuffShowDuration end
+            local durShadow = group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "debuffDurationOutline", function() DF:LightweightUpdateAuraDurationText("debuff") end), 30)
+            durShadow.disableOn = function(d) return not d.debuffShowDuration end
+            local durAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "debuffDurationAnchor", function() DF:LightweightUpdateAuraDurationText("debuff") end), 55)
+            durAnchor.disableOn = function(d) return not d.debuffShowDuration end
+            local durX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "debuffDurationX", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
+            durX.disableOn = function(d) return not d.debuffShowDuration end
+            local durY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "debuffDurationY", nil, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 55)
+            durY.disableOn = function(d) return not d.debuffShowDuration end
+            local durColorPick = group:AddWidget(GUI:CreateColorPicker(parent, L["Duration Color"], db, "debuffDurationColor", false, function() DF:LightweightUpdateAuraDurationText("debuff") end, function() DF:LightweightUpdateAuraDurationText("debuff") end, true), 30)
+            durColorPick.disableOn = function(d) return not d.debuffShowDuration or d.debuffDurationColorByTime end
+            local durColor = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], db, "debuffDurationColorByTime", function() tools2.refreshStates(); DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+            durColor.disableOn = function(d) return not d.debuffShowDuration end
+            AddColorsPageLink(group, parent)
+            -- Hide Above can't compose with the Percent format (see the buff page).
+            local durHideAbove = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Above Threshold"], db, "debuffDurationHideAboveEnabled", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+            durHideAbove.disableOn = function(d) return not d.debuffShowDuration or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
+            local durHideAboveSlider = group:AddWidget(GUI:CreateSlider(parent, L["Hide Above (seconds)"], 1, 60, 1, db, "debuffDurationHideAboveThreshold", nil, function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+            durHideAboveSlider.disableOn = function(d) return not d.debuffShowDuration or not d.debuffDurationHideAboveEnabled or DF:IsPercentDurationFormat(d.debuffDurationFormat) end
+            local durHidePerm = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], db, "debuffDurationHideOnPermanent", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 30)
+            durHidePerm.disableOn = function(d) return not d.debuffShowDuration end
+            -- Grey the whole group when Debuffs are off (composes with the per-control
+            -- debuffShowDuration gates), matching Visibility/Position/Layout.
+            group.disableChildrenOn = function(d) return not d.showDebuffs end
+        end
+
+        -- Which of the four icon-sized formats the text is drawn in, in the dropdown's
+        -- own words -- and the one option that takes the colour away from the swatch
+        -- behind it.
+        local function DebuffDurationSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local fmt = debuffDurationFormatOptions[d.debuffDurationFormat]
+            if fmt then parts[#parts + 1] = fmt end
+            if d.debuffDurationColorByTime then parts[#parts + 1] = L["Color by Time Remaining"] end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
+            durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
+            BuildDebuffDurationGroup({
+                group = durationGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(durationGroup, nil, 2)
+        else
+            -- Fifteen: the swipe tick, the format pick, the eight text-style controls,
+            -- Color by Time and its cross-link, the Hide Above pair and the
+            -- permanent-aura tick. The Show Duration tick is HOISTED onto the row.
+            local DEBUFF_DURATION_COUNT = 15
+
+            -- What the suppressed Show Duration checkbox ran, plus the repaint of every
+            -- pane standing open.
+            local function OnDebuffDurationToggle()
+                self:RefreshStates()
+                DF:UpdateAllFrames()
+                tools.ReflowMounted()
+            end
+
+            local durationMount, durationContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffDurationGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local durationRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Duration Text"],
+                db       = tools.RowDB,
+                toggle   = { key = "debuffShowDuration" },
+                summary  = DebuffDurationSummary,
+                count    = DEBUFF_DURATION_COUNT,
+                onToggle = OnDebuffDurationToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = durationMount,
+            }))
+            tools.ClaimKeys(durationRow, durationContent)
+            tools.WireModifiedTick(durationRow)
+            tools.WireFooter(durationRow, ApplyDebuffDurationText)
+            tools.RegisterHoistedToggle(durationRow, L["Show Duration"], "debuffShowDuration", OnDebuffDurationToggle)
+            durationRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== STACK COUNT (a 280 box in column 2 in classic, the Text band's second
+        -- row) ===== — directly under Duration, and in that order on every surface
+        -- that has both: they are the two text elements on an icon and are tuned as a
+        -- pair, so a user looking for one expects the other adjacent. Matches Buffs and
         -- the Aura Designer cards.
-        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
-        stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
-        stackCountGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffStackFont", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffStackScale", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 30)
-        stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffStackAnchor", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "debuffStackColor", false, function() DF:LightweightUpdateAuraStackText("debuff") end, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 30)
-        -- (No "Min Stacks to Show" — see the Buffs page for why it cannot exist on 12.1.)
-        -- Grey the whole group when Debuffs are off, matching Settings/Position/Grid.
-        stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
-        Add(stackCountGroup, nil, 2)
+        --
+        -- ☠ NO TICK TO HOIST: the stack count is drawn by the game whenever an aura has
+        -- one, and every control here styles it. There is no boolean that means "am I
+        -- doing anything at all", so this is a WAY IN.
+        local function ApplyDebuffStackText() DF:LightweightUpdateAuraStackText("debuff") end
 
-        -- Dispel Text Group (col2, under Stack Count) — the dispel-type letters
-        -- ("Ma", "Po", …), engine-written per aura (12.1 factory rows only; the
-        -- legacy renderer has no source for them).
+        local function BuildDebuffStackGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+            group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "debuffStackFont", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.05, db, "debuffStackScale", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
+            group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+            group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 30)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "debuffStackAnchor", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "debuffStackColor", false, function() DF:LightweightUpdateAuraStackText("debuff") end, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 30)
+            -- (No "Min Stacks to Show" — see the Buffs page for why it cannot exist on 12.1.)
+            -- Grey the whole group when Debuffs are off, matching Visibility/Position/Layout.
+            group.disableChildrenOn = function(d) return not d.showDebuffs end
+        end
+
+        -- Where the number sits and how big it is -- the two facts a styling row can
+        -- state without opening. The anchor word comes out of the same nine-way table
+        -- this group's own dropdown offers.
+        local function DebuffStackSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local anchor = anchorOptions[d.debuffStackAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            local scale = tonumber(d.debuffStackScale)
+            if scale and scale ~= 1 then parts[#parts + 1] = format("%s %.2f", L["Scale"], scale) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
+            stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
+            BuildDebuffStackGroup({
+                group = stackCountGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(stackCountGroup, nil, 2)
+        else
+            -- Eight: font, scale, outline, shadow, anchor, two offsets and the colour.
+            local DEBUFF_STACK_COUNT = 8
+
+            local stackMount, stackContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffStackGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local stackRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Stack Count"],
+                db      = tools.RowDB,
+                summary = DebuffStackSummary,
+                count   = DEBUFF_STACK_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = stackMount,
+            }))
+            tools.ClaimKeys(stackRow, stackContent)
+            tools.WireModifiedTick(stackRow)
+            tools.WireFooter(stackRow, ApplyDebuffStackText)
+            stackRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== DISPEL TEXT (a 280 box in column 2 in classic, the Text band's third
+        -- row) ===== — the dispel-type letters ("Ma", "Po", …), engine-written per
+        -- aura (12.1 factory rows only; the legacy renderer has no source for them).
         -- ★ 2026-07-31: no longer requires Colorblind Mode. The bind passes
         -- customDispelTextMap, which takes Blizzard's direct SetText path instead of
         -- the CVar-gated one (DF:GetGameDispelTextMap, Frames/Border.lua) — so the
         -- old caution note and the CVar caveat in the tooltip are gone with it.
         -- Renamed from "Dispel Symbol" the same day: that read as the dispel ICON,
         -- which is a different native feature. DB keys stay debuffDispelSymbol*.
-        -- ☠ Its hideOn makes this the one box on the page that can vanish, so it belongs in
-        -- the SHORTER column: here it takes the page from 1972/1753 to 1972/2196 rather than
-        -- lurching an already-long column by 443 every time the row backend changes.
-        local symbolGroup = GUI:CreateSettingsGroup(self.child, 280)
-        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Text"]), 40)
-        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Text"], db, "debuffDispelSymbolEnabled", function()
-            self:RefreshStates()
-            -- Region presence is structural (create-once) — full re-drive rebuilds the row.
-            DF:InvalidateAuraLayout()
-            DF:UpdateAllFrames()
-        end), 30)
-        symbolEnable.tooltip = L["Shows a short letter code on each debuff for its dispel type — Ma for Magic, Po for Poison, and so on. Uses the game's own wording for your language."]
-        symbolEnable.keepEnabled = true
-        symbolEnable.disableOn = function(d) return not d.showDebuffs end
-        GUI:CreateTextControls(symbolGroup, db, "debuffDispelSymbol", {
-            parent    = self.child,
-            include   = { color = true },
-            disableOn = function(d) return not d.debuffDispelSymbolEnabled end,
-            onChange  = function() DF:InvalidateAuraLayout() end,
-            onDrag    = function() DF:InvalidateAuraLayout() end,
-        })
-        symbolGroup.disableChildrenOn = function(d) return not d.showDebuffs end
-        symbolGroup.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        Add(symbolGroup, nil, 2)
-
-        -- ===== DURATION BAR ===== (12.1 factory rows only — mirrors the Buffs
-        -- page's block; see there for the sig-split routing note)
         --
-        -- The collapsible section used to carry this predicate and hide the bar
-        -- with itself; with the section gone the box declares it directly.
-        local function HideDurationBar(d) return not DF:FactoryOwnsDebuffRow(d) end
+        -- ⚠ IT STAYS IN THE TEXT BAND even though it shares the Duration Bar's factory
+        -- gate. The band above it still has Duration Text and Stack Count in it on a
+        -- client with no factory row, so its header is never left standing over
+        -- nothing -- which is the only thing that argued the Duration Bar into a
+        -- headerless band of its own.
+        local function ApplyDispelText()
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+        end
 
-        local function DebuffBarChanged() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end
+        local function BuildDebuffDispelTextGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        local durBarGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durBarGroup.hideOn = HideDurationBar
-        durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Bar"]), 40)
-        durBarGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
-        local debuffBarEnable = durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Duration Bar"], db, "debuffDurationBarEnabled", function()
-            self:RefreshStates()
-            DebuffBarChanged()
-        end), 30)
-        debuffBarEnable.keepEnabled = true
-        debuffBarEnable.disableOn = function(d) return not d.showDebuffs end
-        durBarGroup.disableChildrenOn = function(d) return not d.showDebuffs or not d.debuffDurationBarEnabled end
-        -- Where the bar sits, then what it looks like. One box rather than two:
-        -- every other optional element on this page (Stack Count, Dispel Text)
-        -- is a single box, and splitting only this one into geometry + style
-        -- made the bar read as more of a feature than its neighbours while
-        -- taking up half of column 2.
-        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], { BOTTOM = L["Bottom"], TOP = L["Top"] }, db, "debuffDurationBarPosition", DebuffBarChanged), 55)
-        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Height"], 1, 12, 1, db, "debuffDurationBarHeight", nil, DebuffBarChanged, true), 55)
-        durBarGroup:AddWidget(GUI:CreateSlider(self.child, L["Gap"], 0, 10, 1, db, "debuffDurationBarGap", nil, DebuffBarChanged, true), 55)
-        durBarGroup:AddWidget(GUI:CreateDropdown(self.child, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
-            self:RefreshStates()
-            DebuffBarChanged()
-        end), 55)
-        local debuffBarTex = durBarGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
-        local debuffBarCol = durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
-        -- A curve mode brings its own ramp texture and forces white, so these two do
-        -- nothing while it is selected - dim them rather than leave dead controls live.
-        debuffBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.debuffDurationBarColorMode) end
-        debuffBarCol.disableOn = debuffBarTex.disableOn
-        durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "debuffDurationBarBGColor", true, DebuffBarChanged), 30)
-        durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "debuffDurationBarReverseFill", DebuffBarChanged), 30)
-        Add(durBarGroup, nil, 2)
+            -- Suppressed when the ROW carries this tick. Still built in classic, where
+            -- it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local symbolEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Dispel Text"], db, "debuffDispelSymbolEnabled", function()
+                    tools2.refreshStates()
+                    -- Region presence is structural (create-once) — full re-drive rebuilds the row.
+                    DF:InvalidateAuraLayout()
+                    DF:UpdateAllFrames()
+                end), 30)
+                symbolEnable.tooltip = L["Shows a short letter code on each debuff for its dispel type — Ma for Magic, Po for Poison, and so on. Uses the game's own wording for your language."]
+                symbolEnable.keepEnabled = true
+                symbolEnable.disableOn = function(d) return not d.showDebuffs end
+            end
+            GUI:CreateTextControls(group, db, "debuffDispelSymbol", {
+                parent    = parent,
+                include   = { color = true },
+                disableOn = function(d) return not d.debuffDispelSymbolEnabled end,
+                onChange  = function() DF:InvalidateAuraLayout() end,
+                onDrag    = function() DF:InvalidateAuraLayout() end,
+            })
+            group.disableChildrenOn = function(d) return not d.showDebuffs end
+        end
+
+        -- The same two facts the Stack Count row states, off this block's own keys:
+        -- where the letters sit and how big they are.
+        local function DebuffDispelSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local anchor = anchorOptions[d.debuffDispelSymbolAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            local scale = tonumber(d.debuffDispelSymbolScale)
+            if scale and scale ~= 1 then parts[#parts + 1] = format("%s %.2f", L["Scale"], scale) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local symbolGroup = GUI:CreateSettingsGroup(self.child, 280)
+            symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Text"]), 40)
+            BuildDebuffDispelTextGroup({
+                group = symbolGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            symbolGroup.hideOn = NoFactoryRow
+            -- ☠ Its hideOn makes this the one box on the page that can vanish, so it belongs in
+            -- the SHORTER column: here it takes the page from 1972/1753 to 1972/2196 rather than
+            -- lurching an already-long column by 443 every time the row backend changes.
+            Add(symbolGroup, nil, 2)
+        else
+            -- Eight: the text-style block's font, scale, outline, shadow, colour,
+            -- anchor and two offsets. The Show Dispel Text tick is HOISTED onto the row.
+            local DEBUFF_DISPEL_COUNT = 8
+
+            local function OnDispelTextToggle()
+                self:RefreshStates()
+                ApplyDispelText()
+                tools.ReflowMounted()
+            end
+
+            local dispelMount, dispelContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffDispelTextGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local dispelRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Dispel Text"],
+                db       = tools.RowDB,
+                toggle   = { key = "debuffDispelSymbolEnabled" },
+                summary  = DebuffDispelSummary,
+                count    = DEBUFF_DISPEL_COUNT,
+                onToggle = OnDispelTextToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = dispelMount,
+            }))
+            -- The box's own hideOn becomes the ROW's, so the band collapses the slot
+            -- rather than leaving a gap where letters the client cannot write would be.
+            dispelRow.hideOn = NoFactoryRow
+            tools.ClaimKeys(dispelRow, dispelContent)
+            tools.WireModifiedTick(dispelRow)
+            tools.WireFooter(dispelRow, ApplyDispelText)
+            tools.RegisterHoistedToggle(dispelRow, L["Show Dispel Text"], "debuffDispelSymbolEnabled", OnDispelTextToggle)
+            dispelRow.disableOn = DebuffsOffRow
+        end
+
+        -- ===== DURATION BAR (a 280 box in column 2 in classic, the headerless band's
+        -- only row) ===== (12.1 factory rows only — mirrors the Buffs page's block;
+        -- see there for the sig-split routing note)
+        local function BuildDebuffDurationBarGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Shows a bar on each icon that drains with the aura's remaining time."], 250), 30)
+            if not tools2.hoistToggle then
+                local debuffBarEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Duration Bar"], db, "debuffDurationBarEnabled", function()
+                    tools2.refreshStates()
+                    DebuffBarChanged()
+                end), 30)
+                debuffBarEnable.keepEnabled = true
+                debuffBarEnable.disableOn = function(d) return not d.showDebuffs end
+            end
+            group.disableChildrenOn = function(d) return not d.showDebuffs or not d.debuffDurationBarEnabled end
+            -- Where the bar sits, then what it looks like. One box rather than two:
+            -- every other optional element on this page (Stack Count, Dispel Text)
+            -- is a single box, and splitting only this one into geometry + style
+            -- made the bar read as more of a feature than its neighbours while
+            -- taking up half of column 2.
+            group:AddWidget(GUI:CreateDropdown(parent, L["Position"], durBarPositionOptions, db, "debuffDurationBarPosition", DebuffBarChanged), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 12, 1, db, "debuffDurationBarHeight", nil, DebuffBarChanged, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Gap"], 0, 10, 1, db, "debuffDurationBarGap", nil, DebuffBarChanged, true), 55)
+            group:AddWidget(GUI:CreateDropdown(parent, L["Color Mode"], DF:GetDurationBarColorModes(), db, "debuffDurationBarColorMode", function()
+                tools2.refreshStates()
+                DebuffBarChanged()
+            end), 55)
+            local debuffBarTex = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "debuffDurationBarTexture", DebuffBarChanged), 55)
+            local debuffBarCol = group:AddWidget(GUI:CreateColorPicker(parent, L["Bar Color"], db, "debuffDurationBarColor", true, DebuffBarChanged), 30)
+            -- A curve mode brings its own ramp texture and forces white, so these two do
+            -- nothing while it is selected - dim them rather than leave dead controls live.
+            debuffBarTex.disableOn = function(d) return DF:IsDurationBarCurveMode(d.debuffDurationBarColorMode) end
+            debuffBarCol.disableOn = debuffBarTex.disableOn
+            group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "debuffDurationBarBGColor", true, DebuffBarChanged), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Reverse Fill"], db, "debuffDurationBarReverseFill", DebuffBarChanged), 30)
+        end
+
+        local function DebuffDurationBarSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local pos = durBarPositionOptions[d.debuffDurationBarPosition]
+            if pos then parts[#parts + 1] = pos end
+            local h = tonumber(d.debuffDurationBarHeight)
+            if h then parts[#parts + 1] = format("%dpx", math.floor(h)) end
+            local modes = DF:GetDurationBarColorModes()
+            local mode = modes and modes[d.debuffDurationBarColorMode]
+            if mode then parts[#parts + 1] = mode end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local durBarGroup = GUI:CreateSettingsGroup(self.child, 280)
+            durBarGroup.hideOn = NoFactoryRow
+            durBarGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Bar"]), 40)
+            BuildDebuffDurationBarGroup({
+                group = durBarGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(durBarGroup, nil, 2)
+        else
+            -- Nine: the blurb, the position pick, height, gap, the colour mode, the
+            -- texture and two colours, and Reverse Fill. The Enable tick is HOISTED.
+            local DEBUFF_DURBAR_COUNT = 9
+
+            local function OnDebuffDurationBarToggle()
+                self:RefreshStates()
+                DebuffBarChanged()
+                tools.ReflowMounted()
+            end
+
+            local durBarMount, durBarContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDebuffDurationBarGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local durBarRow = factoryBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Duration Bar"],
+                db       = tools.RowDB,
+                toggle   = { key = "debuffDurationBarEnabled" },
+                summary  = DebuffDurationBarSummary,
+                count    = DEBUFF_DURBAR_COUNT,
+                onToggle = OnDebuffDurationBarToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = durBarMount,
+            }))
+            -- The box's own hideOn becomes the ROW's, so the band collapses the slot
+            -- rather than leaving a gap where a bar the client cannot draw would be.
+            durBarRow.hideOn = NoFactoryRow
+            tools.ClaimKeys(durBarRow, durBarContent)
+            tools.WireModifiedTick(durBarRow)
+            tools.WireFooter(durBarRow, DebuffBarChanged)
+            tools.RegisterHoistedToggle(durBarRow, L["Enable Duration Bar"], "debuffDurationBarEnabled", OnDebuffDurationBarToggle)
+            durBarRow.disableOn = DebuffsOffRow
+        end
 
         -- (No Pandemic box here, unlike Buffs. This row shows harmful auras on a FRIENDLY
         -- unit — cast on your party by something else — which you cannot refresh, so they
         -- have no refresh window and the cue could never light. Controls wired to an
         -- impossibility are worse than no controls. See BuildAuraRowConfig in
         -- Features/Auras.lua for the render-side gate that matches this.)
+
+        -- ===== THE FOUR BANDS, IN READING ORDER ===========================
+        -- Added at the foot rather than in place: every band is full width, so there
+        -- is no column flow left to unbalance and the order below is purely the order
+        -- the page reads in.
+        if not classicLayout then
+            Add(contentBand, nil, "both")
+            Add(iconBand, nil, "both")
+            Add(textBand, nil, "both")
+            Add(factoryBand, nil, "both")
+        end
 
         -- See Also links
 

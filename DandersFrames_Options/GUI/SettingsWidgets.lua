@@ -82,6 +82,19 @@ function GUI:RelayoutHost(widget, slotHeight)
             p.dfAD_ReflowWidgets()
             return
         end
+        -- ☠ A POPOUT PANE NEXT, for the card's reason one host along. A pane is not a
+        -- page: the walk would run straight past it to the settings WINDOW, which
+        -- knows nothing about the panel, so the group's own LayoutChildren above
+        -- would be the only thing that happened -- the group knows its new height and
+        -- the PANEL around it still has the one it was given at mount, clipping the
+        -- bottom of the pane by exactly what the widget grew.
+        -- GUI:CreatePopoutPageTools stamps this on the pane it mounts a group into,
+        -- and it is the same ReflowPane the toolkit runs after a hideOn change: the
+        -- group re-flows, the pane is re-sized to it, and the panel re-syncs.
+        if type(p.dfReflowPane) == "function" then
+            p.dfReflowPane()
+            return
+        end
         if type(p.RefreshStates) == "function" and p.children then
             p:RefreshStates()
             return
