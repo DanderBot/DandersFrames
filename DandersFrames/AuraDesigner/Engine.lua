@@ -172,17 +172,46 @@ local pihSoundCfg = nil
 -- feature is used. If this ever needs to differ per mode, the gate has to become per-mode
 -- first, and that is a bigger change than a better read.
 local PIH_MODES = { "party", "raid" }
+
+-- ☠ "DOES A HELPER EXIST" IS ONE QUESTION, ANSWERED FROM THE MARKS -- the same
+-- derivation the panel uses, so the two halves cannot disagree. An earlier version tested for
+-- the recorded list id instead, and the two definitions drifted apart in exactly one state:
+-- untick every signal without pressing Remove, and the panel correctly reported the helper
+-- gone while the engine kept its event registrations and its armed sound, because the list id
+-- outlives the signals (the spell list is still there; nothing points at it). Field-found.
+--
+-- ⚠ The marks ARE the record -- effects, placed instances and icon groups all carry
+-- pihSignal -- so scanning for one is the definition, not a proxy for it. Cheap: it runs on
+-- settings changes and login, never in a frame update.
+local function pihHasHelper(adDB)
+    if type(adDB) ~= "table" then return false end
+    for _, auraCfg in pairs(adDB.otherAuras or {}) do
+        if type(auraCfg) == "table" then
+            for _, v in pairs(auraCfg) do
+                if type(v) == "table" and v.pihSignal then return true end
+            end
+            for _, inst in ipairs(auraCfg.indicators or {}) do
+                if type(inst) == "table" and inst.pihSignal then return true end
+            end
+        end
+    end
+    for _, g in ipairs(adDB.otherLayoutGroups or {}) do
+        if type(g) == "table" and g.pihSignal then return true end
+    end
+    return false
+end
+
+-- ⚠ FIRST PRESET THAT HAS A HELPER WINS, PARTY FIRST. The gate is ONE switch for the
+-- whole addon, so two presets carrying different helper settings is an ambiguity no read can
+-- resolve -- taking the first is a choice, not a derivation. Party first because that is where
+-- the feature is used. A preset whose settings table survived a Remove no longer shadows one
+-- that actually has a helper, because the marks decide.
 local function pihSettings()
     if not DF.GetModeBaseAuraDesigner then return nil end
     for _, mode in ipairs(PIH_MODES) do
         local adDB = DF:GetModeBaseAuraDesigner(mode)
         local s = adDB and adDB.pihelper
-        -- ☠ A pihelper TABLE ALONE IS NOT A HELPER. Remove leaves the table behind on
-        -- purpose (behaviour survives a remove), so a preset that ONCE had a helper would
-        -- otherwise shadow the preset that has one now -- settings configured in raid mode
-        -- reverting to party leftovers on every reload. The recorded list id only exists
-        -- while a helper is actually installed, so it is the installed test.
-        if s and s.cooldownFilterID then return s end
+        if s and pihHasHelper(adDB) then return s end
     end
     return nil
 end
@@ -318,7 +347,12 @@ local function pihReadReady()
 
     local gcd = info.isOnGCD
     local sealed = issecretvalue and issecretvalue(gcd)
-    if gcd ~= nil and not sealed then
+    -- ☠ SEALED TEST FIRST. `and` evaluates left to right, so writing this as
+    -- `gcd ~= nil and not sealed` runs the nil comparison BEFORE the guard that exists to
+    -- prevent it -- and a comparison against a sealed value throws. The guard was decorative
+    -- in exactly the branch it was written for. pihReadCharges gets the order right and says
+    -- why; caught in Danders' PR review.
+    if not sealed and gcd ~= nil then
         -- Active AND merely the global cooldown = not a real cooldown = still ready.
         return gcd == true
     end
@@ -490,6 +524,12 @@ local PIH_WATCH_EVENTS = { "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES",
 local pihWatching = false
 pihSyncWatcher = function()
     local want = pihSettings() ~= nil
+    -- The container's own backstop frame follows the same fact, from the same test -- one
+    -- definition of "a helper exists" driving both registrations. Called unconditionally
+    -- (it is idempotent) so it self-corrects even when our own state has not moved.
+    if DF.AuraContainer and DF.AuraContainer.SetHelperGateActive then
+        DF.AuraContainer.SetHelperGateActive(want)
+    end
     if want == pihWatching then return end
     pihWatching = want
     for _, ev in ipairs(PIH_WATCH_EVENTS) do
@@ -664,7 +704,11 @@ SlashCmdList["DFPI"] = function(msg)
         :Field("sound registrations", ("%d over %d frame%s%s"):format(
             pihLastArmCount, pihLastArmFrames, pihLastArmFrames == 1 and "" or "s",
             pihLastArmAt and (" (last armed " .. pihLastArmAt .. ")") or ""),
-            (pihSoundCfg and pihGateOpen and pihLastArmCount == 0) and "bad" or "neutral")
+            -- ⚠ Only a fault WITH A GROUP: solo there is no unit to register on (we
+            -- never register the player's own), so zero is the right answer and a red zero
+            -- would teach the reader to ignore the line that matters.
+            (pihSoundCfg and pihGateOpen and pihLastArmCount == 0
+             and GetNumGroupMembers and GetNumGroupMembers() > 1) and "bad" or "neutral")
         :Field("gated containers live", (function()
             local AC = DF.AuraContainer
             local n = 0

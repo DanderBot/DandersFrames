@@ -4,7 +4,7 @@
 
 ### New Features
 
-* (Aura Designer) New **Power Infusion Helper** for priests, added from the Other Buffs tab. One click marks the group members worth infusing: tick "Big cooldown" for anyone who has used a major damage cooldown, "Big cooldown with a trinket or potion" for someone going all in, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it — with a switch to keep it always on. Choose where each one appears — border, health bar, background or text colour — pick which classes count, and add a sound for when someone becomes worth infusing. Tanks and healers are skipped unless you say otherwise. (by Maelareth)
+* (Aura Designer) New **Power Infusion Helper** for priests, added from the Other Buffs tab. One click marks the group members worth infusing: tick "Big cooldown" for anyone who has used a major damage cooldown, "Big cooldown with a trinket or potion" for someone going all in, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Choose where each signal appears — border, health bar, background, text colour, an icon or a square — pick which classes count, and add a sound; tanks and healers are skipped unless you say otherwise. (by Maelareth)
 
 ### Bug Fixes
 

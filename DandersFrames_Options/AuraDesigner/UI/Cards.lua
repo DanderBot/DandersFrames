@@ -243,11 +243,23 @@ end
 
 -- Localised at call time, not at file scope: the same locale-timing rule the effect-label
 -- tables in Groups.lua follow.
+--
+-- ☠ RESOLVED AT RENDER, NEVER STORED. An earlier version wrote this string onto the
+-- effect config as `cfg.label` -- which lives in the PROFILE, so a translated string became
+-- saved data. Build the helper on an English client and switch to German: the stored row name
+-- stays English forever while the surface dropdown resolves live and shows German, two names
+-- for one signal disagreeing on screen. The addon's own rule ("never store L[...] as a db
+-- value") says it plainly; caught in Danders' PR review, and it blocked the merge because bad
+-- data outlives the fix. `pihSignal` is the stored truth and the label is derived from it.
 local function pihLabel(key)
     if key == "burst"   then return L["PI Helper — Big cooldown"]    end
     if key == "strong"  then return L["PI Helper — Big cooldown with a trinket or potion"]   end
     if key == "infused" then return L["PI Helper — Already has active Power Infusion"] end
 end
+
+-- The effects list (Groups.lua) resolves helper rows through this: same derivation, one
+-- definition, so the list and the panel can never disagree about what a signal is called.
+P.PIH_SignalLabel = pihLabel
 
 local function pihFilterIdByName(name)
     local R = DF.FilterRegistry
@@ -561,9 +573,6 @@ local function pihCreateSignal(key, surfaceOverride)
     if not cfg then return false, "could not create the effect" end
     -- ☠ THE MARK. This one field is what makes every question above answerable.
     cfg.pihSignal = key
-    -- Its own row label. Burst and strong share one spell list, so without this they read
-    -- identically in the effects list.
-    cfg.label = pihLabel(key)
     cfg[pihColorKey(tgt)] = { r = def.color[1], g = def.color[2], b = def.color[3], a = 1 }
     -- ☠ TINT, NOT REPLACE. A health-bar effect's generic default is Replace, which
     -- repaints the whole bar and covers every other tint -- the exact collision the panel's
@@ -659,7 +668,8 @@ end
 -- first (only helper effects carry one today), then the registry's name for a filter-owned
 -- record, then the pool key -- which for an ordinary record IS the aura's name.
 local function pihEffectName(auraName, cfg)
-    if type(cfg) == "table" and cfg.label then return cfg.label end
+    -- Derived from the mark; see pihLabel for why nothing is stored.
+    if type(cfg) == "table" and cfg.pihSignal then return pihLabel(cfg.pihSignal) end
     local named = DF.ADFilterRefDisplayName and DF:ADFilterRefDisplayName(auraName)
     return named or auraName
 end
@@ -837,7 +847,6 @@ local function pihPlace(key, auraName, surface, carried)
     local cfg = EnsureTypeConfig(auraName, surface, pihOtherPoolWrite())
     if not cfg then return false end
     cfg.pihSignal  = key
-    cfg.label      = pihLabel(key)
     cfg.othersOnly = (key ~= "infused") or nil   -- infused = own cast; see pihCreateSignal
     cfg.enabled    = true
     cfg.conditions = carried and carried.conditions or nil
@@ -1155,6 +1164,10 @@ end
 
 function P.PIH_Create()
     local ok, why = pihCreateSignal("burst")
+    -- See PIH_SetSignal: a silent refusal is indistinguishable from a dead button.
+    if not ok then
+        DF:DebugWarn("AURADESIGNER", "PIH: could not add the helper -- %s", tostring(why))
+    end
     if ok then
         -- ☠ PUSH THE DEFAULTS NOW. Creating writes the settings table (tanks and
         -- healers excluded, gate on) but writing is not applying -- without this push the
@@ -1261,13 +1274,26 @@ function P.PIH_SetSignal(key, on)
         if key == "strong" and not (s.potions or s.trinkets) then
             s.potions, s.trinkets = true, true
         end
-        pihCreateSignal(key)
+        local ok, why = pihCreateSignal(key)
+        -- ⚠ A REFUSAL MUST LEAVE A TRACE. All of these paths return a reason and nothing
+        -- read it, so a failure (the registry not ready, a list that would not build) looked
+        -- exactly like a dead control: click, nothing, no message anywhere.
+        if not ok then DF:DebugWarn("AURADESIGNER", "PIH: signal %s not created -- %s",
+            tostring(key), tostring(why)) end
         P.PIH_Apply()   -- see PIH_Create: writing settings is not applying them
     else
         pihDeleteSignal(key)
         -- Off means off everywhere: the signal's own icon list goes with it, or the master
         -- tick would re-read as on from the icons it left behind.
         if PIH_ICON_OF[key] then P.PIH_SetIconsShow(PIH_ICON_OF[key], false) end
+        -- ⚠ RE-DERIVE, AS REMOVE DOES. Unticking the LAST signal leaves no helper, and
+        -- without this the resident half keeps its event registrations and its sound armed for
+        -- a helper with nothing left in it. Remove gets that reset; this path reaches the same
+        -- state one tick at a time and got nothing. Caught in Danders' PR review.
+        if not P.PIH_Exists() then
+            local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+            if Engine and Engine.PIH_ApplySaved then Engine:PIH_ApplySaved() end
+        end
     end
     pihRefresh()
 end
@@ -4038,14 +4064,19 @@ S.BuildEffectsTab = function()
                         S.SwitchTab("effects")   -- the dependent groups appear and vanish with it
                     end))
 
-                -- The surface picker, and it only exists while the signal does: "where does
-                -- this draw" is not a question about a signal that draws nothing.
+                -- ⚠ GREYED, NOT HIDDEN. The signal tick is a FEATURE TOGGLE, and the
+                -- house rule is grey-in-place for those; hiding is for mode choices, where a
+                -- control genuinely does not apply. A vanished dropdown also loses the one
+                -- thing worth seeing while the signal is off: where it WOULD draw.
+                -- (The Trinkets and Potions group below stays hidden, deliberately, and says
+                -- why -- greying that pair would imply strong window works without them.)
                 local surface = P.PIH_SurfaceOf(key)
-                if not surface then return end
+                local signalOff = (surface == nil)
+                if signalOff then surface = "none" end
 
                 -- Inline, so the checkbox above is its label. A second heading saying
                 -- "Surface" over every row would triple the words for no added meaning.
-                g:AddWidget(GUI:CreateDropdown(parent, label, P.PIH_SurfaceOptions(key),
+                local dd = GUI:CreateDropdown(parent, label, P.PIH_SurfaceOptions(key),
                     nil, nil, nil,
                     -- ⚠ NEVER nil: this widget survives a profile switch for one frame,
                     -- and the shared dropdown's display refresh treats a nil answer as "try
@@ -4054,7 +4085,9 @@ S.BuildEffectsTab = function()
                     -- owns, so a dying row reads honestly until it is rebuilt away.
                     function() return P.PIH_SurfaceOf(key) or "none" end,
                     function(v)
-                        P.PIH_SetSurface(key, v)
+                        local ok, why = P.PIH_SetSurface(key, v)
+                        if not ok then DF:DebugWarn("AURADESIGNER",
+                            "PIH: surface %s refused -- %s", tostring(v), tostring(why)) end
                         S.SwitchTab("effects")   -- the other rows' menus re-grey around it
                     end,
                     -- ⚠ An INLINE dropdown does not own its slot: CreateDropdown only stamps
@@ -4062,7 +4095,9 @@ S.BuildEffectsTab = function()
                     -- a hand-guessed one gets read. Content is 24 tall; the tight gap is right
                     -- because hiding the label makes it a compact row -- its control sits beside
                     -- its name (the checkbox above) rather than under it.
-                    { inline = true }), 24 + GUI.RowGapTight)
+                    { inline = true })
+                if signalOff and dd.SetEnabled then dd:SetEnabled(false) end
+                g:AddWidget(dd, 24 + GUI.RowGapTight)
 
                 -- ⚠ THE CLASH WARNING, AND IT IS SCOPED ON PURPOSE. pickWinner decides from
                 -- config alone and never asks what is on the unit, so a clash is fully knowable
@@ -4277,8 +4312,13 @@ S.BuildEffectsTab = function()
                     end
                 end)
                 if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
-                    fdBtn:Disable()
-                    fdBtn.Text:SetTextColor(0.4, 0.4, 0.4)
+                    -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
+                    -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
+                    -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
+                    -- backdrop with grey text, visibly unlike every other disabled button in the
+                    -- addon. Caught in Danders' PR review.
+                    if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
+                    else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
                 end
                 g:AddWidget(fdBtn, 28)
 
