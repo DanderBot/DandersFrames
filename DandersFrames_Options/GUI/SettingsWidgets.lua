@@ -2728,6 +2728,17 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         dbTable, aKey("ProcStart"), fullUpdate), 30)
     w.animationHideIntro.hideOn = hideUnless({ DF_FLASH = 1, DF_PROC = 1 })
     w.animationHideIntro.tooltip = L["These effects open with a one-off burst before settling into their loop. Turn this on to skip the burst and go straight to the loop."]
+    -- introInert (aura-button border cards): the intro cannot fire on a pooled
+    -- container button — animation timelines advance while the button is hidden
+    -- and no OnShow script runs in the restricted subtree, so a build-time
+    -- one-shot is spent before the first aura ever shows. The runtime forces the
+    -- intro off for row-mode buttons (AuraContainer's ANIMATION FILTER), so this
+    -- checkbox is permanently greyed there and the tooltip explains why instead
+    -- of describing a burst the user will never see.
+    if opts.introInert then
+        w.animationHideIntro.disableOn = function() return true end
+        w.animationHideIntro.tooltip = L["Aura buttons never play the intro burst: the game engine shows and hides the pooled buttons itself, and the burst can only play when the buttons are first built - not when an aura appears. Buttons go straight to the settled loop, so there is nothing to switch off here. The frame-level border keeps its intro."]
+    end
 
     w.animationCornerLength = group:AddWidget(GUI:CreateSlider(parent, L["Corner Length"],
         2, 40, 1, dbTable, aKey("CornerLength"),
@@ -3026,6 +3037,9 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             -- site (e.g. the Aura Designer border restricts to overlay-recoverable
             -- animation types). nil for every other caller → full type list.
             excludeTypes = opts.animExcludeTypes,
+            -- Aura-button border cards grey the intro checkbox — see introInert
+            -- in CreateAnimationControls. nil everywhere else.
+            introInert   = opts.animIntroInert,
             hideExtra    = hideOff,
             onTypeChange = function()
                 if refreshStates then refreshStates() end

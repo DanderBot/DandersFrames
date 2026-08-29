@@ -1663,6 +1663,19 @@ local function styleButton_regions(slot, config)
                         or not (animType and SAFE_OVERLAY_ANIM[animType]) then
                         spec.animation = nil
                     end
+                    -- ☠ NO INTRO ON BUTTONS — forced, not user-configurable. The DF Proc /
+                    -- DF Flash intro one-shot plays at BUILD: timelines advance while a
+                    -- button is hidden and no OnShow script runs in the subtree, so on a
+                    -- pooled button it can only ever fire as a burst on every container
+                    -- rebuild that happens while an aura is up — config-edit noise on a
+                    -- whole row of icons, never an "aura appeared" cue. Buttons go
+                    -- straight to the settled loop (and skip building the intro objects).
+                    -- The GUI greys the Hide Intro Flash checkbox on button cards
+                    -- (introInert). The overlay frame border KEEPS its intro: one ring,
+                    -- and its rebuild-time burst is user-triggered edit feedback.
+                    if spec.animation and isRow then
+                        spec.animation.procStart = true
+                    end
                     -- pp: the border renders inside the container's SetScale(scale)
                     -- subtree — Apply must snap thickness in that space, not
                     -- UIParent's (spec.renderScale, Border:SnapThickness). Factory

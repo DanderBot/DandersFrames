@@ -2963,6 +2963,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
                 gradient = true, shadow = true, alpha = true,
                 animate = true,
             },
+            animIntroInert = true,   -- pooled buttons never see the intro burst
             fullUpdate    = refresh,
             lightUpdate   = refresh,
             lightColors   = refresh,
