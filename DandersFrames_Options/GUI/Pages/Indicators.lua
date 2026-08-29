@@ -5110,6 +5110,57 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Party-only feature; raid mode shows a redirect message.
     local pageTargetedList = CreateSubTab("indicators", "indicators_targetedlist", L["Targeted List"])
     BuildPage(pageTargetedList, function(self, db, Add, AddSpace, AddSyncPoint)
+            -- ===== THE PAGE'S TWO LAYOUTS =====================================
+            -- CLASSIC is exactly what it always was: thirteen 280 boxes in two
+            -- columns, in the columns and the order they have always had.
+            --
+            -- POPOUT turns all thirteen into feature rows, in three bands:
+            --
+            --   "Content"      Settings -- whether the display exists at all, what
+            --                  reaches it and how many bars it may draw -- and
+            --                  Size & Spacing, which is how those bars are laid out.
+            --   "Appearance"   Bar Style, Bar Color, Border, Icon and Timing: the
+            --                  five things that decide what one bar looks like and
+            --                  how long it lives.
+            --   "Text"         Show Text, Text Font and the four per-element
+            --                  position boxes.
+            --
+            -- All three band headers are locale strings the page already ships, and
+            -- none can strand: no row on this page hides, so every band always has
+            -- something under it.
+            --
+            -- ☠ THE PAGE'S GATE IS A GREY IN BOTH LAYOUTS, which is why this page
+            -- needs no GateHide seam. Every dependent control already carries
+            -- `disableOn = HideTLOptions` -- the addon-wide convention for a boolean
+            -- master -- so it greys in the box and greys in the pane, unchanged. The
+            -- popout adds one thing on top: the ROW greys too (row.disableOn =
+            -- TLOffRow), so a switched-off feature reads as one dim plate rather
+            -- than as a live plate over a pane of dim controls.
+            --
+            -- ⚠ THE SETTINGS ROW IS THE EXCEPTION, for the Dispel Overlay's reason:
+            -- it carries the gate's own tick, so greying it would leave no way to
+            -- switch the display back on.
+            --
+            -- Every converted group's widgets live in a `Build<X>Group(tools2)`
+            -- taking { group, parent, refreshStates } and, where a toggle is
+            -- hoisted, `hoistToggle`. The classic branch mounts the SAME builder
+            -- into the box it always built -- test_targetedlist_page_builders.lua
+            -- pins the inventory of each one against the census taken before the
+            -- move.
+            local classicLayout = DF:IsClassicSettingsLayout()
+            -- The shared page-scope machinery: eager holders, pane reflow, the key
+            -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+            -- hoisted-toggle search repair and the band width. nil in classic, which
+            -- is what every `if classicLayout then` arm below leans on.
+            --
+            -- ☠ ABOVE THE RAID BAIL, DELIBERATELY. A mode switch is a rebuild, and
+            -- the switch INTO raid is the one rebuild this page could reach with a
+            -- popout panel standing open -- so it has to run the helper's prologue
+            -- (close every open panel, retire the previous build's holders) before
+            -- it returns. Left below the bail, a party-mode panel would float beside
+            -- the raid message, wired to rows this build has retired.
+            local tools = GUI:CreatePopoutPageTools(self)
+
             -- Party-only feature: show message and return if in raid mode
             if GUI.SelectedMode == "raid" then
                 Add(GUI:CreateHeader(self.child, L["Targeted List"]), 40, "both")
@@ -5122,8 +5173,26 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Copy button at top
             Add(CreateCopyButton(self.child, {"targetedList"}, L["Targeted List"], "indicators_targetedlist"), 25, 2)
 
+            local contentBand, appearanceBand, textBand
+            if tools then
+                contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+                contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
+                appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+                appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+                textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+                textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
+            end
 
-
+            -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
+            -- These tables used to sit inside the box that offered them. The rows
+            -- print the chosen value as their SUMMARY, and a summary is written
+            -- OUTSIDE the group's builder -- so the word has to come out of the same
+            -- table the dropdown offers, or a row could say one thing while the
+            -- control behind it says another.
+            --
+            -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure
+            -- captures the upvalue that exists when it is created -- so one declared
+            -- above these lines would see nil rather than the table or the function.
             local growthOptions = { UP = L["Up"], DOWN = L["Down"] }
             local iconPosOptions = { LEFT = L["Left"], RIGHT = L["Right"] }
             local stylePresetOptions = {
@@ -5132,136 +5201,429 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DETAILED = L["Detailed"],
                 MINIMAL = L["Minimal"],
             }
+            local sortOptions = { NEWEST = L["Newest First"], OLDEST = L["Oldest First"], STATIC = L["Static (No Reorder)"] }
+            -- Per-element anchor + X/Y offset. Each text element (spell name,
+            -- target name, duration, interrupt text) can be independently
+            -- anchored to LEFT / CENTER / RIGHT within the bar's progress
+            -- region with a pixel offset applied on top.
+            local textAnchorOptions = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
+            local textAlignOptions = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
 
 
             local function HideTLOptions(d) return not d.targetedListEnabled end
             local function HideIconOptions(d) return not d.targetedListEnabled or not d.targetedListShowIcon end
             local function HideTargetNameOptions(d) return not d.targetedListEnabled or not d.targetedListShowTargetName end
+            local function HideSelfTargetOptions(d) return not d.targetedListEnabled or not d.targetedListSelfTargetColorEnabled end
+            local function HideHighlightOptions(d) return not d.targetedListEnabled or not d.targetedListHighlightImportant end
+            local function HideDurationPosOptions(d) return not d.targetedListEnabled or not d.targetedListShowDuration end
+
+            -- ☠ THE PAGE GATE, ON THE ROWS. Reads `d or db` because a row's own
+            -- predicate is asked with the row's resolved table, and the page's
+            -- state pass with the page's -- one predicate has to answer both.
+            local function TLOffRow(d) return not (d or db).targetedListEnabled end
 
             local function TargetedListUpdate()
                 if DF.UpdateTargetedListLayout then DF:UpdateTargetedListLayout() end
             end
 
-            -- ===== SETTINGS GROUP (Column 1) =====
-            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-            settingsGroup:AddWidget(GUI:CreateLabel(self.child,
-                L["Shows a bar when an enemy is casting a spell targeting a party/raid member."], 250), 35)
-            settingsGroup:AddWidget(GUI:CreateLabel(self.child,
-                "|cff888888" .. L["To reposition: Unlock frames (/df unlock) and drag the mover."] .. "|r", 250), 30)
-            settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable"], db, "targetedListEnabled", function()
-                self:RefreshStates()
-                if DF.ToggleTargetedList then DF:ToggleTargetedList(db.targetedListEnabled) end
-                -- Reflect the enable change in test mode immediately (so disabling
-                -- hides the test display, not just the live bars).
-                if DF.UpdateAllTestTargetedList then DF:UpdateAllTestTargetedList() end
-            end), 30)
-            local tlImportantOnly = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells Only"], db, "targetedListImportantOnly", TargetedListUpdate), 30)
-            tlImportantOnly.disableOn = HideTLOptions
-            local tlHideOwn = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Casts Targeting You"], db, "targetedListHideOwnCasts", TargetedListUpdate), 30)
-            tlHideOwn.disableOn = HideTLOptions
-            local tlShowUntargeted = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Untargeted Casts"], db, "targetedListShowUntargeted", TargetedListUpdate), 30)
-            tlShowUntargeted.disableOn = HideTLOptions
-            local tlHideOOC = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Out-of-Combat Casts"], db, "targetedListHideOutOfCombat", TargetedListUpdate), 30)
-            tlHideOOC.disableOn = HideTLOptions
-            tlHideOOC.tooltip = L["Hides the ambient spells idle NPCs cast while standing around: casts with no target, from an enemy that is not in combat. Casts aimed at you or a group member always show, so the opening cast of a pull is never hidden."]
-            -- Game CVar, not a profile key — bound straight to the CVar via
-            -- customGet/customSet so it cannot drift out of sync. See
-            -- DF:SetNameplateOffscreen for why both features depend on it.
-            local tlOffscreen = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Offscreen Nameplates"], nil, nil, nil,
-                function() return DF:GetNameplateOffscreen() end,
-                function(val) DF:SetNameplateOffscreen(val) end), 30)
-            tlOffscreen.disableOn = HideTLOptions
-            tlOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
-            local tlMaxBars = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Bars"], 1, 20, 1, db, "targetedListMaxBars", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlMaxBars.disableOn = HideTLOptions
-            Add(settingsGroup, nil, 1)
+            -- The summary convention, once: at most four items, a fixed order,
+            -- "\194\183" between them, WORDS localised and numbers raw, every read
+            -- guarded because a profile mid-migration may be missing any of these
+            -- keys.
+            local function Join(parts) return table.concat(parts, " \194\183 ") end
 
+            -- ===== SETTINGS (a 280 box in column 1 in classic, the Content band's
+            -- first row) =====
+            -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
+            -- rather than a stack of control rows: a control row carries a SETTING
+            -- rather than a group, so it can offer neither the group's Reset Group
+            -- nor the tick that says the group has been touched -- and the page gate
+            -- would then belong to no row at all.
+            local function BuildTargetedListSettingsGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
 
+                group:AddWidget(GUI:CreateLabel(parent,
+                    L["Shows a bar when an enemy is casting a spell targeting a party/raid member."], 250), 35)
+                group:AddWidget(GUI:CreateLabel(parent,
+                    "|cff888888" .. L["To reposition: Unlock frames (/df unlock) and drag the mover."] .. "|r", 250), 30)
+                -- Suppressed when the ROW carries this tick. Still built in classic,
+                -- where it is the page's only on/off control.
+                if not tools2.hoistToggle then
+                    group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], db, "targetedListEnabled", function()
+                        tools2.refreshStates()
+                        if DF.ToggleTargetedList then DF:ToggleTargetedList(db.targetedListEnabled) end
+                        -- Reflect the enable change in test mode immediately (so disabling
+                        -- hides the test display, not just the live bars).
+                        if DF.UpdateAllTestTargetedList then DF:UpdateAllTestTargetedList() end
+                    end), 30)
+                end
+                local tlImportantOnly = group:AddWidget(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "targetedListImportantOnly", TargetedListUpdate), 30)
+                tlImportantOnly.disableOn = HideTLOptions
+                local tlHideOwn = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Casts Targeting You"], db, "targetedListHideOwnCasts", TargetedListUpdate), 30)
+                tlHideOwn.disableOn = HideTLOptions
+                local tlShowUntargeted = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Untargeted Casts"], db, "targetedListShowUntargeted", TargetedListUpdate), 30)
+                tlShowUntargeted.disableOn = HideTLOptions
+                local tlHideOOC = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Out-of-Combat Casts"], db, "targetedListHideOutOfCombat", TargetedListUpdate), 30)
+                tlHideOOC.disableOn = HideTLOptions
+                tlHideOOC.tooltip = L["Hides the ambient spells idle NPCs cast while standing around: casts with no target, from an enemy that is not in combat. Casts aimed at you or a group member always show, so the opening cast of a pull is never hidden."]
+                -- Game CVar, not a profile key — bound straight to the CVar via
+                -- customGet/customSet so it cannot drift out of sync. See
+                -- DF:SetNameplateOffscreen for why both features depend on it.
+                --
+                -- ⚠ IT IS THE ONE KEY THIS ROW CLAIMS THAT THE DEFAULTS ENGINE
+                -- CANNOT ANSWER FOR. A custom get/set tick registers with search
+                -- under a synthetic `custom_…` key, which the claim walk picks up
+                -- like any other — and DF.Defaults answers nil for it, so it never
+                -- lights the amber tick and Reset Group skips it. That is exactly
+                -- right: this is an account-wide GAME setting, and a group reset
+                -- must not reach outside the profile.
+                local tlOffscreen = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Offscreen Nameplates"], nil, nil, nil,
+                    function() return DF:GetNameplateOffscreen() end,
+                    function(val) DF:SetNameplateOffscreen(val) end), 30)
+                tlOffscreen.disableOn = HideTLOptions
+                tlOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
+                local tlMaxBars = group:AddWidget(GUI:CreateSlider(parent, L["Max Bars"], 1, 20, 1, db, "targetedListMaxBars", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlMaxBars.disableOn = HideTLOptions
+            end
 
-            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
-            layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Size & Spacing"]), 40)
-            local tlW = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Bar Width"], 120, 600, 1, db, "targetedListWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlW.disableOn = HideTLOptions
-            local tlH = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Bar Height"], 14, 48, 1, db, "targetedListHeight", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlH.disableOn = HideTLOptions
-            local tlSpace = layoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], 0, 10, 1, db, "targetedListSpacing", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlSpace.disableOn = HideTLOptions
-            local tlGrowth = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions, db, "targetedListGrowth", TargetedListUpdate), 55)
-            tlGrowth.disableOn = HideTLOptions
-            local sortOptions = { NEWEST = L["Newest First"], OLDEST = L["Oldest First"], STATIC = L["Static (No Reorder)"] }
-            local tlSort = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Sort Order"], sortOptions, db, "targetedListSortOrder", TargetedListUpdate), 55)
-            tlSort.disableOn = HideTLOptions
-            Add(layoutGroup, nil, 1)
+            -- How many bars may stack up, then the three filters that decide which
+            -- casts get one. The bar cap is always printed -- it is the number
+            -- people come back to this row for -- and the filters only while they
+            -- are doing something, which keeps the four-item budget.
+            local function TargetedListSettingsSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local n = tonumber(d.targetedListMaxBars)
+                if n then parts[#parts + 1] = format("%s %d", L["Max Bars"], math.floor(n)) end
+                if d.targetedListImportantOnly then parts[#parts + 1] = L["Important Spells Only"] end
+                if d.targetedListHideOwnCasts then parts[#parts + 1] = L["Hide Casts Targeting You"] end
+                if d.targetedListHideOutOfCombat then parts[#parts + 1] = L["Hide Out-of-Combat Casts"] end
+                return Join(parts)
+            end
 
-            local presetGroup = GUI:CreateSettingsGroup(self.child, 280)
-            presetGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
+            if classicLayout then
+                local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+                settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+                BuildTargetedListSettingsGroup({
+                    group = settingsGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(settingsGroup, nil, 1)
+            else
+                -- Eight: the two blurbs, the three filters, the untargeted tick, the
+                -- offscreen CVar tick and the bar cap. The Enable tick is HOISTED
+                -- onto the row.
+                local TL_SETTINGS_COUNT = 8
+
+                -- What the suppressed Enable checkbox ran, plus a repaint of every
+                -- pane standing open -- twelve rows grey with it. Never a page
+                -- rebuild: that would retire the row being clicked through.
+                local function OnTargetedListEnableToggle()
+                    self:RefreshStates()
+                    if DF.ToggleTargetedList then DF:ToggleTargetedList(db.targetedListEnabled) end
+                    if DF.UpdateAllTestTargetedList then DF:UpdateAllTestTargetedList() end
+                    tools.ReflowMounted()
+                end
+
+                local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListSettingsGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                        hoistToggle = true,
+                    })
+                end)
+                local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label    = L["Settings"],
+                    db       = tools.RowDB,
+                    toggle   = { key = "targetedListEnabled" },
+                    summary  = TargetedListSettingsSummary,
+                    count    = TL_SETTINGS_COUNT,
+                    onToggle = OnTargetedListEnableToggle,
+                    window   = DF.GUIFrame,
+                    clipTo   = self,
+                    build    = settingsMount,
+                }))
+                tools.ClaimKeys(settingsRow, settingsContent)
+                tools.WireModifiedTick(settingsRow)
+                tools.WireFooter(settingsRow, TargetedListUpdate)
+                tools.RegisterHoistedToggle(settingsRow, L["Enable"], "targetedListEnabled", OnTargetedListEnableToggle)
+            end
+
+            -- ===== SIZE & SPACING (a 280 box in column 1 in classic, the Content
+            -- band's second row) =====
+            local function BuildTargetedListLayoutGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlW = group:AddWidget(GUI:CreateSlider(parent, L["Bar Width"], 120, 600, 1, db, "targetedListWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlW.disableOn = HideTLOptions
+                local tlH = group:AddWidget(GUI:CreateSlider(parent, L["Bar Height"], 14, 48, 1, db, "targetedListHeight", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlH.disableOn = HideTLOptions
+                local tlSpace = group:AddWidget(GUI:CreateSlider(parent, L["Spacing"], 0, 10, 1, db, "targetedListSpacing", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlSpace.disableOn = HideTLOptions
+                local tlGrowth = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growthOptions, db, "targetedListGrowth", TargetedListUpdate), 55)
+                tlGrowth.disableOn = HideTLOptions
+                local tlSort = group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], sortOptions, db, "targetedListSortOrder", TargetedListUpdate), 55)
+                tlSort.disableOn = HideTLOptions
+            end
+
+            -- The bar's footprint, then the two questions about the stack: which way
+            -- it grows and what order it grows in. Spacing only while it is doing
+            -- something, which on the shipped profile it is not.
+            local function TargetedListLayoutSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local w, h = tonumber(d.targetedListWidth), tonumber(d.targetedListHeight)
+                if w and h then parts[#parts + 1] = format("%d x %d", math.floor(w), math.floor(h)) end
+                local g = growthOptions[d.targetedListGrowth]
+                if g then parts[#parts + 1] = g end
+                local s = sortOptions[d.targetedListSortOrder]
+                if s then parts[#parts + 1] = s end
+                local sp = tonumber(d.targetedListSpacing)
+                if sp and sp ~= 0 then parts[#parts + 1] = format("%s %d", L["Spacing"], math.floor(sp)) end
+                return Join(parts)
+            end
+
+            if classicLayout then
+                local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
+                layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Size & Spacing"]), 40)
+                BuildTargetedListLayoutGroup({
+                    group = layoutGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(layoutGroup, nil, 1)
+            else
+                -- Five: width, height, spacing, growth and sort order.
+                local TL_LAYOUT_COUNT = 5
+
+                local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListLayoutGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local layoutRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Size & Spacing"],
+                    db      = tools.RowDB,
+                    summary = TargetedListLayoutSummary,
+                    count   = TL_LAYOUT_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = layoutMount,
+                }))
+                tools.ClaimKeys(layoutRow, layoutContent)
+                tools.WireModifiedTick(layoutRow)
+                tools.WireFooter(layoutRow, TargetedListUpdate)
+                layoutRow.disableOn = TLOffRow
+            end
+
+            -- ===== BAR STYLE (a 280 box in column 2 in classic, the Appearance
+            -- band's first row) =====
             -- Picking a preset writes a bundle of settings to db
             -- (bar dimensions, show/hide toggles, font size, etc.)
             -- via DF:ApplyTargetedListPreset. After the bundle is
             -- applied the individual settings remain editable —
             -- the preset is a one-shot "start from this configuration"
             -- action, not a continuous override.
-            local tlPreset = presetGroup:AddWidget(GUI:CreateDropdown(self.child, L["Bar Style"], stylePresetOptions, db, "targetedListStylePreset", function()
+            --
+            -- ☠ AND THAT BUNDLE IS WHY THIS ONE CANNOT BE THE SAME CALL IN BOTH
+            -- LAYOUTS. Classic has always paid for a preset with a whole page
+            -- REBUILD, because the values it writes sit behind a dozen OTHER boxes;
+            -- it keeps doing exactly that. A pane must not: a rebuild retires every
+            -- widget on the page including the dropdown the user is clicking
+            -- through, and the helper's own prologue closes every open panel on the
+            -- way in. What the rebuild was buying is a repaint of controls that were
+            -- written behind their backs, and that is the group-wide VALUE sweep --
+            -- ReflowMounted(true) for the panes standing open, the page's state pass
+            -- for the twelve row summaries and their amber ticks, and the override
+            -- indicators, which is the set RefreshAfterGroupWrite runs for a reset.
+            local function TargetedListPresetChanged(tools2)
                 if DF.ApplyTargetedListPreset then
                     DF:ApplyTargetedListPreset(db.targetedListStylePreset)
                 end
-                -- Also refresh GUI widgets so users see the preset's
-                -- values reflected in the other sliders/checkboxes.
-                if GUI and GUI.RefreshCurrentPage then
-                    GUI:RefreshCurrentPage()
+                if tools2.popout then
+                    tools.ReflowMounted(true)
+                    self:RefreshStates()
+                    if GUI.RefreshAllOverrideIndicators then
+                        GUI.RefreshAllOverrideIndicators()
+                    end
+                else
+                    -- Also refresh GUI widgets so users see the preset's
+                    -- values reflected in the other sliders/checkboxes.
+                    if GUI and GUI.RefreshCurrentPage then
+                        GUI:RefreshCurrentPage()
+                    end
                 end
                 TargetedListUpdate()
-            end), 55)
-            tlPreset.disableOn = HideTLOptions
-            local tlTexture = presetGroup:AddWidget(GUI:CreateTextureDropdown(self.child, L["Texture"], db, "targetedListTexture", TargetedListUpdate), 55)
-            tlTexture.disableOn = HideTLOptions
-            local tlBgAlpha = presetGroup:AddWidget(GUI:CreateSlider(self.child, L["Background Alpha"], 0, 1, 0.05, db, "targetedListBackgroundAlpha", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlBgAlpha.disableOn = HideTLOptions
-            Add(presetGroup, nil, 2)
+            end
 
+            local function BuildTargetedListPresetGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
 
+                local tlPreset = group:AddWidget(GUI:CreateDropdown(parent, L["Bar Style"], stylePresetOptions, db, "targetedListStylePreset", function()
+                    TargetedListPresetChanged(tools2)
+                end), 55)
+                tlPreset.disableOn = HideTLOptions
+                local tlTexture = group:AddWidget(GUI:CreateTextureDropdown(parent, L["Texture"], db, "targetedListTexture", TargetedListUpdate), 55)
+                tlTexture.disableOn = HideTLOptions
+                local tlBgAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Background Alpha"], 0, 1, 0.05, db, "targetedListBackgroundAlpha", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlBgAlpha.disableOn = HideTLOptions
+            end
 
-            local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
-            colorGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Color"]), 40)
-            local tlInterColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Interruptible Color"], db, "targetedListInterruptibleColor", true, TargetedListUpdate, function() if DF.LightweightUpdateTargetedListBarColor then DF:LightweightUpdateTargetedListBarColor() end end, true), 35)
-            tlInterColor.disableOn = HideTLOptions
-            local tlUninterColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Uninterruptible Color"], db, "targetedListUninterruptibleColor", true, TargetedListUpdate, function() if DF.LightweightUpdateTargetedListBarColor then DF:LightweightUpdateTargetedListBarColor() end end, true), 35)
-            tlUninterColor.disableOn = HideTLOptions
-            local tlSelfTargetEnabled = colorGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Self-Target Color"], db, "targetedListSelfTargetColorEnabled", function()
-                self:RefreshStates()
-                TargetedListUpdate()
-            end), 30)
-            tlSelfTargetEnabled.disableOn = HideTLOptions
-            tlSelfTargetEnabled.tooltip = L["Highlight the bar when the enemy is casting at you."]
-            local function HideSelfTargetOptions(d) return not d.targetedListEnabled or not d.targetedListSelfTargetColorEnabled end
-            local tlSelfTargetColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Self-Target Color"], db, "targetedListSelfTargetColor", true, TargetedListUpdate, nil, true), 35)
-            tlSelfTargetColor.disableOn = HideSelfTargetOptions
-            local tlHighlight = colorGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Spells"], db, "targetedListHighlightImportant", function()
-                self:RefreshStates()
-                TargetedListUpdate()
-            end), 30)
-            tlHighlight.disableOn = HideTLOptions
-            local function HideHighlightOptions(d) return not d.targetedListEnabled or not d.targetedListHighlightImportant end
-            local tlHighlightColor = colorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Highlight Color"], db, "targetedListHighlightColor", true, TargetedListUpdate, function() if DF.LightweightUpdateTargetedListHighlightColor then DF:LightweightUpdateTargetedListHighlightColor() end end, true), 35)
-            tlHighlightColor.disableOn = HideHighlightOptions
-            local tlResetColors = colorGroup:AddWidget(GUI:CreateButton(self.child, L["Reset Colors to Default"], 200, 24, function()
-                db.targetedListInterruptibleColor = {r = 1, g = 0.494, b = 0.137, a = 1}
-                db.targetedListUninterruptibleColor = {r = 0.8, g = 0.302, b = 0.302, a = 1}
-                db.targetedListSelfTargetColor = {r = 0.02, g = 0.776, b = 0.4, a = 0.2}
-                db.targetedListHighlightColor = {r = 1, g = 0.8, b = 0, a = 1}
-                db.targetedListBorderColor = {r = 0.18, g = 0.18, b = 0.18, a = 1}
-                -- Refresh color swatches
-                if tlInterColor.UpdateSwatch then tlInterColor:UpdateSwatch() end
-                if tlUninterColor.UpdateSwatch then tlUninterColor:UpdateSwatch() end
-                if tlSelfTargetColor.UpdateSwatch then tlSelfTargetColor:UpdateSwatch() end
-                if tlHighlightColor.UpdateSwatch then tlHighlightColor:UpdateSwatch() end
-                TargetedListUpdate()
-                self:RefreshStates()
-            end), 30)
-            tlResetColors.disableOn = HideTLOptions
-            Add(colorGroup, nil, 2)
+            -- The preset word, the bar texture by its own name, and the background
+            -- alpha only while it is doing something.
+            local function TargetedListPresetSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local p = stylePresetOptions[d.targetedListStylePreset]
+                if p then parts[#parts + 1] = p end
+                local t = d.targetedListTexture
+                if type(t) == "string" and t ~= "" then parts[#parts + 1] = t end
+                local a = tonumber(d.targetedListBackgroundAlpha)
+                if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+                return Join(parts)
+            end
 
+            if classicLayout then
+                local presetGroup = GUI:CreateSettingsGroup(self.child, 280)
+                presetGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Style"]), 40)
+                BuildTargetedListPresetGroup({
+                    group = presetGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(presetGroup, nil, 2)
+            else
+                -- Three: the preset, the texture and the background alpha.
+                local TL_PRESET_COUNT = 3
+
+                local presetMount, presetContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListPresetGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local presetRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Bar Style"],
+                    db      = tools.RowDB,
+                    summary = TargetedListPresetSummary,
+                    count   = TL_PRESET_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = presetMount,
+                }))
+                tools.ClaimKeys(presetRow, presetContent)
+                tools.WireModifiedTick(presetRow)
+                tools.WireFooter(presetRow, TargetedListUpdate)
+                presetRow.disableOn = TLOffRow
+            end
+
+            -- ===== BAR COLOR (a 280 box in column 2 in classic, the Appearance
+            -- band's second row) =====
+            local function BuildTargetedListColorGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlInterColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Interruptible Color"], db, "targetedListInterruptibleColor", true, TargetedListUpdate, function() if DF.LightweightUpdateTargetedListBarColor then DF:LightweightUpdateTargetedListBarColor() end end, true), 35)
+                tlInterColor.disableOn = HideTLOptions
+                local tlUninterColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Uninterruptible Color"], db, "targetedListUninterruptibleColor", true, TargetedListUpdate, function() if DF.LightweightUpdateTargetedListBarColor then DF:LightweightUpdateTargetedListBarColor() end end, true), 35)
+                tlUninterColor.disableOn = HideTLOptions
+                local tlSelfTargetEnabled = group:AddWidget(GUI:CreateCheckbox(parent, L["Self-Target Color"], db, "targetedListSelfTargetColorEnabled", function()
+                    tools2.refreshStates()
+                    TargetedListUpdate()
+                end), 30)
+                tlSelfTargetEnabled.disableOn = HideTLOptions
+                tlSelfTargetEnabled.tooltip = L["Highlight the bar when the enemy is casting at you."]
+                local tlSelfTargetColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Self-Target Color"], db, "targetedListSelfTargetColor", true, TargetedListUpdate, nil, true), 35)
+                tlSelfTargetColor.disableOn = HideSelfTargetOptions
+                local tlHighlight = group:AddWidget(GUI:CreateCheckbox(parent, L["Highlight Important Spells"], db, "targetedListHighlightImportant", function()
+                    tools2.refreshStates()
+                    TargetedListUpdate()
+                end), 30)
+                tlHighlight.disableOn = HideTLOptions
+                local tlHighlightColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Highlight Color"], db, "targetedListHighlightColor", true, TargetedListUpdate, function() if DF.LightweightUpdateTargetedListHighlightColor then DF:LightweightUpdateTargetedListHighlightColor() end end, true), 35)
+                tlHighlightColor.disableOn = HideHighlightOptions
+                -- ⚠ THE IN-PANE BUTTON AND THE ROW'S FOOTER ARE TWO DIFFERENT VERBS,
+                -- and they are both correct. This one writes the five COLOURS -- the
+                -- four on this row plus the border's, which belongs to another row --
+                -- and leaves the two toggles alone. Reset Group writes this row's own
+                -- keys, toggles included, and never reaches the Border row. The
+                -- literals below are the shipped defaults, so the two can never
+                -- disagree about a colour they both touch.
+                local tlResetColors = group:AddWidget(GUI:CreateButton(parent, L["Reset Colors to Default"], 200, 24, function()
+                    db.targetedListInterruptibleColor = {r = 1, g = 0.494, b = 0.137, a = 1}
+                    db.targetedListUninterruptibleColor = {r = 0.8, g = 0.302, b = 0.302, a = 1}
+                    db.targetedListSelfTargetColor = {r = 0.02, g = 0.776, b = 0.4, a = 0.2}
+                    db.targetedListHighlightColor = {r = 1, g = 0.8, b = 0, a = 1}
+                    db.targetedListBorderColor = {r = 0.18, g = 0.18, b = 0.18, a = 1}
+                    -- Refresh color swatches
+                    if tlInterColor.UpdateSwatch then tlInterColor:UpdateSwatch() end
+                    if tlUninterColor.UpdateSwatch then tlUninterColor:UpdateSwatch() end
+                    if tlSelfTargetColor.UpdateSwatch then tlSelfTargetColor:UpdateSwatch() end
+                    if tlHighlightColor.UpdateSwatch then tlHighlightColor:UpdateSwatch() end
+                    TargetedListUpdate()
+                    tools2.refreshStates()
+                end), 30)
+                tlResetColors.disableOn = HideTLOptions
+            end
+
+            -- The one thing four swatches cannot say for themselves: whether the two
+            -- conditional colours are being used at all.
+            local function TargetedListColorSummary(d)
+                if not d then return "" end
+                local parts = {}
+                if d.targetedListSelfTargetColorEnabled then parts[#parts + 1] = L["Self-Target Color"] end
+                if d.targetedListHighlightImportant then parts[#parts + 1] = L["Highlight Important Spells"] end
+                return Join(parts)
+            end
+
+            if classicLayout then
+                local colorGroup = GUI:CreateSettingsGroup(self.child, 280)
+                colorGroup:AddWidget(GUI:CreateHeader(self.child, L["Bar Color"]), 40)
+                BuildTargetedListColorGroup({
+                    group = colorGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(colorGroup, nil, 2)
+            else
+                -- Seven: the four swatches, the two toggles that gate two of them and
+                -- the colours-only reset button.
+                local TL_COLOR_COUNT = 7
+
+                local colorMount, colorContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListColorGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local colorRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Bar Color"],
+                    db      = tools.RowDB,
+                    summary = TargetedListColorSummary,
+                    count   = TL_COLOR_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = colorMount,
+                }))
+                tools.ClaimKeys(colorRow, colorContent)
+                tools.WireModifiedTick(colorRow)
+                -- ⚠ A FOOTER IS SAFE HERE, and that is a decision about the KEYS
+                -- rather than about the button already in the pane. Four colour
+                -- tables and two booleans, all plain profile settings the defaults
+                -- engine can write; a colour picker's refreshValue is UpdateSwatch,
+                -- which re-reads dbTable[dbKey], so a reset that REPLACES a table is
+                -- repainted rather than detached.
+                tools.WireFooter(colorRow, TargetedListUpdate)
+                colorRow.disableOn = TLOffRow
+            end
+
+            -- ===== BORDER (a 280 box in column 2 in classic, the Appearance band's
+            -- third row) =====
             -- Border gets its own box, after Appearance (Bar Style + Bar Color)
             -- and before the element extras — the page-layout standard's column 2
             -- order. It used to be appended to the Bar Style box, where it read as
@@ -5271,152 +5633,616 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- skipped (per-bar animation would be visual noise + a perf hit).
             -- class/role colour skipped because the bars represent SPELLS, not
             -- units. colour-by-time / colour-by-type also skipped (no aura state).
-            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-            GUI:CreateBorderControls(borderGroup, db, "targetedList", {
-                parent       = self.child,
-                include      = { alpha = true, inset = true, blendMode = true,
-                                 gradient = true, shadow = true },
-                fullUpdate   = TargetedListUpdate,
-                lightUpdate  = TargetedListUpdate,
-                lightColors  = function() if DF.LightweightUpdateTargetedListBorderColor then DF:LightweightUpdateTargetedListBorderColor() end end,
-                refreshStates = function() self:RefreshStates() end,
-                sizeMin = 1, sizeMax = 6, sizeStep = 1,
-                -- GREY, not hide: the rest of this page greys via
-                -- disableOn = HideTLOptions, and the border block was the one
-                -- thing that vanished instead.
-                disableWhen  = HideTLOptions,
-            })
-            Add(borderGroup, nil, 2)
+            --
+            -- ⚠ noShowToggle IS THE HOIST -- the Buff Bar border row's move,
+            -- verbatim. With it the built-in Show Border checkbox is not built and
+            -- the row carries that tick instead; the show key is still read, so it
+            -- still greys the other fifteen exactly as before.
+            local function BuildTargetedListBorderGroup(tools2)
+                GUI:CreateBorderControls(tools2.group, db, "targetedList", {
+                    parent       = tools2.parent,
+                    include      = { alpha = true, inset = true, blendMode = true,
+                                     gradient = true, shadow = true },
+                    fullUpdate   = TargetedListUpdate,
+                    lightUpdate  = TargetedListUpdate,
+                    lightColors  = function() if DF.LightweightUpdateTargetedListBorderColor then DF:LightweightUpdateTargetedListBorderColor() end end,
+                    refreshStates = tools2.refreshStates,
+                    sizeMin = 1, sizeMax = 6, sizeStep = 1,
+                    -- GREY, not hide: the rest of this page greys via
+                    -- disableOn = HideTLOptions, and the border block was the one
+                    -- thing that vanished instead.
+                    disableWhen  = HideTLOptions,
+                    noShowToggle = tools2.hoistToggle or nil,
+                })
+            end
 
-            local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
-            iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
-            local tlShowIcon = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Icon"], db, "targetedListShowIcon", function()
-                self:RefreshStates()
-                TargetedListUpdate()
-            end), 30)
-            tlShowIcon.disableOn = HideTLOptions
-            local tlIconPos = iconGroup:AddWidget(GUI:CreateDropdown(self.child, L["Icon Position"], iconPosOptions, db, "targetedListIconPosition", TargetedListUpdate), 55)
-            tlIconPos.disableOn = HideIconOptions
-            local tlZoom = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Zoom Icon"], db, "targetedListZoomIcon", TargetedListUpdate), 30)
-            tlZoom.disableOn = HideIconOptions
-            Add(iconGroup, nil, 2)
+            -- The Buff Bar's border summary, unchanged: thickness in pixels, the
+            -- style word, and the alpha only when it is doing something.
+            local function TargetedListBorderSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local size = tonumber(d.targetedListBorderSize)
+                if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+                local style = d.targetedListBorderStyle
+                parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                                 or (style == "TEXTURE" and L["Texture"])
+                                 or L["Solid"]
+                local c = d.targetedListBorderColor
+                local a = type(c) == "table" and tonumber(c.a) or nil
+                if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+                return Join(parts)
+            end
 
+            if classicLayout then
+                local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
+                borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+                BuildTargetedListBorderGroup({
+                    group = borderGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(borderGroup, nil, 2)
+            else
+                -- Fifteen: the sixteen CreateBorderControls builds for this include
+                -- set, less the hoisted Show Border.
+                local TL_BORDER_COUNT = 15
 
+                -- What the suppressed Show Border checkbox ran, and never a page
+                -- rebuild: that would retire every widget on the page including the
+                -- row being clicked through.
+                local function OnTargetedListBorderToggle()
+                    self:RefreshStates()
+                    TargetedListUpdate()
+                    tools.ReflowMounted()
+                end
 
-            local textToggleGroup = GUI:CreateSettingsGroup(self.child, 280)
-            textToggleGroup:AddWidget(GUI:CreateHeader(self.child, L["Show Text"]), 40)
-            local tlShowSpellName = textToggleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Spell Name"], db, "targetedListShowSpellName", TargetedListUpdate), 30)
-            tlShowSpellName.disableOn = HideTLOptions
-            local tlShowTargetName = textToggleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Target Name"], db, "targetedListShowTargetName", function()
-                self:RefreshStates()
-                TargetedListUpdate()
-            end), 30)
-            tlShowTargetName.disableOn = HideTLOptions
-            local tlShowDuration = textToggleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "targetedListShowDuration", TargetedListUpdate), 30)
-            tlShowDuration.disableOn = HideTLOptions
-            local tlClassColor = textToggleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Target Name Class Color"], db, "targetedListTargetNameClassColor", TargetedListUpdate), 30)
-            tlClassColor.disableOn = HideTargetNameOptions
-            local tlArrow = textToggleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Arrow Prefix"], db, "targetedListShowArrowPrefix", TargetedListUpdate), 30)
-            tlArrow.disableOn = HideTargetNameOptions
-            local tlArrowSuffix = textToggleGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Arrow Suffix"], db, "targetedListShowArrowSuffix", TargetedListUpdate), 30)
-            tlArrowSuffix.disableOn = HideTargetNameOptions
-            Add(textToggleGroup, nil, 1)
+                local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListBorderGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                        hoistToggle = true,
+                    })
+                end)
+                local borderRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label    = L["Border"],
+                    db       = tools.RowDB,
+                    toggle   = { key = "targetedListShowBorder" },
+                    summary  = TargetedListBorderSummary,
+                    count    = TL_BORDER_COUNT,
+                    onToggle = OnTargetedListBorderToggle,
+                    window   = DF.GUIFrame,
+                    clipTo   = self,
+                    build    = borderMount,
+                }))
+                tools.ClaimKeys(borderRow, borderContent)
+                tools.WireModifiedTick(borderRow)
+                tools.WireFooter(borderRow, TargetedListUpdate)
+                tools.RegisterHoistedToggle(borderRow, L["Show Border"], "targetedListShowBorder", OnTargetedListBorderToggle)
+                borderRow.disableOn = TLOffRow
+            end
 
-            local fontGroup = GUI:CreateSettingsGroup(self.child, 280)
-            fontGroup:AddWidget(GUI:CreateHeader(self.child, L["Text Font"]), 40)
-            local tlFont = fontGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "targetedListFont", TargetedListUpdate), 55)
-            tlFont.disableOn = HideTLOptions
-            local tlFontSize = fontGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 8, 24, 1, db, "targetedListFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlFontSize.disableOn = HideTLOptions
-            local tlFontOutline = fontGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "targetedListFontOutline", TargetedListUpdate), 55)
-            tlFontOutline.disableOn = HideTLOptions
-            local tlFontShadow = fontGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "targetedListFontOutline", TargetedListUpdate), 30)
-            tlFontShadow.disableOn = HideTLOptions
-            Add(fontGroup, nil, 2)
+            -- ===== ICON (a 280 box in column 2 in classic, the Appearance band's
+            -- fourth row) =====
+            local function BuildTargetedListIconGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
 
+                -- Suppressed when the ROW carries this tick; still the group's own
+                -- head in classic.
+                if not tools2.hoistToggle then
+                    local tlShowIcon = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Icon"], db, "targetedListShowIcon", function()
+                        tools2.refreshStates()
+                        TargetedListUpdate()
+                    end), 30)
+                    tlShowIcon.disableOn = HideTLOptions
+                end
+                local tlIconPos = group:AddWidget(GUI:CreateDropdown(parent, L["Icon Position"], iconPosOptions, db, "targetedListIconPosition", TargetedListUpdate), 55)
+                tlIconPos.disableOn = HideIconOptions
+                local tlZoom = group:AddWidget(GUI:CreateCheckbox(parent, L["Zoom Icon"], db, "targetedListZoomIcon", TargetedListUpdate), 30)
+                tlZoom.disableOn = HideIconOptions
+            end
 
-            -- Per-element anchor + X/Y offset. Each text element
-            -- (spell name, target name, duration) can be independently
-            -- anchored to LEFT / CENTER / RIGHT within the bar's
-            -- progress region with a pixel offset applied on top.
+            -- Which side of the bar the icon sits on, and whether it is cropped.
+            local function TargetedListIconSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local p = iconPosOptions[d.targetedListIconPosition]
+                if p then parts[#parts + 1] = p end
+                if d.targetedListZoomIcon then parts[#parts + 1] = L["Zoom Icon"] end
+                return Join(parts)
+            end
 
-            local textAnchorOptions = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
-            local textAlignOptions = { LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
+            if classicLayout then
+                local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
+                iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
+                BuildTargetedListIconGroup({
+                    group = iconGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(iconGroup, nil, 2)
+            else
+                -- Two: the position and the zoom. The Show Icon tick is HOISTED onto
+                -- the row.
+                local TL_ICON_COUNT = 2
 
-            local spellNamePosGroup = GUI:CreateSettingsGroup(self.child, 280)
-            spellNamePosGroup:AddWidget(GUI:CreateHeader(self.child, L["Spell Name Position"]), 40)
-            local tlSNFontSize = spellNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListSpellNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlSNFontSize.disableOn = HideTLOptions
-            local tlSNWidth = spellNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Text Width"], 0, 400, 1, db, "targetedListSpellNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlSNWidth.disableOn = HideTLOptions
-            local tlSNAnchor = spellNamePosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], textAnchorOptions, db, "targetedListSpellNameAnchor", TargetedListUpdate), 55)
-            tlSNAnchor.disableOn = HideTLOptions
-            local tlSNAlign = spellNamePosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Alignment"], textAlignOptions, db, "targetedListSpellNameAlign", TargetedListUpdate), 55)
-            tlSNAlign.disableOn = HideTLOptions
-            local tlSNX = spellNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -500, 500, 1, db, "targetedListSpellNameX", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlSNX.disableOn = HideTLOptions
-            local tlSNY = spellNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -500, 500, 1, db, "targetedListSpellNameY", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlSNY.disableOn = HideTLOptions
-            Add(spellNamePosGroup, nil, 1)
+                local function OnTargetedListIconToggle()
+                    self:RefreshStates()
+                    TargetedListUpdate()
+                    tools.ReflowMounted()
+                end
 
-            local targetNamePosGroup = GUI:CreateSettingsGroup(self.child, 280)
-            targetNamePosGroup:AddWidget(GUI:CreateHeader(self.child, L["Target Name Position"]), 40)
-            local tlTNFontSize = targetNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListTargetNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlTNFontSize.disableOn = HideTargetNameOptions
-            local tlTNWidth = targetNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Text Width"], 0, 400, 1, db, "targetedListTargetNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlTNWidth.disableOn = HideTargetNameOptions
-            local tlTNAnchor = targetNamePosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], textAnchorOptions, db, "targetedListTargetNameAnchor", TargetedListUpdate), 55)
-            tlTNAnchor.disableOn = HideTargetNameOptions
-            local tlTNAlign = targetNamePosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Alignment"], textAlignOptions, db, "targetedListTargetNameAlign", TargetedListUpdate), 55)
-            tlTNAlign.disableOn = HideTargetNameOptions
-            local tlTNX = targetNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -500, 500, 1, db, "targetedListTargetNameX", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlTNX.disableOn = HideTargetNameOptions
-            local tlTNY = targetNamePosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -500, 500, 1, db, "targetedListTargetNameY", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlTNY.disableOn = HideTargetNameOptions
-            Add(targetNamePosGroup, nil, 2)
+                local iconMount, iconContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListIconGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                        hoistToggle = true,
+                    })
+                end)
+                local iconRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label    = L["Icon"],
+                    db       = tools.RowDB,
+                    toggle   = { key = "targetedListShowIcon" },
+                    summary  = TargetedListIconSummary,
+                    count    = TL_ICON_COUNT,
+                    onToggle = OnTargetedListIconToggle,
+                    window   = DF.GUIFrame,
+                    clipTo   = self,
+                    build    = iconMount,
+                }))
+                tools.ClaimKeys(iconRow, iconContent)
+                tools.WireModifiedTick(iconRow)
+                tools.WireFooter(iconRow, TargetedListUpdate)
+                tools.RegisterHoistedToggle(iconRow, L["Show Icon"], "targetedListShowIcon", OnTargetedListIconToggle)
+                iconRow.disableOn = TLOffRow
+            end
 
-            local function HideDurationPosOptions(d) return not d.targetedListEnabled or not d.targetedListShowDuration end
-            local durationPosGroup = GUI:CreateSettingsGroup(self.child, 280)
-            durationPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Position"]), 40)
-            local tlDurFontSize = durationPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListDurationFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlDurFontSize.disableOn = HideDurationPosOptions
-            local tlDurAnchor = durationPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], textAnchorOptions, db, "targetedListDurationAnchor", TargetedListUpdate), 55)
-            tlDurAnchor.disableOn = HideDurationPosOptions
-            local tlDurAlign = durationPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Alignment"], textAlignOptions, db, "targetedListDurationAlign", TargetedListUpdate), 55)
-            tlDurAlign.disableOn = HideDurationPosOptions
-            local tlDurX = durationPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -500, 500, 1, db, "targetedListDurationX", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlDurX.disableOn = HideDurationPosOptions
-            local tlDurY = durationPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -500, 500, 1, db, "targetedListDurationY", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlDurY.disableOn = HideDurationPosOptions
-            Add(durationPosGroup, nil, 1)
+            -- ===== SHOW TEXT (a 280 box in column 1 in classic, the Text band's
+            -- first row) =====
+            local function BuildTargetedListShowTextGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
 
-            local interruptPosGroup = GUI:CreateSettingsGroup(self.child, 280)
-            interruptPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Text Position"]), 40)
-            local tlIntFontSize = interruptPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Font Size"], 6, 24, 1, db, "targetedListInterruptTextFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlIntFontSize.disableOn = HideTLOptions
-            local tlIntWidth = interruptPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Text Width"], 0, 400, 1, db, "targetedListInterruptTextWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlIntWidth.disableOn = HideTLOptions
-            local tlIntAnchor = interruptPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], textAnchorOptions, db, "targetedListInterruptTextAnchor", TargetedListUpdate), 55)
-            tlIntAnchor.disableOn = HideTLOptions
-            local tlIntAlign = interruptPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Alignment"], textAlignOptions, db, "targetedListInterruptTextAlign", TargetedListUpdate), 55)
-            tlIntAlign.disableOn = HideTLOptions
-            local tlIntX = interruptPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -500, 500, 1, db, "targetedListInterruptTextX", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlIntX.disableOn = HideTLOptions
-            local tlIntY = interruptPosGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -500, 500, 1, db, "targetedListInterruptTextY", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlIntY.disableOn = HideTLOptions
-            Add(interruptPosGroup, nil, 2)
+                local tlShowSpellName = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Spell Name"], db, "targetedListShowSpellName", TargetedListUpdate), 30)
+                tlShowSpellName.disableOn = HideTLOptions
+                local tlShowTargetName = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Target Name"], db, "targetedListShowTargetName", function()
+                    tools2.refreshStates()
+                    TargetedListUpdate()
+                end), 30)
+                tlShowTargetName.disableOn = HideTLOptions
+                local tlShowDuration = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], db, "targetedListShowDuration", TargetedListUpdate), 30)
+                tlShowDuration.disableOn = HideTLOptions
+                local tlClassColor = group:AddWidget(GUI:CreateCheckbox(parent, L["Target Name Class Color"], db, "targetedListTargetNameClassColor", TargetedListUpdate), 30)
+                tlClassColor.disableOn = HideTargetNameOptions
+                local tlArrow = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Arrow Prefix"], db, "targetedListShowArrowPrefix", TargetedListUpdate), 30)
+                tlArrow.disableOn = HideTargetNameOptions
+                local tlArrowSuffix = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Arrow Suffix"], db, "targetedListShowArrowSuffix", TargetedListUpdate), 30)
+                tlArrowSuffix.disableOn = HideTargetNameOptions
+            end
 
+            -- Which of the three text elements a bar draws, in the order they read
+            -- along it. The three arrow/class extras are left to the pane: they only
+            -- decorate the target name, which this row has already named.
+            local function TargetedListShowTextSummary(d)
+                if not d then return "" end
+                local parts = {}
+                if d.targetedListShowSpellName then parts[#parts + 1] = L["Show Spell Name"] end
+                if d.targetedListShowTargetName then parts[#parts + 1] = L["Show Target Name"] end
+                if d.targetedListShowDuration then parts[#parts + 1] = L["Show Duration"] end
+                return Join(parts)
+            end
 
+            if classicLayout then
+                local textToggleGroup = GUI:CreateSettingsGroup(self.child, 280)
+                textToggleGroup:AddWidget(GUI:CreateHeader(self.child, L["Show Text"]), 40)
+                BuildTargetedListShowTextGroup({
+                    group = textToggleGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(textToggleGroup, nil, 1)
+            else
+                -- Six: the three elements and the three target-name extras.
+                local TL_SHOWTEXT_COUNT = 6
 
-            local timingGroup = GUI:CreateSettingsGroup(self.child, 280)
-            timingGroup:AddWidget(GUI:CreateHeader(self.child, L["Timing"]), 40)
-            local tlFadeOut = timingGroup:AddWidget(GUI:CreateSlider(self.child, L["Fade Out Duration"], 0, 1, 0.05, db, "targetedListFadeOutDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlFadeOut.disableOn = HideTLOptions
-            local tlFlashDur = timingGroup:AddWidget(GUI:CreateSlider(self.child, L["Interrupted Flash Duration"], 0, 2, 0.1, db, "targetedListInterruptedFlashDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
-            tlFlashDur.disableOn = HideTLOptions
-            Add(timingGroup, nil, 1)
+                local showTextMount, showTextContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListShowTextGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local showTextRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Show Text"],
+                    db      = tools.RowDB,
+                    summary = TargetedListShowTextSummary,
+                    count   = TL_SHOWTEXT_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = showTextMount,
+                }))
+                tools.ClaimKeys(showTextRow, showTextContent)
+                tools.WireModifiedTick(showTextRow)
+                tools.WireFooter(showTextRow, TargetedListUpdate)
+                showTextRow.disableOn = TLOffRow
+            end
 
+            -- ===== TEXT FONT (a 280 box in column 2 in classic, the Text band's
+            -- second row) =====
+            local function BuildTargetedListFontGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlFont = group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "targetedListFont", TargetedListUpdate), 55)
+                tlFont.disableOn = HideTLOptions
+                local tlFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 8, 24, 1, db, "targetedListFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlFontSize.disableOn = HideTLOptions
+                local tlFontOutline = group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "targetedListFontOutline", TargetedListUpdate), 55)
+                tlFontOutline.disableOn = HideTLOptions
+                local tlFontShadow = group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "targetedListFontOutline", TargetedListUpdate), 30)
+                tlFontShadow.disableOn = HideTLOptions
+            end
+
+            -- The font by its own name and the base size. The outline and its shadow
+            -- are left to the pane -- they are one key between them, and a row that
+            -- printed "Outline" over every default profile would be noise.
+            local function TargetedListFontSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local f = d.targetedListFont
+                if type(f) == "string" and f ~= "" then parts[#parts + 1] = f end
+                local s = tonumber(d.targetedListFontSize)
+                if s then parts[#parts + 1] = format("%dpx", math.floor(s)) end
+                return Join(parts)
+            end
+
+            if classicLayout then
+                local fontGroup = GUI:CreateSettingsGroup(self.child, 280)
+                fontGroup:AddWidget(GUI:CreateHeader(self.child, L["Text Font"]), 40)
+                BuildTargetedListFontGroup({
+                    group = fontGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(fontGroup, nil, 2)
+            else
+                -- Four: the font, the size, the outline and its shadow.
+                local TL_FONT_COUNT = 4
+
+                local fontMount, fontContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListFontGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local fontRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Text Font"],
+                    db      = tools.RowDB,
+                    summary = TargetedListFontSummary,
+                    count   = TL_FONT_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = fontMount,
+                }))
+                tools.ClaimKeys(fontRow, fontContent)
+                tools.WireModifiedTick(fontRow)
+                tools.WireFooter(fontRow, TargetedListUpdate)
+                fontRow.disableOn = TLOffRow
+            end
+
+            -- ===== THE FOUR PER-ELEMENT POSITION BOXES (280 boxes in classic, the
+            -- Text band's last four rows) =====
+            -- ☠ FOUR BOXES, ONE SUMMARY. All four say the same three facts about the
+            -- same three key shapes, so the body is written ONCE and given the
+            -- element's prefix -- the Highlights page's HighlightSummary move. The
+            -- Alignment dropdown is deliberately NOT printed: it offers the same
+            -- three words as Anchor, and "Left \194\183 Left" reads as a stutter
+            -- rather than as two facts.
+            local function TargetedTextSummary(d, prefix)
+                if not d then return "" end
+                local parts = {}
+                local fs = tonumber(d["targetedList" .. prefix .. "FontSize"])
+                if fs then parts[#parts + 1] = format("%dpx", math.floor(fs)) end
+                local a = textAnchorOptions[d["targetedList" .. prefix .. "Anchor"]]
+                if a then parts[#parts + 1] = a end
+                local x = tonumber(d["targetedList" .. prefix .. "X"]) or 0
+                local y = tonumber(d["targetedList" .. prefix .. "Y"]) or 0
+                if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+                return Join(parts)
+            end
+            local function TargetedListSpellNameSummary(d) return TargetedTextSummary(d, "SpellName") end
+            local function TargetedListTargetNameSummary(d) return TargetedTextSummary(d, "TargetName") end
+            local function TargetedListDurationPosSummary(d) return TargetedTextSummary(d, "Duration") end
+            local function TargetedListInterruptPosSummary(d) return TargetedTextSummary(d, "InterruptText") end
+
+            local function BuildTargetedListSpellNamePosGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlSNFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListSpellNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlSNFontSize.disableOn = HideTLOptions
+                local tlSNWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListSpellNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlSNWidth.disableOn = HideTLOptions
+                local tlSNAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListSpellNameAnchor", TargetedListUpdate), 55)
+                tlSNAnchor.disableOn = HideTLOptions
+                local tlSNAlign = group:AddWidget(GUI:CreateDropdown(parent, L["Alignment"], textAlignOptions, db, "targetedListSpellNameAlign", TargetedListUpdate), 55)
+                tlSNAlign.disableOn = HideTLOptions
+                local tlSNX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -500, 500, 1, db, "targetedListSpellNameX", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlSNX.disableOn = HideTLOptions
+                local tlSNY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -500, 500, 1, db, "targetedListSpellNameY", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlSNY.disableOn = HideTLOptions
+            end
+
+            if classicLayout then
+                local spellNamePosGroup = GUI:CreateSettingsGroup(self.child, 280)
+                spellNamePosGroup:AddWidget(GUI:CreateHeader(self.child, L["Spell Name Position"]), 40)
+                BuildTargetedListSpellNamePosGroup({
+                    group = spellNamePosGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(spellNamePosGroup, nil, 1)
+            else
+                -- Six: the size, the width cap, anchor, alignment and the two offsets.
+                local TL_SPELLNAME_COUNT = 6
+
+                local spellNameMount, spellNameContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListSpellNamePosGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local spellNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Spell Name Position"],
+                    db      = tools.RowDB,
+                    summary = TargetedListSpellNameSummary,
+                    count   = TL_SPELLNAME_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = spellNameMount,
+                }))
+                tools.ClaimKeys(spellNameRow, spellNameContent)
+                tools.WireModifiedTick(spellNameRow)
+                tools.WireFooter(spellNameRow, TargetedListUpdate)
+                spellNameRow.disableOn = TLOffRow
+            end
+
+            local function BuildTargetedListTargetNamePosGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlTNFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListTargetNameFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlTNFontSize.disableOn = HideTargetNameOptions
+                local tlTNWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListTargetNameWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlTNWidth.disableOn = HideTargetNameOptions
+                local tlTNAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListTargetNameAnchor", TargetedListUpdate), 55)
+                tlTNAnchor.disableOn = HideTargetNameOptions
+                local tlTNAlign = group:AddWidget(GUI:CreateDropdown(parent, L["Alignment"], textAlignOptions, db, "targetedListTargetNameAlign", TargetedListUpdate), 55)
+                tlTNAlign.disableOn = HideTargetNameOptions
+                local tlTNX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -500, 500, 1, db, "targetedListTargetNameX", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlTNX.disableOn = HideTargetNameOptions
+                local tlTNY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -500, 500, 1, db, "targetedListTargetNameY", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlTNY.disableOn = HideTargetNameOptions
+            end
+
+            if classicLayout then
+                local targetNamePosGroup = GUI:CreateSettingsGroup(self.child, 280)
+                targetNamePosGroup:AddWidget(GUI:CreateHeader(self.child, L["Target Name Position"]), 40)
+                BuildTargetedListTargetNamePosGroup({
+                    group = targetNamePosGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(targetNamePosGroup, nil, 2)
+            else
+                -- Six: the same set the Spell Name row carries.
+                local TL_TARGETNAME_COUNT = 6
+
+                local targetNameMount, targetNameContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListTargetNamePosGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local targetNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Target Name Position"],
+                    db      = tools.RowDB,
+                    summary = TargetedListTargetNameSummary,
+                    count   = TL_TARGETNAME_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = targetNameMount,
+                }))
+                tools.ClaimKeys(targetNameRow, targetNameContent)
+                tools.WireModifiedTick(targetNameRow)
+                tools.WireFooter(targetNameRow, TargetedListUpdate)
+                -- ⚠ THE ROW GREYS ON THE PAGE GATE ONLY, not on Show Target Name.
+                -- The six controls behind it carry that second gate themselves --
+                -- exactly as they did in the box -- so the row stays reachable and
+                -- the pane says which of the two switches is holding it.
+                targetNameRow.disableOn = TLOffRow
+            end
+
+            local function BuildTargetedListDurationPosGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlDurFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListDurationFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlDurFontSize.disableOn = HideDurationPosOptions
+                local tlDurAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListDurationAnchor", TargetedListUpdate), 55)
+                tlDurAnchor.disableOn = HideDurationPosOptions
+                local tlDurAlign = group:AddWidget(GUI:CreateDropdown(parent, L["Alignment"], textAlignOptions, db, "targetedListDurationAlign", TargetedListUpdate), 55)
+                tlDurAlign.disableOn = HideDurationPosOptions
+                local tlDurX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -500, 500, 1, db, "targetedListDurationX", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlDurX.disableOn = HideDurationPosOptions
+                local tlDurY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -500, 500, 1, db, "targetedListDurationY", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlDurY.disableOn = HideDurationPosOptions
+            end
+
+            if classicLayout then
+                local durationPosGroup = GUI:CreateSettingsGroup(self.child, 280)
+                durationPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Position"]), 40)
+                BuildTargetedListDurationPosGroup({
+                    group = durationPosGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(durationPosGroup, nil, 1)
+            else
+                -- Five: the same set less the width cap, which the duration text has
+                -- never had.
+                local TL_DURATIONPOS_COUNT = 5
+
+                local durationPosMount, durationPosContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListDurationPosGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local durationPosRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Duration Position"],
+                    db      = tools.RowDB,
+                    summary = TargetedListDurationPosSummary,
+                    count   = TL_DURATIONPOS_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = durationPosMount,
+                }))
+                tools.ClaimKeys(durationPosRow, durationPosContent)
+                tools.WireModifiedTick(durationPosRow)
+                tools.WireFooter(durationPosRow, TargetedListUpdate)
+                durationPosRow.disableOn = TLOffRow
+            end
+
+            local function BuildTargetedListInterruptPosGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlIntFontSize = group:AddWidget(GUI:CreateSlider(parent, L["Font Size"], 6, 24, 1, db, "targetedListInterruptTextFontSize", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlIntFontSize.disableOn = HideTLOptions
+                local tlIntWidth = group:AddWidget(GUI:CreateSlider(parent, L["Max Text Width"], 0, 400, 1, db, "targetedListInterruptTextWidth", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlIntWidth.disableOn = HideTLOptions
+                local tlIntAnchor = group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], textAnchorOptions, db, "targetedListInterruptTextAnchor", TargetedListUpdate), 55)
+                tlIntAnchor.disableOn = HideTLOptions
+                local tlIntAlign = group:AddWidget(GUI:CreateDropdown(parent, L["Alignment"], textAlignOptions, db, "targetedListInterruptTextAlign", TargetedListUpdate), 55)
+                tlIntAlign.disableOn = HideTLOptions
+                local tlIntX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -500, 500, 1, db, "targetedListInterruptTextX", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlIntX.disableOn = HideTLOptions
+                local tlIntY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -500, 500, 1, db, "targetedListInterruptTextY", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlIntY.disableOn = HideTLOptions
+            end
+
+            if classicLayout then
+                local interruptPosGroup = GUI:CreateSettingsGroup(self.child, 280)
+                interruptPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Text Position"]), 40)
+                BuildTargetedListInterruptPosGroup({
+                    group = interruptPosGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(interruptPosGroup, nil, 2)
+            else
+                -- Six: the same set the Spell Name row carries.
+                local TL_INTERRUPTPOS_COUNT = 6
+
+                local interruptPosMount, interruptPosContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListInterruptPosGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local interruptPosRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Interrupt Text Position"],
+                    db      = tools.RowDB,
+                    summary = TargetedListInterruptPosSummary,
+                    count   = TL_INTERRUPTPOS_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = interruptPosMount,
+                }))
+                tools.ClaimKeys(interruptPosRow, interruptPosContent)
+                tools.WireModifiedTick(interruptPosRow)
+                tools.WireFooter(interruptPosRow, TargetedListUpdate)
+                interruptPosRow.disableOn = TLOffRow
+            end
+
+            -- ===== TIMING (a 280 box in column 1 in classic, the Appearance band's
+            -- fifth row) =====
+            -- ☠ IT READS FIFTH, NOT THIRTEENTH -- AND THE SOURCE STILL COMES LAST.
+            -- In classic it is the last box on the page because the columns had to
+            -- balance; in a band there is nothing to balance, and "how long does a
+            -- bar linger" belongs with the four boxes that decide what a bar looks
+            -- like, not after six boxes about text. So the row is mounted into the
+            -- APPEARANCE band from here, at the foot of the page: within a column
+            -- the Add() order IS the layout order, so moving this block up the file
+            -- would have reordered classic's column 1 -- and the bands are Add()ed
+            -- after every row is mounted, so a row registered last still lands where
+            -- its band puts it.
+            local function BuildTargetedListTimingGroup(tools2)
+                local group, parent = tools2.group, tools2.parent
+
+                local tlFadeOut = group:AddWidget(GUI:CreateSlider(parent, L["Fade Out Duration"], 0, 1, 0.05, db, "targetedListFadeOutDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlFadeOut.disableOn = HideTLOptions
+                local tlFlashDur = group:AddWidget(GUI:CreateSlider(parent, L["Interrupted Flash Duration"], 0, 2, 0.1, db, "targetedListInterruptedFlashDuration", TargetedListUpdate, TargetedListUpdate, true), 55)
+                tlFlashDur.disableOn = HideTLOptions
+            end
+
+            -- Two durations in seconds, in the order the bar meets them: the flash
+            -- when a cast is interrupted, then the fade as the bar leaves.
+            local function TargetedListTimingSummary(d)
+                if not d then return "" end
+                local parts = {}
+                local flash = tonumber(d.targetedListInterruptedFlashDuration)
+                if flash then parts[#parts + 1] = format("%.1fs", flash) end
+                local fade = tonumber(d.targetedListFadeOutDuration)
+                if fade then parts[#parts + 1] = format("%.2fs", fade) end
+                return Join(parts)
+            end
+
+            if classicLayout then
+                local timingGroup = GUI:CreateSettingsGroup(self.child, 280)
+                timingGroup:AddWidget(GUI:CreateHeader(self.child, L["Timing"]), 40)
+                BuildTargetedListTimingGroup({
+                    group = timingGroup,
+                    parent = self.child,
+                    refreshStates = function() self:RefreshStates() end,
+                })
+                Add(timingGroup, nil, 1)
+            else
+                -- Two: the fade-out and the interrupted flash.
+                local TL_TIMING_COUNT = 2
+
+                local timingMount, timingContent = tools.PopoutContent(function(group, holder, reflow)
+                    BuildTargetedListTimingGroup({
+                        group = group, parent = holder,
+                        refreshStates = reflow,
+                        popout = true,
+                    })
+                end)
+                local timingRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                    label   = L["Timing"],
+                    db      = tools.RowDB,
+                    summary = TargetedListTimingSummary,
+                    count   = TL_TIMING_COUNT,
+                    window  = DF.GUIFrame,
+                    clipTo  = self,
+                    build   = timingMount,
+                }))
+                tools.ClaimKeys(timingRow, timingContent)
+                tools.WireModifiedTick(timingRow)
+                tools.WireFooter(timingRow, TargetedListUpdate)
+                timingRow.disableOn = TLOffRow
+            end
+
+            -- ===== THE THREE BANDS, IN READING ORDER ==========================
+            -- Added at the foot rather than in place: all three are full width, so
+            -- there is no column flow left to unbalance and the order below is
+            -- purely the order the page reads in.
+            if not classicLayout then
+                Add(contentBand, nil, "both")
+                Add(appearanceBand, nil, "both")
+                Add(textBand, nil, "both")
+            end
 
             -- See Also links
             AddSpace(GUI.Space.block, "both")
