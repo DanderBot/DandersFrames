@@ -3339,8 +3339,9 @@ local function FilterChips()
 end
 P.FilterChips = FilterChips
 
--- What the `Showing` row reports. Read off the SAME list the chips are built
--- from, so a chip added there cannot summarise as its own raw key here.
+-- What the filter glyph writes beside itself when a filter is on. Read off the
+-- SAME list the chips are built from, so a chip added there cannot summarise as
+-- its own raw key here.
 local function ActiveFilterLabel()
     local active = S.activeFilter or "all"
     for _, chip in ipairs(FilterChips()) do
@@ -3413,6 +3414,52 @@ S.BuildFilterChips = function(host, width)
     return LayoutChips
 end
 
+-- ── THE FILTER GLYPH'S PANEL ──
+-- ☠ A FREE-STANDING POPOUT, NOT A ROW'S PANE. The eight chips were a `Showing`
+-- popout row for one release and that is 50px of page (a 44px plate plus its 6px
+-- gap) spent on ONE filter -- more than the 22px chip row it replaced, which is
+-- where the honest chrome total went UP rather than down. Behind a glyph on the
+-- caption the page pays nothing for it at all.
+--
+-- Built exactly the way the canvas's Preview Scale glyph builds its panel
+-- (CreateFramePreview's `compact` arm): GUI:CreatePopout keyed once so the panel
+-- is POOLED, then Follow'd to the button. The kit owns the stacking, so nothing
+-- here has to know about _ApplyStackLevel.
+local FILTER_POPOUT_KEY = "df.filter.auradesigner"
+local FILTER_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list"
+
+local function OpenFilterPopout(btn)
+    -- Second click on the glyph shuts it, like any toggle.
+    local open = S.filterPopout
+    if open and not open.closed and open:IsShown() then
+        open:Close("api")
+        return
+    end
+    local width = GUI.PopoutContentWidth or 260
+    local pop = GUI:CreatePopout({
+        key   = FILTER_POPOUT_KEY,
+        title = L["Showing"],
+        icon  = FILTER_ICON,
+        width = width,
+        build = function(po, content)
+            local pane = CreateFrame("Frame", nil, content)
+            pane:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+            pane:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+            -- ⚠ THE FLOW IS TOLD ITS WIDTH, not asked for it. Two horizontal
+            -- anchors own the pane's width, and at build time that number has not
+            -- resolved -- reading it off the pane is the mistake that made the
+            -- chips wrap at a hardcoded 260 on the page.
+            S.BuildFilterChips(pane, width)
+            -- The shell derives the panel's height from what build mounted
+            -- (Popout:_Resize), so the content strip states its own.
+            content:SetHeight(max(pane:GetHeight() or CHIP_H, CHIP_H))
+        end,
+    })
+    pop:Follow(btn, { outsideOf = DF.GUIFrame })
+    S.filterPopout = pop
+end
+P.OpenFilterPopout = OpenFilterPopout
+
 -- ☠ EXTRACTED, NOT COPIED. The popout layout's row page (AuraDesigner/UI/Rows.lua)
 -- mounts exactly this furniture above its band of effect rows. The add flow is a
 -- later phase of the designer rework, and a second copy of it here would be a
@@ -3429,12 +3476,16 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     -- panel still draws the block: it is the one surface with 230px to spend on
     -- standing furniture.
     local skipAdd = opts and opts.skipAddBlock or false
-    -- ☠ opts.skipChips: THE ROW LAYOUT'S FILTER IS A ROW, NOT A CHIP FLOW. The
-    -- eight chips became the pane behind a `Showing` popout row, so in that layout
-    -- this function draws only the ACTIVE INDICATORS caption and the Any Buff hint
-    -- -- and, with the one flowing element gone, it reports a height that cannot
-    -- be wrong. See S.BuildFilterChips above for the chips themselves.
+    -- ☠ opts.skipChips: THE ROW LAYOUT'S FILTER IS NOT A CHIP FLOW. The eight
+    -- chips live in a popout there, so in that layout this function draws only the
+    -- ACTIVE INDICATORS caption and the Any Buff hint -- and, with the one flowing
+    -- element gone, it reports a height that cannot be wrong. See
+    -- S.BuildFilterChips above for the chips themselves.
     local skipChips = opts and opts.skipChips or false
+    -- ⚠ opts.filterGlyph: ...AND THE WAY IN TO THEM RIDES THE CAPTION. A row of
+    -- its own cost 50px for a single filter; a glyph on a caption the page already
+    -- pays for costs nothing. Opt-in, so the split panel keeps its chips.
+    local filterGlyph = opts and opts.filterGlyph or false
 
     -- ☠ THE WIDTH THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED. Every
     -- object below is anchored 8px inside the host on both sides, so the column
@@ -3612,6 +3663,65 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     activeHeader:SetPoint("TOPLEFT", 8, yPos)  -- align with chips/cards/add button
     activeHeader:SetText(L["ACTIVE INDICATORS"])
     activeHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    -- ── THE FILTER GLYPH, ON THAT CAPTION ──
+    if filterGlyph then
+        -- ☠ A FILTER THAT LOOKS THE SAME WHETHER IT IS ON OR OFF IS HOW PEOPLE
+        -- LOSE THEIR WORK. Showing only Borders hides seven kinds of indicator,
+        -- and a glyph identical to the one that means "showing everything" reads
+        -- as "they have been deleted". So the ACTIVE state is said TWICE: the
+        -- glyph goes accent, and the filter's own name is written beside it.
+        -- Neither alone survives a glance.
+        local active = (S.activeFilter or "all") ~= "all"
+        local glyph = GUI:CreateGlyphButton(parent, {
+            size = 18, iconSize = 14,
+            -- ☠ DOUBLE BACKSLASHES. Lua 5.1 passes an unrecognised escape through
+            -- as the bare character, so the single-backslash form is a path to
+            -- nothing and the client draws an empty square. It does not error,
+            -- which is why it shipped once; run.py bans it now.
+            texture = FILTER_ICON,
+            color   = active and tc or C_TEXT_DIM,
+            tooltip = {
+                title = L["Showing"],
+                lines = {
+                    L["Which kinds of indicator are listed below."],
+                    active and format(L["Showing: %s"], ActiveFilterLabel()) or nil,
+                },
+            },
+            onClick = OpenFilterPopout,
+        })
+        -- The 18px button centred on an ~11px caption line: yPos is the caption's
+        -- TOP, so lifting the button by half the difference lands the two centres
+        -- together. It still sits inside the 16px the caption spends below.
+        glyph:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos + 4)
+        -- ☠ THE PANEL IS DOCKED TO THIS BUTTON, so it goes when this button does.
+        -- Picking a chip rewrites the list, which rebuilds the page and retires
+        -- the glyph underneath it -- and a panel left up would be following a
+        -- frame that is no longer on screen. Same bargain the Preview Scale glyph
+        -- strikes with its canvas.
+        glyph:HookScript("OnHide", function()
+            local pop = S.filterPopout
+            if pop and not pop.closed then pop:Close("source") end
+        end)
+
+        local name
+        if active then
+            name = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            name:SetPoint("RIGHT", glyph, "LEFT", -4, 0)
+            name:SetText(ActiveFilterLabel())
+            name:SetTextColor(tc.r, tc.g, tc.b)
+        end
+
+        -- ⚠ GREY WITH THE REST OF THE PAGE. The `Showing` row this replaces
+        -- carried a disableOn and went dim with every other row when the designer
+        -- is off; a glyph that stayed lit would be the one live control on a page
+        -- of dead ones. The kit's SetGlyphEnabled does all three halves of it --
+        -- clicks off, hover off, the 0.4 dim -- and the name beside it follows.
+        if opts and opts.filterGlyphEnabled == false then
+            glyph:SetGlyphEnabled(false)
+            if name then name:SetAlpha(0.4) end
+        end
+    end
     yPos = yPos - 16
 
     -- ── FILTER CHIPS (wrapping layout, split panel only) ──

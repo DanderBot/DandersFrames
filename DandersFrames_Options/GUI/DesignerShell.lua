@@ -26,6 +26,7 @@ local max, floor = math.max, math.floor
 -- top to bottom,
 --
 --     [ enable banner        ]
+--     [ canvas tabs          ]   what the canvas is SHOWING, joined to it
 --     [ frame canvas         ]   ONE shared canvas, not one per row
 --     [ strip(s)             ]   AD's scope row; the Text Designer has none
 --     [ tab strip            ]
@@ -39,7 +40,7 @@ local max, floor = math.max, math.floor
 -- and it has a different canvas, no strips and different tabs. A shell that
 -- reached for DF.AuraDesigner would have to be forked for it, which is the thing
 -- this file exists to prevent. The one AD-shaped assumption left is the ORDER of
--- the five bands, which is the design rather than an accident of the first
+-- the six bands, which is the design rather than an accident of the first
 -- caller.
 --
 -- ⚠ NO COMBAT GUARD HERE, and that is a decision rather than an omission. The
@@ -58,6 +59,10 @@ local TAB_GAP  = 4
 --   Add          REQUIRED  BuildPage's own Add(widget, height, col)
 --   AddSpace               BuildPage's AddSpace, for gaps between bands
 --   banner       fn(parent, shell) -> widget[, height]   omit for no banner
+--   canvasTabs   { height = n, build = fn(host, shell) }  a strip mounted
+--                DIRECTLY ABOVE the canvas -- above its fold header too, so it
+--                sits on the whole preview panel rather than inside it. See the
+--                note on the band below for what does and does not belong here
 --   canvas       fn(host, shell)   -> canvas frame       omit for no canvas
 --   canvasHeight default 132 (the artifact's figure; see Cards.lua's `compact`)
 --   canvasFold   { title =, collapseKey = }  make the canvas a FOLDABLE band
@@ -110,7 +115,34 @@ function GUI:BuildDesignerShell(page, opts)
         end
     end
 
-    -- ── 2. THE CANVAS ──
+    -- ── 2. THE CANVAS TABS ──
+    -- ☠ THIS IS THE ONE PLACE A SECOND STRIP OF TABS BELONGS, and only because
+    -- of where it is. AD's pool (My Buffs / Debuffs / Any Buff) used to sit
+    -- directly on top of the sub-tab strip and the pair read as tabs inside tabs
+    -- -- "so confusion to know that they are tabs within tabs". Hiding it in a
+    -- picker solved that and cost the three per-tab tooltips. Putting it HERE
+    -- solves it by DISTANCE instead: the whole preview panel stands between the
+    -- two strips, and drawn as folder tabs joined to that panel (see
+    -- GUI:StyleFolderTab) it reads as "these belong to this preview" rather than
+    -- as a second row of the thing lower down.
+    --
+    -- ⚠ WHICH IS ALSO THE RULE FOR WHAT MAY GO HERE. A strip in this slot must
+    -- choose what the CANVAS shows. A strip that switches the view of the page
+    -- belongs in opts.tabs; a picker that answers "which set am I editing"
+    -- belongs in opts.strips, below the canvas.
+    --
+    -- The bands abut -- the layout pass stacks them flush (y = y - h) -- so what
+    -- is built here touches the top of the fold header, which is what lets a tab
+    -- be drawn continuous with it.
+    if opts.canvasTabs and opts.canvasTabs.build then
+        local h = opts.canvasTabs.height or 30
+        local host = Band(h)
+        shell.canvasTabHost = host
+        opts.canvasTabs.build(host, shell)
+        Add(host, h, "both")
+    end
+
+    -- ── 3. THE CANVAS ──
     -- ONE canvas for the whole page, at the top, rather than one per row: a row
     -- is a list entry and the canvas is a picture of the WHOLE frame, so twenty
     -- rows would be twenty copies of the same picture.
@@ -166,13 +198,14 @@ function GUI:BuildDesignerShell(page, opts)
         end
     end
 
-    -- ── 3. THE STRIPS ──
+    -- ── 4. THE STRIPS ──
     -- ☠ WHAT GOES HERE IS NOT A SECOND ROW OF TABS. AD's pool (My Buffs /
     -- Debuffs / Any Buff) used to be exactly that, stacked straight on top of the
-    -- sub-tab strip, and the pair read as tabs inside tabs. It picks WHICH SET is
-    -- being edited -- a prior question, and the same one Template and Spec ask --
-    -- so it is a PICKER on a scope row now, beside Spec. A caller that puts
-    -- another strip of tabs here is rebuilding the confusion.
+    -- sub-tab strip, and the pair read as tabs inside tabs. It is a canvasTabs
+    -- strip now -- above the preview, joined to it -- and the whole panel stands
+    -- between the two strips. This slot is for the pickers that answer "which set
+    -- am I editing" and have no picture of their own: AD's Spec. A caller that
+    -- puts another strip of tabs here is rebuilding the confusion.
     for _, strip in ipairs(opts.strips or {}) do
         local h = strip.height or 30
         local host = Band(h)
@@ -180,7 +213,7 @@ function GUI:BuildDesignerShell(page, opts)
         Add(host, h, "both")
     end
 
-    -- ── 4. THE TAB STRIP ──
+    -- ── 5. THE TAB STRIP ──
     if opts.tabs and #opts.tabs > 0 then
         local bar = Band(TABBAR_H)
         shell.tabBar = bar
@@ -248,7 +281,7 @@ function GUI:BuildDesignerShell(page, opts)
         Add(bar, TABBAR_H, "both")
     end
 
-    -- ── 5. THE ACTIVE TAB ──
+    -- ── 6. THE ACTIVE TAB ──
     -- The caller adds its own bands into the SAME column, so a row inside a tab
     -- and the canvas above it share the page's two edges.
     if opts.buildTab then opts.buildTab(shell.activeTab, shell) end

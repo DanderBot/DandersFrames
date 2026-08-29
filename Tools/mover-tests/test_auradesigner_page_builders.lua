@@ -603,11 +603,14 @@ do
 
     -- ☠ ...AND THE ROW LAYOUT ASKS FOR LESS OF IT WITH EVERY PHASE. The add block
     -- became a panel in phase 5 and the filter chips became one in section 20, so
-    -- what is left here is the ACTIVE INDICATORS caption and the Any Buff hint --
-    -- one function, one call site per layout, and the difference between them is
-    -- an argument rather than a second copy.
-    check(ROWS:find("{ skipAddBlock = true, skipChips = true }", 1, true) ~= nil,
+    -- what is left here is the ACTIVE INDICATORS caption, the Any Buff hint, and
+    -- the filter glyph that rides the caption -- one function, one call site per
+    -- layout, and the difference between them is an argument rather than a second
+    -- copy.
+    check(ROWS:find("{ skipAddBlock = true, skipChips = true,", 1, true) ~= nil,
           "head: the Effects caption is all the row layout still takes from it")
+    check(ROWS:find("filterGlyph = true,", 1, true) ~= nil,
+          "head: ...plus the glyph on it, which the split panel does not ask for")
     check(CARDS:find("S.BuildEffectsHeadArea = function(parent, yPos, opts)", 1, true) ~= nil,
           "head: ...declared once, in the card file")
     check(CARDS:find("local skipAdd = opts and opts.skipAddBlock or false", 1, true) ~= nil,
@@ -1237,112 +1240,203 @@ do
 end
 
 -- ============================================================
--- 11. ONE TAB STRIP ON THE PAGE -- THE POOL IS A PICKER, NOT A SECOND STRIP
+-- 11. TWO STRIPS, AND THE PREVIEW BETWEEN THEM -- THE POOL IS TABS AGAIN
 -- ------------------------------------------------------------
 -- My Buffs / Debuffs / Any Buff sat directly above Effects / Layout Groups /
 -- Global and the pair read as tabs inside tabs -- "so confusion to know that they
--- are tabs within tabs". They are not the same kind of control: the pool picks
--- WHICH SET is being edited, exactly as Template and Spec do; the sub-tabs pick
--- WHICH VIEW of it. So the pool joins Spec on a scope row and the page is left
--- with exactly one tab strip.
+-- are tabs within tabs". Hiding the pool in a dropdown solved that and cost the
+-- three per-tab tooltips, which were the only place the two axes the pools differ
+-- on were written down. So the tabs come back and MOVE instead: above the frame
+-- preview, which then stands between the two strips. The nesting goes by distance
+-- rather than by hiding, and the tooltips return.
 -- ============================================================
-print("-- Aura Designer: the scope row")
+print("-- Aura Designer: the pool tabs above the preview")
 do
-    -- The strip survives for its ONE remaining host, the split panel.
+    -- The split panel's own strip survives, untouched, for its ONE host.
     check(ROWS:find("S.BuildPoolStrip = function(buffTabBar)", 1, true) ~= nil,
-          "scope: the pool strip is declared once")
+          "pool: the split panel's pool strip is declared once")
     check(EDIT:find("S.BuildPoolStrip(buffTabBar)", 1, true) ~= nil,
-          "scope: ...and the split panel mounts it into its own slice")
-    -- ☠ THE ABSENCE IS THE ASSERTION, and it is the whole of section 20.2: the
-    -- band layout must not mount a second strip of tabs above the tab strip.
+          "pool: ...and the split panel mounts it into its own slice")
+    -- ☠ THE ABSENCE IS THE ASSERTION: the band layout has its own strip and must
+    -- not also mount the split panel's, which is anchored inside S.mainFrame.
     check(ROWS:find("build = function(host) S.BuildPoolStrip(host) end", 1, true) == nil,
-          "scope: ...but the band layout no longer mounts it as a strip of its own")
-    check(ROWS:find("build = function(host) S.BuildScopeRow(host) end", 1, true) ~= nil,
-          "scope: the band in its place holds the two scope pickers")
-    check(ROWS:find("S.BuildScopeRow = function(host)", 1, true) ~= nil,
-          "scope: ...and the scope row is declared once")
+          "pool: ...but the band layout never mounts THAT one")
 
-    local body = ROWS:match("S%.BuildScopeRow = function%(host%)(.-)\nend\n")
-    check(body ~= nil, "scope: the scope row's body can be read")
-    body = body or ""
-    check(body:find("S.BuildPoolPicker(poolHost, defs)", 1, true) ~= nil,
-          "scope: the pool picker takes the left half")
-    check(body:find("S.BuildSpecPicker(specHost)", 1, true) ~= nil,
-          "scope: ...and Spec sits beside it, which is what makes the greying legible")
-
-    -- ☠ ONE DESCRIPTION OF THE THREE POOLS, and it is a FUNCTION: a file-scope
+    check(ROWS:find("S.BuildPoolTabs = function(host)", 1, true) ~= nil,
+          "pool: the band layout's pool tabs are declared once")
+    check(ROWS:find("canvasTabs = { height = POOLTABS_H,", 1, true) ~= nil
+          and ROWS:find("build = function(host) S.BuildPoolTabs(host) end", 1, true) ~= nil,
+          "pool: ...and mounted, into the shell slot that sits on the canvas")
+    -- ⚠ ONE DESCRIPTION OF THE THREE POOLS, and it is a FUNCTION: a file-scope
     -- table of L[...] lookups freezes on whatever locale was live at load.
     check(ROWS:find("local function PoolDefs()", 1, true) ~= nil,
-          "scope: the three pools are described once")
+          "pool: the three pools are described once")
     check(ROWS:find("local MAIN_TAB_DEFS = PoolDefs()", 1, true) ~= nil,
-          "scope: ...which the split panel's strip reads")
-    check(ROWS:find("defs = defs or PoolDefs()", 1, true) ~= nil,
-          "scope: ...and the picker reads the same list, not a second copy")
+          "pool: ...which the split panel's strip reads")
 
-    -- ☠ DERIVED WIDTHS, NOT SMALLER MAGIC NUMBERS. At the window's 520px minimum
-    -- this band is ~280px and two labelled pickers have to share it. The pool's
-    -- three options are short and fixed; spec names are the long ones.
-    check(body:find("StringWidth(def.label)", 1, true) ~= nil,
-          "scope: the pool half is measured from the words this client holds")
-    check(body:find("local poolW = math.min(poolWant, math.floor(w * 0.45))", 1, true) ~= nil,
-          "scope: ...capped, so a long-worded locale cannot starve Spec")
-    check(body:find("specHost:SetWidth(max(w - SCOPE_GAP - poolW, 40))", 1, true) ~= nil,
-          "scope: ...and Spec takes everything left over, which is what it needs")
-    check(body:find([[host:SetScript("OnSizeChanged", function(_, w) SizeHalves(w) end)]], 1, true) ~= nil,
-          "scope: ...re-taken whenever the band changes width")
-
-    -- No new state: the picker reads and writes exactly what the strip did.
-    local pick = ROWS:match("S%.BuildPoolPicker = function%(host, defs%)(.-)\nend\n")
-    check(pick ~= nil, "scope: the pool picker's body can be read")
-    pick = pick or ""
-    check(pick:find([[function() return S.activeBuffTab or "my" end]], 1, true) ~= nil,
-          "scope: the picker reads S.activeBuffTab -- no new key, no schema change")
-    check(pick:find("function(key) SetMainTab(key) end", 1, true) ~= nil,
-          "scope: ...and writes through SetMainTab, which owns every side effect")
-    -- SetMainTab paints the STRIP's buttons; there are none in this layout, and a
-    -- map left behind by a visit to the split panel would have it painting frames
-    -- this build has retired.
-    check(pick:find("wipe(mainTabButtons)", 1, true) ~= nil,
-          "scope: ...and clears the button map SetMainTab paints")
-    -- ⚠ SCOPED TO SetMainTab'S BODY. UpdateSpecDropdownState is DECLARED in this
-    -- file too, so a file-wide find answers "is this name anywhere" and passes
+    local tabs = ROWS:match("S%.BuildPoolTabs = function%(host%)(.-)\nend\n")
+    check(tabs ~= nil, "pool: the pool tabs' body can be read")
+    tabs = tabs or ""
+    check(tabs:find("local defs = PoolDefs()", 1, true) ~= nil,
+          "pool: ...and reads the same list, not a second copy")
+    -- ☠ THE FOLDER-TAB LANGUAGE, AND IT IS THE KIT'S. A tab that sits ON the
+    -- preview panel and says what it is showing is not the underline tab the
+    -- sub-tab strip wears; drawing it as one is what made the two read as a block.
+    check(tabs:find("GUI:StyleFolderTab(btn, {", 1, true) ~= nil,
+          "pool: they are folder tabs, from the shared factory")
+    check(tabs:find("tab = true", 1, true) == nil,
+          "pool: ...not the underline tabs the sub-tab strip below them wears")
+    -- THE TOOLTIPS ARE BACK, one per tab, which is the whole reason for the move.
+    check(tabs:find("tooltip  = { title = def.label, lines = def.tooltip }", 1, true) ~= nil,
+          "pool: each tab explains itself on hover again")
+    -- No new state: the tabs read and write exactly what the strip did.
+    check(tabs:find("btn:SetActive(S.activeBuffTab == def.key)", 1, true) ~= nil,
+          "pool: a tab reads S.activeBuffTab -- no new key, no schema change")
+    check(tabs:find("onClick  = function() SetMainTab(capturedKey) end", 1, true) ~= nil,
+          "pool: ...and writes through SetMainTab, which owns every side effect")
+    -- SetMainTab paints THESE buttons, so this layout must fill the map it walks --
+    -- and must clear whatever a visit to the split panel left in it first.
+    check(tabs:find("wipe(mainTabButtons)", 1, true) ~= nil,
+          "pool: ...after clearing the map a visit to the split panel left behind")
+    check(tabs:find("mainTabButtons[def.key] = btn", 1, true) ~= nil,
+          "pool: ...and filling it with the buttons SetMainTab now paints")
+    -- ⚠ SCOPED TO SetMainTab'S BODY. UpdateSpecDropdownState is DECLARED in
+    -- Rows.lua too, so a file-wide find answers "is this name anywhere" and passes
     -- with the call deleted -- which is exactly how it first passed.
-    local setMain = CARDS:match("local function SetMainTab%\(tabKey%\)(.-)\nend\nP%\.SetMainTab")
-    check(setMain ~= nil, "scope: SetMainTab's body can be read")
+    local setMain = CARDS:match("local function SetMainTab%(tabKey%)(.-)\nend\nP%.SetMainTab")
+    check(setMain ~= nil, "pool: SetMainTab's body can be read")
+    check((setMain or ""):find("btn:SetActive(key == tabKey)", 1, true) ~= nil,
+          "pool: SetMainTab paints the map these tabs fill")
     check((setMain or ""):find("UpdateSpecDropdownState()", 1, true) ~= nil,
-          "scope: a pool change greys Spec on the spot")
+          "pool: a pool change greys Spec on the spot")
     check(ROWS:find("UpdateSpecDropdownState()", 1, true) ~= nil,
-          "scope: ...and the rebuild it triggers greys the NEW dropdown too")
-    -- Three tabs that each explained themselves on hover become one opener, so
-    -- all three explanations ride it.
-    check(pick:find("poolDrop.openerTooltip", 1, true) ~= nil,
-          "scope: the three tabs' explanations survive on the opener")
-    check(pick:find("openerTooltip", 1, true) ~= nil and pick:find(".tooltip =", 1, true) == nil,
-          "scope: ...on the opener, not on the hidden inline label nothing can hover")
+          "pool: ...and the rebuild it triggers greys the NEW dropdown too")
 
-    -- Still above the one remaining tab strip.
-    local stripAt = ROWS:find("strips = {", 1, true)
-    local tabsAt  = ROWS:find("tabs = {", 1, true)
-    check(stripAt ~= nil and tabsAt ~= nil and stripAt < tabsAt,
-          "scope: the scope row sits above the tab strip")
+    -- ☠ EQUAL WIDTH, DIVIDED FROM THE BAND, and re-taken on resize -- the three
+    -- tabs are one three-way switch, and at the 640px default their words do not
+    -- fit any other way.
+    check(tabs:find("local tabW = (w - (n - 1) * POOLTAB_GAP) / n", 1, true) ~= nil,
+          "pool: the tabs split the band between them")
+    check(tabs:find([[host:SetScript("OnSizeChanged", function(_, w) SizeTabs(w) end)]], 1, true) ~= nil,
+          "pool: ...re-taken whenever the band changes width")
+    check(tabs:find("b:SetFolderX((i - 1) * (tabW + POOLTAB_GAP))", 1, true) ~= nil,
+          "pool: ...and each tab is TOLD its x, because it re-anchors itself")
 
-    -- ...and there is exactly ONE tab strip left on the page, which is the point.
+    -- ☠ ABOVE THE CANVAS, WHICH IS THE ENTIRE POINT. Below it they would be back
+    -- against the sub-tab strip with nothing between them.
+    local poolAt   = ROWS:find("canvasTabs = { height = POOLTABS_H,", 1, true)
+    local canvasAt = ROWS:find("canvas = function(host, shell)", 1, true)
+    local stripAt  = ROWS:find("strips = {", 1, true)
+    local tabsAt   = ROWS:find("tabs = {", 1, true)
+    check(poolAt and canvasAt and poolAt < canvasAt,
+          "pool: the pool tabs are declared above the canvas")
+    check(canvasAt and stripAt and canvasAt < stripAt,
+          "pool: ...the canvas above the scope row")
+    check(stripAt and tabsAt and stripAt < tabsAt,
+          "pool: ...and the scope row above the one tab strip")
+
+    -- The shell mounts them in that order too, not merely declares them.
+    local shellPool   = SHELL:find("if opts.canvasTabs and opts.canvasTabs.build then", 1, true)
+    local shellCanvas = SHELL:find("if opts.canvas then", 1, true)
+    check(shellPool and shellCanvas and shellPool < shellCanvas,
+          "pool: the shell adds the canvas-tab band before the canvas band")
+    -- Bands stack flush (y = y - h), so what is built there touches the panel
+    -- below it -- which is what lets the selected tab be drawn continuous with it.
+    check(SHELL:find("shell.canvasTabHost = host", 1, true) ~= nil,
+          "pool: ...and publishes the host, like every other band")
+
+    -- ...and there is still exactly ONE strip of the OTHER kind on the page.
     check(select(2, ROWS:gsub("strips = {", "")) == 1,
-          "scope: the page declares one strip band")
+          "pool: the page declares one strip band")
     check(select(2, ROWS:gsub("tabs = {", "")) == 1,
-          "scope: ...and one tab strip")
+          "pool: ...and one sub-tab strip")
 end
 
 -- ============================================================
--- 11b. THE ACTIVE INDICATORS FILTER IS A ROW
+-- 11a. THE FOLDER TAB -- A TAB THAT BELONGS TO THE PANEL UNDER IT
 -- ------------------------------------------------------------
--- Eight chips loose on the page: a setting with more than one option, outside a
--- popout, which is the all-rows rule -- and they predate it. They were also the
--- one flowing element left in the band column (section 17, Class 1). Behind a
--- `Showing` row the width is the popout's own content width and there is nothing
--- below them on the page to displace, so the hazard is retired rather than moved.
+-- Two languages, deliberately different: an UNDERLINE tab switches which view of
+-- a page you are looking at; a FOLDER tab sits on a panel and says what that
+-- panel is showing. The pool and the sub-tabs can then stand on one page without
+-- reading as one block. It lives in the kit because nothing about it is an aura.
 -- ============================================================
-print("-- Aura Designer: the Showing row")
+print("-- DandersUI: the folder tab")
+do
+    local W = ui_file_source("Widgets.lua")
+    check(W:find("function UI:StyleFolderTab(btn, opts)", 1, true) ~= nil,
+          "folder: the folder tab is a kit factory")
+    local body = W:match("function UI:StyleFolderTab%(btn, opts%)(.-)\n    btn:SetActive%(btn%.dfActive%)")
+    check(body ~= nil, "folder: ...whose body can be read")
+    body = body or ""
+    -- ☠ IT KNOWS NOTHING ABOUT A DESIGNER. A kit factory that named one would
+    -- have to be forked for the second caller. ⚠ Scoped to the FOLDER TAB'S OWN
+    -- BODY, not the file: Widgets.lua already cites an AuraDesigner page in an
+    -- unrelated comment, so a file-wide find answers "is this name anywhere" and
+    -- fails on a factory that is perfectly host-agnostic.
+    check(body:find("AuraDesigner", 1, true) == nil,
+          "folder: the factory names no consumer")
+    check(body:find("DandersFrames", 1, true) == nil,
+          "folder: ...and no host either")
+
+    -- ☠ THE SELECTED TAB HAS NO RING, AND THAT IS THE WHOLE OF "JOINED". The
+    -- baked `top` shape rounds the two upper corners but still strokes all four
+    -- sides, so a ring on the selected tab draws a line along exactly the edge
+    -- that is supposed to have disappeared into the panel.
+    -- ⚠ SCOPED TO paint()'S OWN BODY. The hover arm repaints through the same
+    -- three lines, so a body-wide find answers "is this anywhere in the factory"
+    -- and stays green with the RESTING paint gutted -- which is the state a tab
+    -- spends almost all of its life in.
+    local paint = body:match("local function paint%(self%)(.-)\n    end")
+    check(paint ~= nil, "folder: the resting paint can be read on its own")
+    paint = paint or ""
+    check(paint:find("border  = (not on) and edge or false", 1, true) ~= nil,
+          "folder: the selected tab drops its ring, so it joins the panel below")
+    check(paint:find("corners = { tl = true, tr = true }", 1, true) ~= nil,
+          "folder: ...and rounds only its top corners, which is the baked shape")
+    -- ☠ ApplyRoundedChrome, NOT CreateRoundedSurface: a rounded fill sits at a
+    -- negative BACKGROUND sublevel, UNDER a backdrop's bgFile, so a frame that
+    -- keeps its square backdrop renders the square in front of a surface that is
+    -- drawing perfectly. Both paints, because either one leaving it out is a tab
+    -- that goes square the moment the mouse crosses it.
+    check(paint:find("host:ApplyRoundedChrome(self, {", 1, true) ~= nil,
+          "folder: the square backdrop comes down through the one call that does it")
+    check(select(2, body:gsub("host:ApplyRoundedChrome", "")) == 2,
+          "folder: ...on the hover repaint too, not only at rest")
+    -- The selected fill is the PANEL's, so it composites to what the band below
+    -- composites to rather than to something close to it.
+    check(body:find("local activeFill   = opts.activeFill   or { C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8 }", 1, true) ~= nil,
+          "folder: the selected tab wears the panel's own fill")
+    -- Set back: shorter and bottom-anchored, so its top edge sits below the
+    -- selected one's -- the sheets-behind-the-front-one read.
+    check(body:find([[self:SetPoint("TOPLEFT", p, "TOPLEFT", x, self.dfActive and 0 or -setBack)]], 1, true) ~= nil,
+          "folder: an unselected tab is set back by its own top edge")
+    check(body:find([[self:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", x, 0)]], 1, true) ~= nil,
+          "folder: ...while the selected one reaches the band's bottom edge")
+
+    -- ⚠ NO HIGHLIGHT TEXTURE. The native HIGHLIGHT layer is a rectangle and
+    -- would paint square corners back over the two arcs on every mouseover.
+    check(body:find("HIGHLIGHT", 1, true) == nil,
+          "folder: hover follows the shape rather than a square highlight layer")
+    -- SetActive is the same verb StyleButton's tabs take, so a strip can be
+    -- swapped between the two languages without rewiring.
+    check(body:find("function btn:SetActive(active)", 1, true) ~= nil,
+          "folder: it is driven by SetActive, like every other tab in the kit")
+    -- OnLeave does not fire for a button hidden under the cursor, and a tab strip
+    -- is rebuilt under a stationary mouse on every page refresh.
+    check(body:find([[btn:HookScript("OnHide", leave)]], 1, true) ~= nil,
+          "folder: a tab hidden under the cursor does not come back stuck lit")
+end
+-- ============================================================
+-- 11b. THE ACTIVE INDICATORS FILTER IS A GLYPH ON THE CAPTION
+-- ------------------------------------------------------------
+-- Eight chips loose on the page broke the all-rows rule they predate, and were
+-- also the one flowing element left in the band column (section 17, Class 1). A
+-- `Showing` popout row fixed both and cost 50px -- a 44px plate plus its 6px gap,
+-- MORE than the 22px chip row it replaced, which is where the honest chrome total
+-- went up rather than down. A glyph on a caption the page already pays for costs
+-- nothing and opens the same panel.
+-- ============================================================
+print("-- Aura Designer: the filter glyph")
 do
     -- ONE definition of the chips, two hosts -- the split panel's wrapping row
     -- and the pane. A second copy is how the three duplicated FRAME_ITEMS lists
@@ -1356,39 +1450,88 @@ do
     check(CARDS:find("local FILTER_CHIPS = {", 1, true) == nil,
           "showing: ...which is a verb, so it cannot freeze on the load-time locale")
     check(CARDS:find("local function ActiveFilterLabel()", 1, true) ~= nil,
-          "showing: the summary is read off that same list")
+          "showing: the active filter's name is read off that same list")
     check(CARDS:match("local function ActiveFilterLabel%(%)(.-)\nend"):find("FilterChips()", 1, true) ~= nil,
           "showing: ...not off a second copy of the labels")
 
-    local SHOW = ROWS:match("local showBand = (.-)local pickerOpen")
-    check(SHOW ~= nil, "showing: the Showing row can be read")
-    SHOW = SHOW or ""
-    check(SHOW:find("GUI:CreatePopoutRow(page.child, {", 1, true) ~= nil,
-          "showing: it is a popout row, built from the shared factory")
-    check(SHOW:find("tools.PopoutContent(", 1, true) ~= nil,
-          "showing: ...whose pane comes from the shared page tools")
-    check(SHOW:find("tools.BandWidth()", 1, true) ~= nil,
-          "showing: ...at the band's width, like everything else in the column")
-    check(SHOW:find([[Add(showBand, nil, "both")]], 1, true) ~= nil,
-          "showing: ...added to both columns, so the page keeps one pair of edges")
-    check(SHOW:find([==[label   = L["Showing"]]==], 1, true) ~= nil,
-          "showing: the row is captioned Showing")
-    check(SHOW:find("summary = function() return ActiveFilterLabel() end", 1, true) ~= nil,
-          "showing: ...and its summary is the filter that is in force")
-    -- It holds no settings, only which of them are on screen -- so no toggle and
-    -- no footer, the same rule the Add Indicator row above it follows.
-    check(SHOW:find("toggle", 1, true) == nil,
-          "showing: no toggle -- the row holds no setting of its own")
-    check(SHOW:find("actions", 1, true) == nil,
-          "showing: ...and no footer to reset")
-    check(SHOW:find("if not ctx.adEnabled then showRow.disableOn", 1, true) ~= nil,
-          "showing: it greys with the rest of the page when the designer is off")
+    -- ☠ THE ROW IS GONE, AND THE ABSENCE IS THE ASSERTION -- 50px of page for
+    -- one filter is what section 21.3 exists to take back.
+    check(ROWS:find("local showBand", 1, true) == nil,
+          "showing: the band layout no longer spends a popout row on the filter")
+    check(ROWS:find([==[label   = L["Showing"]]==], 1, true) == nil,
+          "showing: ...nor a row caption")
 
-    -- ☠ THE HIDDEN HOLDER. PopoutContent builds into a hidden holder and moves
-    -- FRAMES into the group; a FontString created on the parent is a region, stays
-    -- behind and is NEVER DRAWN. It killed five captions in phase 4.
-    check(SHOW:find("CreateFontString", 1, true) == nil,
-          "showing: the pane holds frames only, so nothing is silently left behind")
+    -- The panel it opens instead. Built the way the canvas's Preview Scale glyph
+    -- builds its own: a POOLED CreatePopout, Follow'd to the button.
+    local POP = CARDS:match("local function OpenFilterPopout%(btn%)(.-)\nend\nP%.OpenFilterPopout")
+    check(POP ~= nil, "showing: the filter panel's opener can be read")
+    POP = POP or ""
+    check(POP:find("GUI:CreatePopout({", 1, true) ~= nil,
+          "showing: it is a popout, built from the shared factory")
+    check(POP:find("key   = FILTER_POPOUT_KEY", 1, true) ~= nil,
+          "showing: ...keyed once, so the panel is pooled rather than rebuilt")
+    check(POP:find("S.BuildFilterChips(pane, width)", 1, true) ~= nil,
+          "showing: ...and it holds the same eight chips, at the popout's own width")
+    check(POP:find([[pop:Follow(btn, { outsideOf = DF.GUIFrame })]], 1, true) ~= nil,
+          "showing: ...docked outside the settings window, like every other panel")
+    -- A second click on the glyph shuts it, like any toggle.
+    check(POP:find([[open:Close("api")]], 1, true) ~= nil,
+          "showing: a second click on the glyph closes it")
+
+    -- The glyph itself, on the caption, in the head area both layouts share.
+    local HEADSRC = CARDS:match("if filterGlyph then(.-)\n    end\n    yPos = yPos %- 16")
+    check(HEADSRC ~= nil, "showing: the glyph's arm can be read")
+    HEADSRC = HEADSRC or ""
+    check(HEADSRC:find("GUI:CreateGlyphButton(parent, {", 1, true) ~= nil,
+          "showing: the way in is a glyph, from the shared factory")
+    check(HEADSRC:find("onClick = OpenFilterPopout", 1, true) ~= nil,
+          "showing: ...which opens that panel")
+    check(HEADSRC:find([[glyph:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos + 4)]], 1, true) ~= nil,
+          "showing: ...right-aligned on the ACTIVE INDICATORS caption")
+    -- ☠ filter_list, NOT filter_alt. The funnel is a different icon and the one
+    -- asked for is the three tapering lines.
+    check(CARDS:find([[local FILTER_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list"]], 1, true) ~= nil,
+          "showing: the icon is filter_list, double-backslashed")
+    check(CARDS:find("Icons\\\\filter_alt", 1, true) == nil,
+          "showing: ...not the funnel")
+
+    -- ☠ A FILTER THAT LOOKS THE SAME ON AND OFF IS HOW PEOPLE LOSE THEIR WORK.
+    -- Showing only Borders hides seven kinds of indicator, so the active state is
+    -- said TWICE -- accent tint AND the filter's own name beside the glyph.
+    check(HEADSRC:find([[local active = (S.activeFilter or "all") ~= "all"]], 1, true) ~= nil,
+          "showing: the glyph knows whether a filter is in force")
+    check(HEADSRC:find("color   = active and tc or C_TEXT_DIM", 1, true) ~= nil,
+          "showing: ...accents itself when it is")
+    check(HEADSRC:find("name:SetText(ActiveFilterLabel())", 1, true) ~= nil,
+          "showing: ...and writes the filter's name beside itself, which a glance can read")
+    check(HEADSRC:find([[name:SetPoint("RIGHT", glyph, "LEFT", -4, 0)]], 1, true) ~= nil,
+          "showing: ...on the same line, chained off the glyph")
+
+    -- ☠ THE PANEL IS DOCKED TO A BUTTON THE NEXT REBUILD RETIRES. Picking a chip
+    -- rewrites the list, which rebuilds the page; a panel left up would be
+    -- following a frame that is no longer on screen.
+    check(HEADSRC:find([[glyph:HookScript("OnHide", function()]], 1, true) ~= nil,
+          "showing: the panel goes when the glyph it is docked to does")
+    check(HEADSRC:find([[pop:Close("source")]], 1, true) ~= nil,
+          "showing: ...closed as a source close, not as a user one")
+
+    -- Opt-in, so the split panel keeps its chips and gets no glyph.
+    check(CARDS:find("local filterGlyph = opts and opts.filterGlyph or false", 1, true) ~= nil,
+          "showing: the glyph is opt-in")
+    check(EDIT:find("filterGlyph", 1, true) == nil,
+          "showing: ...and the split panel does not ask for it")
+
+    -- ⚠ AND IT GREYS WITH THE REST OF THE PAGE. The row it replaces carried a
+    -- disableOn; a glyph that stayed lit would be the one live control on a page
+    -- of dead ones. SetGlyphEnabled is the kit's all-three-halves call.
+    check(ROWS:find("filterGlyphEnabled = ctx.adEnabled", 1, true) ~= nil,
+          "showing: the page tells the glyph whether the designer is on")
+    check(HEADSRC:find("if opts and opts.filterGlyphEnabled == false then", 1, true) ~= nil,
+          "showing: ...and the glyph reads it")
+    check(HEADSRC:find("glyph:SetGlyphEnabled(false)", 1, true) ~= nil,
+          "showing: ...greying through the kit's own verb, not a bare SetAlpha")
+    check(HEADSRC:find("if name then name:SetAlpha(0.4) end", 1, true) ~= nil,
+          "showing: ...and the filter's name beside it goes with it")
 
     -- No schema change: the chips write the same in-memory field they always did.
     local chips = CARDS:match("S%.BuildFilterChips = function%(host, width%)(.-)\nend\n")
@@ -1401,18 +1544,20 @@ do
     check(chips:find("width or 260", 1, true) ~= nil,
           "showing: the flow falls back only when it was told nothing at all")
 
-    -- The order the approved sketch draws: add, then filter, then the list.
+    -- The order the approved sketch draws: add, then the list under its caption.
     local addAt  = ROWS:find("local addBand = GUI:CreateSettingsGroup", 1, true)
-    local showAt = ROWS:find("local showBand = GUI:CreateSettingsGroup", 1, true)
     local headAt = ROWS:find("GUI:AddDesignerLegacyTab(shell, function(host)", 1, true)
-    check(addAt and showAt and headAt and addAt < showAt and showAt < headAt,
-          "showing: + Add Indicator, then Showing, then ACTIVE INDICATORS")
+    check(addAt and headAt and addAt < headAt,
+          "showing: + Add Indicator, then ACTIVE INDICATORS and its filter")
 
     local EN = df_file_source("Locales/enUS.lua")
     check(EN:find("L[\"Showing\"] = true", 1, true) ~= nil,
-          "showing: the one new string is in the source locale")
+          "showing: the panel's title is in the source locale")
+    check(EN:find("L[\"Showing: %s\"] = true", 1, true) ~= nil,
+          "showing: ...and so is what the glyph's tooltip reports")
+    check(EN:find("L[\"Which kinds of indicator are listed below.\"] = true", 1, true) ~= nil,
+          "showing: ...and what an icon-only button has to say for itself")
 end
-
 -- ============================================================
 -- 12. THE WIDE-PAGE FLOOR IS GONE -- THE ACCEPTANCE TEST FOR THE WHOLE REWORK
 -- Both designers were 50/50 split panels that forced a 640-wide window to 850 and
@@ -1521,10 +1666,12 @@ do
     check(SHELL:find("host.dfSetHeight = function", 1, true) ~= nil,
           "narrow: the shell keeps the verb for any flowing block that still needs it")
 
-    -- The band layout builds no chips at all, so it has nothing to compensate for.
+    -- The band layout builds no chips ON THE PAGE at all, so it has nothing to
+    -- compensate for; its copy flows inside a panel, against a width that is
+    -- known before the first chip is placed.
     check(HEAD:find("if not skipChips then", 1, true) ~= nil,
           "narrow: the chips are the split panel's alone")
-    check(ROWS:find("S.BuildFilterChips(pane, PopoutWidth())", 1, true) ~= nil,
+    check(CARDS:find("S.BuildFilterChips(pane, width)", 1, true) ~= nil,
           "narrow: ...and the band layout's flow against a width known before it starts")
 
     -- The split panel still re-flows on resize; what it no longer does is try to
@@ -1870,67 +2017,81 @@ end
 
 print("-- Aura Designer: what the chrome now costs, band by band")
 do
-    -- """ + SK + """ THE POINT OF ALL FOUR MOVES, AS A NUMBER. Every figure is READ OUT OF
+    -- ☠ THE POINT OF THE WHOLE DIET, AS A NUMBER. Every figure is READ OUT OF
     -- THE SOURCE rather than restated here, so this fails if a band grows back --
     -- restating them would only test that this file agrees with itself.
     local banner  = tonumber(ROWS:match("banner, (%d+)\n"))
                  or tonumber(ROWS:match("return banner, (%d+)"))
-    local scope   = tonumber(ROWS:match("local SCOPEROW_H = (%d+)"))
-    local pool    = tonumber(ROWS:match("local BUFFTAB_H = (%d+)"))
+    local scope    = tonumber(ROWS:match("local SCOPEROW_H = (%d+)"))
+    local pool     = tonumber(ROWS:match("local BUFFTAB_H = (%d+)"))
+    local pooltabs = tonumber(ROWS:match("local POOLTABS_H = (%d+)"))
     local tabbar  = tonumber(SHELL:match("local TABBAR_H = (%d+)"))
     local F, PAD, DY = CARDS:match("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = (%d+), (%d+), (%d+)")
     F, PAD, DY = tonumber(F), tonumber(PAD), tonumber(DY)
     local foldHeader = tonumber(SHELL:match("Add%(section, (%d+), \"both\"%)"))
-    check(banner and scope and pool and tabbar and F and PAD and DY and foldHeader,
+    check(banner and scope and pool and pooltabs and tabbar and F and PAD and DY and foldHeader,
           "chrome: every band's height can be read from the source")
 
     -- The canvas at the scale the complaint was measured at.
     local fh, scale = 64, 1.5
     local canvas = math.max(132, math.ceil(math.max(2 * F - 2 * DY + fh * scale,
                                                     2 * PAD + 2 * DY + fh * scale)))
-    -- A popout row is one plate plus its gap -- the kit's own constants. There
-    -- are TWO of them above the list now: Add Indicator, and Showing.
+    -- A popout row is one plate plus its gap -- the kit's own constants. There is
+    -- ONE of them above the list now: Add Indicator. The filter's row became a
+    -- glyph on a caption the page was already paying for.
     local THEME = ui_file_source("Theme.lua")
     local plate = tonumber(THEME:match("plate%s*= (%d+)"))
     local gap   = tonumber(THEME:match("gap%s*= (%d+)"))
     check(plate and gap, "chrome: ...including what a popout row costs")
     local popoutRow = plate + gap
 
-    -- ☠ AND THE BAND SECTION 19 NEVER COUNTED. The ACTIVE INDICATORS caption sits
-    -- between the last row and the first indicator and was left out of every
-    -- earlier sum. With the chips gone it is the caption and nothing else: the
-    -- caller starts its y cursor at -4, the caption costs 16, and the band is
-    -- -(y) + 4.
+    -- ☠ AND THE BAND SECTION 19 NEVER COUNTED. The ACTIVE INDICATORS caption
+    -- sits between the last row and the first indicator and was left out of every
+    -- earlier sum. It is the caption and nothing else -- the glyph rides inside
+    -- the 16px the caption already spends: the caller starts its y cursor at -4,
+    -- the caption costs 16, and the band is -(y) + 4.
     local startY  = tonumber(ROWS:match("S%.BuildEffectsHeadArea%(host, %-(%d+),"))
-    local caption = tonumber(CARDS:match(
-        "activeHeader:SetTextColor%(C_TEXT_DIM%.r, C_TEXT_DIM%.g, C_TEXT_DIM%.b%)\n    yPos = yPos %- (%d+)"))
+    -- ⚠ SCOPED TO THE CAPTION'S OWN LINES, not the file and not to a comment.
+    -- "ACTIVE INDICATORS heading" also appears in a section header 700 lines
+    -- earlier, so a match anchored on THAT spans a region with no yPos in it at
+    -- all -- which is how the first version of this came back nil.
+    local headBlock = CARDS:match("activeHeader:SetTextColor(.-)local chipsFrame")
+    local caption = headBlock and tonumber(headBlock:match("yPos = yPos %- (%d+)"))
     check(startY and caption, "chrome: ...and what the caption band costs")
     local head = (startY or 0) + (caption or 0) + 4
 
-    local open   = banner + foldHeader + canvas + scope + tabbar + 2 * popoutRow + head
-    local folded = banner + foldHeader + scope + tabbar + 2 * popoutRow + head
+    local open   = banner + pooltabs + foldHeader + canvas + scope + tabbar + popoutRow + head
+    local folded = banner + pooltabs + foldHeader + scope + tabbar + popoutRow + head
 
     -- Was 542 at the start of the diet (banner 68, canvas 160, pool 30, spec 26,
     -- tabs 28, add block 230), on a basis that counted neither the caption band
-    -- nor a filter row. On THIS basis: 68 + 28 + 132 + 26 + 28 + 50 + 50 + 24.
-    check(open <= 410,
-          "chrome: the page above the first indicator is under 410px with the canvas open")
-    check(folded <= 280,
-          "chrome: ...and under 280px with it folded")
+    -- nor a filter row, and 406 counted honestly at the end of section 20.
+    -- On THIS basis: 68 + 30 + 28 + 132 + 26 + 28 + 50 + 24.
+    check(open <= 386,
+          "chrome: the page above the first indicator is under 386px with the canvas open")
+    check(folded <= 254,
+          "chrome: ...and under 254px with it folded")
     check(canvas <= 132,
           "chrome: the canvas at 1.5x is back to its 132px floor")
 
-    -- ⚠ SECTION 20.2 CLAIMED 30px BACK AND THERE IS NO 30px TO TAKE. The strip is
-    -- REPLACED by the scope row, not removed -- two labelled pickers need a band,
-    -- and the banner row they were supposed to join is already full at the
-    -- window's 520px minimum. What the move must not do is cost MORE than the
-    -- strip it replaced.
-    check(scope <= pool,
-          "chrome: the scope row costs no more than the pool strip it replaces")
-    -- ...and on section 19's own basis -- which stopped at the add row -- the page
-    -- above the first indicator did not grow. It was 336 open / 204 folded.
-    check(banner + foldHeader + canvas + scope + tabbar + popoutRow <= 336,
-          "chrome: on section 19's own basis the page is no taller than it was")
-    check(banner + foldHeader + scope + tabbar + popoutRow <= 204,
-          "chrome: ...folded, likewise")
+    -- ☠ THE POOL STRIP CAME BACK, AND IT IS PAID FOR OUT OF THE FILTER ROW.
+    -- Section 21 predicted -46 by also folding the scope row away; Spec did not
+    -- fit beside Template at the window's 520px minimum, so that band stays and
+    -- the real figure is -20 (406 -> 386). The two halves that DID land:
+    --   + the pool strip returns, at exactly what it costs in the split panel
+    --   - the Showing row goes, at a whole plate and gap
+    check(pooltabs == pool,
+          "chrome: the band layout's pool strip costs what the split panel's does")
+    check(popoutRow > pooltabs - scope,
+          "chrome: ...and the filter row it traded away was the larger of the two")
+
+    -- ⚠ ON SECTION 19'S OWN BASIS -- which stopped at the add row and counted a
+    -- pool strip but no spec strip -- the page GREW, from 332 to 362, because Spec
+    -- kept a band of its own. Asserted rather than quietly dropped: that basis is
+    -- the one every figure before section 20 was quoted on, and the number it now
+    -- gives is 362.
+    check(banner + pooltabs + foldHeader + canvas + scope + tabbar + popoutRow <= 362,
+          "chrome: on section 19's own basis the page is 362px")
+    check(banner + pooltabs + foldHeader + scope + tabbar + popoutRow <= 230,
+          "chrome: ...folded, 230px")
 end

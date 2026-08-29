@@ -2078,6 +2078,7 @@ L["Select trigger for %s"] = true
 L["Show Stacks"] = true
 L["Show When Missing"] = true
 L["Showing"] = true
+L["Showing: %s"] = true
 L["Size & Orientation"] = true
 L["Sound"] = true
 L["Sound Alert"] = true
@@ -2136,6 +2137,7 @@ L["The new profile changes which frame modes are enabled. A UI reload is require
 L["The same frame changes, driven by a whole filter"] = true
 L["The spell's own artwork"] = true
 L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."] = true
+L["Which kinds of indicator are listed below."] = true
 L["Which incoming heals the bar shows: all sources, only yours, or only from others."] = true
 L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."] = true
 L["While in a raid group you can only edit the active layout. Leave the raid group to edit other layouts."] = true
