@@ -6255,212 +6255,840 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Indicators > Personal Targeted Spells (center of screen display for player)
     local pagePersonalTargeted = CreateSubTab("indicators", "indicators_personal_targeted", L["Personal Targeted"])
     BuildPage(pagePersonalTargeted, function(self, db, Add, AddSpace, AddSyncPoint)
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: nine 280 boxes in two columns,
+        -- in the columns and the order they have always had.
+        --
+        -- POPOUT turns eight of them into feature rows and the ninth -- Growth,
+        -- which holds one dropdown -- into a CONTROL ROW, in three bands:
+        --
+        --   "Content"     Settings -- whether the display exists at all and what
+        --                 reaches it -- and Content Types, which is where.
+        --   "Appearance"  Size, Growth Direction (the control row), Border and
+        --                 Duration Text: what one icon looks like.
+        --   "Effects"     Highlight Settings, Interrupt Settings and X Mark --
+        --                 the three things the display DOES rather than draws:
+        --                 it rings an important spell, tints an interrupted one
+        --                 and stamps it.
+        --
+        -- ⚠ THE CONTROL ROW IS NAMED FOR ITS SETTING, NOT FOR ITS BOX. A control
+        -- row draws ONE name and that name is the setting's, so the plate reads
+        -- "Growth Direction"; the box's own "Growth" header has nothing left to
+        -- head. The trade is the group's two verbs -- a control row offers no
+        -- Reset Group and no amber tick -- which for one dropdown the modified
+        -- dot on the control itself already covers.
+        --
+        -- All three band headers are locale strings the page already ships, and
+        -- none can strand: no row on this page hides.
+        --
+        -- ☠ THE PAGE'S GATE IS A GREY IN BOTH LAYOUTS, exactly as on the Targeted
+        -- List page: every dependent control already carries `disableOn =
+        -- HidePersonalOptions`, so it greys in the box and greys in the pane,
+        -- unchanged. The popout adds the ROW's own grey on top. The Settings row
+        -- is the exception, because it carries the gate's own tick.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)`
+        -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
+        -- it always built -- test_personaltargeted_page_builders.lua pins the
+        -- inventory of each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which is
+        -- what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"personalTargeted"}, L["Personal Targeted"], "indicators_personal_targeted"), 25, 2)
-        
-        
-        
+
+        local contentBand, appearanceBand, effectsBand
+        if tools then
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
+            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+            effectsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            effectsBand:AddWidget(GUI:CreateHeader(self.child, L["Effects"]), 40)
+        end
+
+        -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
+        -- The growth table used to sit inside the box that offered it. Its row
+        -- prints the chosen value as its SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder -- so the word has to come out of the same
+        -- table the dropdown offers, or a row could say one thing while the
+        -- control behind it says another.
+        --
+        -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure
+        -- captures the upvalue that exists when it is created -- so one declared
+        -- above these lines would see nil rather than the table or the function.
         local growthOptions = { UP= L["Up"], DOWN= L["Down"], LEFT= L["Left"], RIGHT= L["Right"], CENTER_H= L["Center (Horizontal)"], CENTER_V= L["Center (Vertical)"] }
-        
+
         local function HidePersonalOptions(d) return not d.personalTargetedSpellEnabled end
         local function HidePersonalDurationOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowDuration end
-        
+        local function HidePersonalHighlightOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellHighlightImportant end
+        local function HideInterruptOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowInterrupted end
+        local function HideInterruptXOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowInterrupted or not d.personalTargetedSpellInterruptedShowX end
+
+        -- ☠ THE PAGE GATE, ON THE ROWS. Reads `d or db` because a row's own
+        -- predicate is asked with the row's resolved table, and the page's state
+        -- pass with the page's -- one predicate has to answer both.
+        local function PersonalOffRow(d) return not (d or db).personalTargetedSpellEnabled end
+        -- ...and the X Mark row's, which is the interrupted visual's gate: its own
+        -- tick greys with Show Interrupted Visual, exactly as the checkbox did.
+        local function InterruptOffRow(d)
+            local t = d or db
+            return not t.personalTargetedSpellEnabled or not t.personalTargetedSpellShowInterrupted
+        end
+
         local function PersonalTargetedUpdate()
             if DF.UpdatePersonalTargetedSpellsPosition then DF:UpdatePersonalTargetedSpellsPosition() end
             if DF.UpdateTestPersonalTargetedSpells then DF:UpdateTestPersonalTargetedSpells() end
         end
-        
-        -- ===== SETTINGS GROUP (Column 1) =====
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows incoming targeted spells on YOU in the center of your screen."], 250), 30)
-        settingsGroup:AddWidget(GUI:CreateLabel(self.child, L["To reposition: Unlock frames (/df unlock) and drag the mover."], 250), 30)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Personal Targeted Spells"], db, "personalTargetedSpellEnabled", function()
-            self:RefreshStates()
-            if DF.TogglePersonalTargetedSpells then DF:TogglePersonalTargetedSpells(db.personalTargetedSpellEnabled) end
-            -- Reflect it in test mode, matching the Targeted List enable above. This
-            -- is the owner of the personal preview and gates on the same master
-            -- Enable, so it resolves the display in both directions.
-            if DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
-        end), 30)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), 30)
-        -- Same game CVar as the Targeted List page — Personal detects casts through
-        -- nameplate tokens too (IsValidCasterUnit), so it has the identical
-        -- offscreen blind spot. Both checkboxes drive the one CVar.
-        local ptsOffscreen = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Offscreen Nameplates"], nil, nil, nil,
-            function() return DF:GetNameplateOffscreen() end,
-            function(val) DF:SetNameplateOffscreen(val) end), 30)
-        ptsOffscreen.disableOn = HidePersonalOptions
-        ptsOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
-        Add(settingsGroup, nil, 1)
-        
-        -- ===== CONTENT TYPES GROUP (Column 2) =====
-        local contentGroup = GUI:CreateSettingsGroup(self.child, 280)
-        contentGroup:AddWidget(GUI:CreateHeader(self.child, L["Content Types"]), 40)
-        contentGroup:AddWidget(GUI:CreateLabel(self.child, L["Show in content types:"], 250), 25)
-        local ptsOpenWorld = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Open World"], db, "personalTargetedSpellInOpenWorld", nil), 25)
-        ptsOpenWorld.disableOn = HidePersonalOptions
-        ptsOpenWorld.hideOn = function() return GUI.SelectedMode == "raid" end
-        local ptsDungeons = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Dungeons"], db, "personalTargetedSpellInDungeons", nil), 25)
-        ptsDungeons.disableOn = HidePersonalOptions
-        ptsDungeons.hideOn = function() return GUI.SelectedMode == "raid" end
-        local ptsRaids = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raids"], db, "personalTargetedSpellInRaids", nil), 25)
-        ptsRaids.disableOn = HidePersonalOptions
-        ptsRaids.hideOn = function() return GUI.SelectedMode == "raid" end
-        local ptsArena = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Arena"], db, "personalTargetedSpellInArena", nil), 25)
-        ptsArena.disableOn = HidePersonalOptions
-        ptsArena.hideOn = function() return GUI.SelectedMode == "raid" end
-        local ptsBattlegrounds = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Battlegrounds"], db, "personalTargetedSpellInBattlegrounds", nil), 25)
-        ptsBattlegrounds.disableOn = HidePersonalOptions
-        ptsBattlegrounds.hideOn = function() return GUI.SelectedMode == "raid" end
-        contentGroup:AddWidget(GUI:CreateLabel(self.child, L["Content type filters configured in Party tab."], 250), 25)
-        -- No group-level hideOn: every checkbox in here already carries
-        -- disableOn = HidePersonalOptions, so the box greys in place like the
-        -- rest of the page instead of the whole column reflowing when the
-        -- feature is switched off. (The per-checkbox hideOn for RAID mode
-        -- stays — that one is about which mode you're in, not an off state.)
-        Add(contentGroup, nil, 2)
-        
-        
-        
-        -- Size Group (col1)
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
-        local ptsSize = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 20, 80, 1, db, "personalTargetedSpellSize", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsSize.disableOn = HidePersonalOptions
-        local ptsScale = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "personalTargetedSpellScale", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsScale.disableOn = HidePersonalOptions
-        local ptsAlpha = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.0, 1.0, 0.05, db, "personalTargetedSpellAlpha", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsAlpha.disableOn = HidePersonalOptions
-        local ptsSpacing = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], 0, 20, 1, db, "personalTargetedSpellSpacing", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsSpacing.disableOn = HidePersonalOptions
-        local ptsMaxIcons = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 10, 1, db, "personalTargetedSpellMaxIcons", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsMaxIcons.disableOn = HidePersonalOptions
-        Add(sizeGroup, nil, 1)
-        
-        -- Growth Group (col2)
-        local growthGroup = GUI:CreateSettingsGroup(self.child, 280)
-        growthGroup:AddWidget(GUI:CreateHeader(self.child, L["Growth"]), 40)
-        local ptsGrowth = growthGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)
-        ptsGrowth.disableOn = HidePersonalOptions
-        Add(growthGroup, nil, 1)
-        
-        
-        
-        -- Border Group (col1) — Stage 4.4: 3 hand-rolled border widgets
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these
+        -- keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- ===== SETTINGS (a 280 box in column 1 in classic, the Content band's
+        -- first row) =====
+        -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
+        -- rather than two control rows: a control row carries a SETTING rather
+        -- than a group, so it can offer neither the group's Reset Group nor the
+        -- tick that says the group has been touched -- and the page gate would
+        -- then belong to no row at all.
+        local function BuildPersonalSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Shows incoming targeted spells on YOU in the center of your screen."], 250), 30)
+            group:AddWidget(GUI:CreateLabel(parent, L["To reposition: Unlock frames (/df unlock) and drag the mover."], 250), 30)
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the page's only on/off control.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Personal Targeted Spells"], db, "personalTargetedSpellEnabled", function()
+                    tools2.refreshStates()
+                    if DF.TogglePersonalTargetedSpells then DF:TogglePersonalTargetedSpells(db.personalTargetedSpellEnabled) end
+                    -- Reflect it in test mode, matching the Targeted List enable above. This
+                    -- is the owner of the personal preview and gates on the same master
+                    -- Enable, so it resolves the display in both directions.
+                    if DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
+                end), 30)
+            end
+            -- ⚠ NO disableOn HERE, and that is the box's own answer left alone: in
+            -- classic this tick stays live with the feature off. In the pane it
+            -- greys with the rest, because the row's toggle gates the WHOLE pane --
+            -- the kit's own syncGate, the same one the Dispel Overlay page accepted.
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), 30)
+            -- Same game CVar as the Targeted List page — Personal detects casts through
+            -- nameplate tokens too (IsValidCasterUnit), so it has the identical
+            -- offscreen blind spot. Both checkboxes drive the one CVar.
+            --
+            -- ⚠ AND IT IS THE ONE KEY THIS ROW CLAIMS THAT THE DEFAULTS ENGINE
+            -- CANNOT ANSWER FOR -- a custom get/set tick registers with search under
+            -- a synthetic `custom_…` key, DF.Defaults answers nil for it, so it never
+            -- lights the amber tick and Reset Group skips it. That is exactly right:
+            -- this is an account-wide GAME setting.
+            local ptsOffscreen = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Offscreen Nameplates"], nil, nil, nil,
+                function() return DF:GetNameplateOffscreen() end,
+                function(val) DF:SetNameplateOffscreen(val) end), 30)
+            ptsOffscreen.disableOn = HidePersonalOptions
+            ptsOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
+        end
+
+        -- The one profile tick the row does not carry, in its own words. Silent
+        -- while it is off, which is the shipped profile.
+        local function PersonalSettingsSummary(d)
+            if not d then return "" end
+            if not d.personalTargetedSpellImportantOnly then return "" end
+            return L["Important Spells Only"]
+        end
+
+        if classicLayout then
+            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+            BuildPersonalSettingsGroup({
+                group = settingsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(settingsGroup, nil, 1)
+        else
+            -- Four: the two blurbs, Important Spells Only and the offscreen CVar
+            -- tick. The Enable tick is HOISTED onto the row.
+            local PT_SETTINGS_COUNT = 4
+
+            -- What the suppressed Enable checkbox ran, plus a repaint of every pane
+            -- standing open -- seven rows and the control row grey with it. Never a
+            -- page rebuild: that would retire the row being clicked through.
+            local function OnPersonalEnableToggle()
+                self:RefreshStates()
+                if DF.TogglePersonalTargetedSpells then DF:TogglePersonalTargetedSpells(db.personalTargetedSpellEnabled) end
+                if DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
+                tools.ReflowMounted()
+            end
+
+            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalSettingsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Settings"],
+                db       = tools.RowDB,
+                toggle   = { key = "personalTargetedSpellEnabled" },
+                summary  = PersonalSettingsSummary,
+                count    = PT_SETTINGS_COUNT,
+                onToggle = OnPersonalEnableToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = settingsMount,
+            }))
+            tools.ClaimKeys(settingsRow, settingsContent)
+            tools.WireModifiedTick(settingsRow)
+            tools.WireFooter(settingsRow, PersonalTargetedUpdate)
+            tools.RegisterHoistedToggle(settingsRow, L["Enable Personal Targeted Spells"], "personalTargetedSpellEnabled", OnPersonalEnableToggle)
+        end
+
+        -- ===== CONTENT TYPES (a 280 box in column 2 in classic, the Content
+        -- band's second row) =====
+        local function BuildPersonalContentGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Show in content types:"], 250), 25)
+            -- ⚠ THE PER-CHECKBOX hideOn IS A MODE GATE, so it survives in both
+            -- layouts unchanged: it is about which mode you are in, not about an
+            -- off state, and the two labels below stay to say so.
+            local ptsOpenWorld = group:AddWidget(GUI:CreateCheckbox(parent, L["Open World"], db, "personalTargetedSpellInOpenWorld", nil), 25)
+            ptsOpenWorld.disableOn = HidePersonalOptions
+            ptsOpenWorld.hideOn = function() return GUI.SelectedMode == "raid" end
+            local ptsDungeons = group:AddWidget(GUI:CreateCheckbox(parent, L["Dungeons"], db, "personalTargetedSpellInDungeons", nil), 25)
+            ptsDungeons.disableOn = HidePersonalOptions
+            ptsDungeons.hideOn = function() return GUI.SelectedMode == "raid" end
+            local ptsRaids = group:AddWidget(GUI:CreateCheckbox(parent, L["Raids"], db, "personalTargetedSpellInRaids", nil), 25)
+            ptsRaids.disableOn = HidePersonalOptions
+            ptsRaids.hideOn = function() return GUI.SelectedMode == "raid" end
+            local ptsArena = group:AddWidget(GUI:CreateCheckbox(parent, L["Arena"], db, "personalTargetedSpellInArena", nil), 25)
+            ptsArena.disableOn = HidePersonalOptions
+            ptsArena.hideOn = function() return GUI.SelectedMode == "raid" end
+            local ptsBattlegrounds = group:AddWidget(GUI:CreateCheckbox(parent, L["Battlegrounds"], db, "personalTargetedSpellInBattlegrounds", nil), 25)
+            ptsBattlegrounds.disableOn = HidePersonalOptions
+            ptsBattlegrounds.hideOn = function() return GUI.SelectedMode == "raid" end
+            group:AddWidget(GUI:CreateLabel(parent, L["Content type filters configured in Party tab."], 250), 25)
+        end
+
+        -- ☠ IT NAMES WHAT IS LEFT ON, AND ONLY ONCE SOMETHING IS OFF. All five are
+        -- on in the shipped profile, so the row is silent there rather than
+        -- reciting the default back -- and the moment any one is switched off
+        -- there are at most four left to name, which is the budget exactly.
+        local function PersonalContentSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local off = 0
+            if d.personalTargetedSpellInOpenWorld then parts[#parts + 1] = L["Open World"] else off = off + 1 end
+            if d.personalTargetedSpellInDungeons then parts[#parts + 1] = L["Dungeons"] else off = off + 1 end
+            if d.personalTargetedSpellInRaids then parts[#parts + 1] = L["Raids"] else off = off + 1 end
+            if d.personalTargetedSpellInArena then parts[#parts + 1] = L["Arena"] else off = off + 1 end
+            if d.personalTargetedSpellInBattlegrounds then parts[#parts + 1] = L["Battlegrounds"] else off = off + 1 end
+            if off == 0 then return "" end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local contentGroup = GUI:CreateSettingsGroup(self.child, 280)
+            contentGroup:AddWidget(GUI:CreateHeader(self.child, L["Content Types"]), 40)
+            BuildPersonalContentGroup({
+                group = contentGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            -- No group-level hideOn: every checkbox in here already carries
+            -- disableOn = HidePersonalOptions, so the box greys in place like the
+            -- rest of the page instead of the whole column reflowing when the
+            -- feature is switched off. (The per-checkbox hideOn for RAID mode
+            -- stays — that one is about which mode you're in, not an off state.)
+            Add(contentGroup, nil, 2)
+        else
+            -- Seven: the caption, the five content ticks and the party-tab note.
+            local PT_CONTENT_COUNT = 7
+
+            local contentMount, contentContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalContentGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local contentRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Content Types"],
+                db      = tools.RowDB,
+                summary = PersonalContentSummary,
+                count   = PT_CONTENT_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = contentMount,
+            }))
+            tools.ClaimKeys(contentRow, contentContent)
+            tools.WireModifiedTick(contentRow)
+            tools.WireFooter(contentRow, PersonalTargetedUpdate)
+            contentRow.disableOn = PersonalOffRow
+        end
+
+        -- ===== SIZE (a 280 box in column 1 in classic, the Appearance band's
+        -- first row) =====
+        local function BuildPersonalSizeGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            local ptsSize = group:AddWidget(GUI:CreateSlider(parent, L["Icon Size"], 20, 80, 1, db, "personalTargetedSpellSize", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsSize.disableOn = HidePersonalOptions
+            local ptsScale = group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.05, db, "personalTargetedSpellScale", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsScale.disableOn = HidePersonalOptions
+            local ptsAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0.0, 1.0, 0.05, db, "personalTargetedSpellAlpha", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsAlpha.disableOn = HidePersonalOptions
+            local ptsSpacing = group:AddWidget(GUI:CreateSlider(parent, L["Spacing"], 0, 20, 1, db, "personalTargetedSpellSpacing", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsSpacing.disableOn = HidePersonalOptions
+            local ptsMaxIcons = group:AddWidget(GUI:CreateSlider(parent, L["Max Icons"], 1, 10, 1, db, "personalTargetedSpellMaxIcons", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsMaxIcons.disableOn = HidePersonalOptions
+        end
+
+        -- The icon's footprint and how many of them there can be. Scale and alpha
+        -- only while they are doing something -- a row reading "x1.00" on every
+        -- default profile is noise (the Buff Bar's appearance rule).
+        local function PersonalSizeSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.personalTargetedSpellSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local n = tonumber(d.personalTargetedSpellMaxIcons)
+            if n then parts[#parts + 1] = format("%s %d", L["Max Icons"], math.floor(n)) end
+            local sc = tonumber(d.personalTargetedSpellScale)
+            if sc and sc ~= 1 then parts[#parts + 1] = format("x%.2f", sc) end
+            local a = tonumber(d.personalTargetedSpellAlpha)
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
+            sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
+            BuildPersonalSizeGroup({
+                group = sizeGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(sizeGroup, nil, 1)
+        else
+            -- Five: size, scale, alpha, spacing and the icon cap.
+            local PT_SIZE_COUNT = 5
+
+            local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalSizeGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local sizeRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Size"],
+                db      = tools.RowDB,
+                summary = PersonalSizeSummary,
+                count   = PT_SIZE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = sizeMount,
+            }))
+            tools.ClaimKeys(sizeRow, sizeContent)
+            tools.WireModifiedTick(sizeRow)
+            tools.WireFooter(sizeRow, PersonalTargetedUpdate)
+            sizeRow.disableOn = PersonalOffRow
+        end
+
+        -- ===== GROWTH (a 280 box in column 1 in classic, the Appearance band's
+        -- second plate) =====
+        -- ☠ ONE SETTING, SO A CONTROL ROW RATHER THAN A WAY IN. There is nothing
+        -- behind this plate to open: a popout row here would be a panel holding a
+        -- single dropdown, with the row above it saying what the dropdown says.
+        -- The trade is the group's two verbs -- a control row offers no Reset
+        -- Group and no amber tick -- which for one dropdown the modified dot on
+        -- the control itself already covers.
+        if classicLayout then
+            local growthGroup = GUI:CreateSettingsGroup(self.child, 280)
+            growthGroup:AddWidget(GUI:CreateHeader(self.child, L["Growth"]), 40)
+            local ptsGrowth = growthGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions, db, "personalTargetedSpellGrowth", PersonalTargetedUpdate), 55)
+            ptsGrowth.disableOn = HidePersonalOptions
+            Add(growthGroup, nil, 1)
+        else
+            local growthRow = appearanceBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Growth Direction"],
+                kind      = "dropdown",
+                options   = growthOptions,
+                -- The FUNCTION form: the table is re-resolved on each read, so a
+                -- mode switch is followed rather than frozen at whichever table
+                -- this build captured.
+                db        = tools.RowDB,
+                key       = "personalTargetedSpellGrowth",
+                onChanged = PersonalTargetedUpdate,
+            }))
+            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
+            -- are the popout row's own slot), which is what makes a control row and
+            -- a feature row share one rhythm in a band.
+            growthRow.disableOn = PersonalOffRow
+            tools.RegisterControlRow(growthRow, "dropdown", "personalTargetedSpellGrowth")
+        end
+
+        -- ===== BORDER (a 280 box in column 2 in classic, the Appearance band's
+        -- third row) =====
+        -- Stage 4.4: 3 hand-rolled border widgets
         -- (Show / Size / Color) replaced by CreateBorderControls. include
         -- set tailored for a "needs attention" alert surface (Personal
         -- Targeted = spells targeting you). Skipped: offset (icon has its
         -- own positioning), classColor / roleColor (spell alert, not unit
         -- identity), colorByTime / colorByType (no aura-state context).
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        GUI:CreateBorderControls(borderGroup, db, "personalTargetedSpell", {
-            parent       = self.child,
-            include      = { alpha = true, inset = true, blendMode = true,
-                             gradient = true, shadow = true, animate = true },
-            fullUpdate   = PersonalTargetedUpdate,
-            lightUpdate  = PersonalTargetedUpdate,
-            lightColors  = PersonalTargetedUpdate,
-            refreshStates = function() self:RefreshStates() end,
-            -- GREY, not hide — every other control on this page greys via
-            -- disableOn = HidePersonalOptions.
-            disableWhen  = HidePersonalOptions,
-            sizeMin = 0, sizeMax = 5, sizeStep = 1,  -- 0 = animation-only (no solid edge)
-        })
-        Add(borderGroup, nil, 2)
-        
-        -- Duration Group (col2)
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
-        local ptsDuration = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "personalTargetedSpellShowDuration", function()
-            self:RefreshStates()
-            PersonalTargetedUpdate()
-        end), 30)
-        ptsDuration.disableOn = HidePersonalOptions
-        -- The cooldown swipe is the radial cooldown sweep on the icon (independent
-        -- of the numeric duration text), so it's gated only on the feature itself.
-        local ptsSwipe = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Cooldown Swipe"], db, "personalTargetedSpellShowSwipe", PersonalTargetedUpdate), 30)
-        ptsSwipe.disableOn = HidePersonalOptions
-        local ptsDurFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "personalTargetedSpellDurationFont", PersonalTargetedUpdate), 55)
-        ptsDurFont.disableOn = HidePersonalDurationOptions
-        local ptsDurScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.1, db, "personalTargetedSpellDurationScale", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsDurScale.disableOn = HidePersonalDurationOptions
-        local ptsDurOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "personalTargetedSpellDurationOutline", PersonalTargetedUpdate), 55)
-        ptsDurOutline.disableOn = HidePersonalDurationOptions
-        local ptsDurShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "personalTargetedSpellDurationOutline", PersonalTargetedUpdate), 30)
-        ptsDurShadow.disableOn = HidePersonalDurationOptions
-        local ptsDurX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -20, 20, 1, db, "personalTargetedSpellDurationX", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsDurX.disableOn = HidePersonalDurationOptions
-        local ptsDurY = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -20, 20, 1, db, "personalTargetedSpellDurationY", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsDurY.disableOn = HidePersonalDurationOptions
-        local ptsDurColor = durationGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "personalTargetedSpellDurationColor", false, PersonalTargetedUpdate), 35)
-        ptsDurColor.disableOn = HidePersonalDurationOptions
-        Add(durationGroup, nil, 2)
-        
-        
-        
-        local function HidePersonalHighlightOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellHighlightImportant end
+        --
+        -- ⚠ noShowToggle IS THE HOIST -- the Buff Bar border row's move, verbatim.
+        -- With it the built-in Show Border checkbox is not built and the row
+        -- carries that tick instead; the show key is still read, so it still greys
+        -- the other twenty-eight exactly as before.
+        local function BuildPersonalBorderGroup(tools2)
+            GUI:CreateBorderControls(tools2.group, db, "personalTargetedSpell", {
+                parent       = tools2.parent,
+                include      = { alpha = true, inset = true, blendMode = true,
+                                 gradient = true, shadow = true, animate = true },
+                fullUpdate   = PersonalTargetedUpdate,
+                lightUpdate  = PersonalTargetedUpdate,
+                lightColors  = PersonalTargetedUpdate,
+                refreshStates = tools2.refreshStates,
+                -- GREY, not hide — every other control on this page greys via
+                -- disableOn = HidePersonalOptions.
+                disableWhen  = HidePersonalOptions,
+                sizeMin = 0, sizeMax = 5, sizeStep = 1,  -- 0 = animation-only (no solid edge)
+                noShowToggle = tools2.hoistToggle or nil,
+            })
+        end
 
-        local highlightGroup = GUI:CreateSettingsGroup(self.child, 280)
-        highlightGroup:AddWidget(GUI:CreateHeader(self.child, L["Highlight Settings"]), 40)
-        local ptsHighlight = highlightGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Spells"], db, "personalTargetedSpellHighlightImportant", function()
-            self:RefreshStates()
-            PersonalTargetedUpdate()
-        end), 30)
-        ptsHighlight.disableOn = HidePersonalOptions
+        -- The Buff Bar's border summary, unchanged: thickness in pixels, the style
+        -- word, and the alpha only when it is doing something.
+        local function PersonalBorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.personalTargetedSpellBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local style = d.personalTargetedSpellBorderStyle
+            parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                             or (style == "TEXTURE" and L["Texture"])
+                             or L["Solid"]
+            local c = d.personalTargetedSpellBorderColor
+            local a = type(c) == "table" and tonumber(c.a) or nil
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            BuildPersonalBorderGroup({
+                group = borderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(borderGroup, nil, 2)
+        else
+            -- Twenty-eight: the twenty-nine CreateBorderControls builds for this
+            -- include set -- the toolkit's usual set plus the thirteen-widget
+            -- animation block -- less the hoisted Show Border.
+            local PT_BORDER_COUNT = 28
+
+            -- What the suppressed Show Border checkbox ran, and never a page
+            -- rebuild: that would retire every widget on the page including the row
+            -- being clicked through.
+            local function OnPersonalBorderToggle()
+                self:RefreshStates()
+                PersonalTargetedUpdate()
+                tools.ReflowMounted()
+            end
+
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local borderRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = tools.RowDB,
+                toggle   = { key = "personalTargetedSpellShowBorder" },
+                summary  = PersonalBorderSummary,
+                count    = PT_BORDER_COUNT,
+                onToggle = OnPersonalBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            tools.ClaimKeys(borderRow, borderContent)
+            tools.WireModifiedTick(borderRow)
+            tools.WireFooter(borderRow, PersonalTargetedUpdate)
+            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "personalTargetedSpellShowBorder", OnPersonalBorderToggle)
+            borderRow.disableOn = PersonalOffRow
+        end
+
+        -- ===== DURATION TEXT (a 280 box in column 2 in classic, the Appearance
+        -- band's fourth row) =====
+        -- ☠ THIS ROW HOISTS NOTHING, AND THAT IS A VERDICT RATHER THAN AN
+        -- OMISSION. "Show Duration" looks like the group's master and is not one:
+        -- the cooldown SWIPE beside it is the radial sweep on the icon, gated only
+        -- on the feature itself, and it stays usable with the duration text off.
+        -- A hoisted tick gates the whole pane behind it (the kit's own syncGate),
+        -- so hoisting this one would have greyed a control classic leaves live.
+        -- Left in the pane it also rides this row's Reset Group.
+        local function BuildPersonalDurationGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            local ptsDuration = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], db, "personalTargetedSpellShowDuration", function()
+                tools2.refreshStates()
+                PersonalTargetedUpdate()
+            end), 30)
+            ptsDuration.disableOn = HidePersonalOptions
+            -- The cooldown swipe is the radial cooldown sweep on the icon (independent
+            -- of the numeric duration text), so it's gated only on the feature itself.
+            local ptsSwipe = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Cooldown Swipe"], db, "personalTargetedSpellShowSwipe", PersonalTargetedUpdate), 30)
+            ptsSwipe.disableOn = HidePersonalOptions
+            local ptsDurFont = group:AddWidget(GUI:CreateFontDropdown(parent, L["Font"], db, "personalTargetedSpellDurationFont", PersonalTargetedUpdate), 55)
+            ptsDurFont.disableOn = HidePersonalDurationOptions
+            local ptsDurScale = group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 2.0, 0.1, db, "personalTargetedSpellDurationScale", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsDurScale.disableOn = HidePersonalDurationOptions
+            local ptsDurOutline = group:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], db, "personalTargetedSpellDurationOutline", PersonalTargetedUpdate), 55)
+            ptsDurOutline.disableOn = HidePersonalDurationOptions
+            local ptsDurShadow = group:AddWidget(GUI:CreateShadowCheckbox(parent, L["Shadow"], db, "personalTargetedSpellDurationOutline", PersonalTargetedUpdate), 30)
+            ptsDurShadow.disableOn = HidePersonalDurationOptions
+            local ptsDurX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -20, 20, 1, db, "personalTargetedSpellDurationX", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsDurX.disableOn = HidePersonalDurationOptions
+            local ptsDurY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -20, 20, 1, db, "personalTargetedSpellDurationY", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsDurY.disableOn = HidePersonalDurationOptions
+            local ptsDurColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], db, "personalTargetedSpellDurationColor", false, PersonalTargetedUpdate), 35)
+            ptsDurColor.disableOn = HidePersonalDurationOptions
+        end
+
+        -- The two ticks first, because with no hoisted tick on this row they are
+        -- the only thing that says whether anything is drawn at all -- then the
+        -- font size, which is what people come back to change.
+        local function PersonalDurationSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if d.personalTargetedSpellShowDuration then
+                parts[#parts + 1] = L["Show Duration"]
+                local sc = tonumber(d.personalTargetedSpellDurationScale)
+                if sc and sc ~= 1 then parts[#parts + 1] = format("x%.2f", sc) end
+            end
+            if d.personalTargetedSpellShowSwipe then parts[#parts + 1] = L["Show Cooldown Swipe"] end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
+            durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
+            BuildPersonalDurationGroup({
+                group = durationGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(durationGroup, nil, 2)
+        else
+            -- Nine: the two ticks, the font block and the colour. Nothing is
+            -- hoisted -- see the essay above the builder.
+            local PT_DURATION_COUNT = 9
+
+            local durationMount, durationContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalDurationGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local durationRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Duration Text"],
+                db      = tools.RowDB,
+                summary = PersonalDurationSummary,
+                count   = PT_DURATION_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = durationMount,
+            }))
+            tools.ClaimKeys(durationRow, durationContent)
+            tools.WireModifiedTick(durationRow)
+            tools.WireFooter(durationRow, PersonalTargetedUpdate)
+            durationRow.disableOn = PersonalOffRow
+        end
+
+        -- ===== HIGHLIGHT SETTINGS (a 280 box in column 1 in classic, the Effects
+        -- band's first row) =====
         -- Important Spell Border: the highlight on its own DF.Border (full toolkit),
         -- gated by the Highlight Important Spells toggle above.
-        GUI:CreateBorderControls(highlightGroup, db, "personalTargetedSpellImportant", {
-            parent        = self.child,
-            noShowToggle  = true,  -- the Highlight Important Spells checkbox is the gate
-            include       = { alpha = true, inset = true, blendMode = true,
-                              gradient = true, shadow = true, animate = true },
-            fullUpdate    = PersonalTargetedUpdate,
-            lightUpdate   = PersonalTargetedUpdate,
-            lightColors   = PersonalTargetedUpdate,
-            refreshStates = function() self:RefreshStates() end,
-            disableWhen   = HidePersonalHighlightOptions,
-            sizeMin = 0, sizeMax = 8, sizeStep = 1,
-        })
-        Add(highlightGroup, nil, 1)
-        
-        
-        
-        local function HideInterruptOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowInterrupted end
-        local function HideInterruptXOptions(d) return not d.personalTargetedSpellEnabled or not d.personalTargetedSpellShowInterrupted or not d.personalTargetedSpellInterruptedShowX end
-        
-        local interruptGroup = GUI:CreateSettingsGroup(self.child, 280)
-        interruptGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Settings"]), 40)
-        local ptsInterrupted = interruptGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Interrupted Visual"], db, "personalTargetedSpellShowInterrupted", function()
-            self:RefreshStates()
-            PersonalTargetedUpdate()
-        end), 30)
-        ptsInterrupted.disableOn = HidePersonalOptions
-        local ptsInterruptDur = interruptGroup:AddWidget(GUI:CreateSlider(self.child, L["Duration"], 0.1, 2.0, 0.1, db, "personalTargetedSpellInterruptedDuration", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsInterruptDur.disableOn = HideInterruptOptions
-        local ptsInterruptTint = interruptGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Tint Color"], db, "personalTargetedSpellInterruptedTintColor", false, PersonalTargetedUpdate), 35)
-        ptsInterruptTint.disableOn = HideInterruptOptions
-        local ptsInterruptTintAlpha = interruptGroup:AddWidget(GUI:CreateSlider(self.child, L["Tint Opacity"], 0, 1, 0.1, db, "personalTargetedSpellInterruptedTintAlpha", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsInterruptTintAlpha.disableOn = HideInterruptOptions
-        Add(interruptGroup, nil, 2)
-        
-        local xMarkGroup = GUI:CreateSettingsGroup(self.child, 280)
-        xMarkGroup:AddWidget(GUI:CreateHeader(self.child, L["X Mark"]), 40)
-        local ptsShowX = xMarkGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show X Mark"], db, "personalTargetedSpellInterruptedShowX", function()
-            self:RefreshStates()
-            PersonalTargetedUpdate()
-        end), 30)
-        ptsShowX.disableOn = HideInterruptOptions
-        local ptsXColor = xMarkGroup:AddWidget(GUI:CreateColorPicker(self.child, L["X Color"], db, "personalTargetedSpellInterruptedXColor", false, PersonalTargetedUpdate), 35)
-        ptsXColor.disableOn = HideInterruptXOptions
-        local ptsXSize = xMarkGroup:AddWidget(GUI:CreateSlider(self.child, L["X Size"], 8, 40, 1, db, "personalTargetedSpellInterruptedXSize", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
-        ptsXSize.disableOn = HideInterruptXOptions
-        -- No group-level hideOn: the three controls already grey via their own
-        -- disableOn, so the box stays put when Show Interrupted Visual is off.
-        Add(xMarkGroup, nil, 2)
-        
-        
+        --
+        -- ⚠ TWO SUPPRESSIONS THAT LOOK ALIKE AND ARE NOT. `noShowToggle = true` on
+        -- the toolkit call is UNCONDITIONAL and always was: this border has never
+        -- had its own Show tick, because the Highlight Important Spells checkbox
+        -- is its gate. The HOIST is that checkbox, and it is the `if not
+        -- tools2.hoistToggle` branch below.
+        local function BuildPersonalHighlightGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local ptsHighlight = group:AddWidget(GUI:CreateCheckbox(parent, L["Highlight Important Spells"], db, "personalTargetedSpellHighlightImportant", function()
+                    tools2.refreshStates()
+                    PersonalTargetedUpdate()
+                end), 30)
+                ptsHighlight.disableOn = HidePersonalOptions
+            end
+            GUI:CreateBorderControls(group, db, "personalTargetedSpellImportant", {
+                parent        = parent,
+                noShowToggle  = true,  -- the Highlight Important Spells checkbox is the gate
+                include       = { alpha = true, inset = true, blendMode = true,
+                                  gradient = true, shadow = true, animate = true },
+                fullUpdate    = PersonalTargetedUpdate,
+                lightUpdate   = PersonalTargetedUpdate,
+                lightColors   = PersonalTargetedUpdate,
+                refreshStates = tools2.refreshStates,
+                disableWhen   = HidePersonalHighlightOptions,
+                sizeMin = 0, sizeMax = 8, sizeStep = 1,
+            })
+        end
+
+        -- The same three facts the other border row reports, about the ring this
+        -- one draws round an important spell.
+        local function PersonalHighlightSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.personalTargetedSpellImportantBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local style = d.personalTargetedSpellImportantBorderStyle
+            parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                             or (style == "TEXTURE" and L["Texture"])
+                             or L["Solid"]
+            local c = d.personalTargetedSpellImportantBorderColor
+            local a = type(c) == "table" and tonumber(c.a) or nil
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local highlightGroup = GUI:CreateSettingsGroup(self.child, 280)
+            highlightGroup:AddWidget(GUI:CreateHeader(self.child, L["Highlight Settings"]), 40)
+            BuildPersonalHighlightGroup({
+                group = highlightGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(highlightGroup, nil, 1)
+        else
+            -- Twenty-eight: what CreateBorderControls builds for this include set
+            -- with its own Show tick already suppressed. The Highlight Important
+            -- Spells checkbox is HOISTED onto the row.
+            local PT_HIGHLIGHT_COUNT = 28
+
+            local function OnPersonalHighlightToggle()
+                self:RefreshStates()
+                PersonalTargetedUpdate()
+                tools.ReflowMounted()
+            end
+
+            local highlightMount, highlightContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalHighlightGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local highlightRow = effectsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Highlight Settings"],
+                db       = tools.RowDB,
+                toggle   = { key = "personalTargetedSpellHighlightImportant" },
+                summary  = PersonalHighlightSummary,
+                count    = PT_HIGHLIGHT_COUNT,
+                onToggle = OnPersonalHighlightToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = highlightMount,
+            }))
+            tools.ClaimKeys(highlightRow, highlightContent)
+            tools.WireModifiedTick(highlightRow)
+            tools.WireFooter(highlightRow, PersonalTargetedUpdate)
+            tools.RegisterHoistedToggle(highlightRow, L["Highlight Important Spells"], "personalTargetedSpellHighlightImportant", OnPersonalHighlightToggle)
+            highlightRow.disableOn = PersonalOffRow
+        end
+
+        -- ===== INTERRUPT SETTINGS (a 280 box in column 2 in classic, the Effects
+        -- band's second row) =====
+        local function BuildPersonalInterruptGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local ptsInterrupted = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Interrupted Visual"], db, "personalTargetedSpellShowInterrupted", function()
+                    tools2.refreshStates()
+                    PersonalTargetedUpdate()
+                end), 30)
+                ptsInterrupted.disableOn = HidePersonalOptions
+            end
+            local ptsInterruptDur = group:AddWidget(GUI:CreateSlider(parent, L["Duration"], 0.1, 2.0, 0.1, db, "personalTargetedSpellInterruptedDuration", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsInterruptDur.disableOn = HideInterruptOptions
+            local ptsInterruptTint = group:AddWidget(GUI:CreateColorPicker(parent, L["Tint Color"], db, "personalTargetedSpellInterruptedTintColor", false, PersonalTargetedUpdate), 35)
+            ptsInterruptTint.disableOn = HideInterruptOptions
+            local ptsInterruptTintAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Tint Opacity"], 0, 1, 0.1, db, "personalTargetedSpellInterruptedTintAlpha", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsInterruptTintAlpha.disableOn = HideInterruptOptions
+        end
+
+        -- How long the tint sits on the icon, and how heavy it is.
+        local function PersonalInterruptSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local dur = tonumber(d.personalTargetedSpellInterruptedDuration)
+            if dur then parts[#parts + 1] = format("%.1fs", dur) end
+            local a = tonumber(d.personalTargetedSpellInterruptedTintAlpha)
+            if a then parts[#parts + 1] = format("%s %.1f", L["Tint Opacity"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local interruptGroup = GUI:CreateSettingsGroup(self.child, 280)
+            interruptGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Settings"]), 40)
+            BuildPersonalInterruptGroup({
+                group = interruptGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(interruptGroup, nil, 2)
+        else
+            -- Three: the duration, the tint colour and its opacity. The Show
+            -- Interrupted Visual tick is HOISTED onto the row.
+            local PT_INTERRUPT_COUNT = 3
+
+            local function OnPersonalInterruptToggle()
+                self:RefreshStates()
+                PersonalTargetedUpdate()
+                tools.ReflowMounted()
+            end
+
+            local interruptMount, interruptContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalInterruptGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local interruptRow = effectsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Interrupt Settings"],
+                db       = tools.RowDB,
+                toggle   = { key = "personalTargetedSpellShowInterrupted" },
+                summary  = PersonalInterruptSummary,
+                count    = PT_INTERRUPT_COUNT,
+                onToggle = OnPersonalInterruptToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = interruptMount,
+            }))
+            tools.ClaimKeys(interruptRow, interruptContent)
+            tools.WireModifiedTick(interruptRow)
+            tools.WireFooter(interruptRow, PersonalTargetedUpdate)
+            tools.RegisterHoistedToggle(interruptRow, L["Show Interrupted Visual"], "personalTargetedSpellShowInterrupted", OnPersonalInterruptToggle)
+            interruptRow.disableOn = PersonalOffRow
+        end
+
+        -- ===== X MARK (a 280 box in column 2 in classic, the Effects band's third
+        -- row) =====
+        local function BuildPersonalXMarkGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local ptsShowX = group:AddWidget(GUI:CreateCheckbox(parent, L["Show X Mark"], db, "personalTargetedSpellInterruptedShowX", function()
+                    tools2.refreshStates()
+                    PersonalTargetedUpdate()
+                end), 30)
+                ptsShowX.disableOn = HideInterruptOptions
+            end
+            local ptsXColor = group:AddWidget(GUI:CreateColorPicker(parent, L["X Color"], db, "personalTargetedSpellInterruptedXColor", false, PersonalTargetedUpdate), 35)
+            ptsXColor.disableOn = HideInterruptXOptions
+            local ptsXSize = group:AddWidget(GUI:CreateSlider(parent, L["X Size"], 8, 40, 1, db, "personalTargetedSpellInterruptedXSize", PersonalTargetedUpdate, PersonalTargetedUpdate, true), 55)
+            ptsXSize.disableOn = HideInterruptXOptions
+            -- No group-level hideOn: the three controls already grey via their own
+            -- disableOn, so the box stays put when Show Interrupted Visual is off.
+        end
+
+        -- How big the stamp is. Its colour is a swatch that says itself.
+        local function PersonalXMarkSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.personalTargetedSpellInterruptedXSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local xMarkGroup = GUI:CreateSettingsGroup(self.child, 280)
+            xMarkGroup:AddWidget(GUI:CreateHeader(self.child, L["X Mark"]), 40)
+            BuildPersonalXMarkGroup({
+                group = xMarkGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(xMarkGroup, nil, 2)
+        else
+            -- Two: the colour and the size. The Show X Mark tick is HOISTED onto
+            -- the row.
+            local PT_XMARK_COUNT = 2
+
+            local function OnPersonalXMarkToggle()
+                self:RefreshStates()
+                PersonalTargetedUpdate()
+                tools.ReflowMounted()
+            end
+
+            local xMarkMount, xMarkContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildPersonalXMarkGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local xMarkRow = effectsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["X Mark"],
+                db       = tools.RowDB,
+                toggle   = { key = "personalTargetedSpellInterruptedShowX" },
+                summary  = PersonalXMarkSummary,
+                count    = PT_XMARK_COUNT,
+                onToggle = OnPersonalXMarkToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = xMarkMount,
+            }))
+            tools.ClaimKeys(xMarkRow, xMarkContent)
+            tools.WireModifiedTick(xMarkRow)
+            tools.WireFooter(xMarkRow, PersonalTargetedUpdate)
+            tools.RegisterHoistedToggle(xMarkRow, L["Show X Mark"], "personalTargetedSpellInterruptedShowX", OnPersonalXMarkToggle)
+            -- ⚠ NOT THE PAGE GATE, BUT THE INTERRUPTED VISUAL'S. The X is drawn on
+            -- that visual, so its tick greyed with Show Interrupted Visual in the
+            -- box and greys with it here -- one gate that happens to include the
+            -- page's.
+            xMarkRow.disableOn = InterruptOffRow
+        end
+
+        -- ===== THE THREE BANDS, IN READING ORDER ==========================
+        -- Added at the foot rather than in place: all three are full width, so
+        -- there is no column flow left to unbalance and the order below is purely
+        -- the order the page reads in.
+        if not classicLayout then
+            Add(contentBand, nil, "both")
+            Add(appearanceBand, nil, "both")
+            Add(effectsBand, nil, "both")
+        end
+
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
