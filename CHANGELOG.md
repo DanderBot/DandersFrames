@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### New Features
+
+* (Aura Designer) Border animations are back from the 12.1 lockdown — first on the frame-level border, and now on the aura icons themselves: placed icons and squares, aura bars, and filter, debuff and layout group icons can all animate their borders again, in combat included. Icons always start on an effect's settled loop; only the frame-level border plays the intro flash. (by Krathe)
+
 ### Bug Fixes
 
 * (Aura Designer) Fix layout and filter group indicators staying at full brightness on out-of-range players when element-specific fading is on — placed indicators faded, groups next to them did not. (by Krathe)
