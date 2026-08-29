@@ -5,8 +5,9 @@ local NS = ...
 -- ------------------------------------------------------------
 -- General > Group Labels is the sweep's third page. Three of its four groups
 -- become popout feature rows -- Raid Group Labels, Font Settings, Position --
--- and the one single-option group (Text Format) stays inline wearing the band
--- skin, because a pane holding one dropdown is a click that buys nothing.
+-- and the one single-option group (Text Format) becomes a CONTROL ROW: a pane
+-- holding one dropdown is a click that buys nothing, but a 280 box beside a
+-- full-width band is the one shape a column of plates cannot absorb.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
@@ -375,24 +376,64 @@ do
 end
 
 -- ============================================================
--- 5. WHAT STAYED INLINE, AND THE PAGE'S OWN ORDER
--- One single-option group keeps its box and takes the band skin; the two mode
--- messages and the copy button are not settings groups at all and are untouched.
+-- 5. TEXT FORMAT'S CONTROL ROW, AND THE PAGE'S OWN ORDER
+-- The one single-option group becomes a control row in a band of its own; the
+-- two mode messages and the copy button are not settings groups at all and are
+-- untouched.
 -- ============================================================
-print("-- Group Labels page: the stay-inline group, the band and the page's own order")
+print("-- Group Labels page: the Text Format control row, the band and the page's own order")
 do
-    -- ---- the skin, at the one stay-inline site and nowhere else ------
-    local sites = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools and tools%.INLINE_BOX or nil%)") do
-        sites = sites + 1
-    end
-    eq(sites, 1, "inline: exactly one group stays inline and wears the band skin")
-    check(PAGE:find("local formatGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "inline: ...and it is Text Format")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL ON THIS PAGE. One shared table off
-    -- the tools, so classic gets nil -- which is what "no opts" already meant.
+    -- ---- nothing is mounted at a column's 280 any more ---------------
+    local narrow = 0
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
+    eq(narrow, 0, "inline: no box on this page is still mounted at a column's 280")
     check(PAGE:find("bandStyle", 1, true) == nil,
-          "inline: the skin is taken from the tools, never restated as a literal")
+          "inline: the band skin is never restated as a literal")
+
+    -- ---- Text Format is a CONTROL ROW --------------------------------
+    -- It is still NOT a popout row: a pane holding one dropdown buys nothing.
+    check(PAGE:find('label   = L["Label Format"]', 1, true) == nil,
+          "control row: no popout row is declared for one dropdown")
+    check(PAGE:find('label     = L["Label Format"],\n                kind      = "dropdown",', 1, true) ~= nil,
+          "control row: Text Format is a dropdown control row")
+    check(PAGE:find("formatBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+          "control row: ...in a chromeless band at the width the layout pass will give it")
+    check(PAGE:find("formatBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
+          "control row: ...mounted into that band")
+    check(PAGE:find("formatBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
+          "control row: ...and no band header, because the row's own label names it")
+    -- ⚠ THE CONTROL'S OWN NAME, NOT THE BOX'S TITLE. "Text Format" named a
+    -- SECTION; "Label Format" is what the dropdown has always been called, so the
+    -- entry the kit registers off this label is the SAME entry classic registers.
+    check(PAGE:find('label     = L["Text Format"]', 1, true) == nil,
+          "control row: ...named 'Label Format', not the box's section title")
+    -- The TABLE binding, which is what keeps the override markers and the search
+    -- index addressing the same (table, key) pair the classic dropdown gave them.
+    check(PAGE:find('options   = formatOptions,\n                db        = db,\n                key       = "groupLabelFormat",', 1, true) ~= nil,
+          "control row: the options and the TABLE binding ride the row")
+    check(PAGE:find("onChanged = UpdateLabels,", 1, true) ~= nil,
+          "control row: ...and the page's own apply, unchanged")
+    check(PAGE:find("hideOn    = HideGroupLabelOptions,", 1, true) ~= nil,
+          "control row: ...the box's hideOn becomes the ROW's, so the slot collapses")
+    check(PAGE:find("formatRow.disableOn = DisableGroupLabelOptions", 1, true) ~= nil,
+          "control row: ...and its disableChildrenOn becomes the row's own grey")
+    check(PAGE:find('tools.RegisterControlRow(formatRow, "dropdown", "groupLabelFormat")', 1, true) ~= nil,
+          "control row: ...and it reaches search through the shared verb")
+
+    -- ---- classic still builds the box it always built -----------------
+    check(PAGE:find("local formatGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "control row: classic keeps the bare 280 box")
+    check(PAGE:find('formatGroup:AddWidget(GUI:CreateHeader(self.child, L["Text Format"]), 40)', 1, true) ~= nil,
+          "control row: ...under the header it always had")
+    check(PAGE:find('formatGroup:AddWidget(GUI:CreateDropdown(self.child, L["Label Format"], formatOptions, db, "groupLabelFormat", UpdateLabels), 55)', 1, true) ~= nil,
+          "control row: ...with the dropdown call it always made")
+    check(PAGE:find("formatGroup.hideOn = HideGroupLabelOptions", 1, true) ~= nil
+      and PAGE:find("formatGroup.disableChildrenOn = DisableGroupLabelOptions", 1, true) ~= nil,
+          "control row: ...and both of the box's own gates")
+    -- The option table is declared ONCE and read by both arms.
+    local opts = 0
+    for _ in PAGE:gmatch("local formatOptions = {") do opts = opts + 1 end
+    eq(opts, 1, "control row: the four format options are declared once, for both arms")
 
     -- ---- the band ----------------------------------------------------
     check(PAGE:find("labelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
@@ -421,20 +462,17 @@ do
             if e.name == name and (col == nil or e.col == col) then return i end
         end
     end
-    -- ☠ THE BAND IS ADDED AFTER ITS LAST ROW AND BEFORE THE INLINE BOX, and both
-    -- halves of that are forced. `Add` resolves a widget's slot height on the
-    -- spot, so a band added before its rows would be measured empty; and "both"
-    -- is a sync point, so a full-width band dropped in BELOW the lone column box
-    -- would leave a hole beside it. The classic arm keeps the box's own Add
+    -- ☠ THE BAND IS ADDED AFTER ITS LAST ROW, AND THE CONTROL ROW'S BAND AFTER
+    -- IT. `Add` resolves a widget's slot height on the spot, so a band added
+    -- before its rows would be measured empty. Both are "both", so what follows
+    -- is purely the page's reading order. The classic arm keeps the box's own Add
     -- exactly where it always was.
     check(indexOf("labelBand", '"both"') ~= nil, "order: the band spans both columns")
-    check(indexOf("formatGroup", "2") ~= nil, "order: Text Format keeps column 2")
-    -- The popout arm's pair, in order and adjacent. Asserted as literal text
-    -- rather than through indexOf, because the box is added in BOTH arms and the
-    -- index of the first one is the classic branch's.
-    check(PAGE:find('Add(labelBand, nil, "both")\n            Add(formatGroup, nil, 2)', 1, true) ~= nil,
-          "order: in the popout layout the band is added first, then the inline box")
-    check(PAGE:find("if classicLayout then Add(formatGroup, nil, 2) end", 1, true) ~= nil,
+    check(indexOf("formatBand", '"both"') ~= nil, "order: ...and so does the Text Format band")
+    check(indexOf("formatGroup", "2") ~= nil, "order: classic still puts Text Format in column 2")
+    check(PAGE:find('Add(labelBand, nil, "both")\n            Add(formatBand, nil, "both")', 1, true) ~= nil,
+          "order: in the popout layout the band is added first, then the control row's band")
+    check(PAGE:find("Add(formatGroup, nil, 2)", 1, true) ~= nil,
           "order: ...and classic still adds Text Format at its own slot")
 
     -- The classic column assignments, unchanged -- the one thing this pass was
@@ -446,11 +484,11 @@ do
         check(indexOf(name, col) ~= nil,
               "order: the classic " .. name .. " still goes to column " .. col)
     end
-    -- Three bare 280 boxes are left, and all three are inside the classicLayout
-    -- arm: a fourth appearing outside one is the drift this counts.
+    -- Four bare 280 boxes are left, and every one is inside a classicLayout arm:
+    -- a fifth appearing outside one is the drift this counts.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 3, "order: three bare 280 boxes left, and they are the classic branch's own")
+    eq(bare, 4, "order: four bare 280 boxes left, and they are the classic branch's own")
 
     -- ---- the copy button and the two mode messages are untouched -------
     check(PAGE:find('Add(CreateCopyButton(self.child, {"groupLabel"}, L["Group Labels"], "general_labels"), 25, 2)', 1, true) ~= nil,

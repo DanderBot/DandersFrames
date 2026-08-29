@@ -106,9 +106,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
         -- CLASSIC is exactly what it always was: five 280 boxes in two columns.
         -- POPOUT turns the three MULTI-CONTROL groups into feature rows -- Unit
-        -- Frame Sorting, Role Priority, Class Priority -- and leaves the two
-        -- single-option groups inline wearing the band skin, because a row whose
-        -- pane holds one dropdown is a click that buys nothing.
+        -- Frame Sorting, Role Priority, Class Priority. Neither of the other two
+        -- earns a row -- a pane holding one dropdown is a click that buys nothing
+        -- -- so each takes the shape that fits what it IS: Self Position is one
+        -- control and becomes a CONTROL ROW, and FrameSort Integration is a
+        -- control plus the paragraph that explains it, so it stays a BOX and goes
+        -- FULL WIDTH. Every top-level object on the page then starts and ends on
+        -- the same two edges.
         --
         -- Every converted group's widgets live in a `Build<X>Group(tools2)`
         -- taking { group, parent, refreshStates } and, where a toggle is hoisted,
@@ -298,16 +302,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(sortBand, nil, "both")
         end
 
-        -- ===== FRAMESORT INTEGRATION GROUP (Column 1) =====
-        -- STAYS INLINE in both layouts: one checkbox and a blurb, which is not a
-        -- click's worth of contents. It wears the band skin in the popout layout
-        -- so it does not read as a second visual language beside the rows -- the
-        -- opts table is nil in classic, which is what "no opts" already meant.
-        if FrameSortApi then
-            local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-            frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
-            frameSortGroup:AddWidget(GUI:CreateLabel(self.child, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
-            frameSortGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use FrameSort Addon"], db, "useFrameSort", function()
+        -- ===== FRAMESORT INTEGRATION GROUP (a 280 box in column 1 in classic, a
+        -- full-width box here) =====
+        -- Verbatim, taking the group and parent it should build into: same
+        -- factories, same L keys, same db key, same callback, same slot heights.
+        local function BuildFrameSortGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, format(L["FrameSort addon detected. Enable to let FrameSort control frame ordering.\n\n%sExperimental:%s This feature is new and may not work perfectly in all scenarios. Please report any issues."], "|c" .. GUI:ToneHex("caution"), "|r"), 250), 70)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Use FrameSort Addon"], db, "useFrameSort", function()
                 -- Set both modes simultaneously
                 local partyDB = DF:GetDB("party")
                 local raidDB = DF:GetDB("raid")
@@ -322,17 +325,45 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Refresh options visibility
                 self:RefreshStates()
             end), 30)
-            Add(frameSortGroup, nil, 1)
         end
 
-        -- ===== SELF POSITION GROUP (Column 1) =====
-        -- STAYS INLINE, for the reason FrameSort Integration does: one dropdown
-        -- behind a click is a click that buys nothing. Band skin in the popout
-        -- layout, nil opts in classic. Its group-level hideOn and
-        -- disableChildrenOn are unchanged in both.
-        local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-        selfPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Self Position"]), 40)
-        
+        -- ☠ IT STAYS A BOX, AND IT GOES FULL WIDTH. It is not a single control --
+        -- it is a tick plus the paragraph that explains it, which is the pet-frame
+        -- boxes' shape (Pages/Options.lua) and the reason they stayed boxes too.
+        -- A control row draws ONE name and has nowhere to put a paragraph but a
+        -- hover, and the paragraph here carries an EXPERIMENTAL warning -- the one
+        -- sentence on this page that must not be behind a hover.
+        --
+        -- What changes is the single thing that made it read as a second visual
+        -- language: it is constructed at the BAND's width and added as a sync
+        -- point, so its left and right edges are the bands' edges. A box built at
+        -- the band width but added to a COLUMN would be worse than what it
+        -- replaced -- the layout pass only stretches a "both" widget and never
+        -- narrows a column one (GUI/Panel.lua's LayoutPage), so on a widened
+        -- two-column window it would run straight over column 2.
+        --
+        -- ⚠ THE BLURB KEEPS ITS 250 AND ITS PINNED SLOT. Widening the BOX does not
+        -- widen the paragraph inside it: at the band's width a sentence would run
+        -- to a measure nobody reads comfortably, and the pinned height is only
+        -- honest while the wrap width it was measured at is unchanged. The pet
+        -- boxes hold their blurbs at 250 inside a full-width box for the same
+        -- reason.
+        if FrameSortApi then
+            if classicLayout then
+                local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)
+                frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
+                BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })
+                Add(frameSortGroup, nil, 1)
+            else
+                local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
+                frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
+                BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })
+                Add(frameSortGroup, nil, "both")
+            end
+        end
+
+        -- ===== SELF POSITION (a 280 box in column 1 in classic, a control row
+        -- here) =====
         local selfPosValues = {
             ["FIRST"] = L["Always First"],
             ["LAST"] = L["Always Last"],
@@ -340,13 +371,66 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             ["NORMAL"] = L["Sorted with Group"],
             _order = {"FIRST", "LAST", "SORTED"},
         }
-        selfPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], selfPosValues, db, "sortSelfPosition", function()
+
+        -- The dropdown's callback, under a name at page scope: both layouts drive
+        -- it now, and two copies of a body that repaints the combat banner is the
+        -- kind of duplication that drifts one of them.
+        local function ApplySelfPosition()
             TriggerSortForCurrentMode()
             UpdateCombatBanner()
-        end), 55)
-        selfPosGroup.hideOn = HideSortOptions
-        selfPosGroup.disableChildrenOn = DisableSortOptions
-        Add(selfPosGroup, nil, 1)
+        end
+
+        -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT. A
+        -- pane holding one dropdown is a click that buys nothing, so this never
+        -- earned a feature row; but a 280 box beside a full-width band is the one
+        -- shape a column of plates cannot absorb -- a narrower rectangle with its
+        -- own border and its own left edge, in a list whose whole argument is that
+        -- every row starts at the same x. So the dropdown wears the same plate the
+        -- rows above it do (DandersUI/ControlRow.lua), in a band of its own.
+        --
+        -- ⚠ ONE NAME, AND IT IS THE GROUP'S. The box put "Self Position" over a
+        -- dropdown captioned "Position"; a row draws ONE label, and of the two only
+        -- "Self Position" survives standing alone -- "Position" on a page about
+        -- sorting does not say WHOSE. It is also the section name a search
+        -- breadcrumb has always printed for this setting, so the words a user
+        -- searches on do not move. Both strings already ship; nothing is invented.
+        --
+        -- ⚠ THE db IS THE TABLE, NOT tools.RowDB. A dropdown reaches the override
+        -- markers and the search index through the dbRef the kit derives from a
+        -- TABLE binding, and a FUNCTION binding has none by contract -- so the
+        -- Language row's rule applies here: the entry the kit registers off this
+        -- row is the same (table, key) pair the classic dropdown gives them. The
+        -- page is rebuilt on a mode switch (GUI:RefreshCurrentPage), which is what
+        -- makes capturing the table safe -- and it is what every classic control on
+        -- this page already does.
+        --
+        -- ⚠ THE BOX'S TWO GATES, ON THE ROW: hidden under a FrameSort takeover,
+        -- greyed while custom sorting is off. hideOn is the ROW's, so the band's
+        -- own layout collapses the slot instead of drawing an empty box; the grey
+        -- was the group's disableChildrenOn over one child, which on a row IS the
+        -- row's own disableOn (the two priority rows below say it the same way).
+        if classicLayout then
+            local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280)
+            selfPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Self Position"]), 40)
+            selfPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)
+            selfPosGroup.hideOn = HideSortOptions
+            selfPosGroup.disableChildrenOn = DisableSortOptions
+            Add(selfPosGroup, nil, 1)
+        else
+            local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local selfPosRow = selfPosBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Self Position"],
+                kind      = "dropdown",
+                options   = selfPosValues,
+                db        = db,
+                key       = "sortSelfPosition",
+                onChanged = ApplySelfPosition,
+                hideOn    = HideSortOptions,
+            }))
+            selfPosRow.disableOn = DisableSortOptions
+            tools.RegisterControlRow(selfPosRow, "dropdown", "sortSelfPosition")
+            Add(selfPosBand, nil, "both")
+        end
         
         -- ===== ROLE PRIORITY (a 280 box in classic, a priority-band row) =====
         -- ☠ THE WIDGET REFERENCE IS REBOUND ON EVERY BUILD, NOT CAPTURED ONCE.
@@ -1836,12 +1920,39 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- a title inside a faint rectangle sitting under a band of fat row
         -- plates, which is the two-visual-languages problem the skin settles.
         --
+        -- ☠ AND IN THE POPOUT LAYOUT IT IS FULL WIDTH, ADDED AS A SYNC POINT. The
+        -- skin alone was never enough: a 280 box under a full-width band is still
+        -- a narrower rectangle with its own left edge, in a list whose whole
+        -- argument is that every top-level object starts and ends on the same two
+        -- edges. It cannot become a control row -- it is a preview strip, a
+        -- variable number of stop rows and an add/reset footer -- so it takes the
+        -- pet-frame boxes' answer instead (Pages/Options.lua): built at the BAND's
+        -- width and added "both". A box built at the band width but added to a
+        -- COLUMN would be worse than what it replaced -- the layout pass only
+        -- stretches a "both" widget and never narrows a column one (GUI/Panel.lua's
+        -- LayoutPage), so on a widened two-column window it would run straight
+        -- over whatever sits in column 2.
+        --
+        -- ⚠ NOTHING INSIDE NEEDS A SECOND NUMBER FOR THAT. Every width-dependent
+        -- child here -- the gradient bar and each stop row -- is already sized off
+        -- `gradInner`, which is GroupInnerWidth OF THIS GROUP, so it follows the
+        -- box's own width. And nothing here wraps: these are fixed-height rows,
+        -- not measured paragraphs, so no pinned slot goes stale when it widens.
+        --
         -- ⚠ A REBUILD FROM HERE CLOSES ANY OPEN ROW PANEL, and that is accepted
         -- rather than fixed: the panel's contents are the colour/texture rows,
         -- not the ramp, and the Colors page's palettes made the same trade.
         local function BuildGradientStopBox(prefix, hideOn)
         local listKey = prefix .. "Stops"
-        local gradGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
+        -- ⚠ THE TWO WIDTHS AS AN EXPRESSION, NOT AN `if classicLayout then` ARM.
+        -- This builder is declared ABOVE the section's own layout arms and inside
+        -- the page builder's indent, so a second `if classicLayout then ... else`
+        -- at that indent here is one the section's own arm-locators would find
+        -- first. One expression, one construction, and nothing else in the body
+        -- has to know which layout it is in.
+        local gradGroup = classicLayout
+            and GUI:CreateSettingsGroup(self.child, 280)
+            or GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
         gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
         local gradInner = GUI:GroupInnerWidth(gradGroup)
         -- Own copy: the Colors page's `iconPath` is a local inside ITS BuildPage closure,
@@ -2120,7 +2231,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         gradGroup.hideOn = hideOn
-        AddToSection(gradGroup, nil, 1)
+        -- Column 1 in classic, exactly where it always was; a sync point in the
+        -- popout layout, which is the whole of "it lines up with the bands".
+        AddToSection(gradGroup, nil, classicLayout and 1 or "both")
         end
 
         -- ===== BACKGROUND (a 280 box in column 2 in classic, the Health Bar
@@ -2189,8 +2302,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- imbalance, and the pending "gradient editor as a single-column box" rework
         -- changes the same balance, so the two want checking together.
         -- ⚠ ALL OF THAT IS ABOUT THE CLASSIC LAYOUT ONLY. The popout layout has no
-        -- columns left to balance in this section: the three boxes are rows in one
-        -- full-width band, and only the gradient editor is still in a column.
+        -- columns left to balance in this section at all: the three boxes are rows
+        -- in one full-width band, and the gradient editor is a full-width box under
+        -- it.
         local function HealthGradientHiddenOn(d) return d.healthColorMode ~= "PERCENT" end
 
         if classicLayout then
@@ -2293,10 +2407,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.WireModifiedTick(bgRow)
             tools.WireFooter(bgRow, ApplyHealthBackground)
 
-            -- ☠ THE BAND GOES IN AFTER ITS LAST ROW AND BEFORE THE GRADIENT BOX.
+            -- ☠ THE BAND GOES IN AFTER ITS LAST ROW, AND BEFORE THE GRADIENT BOX.
             -- `Add` resolves a widget's slot height on the spot, so a band has to
-            -- be added once it is full; and "both" is a sync point, so it must
-            -- still precede the column-1 editor under it.
+            -- be added once it is full. The gradient box follows it because that is
+            -- the READING order -- with the editor full width too, there is no
+            -- column flow left for a sync point to strand.
             AddToSection(healthBand, nil, "both")
 
             BuildGradientStopBox("healthColor", HealthGradientHiddenOn)
@@ -2380,8 +2495,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- One if/else for the section, for the reason the Health Bar section has
-        -- one: the band is a "both" widget and so a sync point, so it has to be
-        -- added before the column-1 gradient editor under it.
+        -- one: the two arms build different things, and the band has to be added
+        -- once it is full and before the gradient box that reads after it.
         if classicLayout then
             local missingGroup = GUI:CreateSettingsGroup(self.child, 280)
             missingGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
@@ -3550,23 +3665,72 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             borderRow.disableOn = ResourceOffRow
         end
 
-        -- ===== FRAME LEVEL (Column 1, inline in BOTH layouts) =====
-        -- ⚠ ONE SLIDER IS NOT A FEATURE TO OPEN. The sweep's stay-inline rule is
-        -- about single-option groups, and this is the page's only one: a row plate,
-        -- a docked panel and a Reset Group footer wrapped round one slider costs
-        -- more than the slider. It wears tools.INLINE_BOX so it speaks the band's
-        -- visual language instead of sitting as a faint bordered box between two
-        -- bands -- and the flag is taken off the tools, so classic gets nil, which
-        -- is what "no opts" already meant.
+        -- ===== FRAME LEVEL (a 280 box in column 1 in classic, a control row
+        -- here) =====
+        -- ⚠ ONE SLIDER IS NOT A FEATURE TO OPEN. A row plate, a docked panel and a
+        -- Reset Group footer wrapped round one slider costs more than the slider,
+        -- so this never earned a feature row -- it is the page's only single-option
+        -- group.
         --
-        -- ⚠ ITS PLACE IN THE SEQUENCE IS UNCHANGED -- eighth, in column 1 -- which
-        -- is what puts it between the Layout and Style bands in the popout layout
-        -- and leaves the classic page exactly as it was.
-        local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-        frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)
-        frameLevelGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
-        frameLevelGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
-        Add(frameLevelGroup, nil, 1)
+        -- ☠ BUT IT IS NOT A BOX EITHER, ANY MORE. A 280 box between two full-width
+        -- bands is the one shape a column of plates cannot absorb: a narrower
+        -- rectangle with its own border and its own left edge, in a list whose
+        -- whole argument is that every row starts at the same x. The band skin was
+        -- an answer to the border and never to the edge. So the slider wears the
+        -- same plate the rows around it do (DandersUI/ControlRow.lua), in a
+        -- chromeless band of its own.
+        --
+        -- ⚠ ONE NAME, BECAUSE BOTH NAMES WERE THE SAME WORD. The box was headed
+        -- "Frame Level" over a slider captioned "Frame Level"; a row draws ONE
+        -- label and that is it -- no string moves, and the band carries no header,
+        -- because a header directly above one row that already says the word is the
+        -- page saying it twice.
+        --
+        -- ⚠ THE SLIDER'S TWO CALLBACK SLOTS ARE PRESERVED AS THEY WERE: nothing on
+        -- COMMIT, and the frame-level reapply on the DRAG TICK -- `lightweight`, the
+        -- kit's own name for the preview half (DandersUI/Widgets.lua's PREVIEW vs
+        -- COMMIT). The classic call passed them positionally, in slots 8 and 9.
+        --
+        -- ⚠ THE db IS THE TABLE, NOT tools.RowDB, for the Self Position row's
+        -- reason: only a TABLE binding yields the dbRef a slider needs to reach the
+        -- override markers and the search index, and the page is rebuilt on a mode
+        -- switch anyway.
+        --
+        -- ⚠ THE SHARED FRAME LEVEL SENTENCE COMES FROM THE ONE HELPER, in its spec
+        -- form (GUI/SettingsWidgets.lua): a row shows its tooltip off its own plate
+        -- because the embedded slider's caption -- which is what SetFrameLevelTooltip
+        -- stamps -- is hidden on a control row and can never fire.
+        --
+        -- ⚠ THE GATE IS SAID THE WAY EACH SHAPE SAYS IT, which is the page's own
+        -- convention rather than a third spelling: a classic BOX carries the
+        -- predicate inline as its disableChildrenOn (the border box above does the
+        -- same), and a ROW takes ResourceOffRow, exactly as the page's other eight
+        -- rows do.
+        --
+        -- ⚠ ITS PLACE IN THE SEQUENCE IS UNCHANGED -- eighth -- which is what puts
+        -- it between the Layout and Style bands in the popout layout and leaves the
+        -- classic page exactly as it was.
+        if classicLayout then
+            local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280)
+            frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)
+            frameLevelGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
+            frameLevelGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
+            Add(frameLevelGroup, nil, 1)
+        else
+            local frameLevelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local frameLevelRow = frameLevelBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label       = L["Frame Level"],
+                kind        = "slider",
+                min         = 0, max = 100, step = 1,
+                db          = db,
+                key         = "resourceBarFrameLevel",
+                lightweight = function() DF:LightweightUpdateResourceBarFrameLevel() end,
+                tooltip     = GUI:FrameLevelTooltip(),
+            }))
+            frameLevelRow.disableOn = ResourceOffRow
+            tools.RegisterControlRow(frameLevelRow, "slider", "resourceBarFrameLevel")
+            Add(frameLevelBand, nil, "both")
+        end
 
         if classicLayout then
             local colorGroup = GUI:CreateSettingsGroup(self.child, 280)

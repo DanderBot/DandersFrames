@@ -97,12 +97,12 @@ end
 
 print("-- Popout page tools: every verb the pages call")
 do
-    -- The eight named verbs plus the band skin, each declared and each returned.
+    -- The nine named verbs plus the band skin, each declared and each returned.
     -- Named rather than counted so a rename fails here instead of quietly
     -- shrinking what the next page can use.
     local VERBS = {
         "PopoutContent", "RowDB", "ClaimKeys", "WireModifiedTick", "WireFooter",
-        "RegisterHoistedToggle", "ReflowMounted", "BandWidth",
+        "RegisterHoistedToggle", "RegisterControlRow", "ReflowMounted", "BandWidth",
     }
     for _, v in ipairs(VERBS) do
         check(BODY:find("local function " .. v .. "(", 1, true) ~= nil,
@@ -212,6 +212,35 @@ do
           "semantics: a hoisted toggle keeps the entry its checkbox used to register")
     check(BODY:find("if not (Search and Search.RegisterCheckbox) then return end", 1, true) ~= nil,
           "semantics: ...guarded on the METHOD, so the page need not know search exists")
+
+    -- ---- the control row's search repair ----------------------------
+    -- ☠ ADOPT, THEN REGISTER WHAT IS MISSING -- because one of the two kinds is
+    -- ALREADY in the registry by the time this runs. A control row's dropdown is
+    -- the kit's own, and the kit fires the `registerSearch` host hook whenever it
+    -- has a dbKey; a checkbox row's tick is hand-built from the shared styler and
+    -- registers nothing. Registering both would put one setting in twice.
+    local ctrl = BODY:match("local function RegisterControlRow%(row, kind, key, custom, callback%)(.-)\n    end")
+    check(ctrl ~= nil, "semantics: the control row's registration is locatable")
+    if ctrl then
+        check(ctrl:find("local entry = row.control and row.control.searchEntry", 1, true) ~= nil,
+              "control row: whatever the embedded factory already registered is adopted")
+        check(ctrl:find('if not entry and kind == "checkbox" and Search.RegisterCheckbox then', 1, true) ~= nil,
+              "control row: ...and only a kind that registered nothing is registered here")
+        check(ctrl:find("Search:RegisterCheckbox(RowLabel(row), key, nil, custom and true or false, callback)", 1, true) ~= nil,
+              "control row: ...under the ROW's own name, which is the only name it draws")
+        check(ctrl:find("AnchorRow(row)", 1, true) ~= nil,
+              "control row: the row answers to that name, so a jump can land on it")
+        check(ctrl:find("StampSection(row, entry)", 1, true) ~= nil,
+              "control row: ...and the entry says it lives there, not in the last band header")
+        -- ⚠ NO ROW MAP ENTRY. That map exists so a hit on a control hidden BEHIND a
+        -- row can open the panel it is behind; a control row opens nothing.
+        check(ctrl:find("_popoutRowForKey", 1, true) == nil,
+              "control row: ...and nothing is written to the row map, because there is no panel to open")
+        local anchorAt = ctrl:find("AnchorRow(row)", 1, true)
+        local guardAt  = ctrl:find("if not Search then return end", 1, true)
+        check(anchorAt ~= nil and guardAt ~= nil and anchorAt < guardAt,
+              "control row: the anchor is above the search guard, so a row is named either way")
+    end
 end
 
 print("-- Popout page tools: the Frame page comes home")
@@ -344,8 +373,10 @@ do
     DF.L = setmetatable({}, { __index = function(_, k) return k end })
     -- Register drops any entry the current mode has no default for, so the two
     -- keys under test have to exist here or nothing would ever be registered.
-    DF.PartyDefaults = { tooltipFrameX = 0, tooltipFrameEnabled = true }
-    DF.RaidDefaults  = { tooltipFrameX = 0, tooltipFrameEnabled = true }
+    DF.PartyDefaults = { tooltipFrameX = 0, tooltipFrameEnabled = true,
+                         tooltipResurrectionEnabled = true }
+    DF.RaidDefaults  = { tooltipFrameX = 0, tooltipFrameEnabled = true,
+                         tooltipResurrectionEnabled = true }
     function DF:DebugWarn() end
     -- SettingsBox only has to EXIST for Search.lua's file scope to load; the real
     -- table is driven against Search.lua in test_page_parking.
@@ -384,7 +415,7 @@ do
         return Search:RegisterCheckbox(label, key)
     end
 
-    local page, tools, band, hoisted
+    local page, tools, band, hoisted, ctrlTick, ctrlDrop
     local function buildPage()
         Search.Registry = {}
         Search.RegistryBuilt = false
@@ -394,7 +425,7 @@ do
         -- The LAST band header on the page -- the wrong answer every entry below
         -- it inherits, which is the whole bug.
         band  = registerUnder("Auras", "Show Out of Combat", "tooltipFrameX")
-        hoisted = nil
+        hoisted, ctrlTick, ctrlDrop = nil, nil, nil
         if tools then
             local row = { _label = "Frame Tooltips" }
             tools.ClaimKeys(row, { groupChildren = { { widget = { searchEntry = band } } } })
@@ -403,6 +434,24 @@ do
             tools.RegisterHoistedToggle(togRow, "Enable Binding Tooltips",
                                         "tooltipFrameEnabled", function() end)
             hoisted = { row = togRow, entry = togRow.searchEntry }
+
+            -- A CHECKBOX control row. Its tick is hand-built from the shared
+            -- styler, so NOTHING has registered it and the verb has to.
+            local tickRow = { _label = "Resurrection Icon Tooltips" }
+            local before  = #Search.Registry
+            tools.RegisterControlRow(tickRow, "checkbox", "tooltipResurrectionEnabled")
+            ctrlTick = { row = tickRow, added = #Search.Registry - before }
+
+            -- A DROPDOWN control row. The kit's own dropdown fires the
+            -- registerSearch host hook and stamps the entry on the container, so
+            -- by the time the verb runs the setting is ALREADY in the registry --
+            -- under the stale band section, like everything else on the page.
+            local ddEntry = registerUnder("Auras", "Addon Language", "tooltipFrameX")
+            local ddRow   = { _label = "Addon Language", control = { searchEntry = ddEntry } }
+            before = #Search.Registry
+            tools.RegisterControlRow(ddRow, "dropdown", "tooltipFrameX")
+            ctrlDrop = { row = ddRow, entry = ddEntry, added = #Search.Registry - before }
+
             return row, togRow
         end
     end
@@ -435,6 +484,41 @@ do
            "live: a hoisted toggle's entry reads its own row, not the last band header")
         eq(togRow.GetText and togRow:GetText(), "Binding Tooltips",
            "live: ...and that row is anchored too, though it claimed nothing")
+    end
+
+    -- ---- the control rows -------------------------------------------
+    check(ctrlTick ~= nil and ctrlTick.row.searchEntry ~= nil,
+          "live: a checkbox control row registers the entry nothing else would")
+    if ctrlTick then
+        eq(ctrlTick.added, 1, "live: ...exactly one entry, not two")
+        eq(ctrlTick.row.searchEntry.dbKey, "tooltipResurrectionEnabled",
+           "live: ...against the key the row is bound to")
+        eq(ctrlTick.row.searchEntry.label, "Resurrection Icon Tooltips",
+           "live: ...under the row's own name, which is the only name it draws")
+        eq(ctrlTick.row.searchEntry.section, "Resurrection Icon Tooltips",
+           "live: ...and it says it lives on that row, not under the last band header")
+        eq(ctrlTick.row.GetText and ctrlTick.row:GetText(), "Resurrection Icon Tooltips",
+           "live: ...which the row answers to, so the jump can land on it")
+        -- ⚠ NO ROW MAP ENTRY: a control row opens nothing, so there is no panel
+        -- for the jump's last step to open.
+        eq(page._popoutRowForKey["tooltipResurrectionEnabled"], nil,
+           "live: ...and the row map is left alone, because there is no panel behind it")
+    end
+
+    check(ctrlDrop ~= nil, "live: a dropdown control row is driven")
+    if ctrlDrop then
+        -- ☠ THE POINT OF THE WHOLE SHAPE OF THE VERB: the kit already put this one
+        -- in, so the verb must correct it rather than register one setting twice.
+        eq(ctrlDrop.added, 0, "live: a dropdown control row adds NO second entry")
+        eq(ctrlDrop.row.searchEntry, ctrlDrop.entry,
+           "live: ...it adopts the entry the kit's own factory registered")
+        eq(ctrlDrop.entry.section, "Addon Language",
+           "live: ...and re-sections it onto the row, off the stale band header")
+        local ddWords = {}
+        for _, k in ipairs(ctrlDrop.entry.keywords or {}) do ddWords[k] = true end
+        check(not ddWords["auras"], "live: ...dropping the old section's words with it")
+        eq(ctrlDrop.row.GetText and ctrlDrop.row:GetText(), "Addon Language",
+           "live: ...and that row is anchored too")
     end
 
     -- ---- and CLASSIC is untouched, by construction -------------------

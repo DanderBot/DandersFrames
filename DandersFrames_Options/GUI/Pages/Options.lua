@@ -458,24 +458,33 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             soloNote.hideOn = function() return GUI.SelectedMode == "raid" end
         end
 
-        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, an
-        -- inline box of its own in the popout layout) =====
+        -- ===== HIDE SELF FROM PARTY FRAMES (the foot of the classic box, a
+        -- control row of its own in the popout layout) =====
         -- ⚠ THE CALLBACK IS VERBATIM AND MUST STAY SO: it writes a SECURE header
         -- attribute, which is why it is gated on InCombatLockdown before it
         -- touches showPlayer.
+        --
+        -- ☠ AND IT IS NAMED, AT PAGE SCOPE, BECAUSE BOTH LAYOUTS NOW DRIVE IT.
+        -- Classic runs it from the checkbox inside the builder below; the popout
+        -- layout runs it from a control row, which is not a checkbox and cannot
+        -- reach into the builder for it. A second copy of a body that writes a
+        -- secure attribute is exactly the duplication "verbatim" is meant to
+        -- prevent, so there is one copy and both arms point at it.
+        local function ApplyHideSelf()
+            -- Update the secure header's showPlayer attribute
+            if not InCombatLockdown() and DF.partyHeader then
+                DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)
+            end
+            -- Reapply header settings to reposition frames
+            if DF.ApplyHeaderSettings then
+                DF:ApplyHeaderSettings()
+            end
+            DF:UpdateAllFrames()
+        end
+
         local function BuildHideSelfGroup(tools2)
             local group, parent = tools2.group, tools2.parent
-            local hidePlayer = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Self from Party Frames"], db, "hidePlayerFrame", function()
-                -- Update the secure header's showPlayer attribute
-                if not InCombatLockdown() and DF.partyHeader then
-                    DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)
-                end
-                -- Reapply header settings to reposition frames
-                if DF.ApplyHeaderSettings then
-                    DF:ApplyHeaderSettings()
-                end
-                DF:UpdateAllFrames()
-            end), 30)
+            local hidePlayer = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Self from Party Frames"], db, "hidePlayerFrame", ApplyHideSelf), 30)
             hidePlayer.hideOn = function() return GUI.SelectedMode == "raid" end
             hidePlayer.tooltip = L["Removes your player frame from the DandersFrames party display."]
         end
@@ -575,23 +584,53 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- empty themselves out and the row stays where the user last saw it
             -- -- and the tab is partyOnly, so nobody ever gets there.
 
-            -- ===== WHAT IS LEFT OF FRAME DISPLAY (Column 1) =====
-            -- The one independent tick, in the box it always lived in, wearing
-            -- the band skin so it does not read as a second visual language
-            -- beside the row above it.
-            local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)
-            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)
-            BuildHideSelfGroup({
-                group = frameDisplayGroup,
-                parent = self.child,
-                refreshStates = function() self:RefreshStates() end,
-            })
+            -- ===== WHAT IS LEFT OF FRAME DISPLAY: A CONTROL ROW =================
+            -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT.
+            -- With Solo Mode gone to the band above, this box holds ONE tick, and a
+            -- pane holding one checkbox is a click that buys nothing. But a 280 box
+            -- beside a full-width band is the one thing a column of plates cannot
+            -- absorb: a narrower rectangle with its own border and its own left
+            -- edge, in a list whose whole argument is that every row starts at the
+            -- same x. So the tick wears the same plate the row above it does
+            -- (DandersUI/ControlRow.lua), in a band of its own.
+            --
+            -- ⚠ THE HEADER GOES WITH THE BOX. "Frame Display" named a box of six
+            -- controls; five of them left, and the one that stayed is not about
+            -- display in that sense. This page carries no band headers at all -- the
+            -- Solo Mode band above has none either -- so a header here would be the
+            -- page's only one, over a single row that already names itself. Classic
+            -- keeps the title, because classic still has the box it titles.
+            --
+            -- ⚠ THE CHILD'S hideOn BECOMES THE ROW'S, because the row IS that
+            -- child. Under the box it was the tick that hid in raid and the box
+            -- that stayed, drawn empty; the kit stamps this onto the frame and the
+            -- band's own layout collapses the whole slot instead. (The Solo Mode
+            -- row above still carries none, for the reason stated there: it stands
+            -- for a group whose CHILDREN hide, not for one control.)
+            local hideSelfBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local hideSelfRow = hideSelfBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Hide Self from Party Frames"],
+                kind      = "checkbox",
+                -- The FUNCTION form, like the row above: the table is re-resolved
+                -- on each read, so a mode switch is followed rather than frozen at
+                -- whichever table this build captured.
+                db        = tools.RowDB,
+                key       = "hidePlayerFrame",
+                onChanged = ApplyHideSelf,
+                hideOn    = function() return GUI.SelectedMode == "raid" end,
+                -- The tick's own sentence, unchanged. A checkbox row shows this on
+                -- the PLATE's hover rather than through a hit frame over its label
+                -- -- see the ☠ at ControlRow's interaction block -- so the whole row
+                -- answers it, which is what the box's one-line tick effectively did.
+                tooltip   = L["Removes your player frame from the DandersFrames party display."],
+            }))
+            tools.RegisterControlRow(hideSelfRow, "checkbox", "hidePlayerFrame")
 
-            -- ☠ THE BAND FIRST. Add's "both" is a sync point, so a full-width
-            -- band dropped in below a lone column box would leave a hole beside
-            -- it.
+            -- Both bands, in reading order. With nothing left in a column there is
+            -- no flow to unbalance -- the sync-point hole that used to force the
+            -- band above the lone column box cannot arise.
             Add(soloBand, nil, "both")
-            Add(frameDisplayGroup, nil, 1)
+            Add(hideSelfBand, nil, "both")
         end
     end)
     -- The Visibility tab is entirely party/solo-oriented, so hide it in raid mode.
@@ -1314,34 +1353,62 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.WireFooter(adRow, RefreshAuraTooltips)
         end
 
-        -- Resurrection Icon Tooltips (Column 2) — the one short box, kept last so
-        -- the leftover space lands at the foot of a column.
+        -- Resurrection Icon Tooltips (Column 2 in classic; a row of its own here)
+        -- — the one short box, kept last so the leftover space lands at the foot
+        -- of a column.
         --
-        -- STAYS INLINE in both layouts: one checkbox behind a click is a click
-        -- that buys nothing. It wears the band skin in the popout layout so it
-        -- does not read as a second visual language beside the rows -- the opts
-        -- table is nil in classic, which is what "no opts" already meant. And it
-        -- is not an aura, so it would not have belonged in the Auras band even if
-        -- it had earned a row.
+        -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT.
+        -- A pane holding one checkbox is a click that buys nothing, so this never
+        -- earned a feature row. But a 280 box standing beside two full-width bands
+        -- is the one thing a column of plates cannot absorb: a narrower rectangle
+        -- with its own border and its own left edge, in a list whose whole argument
+        -- is that every row starts at the same x. So the checkbox wears the SAME
+        -- plate the rows above it do (DandersUI/ControlRow.lua) and sits in a band
+        -- that is chromeless and full width exactly like the other two. And it is
+        -- not an aura, so it would not have belonged in the Auras band even then.
         --
-        -- ⚠ CONSTRUCTED HERE, ADDED IN TWO PLACES. Classic adds it at its own
-        -- slot, exactly where it always was. The popout layout cannot: `Add`
-        -- resolves a widget's slot height on the spot, so a band has to be added
-        -- AFTER the last row goes into it -- and the bands must still come FIRST,
-        -- because "both" is a sync point and a full-width band dropped in below a
-        -- lone column box would leave a hole beside it.
-        local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-        resTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Resurrection Icon Tooltips"]), 40)
-        resTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
-        if classicLayout then Add(resTooltipGroup, nil, 2) end
+        -- ⚠ ONE NAME, AND IT IS THE GROUP'S. The box put "Resurrection Icon
+        -- Tooltips" over a tick reading "Enable Resurrection Icon Tooltips"; a row
+        -- draws ONE label, and the tick beside it already says "enable" -- so the
+        -- shorter of the two is what is left. It is also the vocabulary the rows
+        -- above are named in ("Frame Tooltips", "Aura Designer Tooltips") and the
+        -- section name a search breadcrumb has always printed for this setting.
+        -- Both strings already ship; nothing is invented and nothing is added.
+        --
+        -- ⚠ CONSTRUCTED HERE, ADDED WITH THE BANDS. `Add` resolves a widget's slot
+        -- height on the spot, so a band has to go in AFTER the last row is put into
+        -- it -- which is why the trio is added together at the foot rather than in
+        -- place. With all three full width there is no column flow left to
+        -- unbalance, so the order below is purely reading order.
+        local resBand
+        if classicLayout then
+            local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+            resTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Resurrection Icon Tooltips"]), 40)
+            resTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
+            Add(resTooltipGroup, nil, 2)
+        else
+            resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local resRow = resBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label = L["Resurrection Icon Tooltips"],
+                kind  = "checkbox",
+                -- The FUNCTION form, like every row on this page: the table is
+                -- re-resolved on each read, so a mode switch is followed rather
+                -- than frozen at whichever table this build captured.
+                db    = tools.RowDB,
+                key   = "tooltipResurrectionEnabled",
+            }))
+            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
+            -- are the popout row's own slot), which is what makes a control row and
+            -- a feature row share one rhythm in a band.
+            tools.RegisterControlRow(resRow, "checkbox", "tooltipResurrectionEnabled")
+        end
 
-        -- The two bands, then the one stay-inline box in its original column --
-        -- see the Resurrection note above for why the trio is added here rather
-        -- than in place, and why the bands have to come first.
+        -- The three bands. See the Resurrection note above for why the trio is
+        -- added here rather than in place.
         if not classicLayout then
             Add(frameBand, nil, "both")
             Add(auraBand, nil, "both")
-            Add(resTooltipGroup, nil, 2)
+            Add(resBand, nil, "both")
         end
 
         -- Sync point before See Also
@@ -2017,8 +2084,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- only), Size and Position (attached only) down column 1; Appearance,
         -- Border, Health Bar, Name Text and Health Text down column 2.
         --
-        -- POPOUT turns EIGHT of those ten into feature rows and keeps two inline.
-        -- The two that stay are the page's SHAPE controls rather than features:
+        -- POPOUT turns EIGHT of those ten into feature rows and keeps two as
+        -- boxes. The two that stay are the page's SHAPE controls rather than
+        -- features:
         --
         --   PET FRAME SETTINGS is the page-wide enable and a paragraph of prose.
         --   A row hoisting petEnabled would leave a pane holding NOTHING BUT THE
@@ -2038,13 +2106,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --   perfectly good inline one, because a page widget expects to be
         --   retired by a rebuild. See the note on the dropdown itself.
         --
-        -- ⚠ THE TWO INLINE BOXES SIT SIDE BY SIDE HERE, not stacked in column 1
-        -- as classic has them. `Add`'s "both" is a sync point, so a full-width
-        -- band under a lone column-1 stack would leave a two-box-tall hole beside
-        -- it (the Visibility page's note, which solved it by putting its band
-        -- first -- not an option here, where the page's own enable has to be the
-        -- first thing on it). Filling column 2 with the other shape box costs
-        -- nothing and is the only thing on the page that moves.
+        -- ⚠ THE TWO BOXES ARE FULL WIDTH HERE, stacked above the bands rather than
+        -- side by side in the two columns classic keeps them in. They stay BOXES --
+        -- neither is a single control, so neither can be a control row -- but they
+        -- are built at the BAND's width and added as sync points, so every
+        -- top-level object on the page starts and ends on the same two edges.
+        -- That also disposes of what used to stand here: `Add`'s "both" is a sync
+        -- point, so a full-width band under a lone column-1 stack would have left a
+        -- two-box-tall hole beside it, and the answer was to fill column 2 with the
+        -- other shape box. With both of them spanning, there is no column flow left
+        -- to leave a hole in.
         --
         -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } plus, where it matters, `popout` and
@@ -2196,8 +2267,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             and function() if DF.UpdateRaidPetGroupLayout then DF:UpdateRaidPetGroupLayout() end end
             or function() if DF.UpdatePetGroupLayout then DF:UpdatePetGroupLayout() end end
 
-        -- ===== GENERAL GROUP (a 280 box in column 1 in classic, the stay-inline
-        -- box in column 1 in the popout layout) =====
+        -- ===== GENERAL GROUP (a 280 box in column 1 in classic, a full-width box
+        -- in the popout layout) =====
         -- Verbatim, taking the group and parent it should build into: same
         -- factories, same L keys, same db keys, same callbacks, same slot heights.
         --
@@ -2221,8 +2292,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             group:AddWidget(GUI:CreateLabel(parent, L["Show health bars for player and party/raid member pets, anchored to their owner's frame. Pet frames hide when owner dies."], 250))
         end
 
-        -- ===== LAYOUT MODE GROUP (a 280 box in column 1 in classic, the
-        -- stay-inline box in column 2 in the popout layout) =====
+        -- ===== LAYOUT MODE GROUP (a 280 box in column 1 in classic, a full-width
+        -- box in the popout layout) =====
         local function BuildPetLayoutModeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2282,23 +2353,35 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- second visual language beside the rows below them. The enable's
             -- refresh carries the extra half the popout layout needs: the rows'
             -- own grey, and any pane standing open behind one of them.
-            local generalGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)
+            --
+            -- ☠ FULL WIDTH, AND THEREFORE "both". Neither of these is a single
+            -- control -- each is a control plus the sentence that explains it -- so
+            -- neither becomes a control row; they stay BOXES, with their own chrome
+            -- and their own header. What changes is the one thing that made them
+            -- read as a different language: they are constructed at the BAND's
+            -- width and added as sync points, so their left and right edges are the
+            -- bands' edges. A box built at the band width but added to a COLUMN
+            -- would be worse than what it replaced -- the layout pass only stretches
+            -- a "both" widget and never narrows a column one (GUI/Panel.lua's
+            -- LayoutPage), so on a widened two-column window it would run straight
+            -- over whatever sits in column 2.
+            local generalGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
             generalGroup:AddWidget(GUI:CreateHeader(self.child, L["Pet Frame Settings"]), 40)
             BuildPetGeneralGroup({
                 group = generalGroup,
                 parent = self.child,
                 refreshStates = function() self:RefreshStates() tools.ReflowMounted() end,
             })
-            Add(generalGroup, nil, 1)
+            Add(generalGroup, nil, "both")
 
-            local layoutGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)
+            local layoutGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
             layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Mode"]), 40)
             BuildPetLayoutModeGroup({
                 group = layoutGroup,
                 parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
-            Add(layoutGroup, nil, 2)
+            Add(layoutGroup, nil, "both")
         end
 
         -- ===== GROUP SETTINGS (grouped mode only: a 280 box in column 1 in
@@ -3101,7 +3184,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ☠ THE BANDS ARE ADDED HERE, NOT WHERE THEY WERE BUILT. `Add` resolves a
         -- widget's slot height on the spot, so a band has to go in after the last
-        -- row has been put into it -- and all three go in after the two inline
+        -- row has been put into it -- and all three go in after the two full-width
         -- boxes above, which is what keeps the page's own enable first.
         if not classicLayout then
             Add(petLayoutBand, nil, "both")
@@ -3497,29 +3580,80 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(blizRow, blizContent)
         end
 
-        -- ===== MINIMAP GROUP (Column 1) =====
+        -- ===== MINIMAP (Column 1 in classic; a row of its own here) ==========
         -- The minimap button is a single global UI element (no mode), so it lives
         -- here rather than the per-mode Visibility page. Reads party-canonical and
         -- writes both dbs so it stays consistent regardless of selected mode.
         --
-        -- STAYS INLINE in both layouts: one checkbox behind a click is a click
-        -- that buys nothing. It wears the band skin in the popout layout so it
-        -- does not read as a second visual language beside the rows -- the opts
-        -- table is nil in classic, which is what "no opts" already meant.
+        -- ☠ ONE SETTING IS A CONTROL ROW -- NOT A BOX, AND STILL NOT A POPOUT. A
+        -- pane holding one checkbox is a click that buys nothing, so this never
+        -- earned a feature row; but a 280 box beside a full-width band is a
+        -- narrower rectangle with its own left edge in a list whose whole argument
+        -- is that every row starts at the same x. So the tick wears the same plate
+        -- the rows above it do (DandersUI/ControlRow.lua), in a band of its own.
         --
-        -- ⚠ CONSTRUCTED HERE, ADDED IN TWO PLACES. Classic adds it at its own
-        -- slot, exactly where it always was. The popout layout cannot: `Add`
-        -- resolves a widget's slot height on the spot, so the band has to be added
-        -- AFTER the last row goes into it -- and the band must still come FIRST,
-        -- because "both" is a sync point and a full-width band dropped in below a
-        -- lone column box would leave a hole beside it. So the popout arm at the
-        -- foot does the three in order: band, then this box, then Language.
-        local minimapGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-        minimapGroup:AddWidget(GUI:CreateHeader(self.child, L["Minimap"]), 40)
-        minimapGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function()
-            DF:UpdateMinimapButton()
-        end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)
-        if classicLayout then Add(minimapGroup, nil, 1) end
+        -- ⚠ AND THE BAND CARRIES NO HEADER. "Show Minimap Button" already says the
+        -- word the box's own title said, and a header repeating it directly above
+        -- one row is the page saying it twice -- the Permanent Mover band's rule on
+        -- the Frame page. The row's label IS the section name from here on.
+        --
+        -- ⚠ CONSTRUCTED HERE, ADDED AT THE FOOT. `Add` resolves a widget's slot
+        -- height on the spot, so a band has to go in AFTER the last row is put into
+        -- it -- which is why the three go in together below.
+        local minimapBand
+        if classicLayout then
+            local minimapGroup = GUI:CreateSettingsGroup(self.child, 280)
+            minimapGroup:AddWidget(GUI:CreateHeader(self.child, L["Minimap"]), 40)
+            minimapGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Minimap Button"], nil, nil, function()
+                DF:UpdateMinimapButton()
+            end, makeBlizGet("showMinimapButton"), makeBlizSet("showMinimapButton"), "showMinimapButton"), 30)
+            Add(minimapGroup, nil, 1)
+        else
+            local MINIMAP_KEY = "showMinimapButton"
+            local minimapGet = makeBlizGet(MINIMAP_KEY)
+            local minimapSet = makeBlizSet(MINIMAP_KEY)
+            local function ApplyMinimapButton() DF:UpdateMinimapButton() end
+
+            -- ☠ THE HOST BRACKET, SPELLED HERE, BECAUSE THE KIT DOES NOT SPELL IT
+            -- FOR A get/set BINDING. ControlRow brackets a {db, key} write with
+            -- interceptWrite / onSettingWritten itself; a consumer's own set() it
+            -- forwards VERBATIM and gates nothing, which its own THE BINDING essay
+            -- states as the contract. This tick cannot use the {db, key} form --
+            -- one value is kept in BOTH mode tables by makeBlizSet -- so the two
+            -- hooks the classic checkbox fires are fired here instead, with the
+            -- SAME arguments it uses (GUI/SettingsWidgets.lua's CreateCheckbox): a
+            -- nil table and the override key.
+            --
+            -- ⚠ THE NIL TABLE IS DELIBERATE, and it is what keeps this write
+            -- invisible to the undo engine exactly as it is in classic: the value
+            -- does not live in db[key], so there is nothing there to put back
+            -- (Core/SettingsUndo.lua bails on a non-table db). The raid
+            -- runtime-write redirect still runs, which is the half that would have
+            -- been lost by handing the row a bare setter.
+            --
+            -- ⚠ AND THE APPLY IS INSIDE THE WRITE, not on the row's onChanged. The
+            -- kit only skips a consumer's commit for a REDIRECTED write when the
+            -- setter is its own; ours is not, so a redirected write would still run
+            -- the callback if it hung off onChanged.
+            local function WriteMinimapButton(v)
+                if GUI:Call("interceptWrite", nil, MINIMAP_KEY, v) then return end
+                minimapSet(v)
+                GUI:Call("onSettingWritten", nil, MINIMAP_KEY, v, L["Show Minimap Button"], ApplyMinimapButton)
+                ApplyMinimapButton()
+            end
+
+            minimapBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local minimapRow = minimapBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label = L["Show Minimap Button"],
+                kind  = "checkbox",
+                get   = minimapGet,
+                set   = WriteMinimapButton,
+            }))
+            -- `custom` = true, with no dbKey: the value is not in db[key], which is
+            -- precisely what the classic tick tells the registry for a custom
+            -- get/set control -- so the entry is the same entry either way.
+            tools.RegisterControlRow(minimapRow, "checkbox", nil, true, ApplyMinimapButton)
+        end
 
         -- ===== RENDERING (a 280 box in classic, a band row) =================
         -- Pixel-Perfect Scaling is a render-quality flag read by every frame and
@@ -3804,11 +3938,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(appearanceRow, appearanceContent)
         end
 
-        -- ===== LANGUAGE GROUP (Column 2, Bottom) =====
-        -- STAYS INLINE in both layouts, for the reason the Minimap box does: one
-        -- dropdown behind a click is a click that buys nothing. Band skin in the
-        -- popout layout, nil opts in classic; added at the foot there, in place
-        -- here. (See the Minimap note for the band-before-boxes ordering.)
+        -- ===== LANGUAGE (Column 2 in classic; a row of its own here) =========
+        -- A CONTROL ROW for the reason the Minimap tick is one: one dropdown behind
+        -- a click is a click that buys nothing, and a 280 box beside a full-width
+        -- band is the one shape a column of plates cannot absorb. See the Minimap
+        -- note above for the whole argument and for why its band has no header.
         local languageValues = {
             AUTO  = L["Auto (use client language)"],
             enUS  = "English",
@@ -3823,11 +3957,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             zhCN  = "中文 (简体)",
             zhTW  = "中文 (繁體)",
         }
-        local languageGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)
-        languageGroup:AddWidget(GUI:CreateHeader(self.child, L["Language"]), 40)
-        -- Language override lives on the per-character SavedVariable so
-        -- locale files can read it at file-load time (before DF.db exists).
-        languageGroup:AddWidget(GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride", function()
+        -- The reload prompt, under a name at page scope: the classic dropdown and
+        -- the row's own dropdown must run the SAME callback, and a second copy of
+        -- a four-branch popup is the kind of duplication that drifts a button
+        -- caption. The body is the one that was inline here, unchanged.
+        local function PromptLanguageReload()
             if DF.ShowPopupAlert then
                 DF:ShowPopupAlert({
                     title = L["Reload Required"],
@@ -3838,11 +3972,51 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     },
                 })
             end
-        end), 55)
-        languageGroup:AddWidget(GUI:CreateLabel(self.child,
-            L["Override the addon's display language. Auto follows your WoW client language. Translations are community-contributed and may be incomplete."],
-            260), 60)
-        if classicLayout then Add(languageGroup, nil, 2) end
+        end
+
+        local languageBand
+        if classicLayout then
+            local languageGroup = GUI:CreateSettingsGroup(self.child, 280)
+            languageGroup:AddWidget(GUI:CreateHeader(self.child, L["Language"]), 40)
+            -- Language override lives on the per-character SavedVariable so
+            -- locale files can read it at file-load time (before DF.db exists).
+            languageGroup:AddWidget(GUI:CreateDropdown(self.child, L["Addon Language"], languageValues, DandersFramesCharDB, "languageOverride", PromptLanguageReload), 55)
+            languageGroup:AddWidget(GUI:CreateLabel(self.child,
+                L["Override the addon's display language. Auto follows your WoW client language. Translations are community-contributed and may be incomplete."],
+                260), 60)
+            Add(languageGroup, nil, 2)
+        else
+            languageBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local languageRow = languageBand:AddWidget(GUI:CreateControlRow(self.child, {
+                -- ⚠ THE CONTROL'S OWN NAME, NOT THE BOX'S TITLE. "Language" named a
+                -- SECTION; the row IS the setting, and "Addon Language" is what the
+                -- dropdown has always been called -- so the entry the kit registers
+                -- off this label is the same entry classic registers, rather than
+                -- one setting under two spellings.
+                label     = L["Addon Language"],
+                kind      = "dropdown",
+                options   = languageValues,
+                -- The per-character SavedVariable, verbatim: locale files read it
+                -- at file-load time, before DF.db exists. A TABLE rather than the
+                -- page's RowDB, so the kit hands the dropdown a dbRef and the
+                -- override markers and the search index see the same (table, key)
+                -- pair the classic control gives them.
+                db        = DandersFramesCharDB,
+                key       = "languageOverride",
+                onChanged = PromptLanguageReload,
+            }))
+            -- ⚠ THE BOX'S BLURB, ON THE OPENER, BECAUSE A ROW HAS NOWHERE ELSE TO
+            -- PUT A PARAGRAPH. An inline dropdown's own label is hidden and
+            -- zero-wide, so the shared label-hover attach has nothing to sit on and
+            -- `.tooltip` is unreachable on it; `.openerTooltip` is the kit's door
+            -- for exactly that case (DandersUI/Widgets.lua), and it is the one
+            -- DandersMover's picker rows already use. The sentence is the box's,
+            -- unchanged -- no new locale string, and nothing said here that classic
+            -- does not still say in full.
+            languageRow.control.openerTooltip =
+                L["Override the addon's display language. Auto follows your WoW client language. Translations are community-contributed and may be incomplete."]
+            tools.RegisterControlRow(languageRow, "dropdown", "languageOverride")
+        end
 
         -- ===== NOTIFICATIONS (a 280 box in classic, the band's last row) ====
         -- Verbatim, including the two empty-bodied callbacks: neither setting has
@@ -3898,13 +4072,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(notifyRow, notifyContent)
         end
 
-        -- The band, then the two stay-inline boxes in their original columns --
-        -- see the Minimap note for why the trio is added here rather than in
-        -- place, and why the band has to be first.
+        -- The page's three bands -- see the Minimap note for why the trio is added
+        -- here rather than in place. With every one of them full width there is no
+        -- column flow left to unbalance, so the order below is purely reading
+        -- order, and it is the order the page has always read in.
         if not classicLayout then
             Add(settingsBand, nil, "both")
-            Add(minimapGroup, nil, 1)
-            Add(languageGroup, nil, 2)
+            Add(minimapBand, nil, "both")
+            Add(languageBand, nil, "both")
         end
     end)
 

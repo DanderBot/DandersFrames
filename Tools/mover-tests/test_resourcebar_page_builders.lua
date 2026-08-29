@@ -5,11 +5,11 @@ local NS = ...
 -- ------------------------------------------------------------
 -- Bars > Resource Bar is nine 280 boxes in classic. EIGHT of them become feature
 -- rows across three HEADED bands, and the ninth -- Frame Level, one slider --
--- stays inline wearing the band skin:
+-- becomes a CONTROL ROW in a headerless band of its own:
 --
 --   "General"   Resource Bar Settings (hoisted enable), Class Filter
 --   "Layout"    Size, Position
---                  ...then the Frame Level box, still a box
+--                  ...then the Frame Level control row, in its own band
 --   "Style"     Appearance, Background, Border (hoisted Show Border),
 --               Resource Colors
 --
@@ -334,13 +334,18 @@ do
     end
     eq(inBuilder, 7, "gate: seven builders carry the group gate themselves")
 
-    -- The classic border box keeps its own, exactly as it always had, and the
-    -- inline Frame Level box keeps its own too -- it is a page box in both
-    -- layouts, so nothing about it moved.
+    -- The classic border box keeps its own, exactly as it always had.
     check(PAGE:find("borderGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end", 1, true) ~= nil,
           "gate: the classic border box keeps the gate it always had")
+    -- ⚠ AND FRAME LEVEL SAYS THE GATE THE WAY EACH SHAPE ON THIS PAGE SAYS IT:
+    -- the classic BOX carries it inline as a disableChildrenOn, exactly as it
+    -- always did and exactly as the classic border box does; the control ROW takes
+    -- ResourceOffRow, exactly as the page's other eight rows do. A third spelling
+    -- for one setting is what this avoids.
     check(PAGE:find("frameLevelGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end", 1, true) ~= nil,
-          "gate: ...and so does the inline Frame Level box, in both layouts")
+          "gate: the classic Frame Level box keeps the gate it always had")
+    check(PAGE:find("frameLevelRow.disableOn = ResourceOffRow", 1, true) ~= nil,
+          "gate: ...and the control row greys off the page's own row predicate")
 end
 
 -- ============================================================
@@ -710,25 +715,64 @@ do
 end
 
 -- ============================================================
--- 9. THE STAY-INLINE FRAME LEVEL BOX
--- ⚠ One slider is not a feature to open. It wears the band skin so it does not
--- read as a second visual language between two bands.
+-- 9. FRAME LEVEL -- the page's one CONTROL ROW
+-- ⚠ One slider is not a feature to open, so it never earned a popout row. But a
+-- 280 box between two full-width bands is the one shape a column of plates
+-- cannot absorb, so the slider wears the row plate instead -- the band skin
+-- settled the border and never the edge.
 -- ============================================================
-print("-- Resource Bar page: the stay-inline Frame Level box")
+print("-- Resource Bar page: the Frame Level control row")
 do
-    check(PAGE:find("local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "frame level: the box wears the band skin in the popout layout")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL. One shared table off the tools, so
-    -- classic gets nil -- which is what "no opts" already meant.
-    check(PAGE:find("bandStyle", 1, true) == nil,
-          "frame level: the skin is taken from the tools, never restated as a literal")
-    check(PAGE:find('frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)', 1, true) ~= nil,
-          "frame level: ...and it keeps the header it always had")
-    check(PAGE:find("Add(frameLevelGroup, nil, 1)", 1, true) ~= nil,
-          "frame level: ...in column 1, in both layouts")
-    -- No row is declared for it.
-    check(PAGE:find('label%s*=%s*L%["Frame Level"%]') == nil,
+    -- ---- still not a popout row --------------------------------------
+    check(PAGE:find('label   = L["Frame Level"]', 1, true) == nil,
           "frame level: no popout row is declared for one slider")
+
+    -- ---- the row -----------------------------------------------------
+    check(PAGE:find('label       = L["Frame Level"],\n                kind        = "slider",', 1, true) ~= nil,
+          "frame level: it is a slider control row")
+    check(PAGE:find("local frameLevelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+          "frame level: ...in a chromeless band at the width the layout pass will give it")
+    check(PAGE:find("frameLevelBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
+          "frame level: ...mounted into that band")
+    -- ⚠ NO BAND HEADER. The box was headed "Frame Level" over a slider captioned
+    -- "Frame Level"; a row draws ONE name, so a header would be the third copy.
+    check(PAGE:find("frameLevelBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
+          "frame level: ...and no band header, because the row's own label names it")
+    check(PAGE:find("min         = 0, max = 100, step = 1,", 1, true) ~= nil,
+          "frame level: the slider's range is the one it always had")
+    -- The TABLE binding, which is what keeps the override markers and the search
+    -- index addressing the same (table, key) pair the classic slider gave them.
+    check(PAGE:find('db          = db,\n                key         = "resourceBarFrameLevel",', 1, true) ~= nil,
+          "frame level: ...bound to the page's own table, not a function")
+    -- ☠ THE CALLBACK STAYS ON THE PREVIEW HALF. The classic call passed nothing on
+    -- commit and the frame-level reapply on the drag tick (positional slots 8 and
+    -- 9); `lightweight` is the kit's own name for that half.
+    check(PAGE:find("lightweight = function() DF:LightweightUpdateResourceBarFrameLevel() end,", 1, true) ~= nil,
+          "frame level: ...and the reapply is still the drag-tick preview, not a commit")
+    -- ...and NOTHING on commit, which is what the classic call's nil slot 8 said.
+    local rowOpts
+    do
+        local a = PAGE:find('label       = L["Frame Level"],', 1, true)
+        local b = a and PAGE:find("}))", a, true)
+        rowOpts = a and PAGE:sub(a, (b or a) + 2) or ""
+    end
+    check(rowOpts:find("onChanged", 1, true) == nil,
+          "frame level: ...with nothing hung on commit, exactly as before")
+    check(PAGE:find("tooltip     = GUI:FrameLevelTooltip(),", 1, true) ~= nil,
+          "frame level: ...and the shared Frame Level sentence, from the one helper")
+    check(PAGE:find('tools.RegisterControlRow(frameLevelRow, "slider", "resourceBarFrameLevel")', 1, true) ~= nil,
+          "frame level: ...and it reaches search through the shared verb")
+
+    -- ---- classic still builds the box it always built ------------------
+    check(PAGE:find("local frameLevelGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "frame level: classic keeps the bare 280 box")
+    check(PAGE:find('frameLevelGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Level"]), 40)', 1, true) ~= nil,
+          "frame level: ...with the header it always had")
+    check(PAGE:find('frameLevelGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)', 1, true) ~= nil,
+          "frame level: ...and the slider call it always made, tooltip helper and all")
+    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL. One shared table off the tools.
+    check(PAGE:find("bandStyle", 1, true) == nil,
+          "frame level: the band skin is never restated as a literal")
 end
 
 -- ============================================================
@@ -756,18 +800,19 @@ do
         prev = at or prev
     end
 
-    -- ---- popout: General, Layout, the Frame Level box, Style --------------
-    -- ☠ THE BANDS ARE ADDED AT THREE DIFFERENT POINTS, not in one block at the
-    -- end, because the Frame Level box sits BETWEEN two of them -- and it is added
-    -- where classic has it (eighth), so neither layout has to move for the other.
+    -- ---- popout: General, Layout, the Frame Level band, Style -------------
+    -- ☠ THE BANDS ARE ADDED AT FOUR DIFFERENT POINTS, not in one block at the
+    -- end, because the Frame Level band sits BETWEEN two of them -- in the slot
+    -- classic gives its box (eighth), so neither layout has to move for the other.
+    -- Every one of the four is "both", which is the alignment rule as an Add.
     local gen   = PAGE:find('Add(generalBand, nil, "both")', 1, true)
     local lay   = PAGE:find('Add(layoutBand, nil, "both")', 1, true)
-    local level = PAGE:find("Add(frameLevelGroup, nil, 1)", 1, true)
+    local level = PAGE:find('Add(frameLevelBand, nil, "both")', 1, true)
     local style = PAGE:find('Add(styleBand, nil, "both")', 1, true)
-    check(gen and lay and level and style, "order: all four page-level Adds are present")
+    check(gen and lay and level and style, "order: all four page-level Adds are present, all of them sync points")
     check(gen and lay and gen < lay, "order: the General band goes in before the Layout band")
-    check(lay and level and lay < level, "order: ...the Layout band before the Frame Level box")
-    check(level and style and level < style, "order: ...and the Frame Level box before the Style band")
+    check(lay and level and lay < level, "order: ...the Layout band before the Frame Level band")
+    check(level and style and level < style, "order: ...and the Frame Level band before the Style band")
 
     -- Each band is added after its LAST row, because `Add` resolves a widget's
     -- slot height on the spot.
@@ -778,12 +823,18 @@ do
     check(PAGE:find("local colorsRow = styleBand:AddWidget", 1, true) < style,
           "order: ...and the Style band after its last row")
 
-    -- ---- nine bare 280 boxes: eight classic-arm boxes and Frame Level -----
-    -- (the Frame Level box is built with an opts argument, so it is not one of
-    -- these -- eight is the whole classic arm.)
+    -- ---- nine bare 280 boxes, and every one is a classic arm's -----------
+    -- The eight converted boxes plus Frame Level's own classic width, which is
+    -- now written out rather than shared with the popout arm.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 8, "boxes: eight bare 280 boxes left -- the eight classic-arm boxes")
+    eq(bare, 9, "boxes: nine bare 280 boxes left -- the classic arms' own")
+    -- ☠ THE ALIGNMENT RULE, ON THIS PAGE: nothing is mounted at a column's 280
+    -- with the tools in hand. A 280 box only ever appears with NO opts, which is
+    -- the classic arm's signature.
+    local narrow = 0
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
+    eq(narrow, 0, "boxes: ...and none of them is a new-UI mount at 280")
 end
 
 -- ============================================================

@@ -3857,10 +3857,11 @@ end
 --   WireModifiedTick(row)
 --   WireFooter(row, apply)
 --   RegisterHoistedToggle(row, label, key, onToggle)
+--   RegisterControlRow(row, kind, key, custom, callback)
 --   ReflowMounted(values)
 --   RowDB()
 --   BandWidth()
---   INLINE_BOX          -- the stay-inline box's band skin
+--   INLINE_BOX          -- the full-width box's band skin
 -- ============================================================
 function GUI:CreatePopoutPageTools(page)
     if not page then return nil end
@@ -4309,6 +4310,64 @@ function GUI:CreatePopoutPageTools(page)
         StampSection(row, row.searchEntry)
     end
 
+    -- ============================================================
+    -- A CONTROL ROW IS A SECTION TOO
+    -- ------------------------------------------------------------
+    -- The same two halves, for the shape that IS a setting rather than a way in to
+    -- fifteen of them (DandersUI/ControlRow.lua). A single-control box that used to
+    -- stand beside the bands at 280 becomes one plate in a band of its own, and the
+    -- moment it does it inherits both of a popout row's problems: nothing on the
+    -- page answers to its name, and whatever it registered with search says it
+    -- lives in the last band header built.
+    --
+    -- ☠ ONE OF THE TWO KINDS IS ALREADY IN THE REGISTRY BY THE TIME THIS RUNS, AND
+    -- REGISTERING IT AGAIN WOULD PUT ONE SETTING IN TWICE. A control row's DROPDOWN
+    -- is the kit's own CreateDropdown, which fires the `registerSearch` host hook
+    -- whenever it is handed a dbKey (DandersUI/Widgets.lua) and the host answers by
+    -- calling Search:RegisterDropdown and stamping the entry on the container
+    -- (DandersFrames/GUI/GUI.lua). A CHECKBOX row has no such entry: its tick is
+    -- hand-built from the shared styler rather than embedded from
+    -- CreateCheckboxNative -- which is precisely what puts it in the popout row's
+    -- own tick column -- and neither that tick nor the kit's checkbox factory
+    -- registers anything at all. So this ADOPTS what is there and registers only
+    -- what is not.
+    --
+    -- ⚠ AND THE TWO LAYOUTS CANNOT DOUBLE UP EITHER. The registry is built by
+    -- re-running every page's builder in whichever layout is live, and every call
+    -- site of this is the `else` arm of an `if classicLayout then` whose other arm
+    -- builds the old box -- so exactly one of the two registers per build.
+    --
+    -- ⚠ NO ROW MAP ENTRY, deliberately. page._popoutRowForKey exists so a search
+    -- hit on a control hidden BEHIND a row can open the panel it is behind
+    -- (Search:OpenOwningPopoutRow). A control row opens nothing and has no
+    -- OpenPopout, so an entry here would buy a nil lookup and a false claim that
+    -- the key lives inside a panel.
+    --
+    -- The label is the ROW's, never a second string: a control row draws ONE name
+    -- and that name is the setting's, so the result and the plate say the same
+    -- thing by construction. `custom` says the value does not live in db[key] --
+    -- what the classic checkbox tells the registry for a custom get/set tick.
+    local function RegisterControlRow(row, kind, key, custom, callback)
+        if not row then return end
+        -- Half one, above every guard: a row is worth naming even where search
+        -- never loaded, because the cross-links that jump to a row by name do not
+        -- care whether it is in the registry.
+        AnchorRow(row)
+        local Search = DF.Search
+        if not Search then return end
+        local entry = row.control and row.control.searchEntry
+        if not entry and kind == "checkbox" and Search.RegisterCheckbox then
+            entry = Search:RegisterCheckbox(RowLabel(row), key, nil, custom and true or false, callback)
+            row.searchEntry = entry
+            -- The row IS the control on a checkbox row, so the row is what an
+            -- inline result reads its tooltip off.
+            if Search.LinkSourceWidget then Search:LinkSourceWidget(row) end
+        else
+            row.searchEntry = entry
+        end
+        StampSection(row, entry)
+    end
+
     -- The width a full-width band is CONSTRUCTED at, asked for rather than
     -- guessed: GUI.PageUsableWidth is the same helper the layout pass stretches
     -- "both" widgets to. A group cannot be widened for free -- LayoutChildren
@@ -4331,19 +4390,26 @@ function GUI:CreatePopoutPageTools(page)
         WireModifiedTick      = WireModifiedTick,
         WireFooter            = WireFooter,
         RegisterHoistedToggle = RegisterHoistedToggle,
+        RegisterControlRow    = RegisterControlRow,
         ReflowMounted         = ReflowMounted,
         BandWidth             = BandWidth,
 
-        -- ☠ ONE TABLE, PASSED AT EVERY STAY-INLINE SITE. A single-option group
-        -- that stays inline beside a page of bands is speaking the other visual
+        -- ☠ ONE TABLE, PASSED AT EVERY BOX A CONVERTED PAGE STILL BUILDS. A group
+        -- standing beside a page of bands is otherwise speaking the other visual
         -- language -- a title INSIDE a faint rectangle next to accent headers
         -- over fat row plates. bandStyle (DandersUI/Sections.lua) is the skin
         -- that settles it: the title moves out of the box and is drawn as the
         -- band's own header, and the box becomes a PopoutRow plate. Nothing
         -- inside changes. Read-only to the factory, which is what makes one
-        -- shared table safe across every box on the page. Callers write
-        -- `tools and tools.INLINE_BOX or nil`, so classic gets nil -- which is
-        -- exactly what "no opts" already meant to CreateSettingsGroup.
+        -- shared table safe across every box on the page.
+        --
+        -- ⚠ THE SKIN IS HALF THE ANSWER; THE OTHER HALF IS THE WIDTH. It settles
+        -- the BORDER, and never the EDGE -- a skinned 280 box under a full-width
+        -- band still starts and ends somewhere no other object on the page does.
+        -- So every surviving box on a converted page is built at BandWidth() and
+        -- added "both", and every site that passes this flag is inside an `else`
+        -- arm where `tools` is known to exist. Classic passes no opts at all,
+        -- which is what it always did.
         INLINE_BOX            = { bandStyle = true },
     }
 end

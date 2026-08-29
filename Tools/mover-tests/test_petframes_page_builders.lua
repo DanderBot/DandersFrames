@@ -4,15 +4,16 @@ local NS = ...
 -- PET FRAMES PAGE BUILDERS -- DandersFrames_Options/GUI/Pages/Options.lua
 -- ------------------------------------------------------------
 -- Display > Pet Frames is TEN groups. Eight become feature rows in three bands;
--- two stay inline, wearing the band skin:
+-- two stay BOXES, wearing the band skin at the band's own full width:
 --
---   Pet Frame Settings      INLINE -- the page-wide enable plus a blurb. Hoisting
+--   Pet Frame Settings      BOX -- the page-wide enable plus a blurb. Hoisting
 --                           petEnabled would leave a pane holding nothing but the
 --                           paragraph, and the key gates all eight rows, so no one
---                           row can speak for it
---   Layout Mode             INLINE -- one dropdown and a sentence, and the
---                           dropdown REBUILDS the page (it changes which groups
---                           exist), which a pane cannot host
+--                           row can speak for it. Two widgets, so it is not a
+--                           control row either
+--   Layout Mode             BOX -- one dropdown and a sentence, and the dropdown
+--                           REBUILDS the page (it changes which groups exist),
+--                           which a pane cannot host
 --   Group Settings          ROW, grouped mode only, no tick
 --   Size                    ROW, no tick
 --   Position                ROW, attached mode only, no tick
@@ -186,8 +187,11 @@ do
           "tools: ...nor the search row map")
 
     -- ---- three bands, each headed --------------------------------------
+    -- ⚠ COUNTED BY THE CHROMELESS SKIN, not by the band width alone. The two boxes
+    -- that stay boxes are built at the SAME width now (see section 2), so a count
+    -- of BandWidth() call sites answers five rather than three.
     local bands = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%(%)") do bands = bands + 1 end
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%(%), { chromeless = true }%)") do bands = bands + 1 end
     eq(bands, 3, "band: three bands, which is how eight rows stop being one list")
     for band, header in pairs({ petLayoutBand = "Layout", petFrameBand = "Frame", petTextBand = "Text" }) do
         check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
@@ -233,11 +237,12 @@ do
 end
 
 -- ============================================================
--- 2. THE TWO STAY-INLINE BOXES
+-- 2. THE TWO BOXES THAT STAY BOXES
 -- Neither is a feature: one is the page's enable and a paragraph, the other is
--- one dropdown that rebuilds the page. Both keep their own header and both wear
--- the band skin in the popout layout so they do not read as a second visual
--- language beside the rows.
+-- one dropdown that rebuilds the page. Neither is a single control either, so
+-- neither becomes a control row. Both keep their own header and both wear the
+-- band skin in the popout layout, at the band's own width, so they do not read as
+-- a second visual language beside the rows.
 -- ============================================================
 local GENERAL = {
     { "checkbox", "Enable Pet Frames", "petEnabled", 30 },
@@ -252,7 +257,7 @@ local LAYOUT_MODE = {
     { "label", "Pet frames are grouped together in a separate container.", "(none)", nil },
 }
 
-print("-- Pet Frames page: the two stay-inline boxes")
+print("-- Pet Frames page: the two boxes that stay boxes")
 do
     checkCensus(census(builderBody("BuildPetGeneralGroup")), GENERAL, "general")
     checkCensus(census(builderBody("BuildPetLayoutModeGroup")), LAYOUT_MODE, "layout mode")
@@ -264,19 +269,29 @@ do
               "inline: " .. label .. " is not a popout row")
     end
 
-    -- Two boxes wearing the band skin, and the columns they land in. The general
-    -- box keeps column 1 in both layouts; the layout-mode box moves to column 2
-    -- in the popout layout ONLY, so the full-width bands below it do not open on
-    -- a two-box-tall hole (Add's "both" is a sync point).
+    -- Two boxes wearing the band skin, and the WIDTH they are built at. Both keep
+    -- their own chrome and their own header -- neither is a single control, so
+    -- neither can be a control row -- but both are constructed at the BAND's width
+    -- and added as sync points, so every top-level object on the page starts and
+    -- ends on the same two edges.
+    --
+    -- ☠ THE WIDTH AND THE "both" ARE ONE CHANGE, NOT TWO. LayoutPage only stretches
+    -- a "both" widget and never narrows a column one, so a box built at the band
+    -- width and added to a column would run over column 2 on a widened window.
     local skinned = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools%.INLINE_BOX%)") do skinned = skinned + 1 end
-    eq(skinned, 2, "inline: two boxes wear the band skin, which is both of them")
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%(%), tools%.INLINE_BOX%)") do skinned = skinned + 1 end
+    eq(skinned, 2, "inline: two boxes wear the band skin, at the band's own width")
+    check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)", 1, true) == nil,
+          "inline: ...and neither is left mounted at a column's 280")
     check(PAGE:find("Add(generalGroup, nil, 1)", 1, true) ~= nil,
-          "inline: the general box is column 1")
+          "inline: classic keeps the general box in column 1")
     check(PAGE:find("Add(layoutGroup, nil, 1)", 1, true) ~= nil,
-          "inline: ...and classic keeps the layout box under it, in column 1")
-    check(PAGE:find("Add(layoutGroup, nil, 2)", 1, true) ~= nil,
-          "inline: ...while the popout layout puts it in column 2, beside it")
+          "inline: ...and the layout box under it, in column 1")
+    check(PAGE:find('Add(generalGroup, nil, "both")', 1, true) ~= nil
+      and PAGE:find('Add(layoutGroup, nil, "both")', 1, true) ~= nil,
+          "inline: ...while the popout layout spans both columns with each of them")
+    check(PAGE:find("Add(layoutGroup, nil, 2)", 1, true) == nil,
+          "inline: ...so neither is left in a column of its own")
 
     -- The enable is the page's, so its refresh has to reach the rows AND any
     -- pane standing open behind one. Classic's hook is the page refresh alone,

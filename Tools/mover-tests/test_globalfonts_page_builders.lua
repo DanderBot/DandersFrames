@@ -5,7 +5,7 @@ local NS = ...
 -- ------------------------------------------------------------
 -- General > Global Fonts is the sweep's fifth page. Its two REAL groups become
 -- popout feature rows -- Global Font Settings, Shadow Settings -- and Affected
--- Elements stays inline wearing the band skin, because it holds a header, a
+-- Elements stays a FULL-WIDTH box wearing the band skin, because it holds a header, a
 -- twelve-line reference list and a caution note and ZERO controls: a row buys a
 -- page space by folding CONTROLS away behind a click, and folding away the list
 -- a user reads while deciding whether to press Apply to All buys nothing.
@@ -439,28 +439,67 @@ do
 end
 
 -- ============================================================
--- 5. WHAT STAYED INLINE, THE BAND, AND THE PAGE'S OWN ORDER
+-- 5. THE BOX THAT STAYED A BOX, THE BAND, AND THE PAGE'S OWN ORDER
+-- Affected Elements holds ZERO controls, so it can be neither a feature row nor
+-- a control row -- but it stops standing in a column: the popout arm builds it
+-- at the band's width and adds it as a sync point.
 -- ============================================================
+--
+-- ⚠ THE LAST TWO ROWS READ "(none)" WHERE THEY USED TO READ THEIR TEXT, and that
+-- is the census reader being literal rather than a string going missing. The
+-- bullet list and the caution sentence are now page-scope locals -- ONE copy
+-- each, read by both arms -- so the L key is no longer the factory's second
+-- argument. Their bytes are pinned by the two declaration checks below instead,
+-- which is the same evidence in a different place.
 local INFO_GROUP = {
     { "header", "Affected Elements", "(none)",  40 },
     { "label",  "(any)",             "(none)", 235 },
-    { "note",   "Font sizes are not changed. Adjust sizes in each element's page.", "(none)", 40 },
+    { "note",   "(none)",            "(none)",  40 },
 }
 
-print("-- Global Fonts page: the stay-inline box, the band and the page's own order")
+print("-- Global Fonts page: the full-width box, the band and the page's own order")
 do
-    -- ---- the skin, at the one stay-inline site and nowhere else ------
-    local sites = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools and tools%.INLINE_BOX or nil%)") do
-        sites = sites + 1
-    end
-    eq(sites, 1, "inline: exactly one group stays inline and wears the band skin")
-    check(PAGE:find("local infoGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "inline: ...and it is Affected Elements")
+    -- ---- nothing is mounted at a column's 280 any more ---------------
+    local narrow = 0
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
+    eq(narrow, 0, "inline: no box on this page is still mounted at a column's 280")
+    check(PAGE:find("local infoGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)", 1, true) ~= nil,
+          "inline: Affected Elements is built at the band's width, wearing the band skin")
+    check(PAGE:find("local infoGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "inline: ...and classic still builds the bare 280 box it always built")
     -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL ON THIS PAGE. One shared table off
-    -- the tools, so classic gets nil -- which is what "no opts" already meant.
+    -- the tools, and only in the arm where the tools exist.
     check(PAGE:find("bandStyle", 1, true) == nil,
           "inline: the skin is taken from the tools, never restated as a literal")
+
+    -- ---- one copy of each string, read by both arms ------------------
+    -- ☠ THE LIST AND THE NOTE ARE NAMED AT PAGE SCOPE. Both arms build the same
+    -- two strings, and a second copy of a twelve-line locale key is exactly the
+    -- duplication that drifts when one of them is edited.
+    check(PAGE:find("local INFO_LIST = L[\"• Text Designer (Name, Health, Status & custom text)", 1, true) ~= nil,
+          "inline: the bullet list is one page-scope local, still opening on the Text Designer")
+    check(PAGE:find("• Pinned Frames\"]", 1, true) ~= nil,
+          "inline: ...and still closing on the pinned pool")
+    check(PAGE:find("local INFO_NOTE = L[\"Font sizes are not changed. Adjust sizes in each element's page.\"]", 1, true) ~= nil,
+          "inline: ...and the caution sentence is the other")
+    local listUses, noteUses = 0, 0
+    for _ in PAGE:gmatch("INFO_LIST") do listUses = listUses + 1 end
+    for _ in PAGE:gmatch("INFO_NOTE") do noteUses = noteUses + 1 end
+    eq(listUses, 3, "inline: the list is declared once and used by both arms")
+    eq(noteUses, 3, "inline: ...and so is the note")
+
+    -- ---- the wide arm measures what the narrow one pinned ------------
+    -- ⚠ 235 WAS THE HEIGHT TWELVE BULLETS WRAP TO AT 250. At the band's width
+    -- several of them stop wrapping, so the same number would leave a hole under
+    -- the list -- CreateLabel measures itself whenever the call site does not pin
+    -- it, which is the pet blurbs' rule. The note is one line either way, so its
+    -- 40 stays.
+    check(PAGE:find("local infoInner = GUI:GroupInnerWidth(infoGroup)", 1, true) ~= nil,
+          "inline: the wide arm asks the group for its own inner width")
+    check(PAGE:find("infoGroup:AddWidget(GUI:CreateLabel(self.child, INFO_LIST, infoInner))", 1, true) ~= nil,
+          "inline: ...wraps the list to it, and pins no height")
+    check(PAGE:find('infoGroup:AddWidget(GUI:CreateNote(self.child, INFO_NOTE, {tone = "caution", prefix = "Note", width = infoInner}), 40)', 1, true) ~= nil,
+          "inline: ...and gives the note the same width, keeping its 40")
 
     -- The box's own three widgets are unchanged, and it is the one group on the
     -- page with ZERO controls -- which is the whole argument for leaving it out
@@ -478,13 +517,10 @@ do
         infoBody = PAGE:sub(a or 1, (b or 1) + 34)
     end
     checkCensus(census(infoBody), INFO_GROUP, "affected elements")
-    -- The bullet list itself, spot-checked at both ends rather than retyped.
-    check(infoBody:find("• Text Designer (Name, Health, Status & custom text)", 1, true) ~= nil,
-          "inline: the list still opens on the Text Designer")
-    check(infoBody:find("• Pinned Frames", 1, true) ~= nil,
-          "inline: ...and still closes on the pinned pool")
     check(infoBody:find('{tone = "caution", prefix = "Note", width = 250}', 1, true) ~= nil,
-          "inline: the caution note keeps its tone, prefix and width")
+          "inline: the classic note keeps its tone, prefix and width")
+    check(infoBody:find("GUI:CreateLabel(self.child, INFO_LIST, 250), 235)", 1, true) ~= nil,
+          "inline: ...and the classic list keeps the 250 its 235 was measured at")
 
     -- ---- the band ----------------------------------------------------
     check(PAGE:find("fontBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
@@ -512,20 +548,19 @@ do
             if e.name == name and (col == nil or e.col == col) then return i end
         end
     end
-    -- ☠ THE BAND IS ADDED AFTER ITS LAST ROW AND BEFORE THE INLINE BOX, and both
-    -- halves of that are forced. `Add` resolves a widget's slot height on the
-    -- spot, so a band added before its rows would be measured empty; and "both"
-    -- is a sync point, so a full-width band dropped in BELOW the lone column-2
-    -- box would leave a hole beside it.
+    -- ☠ THE BAND IS ADDED AFTER ITS LAST ROW AND BEFORE THE BOX. `Add` resolves a
+    -- widget's slot height on the spot, so a band added before its rows would be
+    -- measured empty. The box follows it because that is the reading order -- with
+    -- both of them "both", there is no column flow left for a sync point to
+    -- strand.
     check(indexOf("fontBand", '"both"') ~= nil, "order: the band spans both columns")
-    check(indexOf("infoGroup", "2") ~= nil, "order: Affected Elements keeps column 2")
-    local bandAt, infoAt = indexOf("fontBand", '"both"'), indexOf("infoGroup", "2")
+    check(indexOf("infoGroup", '"both"') ~= nil, "order: ...and so does Affected Elements")
+    check(indexOf("infoGroup", "2") ~= nil, "order: classic still puts Affected Elements in column 2")
+    local bandAt, infoAt = indexOf("fontBand", '"both"'), indexOf("infoGroup", '"both"')
     check(bandAt ~= nil and infoAt ~= nil and bandAt < infoAt,
-          "order: the band is added first, then the inline box")
-    -- The box's own Add is shared by both layouts -- it was already the last
-    -- thing on the page in classic, so the popout arm needs no second copy.
-    check(PAGE:find("if not classicLayout then\n            Add(fontBand, nil, \"both\")\n        end\n        Add(infoGroup, nil, 2)", 1, true) ~= nil,
-          "order: ...and classic reaches the same Add with no band in front of it")
+          "order: the band is added first, then the box")
+    check(PAGE:find('Add(fontBand, nil, "both")\n            Add(infoGroup, nil, "both")', 1, true) ~= nil,
+          "order: ...and the pair goes in together, inside the popout arm")
 
     -- The classic column assignments, unchanged -- the one thing this pass was
     -- not allowed to move.
@@ -534,11 +569,11 @@ do
         check(indexOf(name, col) ~= nil,
               "order: the classic " .. name .. " still goes to column " .. col)
     end
-    -- Two bare 280 boxes are left, and both are inside the classicLayout arm: a
-    -- third appearing outside one is the drift this counts.
+    -- Three bare 280 boxes are left, and every one is inside a classicLayout arm:
+    -- a fourth appearing outside one is the drift this counts.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 2, "order: two bare 280 boxes left, and they are the classic branch's own")
+    eq(bare, 3, "order: three bare 280 boxes left, and they are the classic branch's own")
 
     -- ---- the copy button is untouched ---------------------------------
     check(PAGE:find('Add(CreateCopyButton(self.child, {"fontShadow"}, L["Global Fonts"], "general_fonts"), 25, 2)', 1, true) ~= nil,

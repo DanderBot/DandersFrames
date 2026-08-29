@@ -8,15 +8,20 @@ local NS = ...
 -- has always had exactly one group -- "Frame Display" -- holding two unrelated
 -- things: Solo Mode with its three rested controls (a gated group, which becomes
 -- a feature ROW with the enable hoisted onto it) and "Hide Self from Party
--- Frames" (an independent single tick, which stays INLINE wearing the band
--- skin).
+-- Frames" (an independent single tick, which becomes a CONTROL ROW -- the same
+-- plate carrying the setting itself instead of a way in to a group of them).
 --
 -- ☠ THE SPLIT IS THE WHOLE RISK THIS FILE COVERS. Classic still builds ONE box
 -- with all six controls in their original order; it does it by mounting the two
 -- builders into the same group, one after the other. If either builder drifts,
 -- or if the classic arm stops mounting both, classic silently loses controls --
 -- so the census below is taken from the PRE-CHANGE source and both builders are
--- checked for being declared once and mounted twice.
+-- checked against it.
+--
+-- ⚠ AND THE SECOND BUILDER IS NOW CLASSIC'S ALONE. A control row is not a
+-- checkbox in a group, so the popout arm binds the same key directly rather than
+-- mounting BuildHideSelfGroup. What stops the two arms drifting is that the
+-- secure apply they share is ONE named function, guarded in section 3.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
@@ -285,9 +290,12 @@ do
 end
 
 -- ============================================================
--- 3. HIDE SELF FROM PARTY FRAMES -- the single option that stays inline
+-- 3. HIDE SELF FROM PARTY FRAMES -- the single option, and its CONTROL ROW
 -- One independent tick. It is NOT behind Solo Mode's gate and never was, which
--- is the whole reason the box was split rather than lifted whole.
+-- is the whole reason the box was split rather than lifted whole. Classic keeps
+-- it as the foot of the Frame Display box; the popout layout gives it the row
+-- plate, because one control in a 280 box beside a full-width band is the one
+-- shape a column of plates cannot absorb.
 -- ============================================================
 local HIDE_SELF = {
     { "checkbox", "Hide Self from Party Frames", "hidePlayerFrame", 30 },
@@ -298,33 +306,66 @@ do
     local body = builderBody("BuildHideSelfGroup")
     checkCensus(census(body), HIDE_SELF, "hide self")
 
+    -- ⚠ ONE MOUNT NOW, NOT TWO. The builder is the CLASSIC box's; the popout arm
+    -- binds the same key on a control row instead, because a control row is not a
+    -- checkbox in a group and cannot be built through a group builder.
     local calls = 0
     for _ in PAGE:gmatch("BuildHideSelfGroup%(") do calls = calls + 1 end
-    eq(calls, 3, "hide self: declared once, mounted twice -- the classic box and the inline box")
+    eq(calls, 2, "hide self: declared once, mounted once -- the classic box")
 
-    -- ☠ THE SECURE WRITE IS UNTOUCHED AND STILL COMBAT-GATED.
-    check(body:find("if not InCombatLockdown() and DF.partyHeader then", 1, true) ~= nil,
-          "hide self: the secure attribute write is still gated on combat")
-    check(body:find('DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)', 1, true) ~= nil,
-          "hide self: ...and writes the same attribute it always did")
-    check(body:find("DF:ApplyHeaderSettings()", 1, true) ~= nil
-      and body:find("DF:UpdateAllFrames()", 1, true) ~= nil,
-          "hide self: ...followed by the same two refreshes")
+    -- ☠ THE SECURE WRITE IS UNTOUCHED AND STILL COMBAT-GATED -- and it is now
+    -- NAMED at page scope, because BOTH layouts drive it. A second copy of a body
+    -- that writes a secure attribute is exactly the duplication "verbatim" exists
+    -- to prevent, so the guard moved to the one copy rather than being dropped.
+    local apply = PAGE:match("local function ApplyHideSelf%(%)(.-)\n        end")
+    check(apply ~= nil, "hide self: the apply is a named function at page scope")
+    if apply then
+        check(apply:find("if not InCombatLockdown() and DF.partyHeader then", 1, true) ~= nil,
+              "hide self: the secure attribute write is still gated on combat")
+        check(apply:find('DF.partyHeader:SetAttribute("showPlayer", not db.hidePlayerFrame)', 1, true) ~= nil,
+              "hide self: ...and writes the same attribute it always did")
+        check(apply:find("DF:ApplyHeaderSettings()", 1, true) ~= nil
+          and apply:find("DF:UpdateAllFrames()", 1, true) ~= nil,
+              "hide self: ...followed by the same two refreshes")
+    end
+    check(body:find('"hidePlayerFrame", ApplyHideSelf)', 1, true) ~= nil,
+          "hide self: the classic tick runs that one copy")
     check(body:find('hidePlayer.tooltip = L["Removes your player frame from the DandersFrames party display."]', 1, true) ~= nil,
           "hide self: the tooltip rode along")
 
-    -- It is NOT a row: no popout is declared for it.
-    check(PAGE:find('label%s*=%s*L%["Hide Self from Party Frames"%]') == nil,
+    -- ---- the control row ----------------------------------------------
+    -- It is still NOT a popout row: a pane holding one checkbox is a click that
+    -- buys nothing.
+    check(PAGE:find('GUI:CreatePopoutRow(self.child, {\n                label    = L["Hide Self from Party Frames"]', 1, true) == nil,
           "hide self: no popout row -- a pane holding one checkbox is a click that buys nothing")
+    check(PAGE:find('label     = L["Hide Self from Party Frames"],\n                kind      = "checkbox"', 1, true) ~= nil,
+          "control row: it is a checkbox control row, named by the tick's own caption")
+    check(PAGE:find("hideSelfBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+          "control row: ...in a chromeless band at the width the layout pass will give it")
+    check(PAGE:find("hideSelfBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
+          "control row: ...mounted into that band")
+    -- ⚠ NO BAND HEADER. "Frame Display" named a box of six controls; five left,
+    -- and this page carries no band headers at all.
+    check(PAGE:find("hideSelfBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
+          "control row: ...and no header, because the row's own label names it")
+    -- The three things the box's tick carried, carried through the binding.
+    check(PAGE:find('key       = "hidePlayerFrame",\n                onChanged = ApplyHideSelf,', 1, true) ~= nil,
+          "control row: the key and the secure apply ride the row's binding")
+    check(PAGE:find('hideOn    = function() return GUI.SelectedMode == "raid" end,', 1, true) ~= nil,
+          "control row: ...the child's own hideOn becomes the ROW's, so the slot collapses")
+    check(PAGE:find('tooltip   = L["Removes your player frame from the DandersFrames party display."],', 1, true) ~= nil,
+          "control row: ...and the tick's sentence rides along, on the plate's own hover")
+    check(PAGE:find('tools.RegisterControlRow(hideSelfRow, "checkbox", "hidePlayerFrame")', 1, true) ~= nil,
+          "control row: ...and it reaches search through the shared verb")
 end
 
 -- ============================================================
--- 4. THE TWO BOXES, THE SKIN AND THE ADD ORDER
+-- 4. THE ONE BOX, THE TWO BANDS AND THE ADD ORDER
 -- Classic builds one bare 280 box and mounts both builders into it. The popout
--- layout builds the band, then keeps what is left of Frame Display as an inline
--- box wearing the band skin.
+-- layout builds two full-width bands instead -- Solo Mode's feature row, then
+-- Hide Self's control row -- so nothing is left standing in a column.
 -- ============================================================
-print("-- Visibility page: the boxes, the skin and the page's own order")
+print("-- Visibility page: the box, the bands and the page's own order")
 do
     -- ---- classic: ONE bare box, both builders, its own header ---------
     local bare = 0
@@ -333,35 +374,36 @@ do
     check(PAGE:find('local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280)\n            frameDisplayGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Display"]), 40)', 1, true) ~= nil,
           "boxes: the classic box is built with the header it always had")
 
-    -- ---- popout: the inline box, wearing the skin --------------------
-    check(PAGE:find("local frameDisplayGroup = GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)", 1, true) ~= nil,
-          "boxes: what is left of Frame Display stays inline and wears the band skin")
-    -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL. One shared table off the tools.
+    -- ---- popout: nothing is left mounted at a column's 280 ------------
+    check(PAGE:find("GUI:CreateSettingsGroup(self.child, 280, tools.INLINE_BOX)", 1, true) == nil,
+          "boxes: no stay-inline 280 box is left beside the bands")
+    check(PAGE:find("INLINE_BOX", 1, true) == nil,
+          "boxes: ...and the page no longer asks for the band skin at all")
+    -- ⚠ THE FLAG WAS NEVER WRITTEN AS A LITERAL EITHER.
     check(PAGE:find("bandStyle", 1, true) == nil,
-          "boxes: the skin is taken from the tools, never restated as a literal")
-    -- Both boxes keep the same header, because it is the same group.
+          "boxes: the skin was never restated as a literal")
+    -- The title belongs to the BOX, so only classic still says it.
     local headers = 0
     for _ in PAGE:gmatch('GUI:CreateHeader%(self%.child, L%["Frame Display"%]%)') do headers = headers + 1 end
-    eq(headers, 2, "boxes: both layouts head the box with L[\"Frame Display\"] -- no new locale string")
+    eq(headers, 1, "boxes: only the classic box is headed L[\"Frame Display\"], because only it is a box")
 
     -- ---- the Add order -----------------------------------------------
-    -- ☠ THE BAND FIRST. Add's "both" is a sync point, so a full-width band
-    -- dropped in below a lone column box would leave a hole beside it.
+    -- Two full-width bands in reading order. With nothing left in a column there
+    -- is no flow to unbalance, so the sync-point hole that used to force the band
+    -- above the lone column box cannot arise.
     local band = PAGE:find('Add(soloBand, nil, "both")', 1, true)
-    check(band ~= nil, "order: the band spans both columns")
-    local lastBox, at = nil, 1
-    while true do
-        local s = PAGE:find("Add(frameDisplayGroup, nil, 1)", at, true)
-        if not s then break end
-        lastBox, at = s, s + 1
-    end
-    check(lastBox ~= nil and band ~= nil and band < lastBox,
-          "order: ...and comes before the inline box, so nothing is left holed")
+    local hide = PAGE:find('Add(hideSelfBand, nil, "both")', 1, true)
+    check(band ~= nil, "order: the Solo Mode band spans both columns")
+    check(hide ~= nil and band ~= nil and band < hide,
+          "order: ...and the Hide Self band spans them too, under it")
     -- The classic box keeps column 1, which is the one thing this pass was not
     -- allowed to move.
     local firstBox = PAGE:find("Add(frameDisplayGroup, nil, 1)", 1, true)
     check(firstBox ~= nil and firstBox < band,
           "order: the classic branch still adds its box to column 1")
+    local col1 = 0
+    for _ in PAGE:gmatch("Add%(frameDisplayGroup, nil, 1%)") do col1 = col1 + 1 end
+    eq(col1, 1, "order: ...exactly once, because only classic builds it")
 
     -- ---- the page's own furniture is untouched ------------------------
     check(PAGE:find('Add(CreateCopyButton(self.child, {"soloMode", "hidePlayerFrame", "restedIndicator"}, L["Visibility"], "display_visibility"), 25, 2)', 1, true) ~= nil,

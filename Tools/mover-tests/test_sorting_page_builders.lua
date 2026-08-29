@@ -5,8 +5,11 @@ local NS = ...
 -- ------------------------------------------------------------
 -- General > Sorting is the sweep's second page. Three of its five groups become
 -- popout feature rows -- Unit Frame Sorting, Role Priority, Class Priority --
--- and the two single-option groups stay inline wearing the band skin, because a
--- pane holding one dropdown is a click that buys nothing.
+-- because a pane holding one dropdown is a click that buys nothing. The other
+-- two take the shape that fits what they ARE: Self Position is one control and
+-- becomes a CONTROL ROW, FrameSort Integration is a control plus the paragraph
+-- that explains it and stays a BOX -- built at the band's width and added as a
+-- sync point, so every top-level object on the page shares two edges.
 --
 -- ☠ THE PAGE CANNOT BE BUILT HEADLESSLY. It is welded to the panel -- a real
 -- ScrollFrame, a real settings group, GUI.SelectedMode, DF.db -- so this file
@@ -375,9 +378,50 @@ do
 end
 
 -- ============================================================
--- 4. WHAT STAYED INLINE, AND WHAT THE PAGE ADDS
--- Two single-option groups keep their box and take the band skin; the combat
--- banner is not a settings group at all and is untouched.
+-- 4. FRAMESORT INTEGRATION -- the box that stayed a box
+-- Its widgets moved out into a Build<X>Group so the two arms cannot drift, the
+-- way every converted group on this page already works. Nothing about WHAT it
+-- builds changed: the census below is the pre-change inventory.
+--
+-- ⚠ THE BLURB READS AS "(none)" AND 250 HERE, and that is the census reader
+-- being literal rather than a control going missing. Its text is wrapped in
+-- `format(...)` so the L key is not the factory's second argument, and the first
+-- `), <n>)` the reader finds in that chunk is the label's WRAP WIDTH. Written
+-- down rather than papered over -- the value still pins the call.
+-- ============================================================
+local FRAMESORT = {
+    { "label",    "(none)",               "(none)",       250 },
+    { "checkbox", "Use FrameSort Addon",  "useFrameSort",  30 },
+}
+
+print("-- Sorting page: FrameSort Integration")
+do
+    checkCensus(census(builderBody("BuildFrameSortGroup")), FRAMESORT, "framesort")
+
+    local body = builderBody("BuildFrameSortGroup")
+    -- The callback is the box's own, verbatim -- it writes the key into BOTH
+    -- mode tables, tells the FrameSort module, resorts, and re-runs the page's
+    -- state passes so the sort rows hide under the takeover.
+    check(body:find("if partyDB then partyDB.useFrameSort = db.useFrameSort end", 1, true) ~= nil
+      and body:find("if raidDB then raidDB.useFrameSort = db.useFrameSort end", 1, true) ~= nil,
+          "framesort: the tick still writes both mode tables")
+    check(body:find("DF.FrameSort:OnSettingChanged()", 1, true) ~= nil,
+          "framesort: ...still tells the FrameSort module")
+    check(body:find("TriggerSortForCurrentMode()", 1, true) ~= nil,
+          "framesort: ...still resorts immediately")
+    check(body:find("self:RefreshStates()", 1, true) ~= nil,
+          "framesort: ...and still re-runs the page's state passes")
+    -- ⚠ THE PARAGRAPH KEEPS ITS 250 IN BOTH ARMS. Widening the BOX does not widen
+    -- the sentence inside it, and the pinned slot is only honest while the wrap
+    -- width it was measured at is unchanged.
+    check(body:find('"|c" .. GUI:ToneHex("caution")', 1, true) ~= nil,
+          "framesort: the experimental warning keeps its tone colour")
+end
+
+-- ============================================================
+-- 5. WHAT IS LEFT INLINE, AND WHAT THE PAGE ADDS
+-- One box that stays a box and goes full width, one control row, and the combat
+-- banner -- which is not a settings group at all and is untouched.
 -- ============================================================
 print("-- Sorting page: the stay-inline groups and the page's own order")
 do
@@ -388,20 +432,73 @@ do
     check(a ~= nil and b ~= nil and b > a, "the Sorting page builder is locatable by its own ends")
     local PAGE = SRC:sub(a or 1, b or 1)
 
-    -- ---- the skin, at both stay-inline sites and nowhere else --------
-    local sites = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools and tools%.INLINE_BOX or nil%)") do
-        sites = sites + 1
-    end
-    eq(sites, 2, "inline: exactly two groups stay inline and wear the band skin")
-    check(SRC:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "inline: FrameSort Integration is one of them")
-    check(SRC:find("local selfPosGroup = GUI:CreateSettingsGroup(self.child, 280, tools and tools.INLINE_BOX or nil)", 1, true) ~= nil,
-          "inline: ...and Self Position the other")
+    -- ---- the box that is left is FULL WIDTH -------------------------
+    -- FrameSort Integration is a tick plus its paragraph, so it cannot be a
+    -- control row -- but it stops standing in a column, which is the alignment
+    -- rule. One site, one skin, and the width comes from the tools.
+    local narrow = 0
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
+    eq(narrow, 0, "inline: no box on this page is still mounted at a column's 280")
+    check(PAGE:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)", 1, true) ~= nil,
+          "inline: FrameSort Integration is built at the band's width, wearing the band skin")
+    check(PAGE:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
+          "inline: ...and classic still builds the bare 280 box it always built")
+    check(PAGE:find('frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)', 1, true) ~= nil,
+          "inline: ...with the header it always had, in both arms")
+    local mounts = 0
+    for _ in PAGE:gmatch("BuildFrameSortGroup%(") do mounts = mounts + 1 end
+    eq(mounts, 3, "inline: declared once, mounted twice -- the classic box and the wide one")
     -- ⚠ THE FLAG IS NEVER WRITTEN AS A LITERAL ON THIS PAGE. One shared table off
-    -- the tools, so classic gets nil -- which is what "no opts" already meant.
+    -- the tools, and only in the arm where the tools exist.
     check(PAGE:find("bandStyle", 1, true) == nil,
           "inline: the skin is taken from the tools, never restated as a literal")
+
+    -- ---- Self Position is a CONTROL ROW -----------------------------
+    -- It is still NOT a popout row: a pane holding one dropdown is a click that
+    -- buys nothing.
+    check(PAGE:find('label   = L["Self Position"]', 1, true) == nil,
+          "control row: no popout row -- a pane holding one dropdown buys nothing")
+    check(PAGE:find('label     = L["Self Position"],\n                kind      = "dropdown",', 1, true) ~= nil,
+          "control row: Self Position is a dropdown control row")
+    check(PAGE:find("local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+          "control row: ...in a chromeless band at the width the layout pass will give it")
+    check(PAGE:find("selfPosBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
+          "control row: ...mounted into that band")
+    check(PAGE:find("selfPosBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
+          "control row: ...and no band header, because the row's own label names it")
+    -- ⚠ THE GROUP'S TITLE, NOT THE DROPDOWN'S CAPTION. "Position" alone does not
+    -- say whose; "Self Position" is also the section a search breadcrumb has
+    -- always printed for this key, so the words a user searches on do not move.
+    check(PAGE:find('label     = L["Position"]', 1, true) == nil,
+          "control row: ...named 'Self Position', not the bare 'Position'")
+    -- The TABLE binding, which is what keeps the override markers and the search
+    -- index addressing the same (table, key) pair the classic dropdown gave them.
+    check(PAGE:find('options   = selfPosValues,\n                db        = db,\n                key       = "sortSelfPosition",', 1, true) ~= nil,
+          "control row: the options and the TABLE binding ride the row")
+    check(PAGE:find("onChanged = ApplySelfPosition,", 1, true) ~= nil,
+          "control row: ...and the callback both layouts now share")
+    check(PAGE:find("hideOn    = HideSortOptions,", 1, true) ~= nil,
+          "control row: ...the box's hideOn becomes the ROW's, so the slot collapses")
+    check(PAGE:find("selfPosRow.disableOn = DisableSortOptions", 1, true) ~= nil,
+          "control row: ...and its disableChildrenOn becomes the row's own grey")
+    check(PAGE:find('tools.RegisterControlRow(selfPosRow, "dropdown", "sortSelfPosition")', 1, true) ~= nil,
+          "control row: ...and it reaches search through the shared verb")
+    -- ☠ ONE COPY OF THE CALLBACK, NAMED, because both layouts drive it.
+    local apply = PAGE:match("local function ApplySelfPosition%(%)(.-)\n        end")
+    check(apply ~= nil, "control row: the dropdown's callback is a named function at page scope")
+    if apply then
+        check(apply:find("TriggerSortForCurrentMode()", 1, true) ~= nil
+          and apply:find("UpdateCombatBanner()", 1, true) ~= nil,
+              "control row: ...running exactly what the inline dropdown ran")
+    end
+    -- Classic still builds the box, with the caption it always had.
+    check(PAGE:find('selfPosGroup:AddWidget(GUI:CreateDropdown(self.child, L["Position"], selfPosValues, db, "sortSelfPosition", ApplySelfPosition), 55)', 1, true) ~= nil,
+          "control row: classic keeps the box's own dropdown, captioned 'Position'")
+    check(PAGE:find('selfPosGroup:AddWidget(GUI:CreateHeader(self.child, L["Self Position"]), 40)', 1, true) ~= nil,
+          "control row: ...under the header it always had")
+    check(PAGE:find("selfPosGroup.hideOn = HideSortOptions", 1, true) ~= nil
+      and PAGE:find("selfPosGroup.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
+          "control row: ...and both of the box's own gates")
 
     -- ---- the two bands ----------------------------------------------
     check(SRC:find("sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
@@ -425,18 +522,22 @@ do
             if e.name == name and (col == nil or e.col == col) then return i end
         end
     end
-    -- The two bands span both columns; the two stay-inline boxes keep column 1
-    -- and the classic boxes keep the columns they always had.
+    -- ☠ EVERY TOP-LEVEL OBJECT IS "both" NOW, which is the alignment rule stated
+    -- as an Add: two bands, one full-width box and one control row's band, all
+    -- sync points. With no column flow left there is no hole for one to strand,
+    -- so the order below is purely the page's own reading order -- and it is the
+    -- order it always read in.
     check(indexOf("sortBand", '"both"') ~= nil, "order: the sorting band spans both columns")
     check(indexOf("priorityBand", '"both"') ~= nil, "order: ...and so does the priority band")
-    -- ☠ THE SORTING BAND IS ADDED ABOVE THE COLUMN BOXES, NOT AT THE FOOT. "both"
-    -- is a sync point (it drops both columns to the lower of the two), so a band
-    -- dropped in below the two column-1 boxes would leave a hole beside them.
-    check(indexOf("sortBand", '"both"') < indexOf("frameSortGroup", "1"),
-          "order: the sorting band comes before the column-1 boxes, so nothing is left holed")
-    check(indexOf("frameSortGroup", "1") < indexOf("selfPosGroup", "1"),
-          "order: ...and the two stay-inline boxes keep their own order")
-    check(indexOf("selfPosGroup", "1") < indexOf("priorityBand", '"both"'),
+    check(indexOf("frameSortGroup", '"both"') ~= nil, "order: ...and so does the FrameSort box")
+    check(indexOf("selfPosBand", '"both"') ~= nil, "order: ...and so does the Self Position band")
+    check(indexOf("frameSortGroup", "1") ~= nil, "order: classic still puts the FrameSort box in column 1")
+    check(indexOf("selfPosGroup", "1") ~= nil, "order: ...and the Self Position box too")
+    check(indexOf("sortBand", '"both"') < indexOf("frameSortGroup", '"both"'),
+          "order: the sorting band reads first")
+    check(indexOf("frameSortGroup", '"both"') < indexOf("selfPosBand", '"both"'),
+          "order: ...then FrameSort, then Self Position")
+    check(indexOf("selfPosBand", '"both"') < indexOf("priorityBand", '"both"'),
           "order: ...with the priority band last, which is the page's old reading order")
 
     -- The classic column assignments, unchanged -- the one thing this pass was
@@ -448,11 +549,11 @@ do
         check(indexOf(name, col) ~= nil,
               "order: the classic " .. name .. " still goes to column " .. col)
     end
-    -- Three bare 280 boxes are left, and all three are inside a classicLayout
-    -- arm: a fourth appearing outside one is the drift this counts.
+    -- Five bare 280 boxes are left, and every one of them is inside a
+    -- classicLayout arm: a sixth appearing outside one is the drift this counts.
     local bare = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280%)") do bare = bare + 1 end
-    eq(bare, 3, "order: three bare 280 boxes left, and they are the classic branch's own")
+    eq(bare, 5, "order: five bare 280 boxes left, and they are the classic branch's own")
 
     -- ---- the combat banner is untouched ------------------------------
     -- Not a settings group, so not a candidate: it is the page's own full-width
