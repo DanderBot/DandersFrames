@@ -726,6 +726,60 @@ local function buildHeaderControls(host, po, bar)
     return cb, badge
 end
 
+-- ============================================================
+-- ONE PANEL PER ROW
+-- ------------------------------------------------------------
+-- A row that already has a panel up does not get a second one, and the POOL
+-- alone cannot promise that. Pinning takes an instance OUT of the pool -- that
+-- is what pinning IS -- so a second click on the very same row found no pooled
+-- instance for the key and built a fresh one: two panels, one row, the same
+-- controls in both. Reported in-game as "if a popout is pinned, it shouldn't be
+-- able to open again as an unpinned popout. Only 1 of each popout."
+--
+-- So the question the open path asks is about the ROW, not about the key: is any
+-- LIVE instance currently bound to me. `_bound` is the set that answers it -- the
+-- same set _SyncActive walks to paint the row ACTIVE -- and `_boundRow` is what
+-- makes the answer honest: the shared instance appears in several rows' bound
+-- sets over its life and is only ABOUT one of them at a time.
+--
+-- A pinned instance wins the tie. Two live panels about one row is the state
+-- this exists to stop, so the tie is unreachable once the open path uses it --
+-- but `pairs` has no order, and a rule that has to pick has to say which.
+local function livePanel(row)
+    local pinned, loose
+    for po in pairs(row._bound) do
+        if po and not po.closed and po._boundRow == row then
+            if po.pinned then pinned = pinned or po else loose = loose or po end
+        end
+    end
+    return pinned or loose
+end
+
+-- Every UNPINNED panel this row currently has, closed -- the row is going away
+-- and a panel still docked to it, with a beam and an outline drawn on it, would
+-- be describing something that is no longer on screen.
+--
+-- PINNED ones are left, by definition: pinning is the gesture that detaches a
+-- panel from the row it came out of, and a detached panel does not care where
+-- that row went.
+--
+-- Collected before anything is closed: Close fires onClose, which reaches back
+-- into `_bound` through forgetInstance, and mutating a table mid-`pairs` is how
+-- one of two panels silently survives.
+local function closeLoosePanels(row, reason)
+    local doomed
+    for po in pairs(row._bound) do
+        if po and not po.closed and not po.pinned and po._boundRow == row then
+            doomed = doomed or {}
+            doomed[#doomed + 1] = po
+        end
+    end
+    if not doomed then return end
+    for _, po in ipairs(doomed) do
+        if not po.closed then po:Close(reason or "source") end
+    end
+end
+
 local function forgetInstance(host, po)
     local s = storeFor(host)
     if s.shared[po.key] == po then s.shared[po.key] = nil end
@@ -816,6 +870,12 @@ end
 -- Returns the row frame with .Refresh() / .refreshContent(db), :SetEnabled(bool),
 -- :SetModifiedCheck(fn), :SetActions(list), :SetAccent(c), :SetSurface(style) / :GetSurface(),
 -- :OpenPopout(), :ClosePopout(reason) and .popout.
+--
+-- :OpenPopout() on a row that ALREADY has a panel about it raises that panel
+-- instead of opening a second -- see ONE PANEL PER ROW. The row also answers the
+-- kit's layout-hidden contract (UI:NotifyLayoutHidden): whatever hides the row as
+-- part of a layout -- a section folding, a hideOn flipping -- takes the row's
+-- unpinned panels down with it.
 function UI:CreatePopoutRow(parent, opts)
     local host = self
     opts = opts or {}
@@ -1273,8 +1333,26 @@ function UI:CreatePopoutRow(parent, opts)
         -- THE WHOLE CLICK, end to end: the adopt (or the build), the pane swap,
         -- the dock and the chrome. Every other mark in this pair of files
         -- decomposes this one, so a report that shows a slow open says in the
-        -- same breath which part of it was slow.
+        -- same breath which part of it was slow. The raise below is a click too,
+        -- and is booked under the same name.
         local t0 = perfStart(host)
+        -- ALREADY OPEN ABOUT THIS ROW? Then this click means "show me that one",
+        -- not "make me another" -- see ONE PANEL PER ROW. It goes through the
+        -- same swap the ordinary open does, because the swap is what re-states
+        -- the panel (the gate, the pane's measured height, the header, the
+        -- footer's `enabled` verdicts) and every one of those may have moved
+        -- since it was last bound. What it does NOT do is create anything: no
+        -- adopt, no build, no dock, no entrance -- the panel is already all of
+        -- that. It comes to the front of the stack, and pops once so the click
+        -- reads as having done something.
+        local up = livePanel(row)
+        if up then
+            swapTo(up, row)
+            up:Raise(true)
+            row.popout = up
+            perfStop(host, "popoutrow:open", t0)
+            return row
+        end
         local po = host:CreatePopout({
             key     = row._key,
             title   = row._title,
@@ -1324,6 +1402,33 @@ function UI:CreatePopoutRow(parent, opts)
         if po and not po.closed then po:Close(reason or "api") end
         row.popout = nil
         return row
+    end
+
+    -- ☠ THE ROW WENT AWAY UNDER ITS OWN PANEL. A section folding, or a hideOn
+    -- flipping, takes the row off the page WITHOUT telling anything docked to it
+    -- -- so the panel stayed up, and with it the outline traced on the row, the
+    -- connection point and the beam. The row's slot is re-flowed the same frame,
+    -- so that outline is now a bright accent rectangle lying across whatever
+    -- moved up into the space. Reported in-game as "if a collapsible section
+    -- collapses when something is popped out, it leaves a highlight overlapping
+    -- other parts of the settings".
+    --
+    -- This is the kit's LAYOUT-HIDDEN contract (see UI:NotifyLayoutHidden in
+    -- Sections.lua): whatever hides a widget as part of a layout says so, and the
+    -- widget decides what that means. For a row it means every UNPINNED panel it
+    -- has open closes -- a pinned one is detached by definition and stays.
+    --
+    -- The chrome comes down INSTANTLY rather than fading with the panel: the
+    -- thing it was drawn on has already gone, so a 0.15s fade would be exactly
+    -- the stray highlight this is here to remove, just briefer.
+    row._OnLayoutHidden = function()
+        for po in pairs(row._bound) do
+            if po and not po.closed and not po.pinned and po._boundRow == row
+               and po.HideChrome then
+                po:HideChrome()
+            end
+        end
+        closeLoosePanels(row, "source")
     end
 
     -- Re-tint the row AND whatever it currently has open -- a pinned panel this
