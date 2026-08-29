@@ -3406,8 +3406,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     BuildPage(pageMissingBuffs, function(self, db, Add, AddSpace, AddSyncPoint)
         -- Copy button at top
         Add(CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs"), 25, 2)
-        
-        
+
+
         -- Dependent controls GREY OUT (disabled-in-place) when the feature is off.
         local function HideMissingBuffOptions(d)
             return not d.missingBuffIconEnabled
@@ -3429,105 +3429,432 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if DF.UpdateAllMissingBuffIcons then DF:UpdateAllMissingBuffIcons() end
         end
 
+        -- What the Settings group's two remaining ticks cost between them: the
+        -- strip's own drive, and the buff row's, because Hide Raid Buffs from Buff
+        -- Bar is a candidate filter on the OTHER row.
+        local function ApplyMissingSettings()
+            refreshMissing()
+            DF:UpdateAllAuras()
+        end
+
         local anchorOptions = {
             ["TOPLEFT"]= L["Top Left"], ["TOP"]= L["Top"], ["TOPRIGHT"]= L["Top Right"],
             ["LEFT"]= L["Left"], ["CENTER"]= L["Center"], ["RIGHT"]= L["Right"],
             ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOM"]= L["Bottom"], ["BOTTOMRIGHT"]= L["Bottom Right"],
         }
-        
-        -- ===== SETTINGS GROUP (Column 1) =====
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows icon when party members are missing raid buffs."], 250), 30)
-        -- 12.1 (factory path): the read-free widget works in combat + Mythic+ and
-        -- shows EVERY tracked-and-missing buff (the legacy "first missing only"
-        -- priority pick needed a cross-aura read). Legacy path keeps the caveat.
-        local mbOwns = DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db)
-        local mPlusWarn = GUI:CreateInfoBanner(self.child, { tone = mbOwns and "info" or "caution" })
-        mPlusWarn:SetText(mbOwns
-            and L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."]
-            or L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."])
-        settingsGroup:AddWidget(mPlusWarn, 60)
-        local missingBuffEnable = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Missing Buff Icon"], db, "missingBuffIconEnabled", function()
-            self:RefreshStates()
-            refreshMissing()
-        end), 30)
-        missingBuffEnable.keepEnabled = true
-        settingsGroup.disableChildrenOn = HideMissingBuffOptions
-        local mbAutoDetect = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Auto-detect (your class's buff)"], db, "missingBuffClassDetection", function()
-            self:RefreshStates()
-            refreshMissing()
-        end), 30)
-        mbAutoDetect.tooltip = L["Watches whichever raid buff your own class provides, and follows you when you change character. Turn it off to pick the buffs to watch by hand below."]
-        local mbHideFromBar = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Raid Buffs from Buff Bar"], db, "missingBuffHideFromBar", function()
-            -- Factory: the exclusion is a structural candidate-filter on the BUFF row —
-            -- refreshMissing's InvalidateAuraLayout re-drives it (sig change -> Rebuild).
-            refreshMissing()
-            DF:UpdateAllAuras()
-        end), 30)
-        mbHideFromBar.tooltip = L["Stops the raid buffs tracked here from also taking up a slot in the normal buff row, so the missing-buff icon is the only place they appear."]
-        -- (No Debug Mode checkbox: its trace narrated the legacy UnitHasBuff scan, which
-        -- never runs on the read-free 12.1 widget -- presence is never known to Lua, so
-        -- there is nothing to print. Removed 2026-07-25 as its own comment long proposed.)
-        Add(settingsGroup, nil, 1)
-        
-        -- ===== BUFFS TO CHECK GROUP (Column 1) =====
-        local buffsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        buffsGroup:AddWidget(GUI:CreateHeader(self.child, L["Buffs to Check (Manual Mode)"]), 40)
-        buffsGroup:AddWidget(GUI:CreateLabel(self.child, L["When auto-detect is OFF, select which raid buffs to monitor manually."], 250), 35)
-        buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Arcane Intellect (Mage)"], db, "missingBuffCheckIntellect", function()
-            refreshMissing()
-        end), 30)
-        buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Power Word: Fortitude (Priest)"], db, "missingBuffCheckStamina", function()
-            refreshMissing()
-        end), 30)
-        buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Battle Shout (Warrior)"], db, "missingBuffCheckAttackPower", function()
-            refreshMissing()
-        end), 30)
-        buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Mark of the Wild (Druid)"], db, "missingBuffCheckVersatility", function()
-            refreshMissing()
-        end), 30)
-        buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Skyfury (Shaman)"], db, "missingBuffCheckSkyfury", function()
-            refreshMissing()
-        end), 30)
-        buffsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Blessing of the Bronze (Evoker)"], db, "missingBuffCheckBronze", function()
-            refreshMissing()
-        end), 30)
-        buffsGroup.hideOn = HideManualBuffVariant
-        buffsGroup.disableChildrenOn = HideMissingBuffOptions
-        Add(buffsGroup, nil, 1)
-        
-        -- ===== APPEARANCE GROUP (Column 2) =====
-        local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
-        appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-        appearanceGroup.disableChildrenOn = HideMissingBuffOptions
-        appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 12, 48, 1, db, "missingBuffIconSize", function()
-            refreshMissing()
-        end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
-        appearanceGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 3.0, 0.1, db, "missingBuffIconScale", function()
-            refreshMissing()
-        end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
-        appearanceGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "missingBuffIconFrameLevel", function()
-            refreshMissing()
-        end, function() DF:LightweightUpdateFrameLevel("missingBuff") end, true)), 55)
-        Add(appearanceGroup, nil, 2)
-        
-        -- ===== POSITION GROUP (Column 1) =====
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-        positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-        positionGroup.disableChildrenOn = HideMissingBuffOptions
-        positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "missingBuffIconAnchor", function()
-            refreshMissing()
-        end), 55)
-        positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "missingBuffIconX", function()
-            refreshMissing()
-        end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
-        positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "missingBuffIconY", function()
-            refreshMissing()
-        end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
-        Add(positionGroup, nil, 1)
-        
-        -- ===== BORDER GROUP (Column 2) =====
+
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: five 280 boxes in two columns, in
+        -- the columns and the order they have always had.
+        --
+        -- POPOUT turns all five into feature rows in two bands:
+        --
+        --   "Content"   Settings and Buffs to Check (Manual Mode) -- whether the
+        --               icon exists at all, and which raid buffs it is watching.
+        --   "Icon"      Appearance, Position, Border -- how big the icon is, where
+        --               it sits and what rings it.
+        --
+        -- Both band headers are locale strings the page already ships, and neither
+        -- can strand: the Content band's first row carries the page's own gate and
+        -- is never hidden, and none of the Icon band's three can hide either.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box it
+        -- always built -- test_missingbuffs_page_builders.lua pins the inventory of
+        -- each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which is
+        -- what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        local contentBand, iconBand
+        if tools then
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
+            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
+        end
+
+        -- ☠ THE PAGE GATE, ON THE ROWS. Enable Missing Buff Icon greys every group
+        -- it greyed in classic -- all four of the others, which is every box on the
+        -- page bar the one carrying the tick itself.
+        --
+        -- ⚠ THE SETTINGS ROW IS THE EXCEPTION, for the Buff Bar's reason: it holds
+        -- the gate's own tick, so greying it would leave no way to switch the icon
+        -- back on.
+        local function MissingOffRow(d) return not (d or db).missingBuffIconEnabled end
+
+        -- ☠ AND THE GROUP GATE SKIPS CHILD ONE, WHICH IN A PANE IS NOT A HEADER.
+        -- DandersUI Sections' RefreshChildStates greys every child a
+        -- disableChildrenOn covers EXCEPT index 1 -- correct for a page box, whose
+        -- first child is always the header, and wrong for a popout pane, which has
+        -- no header at all. The Pet Frames / Resource Bar / Buff Bar answer,
+        -- verbatim: composed with whatever predicate the widget already carries and
+        -- applied at the MOUNT rather than inside the builder.
+        --
+        -- Only the three panes that OPEN ON A GATED CONTROL need it. Settings and
+        -- Buffs to Check both open on a label, which has nothing to grey.
+        local function GatePaneFirstChild(group)
+            local entry = group and group.groupChildren and group.groupChildren[1]
+            local w = entry and entry.widget
+            if not w then return end
+            local prev = w.disableOn
+            w.disableOn = function(d) return MissingOffRow(d) or (prev and prev(d)) or false end
+        end
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- ===== SETTINGS (a 280 box in column 1 in classic, the Content band's
+        -- first row) =====
+        -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
+        -- rather than three control rows: a control row carries a SETTING rather
+        -- than a group, so it can offer neither the group's Reset Group nor the
+        -- tick that says the group has been touched -- and the page gate would then
+        -- belong to no row at all.
+        local function BuildMissingSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, L["Shows icon when party members are missing raid buffs."], 250), 30)
+            -- 12.1 (factory path): the read-free widget works in combat + Mythic+ and
+            -- shows EVERY tracked-and-missing buff (the legacy "first missing only"
+            -- priority pick needed a cross-aura read). Legacy path keeps the caveat.
+            local mbOwns = DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db)
+            local mPlusWarn = GUI:CreateInfoBanner(parent, { tone = mbOwns and "info" or "caution" })
+            mPlusWarn:SetText(mbOwns
+                and L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."]
+                or L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."])
+            group:AddWidget(mPlusWarn, 60)
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the page's only on/off control.
+            if not tools2.hoistToggle then
+                local missingBuffEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Missing Buff Icon"], db, "missingBuffIconEnabled", function()
+                    tools2.refreshStates()
+                    refreshMissing()
+                end), 30)
+                missingBuffEnable.keepEnabled = true
+            end
+            group.disableChildrenOn = HideMissingBuffOptions
+            local mbAutoDetect = group:AddWidget(GUI:CreateCheckbox(parent, L["Auto-detect (your class's buff)"], db, "missingBuffClassDetection", function()
+                -- ⚠ THIS ONE MOVES ANOTHER ROW. Auto-detect is the variant gate on
+                -- Buffs to Check, so the state pass is what makes that row appear and
+                -- disappear -- exactly as it made the box do it, and through the same
+                -- page-level pass either way.
+                tools2.refreshStates()
+                refreshMissing()
+            end), 30)
+            mbAutoDetect.tooltip = L["Watches whichever raid buff your own class provides, and follows you when you change character. Turn it off to pick the buffs to watch by hand below."]
+            local mbHideFromBar = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Raid Buffs from Buff Bar"], db, "missingBuffHideFromBar", function()
+                -- Factory: the exclusion is a structural candidate-filter on the BUFF row —
+                -- refreshMissing's InvalidateAuraLayout re-drives it (sig change -> Rebuild).
+                refreshMissing()
+                DF:UpdateAllAuras()
+            end), 30)
+            mbHideFromBar.tooltip = L["Stops the raid buffs tracked here from also taking up a slot in the normal buff row, so the missing-buff icon is the only place they appear."]
+            -- (No Debug Mode checkbox: its trace narrated the legacy UnitHasBuff scan, which
+            -- never runs on the read-free 12.1 widget -- presence is never known to Lua, so
+            -- there is nothing to print. Removed 2026-07-25 as its own comment long proposed.)
+        end
+
+        -- The two ticks the row does not carry, in their own words. Silent while
+        -- neither is on, which is the shipped profile.
+        local function MissingSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            if d.missingBuffClassDetection then parts[#parts + 1] = L["Auto-detect (your class's buff)"] end
+            if d.missingBuffHideFromBar then parts[#parts + 1] = L["Hide Raid Buffs from Buff Bar"] end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+            BuildMissingSettingsGroup({
+                group = settingsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(settingsGroup, nil, 1)
+        else
+            -- Four: the blurb, the client-capability banner, Auto-detect and Hide
+            -- Raid Buffs from Buff Bar. The Enable tick is HOISTED onto the row.
+            local MISSING_SETTINGS_COUNT = 4
+
+            -- What the suppressed Enable checkbox ran, plus a repaint of every pane
+            -- standing open -- four of which grey with it. Never a page rebuild:
+            -- that would retire the row being clicked through.
+            local function OnMissingEnableToggle()
+                self:RefreshStates()
+                refreshMissing()
+                tools.ReflowMounted()
+            end
+
+            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildMissingSettingsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Settings"],
+                db       = tools.RowDB,
+                toggle   = { key = "missingBuffIconEnabled" },
+                summary  = MissingSettingsSummary,
+                count    = MISSING_SETTINGS_COUNT,
+                onToggle = OnMissingEnableToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = settingsMount,
+            }))
+            tools.ClaimKeys(settingsRow, settingsContent)
+            tools.WireModifiedTick(settingsRow)
+            tools.WireFooter(settingsRow, ApplyMissingSettings)
+            tools.RegisterHoistedToggle(settingsRow, L["Enable Missing Buff Icon"], "missingBuffIconEnabled", OnMissingEnableToggle)
+        end
+
+        -- ===== BUFFS TO CHECK (MANUAL MODE) (a 280 box in column 1 in classic, the
+        -- Content band's second row) =====
+        -- ☠ A WAY IN, NOT A STRUCTURAL SKIP. This looks like a spell list and is
+        -- not one: it is a FIXED, SHIPPED CATALOG of six raid buffs behind six
+        -- boolean profile keys, with nothing to add and nothing to remove -- the
+        -- Debuff Blacklist's verdict, for the same reason. Nothing here rebuilds
+        -- the page, so the pane is clean.
+        --
+        -- ☠ AND THE ROW HIDES WITH THE BOX. The variant gate is auto-detect: with
+        -- it on there is nothing to pick by hand, so the row collapses out of the
+        -- band exactly as the box collapsed out of the column.
+        local function BuildMissingBuffsToCheckGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group:AddWidget(GUI:CreateLabel(parent, L["When auto-detect is OFF, select which raid buffs to monitor manually."], 250), 35)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Arcane Intellect (Mage)"], db, "missingBuffCheckIntellect", function()
+                refreshMissing()
+            end), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Power Word: Fortitude (Priest)"], db, "missingBuffCheckStamina", function()
+                refreshMissing()
+            end), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Battle Shout (Warrior)"], db, "missingBuffCheckAttackPower", function()
+                refreshMissing()
+            end), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Mark of the Wild (Druid)"], db, "missingBuffCheckVersatility", function()
+                refreshMissing()
+            end), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Skyfury (Shaman)"], db, "missingBuffCheckSkyfury", function()
+                refreshMissing()
+            end), 30)
+            group:AddWidget(GUI:CreateCheckbox(parent, L["Blessing of the Bronze (Evoker)"], db, "missingBuffCheckBronze", function()
+                refreshMissing()
+            end), 30)
+            group.disableChildrenOn = HideMissingBuffOptions
+        end
+
+        -- ⚠ THE KEYS ARE NAMED ONCE, FOR THE SUMMARY ONLY. The six checkboxes stay
+        -- spelled out above rather than looping this table: the census is of what
+        -- the classic box built, and a loop would collapse six calls into one. The
+        -- test asserts every key here appears in the builder, so the pair cannot
+        -- drift apart silently.
+        local MISSING_BUFF_KEYS = {
+            "missingBuffCheckIntellect", "missingBuffCheckStamina",
+            "missingBuffCheckAttackPower", "missingBuffCheckVersatility",
+            "missingBuffCheckSkyfury", "missingBuffCheckBronze",
+        }
+
+        -- How much of the catalog is switched on, in the "3/6" shape the filter
+        -- rows on the two bar pages use.
+        local function MissingBuffsToCheckSummary(d)
+            if not d then return "" end
+            local on = 0
+            for _, k in ipairs(MISSING_BUFF_KEYS) do
+                if d[k] then on = on + 1 end
+            end
+            return format("%d/%d", on, #MISSING_BUFF_KEYS)
+        end
+
+        if classicLayout then
+            local buffsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            buffsGroup:AddWidget(GUI:CreateHeader(self.child, L["Buffs to Check (Manual Mode)"]), 40)
+            BuildMissingBuffsToCheckGroup({
+                group = buffsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            buffsGroup.hideOn = HideManualBuffVariant
+            Add(buffsGroup, nil, 1)
+        else
+            -- Seven: the caption and the six raid buffs.
+            local MISSING_BUFFS_COUNT = 7
+
+            local buffsMount, buffsContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildMissingBuffsToCheckGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+            end)
+            local buffsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Buffs to Check (Manual Mode)"],
+                db      = tools.RowDB,
+                summary = MissingBuffsToCheckSummary,
+                count   = MISSING_BUFFS_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = buffsMount,
+            }))
+            -- The box's own variant gate becomes the ROW's, so the band collapses
+            -- the slot instead of drawing a plate for a list auto-detect has taken
+            -- over.
+            buffsRow.hideOn = HideManualBuffVariant
+            tools.ClaimKeys(buffsRow, buffsContent)
+            tools.WireModifiedTick(buffsRow)
+            -- ⚠ A FOOTER IS SAFE HERE, and that is a decision about the KEYS rather
+            -- than the shape. All six are plain booleans in the profile, so Reset
+            -- Group writes VALUES -- there is no table for it to replace and nothing
+            -- downstream holding a reference to one. (The Buff Bar's filter row
+            -- refused a footer for exactly the opposite reason.)
+            tools.WireFooter(buffsRow, refreshMissing)
+            buffsRow.disableOn = MissingOffRow
+        end
+
+        -- ===== APPEARANCE (a 280 box in column 2 in classic, the Icon band's first
+        -- row) =====
+        local function BuildMissingAppearanceGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = HideMissingBuffOptions
+            group:AddWidget(GUI:CreateSlider(parent, L["Icon Size"], 12, 48, 1, db, "missingBuffIconSize", function()
+                refreshMissing()
+            end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.1, db, "missingBuffIconScale", function()
+                refreshMissing()
+            end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
+            group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "missingBuffIconFrameLevel", function()
+                refreshMissing()
+            end, function() DF:LightweightUpdateFrameLevel("missingBuff") end, true)), 55)
+        end
+
+        -- Pixels first, then the multiplier, and the multiplier only while it is
+        -- doing something -- a row reading "Scale 1.00" on every default profile is
+        -- noise (the Buff Bar's appearance rule). Frame Level is left out: it is a
+        -- stacking-order fix, not a look.
+        local function MissingAppearanceSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.missingBuffIconSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local scale = tonumber(d.missingBuffIconScale)
+            if scale and scale ~= 1 then parts[#parts + 1] = format("%s %.2f", L["Scale"], scale) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
+            appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+            BuildMissingAppearanceGroup({
+                group = appearanceGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(appearanceGroup, nil, 2)
+        else
+            -- Three: size, scale and the frame level.
+            local MISSING_APPEARANCE_COUNT = 3
+
+            local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildMissingAppearanceGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Appearance"],
+                db      = tools.RowDB,
+                summary = MissingAppearanceSummary,
+                count   = MISSING_APPEARANCE_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = appearanceMount,
+            }))
+            tools.ClaimKeys(appearanceRow, appearanceContent)
+            tools.WireModifiedTick(appearanceRow)
+            tools.WireFooter(appearanceRow, refreshMissing)
+            appearanceRow.disableOn = MissingOffRow
+        end
+
+        -- ===== POSITION (a 280 box in column 1 in classic, the Icon band's second
+        -- row) =====
+        local function BuildMissingPositionGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            group.disableChildrenOn = HideMissingBuffOptions
+            group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, db, "missingBuffIconAnchor", function()
+                refreshMissing()
+            end), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -150, 150, 1, db, "missingBuffIconX", function()
+                refreshMissing()
+            end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
+            group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, db, "missingBuffIconY", function()
+                refreshMissing()
+            end, function() DF:LightweightUpdateMissingBuff() end, true), 55)
+        end
+
+        local function MissingPositionSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local anchor = anchorOptions[d.missingBuffIconAnchor]
+            if anchor then parts[#parts + 1] = anchor end
+            local x, y = tonumber(d.missingBuffIconX) or 0, tonumber(d.missingBuffIconY) or 0
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
+            positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
+            BuildMissingPositionGroup({
+                group = positionGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(positionGroup, nil, 1)
+        else
+            -- Three: the anchor and the two offsets.
+            local MISSING_POSITION_COUNT = 3
+
+            local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildMissingPositionGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label   = L["Position"],
+                db      = tools.RowDB,
+                summary = MissingPositionSummary,
+                count   = MISSING_POSITION_COUNT,
+                window  = DF.GUIFrame,
+                clipTo  = self,
+                build   = positionMount,
+            }))
+            tools.ClaimKeys(positionRow, positionContent)
+            tools.WireModifiedTick(positionRow)
+            tools.WireFooter(positionRow, refreshMissing)
+            positionRow.disableOn = MissingOffRow
+        end
+
+        -- ===== BORDER (a 280 box in column 2 in classic, the Icon band's third
+        -- row) =====
         -- Stage 4.1: hand-rolled border block replaced by the unified helper.
         -- include set tailored for a "needs attention" alert: alpha / inset /
         -- offset / blendMode / gradient / shadow / animate (matches the
@@ -3535,25 +3862,107 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Class/Role colour offered too: the missing-buff icon sits on a unit
         -- frame, so its border can communicate WHOSE buff is missing at a glance.
         -- Skipped: colour-by-time / colour-by-type (no aura-state context here).
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        GUI:CreateBorderControls(borderGroup, db, "missingBuffIcon", {
-            parent       = self.child,
-            include      = { alpha = true, inset = true, offset = true, blendMode = true,
-                             gradient = true, shadow = true, animate = true,
-                             classColor = true, roleColor = true },
-            fullUpdate   = function() refreshMissing() end,
-            lightUpdate  = function() DF:LightweightUpdateMissingBuff() end,
-            lightColors  = function() DF:LightweightUpdateMissingBuffBorderColor() end,
-            refreshStates = function() self:RefreshStates() end,
-            sizeMin = 0, sizeMax = 6, sizeStep = 1,  -- 0 = animation-only (no solid edge)
-        })
-        -- No hideWhen: the group gate below is what handles the feature being
-        -- off, and it GREYS like every other box on this page. (This call used to
-        -- pass both, so the controls vanished before the grey could show.)
-        borderGroup.disableChildrenOn = HideMissingBuffOptions
-        Add(borderGroup, nil, 2)
-        
+        --
+        -- ⚠ noShowToggle IS THE HOIST -- the Pet Frames / Resource Bar / Buff Bar
+        -- border row's move, verbatim. With it the built-in Show Border checkbox is
+        -- not built and the row carries that tick instead; the show key is still
+        -- read, so it still greys the other thirty-one exactly as before.
+        local function BuildMissingBorderGroup(tools2)
+            GUI:CreateBorderControls(tools2.group, db, "missingBuffIcon", {
+                parent       = tools2.parent,
+                include      = { alpha = true, inset = true, offset = true, blendMode = true,
+                                 gradient = true, shadow = true, animate = true,
+                                 classColor = true, roleColor = true },
+                fullUpdate   = function() refreshMissing() end,
+                lightUpdate  = function() DF:LightweightUpdateMissingBuff() end,
+                lightColors  = function() DF:LightweightUpdateMissingBuffBorderColor() end,
+                refreshStates = tools2.refreshStates,
+                sizeMin = 0, sizeMax = 6, sizeStep = 1,  -- 0 = animation-only (no solid edge)
+                noShowToggle = tools2.hoistToggle or nil,
+            })
+            -- No hideWhen: the group gate below is what handles the feature being
+            -- off, and it GREYS like every other box on this page. (This call used to
+            -- pass both, so the controls vanished before the grey could show.)
+            tools2.group.disableChildrenOn = HideMissingBuffOptions
+        end
+
+        -- The Buff Bar's border summary, unchanged: thickness in pixels, the style
+        -- word, and the alpha only when it is doing something.
+        local function MissingBorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.missingBuffIconBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local style = d.missingBuffIconBorderStyle
+            parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                             or (style == "TEXTURE" and L["Texture"])
+                             or L["Solid"]
+            local c = d.missingBuffIconBorderColor
+            local a = type(c) == "table" and tonumber(c.a) or nil
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            BuildMissingBorderGroup({
+                group = borderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(borderGroup, nil, 2)
+        else
+            -- Thirty-one: the thirty-two CreateBorderControls builds for this
+            -- include set -- the widest one in the addon, animation and a colour
+            -- source included -- less the hoisted Show Border.
+            local MISSING_BORDER_COUNT = 31
+
+            -- What the suppressed Show Border checkbox ran, and never a page
+            -- rebuild: that would retire every widget on the page including the row
+            -- being clicked through.
+            local function OnMissingBorderToggle()
+                self:RefreshStates()
+                refreshMissing()
+                tools.ReflowMounted()
+            end
+
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildMissingBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+                GatePaneFirstChild(group)
+            end)
+            local borderRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = tools.RowDB,
+                toggle   = { key = "missingBuffIconShowBorder" },
+                summary  = MissingBorderSummary,
+                count    = MISSING_BORDER_COUNT,
+                onToggle = OnMissingBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            tools.ClaimKeys(borderRow, borderContent)
+            tools.WireModifiedTick(borderRow)
+            tools.WireFooter(borderRow, refreshMissing)
+            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "missingBuffIconShowBorder", OnMissingBorderToggle)
+            borderRow.disableOn = MissingOffRow
+        end
+
+        -- ===== THE TWO BANDS, IN READING ORDER ============================
+        -- Added at the foot rather than in place: both bands are full width, so
+        -- there is no column flow left to unbalance and the order below is purely
+        -- the order the page reads in.
+        if not classicLayout then
+            Add(contentBand, nil, "both")
+            Add(iconBand, nil, "both")
+        end
+
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
