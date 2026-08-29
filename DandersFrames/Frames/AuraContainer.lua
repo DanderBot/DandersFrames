@@ -735,22 +735,92 @@ end
 -- (a sealed read skips silently and tries next sweep). Detection needs the player to
 -- be carrying SOME aura the failed reading matches — buffs cover a helpful-drift
 -- instantly, a harmful-drift catches on the first rez sickness / dungeon debuff.
-local parkSentinelWarned = false
-local function checkParkSentinel()
-    if parkSentinelWarned then return end
-    local pf = AuraContainer.SLOT_PARK_FILTER
-    if not pf or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
-    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, "player", pf)
-    if not ok or type(ids) ~= "table" then return end
+-- ★ GENERALIZED 2026-08-29 (Krathe: "catch this situation or something in a similar
+-- shape"): the park string is one instance of a CLASS — filter-string semantics we
+-- depend on but cannot read, which the C parser can change per build. The probe now
+-- checks every convention the codebase leans on, each with its own once-per-session
+-- latch so one drift cannot mask another:
+--   * both polarity contradictions must match NOTHING (the park string is the helpful
+--     one; the harmful twin is the same drift seen from the other side);
+--   * the PLAYER-token partition must be exact: every helpful aura is cast by the
+--     player or it is not, so |HELPFUL| = |HELPFUL,PLAYER| + |HELPFUL,!PLAYER|. This
+--     one identity guards the '!' negation machinery every dedup lattice rides — the
+--     debuff row's neg() chain, the dgroup claims, othersOnly, the dispel gap slot.
+--     All three counts are taken in one uninterrupted Lua tick, so aura churn cannot
+--     fake a violation.
+local sentinelWarned = {}
+local function auraCount(filterStr)
+    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, "player", filterStr)
+    if not ok or type(ids) ~= "table" then return nil end
     local okN, n = pcall(function() return #ids end)
-    if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return end
-    if n > 0 then
-        parkSentinelWarned = true
-        DF:DebugWarn(DBG,
-            "PARK STRING FAILED OPEN: %q matched %d aura(s) on the player — the engine's"
-            .. " parser has drifted again (this would be the THIRD convention). The CF lock"
-            .. " (maxDuration = 0) is what is keeping parked slots dark; the string needs"
-            .. " replacing, not trusting.", tostring(pf), n)
+    if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return nil end
+    return n
+end
+local function checkParkSentinel()
+    if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    local pf = AuraContainer.SLOT_PARK_FILTER
+    if pf and not sentinelWarned.park then
+        local n = auraCount(pf)
+        if n and n > 0 then
+            sentinelWarned.park = true
+            DF:DebugWarn(DBG,
+                "PARK STRING FAILED OPEN: %q matched %d aura(s) on the player — the engine's"
+                .. " parser has drifted again (this would be the THIRD convention). The CF lock"
+                .. " (maxDuration = 0) is what is keeping parked slots dark; the string needs"
+                .. " replacing, not trusting.", tostring(pf), n)
+        end
+    end
+    if not sentinelWarned.harmfulPark then
+        local n = auraCount("HARMFUL|!HARMFUL")
+        if n and n > 0 then
+            sentinelWarned.harmfulPark = true
+            DF:DebugWarn(DBG,
+                "HARMFUL-side contradiction matched %d aura(s) on the player — the polarity"
+                .. " axis has drifted (mirror of the park-string failure).", n)
+        end
+    end
+    if not sentinelWarned.partition then
+        local all = auraCount("HELPFUL")
+        local mine = auraCount("HELPFUL|PLAYER")
+        local others = auraCount("HELPFUL|!PLAYER")
+        if all and mine and others and (mine + others ~= all) then
+            sentinelWarned.partition = true
+            DF:DebugWarn(DBG,
+                "PLAYER-token partition broken: HELPFUL=%d but PLAYER=%d + !PLAYER=%d —"
+                .. " the '!' negation machinery has drifted; every negation-token dedup"
+                .. " lattice (debuff row, debuff groups, othersOnly, dispel gap) is suspect.",
+                all, mine, others)
+        end
+    end
+end
+
+-- ★ SLOT-ACCUMULATION TRIPWIRE. Add-only topology: every structural variant a slot
+-- consumer ever declares is a permanent button (AcquireSlot's park-table warning — the
+-- Frame Level and animation sliders are the known minters). Harmless in normal play and
+-- wiped by /reload, but growth should be VISIBLE in a field log, not deduced. WARNs
+-- once per owner per session when its slot count first crosses the threshold — a busy
+-- config legitimately runs ~18, so 24 means minting happened.
+local SLOT_ACCUM_WARN = 24
+local accumWarned = setmetatable({}, { __mode = "k" })
+local function checkSlotAccumulation()
+    local byOwner
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        local ow = h.owner
+        if ow and not accumWarned[ow] then
+            byOwner = byOwner or {}
+            byOwner[ow] = (byOwner[ow] or 0) + 1
+        end
+    end
+    if not byOwner then return end
+    for ow, n in pairs(byOwner) do
+        if n >= SLOT_ACCUM_WARN then
+            accumWarned[ow] = true
+            DF:DebugWarn(DBG,
+                "slot accumulation: owner %s holds %d slots — structural-edit minting"
+                .. " (one permanent button per Frame Level / animation slider value)."
+                .. " Harmless, permanent until /reload; the /df debug idgate slot audit"
+                .. " has the breakdown.", tostring(ow.unit), n)
+        end
     end
 end
 
@@ -761,6 +831,7 @@ C_Timer.NewTicker(SWEEP_INTERVAL, function()
     if AuraContainer._testMode then return end
     if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
     checkParkSentinel()
+    checkSlotAccumulation()
     if not anyLiveContainers() then return end
     AuraContainer._kickLiveParse("safety sweep")
 end)
@@ -7987,6 +8058,56 @@ function AuraContainer.DebugDumpIdentityGate()
     -- the probe block below; resolved at call time, so declaration order is fine.
     if AuraContainer.DebugGateProbeStatus then
         AuraContainer.DebugGateProbeStatus(o)
+    end
+    -- ★ SLOT AUDIT — the parked-slot leak class (2026-08-29), made visible. Presence is
+    -- secret, so "is this dark slot RENDERING" cannot be read — but every input on OUR
+    -- side of the divergence can: what we believe (parked/latched), what we last pushed
+    -- (_pushedFilter/_cfPushed), and whether the push took (_pushOK). A slot whose
+    -- believed state and pushed state disagree is the leak's precondition, findable in a
+    -- dump BEFORE a user sees debuffs in buff positions. Also counts accumulation per
+    -- owner (add-only topology: every structural variant ever seen is a permanent
+    -- button — see AcquireSlot's park-table warning; /reload clears it).
+    do
+        local total, live, parked, latched, flagged = 0, 0, 0, 0, 0
+        local byOwner = {}
+        for h in pairs(AuraContainer._slotHandles or {}) do
+            total = total + 1
+            local dark = h.parked or h._deathLatched
+            if h.parked then parked = parked + 1 end
+            if h._deathLatched then latched = latched + 1 end
+            if not dark then live = live + 1 end
+            local ow = h.owner
+            if ow then byOwner[ow] = (byOwner[ow] or 0) + 1 end
+            local why
+            if dark and h._pushedFilter ~= SLOT_PARK_FILTER then
+                why = "believed dark, engine holds " .. tostring(h._pushedFilter)
+            elseif dark and h._cfPushed ~= SLOT_PARK_CF then
+                why = "believed dark, CF lock not recorded"
+            elseif h._pushOK == false then
+                why = "last filter push REFUSED and not yet replayed"
+            end
+            if why then
+                flagged = flagged + 1
+                o:Line(("slot %s [%s]: %s%s"):format(tostring(h.key),
+                    tostring(ow and ow.unit), why,
+                    h._pendingTuning and " (replay queued)" or ""), "BAD")
+            end
+        end
+        local worst, worstN = nil, 0
+        local owners = 0
+        for ow, n in pairs(byOwner) do
+            owners = owners + 1
+            if n > worstN then worst, worstN = ow, n end
+        end
+        o:Section(("Slot audit — %d slots on %d owners: %d live, %d parked, %d death-latched, %d flagged")
+            :format(total, owners, live, parked, latched, flagged))
+        if worst and worstN >= 24 then
+            o:Line(("owner %s holds %d slots — structural-edit minting (Frame Level / animation"
+                .. " sliders); permanent until /reload"):format(tostring(worst.unit), worstN), "WARN")
+        end
+        if flagged == 0 and total > 0 then
+            o:Line("every dark slot has both locks pushed and recorded", "GOOD")
+        end
     end
     -- ★ The gate trail's tail — the dump above is NOW, the tail is WHAT LED HERE.
     -- ALWAYS captured (session ring, see GateLog): no category to enable first.
