@@ -1916,6 +1916,206 @@ do
 end
 
 -- ============================================================
+-- 14b. THE STACKING ORDER
+-- ------------------------------------------------------------
+-- "Popouts need correct Z ordering, each consecutive popout should have +1 order
+-- so the newest is always on top. If a popout is clicked and focused, that should
+-- bring it to the top. Currently when popouts overlap they seem to fight for
+-- order and all the settings overlap each other." (Danders, in-game.)
+--
+-- The old contract above is the cause: every docked popout took the SAME
+-- constant, so two panels were peers in one strata at one level and the client
+-- was free to interleave their SUBTREES -- which is what "all the settings
+-- overlap each other" is a description of.
+--
+-- A popout's level is now its PLACE in the host's docked stack, and the step
+-- between two places is a STRIDE rather than 1: a panel is not one frame (its
+-- beam is a level under it and its widgets bump themselves up to +10 above it),
+-- so each one needs a BAND of its own or the interleave comes straight back one
+-- level down.
+--
+-- Mirrors of Popout.lua's own constants, for the reason OUT_LEVEL above is
+-- mirrored: a retune should fail HERE, out loud.
+-- ============================================================
+local STACK_STRIDE = 16
+local STACK_SLOTS = 8
+-- The deepest level bump anything mounted INSIDE a panel makes off the panel's
+-- own level (Widgets.lua's tooltip bubble). The band has to clear it.
+local DEEPEST_CHILD_BUMP = 10
+
+local function slotLevel(n) return OUT_LEVEL + (n - 1) * STACK_STRIDE end
+
+print("-- popout: the newest docked panel is on top, one band at a time")
+do
+    local win = outsideWindow()
+    local a = popout({ key = "zA" }); a:Follow(outsideRow(90), { outsideOf = win })
+    local b = popout({ key = "zB" }); b:Follow(outsideRow(20), { outsideOf = win })
+    local c = popout({ key = "zC" }); c:Follow(outsideRow(-50), { outsideOf = win })
+
+    eq(a.frame:GetFrameLevel(), slotLevel(1), "z: the first panel opened takes the bottom slot")
+    eq(b.frame:GetFrameLevel(), slotLevel(2), "z: the second stands a full stride above it")
+    eq(c.frame:GetFrameLevel(), slotLevel(3), "z: and the newest is on top")
+    check(c.frame:GetFrameLevel() > b.frame:GetFrameLevel()
+          and b.frame:GetFrameLevel() > a.frame:GetFrameLevel(),
+          "z: three overlapping panels are strictly ordered, not tied")
+
+    -- ☠ THE STRIDE IS THE POINT, not the ordering. Two panels one level apart
+    -- would order their FRAMES correctly and still interleave their contents:
+    -- the lower panel's own children sit above it, and its beam sits under it.
+    -- The claim is that a whole panel -- beam at level-1, subtree up to +10 --
+    -- fits between two consecutive slots with nothing shared.
+    eq(a.beam:GetFrameLevel(), slotLevel(1) - 1, "z: each panel's beam sits just under ITS panel")
+    eq(b.beam:GetFrameLevel(), slotLevel(2) - 1, "z: ...the second one under the second")
+    eq(c.beam:GetFrameLevel(), slotLevel(3) - 1, "z: ...and the third under the third")
+    eq(a.srcOutline:GetFrameLevel(), slotLevel(1) - 1, "z: the source outline travels with its own panel too")
+    eq(c.srcOutline:GetFrameLevel(), slotLevel(3) - 1, "z: ...and so does the newest one's")
+    check(slotLevel(1) + DEEPEST_CHILD_BUMP < slotLevel(2) - 1,
+          "z: the deepest thing mounted in a panel still lands under the NEXT panel's beam")
+
+    -- Every band is in the one strata, so the levels are comparable at all.
+    eq(a.frame._flags.strata, "FULLSCREEN", "z: the stack does not change the strata contract")
+    eq(c.frame._flags.strata, "FULLSCREEN", "z: ...for any member of it")
+
+    -- CLICK TO RAISE. The panel the user reached for goes in front of the ones
+    -- they did not, and the ones above it come down a slot each rather than a
+    -- hole being left where it was.
+    a:Raise()
+    eq(a.frame:GetFrameLevel(), slotLevel(3), "z: raising the buried panel puts it on top")
+    eq(b.frame:GetFrameLevel(), slotLevel(1), "z: ...and closes the gap under it")
+    eq(c.frame:GetFrameLevel(), slotLevel(2), "z: ...with the order of the rest kept")
+    eq(a.beam:GetFrameLevel(), slotLevel(3) - 1, "z: the raised panel's beam comes up with it")
+    eq(b.beam:GetFrameLevel(), slotLevel(1) - 1, "z: and the others' beams come down with theirs")
+
+    -- Raising what is already on top is a no-op rather than a shuffle.
+    a:Raise()
+    eq(a.frame:GetFrameLevel(), slotLevel(3), "z: raising the top panel leaves it there")
+    eq(b.frame:GetFrameLevel(), slotLevel(1), "z: ...and moves nobody else")
+
+    -- CLOSING closes the gap too: the live set is always 1..n.
+    c:Close()
+    eq(b.frame:GetFrameLevel(), slotLevel(1), "z: a close under a panel leaves it where it was")
+    eq(a.frame:GetFrameLevel(), slotLevel(2), "z: ...and everything above it comes down one")
+    b:Close()
+    eq(a.frame:GetFrameLevel(), slotLevel(1), "z: the last one standing is back at the bottom slot")
+    a:Close()
+end
+
+-- ONE PANEL ON ITS OWN IS UNCHANGED, and that is what makes the whole change
+-- safe: the level a single docked popout has always had is slot 1.
+do
+    local win = outsideWindow()
+    local p = popout({ key = "zSolo" })
+    p:Follow(outsideRow(), { outsideOf = win })
+    eq(p.frame:GetFrameLevel(), OUT_LEVEL, "z: one panel alone is at exactly the old constant")
+    p:Close()
+end
+
+-- ...and a re-used (pooled) instance earns a FRESH slot from the top rather than
+-- reclaiming the place it used to hold.
+do
+    local win = outsideWindow()
+    local a = popout({ key = "zPoolA" }); a:Follow(outsideRow(90), { outsideOf = win })
+    local b = popout({ key = "zPoolB" }); b:Follow(outsideRow(20), { outsideOf = win })
+    a:Close()
+    eq(b.frame:GetFrameLevel(), slotLevel(1), "z: closing the bottom panel drops the other into its place")
+    local a2 = popout({ key = "zPoolA" })
+    check(a2 == a, "z: (the pool handed the same instance back)")
+    a2:Follow(outsideRow(90), { outsideOf = win })
+    eq(a2.frame:GetFrameLevel(), slotLevel(2), "z: re-opening it puts it on TOP, not back where it was")
+    a2:Close(); b:Close()
+end
+
+-- LEVELS STAY BOUNDED. The stack is renumbered on every push, so no amount of
+-- opening and closing can ratchet the level up -- and past the ceiling the
+-- newest share the top band rather than climbing into the window's own chrome.
+do
+    local win = outsideWindow()
+    -- Twenty opens and closes of the same key: a free-running counter would be at
+    -- slot 20 by the end of this.
+    local p
+    for _ = 1, 20 do
+        p = popout({ key = "zChurn" })
+        p:Follow(outsideRow(), { outsideOf = win })
+        p:Close()
+    end
+    p = popout({ key = "zChurn" })
+    p:Follow(outsideRow(), { outsideOf = win })
+    eq(p.frame:GetFrameLevel(), OUT_LEVEL, "z: churn cannot ratchet the level -- the set is renumbered, not counted")
+    p:Close()
+
+    -- ...and the ceiling itself, with more panels up at once than there are slots.
+    local live = {}
+    for i = 1, STACK_SLOTS + 3 do
+        local q = popout({ key = "zMany" .. i })
+        q:Follow(outsideRow(), { outsideOf = win })
+        live[#live + 1] = q
+    end
+    local top = slotLevel(STACK_SLOTS)
+    for i = 1, #live do
+        local lvl = live[i].frame:GetFrameLevel()
+        check(lvl >= OUT_LEVEL and lvl <= top,
+              "z: every panel stays inside the ladder, however many are up (#" .. i .. ")")
+    end
+    eq(live[1].frame:GetFrameLevel(), OUT_LEVEL, "z: the oldest is still at the bottom of it")
+    eq(live[#live].frame:GetFrameLevel(), top, "z: and the newest at the top of it")
+    check(top < WINDOW_TITLEBAR_LEVEL, "z: the top of the ladder is still under the window's title bar")
+    check(top + 50 < WINDOW_TITLEBAR_LEVEL,
+          "z: ...with the 50 levels of subtree headroom a panel is promised still intact")
+    for i = 1, #live do live[i]:Close() end
+end
+
+-- WHERE THE RAISE COMES FROM. A mouse-down on the panel's own background raises
+-- it; so does one on the title bar, which takes the mouse itself once pinned and
+-- would otherwise swallow the gesture. A control inside the panel is a frame of
+-- its own and consumes its own mouse-down, so it never reaches either -- which is
+-- the whole of "click-to-raise must not steal clicks from the widgets inside".
+do
+    local win = outsideWindow()
+    local a = popout({ key = "zClickA" }); a:Follow(outsideRow(90), { outsideOf = win })
+    local b = popout({ key = "zClickB" }); b:Follow(outsideRow(20), { outsideOf = win })
+    eq(a.frame:GetFrameLevel(), slotLevel(1), "click: (the first panel is the buried one)")
+
+    check(a.frame._flags.mouse, "click: the panel takes the mouse, so a click on it cannot fall through")
+    a.frame:GetScript("OnMouseDown")(a.frame)
+    eq(a.frame:GetFrameLevel(), slotLevel(2), "click: a mouse-down on the panel's background raises it")
+    eq(b.frame:GetFrameLevel(), slotLevel(1), "click: ...and the one that was on top comes down")
+
+    b.titleBar:GetScript("OnMouseDown")(b.titleBar)
+    eq(b.frame:GetFrameLevel(), slotLevel(2), "click: a mouse-down on the title bar raises it too")
+    a:Close(); b:Close()
+end
+
+-- THE MOVER'S CONTEXT KEEPS ITS BEHAVIOUR. There is no window there, so there is
+-- nothing to stack against and no order to keep: the popout's level is whatever
+-- its parent overlay put it at, exactly as before.
+do
+    local a = popout({ key = "zFreeA" })
+    local src = source(40, 40, CX - 200, CY)
+    a:Follow(src)
+    a.frame:SetFrameLevel(40)
+    a:Raise()
+    eq(a.frame:GetFrameLevel(), 40, "z: Raise is a no-op with no window to stack in")
+    local b = popout({ key = "zFreeB" })
+    b:Follow(source(40, 40, CX - 300, CY))
+    b.frame:SetFrameLevel(41)
+    eq(a.frame:GetFrameLevel(), 40, "z: ...and a second free popout does not renumber the first")
+    a:Close(); b:Close()
+end
+
+-- LEAVING THE DOCKED PLACEMENT LEAVES THE STACK. A pooled instance re-used for a
+-- placement that has no window must not go on holding a slot in an order it is
+-- no longer part of.
+do
+    local win = outsideWindow()
+    local a = popout({ key = "zLeaveA" }); a:Follow(outsideRow(90), { outsideOf = win })
+    local b = popout({ key = "zLeaveB" }); b:Follow(outsideRow(20), { outsideOf = win })
+    eq(b.frame:GetFrameLevel(), slotLevel(2), "z: (two docked panels to start with)")
+    a:Follow(source(40, 40, CX - 200, CY))      -- no window: out of the mode
+    eq(b.frame:GetFrameLevel(), slotLevel(1), "z: the one left behind takes the bottom slot back")
+    a:Close(); b:Close()
+end
+
+-- ============================================================
 -- 15. THE POPOUT WEARS THE WINDOW'S SCALE
 -- ------------------------------------------------------------
 -- "Popouts should also scale by the UI scale value too" (Danders, 2026-08-27).

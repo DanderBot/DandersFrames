@@ -165,7 +165,52 @@ local BASE_STRATA = "DIALOG"
 -- The popout must not cover those if the two ever overlap, so the chrome's level
 -- has to stay well below 200. 10 leaves that whole gap spare, and still leaves the
 -- beam somewhere to sit one level under the popout.
-local OUTSIDE_LEVEL = 10
+local STACK_BASE = 10
+
+-- ---- the stacking order ------------------------------------------
+--
+-- ☠ ONE CONSTANT FOR EVERY DOCKED POPOUT WAS THE BUG. Every panel took
+-- STACK_BASE, so two overlapping panels were peers -- one strata, one level --
+-- and the client was free to interleave THEIR CONTENTS. Reported in-game as
+-- "they seem to fight for order and all the settings overlap each other", which
+-- is exactly what a tie between two frame subtrees looks like.
+--
+-- Ordering panels needs an ORDER, so the host keeps one: a list of the popouts
+-- currently docked outside a window, oldest first. A popout's level is its PLACE
+-- in that list:
+--
+--     level = STACK_BASE + (slot - 1) * STACK_STRIDE
+--
+-- A STRIDE, NOT +1, and that is the half that actually stops the interleave. A
+-- panel is not one frame: its beam sits one level UNDER it (see
+-- _SyncChromeLevel) and everything mounted IN it sits above -- the kit's widgets
+-- bump themselves +5 for a hit area or a selection marker and +10 for a tooltip
+-- bubble. So each panel owns a BAND, [level - 1 .. level + STACK_STRIDE - 2],
+-- and the bands butt up against each other with nothing shared. 16 leaves the
+-- deepest of those bumps five levels of air before the next panel's beam.
+--
+-- RENUMBERED, NOT COUNTED UP. The list is re-walked on every push, raise and
+-- close (see reflowStack), so the live set is always slots 1..n and no counter
+-- can ratchet: one panel on its own is at exactly STACK_BASE, which is the level
+-- a single docked popout has always had.
+--
+-- STACK_SLOTS is the ceiling, and it is set by the two things above the stack.
+-- The top band must stay under the window's own title bar at 200 AND still leave
+-- the 50 levels of room a panel's subtree is promised (see the HEADROOM section
+-- of test_popout): 10 + 7 * 16 = 122, and 122 + 50 is comfortably clear of 200.
+-- Eight simultaneous docked panels means SEVEN PINNED ones, since only ever one
+-- is unpinned; past that the newest share the top band rather than climbing into
+-- the window's chrome.
+local STACK_STRIDE = 16
+local STACK_SLOTS  = 8
+
+-- The level a slot draws at, and the whole of the arithmetic. Slots are 1-based
+-- and clamp at the ceiling rather than running off the end of it.
+local function stackLevel(slot)
+    if not slot or slot < 1 then slot = 1 end
+    if slot > STACK_SLOTS then slot = STACK_SLOTS end
+    return STACK_BASE + (slot - 1) * STACK_STRIDE
+end
 
 -- The client's strata ladder, lowest first. File-local rather than published on
 -- UI: this file is loaded STANDALONE by the headless tests (see
@@ -577,10 +622,56 @@ end
 local function storeFor(host)
     local s = rawget(host, "_popouts")
     if not s then
-        s = { pooled = {}, live = {} }
+        -- `stack` is the DOCKED set in z-order, oldest first -- see THE STACKING
+        -- ORDER. A popout only joins it while it is docked outside a window; the
+        -- mover's placement has no window to stand over and so keeps no order.
+        s = { pooled = {}, live = {}, stack = {} }
         rawset(host, "_popouts", s)
     end
+    -- A host whose store predates the stacking order (nothing does in one
+    -- session, but the store is built lazily and read from several files) still
+    -- has to answer a list here rather than nil.
+    if not s.stack then s.stack = {} end
     return s
+end
+
+-- ---- the stacking order, per host --------------------------------
+
+-- Re-walk the docked stack, oldest first, and hand every member the level its
+-- PLACE says. Cheap enough to run on every push and every close: the list holds
+-- the panels docked outside a window RIGHT NOW, which is one plus however many
+-- the user has pinned.
+local function reflowStack(host)
+    local st = storeFor(host).stack
+    for i = 1, #st do
+        local po = st[i]
+        po._stackSlot = i
+        po:_ApplyStackLevel()
+    end
+end
+
+-- Put `po` on TOP: the newest open, and every raise, goes in front of everything
+-- already up. Removed first, so a raise MOVES it rather than listing it twice.
+local function pushStack(po)
+    local st = storeFor(po.host).stack
+    for i = #st, 1, -1 do
+        if st[i] == po then tremove(st, i) end
+    end
+    st[#st + 1] = po
+    reflowStack(po.host)
+end
+
+-- ...and out of it, for a popout that closed or that left the docked placement.
+-- The slot is forgotten with it, so the next push earns a fresh one from the top
+-- rather than reclaiming the place it used to hold.
+local function popStack(po)
+    local st = storeFor(po.host).stack
+    local found = false
+    for i = #st, 1, -1 do
+        if st[i] == po then tremove(st, i); found = true end
+    end
+    po._stackSlot = nil
+    if found then reflowStack(po.host) end
 end
 
 -- ============================================================
@@ -729,21 +820,36 @@ function Popout:_SetChromeStrata(strata)
 end
 
 -- Keep the popout -- and with it the beam and the outline -- clear of the WINDOW
--- it is docked outside of: ONE STRATA ABOVE it, at a modest constant level. See
--- OUTSIDE_LEVEL for why it is a strata boundary and not a big number.
+-- it is docked outside of: ONE STRATA ABOVE it, at the level its slot in the
+-- host's stack names. See STACK_BASE for why the clearance is a strata boundary
+-- and not a big number, and THE STACKING ORDER for what the level is now for.
 --
 -- ⚠ RE-RUN, NOT SET ONCE -- but no longer for the reason it used to be. The old
 -- level was measured off the WINDOW's, and DandersFrames' settings window is
 -- SetToplevel(true): it raises itself to the top of its strata the moment it is
 -- clicked, WITHOUT MOVING A PIXEL, so a level taken once at Follow went stale from
--- the first click onwards. A constant level is immune to that. What the re-run
--- still buys is a window that changes STRATA under a popout that is already up,
--- and re-asserting both against anything else that moved them. It costs two getter
--- calls on a tick that is already reading two rects, so it stays.
+-- the first click onwards. A level that is a function of the STACK is immune to
+-- that -- nothing the window does can move a popout's place among its peers. What
+-- the re-run still buys is a window that changes STRATA under a popout that is
+-- already up, and re-asserting both against anything else that moved them. It
+-- costs two getter calls on a tick that is already reading two rects, so it stays.
 --
 -- With no window it puts everything back on the base strata: a POOLED popout is
 -- re-used for whatever the next consumer asks of it, and one that was raised for a
 -- window must not carry that into a placement that has no window.
+-- The level this popout's SLOT names, on the frame and on the chrome that goes
+-- with it. The beam and the source outline are separate frames and are re-seated
+-- through _SyncChromeLevel, which measures off the popout -- so they travel with
+-- their own panel's band and never with another's.
+function Popout:_ApplyStackLevel()
+    local f = self.frame
+    local want = stackLevel(self._stackSlot)
+    if f.SetFrameLevel and (f:GetFrameLevel() or 0) ~= want then
+        f:SetFrameLevel(want)
+    end
+    self:_SyncChromeLevel()
+end
+
 function Popout:_SyncWindowLevel()
     local win, f = self.outsideOf, self.frame
     if not win then
@@ -751,6 +857,13 @@ function Popout:_SyncWindowLevel()
             self._chromeStrata = nil
             self:_SetChromeStrata(BASE_STRATA)
         end
+        -- Out of the docked placement is out of the stacking order. A slot means
+        -- nothing where there is no window to stand over, and a POOLED popout
+        -- must not carry one into whatever its next consumer asks of it. The
+        -- LEVEL is left where it is, exactly as it always has been: the mover's
+        -- context places the popout under an unlock overlay and the beam is
+        -- synced relative to it, so there is nothing here to assert.
+        if self._stackSlot then popStack(self) end
         self:_SyncChromeLevel()
         return
     end
@@ -764,14 +877,39 @@ function Popout:_SyncWindowLevel()
             self:_SetChromeStrata(want)
         end
     end
-    -- A CONSTANT, and exactly it: the strata boundary already puts the chrome over
-    -- the window's whole subtree, so there is nothing left for the level to clear.
-    -- Pinning it also stops the popout's level from moving under its own children,
-    -- which is what a dropdown menu opened inside the panel derives its level from.
-    if f.SetFrameLevel and (f:GetFrameLevel() or 0) ~= OUTSIDE_LEVEL then
-        f:SetFrameLevel(OUTSIDE_LEVEL)
+    -- A SLOT IN THE HOST'S STACK, not the constant this used to be -- see THE
+    -- STACKING ORDER for why one constant across every docked panel is what let
+    -- two of them interleave. The strata boundary still does the work of getting
+    -- the chrome over the window's whole subtree; the level now only orders the
+    -- panels against EACH OTHER, and it still leaves room above the popout for
+    -- its own children (which is what a dropdown menu derives its level from).
+    --
+    -- Claimed once, on the first sync after the popout enters the docked
+    -- placement; every tick after that only re-asserts it, because this runs on
+    -- the follow ticker and a fresh slot per frame would be a strobe.
+    if not self._stackSlot then
+        pushStack(self)         -- claims the top slot AND applies the level
+    else
+        self:_ApplyStackLevel()
     end
-    self:_SyncChromeLevel()
+end
+
+-- BRING IT TO THE FRONT. The newest open is on top by construction (see THE
+-- STACKING ORDER); this is the other half of the same rule -- the panel the user
+-- just reached for goes in front of the ones they did not.
+--
+-- Only meaningful for a DOCKED popout, because the stacking order IS the docked
+-- set: a no-op in the mover's context, which has no window and keeps no order.
+--
+-- `pop` plays the little confirm pop the pin uses. It is feedback for a click
+-- that would otherwise look like it did nothing -- clicking the row of a panel
+-- that is already up -- and is left off for the raise a mouse-down does, where
+-- the click has a consequence of its own.
+function Popout:Raise(pop)
+    if self.closed then return self end
+    if self.outsideOf then pushStack(self) end
+    if pop and Fx then Fx.PopIn(self.frame, PIN_DUR, 0, 0, 0.98, "CENTER") end
+    return self
 end
 
 -- ---- the docked popout's scale -----------------------------------
@@ -1932,7 +2070,7 @@ function Popout:_EnsureBeam()
     -- The popout's own strata, which in outsideOf mode is one ABOVE the window's:
     -- on BACKGROUND the beam ran UNDER whatever window it crossed, so a settings
     -- window's scrollbar cut the link in half -- and sharing the window's strata
-    -- turned out to be the same thing said a different way (see OUTSIDE_LEVEL).
+    -- turned out to be the same thing said a different way (see STACK_BASE).
     -- The LEVEL is synced to sit just under the popout on every beam update (see
     -- _SyncChromeLevel) -- the "beam emerges from under the notch" trick needs it
     -- beneath the popout, and both are clear of the window by the strata alone.
@@ -2149,6 +2287,11 @@ function Popout:Close(reason)
     for i = #store.live, 1, -1 do
         if store.live[i] == self then tremove(store.live, i) end
     end
+    -- ...and out of the stacking order, which closes the gap it leaves: the
+    -- panels above it come down a slot each rather than the live set keeping a
+    -- hole in it. A pooled instance re-opened later earns a fresh slot from the
+    -- top, which is what "newest open is on top" means for a re-used frame.
+    if self._stackSlot then popStack(self) end
     -- A PINNED instance is discarded: it left the pool when it was pinned and
     -- its frame is not offered back. An unpinned one stays pooled and is
     -- revived by the next request for its key -- that is what the pool is for.
@@ -2313,6 +2456,17 @@ function UI:CreatePopout(opts)
     f:SetClampedToScreen(true)
     f:SetWidth(po.width + PAD * 2)
     f:EnableMouse(true)                       -- a panel must not leak clicks through
+    -- CLICK TO RAISE, and ONLY from the panel's own background. The frame already
+    -- takes the mouse so it cannot leak clicks through; this is the one thing it
+    -- does with them.
+    --
+    -- ☠ IT MUST NOT STEAL A CLICK FROM A CONTROL, and the split that guarantees
+    -- that is the client's own: a widget inside the panel takes the mouse itself,
+    -- so a mouse-down on a slider or a checkbox is consumed there and never
+    -- reaches this handler at all. What is left over -- the padding, the body
+    -- between controls, the strip under the last row -- is exactly the surface
+    -- that means "this panel" rather than "this setting", and that is what raises.
+    f:SetScript("OnMouseDown", function() po:Raise() end)
     f:Hide()
     f._popout = po                            -- the OnUpdate script's way back
     po.frame = f
@@ -2349,6 +2503,12 @@ function UI:CreatePopout(opts)
     bar:SetPoint("TOPRIGHT", 0, 0)
     bar:SetHeight(TITLE_H)
     po.titleBar = bar
+    -- The bar is a CHILD, and once pinned it takes the mouse itself (it is the
+    -- drag surface), so the frame's own raise above stops seeing clicks on it
+    -- from that moment. Same raise, wired here. It runs ALONGSIDE the drag rather
+    -- than instead of it: the client fires OnMouseDown before OnDragStart, so
+    -- picking a buried panel up by its bar brings it forward on the way.
+    bar:SetScript("OnMouseDown", function() po:Raise() end)
 
     -- WHERE THE CHROME STOPS AND THE BODY STARTS, said out loud rather than left
     -- to the spacing: a slightly raised fill over the strip, and a hairline under
