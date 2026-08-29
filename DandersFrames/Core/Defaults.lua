@@ -40,9 +40,42 @@ local addonName, DF = ...
 -- nil -- answers "not modified". A dot that appears on a table the engine
 -- cannot reason about would be a lie, and a group reset driven off that lie
 -- would write defaults into a table that has none. Unknown means silent.
+--
+-- ...UNLESS THE TABLE ANSWERS FOR ITSELF
+-- --------------------------------------
+-- A table may carry its own answers under the raw key __dfDefaultsAdapter, and
+-- the engine asks it instead of pattern-matching the table:
+--
+--     __dfDefaultsAdapter = {
+--         GetDefault = function(key) end,  -- what the key falls back to, or nil
+--                                          -- when it is not a setting here
+--         GetStored  = function(key) end,  -- what the USER set, or nil if unset
+--         ClearKey   = function(key) end,  -- optional; unset the key. A reset
+--                                          -- uses it in preference to writing
+--     }
+--
+-- It exists for the two designers. Their controls bind to a metatable PROXY over
+-- one record (an aura indicator instance, a text element), never to a profile
+-- side, so no identity check can recognise them and every verb below dies
+-- quietly on the nil -- a modified tick that never lights, a Reset Group that
+-- writes nothing, and no error either way.
+--
+-- Nothing that ships carries the key, so the branch is inert for every page that
+-- exists today: rawget on a plain settings table answers nil and the identity
+-- checks run exactly as they did.
+--
+-- The rules above still hold through an adapter. A key it cannot answer for is
+-- unmodified, and the comparison is still ValuesEqual -- which is what makes the
+-- Aura Designer's copy-on-read harmless: reading a table-valued key COPIES the
+-- default onto the instance, so presence is no evidence of an edit, but the copy
+-- compares equal to what it was copied from and reports unmodified.
+--
+-- GetStored MUST READ RAW. A designer proxy's __index answers with the FALLBACK
+-- when the record holds no value of its own, so an adapter that read back
+-- through its own proxy would find every key set and light the whole panel up.
 -- ============================================================
 
-local type, pairs = type, pairs
+local type, pairs, rawget = type, pairs, rawget
 local abs = math.abs
 
 -- Finer than any slider step in the addon. See the header.
@@ -92,14 +125,24 @@ end
 -- TABLE RESOLUTION
 -- ============================================================
 
--- db -> (stored table, defaults table) or nil for anything not understood.
+-- db -> (stored table, defaults table), or (nil, nil, adapter) for a table that
+-- answers for itself, or nil for anything not understood.
 --
--- ☠ THE OVERLAY UNWRAP COMES FIRST. When a runtime auto profile is active,
--- DF.db.raid is the proxy VIEW, not storage. Test it before the plain identity
--- checks so the real table is what comes back; only when no overlay is
+-- ⚠ THE ADAPTER IS ASKED FIRST, and by rawget. A designer proxy's __index
+-- resolves a fallback chain for every key, so a plain read of the hook would
+-- come back with a fallback rather than the hook -- and the identity checks
+-- below can never match a proxy anyway, so nothing that would otherwise have
+-- answered is short-circuited.
+--
+-- ☠ THE OVERLAY UNWRAP COMES FIRST of the rest. When a runtime auto profile is
+-- active, DF.db.raid is the proxy VIEW, not storage. Test it before the plain
+-- identity checks so the real table is what comes back; only when no overlay is
 -- installed is DF.db.raid itself the stored table.
 local function Resolve(db)
     if type(db) ~= "table" then return nil end
+
+    local adapter = rawget(db, "__dfDefaultsAdapter")
+    if type(adapter) == "table" then return nil, nil, adapter end
 
     local root = DF.db
     local real = DF._realRaidDB
@@ -118,12 +161,25 @@ local function Resolve(db)
     return nil
 end
 
+-- What one key resolves to on either path: (stored value, shipped default).
+-- Split out so the comparison and the ledger DiffKeys builds read the pair the
+-- same way -- two spellings of the adapter branch is one drift away from a tick
+-- that disagrees with the value beside it.
+local function KeyValues(stored, defaults, adapter, key)
+    if adapter then
+        local getStored, getDefault = adapter.GetStored, adapter.GetDefault
+        local cur = getStored and getStored(key)
+        local def = getDefault and getDefault(key)
+        return cur, def
+    end
+    return stored[key], defaults[key]
+end
+
 -- One key, already resolved. Split out so Count can reuse it without building
 -- the value tables DiffKeys returns.
-local function IsKeyModified(stored, defaults, key)
-    local def = defaults[key]
+local function IsKeyModified(stored, defaults, adapter, key)
+    local cur, def = KeyValues(stored, defaults, adapter, key)
     if def == nil then return false end            -- not a shipped setting in this mode
-    local cur = stored[key]
     if cur == nil then return false end            -- unset; the migration normally prevents this
     return not ValuesEqual(cur, def)
 end
@@ -151,9 +207,9 @@ end
 -- False for anything the engine cannot answer honestly: an unknown table, a key
 -- the mode does not ship, a value that is not stored at all.
 function Defaults:IsModified(db, key)
-    local stored, defaults = Resolve(db)
-    if not stored or not defaults then return false end
-    return IsKeyModified(stored, defaults, key)
+    local stored, defaults, adapter = Resolve(db)
+    if not adapter and (not stored or not defaults) then return false end
+    return IsKeyModified(stored, defaults, adapter, key)
 end
 
 -- { [key] = { current = <stored>, default = <shipped> } } for the MODIFIED keys
@@ -161,13 +217,15 @@ end
 -- Values are live references on both sides -- same no-mutation rule as GetDefault.
 function Defaults:DiffKeys(db, keys)
     local out = {}
-    local stored, defaults = Resolve(db)
-    if not stored or not defaults or type(keys) ~= "table" then return out end
+    local stored, defaults, adapter = Resolve(db)
+    if not adapter and (not stored or not defaults) then return out end
+    if type(keys) ~= "table" then return out end
 
     for i = 1, #keys do
         local key = keys[i]
-        if IsKeyModified(stored, defaults, key) then
-            out[key] = { current = stored[key], default = defaults[key] }
+        if IsKeyModified(stored, defaults, adapter, key) then
+            local cur, def = KeyValues(stored, defaults, adapter, key)
+            out[key] = { current = cur, default = def }
         end
     end
     return out
@@ -177,12 +235,13 @@ end
 -- measuring DiffKeys: this is the one that runs per section header on every
 -- repaint, and it should not allocate a result table to throw away.
 function Defaults:Count(db, keys)
-    local stored, defaults = Resolve(db)
-    if not stored or not defaults or type(keys) ~= "table" then return 0 end
+    local stored, defaults, adapter = Resolve(db)
+    if not adapter and (not stored or not defaults) then return 0 end
+    if type(keys) ~= "table" then return 0 end
 
     local n = 0
     for i = 1, #keys do
-        if IsKeyModified(stored, defaults, keys[i]) then n = n + 1 end
+        if IsKeyModified(stored, defaults, adapter, keys[i]) then n = n + 1 end
     end
     return n
 end
