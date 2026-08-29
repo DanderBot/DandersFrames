@@ -706,6 +706,14 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         container:SetBackdropBorderColor(cbColor.r, cbColor.g, cbColor.b, 0.5)
     end
 
+    -- ☠ THE CANVAS MASKS ITS OWN CONTENTS. The mock is scaled by the user and
+    -- carries placed indicators anchored OUTSIDE it (a TOP icon sits above the
+    -- frame edge), so there is always some scale at which something inside this
+    -- box wants to draw beyond it -- and in the band layout what is beyond it is
+    -- the pool strip and the tabs, not empty panel. Growing the band (below) is
+    -- the answer for the FRAME; this is the answer for everything else.
+    container:SetClipsChildren(true)
+
     -- "Frame Preview" label
     local previewLabel = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     previewLabel:SetPoint("TOPLEFT", 8, -4)
@@ -755,9 +763,26 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         -- Scale slider, and in a 132px band the two together are more than half
         -- the box. The split panel could ignore them because the slack above the
         -- centred mock was never the binding constraint there.
-        local fit = math.min((cw - 16) / w, (ch - (compact and 72 or 28)) / h)
+        -- ⚠ THE BAND FORM CLAMPS ON WIDTH ONLY. Horizontal space is the page's
+        -- and cannot be negotiated; vertical space CAN, because the band grows to
+        -- fit (WantedHeight below). Clamping height here is what made the slider
+        -- lie -- it read 1.6 while the mock stayed at whatever fitted 132px.
+        local fit = compact and ((cw - 16) / w)
+                            or math.min((cw - 16) / w, (ch - 28) / h)
         mockFrame:SetScale(math.max(0.2, math.min(want, fit)))
     end
+
+    -- What the host band must be for the mock to clear the furniture above it and
+    -- the padding below. Derived from the mock's own anchor: it is centred at
+    -- CENTER,0,-20, so the gap from the container's top to the mock's top is
+    -- H/2 + 20 - (h*scale)/2, and that must cover the 52px label-plus-slider
+    -- strip. Rearranged: H >= 64 + h*scale. The floor is the artifact's 132.
+    --
+    -- Indicators anchored outside the frame are deliberately NOT in this sum --
+    -- they are what SetClipsChildren is for. Sizing the band to the widest
+    -- possible indicator overhang would make an empty frame reserve space for
+    -- icons that may never be placed.
+    container.WantedHeight = function() return P.CanvasWantedHeight(compact) end
 
     -- Resolve health texture
     local healthTexPath = frameDB.healthTexture or DF.STOCK_BAR_TEXTURE
@@ -989,6 +1014,12 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- bounded the height, and 2.5x on a tall frame does not fit either way.
     local function ApplyPreviewScale()
         if container.RefreshGeometry then container.RefreshGeometry() end
+        -- The host decides what to do about a new wanted height -- the split panel
+        -- has a fixed left half and ignores this; the band layout regrows. Called
+        -- on BOTH slider callbacks: during a drag the mock is already at the new
+        -- scale and is being masked at the band's current height, so a host that
+        -- regrows live keeps the two in step instead of snapping on release.
+        if container.onWantHeight then container.onWantHeight(container.WantedHeight()) end
     end
     local scaleSlider = GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, adDB, "previewScale",
         ApplyPreviewScale,   -- on release
@@ -1006,6 +1037,17 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
 
     return container
 end
+-- The band height the compact canvas needs at the CURRENT preview scale. Split
+-- out of the canvas because the host must size the band BEFORE calling the
+-- builder that creates it -- see GUI:BuildDesignerShell's canvasHeight.
+function P.CanvasWantedHeight(compact)
+    if not compact then return 132 end
+    local fdb  = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
+    local fh   = fdb.frameHeight or 64
+    local want = (GetAuraDesignerDB() or {}).previewScale or 1.0
+    return math.max(132, math.ceil(64 + fh * want))
+end
+
 P.CreateFramePreview = CreateFramePreview
 
 -- ============================================================

@@ -46,6 +46,8 @@ local expandedCards            = P.expandedCards
 local mainTabButtons           = P.mainTabButtons
 
 local BUFFTAB_H = 30
+-- The canvas band's FLOOR. Its actual height is P.CanvasWantedHeight, which
+-- grows with the preview scale; this is what that returns at 1.0.
 local CANVAS_H  = 132
 
 -- The width a pane's contents are built at, asked for rather than guessed -- the
@@ -600,7 +602,7 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             return banner, 68
         end,
 
-        canvas = function(host)
+        canvas = function(host, shell)
             -- Lifted as-is: the same anatomy, the same nine anchor dots, the same
             -- RefreshGeometry. `compact` is about the canvas's own FURNITURE, not
             -- its content -- see CreateFramePreview.
@@ -624,9 +626,16 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             -- animations ticking on the external driver. OnHide fires on effective
             -- visibility loss, so closing the window or switching page reaches it.
             host:HookScript("OnHide", P.ClearPlacedIndicators)
+            -- The scale slider's own callback, both halves of it. The canvas
+            -- reports what it now needs and the shell moves the bands below --
+            -- so scaling the mock up pushes the page down instead of painting
+            -- over the pool strip.
+            S.framePreview.onWantHeight = function(want)
+                if shell and shell.SetCanvasHeight then shell.SetCanvasHeight(want) end
+            end
             return S.framePreview
         end,
-        canvasHeight = CANVAS_H,
+        canvasHeight = function() return P.CanvasWantedHeight(true) end,
 
         strips = {
             { height = BUFFTAB_H, build = function(host) S.BuildPoolStrip(host) end },

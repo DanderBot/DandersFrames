@@ -112,11 +112,27 @@ function GUI:BuildDesignerShell(page, opts)
     -- is a list entry and the canvas is a picture of the WHOLE frame, so twenty
     -- rows would be twenty copies of the same picture.
     if opts.canvas then
-        local h = opts.canvasHeight or 132
+        -- A FUNCTION when the canvas grows with its content. The band must be
+        -- sized before the builder that fills it runs, so the height cannot be
+        -- read off the canvas -- the caller supplies a verb that knows the
+        -- answer from the db instead.
+        local h = opts.canvasHeight
+        if type(h) == "function" then h = h() end
+        h = h or 132
         local host = Band(h)
         shell.canvasHost = host
         shell.canvas = opts.canvas(host, shell)
         Add(host, h, "both")
+        -- Regrow in place: the layout pass reads widget.layoutHeight, so setting
+        -- it and re-running the pass moves everything below without a rebuild --
+        -- which matters because the caller is a slider drag.
+        function shell.SetCanvasHeight(want)
+            want = tonumber(want)
+            if not want or not host or host.layoutHeight == want then return end
+            host.layoutHeight = want
+            host:SetHeight(want)
+            if page.RefreshStates then page:RefreshStates() end
+        end
     end
 
     -- ── 3. THE STRIPS ──

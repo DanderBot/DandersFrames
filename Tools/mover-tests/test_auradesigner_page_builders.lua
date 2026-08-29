@@ -633,13 +633,35 @@ do
     -- ⚠ 132px DOES NOT FIT THE CANVAS'S OWN FURNITURE. Label strip 28 + scale
     -- slider 30 + three instruction rows 59 leaves 15px for a 64px-tall frame, so
     -- the mock would be drawn straight over the instructions. They become the
-    -- canvas's tooltip, and the vertical fit accounts for what is left.
-    check(CARDS:find("local fit = math.min((cw - 16) / w, (ch - (compact and 72 or 28)) / h)", 1, true) ~= nil,
-          "canvas: the compact fit accounts for the label and slider strip")
+    -- canvas's tooltip.
     check(CARDS:find("instrRows = {}", 1, true) ~= nil,
-          "canvas: ...and the instruction rows move to the tooltip")
-    check(ROWS:find("canvasHeight = CANVAS_H", 1, true) ~= nil,
-          "canvas: the band height is named once")
+          "canvas: the instruction rows move to the tooltip")
+
+    -- ☠ THE BAND GROWS TO THE FRAME; IT DOES NOT SHRINK THE FRAME TO THE BAND.
+    -- Clamping the mock's scale down to fit a fixed 132px band made the slider
+    -- LIE -- it read 1.6 while the mock stayed at whatever fitted. So the compact
+    -- fit clamps on WIDTH ONLY (horizontal space is the page's and cannot be
+    -- negotiated) and the host regrows instead.
+    check(CARDS:find("local fit = compact and ((cw - 16) / w)", 1, true) ~= nil,
+          "canvas: the compact fit clamps on width only")
+    check(CARDS:find("or math.min((cw - 16) / w, (ch - 28) / h)", 1, true) ~= nil,
+          "canvas: ...while the split panel, whose half is fixed, still clamps both")
+    check(CARDS:find("function P.CanvasWantedHeight(compact)", 1, true) ~= nil,
+          "canvas: the wanted height is a verb the host can call BEFORE the canvas exists")
+    check(ROWS:find("canvasHeight = function() return P.CanvasWantedHeight(true) end", 1, true) ~= nil,
+          "canvas: ...and the band asks it rather than naming a constant")
+    check(SHELL:find("if type(h) == \"function\" then h = h() end", 1, true) ~= nil,
+          "canvas: the shell accepts a verb for a band whose height is not fixed")
+    check(SHELL:find("function shell.SetCanvasHeight(want)", 1, true) ~= nil,
+          "canvas: ...and can regrow it in place, because the caller is a slider drag")
+    check(SHELL:find("host.layoutHeight = want", 1, true) ~= nil,
+          "canvas: ...through layoutHeight, which is what the layout pass reads")
+
+    -- ☠ AND WHAT STILL DOES NOT FIT IS MASKED, NEVER DRAWN OVER THE PAGE. A
+    -- placed indicator anchored outside the frame (a TOP icon) overhangs at every
+    -- scale, and below this band sit the pool strip and the tabs.
+    check(CARDS:find("container:SetClipsChildren(true)", 1, true) ~= nil,
+          "canvas: the canvas masks its own contents")
     check(ROWS:find("local CANVAS_H  = 132", 1, true) ~= nil,
           "canvas: ...and it is the artifact's 132")
 
