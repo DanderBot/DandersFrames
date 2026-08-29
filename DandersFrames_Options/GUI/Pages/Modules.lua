@@ -969,32 +969,222 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             InvalidateCurves()
         end
 
-        -- ===== ENABLE + SHARED SETTINGS =====
+        -- ===== THE PAGE'S TWO LAYOUTS =====================================
+        -- CLASSIC is exactly what it always was: five 280 boxes in two columns,
+        -- in the columns and the order they have always had.
+        --
+        -- POPOUT turns four of them into feature rows and the fifth — Display,
+        -- which holds one checkbox — into a CONTROL ROW, in two bands:
+        --
+        --   "Content"      Settings — whether the overlay exists at all, which
+        --                  dispels light it up, and where its colours come from.
+        --   "Appearance"   Pulse Overlay (the control row), Dispel Symbol,
+        --                  Border, Gradient — the four things drawn.
+        --
+        -- ⚠ THE CONTROL ROW IS NAMED FOR ITS SETTING, NOT FOR ITS BOX. A control
+        -- row draws ONE name and that name is the setting's, so the plate reads
+        -- "Pulse Overlay" and the box's own "Display" header is freed to become
+        -- the band it always described.
+        --
+        -- Both band headers are locale strings the page already ships, and
+        -- neither can strand: the Content band's row carries the page's own gate
+        -- and is never hidden, and nothing in the Appearance band can hide.
+        --
+        -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
+        -- { group, parent, refreshStates } and, where a toggle is hoisted,
+        -- `hoistToggle`. The classic branch mounts the SAME builder into the box
+        -- it always built — test_dispel_page_builders.lua pins the inventory of
+        -- each one against the census taken before the move.
+        local classicLayout = DF:IsClassicSettingsLayout()
+        -- The shared page-scope machinery: eager holders, pane reflow, the key
+        -- claim, the amber tick, the footer's Reset Group / Hold: Defaults, the
+        -- hoisted-toggle search repair and the band width. nil in classic, which is
+        -- what every `if classicLayout then` arm below leans on.
+        local tools = GUI:CreatePopoutPageTools(self)
+
+        local contentBand, appearanceBand
+        if tools then
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
+            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
+        end
+
+        -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
+        -- These tables used to sit inside the box that offered them. The rows
+        -- print the chosen value as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder — so the word has to come out of the same
+        -- table the dropdown offers, or a row could say one thing while the
+        -- control behind it says another.
+        --
+        -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure
+        -- captures the upvalue that exists when it is created — so one declared
+        -- above these lines would see nil rather than the table.
+        local dispelIndicatorOptions = { [1]= L["Dispellable By Me"], [2]= L["All Dispellable"] }
+        local iconPositions = {
+            ["CENTER"]= L["Center"], ["TOP"]= L["Top"], ["BOTTOM"]= L["Bottom"],
+            ["LEFT"]= L["Left"], ["RIGHT"]= L["Right"],
+            ["TOPLEFT"]= L["Top Left"], ["TOPRIGHT"]= L["Top Right"],
+            ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOMRIGHT"]= L["Bottom Right"],
+        }
+        local gradientStyles = {
+            ["FULL"]= L["Full Frame"], ["TOP"]= L["Top Edge"], ["BOTTOM"]= L["Bottom Edge"],
+            ["LEFT"]= L["Left Edge"], ["RIGHT"]= L["Right Edge"], ["EDGE"]= L["Edge Glow (All Sides)"],
+        }
+        local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
+
+        -- Boolean toggles GREY their dependent controls in place (addon-wide
+        -- convention); hideOn stays for the feature/variant switches only.
+        local DisableIfNoGradient = function(d) return d.dispelShowGradient == false end
+        local DisableIfNoBorder = function(d) return d.dispelShowBorder == false end
+        local DisableIfNoIcon = function(d) return d.dispelShowIcon == false end
+
+        -- ☠ THE PAGE GATE IS SAID TWICE, BECAUSE THE TWO LAYOUTS CANNOT SAY IT
+        -- THE SAME WAY. In classic every dependent control HIDES with the overlay
+        -- — a hideOn on each widget and on four of the five boxes — and that is
+        -- left exactly as it was.
+        --
+        -- A pane cannot do that. Hiding a row's whole contents leaves a live row
+        -- over an EMPTY panel, and hiding the rows themselves leaves the band
+        -- header standing over nothing — which is the header the Defensive Icon
+        -- page refused to build for exactly that reason. So the popout layout
+        -- says the gate ONCE, where every other converted page says it: as a
+        -- GREY, on the row (row.disableOn = DispelOffRow) — plus, on the Settings
+        -- row, the kit's own toggle gate, which greys that pane and its footer
+        -- whenever the row's tick is off.
+        --
+        -- ⚠ AND IT IS THE CONVENTION THIS PAGE'S OWN SOURCE STATES four lines up:
+        -- a boolean toggle greys in place. Classic's whole-group hide is the odd
+        -- one out, and it is not disturbed.
+        --
+        -- ⚠ THE SETTINGS ROW IS THE EXCEPTION, for the Buff Bar's reason: it
+        -- holds the gate's own tick, so greying it would leave no way to switch
+        -- the overlay back on.
+        local function DispelOffRow(d) return not (d or db).dispelOverlayEnabled end
+
+        -- `also` is a widget's OWN variant gate, which survives in both layouts;
+        -- only the page gate is dropped from the pane.
+        local function GateHide(tools2, w, also)
+            if tools2.popout then
+                if also then w.hideOn = also end
+            elseif also then
+                w.hideOn = function(d) return HideIfDisabled(d) or also(d) end
+            else
+                w.hideOn = HideDispelOptions
+            end
+            return w
+        end
+
+        -- The summary convention, once: at most four items, a fixed order,
+        -- "\194\183" between them, WORDS localised and numbers raw, every read
+        -- guarded because a profile mid-migration may be missing any of these
+        -- keys.
+        local function Join(parts) return table.concat(parts, " \194\183 ") end
+
+        -- ===== ENABLE + SHARED SETTINGS (a 280 box in column 1 in classic, the
+        -- Content band's only row) =====
         -- 12.1 unified overlay: ONE container-slot-driven system (Features/
         -- Dispel.lua factory path) covering normal AND private-aura dispels
         -- natively. The old Off / DandersFrames / Blizzard / Hybrid source
         -- selector collapsed into this single toggle when the Blizzard wrapper
         -- retired (settings migrate: any non-Off source = enabled).
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-            GUI:RefreshCurrentPage()
-        end), 30)
-        local dispelIndicatorOptions = { [1]= L["Dispellable By Me"], [2]= L["All Dispellable"] }
-        local dispelIndicatorDropdown = settingsGroup:AddWidget(GUI:CreateDropdown(self.child, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
-            OnDispelTypeChanged()
-        end), 55)
-        dispelIndicatorDropdown.hideOn = HideIfDisabled
-        dispelIndicatorDropdown.tooltip = L["Dispellable By Me only lights up debuffs your current spec can actually remove. All Dispellable lights up every removable debuff, including ones for someone else to handle."]
-        -- Dispel-type colours come from the shared account palette on the Colors page
-        -- (defaults = the game palette; Reset restores it). The overlay always follows
-        -- it — no game-vs-custom toggle — so this is just a link to where you edit them.
-        local overlayColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
-        settingsGroup:AddWidget(overlayColorsLink, (overlayColorsLink.layoutHeight or 16) + 2)
-        overlayColorsLink.hideOn = HideIfDisabled
-        Add(settingsGroup, nil, 1)
+        --
+        -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
+        -- rather than two control rows: a control row carries a SETTING rather
+        -- than a group, so it can offer neither the group's Reset Group nor the
+        -- tick that says the group has been touched — and the page gate would
+        -- then belong to no row at all.
+        local function BuildDispelSettingsGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the page's only on/off control.
+            --
+            -- ⚠ AND THE PAGE REBUILD LIVES AND DIES IN HERE. Classic has always
+            -- paid for the gate with a whole-page rebuild and keeps doing exactly
+            -- that; the popout's commit (OnDispelEnableToggle) is a state pass
+            -- and a reflow, because a rebuild retires the row being clicked.
+            if not tools2.hoistToggle then
+                group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Dispel Overlay"], db, "dispelOverlayEnabled", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                    GUI:RefreshCurrentPage()
+                end), 30)
+            end
+            local dispelIndicatorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Show Overlay For"], dispelIndicatorOptions, db, "dispelOverlayDispelType", function()
+                OnDispelTypeChanged()
+            end), 55)
+            GateHide(tools2, dispelIndicatorDropdown)
+            dispelIndicatorDropdown.tooltip = L["Dispellable By Me only lights up debuffs your current spec can actually remove. All Dispellable lights up every removable debuff, including ones for someone else to handle."]
+            -- Dispel-type colours come from the shared account palette on the Colors page
+            -- (defaults = the game palette; Reset restores it). The overlay always follows
+            -- it — no game-vs-custom toggle — so this is just a link to where you edit them.
+            local overlayColorsLink = GUI:CreateDispelColorsPageLink(parent, 260)
+            group:AddWidget(overlayColorsLink, (overlayColorsLink.layoutHeight or 16) + 2)
+            GateHide(tools2, overlayColorsLink)
+        end
+
+        -- The one thing the row does not already say with its tick: WHICH dispels
+        -- light the overlay up. Always printed — it is the row's whole substance,
+        -- and the shipped profile's answer (All Dispellable) is the one people
+        -- most often want to change.
+        local function DispelSettingsSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local which = dispelIndicatorOptions[d.dispelOverlayDispelType]
+            if which then parts[#parts + 1] = which end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+            settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+            BuildDispelSettingsGroup({
+                group = settingsGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            Add(settingsGroup, nil, 1)
+        else
+            -- Two: the Show Overlay For dropdown and the Colors-page link. The
+            -- Enable tick is HOISTED onto the row.
+            local DISPEL_SETTINGS_COUNT = 2
+
+            -- What the suppressed Enable checkbox ran, minus the page rebuild:
+            -- that would retire every widget on the page including the row being
+            -- clicked through. The four rows that grey with it are repainted by
+            -- the page's own state pass, and the panes standing open by the
+            -- reflow.
+            local function OnDispelEnableToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelSettingsGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Settings"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelOverlayEnabled" },
+                summary  = DispelSettingsSummary,
+                count    = DISPEL_SETTINGS_COUNT,
+                onToggle = OnDispelEnableToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = settingsMount,
+            }))
+            tools.ClaimKeys(settingsRow, settingsContent)
+            tools.WireModifiedTick(settingsRow)
+            tools.WireFooter(settingsRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(settingsRow, L["Enable Dispel Overlay"], "dispelOverlayEnabled", OnDispelEnableToggle)
+        end
 
         -- The four boxes below used to sit under an "Appearance" collapsible
         -- header -- the last section in the addon named for a CATEGORY rather
@@ -1004,174 +1194,411 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- It costs nothing to remove: every box already declares the same
         -- hideOn it was inheriting from the section, so the whole block still
         -- disappears when the overlay is off.
+        --
+        -- ⚠ AND THE POPOUT LAYOUT'S "Appearance" BAND IS NOT THAT HEADER COMING
+        -- BACK. A band is the page's own top-level grouping — the shape "Content
+        -- / Icon / Text" takes on every converted page — not a collapsible
+        -- section the user has to open to reach a box that was already visible.
 
-        -- Display group (quick toggles) — Column 1
-        local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
-        displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
-        -- Show Border / Show Gradient are the master toggles for their features, so
-        -- each one now HEADS its own group below (Border / Gradient) — mirroring the
-        -- Show Dispel Symbol toggle that heads the Symbol group. Keeps every group's
-        -- on/off switch at the top of that group.
-        -- Boolean toggles GREY their dependent controls in place (addon-wide
-        -- convention); hideOn stays for the feature/variant switches only.
-        local DisableIfNoGradient = function(d) return d.dispelShowGradient == false end
-        local DisableIfNoBorder = function(d) return d.dispelShowBorder == false end
-        local DisableIfNoIcon = function(d) return d.dispelShowIcon == false end
-        local animate = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Overlay"], db, "dispelAnimate", function()
-            ApplyDispelSettings()
-        end), 30)
-        animate.hideOn = HideDispelOptions
-        -- (Color Name Text removed 2026-07-25 — see Features/Dispel.lua. Its only render
-        -- path was the legacy test-mode show, so it tinted the preview and did nothing
-        -- live; a real version needs an occlusion-safe name tint on the slot overlay.)
-        displayGroup.hideOn = HideDispelOptions
-        Add(displayGroup, nil, 1)
+        -- ===== DISPLAY (a 280 box in column 1 in classic, the Appearance band's
+        -- first plate) =====
+        -- ☠ ONE SETTING, SO A CONTROL ROW RATHER THAN A WAY IN. There is nothing
+        -- behind this plate to open: a popout row here would be a panel holding a
+        -- single checkbox, and the row's own tick column already IS that
+        -- checkbox. The trade is the group's two verbs — a control row offers no
+        -- Reset Group and no amber tick — which for one boolean the modified dot
+        -- on the control itself already covers.
+        if classicLayout then
+            local displayGroup = GUI:CreateSettingsGroup(self.child, 280)
+            displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
+            -- Show Border / Show Gradient are the master toggles for their features, so
+            -- each one now HEADS its own group below (Border / Gradient) — mirroring the
+            -- Show Dispel Symbol toggle that heads the Symbol group. Keeps every group's
+            -- on/off switch at the top of that group.
+            local animate = displayGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Pulse Overlay"], db, "dispelAnimate", function()
+                ApplyDispelSettings()
+            end), 30)
+            animate.hideOn = HideDispelOptions
+            -- (Color Name Text removed 2026-07-25 — see Features/Dispel.lua. Its only render
+            -- path was the legacy test-mode show, so it tinted the preview and did nothing
+            -- live; a real version needs an occlusion-safe name tint on the slot overlay.)
+            displayGroup.hideOn = HideDispelOptions
+            Add(displayGroup, nil, 1)
+        else
+            local animateRow = appearanceBand:AddWidget(GUI:CreateControlRow(self.child, {
+                label     = L["Pulse Overlay"],
+                kind      = "checkbox",
+                -- The FUNCTION form: the table is re-resolved on each read, so a
+                -- mode switch is followed rather than frozen at whichever table
+                -- this build captured.
+                db        = tools.RowDB,
+                key       = "dispelAnimate",
+                onChanged = ApplyDispelSettings,
+            }))
+            -- No slot height: the factory owns it (fixedRowHeight + preferredHeight
+            -- are the popout row's own slot), which is what makes a control row and
+            -- a feature row share one rhythm in a band.
+            --
+            -- The page gate, as a GREY rather than the box's hide -- see the essay
+            -- at DispelOffRow.
+            animateRow.disableOn = DispelOffRow
+            tools.RegisterControlRow(animateRow, "checkbox", "dispelAnimate", false, ApplyDispelSettings)
+        end
 
-        -- ===== ICON GROUP (Column 2) =====
-        local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
-        iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
-        local showIcon = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showIcon.hideOn = HideDispelOptions
-        local iconSize = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Symbol Size"], 10, 40, 1, db, "dispelIconSize", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconSize.hideOn = HideDispelOptions
-        iconSize.disableOn = DisableIfNoIcon
-        local iconAlpha = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Symbol Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
-            InvalidateCurves()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconAlpha.hideOn = HideDispelOptions
-        iconAlpha.disableOn = DisableIfNoIcon
-        local iconPositions = {
-            ["CENTER"]= L["Center"], ["TOP"]= L["Top"], ["BOTTOM"]= L["Bottom"],
-            ["LEFT"]= L["Left"], ["RIGHT"]= L["Right"],
-            ["TOPLEFT"]= L["Top Left"], ["TOPRIGHT"]= L["Top Right"],
-            ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOMRIGHT"]= L["Bottom Right"],
-        }
-        local iconPos = iconGroup:AddWidget(GUI:CreateDropdown(self.child, L["Symbol Position"], iconPositions, db, "dispelIconPosition", function()
-            ApplyDispelSettings()
-        end), 55)
-        iconPos.hideOn = HideDispelOptions
-        iconPos.disableOn = DisableIfNoIcon
-        local iconOffsetX = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "dispelIconOffsetX", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconOffsetX.hideOn = HideDispelOptions
-        iconOffsetX.disableOn = DisableIfNoIcon
-        local iconOffsetY = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "dispelIconOffsetY", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        iconOffsetY.hideOn = HideDispelOptions
-        iconOffsetY.disableOn = DisableIfNoIcon
-        iconGroup.hideOn = HideDispelOptions
-        Add(iconGroup, nil, 2)
+        -- ===== ICON GROUP (a 280 box in column 2 in classic, the Appearance
+        -- band's second row) =====
+        local function BuildDispelIconGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- ===== BORDER GROUP (Column 1) =====
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local showBorder = borderGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Border"], db, "dispelShowBorder", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showBorder.hideOn = HideDispelOptions
-        local borderSize = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Thickness"], 1, 6, 1, db, "dispelBorderSize", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        borderSize.hideOn = HideDispelOptions
-        borderSize.disableOn = DisableIfNoBorder
-        local borderInset = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Inset"], -4, 4, 1, db, "dispelBorderInset", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        borderInset.hideOn = HideDispelOptions
-        borderInset.disableOn = DisableIfNoBorder
-        borderInset.tooltip = L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."]
-        local borderAlpha = borderGroup:AddWidget(GUI:CreateSlider(self.child, L["Border Opacity"], 0.1, 1.0, 0.1, db, "dispelBorderAlpha", function()
-            InvalidateCurves()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        borderAlpha.hideOn = HideDispelOptions
-        borderAlpha.disableOn = DisableIfNoBorder
-        borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
-        Add(borderGroup, nil, 2)
+            -- Suppressed when the ROW carries this tick; still the group's own
+            -- head in classic.
+            if not tools2.hoistToggle then
+                local showIcon = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                end), 30)
+                GateHide(tools2, showIcon)
+            end
+            local iconSize = group:AddWidget(GUI:CreateSlider(parent, L["Symbol Size"], 10, 40, 1, db, "dispelIconSize", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconSize)
+            iconSize.disableOn = DisableIfNoIcon
+            local iconAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Symbol Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
+                InvalidateCurves()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconAlpha)
+            iconAlpha.disableOn = DisableIfNoIcon
+            local iconPos = group:AddWidget(GUI:CreateDropdown(parent, L["Symbol Position"], iconPositions, db, "dispelIconPosition", function()
+                ApplyDispelSettings()
+            end), 55)
+            GateHide(tools2, iconPos)
+            iconPos.disableOn = DisableIfNoIcon
+            local iconOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Offset X"], -50, 50, 1, db, "dispelIconOffsetX", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconOffsetX)
+            iconOffsetX.disableOn = DisableIfNoIcon
+            local iconOffsetY = group:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -50, 50, 1, db, "dispelIconOffsetY", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, iconOffsetY)
+            iconOffsetY.disableOn = DisableIfNoIcon
+        end
 
-        -- ===== GRADIENT GROUP (Column 1) =====
+        -- Size in pixels, then where it sits, then the two things that are only
+        -- worth naming while they are doing something — the offsets and the
+        -- opacity (a row reading "1.00" on every default profile is noise, the
+        -- Buff Bar's appearance rule).
+        local function DispelIconSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.dispelIconSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local pos = iconPositions[d.dispelIconPosition]
+            if pos then parts[#parts + 1] = pos end
+            local x, y = tonumber(d.dispelIconOffsetX) or 0, tonumber(d.dispelIconOffsetY) or 0
+            if x ~= 0 or y ~= 0 then parts[#parts + 1] = format("%d, %d", x, y) end
+            local a = tonumber(d.dispelIconAlpha)
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
+            iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
+            BuildDispelIconGroup({
+                group = iconGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            iconGroup.hideOn = HideDispelOptions
+            Add(iconGroup, nil, 2)
+        else
+            -- Five: size, opacity, position and the two offsets. The Show Dispel
+            -- Symbol tick is HOISTED onto the row.
+            local DISPEL_ICON_COUNT = 5
+
+            -- What the suppressed Show Dispel Symbol checkbox ran, and never a
+            -- page rebuild.
+            local function OnDispelIconToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local iconMount, iconContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelIconGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local iconRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Dispel Symbol"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelShowIcon" },
+                summary  = DispelIconSummary,
+                count    = DISPEL_ICON_COUNT,
+                onToggle = OnDispelIconToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = iconMount,
+            }))
+            tools.ClaimKeys(iconRow, iconContent)
+            tools.WireModifiedTick(iconRow)
+            tools.WireFooter(iconRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(iconRow, L["Show Dispel Symbol"], "dispelShowIcon", OnDispelIconToggle)
+            iconRow.disableOn = DispelOffRow
+        end
+
+        -- ===== BORDER GROUP (a 280 box in column 2 in classic, the Appearance
+        -- band's third row) =====
+        local function BuildDispelBorderGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
+
+            if not tools2.hoistToggle then
+                local showBorder = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Border"], db, "dispelShowBorder", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                end), 30)
+                GateHide(tools2, showBorder)
+            end
+            local borderSize = group:AddWidget(GUI:CreateSlider(parent, L["Border Thickness"], 1, 6, 1, db, "dispelBorderSize", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, borderSize)
+            borderSize.disableOn = DisableIfNoBorder
+            local borderInset = group:AddWidget(GUI:CreateSlider(parent, L["Border Inset"], -4, 4, 1, db, "dispelBorderInset", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, borderInset)
+            borderInset.disableOn = DisableIfNoBorder
+            borderInset.tooltip = L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."]
+            local borderAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Border Opacity"], 0.1, 1.0, 0.1, db, "dispelBorderAlpha", function()
+                InvalidateCurves()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, borderAlpha)
+            borderAlpha.disableOn = DisableIfNoBorder
+        end
+
+        -- The sweep's border summary, for a hand-rolled border rather than the
+        -- shared toolkit's: thickness in pixels, then the inset and the opacity
+        -- only while they are doing something. There is no style word to print —
+        -- this ring is always the one shape.
+        local function DispelBorderSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local size = tonumber(d.dispelBorderSize)
+            if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            local inset = tonumber(d.dispelBorderInset)
+            if inset and inset ~= 0 then parts[#parts + 1] = format("%s %d", L["Inset"], inset) end
+            local a = tonumber(d.dispelBorderAlpha)
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
+            borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
+            BuildDispelBorderGroup({
+                group = borderGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            borderGroup.hideOn = HideDispelOptions   -- works in BOTH modes (game = ring slot)
+            Add(borderGroup, nil, 2)
+        else
+            -- Three: thickness, inset and opacity. The Show Border tick is
+            -- HOISTED onto the row.
+            local DISPEL_BORDER_COUNT = 3
+
+            local function OnDispelBorderToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelBorderGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local borderRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Border"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelShowBorder" },
+                summary  = DispelBorderSummary,
+                count    = DISPEL_BORDER_COUNT,
+                onToggle = OnDispelBorderToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = borderMount,
+            }))
+            tools.ClaimKeys(borderRow, borderContent)
+            tools.WireModifiedTick(borderRow)
+            tools.WireFooter(borderRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(borderRow, L["Show Border"], "dispelShowBorder", OnDispelBorderToggle)
+            borderRow.disableOn = DispelOffRow
+        end
+
+        -- ===== GRADIENT GROUP (a 280 box in column 1 in classic, the Appearance
+        -- band's fourth row) =====
         -- Column 1 with Display, not column 2 with Border: this is the OVERLAY's
         -- own gradient (Full Frame / Top Edge / Edge Glow), so it belongs with
         -- the overlay's display mode rather than with the border drawn over it.
-        local gradientGroup = GUI:CreateSettingsGroup(self.child, 280)
-        gradientGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
-        local showGradient = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Gradient"], db, "dispelShowGradient", function()
-            ApplyDispelSettings()
-            self:RefreshStates()
-        end), 30)
-        showGradient.hideOn = HideDispelOptions
-        local gradientStyles = {
-            ["FULL"]= L["Full Frame"], ["TOP"]= L["Top Edge"], ["BOTTOM"]= L["Bottom Edge"],
-            ["LEFT"]= L["Left Edge"], ["RIGHT"]= L["Right Edge"], ["EDGE"]= L["Edge Glow (All Sides)"],
-        }
-        local gradStyle = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Gradient Position"], gradientStyles, db, "dispelGradientStyle", function()
-            self:RefreshStates()
-            ApplyDispelSettings()
-        end), 55)
-        gradStyle.hideOn = HideDispelOptions
-        gradStyle.disableOn = DisableIfNoGradient
-        gradStyle.tooltip = L["Where the coloured wash sits on the frame. Full covers the whole bar; the edge options leave the middle clear so you can still read health and text underneath."]
-        local onHealthCheck = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show On Current Health Only"], db, "dispelGradientOnCurrentHealth", function()
-            ApplyDispelSettings()
-        end), 30)
-        onHealthCheck.hideOn = function(d) return HideIfDisabled(d) or d.dispelGradientStyle ~= "FULL" end
-        onHealthCheck.disableOn = DisableIfNoGradient
-        onHealthCheck.tooltip = L["Keeps the wash inside the filled part of the health bar, so it shrinks as the unit takes damage instead of covering the empty section too."]
-        local gradSize = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Size"], 0.1, 1.0, 0.1, db, "dispelGradientSize", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        gradSize.hideOn = HideDispelOptions
-        gradSize.disableOn = DisableIfNoGradient
-        local gradAlpha = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
-            InvalidateCurves()
-        end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
-        gradAlpha.hideOn = HideDispelOptions
+        --
+        -- ⚠ CLASSIC ONLY, now. In the popout layout there are no columns to
+        -- balance: two full-width bands in reading order, and the gradient sits
+        -- last because it is the widest of the four things drawn.
+        local function BuildDispelGradientGroup(tools2)
+            local group, parent = tools2.group, tools2.parent
 
-        -- ★ Frame Level. The dispel widget was the only element in the health band with
-        -- no way to reach it, and it is the one that generated a day of "the wash is
-        -- covering X" reports. Moves the ring, the icons and the FULL-FRAME wash together.
-        -- ⚠ NOT hidden behind DisableIfNoGradient: it positions the ring and icons too,
-        -- which exist with no gradient at all.
-        local dispelLevel = gradientGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "dispelOverlayFrameLevel", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true)), 55)
-        dispelLevel.hideOn = HideDispelOptions
-        dispelLevel.tooltip = L["Where the dispel display sits against the other frame elements. Raise it to draw over absorbs and heal prediction, lower it to sit beneath them. Show On Current Health Only ignores this and always stays below them."]
-        gradAlpha.disableOn = DisableIfNoGradient
-        local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
-        local blendDropdown = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()
-            ApplyDispelSettings()
-        end), 55)
-        blendDropdown.hideOn = HideDispelOptions
-        blendDropdown.disableOn = DisableIfNoGradient
-        -- Darken effect lives at the bottom of the Gradient group (it only
-        -- renders behind the gradient).
-        local darkenCheck = gradientGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()
-            self:RefreshStates()
-            ApplyDispelSettings()
-        end), 30)
-        darkenCheck.hideOn = HideDispelOptions
-        darkenCheck.disableOn = DisableIfNoGradient
-        darkenCheck.tooltip = L["Dims the frame underneath the wash so the dispel colour reads cleanly over a bright class colour or a busy health bar."]
-        local darkenAlpha = gradientGroup:AddWidget(GUI:CreateSlider(self.child, L["Darken Amount"], 0.1, 1.0, 0.05, db, "dispelGradientDarkenAlpha", function()
-            ApplyDispelSettings()
-        end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
-        -- HIDE when the dispel feature is off (variant); GREY when the boolean
-        -- toggles it depends on are off (disabled-in-place).
-        darkenAlpha.hideOn = HideIfDisabled
-        darkenAlpha.disableOn = function(d)
-            return d.dispelShowGradient == false or not d.dispelGradientDarkenEnabled
+            if not tools2.hoistToggle then
+                local showGradient = group:AddWidget(GUI:CreateCheckbox(parent, L["Show Gradient"], db, "dispelShowGradient", function()
+                    ApplyDispelSettings()
+                    tools2.refreshStates()
+                end), 30)
+                GateHide(tools2, showGradient)
+            end
+            local gradStyle = group:AddWidget(GUI:CreateDropdown(parent, L["Gradient Position"], gradientStyles, db, "dispelGradientStyle", function()
+                tools2.refreshStates()
+                ApplyDispelSettings()
+            end), 55)
+            GateHide(tools2, gradStyle)
+            gradStyle.disableOn = DisableIfNoGradient
+            gradStyle.tooltip = L["Where the coloured wash sits on the frame. Full covers the whole bar; the edge options leave the middle clear so you can still read health and text underneath."]
+            local onHealthCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["Show On Current Health Only"], db, "dispelGradientOnCurrentHealth", function()
+                ApplyDispelSettings()
+            end), 30)
+            -- The one widget on the page whose hideOn is TWO gates: the page's,
+            -- which the pane drops, and its own variant gate on the gradient
+            -- style, which survives in both layouts.
+            GateHide(tools2, onHealthCheck, function(d) return d.dispelGradientStyle ~= "FULL" end)
+            onHealthCheck.disableOn = DisableIfNoGradient
+            onHealthCheck.tooltip = L["Keeps the wash inside the filled part of the health bar, so it shrinks as the unit takes damage instead of covering the empty section too."]
+            local gradSize = group:AddWidget(GUI:CreateSlider(parent, L["Gradient Size"], 0.1, 1.0, 0.1, db, "dispelGradientSize", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, gradSize)
+            gradSize.disableOn = DisableIfNoGradient
+            local gradAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Gradient Opacity"], 0.1, 1.0, 0.1, db, "dispelGradientAlpha", function()
+                InvalidateCurves()
+            end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
+            GateHide(tools2, gradAlpha)
+
+            -- ★ Frame Level. The dispel widget was the only element in the health band with
+            -- no way to reach it, and it is the one that generated a day of "the wash is
+            -- covering X" reports. Moves the ring, the icons and the FULL-FRAME wash together.
+            -- ⚠ NOT hidden behind DisableIfNoGradient: it positions the ring and icons too,
+            -- which exist with no gradient at all.
+            local dispelLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "dispelOverlayFrameLevel", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true)), 55)
+            GateHide(tools2, dispelLevel)
+            dispelLevel.tooltip = L["Where the dispel display sits against the other frame elements. Raise it to draw over absorbs and heal prediction, lower it to sit beneath them. Show On Current Health Only ignores this and always stays below them."]
+            gradAlpha.disableOn = DisableIfNoGradient
+            local blendDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()
+                ApplyDispelSettings()
+            end), 55)
+            GateHide(tools2, blendDropdown)
+            blendDropdown.disableOn = DisableIfNoGradient
+            -- Darken effect lives at the bottom of the Gradient group (it only
+            -- renders behind the gradient).
+            local darkenCheck = group:AddWidget(GUI:CreateCheckbox(parent, L["Darken Behind Gradient"], db, "dispelGradientDarkenEnabled", function()
+                tools2.refreshStates()
+                ApplyDispelSettings()
+            end), 30)
+            GateHide(tools2, darkenCheck)
+            darkenCheck.disableOn = DisableIfNoGradient
+            darkenCheck.tooltip = L["Dims the frame underneath the wash so the dispel colour reads cleanly over a bright class colour or a busy health bar."]
+            local darkenAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Darken Amount"], 0.1, 1.0, 0.05, db, "dispelGradientDarkenAlpha", function()
+                ApplyDispelSettings()
+            end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
+            -- HIDE when the dispel feature is off (variant); GREY when the boolean
+            -- toggles it depends on are off (disabled-in-place).
+            GateHide(tools2, darkenAlpha)
+            darkenAlpha.disableOn = function(d)
+                return d.dispelShowGradient == false or not d.dispelGradientDarkenEnabled
+            end
         end
-        gradientGroup.hideOn = HideDispelOptions
-        Add(gradientGroup, nil, 1)
 
+        -- Where the wash sits, then the three things worth naming only while they
+        -- are doing something: the opacity, the non-default blend, and the darken
+        -- pass. Gradient Size is left out — it means nothing without the style
+        -- word beside it, and the style word is already the first item.
+        local function DispelGradientSummary(d)
+            if not d then return "" end
+            local parts = {}
+            local style = gradientStyles[d.dispelGradientStyle]
+            if style then parts[#parts + 1] = style end
+            local a = tonumber(d.dispelGradientAlpha)
+            if a and a < 1 then parts[#parts + 1] = format("%s %.2f", L["Alpha"], a) end
+            if d.dispelGradientBlendMode == "ADD" then parts[#parts + 1] = L["Glow (ADD)"] end
+            if d.dispelGradientDarkenEnabled then parts[#parts + 1] = L["Darken Behind Gradient"] end
+            return Join(parts)
+        end
+
+        if classicLayout then
+            local gradientGroup = GUI:CreateSettingsGroup(self.child, 280)
+            gradientGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
+            BuildDispelGradientGroup({
+                group = gradientGroup,
+                parent = self.child,
+                refreshStates = function() self:RefreshStates() end,
+            })
+            gradientGroup.hideOn = HideDispelOptions
+            Add(gradientGroup, nil, 1)
+        else
+            -- Eight: the position, the current-health variant, size, opacity, the
+            -- frame level, the blend mode and the darken pair. The Show Gradient
+            -- tick is HOISTED onto the row.
+            local DISPEL_GRADIENT_COUNT = 8
+
+            local function OnDispelGradientToggle()
+                ApplyDispelSettings()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
+
+            local gradientMount, gradientContent = tools.PopoutContent(function(group, holder, reflow)
+                BuildDispelGradientGroup({
+                    group = group, parent = holder,
+                    refreshStates = reflow,
+                    popout = true,
+                    hoistToggle = true,
+                })
+            end)
+            local gradientRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+                label    = L["Gradient"],
+                db       = tools.RowDB,
+                toggle   = { key = "dispelShowGradient" },
+                summary  = DispelGradientSummary,
+                count    = DISPEL_GRADIENT_COUNT,
+                onToggle = OnDispelGradientToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = gradientMount,
+            }))
+            tools.ClaimKeys(gradientRow, gradientContent)
+            tools.WireModifiedTick(gradientRow)
+            tools.WireFooter(gradientRow, InvalidateCurves)
+            tools.RegisterHoistedToggle(gradientRow, L["Show Gradient"], "dispelShowGradient", OnDispelGradientToggle)
+            gradientRow.disableOn = DispelOffRow
+        end
+
+        -- ===== THE TWO BANDS, IN READING ORDER ============================
+        -- Added at the foot rather than in place: both bands are full width, so
+        -- there is no column flow left to unbalance and the order below is purely
+        -- the order the page reads in.
+        if not classicLayout then
+            Add(contentBand, nil, "both")
+            Add(appearanceBand, nil, "both")
+        end
 
         -- See Also links
         AddSpace(GUI.Space.block, "both")
