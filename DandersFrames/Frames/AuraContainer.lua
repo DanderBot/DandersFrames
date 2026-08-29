@@ -724,12 +724,43 @@ local function samplePoolGrowth()
     end
 end
 
+-- ☠ PARK-STRING SENTINEL. The slot park string rests on engine-INVISIBLE C parser
+-- semantics, and TWO conventions have now failed open in the field — "" (caught
+-- 2026-08-18) and "HELPFUL|!HELPFUL" (caught 2026-08-29: parked slots rendered live
+-- DEBUFFS, the parser reading the contradiction as harmful). The CF second lock
+-- (SLOT_PARK_CF) holds the slots dark either way, but the NEXT parser drift should
+-- announce itself instead of waiting for a field report: ask the engine directly what
+-- the park string matches on the player. Any non-zero answer = the string is open
+-- again. Runs on the 30s sweep (one C call), WARNs once per session, secrecy-guarded
+-- (a sealed read skips silently and tries next sweep). Detection needs the player to
+-- be carrying SOME aura the failed reading matches — buffs cover a helpful-drift
+-- instantly, a harmful-drift catches on the first rez sickness / dungeon debuff.
+local parkSentinelWarned = false
+local function checkParkSentinel()
+    if parkSentinelWarned then return end
+    local pf = AuraContainer.SLOT_PARK_FILTER
+    if not pf or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, "player", pf)
+    if not ok or type(ids) ~= "table" then return end
+    local okN, n = pcall(function() return #ids end)
+    if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return end
+    if n > 0 then
+        parkSentinelWarned = true
+        DF:DebugWarn(DBG,
+            "PARK STRING FAILED OPEN: %q matched %d aura(s) on the player — the engine's"
+            .. " parser has drifted again (this would be the THIRD convention). The CF lock"
+            .. " (maxDuration = 0) is what is keeping parked slots dark; the string needs"
+            .. " replacing, not trusting.", tostring(pf), n)
+    end
+end
+
 C_Timer.NewTicker(SWEEP_INTERVAL, function()
     syncFlowWatch()
     samplePoolGrowth()
     flushFlowLog()
     if AuraContainer._testMode then return end
     if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
+    checkParkSentinel()
     if not anyLiveContainers() then return end
     AuraContainer._kickLiveParse("safety sweep")
 end)
