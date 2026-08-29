@@ -1101,6 +1101,27 @@ S.BuildDebuffGroupsTab = function()
         dedupHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         yPos = yPos - 30
 
+        -- ── CROSS-GROUP DEDUP TOGGLE (2026-08-29) ──
+        -- Its OWN switch, deliberately independent of the row's Hide Duplicate
+        -- Debuffs (Krathe: "you might want to dedupe one and not the other").
+        -- Preset-level (adDB.debuffGroupDedup) because the groups it governs are;
+        -- default ON — nil must READ as checked, hence customGet/customSet rather
+        -- than a raw key bind (a raw bind renders an untouched profile unchecked
+        -- while the factory treats nil as on). The factory's dgroup sync consumes
+        -- it via `adDB.debuffGroupDedup ~= false`; a flip moves the claims fold,
+        -- so it takes the full structural chain — checkbox-safe (no slider
+        -- mid-interaction hazard, see LayoutDebuffGroupRefresh's note).
+        local adDBForDedup = GetAuraDesignerDB()
+        if adDBForDedup then
+            local dgDedup = GUI:CreateCheckbox(parent, L["Hide Duplicates Between Groups"], nil, nil,
+                StructuralDebuffGroupRefresh,
+                function() return adDBForDedup.debuffGroupDedup ~= false end,
+                function(v) adDBForDedup.debuffGroupDedup = v and true or false end)
+            dgDedup.tooltip = L["A debuff matching several groups shows only in the first matching group in the list, so it never appears twice. Turn off to let every matching group show it."]
+            dgDedup:SetPoint("TOPLEFT", 8, yPos)
+            yPos = yPos - 28
+        end
+
         -- ── DEBUFF GROUPS heading — mirrors the Layout Groups tab's caption. ──
         local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
         GUI:SetSettingsFont(groupsHeader, 9, "")

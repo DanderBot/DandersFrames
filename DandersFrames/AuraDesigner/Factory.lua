@@ -3593,7 +3593,8 @@ local function buildDebuffGroupRecords(group, claimed)
     dgroupFacade.debuffMaxDurationKeepImportant = sel.keepImportant ~= false
     -- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the resolver's own
     -- `== false` opt-out can never fire here — the CALLER gates: the sync loop passes
-    -- claimed only while the frame's mode db has the toggle on.
+    -- claimed only while adDB.debuffGroupDedup (the Debuff Groups tab's own toggle,
+    -- independent of the row's) is on.
     return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade, claimed) or nil
 end
 
@@ -3620,12 +3621,10 @@ end
 local function resolveDebuffGroup(group, claimed)
     local ver = DF.auraLayoutVersion or 0
     -- Claims join the cache key: a group's records now depend on the groups ABOVE it.
-    -- Within one auraLayoutVersion the fold is deterministic from config, so the ctx
-    -- only actually changes when an earlier group is edited (which bumps the version
-    -- anyway) or when the mode db's dedup toggle differs between synced frames — the
-    -- one case the version alone cannot see. ⚠ Party and raid dbs disagreeing on the
-    -- toggle would re-resolve on each mode's sync; accepted, only one mode's frames
-    -- are live at a time.
+    -- The fold derives purely from adDB (groups list + the preset-level
+    -- debuffGroupDedup toggle), so within one auraLayoutVersion it is deterministic
+    -- for every frame and mode; the ctx guard covers the one edit the version bump
+    -- can miss (a toggle write racing a sync before its refresh chain lands).
     local ctx = claimCtx(claimed)
     local c = dgroupResCache[group]
     if c and c.version == ver and c.ctx == ctx then return c.records, c.structSig, c.tuningSig end
@@ -6000,12 +5999,14 @@ function Factory:SyncFrame(frame)
             -- once instead of once per group (field: "the same 1 debuff x 4/5",
             -- Drasvin, 5.3.1). Two identical groups leave the second one empty — the
             -- duplicated-config case heals the same way.
-            -- Gated on the SAME toggle as the row's claims (Hide Duplicate Debuffs,
-            -- mode db) so one switch owns every dedup path; off restores the old
-            -- overlapping behaviour. The claim fold mirrors GetClaimedDebuffCategories'
-            -- criterion exactly (enabled + selection table, records not required).
-            local fdb = DF:GetFrameDB(frame) or {}
-            local dedupOn = fdb.debuffDeduplicateDesigner ~= false
+            -- Gated on its OWN preset-level toggle (adDB.debuffGroupDedup, the Debuff
+            -- Groups tab), deliberately independent of the row's Hide Duplicate
+            -- Debuffs — Krathe's call 2026-08-29: "you might want to dedupe one and
+            -- not the other". Preset-level also means the fold is derived purely from
+            -- adDB, so it is deterministic within an auraLayoutVersion for every frame
+            -- and mode. The claim fold mirrors GetClaimedDebuffCategories' criterion
+            -- exactly (enabled + selection table, records not required).
+            local dedupOn = adDB.debuffGroupDedup ~= false
             local claimedSoFar
             for _, group in ipairs(groups) do
                 if type(group) == "table" and group.enabled ~= false then

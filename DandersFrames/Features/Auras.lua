@@ -1078,7 +1078,8 @@ end
 -- circular and reuses these exact drop-record/keep-negation semantics.
 -- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the toggle guard
 -- at the top of BuildDirectDebuffFilters cannot fire for AD calls — the dgroup
--- sync gates on the mode db's toggle before passing claimed.
+-- sync gates on its OWN preset-level toggle (adDB.debuffGroupDedup) before
+-- passing claimed; the two dedup paths are deliberately independent switches.
 function DF:BuildDebuffFilterRecords(dbLike, claimed)
     return BuildDirectDebuffFilters(dbLike, claimed)
 end
