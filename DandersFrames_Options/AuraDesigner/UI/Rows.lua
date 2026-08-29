@@ -33,6 +33,7 @@ local RemoveIndicatorInstance  = P.RemoveIndicatorInstance
 local CreateInstanceProxy      = P.CreateInstanceProxy
 local CreateProxy              = P.CreateProxy
 local CreateSpecDropdown       = P.CreateSpecDropdown
+local ActiveFilterLabel        = P.ActiveFilterLabel
 local CreateEnableBanner       = P.CreateEnableBanner
 local CreateFramePreview       = P.CreateFramePreview
 local BuildTypeContent         = P.BuildTypeContent
@@ -63,7 +64,22 @@ local BuildGlobalView            = P.BuildGlobalView
 --   P.CollectLayoutGroupSections   P.CollectDebuffGroupSections
 --   P.EnsureDebuffSelection
 
+-- The SPLIT PANEL's pool tab strip. It has one host left (Editor.lua): in this
+-- layout the pool is a picker on the scope row, not a strip of its own.
 local BUFFTAB_H = 30
+
+-- ── THE SCOPE ROW ──
+-- One band holding both "which set am I editing" pickers. SCOPEROW_H is a
+-- 22px opener plus 2px of air above and below it.
+local SCOPEROW_H = 26
+-- Between the two halves, and between a caption and the opener it names.
+local SCOPE_GAP  = 10
+local LABEL_GAP  = 8
+-- ⚠ WHAT A DROPDOWN OPENER SPENDS ON CHROME rather than on its caption: the text
+-- is inset 8 from the left and stops 20 short of the right, where the chevron is
+-- (DandersUI/Widgets.lua, CreateDropdown). Named here because the pool picker is
+-- sized to its own widest OPTION, and an option's width is not its text's.
+local OPENER_CHROME = 28
 -- The canvas band's FLOOR. Its actual height is P.CanvasWantedHeight, which
 -- grows with the preview scale; this is what that returns at 1.0.
 local CANVAS_H  = 132
@@ -76,15 +92,20 @@ local CANVAS_H  = 132
 local function PopoutWidth() return GUI.PopoutContentWidth or 260 end
 
 -- ============================================================
--- THE POOL STRIP
+-- THE POOL STRIP -- THE SPLIT PANEL'S ARM ONLY
 -- ------------------------------------------------------------
--- My Buffs / Debuffs / Any Buff, plus the spec dropdown on the right end.
--- ONE definition, two hosts: a slice of S.mainFrame in the split-panel layout
--- (Editor.lua), a band in this one. The three pools differ on two axes the
--- labels can't carry, so each tab explains itself on hover.
+-- My Buffs / Debuffs / Any Buff as three tab buttons, in a slice of S.mainFrame
+-- (Editor.lua). The band layout no longer mounts this: two stacked tab strips
+-- read as tabs inside tabs, so its pool is a picker on the scope row below. The
+-- three pools differ on two axes the labels can't carry, so each tab explains
+-- itself on hover -- and the picker carries all three explanations at once.
 -- ============================================================
-S.BuildPoolStrip = function(buffTabBar)
-    local MAIN_TAB_DEFS = {
+-- ⚠ A FUNCTION, NOT A FILE-SCOPE TABLE. Every label and every tooltip line is an
+-- L[...] lookup, and a table built at load freezes whatever locale was live then
+-- -- the trap DF:RegisterLocaleRefresh exists for. Two callers now read it: the
+-- split panel's strip below and the scope row's picker.
+local function PoolDefs()
+    return {
         { key = "my",      label = L["My Buffs"], tooltip = {
             L["Buffs from your own class, and only when you cast them."],
             L["Set up separately for each specialization."],
@@ -99,6 +120,10 @@ S.BuildPoolStrip = function(buffTabBar)
             L["Shared across all your specializations."],
         } },
     }
+end
+
+S.BuildPoolStrip = function(buffTabBar)
+    local MAIN_TAB_DEFS = PoolDefs()
     wipe(mainTabButtons)
     local prevMainBtn
     for _, def in ipairs(MAIN_TAB_DEFS) do
@@ -152,18 +177,134 @@ S.BuildPoolStrip = function(buffTabBar)
     end
 end
 
--- ☠ THE SPEC PICKER RIDES THE TEMPLATE ROW, AND THAT COST SOMETHING TO ARRANGE.
--- Template and Spec answer the same question -- WHICH SET AM I EDITING -- so they
--- belong on one line, and they did not fit: the preset bar's four action buttons
--- were 100px of fixed row on top of its caption and dropdown. Collapsing those
--- four into one overflow glyph (GUI:CreateDesignerPresetBar's opts.overflowActions)
--- freed 78px, which is what buys this its place and retires the 26px strip it used
--- to stand on.
+-- ============================================================
+-- THE SCOPE ROW -- WHICH SET AM I EDITING
+-- ------------------------------------------------------------
+-- ☠ TWO STACKED TAB STRIPS READ AS ONE BLOCK. The pool strip sat directly above
+-- Effects / Layout Groups / Global and the pair looked like tabs inside tabs --
+-- "so confusion to know that they are tabs within tabs". They are not the same
+-- kind of control. The pool picks WHICH SET is being edited, exactly as Template
+-- and Spec do; the sub-tabs pick WHICH VIEW of it. Only the second is a tab, so
+-- the pool comes here beside Spec and the page is left with exactly ONE tab strip.
 --
--- ⚠ It stays VISIBLE and greys on the pools that have no spec (Debuffs and Any
+-- ⚠ AND SPEC GREYS WHEN THE POOL IS NOT MY BUFFS. It always did -- Debuffs and Any
+-- Buff are shared across specs -- but the two controls stood three bands apart, so
+-- the dependency read as a mystery. Adjacent, it reads as a sentence.
+--
+-- ☠ THE BAND IS THE ONE THE POOL STRIP HELD, AND SPEC COMES DOWN TO IT rather
+-- than the pool going up to the banner. The banner's second row already carries
+-- the Template preset bar, whose fixed parts leave ~113px for its dropdown at the
+-- window's 520px minimum (rework spec section 17's own measurement); a third
+-- labelled picker there does not fit at any width the window can be. Two pickers
+-- on one band do -- which is the arrangement the approved sketch draws. The cost
+-- is that section 20's claimed 30px saving is not real: the strip is REPLACED,
+-- not removed, and the four pixels it gives back are all there is. What the move
+-- buys is the nesting going away and the preset bar getting its whole row back.
+-- ============================================================
+S.BuildScopeRow = function(host)
+    local defs = PoolDefs()
+
+    -- ☠ MEASURED, NOT GUESSED, AND NOT SPLIT DOWN THE MIDDLE. A throwaway probe in
+    -- the font both captions use, so the widths below come from the strings this
+    -- client actually holds rather than from an English build's.
+    local probe = host:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    probe:Hide()
+    local function StringWidth(text)
+        probe:SetText(text or "")
+        return probe:GetStringWidth() or 0
+    end
+    local optW = 0
+    for _, def in ipairs(defs) do optW = max(optW, StringWidth(def.label)) end
+    local poolWant = 2 + StringWidth(L["Editing:"]) + LABEL_GAP + optW + OPENER_CHROME
+
+    local poolHost = CreateFrame("Frame", nil, host)
+    poolHost:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+    poolHost:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, 0)
+
+    local specHost = CreateFrame("Frame", nil, host)
+    specHost:SetPoint("TOPRIGHT", host, "TOPRIGHT", 0, 0)
+    specHost:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+
+    -- The pool's three options are short and FIXED; spec names are the long ones
+    -- ("Auto (Restoration Shaman)"). So the pool takes exactly what its widest
+    -- option needs and spec takes everything left over -- rather than each taking
+    -- half, which would spend on the picker that cannot use it. Capped at 45% of
+    -- the band so a language whose pool words are long cannot starve the control
+    -- beside it: at the window's 520px minimum this band is ~280px, and that is
+    -- the case the cap exists for.
+    local function SizeHalves(w)
+        w = w or host:GetWidth() or 0
+        if w < 60 then return end
+        local poolW = math.min(poolWant, math.floor(w * 0.45))
+        poolHost:SetWidth(poolW)
+        specHost:SetWidth(max(w - SCOPE_GAP - poolW, 40))
+    end
+    host:SetScript("OnSizeChanged", function(_, w) SizeHalves(w) end)
+    SizeHalves()
+
+    S.BuildPoolPicker(poolHost, defs)
+    S.BuildSpecPicker(specHost)
+end
+
+-- ⚠ WHICH POOL, AS A PICKER. Three visible tabs become one opener you click, and
+-- that is a real trade: the mitigation is the caption naming what it does and
+-- there being only three options behind it.
+S.BuildPoolPicker = function(host, defs)
+    defs = defs or PoolDefs()
+
+    local poolLabel = host:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    poolLabel:SetText(L["Editing:"])
+    poolLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    poolLabel:SetPoint("LEFT", host, "LEFT", 2, 0)
+
+    local options, order = {}, {}
+    options._order = order
+    for _, def in ipairs(defs) do
+        order[#order + 1] = def.key
+        options[def.key] = { value = def.key, text = def.label }
+    end
+
+    local poolDrop = GUI:CreateDropdown(
+        host, "", options,
+        nil, nil, nil,
+        function() return S.activeBuffTab or "my" end,     -- customGet
+        function(key) SetMainTab(key) end,                 -- customSet
+        { inline = true }
+    )
+    poolDrop:SetHeight(22)
+    -- Anchored to BOTH edges rather than given a width: the half is whatever
+    -- SizeHalves made it, and an opener floating inside it reads as a stray
+    -- control instead of a row.
+    poolDrop:SetPoint("LEFT", poolLabel, "RIGHT", LABEL_GAP, 0)
+    poolDrop:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+
+    -- ☠ ONE OPENER CANNOT CARRY THREE HOVERS. Each pool tab explained itself on
+    -- hover and that is the only place the two axes they differ on are written
+    -- down, so the whole set rides the opener as one tooltip -- accented label,
+    -- then its sentences, blank line between. `.openerTooltip`, not `.tooltip`:
+    -- an inline dropdown's own label is hidden and zero-wide, which is where the
+    -- shared attach builds its hit frame.
+    local lines = {}
+    for i, def in ipairs(defs) do
+        if i > 1 then lines[#lines + 1] = " " end
+        lines[#lines + 1] = { text = def.label, accent = true }
+        for _, line in ipairs(def.tooltip) do lines[#lines + 1] = line end
+    end
+    poolDrop.openerTooltip = { title = L["Editing"], lines = lines }
+
+    -- ☠ THE STRIP'S BUTTONS ARE WHAT SetMainTab PAINTS, AND THERE ARE NONE HERE.
+    -- A map left behind by a visit to the split panel would have it calling
+    -- SetActive on frames this layout has retired.
+    wipe(mainTabButtons)
+    S.poolDropdown = poolDrop
+end
+
+-- ⚠ SPEC STAYS VISIBLE and greys on the pools that have no spec (Debuffs and Any
 -- Buff are shared across specs), rather than hiding -- that is the addon's
 -- grey-when-disabled convention, and hiding it would change the row's shape on
--- every pool switch. UpdateSpecDropdownState owns the greying.
+-- every pool switch. UpdateSpecDropdownState owns the greying, and a pool change
+-- reaches it twice: SetMainTab calls it directly, then the page rebuild it
+-- triggers runs this builder again on the new dropdown.
 S.BuildSpecPicker = function(host)
     local specLabel = host:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     specLabel:SetText(L["Spec:"])
@@ -172,9 +313,9 @@ S.BuildSpecPicker = function(host)
 
     S.specDropdown, S.specDropdownUpdate = CreateSpecDropdown(host)
     S.specDropdown:SetHeight(22)
-    -- Anchored to BOTH edges rather than given a width: the band is whatever the
-    -- window is, and a 165px dropdown floating in the middle of it reads as a
-    -- stray control instead of a row.
+    -- Anchored to BOTH edges rather than given a width: the half is whatever
+    -- SizeHalves made it, and a 165px dropdown floating in the middle of it reads
+    -- as a stray control instead of a row.
     S.specDropdown:SetPoint("LEFT", specLabel, "RIGHT", 8, 0)
     S.specDropdown:SetPoint("RIGHT", host, "RIGHT", -2, 0)
     UpdateSpecDropdownState()
@@ -586,13 +727,47 @@ local function BuildEffectsTabRows(ctx, shell)
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
 
-    -- The ACTIVE INDICATORS heading, the chips and the Other Buffs hint -- the
-    -- same furniture the card layout puts above its list, mounted as one
-    -- full-width object. The add BLOCK is skipped: this layout has the row above.
+    -- ── SHOWING ──
+    -- ☠ EIGHT CHIPS WERE A SETTING WITH MORE THAN ONE OPTION, LOOSE ON THE PAGE --
+    -- the all-rows rule, which they predate. They were also the flow element
+    -- section 17 Class 1 is about: a height measured before the layout pass had
+    -- given them a width, and then spent to position everything below. In a pane
+    -- the width is the popout's own content width and there is nothing below them
+    -- on the page to displace, so the compensation is DELETED rather than carried
+    -- across (Cards.lua's S.BuildFilterChips).
+    --
+    -- No toggle and no footer: it holds no settings, only which of them are on
+    -- screen -- the same rule the Add Indicator row above follows.
+    local showBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
+    local showMount = tools.PopoutContent(function(g, holder)
+        local pane = CreateFrame("Frame", nil, holder)
+        pane:SetWidth(PopoutWidth())
+        -- ⚠ FRAMES ONLY IN HERE. PopoutContent builds into a HIDDEN holder and
+        -- moves FRAMES into the group; a FontString created on the pane's parent
+        -- is a region, stays behind and is never drawn. The chips are buttons, and
+        -- the panel's own header carries the caption.
+        S.BuildFilterChips(pane, PopoutWidth())
+        g:AddWidget(pane, max(pane:GetHeight() or 1, 1))
+    end)
+    local showRow = showBand:AddWidget(GUI:CreatePopoutRow(page.child, {
+        label   = L["Showing"],
+        title   = L["Showing"],
+        summary = function() return ActiveFilterLabel() end,
+        window  = DF.GUIFrame,
+        clipTo  = page,
+        build   = showMount,
+    }))
+    if not ctx.adEnabled then showRow.disableOn = function() return true end end
+    Add(showBand, nil, "both")
+
+    -- The ACTIVE INDICATORS heading and the Other Buffs hint -- the same furniture
+    -- the card layout puts above its list, mounted as one full-width object. The
+    -- add BLOCK and the chips are both skipped: this layout has a row for each.
     local pickerOpen
     GUI:AddDesignerLegacyTab(shell, function(host)
         host:SetWidth(tools.BandWidth())
-        local yPos, taken = S.BuildEffectsHeadArea(host, -4, { skipAddBlock = true })
+        local yPos, taken = S.BuildEffectsHeadArea(host, -4,
+                                                   { skipAddBlock = true, skipChips = true })
         pickerOpen = taken
         -- ⚠ ONLY THE PICKER ARM SIZES THE HOST ITSELF. The normal arm returns its
         -- running y and leaves the sizing to the caller, because inside the split
@@ -1089,25 +1264,14 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             S.enableBanner = banner
             banner:SetWidth(tools.BandWidth())
 
-            -- ☠ ROW 2 CARRIES BOTH "WHICH SET" QUESTIONS. Template on the left,
-            -- Spec on the right, and the 26px strip the spec used to stand on is
-            -- gone. See S.BuildSpecPicker for what had to move to make room.
-            local specHost = CreateFrame("Frame", nil, banner)
-            specHost:SetHeight(22)
-            specHost:SetPoint("RIGHT", banner, "RIGHT", -10, -18)
-            S.BuildSpecPicker(specHost)
-            banner.specHost = specHost
-            -- A SHARE of the row rather than a fixed width: the band is whatever
-            -- the window is, and a 150px spec block is a third of a narrow row and
-            -- a sixth of a wide one. Re-taken on resize, with a floor that keeps
-            -- the caption and a readable spec name together.
-            local function SizeSpec(w)
-                w = w or banner:GetWidth() or 0
-                if w < 60 then return end
-                specHost:SetWidth(max(120, math.floor(w * 0.34)))
-            end
-            banner:HookScript("OnSizeChanged", function(_, w) SizeSpec(w) end)
-            SizeSpec()
+            -- ☠ ROW 2 IS THE TEMPLATE BAR'S ALONE AGAIN. Spec shared it for one
+            -- release and has moved down to the scope row, where the pool picker
+            -- now stands beside it (S.BuildScopeRow). Three labelled pickers do not
+            -- fit one band at the window's 520px minimum; two do.
+            --
+            -- Which also hands the preset bar back the ~120px the spec block was
+            -- taking, and that was the row's tightest measurement -- section 17 of
+            -- the rework spec records its dropdown down to ~113px there.
 
             -- Which named preset this mode uses, plus library management. Rides
             -- row 2 of the banner, as it does in the split-panel layout.
@@ -1115,9 +1279,13 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
                 local presetBar = GUI:CreateDesignerPresetBar(banner, {
                     kind = "aura",
                     iconButtons = true,
-                    -- ☠ THE FOUR ACTIONS BECOME ONE GLYPH. Four icon buttons are
-                    -- 100px of fixed row, and this row now has to hold the spec
-                    -- picker as well; behind one menu they are 22.
+                    -- ☠ THE FOUR ACTIONS BECOME ONE GLYPH. Four labelled buttons
+                    -- were ~100px of fixed row against a caption and a dropdown;
+                    -- behind one menu they are 22. It bought the spec picker a seat
+                    -- here for one release, and now that Spec has moved down to the
+                    -- scope row it buys the Template dropdown the width instead --
+                    -- which is what the ~113px measurement at the window's minimum
+                    -- was asking for.
                     overflowActions = true,
                     getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
                     onChange = function()
@@ -1135,7 +1303,7 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
                     end,
                 })
                 presetBar:SetPoint("LEFT", banner, "LEFT", 10, -18)
-                presetBar:SetPoint("RIGHT", specHost, "LEFT", -10, 0)
+                presetBar:SetPoint("RIGHT", banner, "RIGHT", -10, -18)
                 banner.presetBar = presetBar
             end
             return banner, 68
@@ -1185,7 +1353,7 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
         canvasFold = { title = L["FRAME PREVIEW"], collapseKey = "ad_canvas" },
 
         strips = {
-            { height = BUFFTAB_H, build = function(host) S.BuildPoolStrip(host) end },
+            { height = SCOPEROW_H, build = function(host) S.BuildScopeRow(host) end },
         },
 
         tabs = {

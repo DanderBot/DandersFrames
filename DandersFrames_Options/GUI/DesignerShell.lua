@@ -27,7 +27,7 @@ local max, floor = math.max, math.floor
 --
 --     [ enable banner        ]
 --     [ frame canvas         ]   ONE shared canvas, not one per row
---     [ strip(s)             ]   AD's pool tabs; the Text Designer has none
+--     [ strip(s)             ]   AD's scope row; the Text Designer has none
 --     [ tab strip            ]
 --     [ ...the active tab    ]   built by the caller, into the same column
 --
@@ -167,9 +167,12 @@ function GUI:BuildDesignerShell(page, opts)
     end
 
     -- ── 3. THE STRIPS ──
-    -- AD's pool tabs (My Buffs / Debuffs / Any Buff) are their own strip above
-    -- the sub-tabs rather than chips among them: they pick WHICH SET is being
-    -- edited, which is a prior question to which part of it you are looking at.
+    -- ☠ WHAT GOES HERE IS NOT A SECOND ROW OF TABS. AD's pool (My Buffs /
+    -- Debuffs / Any Buff) used to be exactly that, stacked straight on top of the
+    -- sub-tab strip, and the pair read as tabs inside tabs. It picks WHICH SET is
+    -- being edited -- a prior question, and the same one Template and Spec ask --
+    -- so it is a PICKER on a scope row now, beside Spec. A caller that puts
+    -- another strip of tabs here is rebuilding the confusion.
     for _, strip in ipairs(opts.strips or {}) do
         local h = strip.height or 30
         local host = Band(h)
