@@ -1893,6 +1893,55 @@ do
     p:Close()
 end
 
+-- ☠ THE HEADER MUST OUTRANK THE FRAME IT SITS ON, AT EVERY STACK LEVEL.
+-- The frame is mouse-enabled and raises on mouse-down, so a cross or a pin that
+-- is not ABOVE it is not clickable -- the click lands on the raise and the button
+-- looks dead. This was invisible while every docked popout took one constant
+-- level (the header was built at that level and nothing moved); it broke the
+-- moment a panel's level became its slot in the stack, because the PANE bumps
+-- itself off its container and keeps up while the header is built once at
+-- construction and had nothing re-seating it. Reported in-game as "nothing in
+-- the top bar is interactable... this is the case for all popouts".
+do
+    local win, row = outsideWindow(), outsideRow()
+    local a = popout({ key = "hdrA", pinnable = true })
+    a.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y)
+    a:Follow(row, { outsideOf = win })
+
+    local function headerClears(po, label)
+        local base = po.frame:GetFrameLevel()
+        check(po.titleBar:GetFrameLevel() > base, label .. ": the bar clears the frame")
+        check(po.closeBtn:GetFrameLevel() > po.titleBar:GetFrameLevel(),
+              label .. ": ...and the cross clears the bar, so the two are never peers")
+        if po.pinBtn then
+            check(po.pinBtn:GetFrameLevel() > po.titleBar:GetFrameLevel(),
+                  label .. ": ...as does the pin")
+        end
+    end
+    headerClears(a, "header")
+
+    -- The real regression: a SECOND panel renumbers the stack, which moves the
+    -- first one's frame level. The header has to move with it.
+    local b = popout({ key = "hdrB", pinnable = true })
+    b.frame:SetFakeCenter(CX + OUT_X, CY + OUT_Y + 40)
+    b:Follow(outsideRow(), { outsideOf = win })
+    headerClears(a, "header after a second panel opens")
+    headerClears(b, "header of the newest panel")
+
+    -- ...and a raise reseats it again.
+    a:Raise()
+    headerClears(a, "header after a raise")
+    headerClears(b, "header of the panel a raise pushed down")
+
+    -- The lift stays inside the panel's own band: the pane bumps +10 and the
+    -- stride is 16, so a header may not reach the next slot's beam.
+    check(a.closeBtn:GetFrameLevel() - a.frame:GetFrameLevel() < 10,
+          "header: the lift stays under the pane's own bump")
+
+    b:Close()
+    a:Close()
+end
+
 -- THE MOVER'S CONTEXT, which has no window at all: the popout hangs off an unlock
 -- overlay and its own level is the only thing the beam and outline can be placed
 -- against. That relative sync is the fallback, and it must survive untouched.

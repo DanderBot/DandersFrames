@@ -841,6 +841,53 @@ end
 -- with it. The beam and the source outline are separate frames and are re-seated
 -- through _SyncChromeLevel, which measures off the popout -- so they travel with
 -- their own panel's band and never with another's.
+-- ☠ THE TITLE BAR AND ITS BUTTONS RIDE THE FRAME'S LEVEL, AND MUST BE TOLD.
+-- The frame itself is mouse-enabled and raises on mouse-down (see the OnMouseDown
+-- wiring below), so anything in the header that is not ABOVE it is not clickable:
+-- the click lands on the raise instead and the button appears dead.
+--
+-- That was invisible while every docked popout took one constant level, because
+-- the header was built at that level and nothing moved. Once a panel's level
+-- became its slot in the stack, the frame started jumping to STACK_BASE and up --
+-- and the PANE keeps up because its widgets bump themselves off their container,
+-- while the header is built ONCE at construction and had nothing re-seating it.
+-- Body clickable, header dead, on every popout at once.
+--
+-- Re-asserted here rather than set at creation, because the level this has to
+-- beat changes on every push, raise and close.
+--
+-- ⚠ TWO STEPS, NOT ONE. The bar is the DRAG surface and takes the mouse itself
+-- once pinned; the buttons sit ON it. Putting both at one level makes them peers
+-- and which one gets a click is then down to sibling order -- the ambiguity this
+-- is fixing, moved rather than removed. The bar clears the frame, the controls
+-- clear the bar.
+--
+-- ⚠ +1 and +2 are INSIDE the panel's own band. STACK_STRIDE is 16 and the pane
+-- bumps to +10, so neither can reach the next slot's beam whatever the stack does.
+local BAR_LIFT, HEADER_LIFT = 1, 2
+
+function Popout:_SyncHeaderLevel()
+    local f = self.frame
+    if not f.GetFrameLevel then return end
+    local base = f:GetFrameLevel() or 2
+    local bar  = self.titleBar
+    if bar and bar.SetFrameLevel and (bar:GetFrameLevel() or 0) ~= base + BAR_LIFT then
+        bar:SetFrameLevel(base + BAR_LIFT)
+    end
+    -- Named one by one rather than walked: several are optional (no pin on an
+    -- unpinnable popout, no header controls on most), and a nil in an ipairs
+    -- list stops the walk at index 1 and silently skips everything after it --
+    -- which is the same class of bug this function exists to fix.
+    local want = base + HEADER_LIFT
+    local parts = { self.closeBtn, self.pinBtn, self.headerLeft, self.headerRight }
+    for i = 1, 4 do
+        local w = parts[i]
+        if w and w.SetFrameLevel and (w:GetFrameLevel() or 0) ~= want then
+            w:SetFrameLevel(want)
+        end
+    end
+end
+
 function Popout:_ApplyStackLevel()
     local f = self.frame
     local want = stackLevel(self._stackSlot)
@@ -848,6 +895,7 @@ function Popout:_ApplyStackLevel()
         f:SetFrameLevel(want)
     end
     self:_SyncChromeLevel()
+    self:_SyncHeaderLevel()
 end
 
 function Popout:_SyncWindowLevel()
@@ -2610,6 +2658,11 @@ function UI:CreatePopout(opts)
             end
         end
     end
+
+    -- Once, here, for the popouts that never enter the docked stack: they keep the
+    -- frame's construction level forever, so nothing else would ever call this.
+    -- The docked ones are re-asserted on every push, raise and close as well.
+    po:_SyncHeaderLevel()
 
     -- ---- content --------------------------------------------------
     -- ⚠ -(TITLE_H + PAD), not -TITLE_H. The height has always been
