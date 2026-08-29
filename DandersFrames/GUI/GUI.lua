@@ -346,7 +346,12 @@ function GUI:DebugDumpWidths()
     for i, widget in ipairs(page.children) do
         if widget.isSettingsGroup then
             local gw = widget:GetWidth() or 0
-            local inner = gw - (widget.padding or 10) * 2
+            -- ⚠ ASK THE KIT, do not re-derive it. A BAND-STYLED group's
+            -- children are laid out inside its plate, which is itself inset --
+            -- so padding*2 is the GROUP's interior, not the one the children
+            -- were sized against, and every band box would be flagged NARROW.
+            local inner = GUI.GroupInnerWidth and GUI:GroupInnerWidth(widget)
+                          or (gw - (widget.padding or 10) * 2)
             print(("  [%d] group  w=%.0f inner=%.0f col=%s shown=%s%s")
                 :format(i, gw, inner, tostring(widget.layoutCol), tostring(widget:IsShown()), flag(gw)))
             for j, entry in ipairs(widget.groupChildren or {}) do

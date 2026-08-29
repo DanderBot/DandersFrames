@@ -402,12 +402,15 @@ do
     -- box -- which is where a band's first row plate starts under its own header.
     -- That equality is the rhythm: same gap under the title on both.
     local px, py = pointAt(plate)
-    eq(px, 0, "band: the plate spans the group's full width")
+    eq(px, 10, "band: the plate is inset by the group's own padding")
+    eq(select(1, pointAt(plate, 2)), -10, "band: ...on the right edge as well as the left")
     eq(py, -(10 + 37), "band: and starts at the y a band's first row plate does")
     check(plate:IsShown(), "band: the plate is drawn")
 
     -- ...and the rows are then inset INSIDE it, exactly as a popout row's content
-    -- is inset inside its own plate.
+    -- is inset inside its own plate: the plate's edge plus the ROW's own padX.
+    eq(pointAt(a), 10 + 10, "band: the first row is inset from the plate by the row's padX")
+    eq(a:GetWidth(), 280 - 2 * (10 + 10), "band: ...and stops the same distance from its right edge")
     eq(offsetY(a), -(10 + 37 + 10), "band: the first row sits one inset inside the plate")
     eq(offsetY(b), -(10 + 37 + 10 + 55), "band: and the second a slot below it")
     eq(g:GetHeight(), 10 + 37 + 10 + 55 + 55 + 10,
@@ -500,13 +503,24 @@ end
 -- and every one of them still runs through this code.
 --
 -- The geometry below is stated in the arithmetic the layout does, at the real
--- tokens: a 280 box at the popout inset has 260 of inner width, and two tracks
--- with a 10 gutter are 125 each at x = 10 and x = 145.
+-- tokens. ⚠ A BAND-STYLED box has TWO interiors, and the tracks come off the
+-- inner one: the group's own is 280 - 2*10 = 260, which is what the TITLE
+-- spans (it is drawn outside the plate), and the PLATE's is 280 - 2*(10+10) =
+-- 240, because the plate is inset by the padding to line its edges up with the
+-- band's row plates and its content then takes the row's padX inside that.
+--
+-- Track TWO's left edge is the same number either way, and not by luck: it is
+-- inset + (W - 2*inset - gutter)/2 + gutter, which reduces to W/2 + gutter/2
+-- with the inset cancelling out. Only the track WIDTH and track one's x move.
 -- ============================================================
 
-local INNER   = 280 - 2 * 10          -- 260
-local TRACK   = (INNER - 10) / 2      -- 125
-local TRACK_2 = 10 + TRACK + 10       -- 145, the second track's left edge
+local INNER   = 280 - 2 * 10          -- 260, the group's own interior
+local PLATE_X = 10 + 10               -- 20, where a band box's content starts
+local PINNER  = 280 - 2 * PLATE_X     -- 240, the plate's interior
+local TRACK   = (PINNER - 10) / 2     -- 115, a track inside the plate
+local TRACK_2 = PLATE_X + TRACK + 10  -- 145, the second track's left edge
+-- The same pair for a group with no plate, where the two interiors are one.
+local PTRACK  = (INNER - 10) / 2      -- 125
 -- Every band-styled box starts its content one inset + the title + one inset
 -- down: this is where row one of the plate's interior lands.
 local CONTENT = -(10 + 37 + 10)       -- -57
@@ -548,7 +562,7 @@ do
     -- have put c under a and paired a with whatever was halfway down the list.
     local ax, ay = pointAt(a)
     local bx, by = pointAt(b)
-    eq(ax, 10, "grid: the first control takes track one")
+    eq(ax, PLATE_X, "grid: the first control takes track one, inside the plate")
     eq(bx, TRACK_2, "grid: the second takes track two, one gutter across")
     eq(ay, CONTENT, "grid: ...and both sit on the same row")
     eq(by, CONTENT, "grid: ...at the same y")
@@ -558,7 +572,7 @@ do
     -- The row is 55 tall -- a's slot, not b's -- because the row below has to
     -- clear whatever did NOT close up.
     local cx, cy = pointAt(c)
-    eq(cx, 10, "grid: the third control wraps back to track one")
+    eq(cx, PLATE_X, "grid: the third control wraps back to track one")
     eq(cy, CONTENT - 55, "grid: ...one TALLEST-SLOT row down, not one 40 down")
 
     eq(g:GetHeight(), 10 + 37 + 10 + 55 + 30 + 10,
@@ -587,9 +601,9 @@ do
     eq(a:GetWidth(), TRACK, "fullRow: ...at one track")
 
     local wx, wy = pointAt(wide)
-    eq(wx, 10, "fullRow: the spanning child starts at track one")
+    eq(wx, PLATE_X, "fullRow: the spanning child starts at track one")
     eq(wy, CONTENT - 55, "fullRow: ...on a row of its own, below the open one")
-    eq(wide:GetWidth(), INNER, "fullRow: ...and takes the whole inner width")
+    eq(wide:GetWidth(), PINNER, "fullRow: ...and takes the whole PLATE width, not the group's")
 
     -- ...and the flow picks the tracks back up underneath it.
     eq(select(2, pointAt(b)), CONTENT - 55 - 25, "fullRow: the pair after it starts a fresh row")
@@ -616,7 +630,7 @@ do
 
     g:LayoutChildren()
     eq(pointAt(b), TRACK_2, "hideOn: with the predicate false, b is track two of row one")
-    eq(pointAt(c), 10, "hideOn: ...and c starts row two")
+    eq(pointAt(c), PLATE_X, "hideOn: ...and c starts row two")
     eq(select(2, pointAt(d)), CONTENT - 30, "hideOn: ...with d beside it")
     eq(g:GetHeight(), 10 + 37 + 10 + 30 + 30 + 10, "hideOn: two rows of content")
 
@@ -625,7 +639,7 @@ do
     check(not b:IsShown(), "hideOn: with it true, b is hidden")
     eq(pointAt(c), TRACK_2, "hideOn: ...and c moves UP into the track b vacated")
     eq(select(2, pointAt(c)), CONTENT, "hideOn: ...on row one, beside a")
-    eq(pointAt(d), 10, "hideOn: ...with d wrapping to row two")
+    eq(pointAt(d), PLATE_X, "hideOn: ...with d wrapping to row two")
     eq(g:GetHeight(), 10 + 37 + 10 + 30 + 30 + 10, "hideOn: three visible children still need two rows")
 
     -- One more off, and the whole thing collapses to a single row.
@@ -687,6 +701,80 @@ do
     UI.RowCompact.checkbox = nil
 end
 
+-- ============================================================
+-- THE ALIGNMENT RULE, MADE NUMERIC
+-- ------------------------------------------------------------
+-- Danders, on the Global Fonts page: the two popout rows and the Affected
+-- Elements box "would be good if it was the same width with same padding".
+-- The box was wider on both sides, by exactly one padding each, because a
+-- band's rows are CHILDREN of a chromeless group (inset by its padding) while
+-- the band-styled box's plate was the group's own full rect.
+--
+-- Both objects are top-level page children added "both", so the page layout
+-- gives them the same x and the same width -- which is what makes this a fair
+-- comparison at one width here. A control row's plate spans its whole slot
+-- (ControlRow.lua anchors it TOPLEFT/TOPRIGHT at 0), so the ROW WIDGET's own
+-- edges are the row plate's edges.
+--
+-- ☠ THIS IS THE ACCEPTANCE CONDITION. Revert either half of the inset in
+-- Sections.lua and one of the two claims below fails.
+-- ============================================================
+print("-- Group: a band box's plate and a band's row plates share both edges")
+do
+    host:SetSurfaceStyle(UI.SurfaceStyle)
+    local PAGE_W = 620   -- any width: the claim is an equality, not a number
+
+    -- The BAND: a chromeless group whose children are the row plates.
+    local band = host:CreateSettingsGroup(FakeUIFrame(), PAGE_W, { chromeless = true })
+    band:SetWidth(PAGE_W)
+    band:AddWidget(headerRow(37), 37)
+    local row = band:AddWidget(control(44), 44)
+    band:LayoutChildren()
+
+    -- The BOX: the same width, the band skin, one control in it.
+    local box = host:CreateSettingsGroup(FakeUIFrame(), PAGE_W, { bandStyle = true })
+    box:SetWidth(PAGE_W)
+    box:AddWidget(headerRow(37), 37)
+    local note = box:AddWidget(control(30), 30)
+    box:LayoutChildren()
+    local plate = rawget(box, "bandPlate")
+
+    local rowLeft   = pointAt(row)
+    local rowRight  = rowLeft + row:GetWidth()
+    local plateLeft = pointAt(plate)
+    -- The plate is anchored by its two corners rather than sized, so its right
+    -- edge is the group's width plus the (negative) BOTTOMRIGHT offset.
+    local plateRight = PAGE_W + select(1, pointAt(plate, 2))
+
+    eq(plateLeft, rowLeft, "align: the box's plate starts on the row plate's left edge")
+    eq(plateRight, rowRight, "align: ...and ends on its right edge")
+    eq(rowLeft, 10, "align: which is the band's own inset")
+    eq(rowRight, PAGE_W - 10, "align: ...on both sides")
+
+    -- ...and the content inside the plate is inset from it by the ROW's padX,
+    -- so it does not sit flush against the border the plate now has.
+    eq(pointAt(note) - plateLeft, UI.PopoutRow.padX,
+       "align: the box's content is one row padX inside its own plate")
+    eq(plateRight - (pointAt(note) + note:GetWidth()), UI.PopoutRow.padX,
+       "align: ...and the same distance off the right edge")
+
+    -- The TITLES are the other half of "one language", and they were already
+    -- aligned: both are their group's first child at its own inset, and neither
+    -- of the two insets above moves them.
+    eq(pointAt(band.groupChildren[1].widget), pointAt(box.groupChildren[1].widget),
+       "align: the band's header and the box's start on one column")
+
+    -- ⚠ GroupInnerWidth REPORTS THE SAME INTERIOR THE LAYOUT USED. A note is
+    -- built at the width this helper returns and then re-sized by the layout, so
+    -- two answers here is text that wraps at one width and is drawn at another.
+    eq(host:GroupInnerWidth(box), note:GetWidth(),
+       "align: the helper and the layout agree on the plate's interior")
+    eq(host:GroupInnerWidth(band), row:GetWidth(),
+       "align: ...and on a chromeless band's, which is unchanged")
+
+    host:SetSurfaceStyle(nil)
+end
+
 print("-- Group: the grid is not tied to the band skin")
 do
     -- innerColumns is about DENSITY and bandStyle is about CHROME. They are used
@@ -706,6 +794,7 @@ do
     -- No plate inset, so row one is straight under the title.
     eq(select(2, pointAt(a)), -(10 + 37), "grid/plain: and the first pair follows it directly")
     eq(pointAt(b), TRACK_2, "grid/plain: with the second control on track two")
+    eq(a:GetWidth(), PTRACK, "grid/plain: ...and a track measured off the GROUP's interior")
     eq(g:GetHeight(), 10 + 37 + 30 + 10, "grid/plain: one title and one row of content")
 end
 
