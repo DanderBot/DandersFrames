@@ -558,8 +558,22 @@ function DF:UpdateUnitFrame(frame, source)
             local secret = issecretvalue and issecretvalue(vis) or false
             if okv and not secret and not vis then invisible = true end
         end
-        if invisible ~= (frame.dfLastKnownInvisible or false) then
-            frame.dfLastKnownInvisible = invisible or nil
+        -- ☠☠ THE EDGE IS KEYED ON THE UNIT, NOT ON THE FRAME. This first shipped
+        -- comparing against a per-FRAME `frame.dfLastKnownInvisible`, and frames are
+        -- REUSED: a roster shuffle or a sort moves a frame from one unit to another and
+        -- the edge state travels with the FRAME while the latch registry is keyed by
+        -- UNIT. The two desynchronise immediately, and the failure is one-way fatal —
+        -- a unit latched ON by a frame that then moved away has NO edge left to clear
+        -- it, because the frame now showing it already reads "not invisible" and so
+        -- never fires a transition. That unit's rows stay parked until a reload.
+        -- ☠ Caught in the field within one session (Krathe, 2026-08-30): the gate trail
+        -- shows "latch ON unit=party3" with no matching OFF, plus an "OFF unit=party4"
+        -- that never had an ON — the same desync in both directions.
+        -- Comparing against the registry makes the state single-sourced and
+        -- self-healing: whichever frame asks next reaches the same answer.
+        local reg = DF.AuraContainer._invisibleUnits
+        local wasLatched = (reg and reg[unit]) and true or false
+        if invisible ~= wasLatched then
             DF.AuraContainer.SetUnitVisibilityLatched(unit, invisible or nil)
         end
     end
