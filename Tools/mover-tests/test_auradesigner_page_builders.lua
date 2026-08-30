@@ -2296,12 +2296,28 @@ do
     check(buildBlock and buildBlock:find("Gap()", 1, true) ~= nil,
           "rhythm: ...and so does the tab's own content, under the strip's baseline")
 
-    -- Published for the tabs' own bands, so a caller keeping the rhythm reads the
-    -- number instead of typing 10 again.
-    check(SHELL:find("shell.BandGap = BAND_GAP", 1, true) ~= nil,
-          "rhythm: the number reaches the callers")
-    check(SHELL:find("shell.Gap     = Gap", 1, true) ~= nil,
-          "rhythm: ...and so does the verb")
+    -- ☠ AND NOT PUBLISHED ON THE SHELL. Inside a tab the objects already carry
+    -- their own spacing -- a popout row's band ends with the kit's 6px gap, a head
+    -- area starts its cursor at -4 -- so a tab builder reaching for a gap verb
+    -- would double a seam that already breathes, and the two tabs' identical seams
+    -- would come out 10 and 20. The one page that genuinely needs the number took
+    -- the column WITHOUT the shell, and reads the published constant.
+    --
+    -- ⚠ COMMENTS STRIPPED FIRST. Every one of these three files EXPLAINS that it
+    -- does not call shell.Gap(), in prose containing the literal -- so a raw find
+    -- answers "is this string anywhere" and is a guaranteed false positive, which
+    -- is exactly how the first version of this failed against correct source.
+    local function codeOnly(src) return (src:gsub("%-%-[^\n]*", "")) end
+    local TDR = options_file_source("TextDesigner/UI/Rows.lua")
+    check(codeOnly(SHELL):find("shell.Gap", 1, true) == nil,
+          "rhythm: the verb is the shell's own, not a knob on the tabs")
+    check(codeOnly(ROWS):find("shell.Gap()", 1, true) == nil,
+          "rhythm: ...so no tab doubles a seam that already breathes")
+    check(codeOnly(TDR):find("shell.Gap()", 1, true) == nil,
+          "rhythm: ...on either designer")
+    -- ...and the strip is doing something: the prose IS there in both.
+    check(ROWS:find("shell.Gap()", 1, true) ~= nil,
+          "rhythm: ...which the source says out loud, in a comment the strip removes")
 end
 
 print("-- Aura Designer: what the chrome now costs, band by band")

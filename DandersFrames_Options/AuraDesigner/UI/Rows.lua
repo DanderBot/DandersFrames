@@ -1086,7 +1086,12 @@ local function BuildLayoutTabRows(ctx, shell)
     }))
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
-    if shell and shell.Gap then shell.Gap() end
+    -- ⚠ NO shell.Gap() HERE, DELIBERATELY. The band rhythm is the SHELL's, spent
+    -- between the page's structural bands; inside a tab the objects already carry
+    -- their own spacing -- a popout row's band ends with the kit's 6px gap and the
+    -- head area below starts its cursor at -4. Adding the shell's 10 on top would
+    -- make this seam 20px where the Effects tab's identical one is 10, which is a
+    -- rhythm with an exception rather than a rhythm.
 
     -- The intro and the dedup hint -- the same furniture the card layout puts
     -- above its list, mounted as one full-width object. One definition, two hosts,

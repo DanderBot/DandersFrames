@@ -152,10 +152,13 @@ function GUI:BuildDesignerShell(page, opts)
         emitted = true
         return widget
     end
-    -- Published so a tab's own bands can keep the page's rhythm rather than
-    -- inventing a second one. The number is read, never copied.
-    shell.BandGap = BAND_GAP
-    shell.Gap     = Gap
+    -- ⚠ NOT PUBLISHED ON THE SHELL, and that is a refusal rather than an omission.
+    -- This rhythm is spent between the page's STRUCTURAL bands; inside a tab the
+    -- objects already carry their own spacing (a popout row's band ends with the
+    -- kit's 6px gap, a head area starts its cursor at -4), so a caller reaching for
+    -- a gap verb would be doubling a seam that already breathes. A page that
+    -- genuinely needs the number -- the Filter Designer's column, which took the
+    -- column without the shell -- reads GUI.DESIGNER_BAND_GAP.
 
     -- ── 1. THE ENABLE BANNER ──
     if opts.banner then
