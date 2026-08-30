@@ -3433,9 +3433,22 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             -- number would let the See Also footer draw over it -- which is the exact
             -- bug BELOW_PANELS_H was introduced to fix, back when the note hung
             -- outside the height arithmetic entirely.
+            -- ☠ THE FONTSTRING, NOT THE FRAME. GUI:CreateLabel returns a frame
+            -- WRAPPING a string, so GetStringHeight on it is nil -- which is what
+            -- opening this page threw. The frame's own height is no use either:
+            -- it converges only inside a settings group and this label is anchored
+            -- to leftPanel, which is the trap already written up at the top of this
+            -- file. The STRING wraps correctly at any width; measure that.
             freshHost:SetScript("OnSizeChanged", function(self)
-                local h = mmax((dbFreshLabel:GetStringHeight() or 0) + 6, BELOW_PANELS_H)
-                if self.dfSetHeight then self.dfSetHeight(h) end
+                local fs = dbFreshLabel.fontString
+                local h = mmax(((fs and fs:GetStringHeight()) or 0) + 6, BELOW_PANELS_H)
+                -- Guarded: dfSetHeight re-runs the page's layout pass, which resizes
+                -- this host, which re-enters here. Bailing when the number has not
+                -- moved is what makes that terminate.
+                if self.dfSetHeight and self._dfLastH ~= h then
+                    self._dfLastH = h
+                    self.dfSetHeight(h)
+                end
             end)
         end
 

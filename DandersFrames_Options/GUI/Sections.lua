@@ -117,6 +117,17 @@ function GUI:CreateLabel(parent, text, width, color)
         if C_Timer and C_Timer.After then C_Timer.After(0, Reflow) end
     end)
 
+    -- ☠ THE FONTSTRING ITSELF, for callers that must MEASURE the wrapped text.
+    -- This wrapper's own height only converges inside a settings group (see the
+    -- gate on frame.settingsGroup below); a label anchored straight to a panel
+    -- keeps the placeholder 40 for the life of the page, so GetHeight() on the
+    -- FRAME is a hard-coded number wearing a measurement's clothes. The STRING
+    -- always wraps correctly -- Reflow runs for every label -- so its
+    -- GetStringHeight is the honest number, and this is how you reach it.
+    -- (The Filter Designer's spell-database freshness note is the caller that
+    -- needed it; calling GetStringHeight on the frame threw a nil-value error.)
+    frame.fontString = lbl
+
     frame.SetText = function(self, newText) lbl:SetText(newText); Measure() end
     return frame
 end

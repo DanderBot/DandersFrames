@@ -434,3 +434,31 @@ do
     check(SRC:find("filterPresetOverrides", 1, true) ~= nil,
           "schema: preset overrides are still the per-profile diff")
 end
+
+-- ============================================================
+-- THE FRESHNESS NOTE IS MEASURED ON ITS STRING, NOT ITS FRAME
+-- ------------------------------------------------------------
+-- ☠ GUI:CreateLabel (GUI/Sections.lua) returns a FRAME WRAPPING a FontString.
+-- The kit's UI:CreateLabel returns the FontString itself, and reading the kit
+-- while calling the host's is how GetStringHeight ended up called on a frame --
+-- a nil value, thrown the moment the page opened.
+--
+-- ⚠ AND THE FRAME'S OWN HEIGHT IS NOT THE FALLBACK. It converges only inside
+-- a settings group; this label is anchored straight to leftPanel, so it keeps
+-- the placeholder for the life of the page -- the trap already written up at the
+-- top of Options.lua. The STRING wraps correctly at any width, so it is the
+-- honest number.
+-- ============================================================
+print("-- Filter Designer: the freshness note measures its string")
+do
+    local SECT = options_file_source("GUI/Sections.lua")
+    check(SECT:find("frame.fontString = lbl", 1, true) ~= nil,
+          "note: the label wrapper exposes its FontString for callers that must measure")
+    check(SRC:find("dbFreshLabel.fontString", 1, true) ~= nil,
+          "note: ...and the freshness note reaches through it")
+    check(SRC:find("dbFreshLabel:GetStringHeight", 1, true) == nil,
+          "note: nothing calls a FontString verb on the wrapper frame")
+    -- The re-report resizes the host, which re-enters OnSizeChanged.
+    check(SRC:find("self._dfLastH ~= h", 1, true) ~= nil,
+          "note: the height re-report bails when the number has not moved, so it terminates")
+end
