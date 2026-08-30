@@ -6204,16 +6204,20 @@ function Factory:DebugDumpADGate()
                             local hGate, hShown, bShown, extra
                             local oShown = "-"
                             if isSlot then
-                                hGate = (h and h._deathLatched) and true or false
-                                -- "shown" for a slot = is a LIVE filter pushed (vs the park
-                                -- string). ⚠ Compare against SLOT_PARK_FILTER, not "" --
-                                -- the empty-string park is retired, and deriving from ""
-                                -- made every correctly-parked slot read shown=true and trip
-                                -- the suspect counter while owner=false proved it dark.
+                                hGate = (h and (h._deathLatched or h._visLatched)) and true or false
+                                -- ☠ "shown" NOW DERIVES FROM THE CF LOCK, NOT THE STRING.
+                                -- A dark slot keeps its own live filter since 2026-08-30
+                                -- (the contradiction string is proven to match auras and is
+                                -- no longer pushed), so reading the string would report
+                                -- every parked slot as shown=true — the same lie the
+                                -- retired empty-string comparison used to tell, one
+                                -- convention later. The CF park constant is now the only
+                                -- thing that darkens a slot, so it is the only honest
+                                -- source for this column.
                                 local pf = h and h._pushedFilter
-                                local park = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_FILTER
-                                hShown = (pf == nil) and "-"
-                                    or ((pf == "" or pf == park) and "false" or "true")
+                                local parkCF = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_CF
+                                local darkCF = parkCF ~= nil and h and h._cfPushed == parkCF
+                                hShown = (pf == nil) and "-" or (darkCF and "false" or "true")
                                 -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
                                 -- literally "has GetButton", so every slot can hand us the
                                 -- frame the player is looking at. An empty pushed filter

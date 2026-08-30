@@ -973,6 +973,11 @@ regenFrame:SetScript("OnEvent", function(_, event)
     -- storm, but well before the first pull needs correct frames.
     C_Timer.After(delay, function()
         if InCombatLockdown() or AuraContainer._testMode then return end
+        -- ★ RECONCILE BEFORE THE KICK, and NOT gated on anyLiveContainers: a stale latch
+        -- is exactly the state where containers are dark, so gating the reconcile on
+        -- live containers would skip the case it exists for.
+        AuraContainer.ReconcileLatches(event == "PLAYER_ENTERING_WORLD"
+            and "zone-in" or "post-combat")
         if not anyLiveContainers() then return end
         AuraContainer._kickLiveParse(event == "PLAYER_ENTERING_WORLD"
             and "zone-in heal" or "post-combat heal")
@@ -1321,9 +1326,19 @@ local function filterHasPlayerToken(f)
     return false
 end
 
-local function recordCandidateFilters(rec, config)
-    local cf = rec.candidateFilters or config.candidateFilters
-    if not filterHasPlayerToken(rec.f) then return cf end
+-- The lock itself, taking a filter STRING and its candidate filters. Split out from
+-- recordCandidateFilters 2026-08-30 because the audit found the claim above ("the ONE
+-- place every record's filter string and candidate filters meet") was TRUE ONLY OF THE
+-- GROUP PATH. The SLOT path — SlotOwner's AddAuraSlot and SlotHandle:ApplyTuning — hands
+-- its candidateFilters straight to the engine and never passes through here, so every
+-- Aura Designer PLACED My Buffs indicator was emitting HELPFUL|PLAYER with no lock at
+-- all. The commit that introduced the chokepoint claimed it covered "every AD pool"; it
+-- covered AD containers (filter/debuff groups) and missed AD slots.
+-- ⚠ ONE IMPLEMENTATION, THREE CALLERS, on purpose — the whole argument for a chokepoint
+-- was that per-site locking gives every site a chance to be missed, and per-site locking
+-- is exactly what missed the slots.
+local function applyCasterLock(filterString, cf)
+    if not filterHasPlayerToken(filterString) then return cf end
     -- ☠ NEVER OVERRIDE AN EXPLICIT VALUE. The debuff row's "nonplayer" record sets
     -- isFromPlayerOrPlayerPet = FALSE on purpose (it is the only way to say "debuffs
     -- somebody else applied"), and silently flipping that to true would invert its
@@ -1340,6 +1355,11 @@ local function recordCandidateFilters(rec, config)
     if cf then for k, v in pairs(cf) do out[k] = v end end
     out.isFromPlayerOrPlayerPet = true
     return out
+end
+
+-- GROUP-path caller: one record, falling back to the config-level candidate filters.
+local function recordCandidateFilters(rec, config)
+    return applyCasterLock(rec.f, rec.candidateFilters or config.candidateFilters)
 end
 
 -- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17, widened 2026-07-18).
@@ -7427,8 +7447,14 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
         owner = owner, key = slotKey, liveFilter = filter, parked = false, config = config,
     }, SlotHandle)
 
+    -- ★ SLOT-PATH CASTER LOCK (2026-08-30). This site and SlotHandle:ApplyTuning are the
+    -- two places a slot's candidate filters reach the engine, and neither passed through
+    -- recordCandidateFilters — so every AD placed "My Buffs" indicator shipped its
+    -- HELPFUL|PLAYER with no lock. Same helper as the group path, keyed off the emitted
+    -- token, so it cannot drift.
+    local lockedCF = applyCasterLock(filter, spec.candidateFilters)
     local okS, btn = pcall(owner.container.AddAuraSlot, owner.container, slotKey, filter, {
-        candidateFilters = spec.candidateFilters,
+        candidateFilters = lockedCF,
         sortMethod       = spec.sortMethod,
         sortDirection    = spec.sortDirection,
         initializeFrame  = function(b)
@@ -7669,7 +7695,26 @@ function SlotHandle:_pushFilter()
     local anchor = self.owner.anchor
     if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
     local dark = (self.parked or unitHidden) and true or false
-    local want = dark and SLOT_PARK_FILTER or self.liveFilter
+    -- ☠☠ THE PARK STRING IS NO LONGER PUSHED (2026-08-30). A dark slot keeps its OWN
+    -- live filter and is held dark by the CF lock below, alone.
+    --
+    -- WHY: the contradiction is PROVEN to match auras on this build. The parser probe
+    -- fired in the field on both polarities in one session —
+    --   "PARK STRING FAILED OPEN: \"HELPFUL|!HELPFUL\" matched 1 aura(s)"
+    --   "HARMFUL-side contradiction matched 12 aura(s)"
+    -- — so pushing it was not neutral, it was actively handing the slot a filter whose
+    -- meaning the engine's parser decides for us. That is how debuffs came to render in
+    -- buff-indicator positions: the string a parked BUFF slot carried matched HARMFUL
+    -- auras. Keeping the slot's real filter makes the same CF-lock failure show that
+    -- slot's OWN intended auras — wrong, but sane, and never the reported bug.
+    -- ★ THE PRINCIPLE: when a lock and a fallback disagree, the fallback should fail
+    -- toward the slot's intent, never toward an arbitrary parse.
+    -- ⚠ The constant and the probe both STAY. The probe is a canary on parser drift and
+    -- is worth keeping precisely because it is no longer load-bearing. Everything that
+    -- USED to read the pushed string to decide "is this slot dark" now reads the CF lock
+    -- instead — the slot audit below, and the Factory's AD dump — because a dark slot's
+    -- pushed string is now indistinguishable from a live one.
+    local want = self.liveFilter
     local ok = pcall(c.SetAuraSlotFilterString, c, self.key, want)
     -- ☠ RECORD WHAT WAS ACTUALLY PUSHED, AND WHETHER IT TOOK. liveFilter is the STORED
     -- filter and never changes when a park or latch darkens a slot; diagnosing an
@@ -7783,6 +7828,12 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     end
     local candidatesChanged = candidateFilters ~= nil
     if candidatesChanged then
+        -- ★ SLOT-PATH CASTER LOCK, applied BEFORE the store so the replay path
+        -- (_pushFilter's dark->live transition, and the regen replay) pushes the locked
+        -- table too — locking only at the push site would leave every deferred
+        -- in-combat edit unlocked. Keyed off self.liveFilter, which the block above has
+        -- already updated for this call.
+        candidateFilters = applyCasterLock(self.liveFilter, candidateFilters)
         self._lastCandidateFilters = candidateFilters
     end
     -- Kept for the replay: sort is not otherwise stored on the handle (AddAuraSlot took
@@ -7811,7 +7862,12 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     -- slot is meant to be dark. _pushFilter's dark->live transition pushes the stored
     -- value on wake. Live pushes record _cfPushed (out of lockdown) so _pushFilter's
     -- value-tracked lock doesn't immediately re-push the same table.
-    if candidatesChanged and not (self.parked or self._deathLatched) then
+    -- ☠ _visLatched BELONGS IN THIS TEST TOO — it was missed when the visibility latch
+    -- landed, and the omission is the exact bug this guard exists to prevent: a
+    -- vis-latched slot would push its live candidates straight over the CF park lock and
+    -- light back up while it is meant to be dark. Any new latch must be added here AND to
+    -- _pushFilter's unitHidden.
+    if candidatesChanged and not (self.parked or self._deathLatched or self._visLatched) then
         pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
         if not InCombatLockdown() then self._cfPushed = candidateFilters end
     end
@@ -8287,6 +8343,69 @@ function AuraContainer.SetUnitVisibilityLatched(unit, on)
     end
 end
 
+-- ============================================================
+-- ★★ LATCH RECONCILER — "stuck parked" becomes self-healing
+-- ============================================================
+-- ☠ CORRECT EDGES ARE NOT A GUARANTEE. Both latches shipped with the edge keyed on a
+-- FRAME flag while the registry is keyed by UNIT, and frames are pooled and retargeted —
+-- so a unit could end up latched with nothing left to clear it and its icons parked
+-- until a /reload (party3, field, 2026-08-30). The edges are fixed, but an edge is a
+-- transition and transitions can always be missed; the only structural answer is to
+-- periodically re-ask the question and drop any latch that no longer earns its place.
+--
+-- ⚠ THIS ONLY EVER CLEARS, never latches. Setting is the edge's job and needs the frame
+-- context; a reconciler that also latched would be a second writer racing the first.
+-- Clearing is safe from anywhere: the worst case is one extra re-parse.
+--
+-- ⚠ FAIL-SAFE, matching each latch's own rule. Death clears on a definite "not dead".
+-- Visibility clears on a definite, non-secret "visible". A unit that no longer EXISTS
+-- clears both — nothing can render it, and leaving the entry would re-latch its
+-- containers at build if the token were ever reused.
+-- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix at :844).
+-- ⚠ Both loops CLEAR the table they are traversing. That is legal Lua: setting an
+-- EXISTING key to nil during a pairs() traversal is explicitly permitted (adding a new
+-- key is not, and neither loop does). Both setters only ever nil an existing key here.
+function AuraContainer.ReconcileLatches(reason)
+    if AuraContainer._testMode then return end
+    local cleared = 0
+
+    for unit in pairs(AuraContainer._deathLatchedUnits) do
+        local gone = not UnitExists(unit)
+        local alive = false
+        if not gone then
+            local okd, dead = pcall(UnitIsDeadOrGhost, unit)
+            local secret = issecretvalue and issecretvalue(dead) or false
+            if okd and not secret and not dead then alive = true end
+        end
+        if gone or alive then
+            AuraContainer.SetUnitDeathLatched(unit, nil)
+            cleared = cleared + 1
+        end
+    end
+
+    for unit in pairs(AuraContainer._invisibleUnits) do
+        local gone = not UnitExists(unit)
+        local visible = false
+        if not gone then
+            local okv, vis = pcall(UnitIsVisible, unit)
+            local secret = issecretvalue and issecretvalue(vis) or false
+            if okv and not secret and vis then visible = true end
+        end
+        if gone or visible then
+            AuraContainer.SetUnitVisibilityLatched(unit, nil)
+            cleared = cleared + 1
+        end
+    end
+
+    -- Silent when there was nothing to do: this runs on every zone-in and every combat
+    -- drop, and a line per run would drown the trail it shares with the latch
+    -- transitions. A line here means a latch had genuinely gone stale — which is a bug
+    -- worth seeing, not routine bookkeeping.
+    if cleared > 0 then
+        GateLog("reconcile (%s): cleared %d stale latch(es)", reason or "sweep", cleared)
+    end
+end
+
 -- /df debug idgate — identity-gate ground truth: EVERY handle (not just the
 -- vulnerable ones — an under-flagged handle is exactly the failure this dump
 -- must expose), with its unit, vulnerability flag, the LIVE UnitCanAssist
@@ -8440,16 +8559,20 @@ function AuraContainer.DebugDumpIdentityGate()
         local byOwner = {}
         for h in pairs(AuraContainer._slotHandles or {}) do
             total = total + 1
-            local dark = h.parked or h._deathLatched
+            local dark = h.parked or h._deathLatched or h._visLatched
             if h.parked then parked = parked + 1 end
-            if h._deathLatched then latched = latched + 1 end
+            if h._deathLatched or h._visLatched then latched = latched + 1 end
             if not dark then live = live + 1 end
             local ow = h.owner
             if ow then byOwner[ow] = (byOwner[ow] or 0) + 1 end
             local why
-            if dark and h._pushedFilter ~= SLOT_PARK_FILTER then
-                why = "believed dark, engine holds " .. tostring(h._pushedFilter)
-            elseif dark and h._cfPushed ~= SLOT_PARK_CF then
+            -- ☠ THE FILTER-STRING TEST IS GONE, and must not come back. A dark slot now
+            -- KEEPS its live filter on purpose (see _pushFilter) — the contradiction
+            -- string is proven to match auras and is no longer pushed — so comparing the
+            -- pushed string against the park constant would flag every correctly-dark
+            -- slot as suspect. The CF lock is the only thing darkening a slot, so it is
+            -- the only sound test for "believed dark but not actually dark".
+            if dark and h._cfPushed ~= SLOT_PARK_CF then
                 why = "believed dark, CF lock not recorded"
             elseif h._pushOK == false then
                 why = "last filter push REFUSED and not yet replayed"
