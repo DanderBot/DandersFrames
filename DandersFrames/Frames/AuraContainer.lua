@@ -1275,11 +1275,26 @@ end
 -- lines earlier, so no gate state can skip it), as a strict equality — nil or false
 -- REJECTS.
 --
--- ⚠ THE RESIDUAL GAP, stated so nobody re-derives a false sense of safety: a failure
--- where the token fails open while the caster IS resolved to another player would leave
--- the field TRUE and this lock would not catch it. The observed case was not that, but
--- nothing rules it out. What the lock cannot do is hide something wrongly — a buff of
--- yours in range has a resolved, player caster, so it passes.
+-- ✅✅ THE WHOLE CHAIN IS NOW MEASURED, cross-instance, 2026-08-30 (Krathe,
+-- /df debug auraexp caster, standing outside an instance from a party member):
+--   row 2  "HELPFUL|PLAYER"                    -> SHOWED the shaman's Earth Shield
+--   row 3  isFromPlayerOrPlayerPet = true      -> did NOT show it
+--   row 4  isFromPlayerOrPlayerPet = false     -> showed it
+-- ⇒ the PLAYER **token** fails OPEN across an instance boundary (it renders a buff the
+-- viewer never cast), and on the very same aura the **candidate boolean** reads FALSE.
+-- Opposite directions on one piece of missing data — caster attribution — which is
+-- exactly what the lock is built to exploit. The same aura reads TRUE in the healthy
+-- in-range case, so this is attribution loss, not a per-aura quirk.
+-- ⚠ Out-of-range and cross-instance behave the SAME here (both -> false). They had been
+-- treated as possibly-different failure modes; they are not, on this field.
+--
+-- ⚠ THE RESIDUAL GAP, kept but downgraded: a failure where the token fails open while
+-- the caster IS resolved to another player would leave the field TRUE and this lock
+-- would not catch it. Nothing rules it out, but both measured fail-open cases share ONE
+-- cause — lost attribution — and that same loss is what drives the field false. So the
+-- gap requires a fail-open with attribution intact, for which there is still no
+-- evidence. What the lock cannot do is hide something wrongly: a buff of yours in range
+-- has a resolved, player caster, so it passes.
 --
 -- ★ WHY HERE AND NOT AT THE CONSUMERS. This resolver is the ONE place every record's
 -- filter string and candidate filters meet, on BOTH the build path and the live-tuning
