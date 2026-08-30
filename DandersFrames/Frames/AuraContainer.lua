@@ -7780,23 +7780,27 @@ AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
 -- lock is now the sole thing parking a slot (the string is no longer pushed), so it
 -- needed to be measured rather than reasoned about.
 --
--- ⚠ TWO MEASUREMENTS OF THE STRING DISAGREE, AND THE CONFLICT IS UNRESOLVED.
---   * The sentinel probe, 20:01:05, queried the PLAYER directly: "HELPFUL|!HELPFUL"
---     matched 1 aura and "HARMFUL|!HARMFUL" matched 12.
---   * The auraexp park row, ~90 min later, rendered NOTHING for the same string.
--- The probe is not measuring a different parser — `GetAllAuraInstanceIDs` returns
--- hasMatchedFilterString = TRUE, and Blizzard_AuraContainerGroups.lua:507 only calls
--- ShouldIncludeAuraForFilterString when that is FALSE — so for the public source the
--- container's whole filter-string decision IS the probe's call. Candidate explanations,
--- neither confirmed: different UNITS (the probe asks "player"; the row rendered on a
--- frame), or the row's group was REJECTED at AddAuraGroup and rendered nothing for an
--- unrelated reason (AuraExplorer logs that; the session log would say).
--- ☠ DO NOT CALL IT "INTERMITTENT" — that was an inference with nothing under it, and the
--- 12-match reading is equally consistent with the polarity negation being IGNORED
--- outright (HARMFUL|!HARMFUL -> HARMFUL -> every debuff), which is a different fault.
--- ★ THE DECISION TO STOP PUSHING THE STRING DOES NOT REST ON THIS. It rests on the FIELD
--- REPRO — parked slots rendering live debuffs (Drasvin, then Krathe's own frames) — plus
--- the CF lock being verified above. The probe corroborates; it does not carry the case.
+-- ✅✅ SOLVED 2026-08-30 — THE NEGATION WINS THE POLARITY AXIS. A self-contradicting
+-- polarity string returns THE OPPOSITE POLARITY'S AURAS. Measured, with the plain-polarity
+-- control taken in the same tick, on two units independently:
+--   party3 21:44:33  "HARMFUL|!HARMFUL" = 6   plain HARMFUL = 0   plain HELPFUL = 6
+--   party4 22:29:01  "HARMFUL|!HARMFUL" = 5   plain HARMFUL = 0   plain HELPFUL = 5
+-- The contradiction's count equals the OPPOSITE polarity's count exactly, while its own
+-- polarity is empty. So "HARMFUL|!HARMFUL" resolves to ~HARMFUL, and by the same rule the
+-- park string "HELPFUL|!HELPFUL" resolves to ~HELPFUL — it returns the unit's DEBUFFS.
+-- ☠ THAT IS THE ENTIRE BLEED BUG, mechanism confirmed: a parked BUFF slot was being handed
+-- a filter that means "show this unit's debuffs". Drasvin's report and Krathe's repro were
+-- the engine doing exactly what the string asked.
+--
+-- ★ AND IT DISSOLVES THE "INTERMITTENT" READING, which was wrong. The auraexp park row
+-- rendered nothing because that unit had NO DEBUFFS at the time — an empty result from a
+-- correctly-resolved ~HELPFUL query, not a working park. Nothing was varying with time.
+-- ⚠ Also kills "the negation was IGNORED": a dropped "!" would have given the contradiction
+-- its own polarity's count, and that count is zero in both samples. The discriminator is
+-- the only reason this is decidable at all — a bare non-zero count cannot tell the two
+-- apart, and the first version of this probe reported exactly that bare count.
+-- ⚠ Independent of the field repro, which stands on its own: parked slots rendering live
+-- debuffs (Drasvin, then Krathe's own frames after a profile swap).
 local SLOT_PARK_CF = { maxDuration = 0 }
 AuraContainer.SLOT_PARK_CF = SLOT_PARK_CF
 
