@@ -1081,6 +1081,39 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     --
     -- No loop: the mock is a child, so scaling it and re-anchoring it cannot
     -- resize the container, which takes its height from the band.
+    -- ☠ A THUMBNAIL IS DECORATION INSIDE A BUTTON, SO NOTHING IN IT MAY TAKE
+    -- THE MOUSE. A tile is a Button and this preview is its child; any descendant
+    -- that is mouse-enabled swallows the press over the very picture the button
+    -- exists to offer -- and the button never even lights, because the hover
+    -- never reaches it. Reported twice: "none of the images are clickable, i have
+    -- to click somewhere outside the image", then "dont even get a hover highlight".
+    --
+    -- ⚠ A WALK, NOT A LIST. The first fix chased ONE taker (the canvas's scale
+    -- slider) and the tiles stayed dead, because the preview builds a backdrop, a
+    -- mock, a border overlay and whatever the effect paints on top -- any of which
+    -- may enable the mouse now or later. Naming them is a list that rots; walking
+    -- the subtree cannot.
+    --
+    -- ⚠ CALLED BY THE TILE AFTER ITS Paint, NOT HERE: the effect art is added
+    -- once this builder has returned, so a walk run here would miss exactly the
+    -- frames drawn over the picture.
+    function container.DisableMouseTree()
+        local function strip(f)
+            if not f then return end
+            if f.EnableMouse then f:EnableMouse(false) end
+            if f.EnableMouseMotion then f:EnableMouseMotion(false) end
+            -- Retail splits click from motion; older shims have neither.
+            if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
+            if f.SetMouseMotionEnabled then f:SetMouseMotionEnabled(false) end
+            if f.GetChildren then
+                for i = 1, select("#", f:GetChildren()) do
+                    strip((select(i, f:GetChildren())))
+                end
+            end
+        end
+        strip(container)
+    end
+
     container:SetScript("OnSizeChanged", function() container.RefreshGeometry() end)
 
     -- ⚠ A THUMBNAIL HAS NO SIZE EVENT TO WAIT FOR. Its box was set at the top of
@@ -3377,6 +3410,9 @@ local function CreateFrameTile(parent, opts)
     })
     tile.preview = pv
     if opts.Paint then opts.Paint(pv) end
+    -- AFTER Paint, for the reason DisableMouseTree's own note gives: the effect
+    -- art lands last, and it is the art sitting over the picture.
+    if pv.DisableMouseTree then pv.DisableMouseTree() end
 
     local lbl = tile:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(lbl, 10, "")

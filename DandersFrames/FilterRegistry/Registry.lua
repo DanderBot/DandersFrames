@@ -820,8 +820,29 @@ function R:FilterSpellList(ref)
     else
         return nil
     end
+    -- ☠ BY CLASS FIRST, in the SAME fixed order the spell picker groups by --
+    -- R.PickerClassOrder, read at CALL time. Registry.lua is resident and that
+    -- table is published by the load-on-demand options half, so a load-time alias
+    -- here would freeze nil; every caller of this verb is options-side UI, so by
+    -- the time it runs the table is there. The fallback keeps a sane order if it
+    -- somehow is not.
+    --
+    -- Classless entries (items, racials, class == "ALL") sort LAST rather than
+    -- under a class they do not belong to -- the same call the picker's own
+    -- "General" group makes.
+    local rank = {}
+    local order = R.PickerClassOrder
+    if order then
+        for i = 1, #order do rank[order[i]] = i end
+    end
+    local function ClassRank(c)
+        if not c or c == "ALL" then return 999 end
+        return rank[c] or 998
+    end
     tsort(out, function(a, b)
         if (a.raw or false) ~= (b.raw or false) then return not a.raw end
+        local ra, rb = ClassRank(a.class), ClassRank(b.class)
+        if ra ~= rb then return ra < rb end
         if a.name ~= b.name then return a.name < b.name end
         return a.id < b.id
     end)

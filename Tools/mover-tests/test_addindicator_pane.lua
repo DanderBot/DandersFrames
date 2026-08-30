@@ -780,3 +780,37 @@ do
 end
 
 CreateFrame = prevCreateFrame
+
+-- ============================================================
+-- A TILE'S PICTURE TAKES NO MOUSE
+-- ------------------------------------------------------------
+-- ☠ A tile is a Button and its preview is a child. Any descendant of that
+-- preview that is mouse-enabled swallows the press over the very picture the
+-- button exists to offer -- and the button never lights either, because the
+-- hover never reaches it. Reported twice in game: "none of the images are
+-- clickable, i have to click somewhere outside the image", then "dont even get a
+-- hover highlight on the button when hovering".
+--
+-- ⚠ A WALK, NOT A LIST. The first attempt chased ONE taker (the canvas's scale
+-- slider, which a thumbnail was building by falling through the non-compact arm)
+-- and the tiles stayed dead. The preview builds a backdrop, a mock, a border
+-- overlay and whatever the effect paints on top; naming them is a list that
+-- rots.
+--
+-- ⚠ AND IT MUST RUN AFTER Paint -- the effect art is added once the preview
+-- builder has returned, so a walk run inside it misses exactly the frames drawn
+-- over the picture.
+-- ============================================================
+print("-- Add panel: a tile's picture takes no mouse")
+do
+    local CARDS = options_file_source("AuraDesigner/UI/Cards.lua")
+    check(CARDS:find("function container.DisableMouseTree()", 1, true) ~= nil,
+          "tile mouse: the preview publishes a verb that strips its whole subtree")
+    check(CARDS:find("if f.GetChildren then", 1, true) ~= nil,
+          "tile mouse: ...and it walks children rather than naming frames")
+    local paintAt = CARDS:find("if opts.Paint then opts.Paint(pv) end", 1, true)
+    local stripAt = CARDS:find("if pv.DisableMouseTree then pv.DisableMouseTree() end", 1, true)
+    check(stripAt ~= nil, "tile mouse: the tile calls it")
+    check(paintAt and stripAt and stripAt > paintAt,
+          "tile mouse: ...AFTER Paint, so the effect art is stripped too")
+end

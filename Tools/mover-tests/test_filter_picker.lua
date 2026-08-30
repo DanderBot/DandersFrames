@@ -483,3 +483,32 @@ do
 end
 
 CreateFrame = prevCreateFrame
+
+-- ============================================================
+-- THE PEEK LIST IS ORDERED BY CLASS
+-- ------------------------------------------------------------
+-- Requested in game: the spells shown when a filter is expanded are ordered by
+-- class, using the picker's own R.PickerClassOrder so the peek and the spell
+-- database agree. Classless entries (items, racials, class == "ALL") sort LAST
+-- rather than under a class they do not belong to -- the same call the picker's
+-- "General" group makes.
+-- ============================================================
+print("-- Filter picker: the peek list is ordered by class")
+do
+    local SRC = df_file_source("FilterRegistry/Registry.lua")
+    local body = SRC:match("function R:FilterSpellList%(ref%)(.-)\nend")
+    check(body ~= nil, "peek sort: FilterSpellList's body can be read")
+    body = (body or ""):gsub("%-%-[^\r\n]*", "")
+    check(body:find("R.PickerClassOrder", 1, true) ~= nil,
+          "peek sort: the order is the picker's, not a second list")
+    check(SRC:find("local order = R.PickerClassOrder", 1, true) ~= nil,
+          "peek sort: ...read inside the verb, not aliased at file scope")
+    check(body:find("ClassRank(a.class), ClassRank(b.class)", 1, true) ~= nil,
+          "peek sort: class outranks name in the comparator")
+    check(body:find("if ra ~= rb then return ra < rb end", 1, true) ~= nil,
+          "peek sort: ...and name still breaks the tie inside a class")
+    check(body:find([[c == "ALL" then return 999]], 1, true) ~= nil,
+          "peek sort: classless entries sort last, not under a class")
+    check(body:find("if (a.raw or false) ~= (b.raw or false)", 1, true) ~= nil,
+          "peek sort: raw ids still sort after named spells")
+end
