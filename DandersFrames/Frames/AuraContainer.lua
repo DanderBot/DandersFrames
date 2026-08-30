@@ -1227,9 +1227,20 @@ end
 --      raider's DoTs on the boss" rule. Under a "you" reading it would instead HIDE YOUR
 --      OWN aura, contradicting line 396 three lines above it, which exists precisely to
 --      show yours.
---   ☠ 3. THE COUNTER-ARGUMENT, recorded so nobody thinks this is settled: the field NAME
---      mirrors AuraUtil.AuraFilters.Player almost word for word ("auras that were cast by
---      the player, or by the player's pet or vehicle"). Naming alone argues the other way.
+--   3. PEER FIELD TEST, and the one piece of hard measurement anyone has: EllesmereUI
+--      8.7.4's raid-frame aura module states that the boolean "matches auras cast by ANY
+--      player (field-verified: same-spec allies' buffs passed it), so own-cast filtering
+--      rides the PLAYER filter token instead." Someone else ran the experiment and got
+--      the same answer.
+--   ☠ 4. BLIZZARD ONCE NAMED IT OUTRIGHT, AND THAT CITATION HAS ROTTED. The old
+--      TargetFrameMixin:ShouldShowDebuffs took this very field as a parameter named
+--      `casterIsAPlayer`. That was the decisive proof and it is GONE: 12.1 refactored the
+--      whole path into TargetFrameAuraContainerPrivateMixin:ShouldShowAuraAsDebuff, and
+--      neither `casterIsAPlayer` nor `ShouldShowDebuffs` appears anywhere in the retail
+--      OR ptr dump any more (checked 2026-08-30). Do not go looking for it. It also kills
+--      the only counter-argument worth raising — that the FIELD name mirrors
+--      AuraUtil.AuraFilters.Player word for word — because Blizzard's own parameter name
+--      for it said "a player", not "the player".
 --   ⚠ An earlier version of this note claimed line 406 would be DEAD CODE under the "you"
 --      reading. That is not airtight and should not be repeated: 406 is still reachable
 --      when sourceUnit is nil, so the branch would be reachable either way. The
