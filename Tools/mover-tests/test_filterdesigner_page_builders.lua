@@ -105,9 +105,30 @@ do
     check(atRow < atDetail,   "bands: ...then the MASTER, before the detail it selects...")
     check(atDetail < atFresh, "bands: ...then the detail, then the database note")
 
+    -- ☠ AND THE ONE FLUSH SEAM GOT ITS OWN BAND. The other four already breathe
+    -- (the chip row and the detail carry BAND_GAP in their slots, the master row
+    -- the kit's 6), but the banner's slot is `banner.layoutHeight` -- a number
+    -- CreateInfoBanner's deferred re-measure rewrites, so a gap folded into it is
+    -- discarded on the next re-wrap. It is a band the banner does not own.
+    local atGap = adopt:find("addFn(bannerGap,", 1, true)
+    check(atGap and atBanner < atGap and atGap < atChips,
+          "bands: ...with the rhythm's own band between the banner and the chips")
+    -- ⚠ BUILT ONCE, OUTSIDE THE ADOPT PASS. It runs on EVERY build, and frames
+    -- cannot be garbage-collected in this client -- a frame created in there is one
+    -- leaked per rebuild.
+    check(adopt:find("CreateFrame(", 1, true) == nil,
+          "bands: ...created outside the pass, which re-runs on every build")
+    check(SRC:find("local bannerGap = CreateFrame(\"Frame\", nil, parent)", 1, true) ~= nil,
+          "bands: ...where the other four roots are built")
+    -- ⚠ AND THE PANEL SIZER IS NOT EDITED FOR IT. The band arm already reserves
+    -- BAND_GAP * 3 above the detail where only two gaps stood; this is the third.
+    -- PANEL_CHROME_H is the ISLAND's sum, and the island has no band gaps at all.
+    check(SRC:find("local PANEL_CHROME_H = 22 + TOP_INSET + CHIP_ROW_H\n", 1, true) ~= nil,
+          "bands: ...so the island's chrome sum is untouched")
+
     -- Full width, every one. The all-rows rule: the page has one left edge and
     -- one right edge.
-    check(select(2, adopt:gsub('"both"', "")) == 5,
+    check(select(2, adopt:gsub('"both"', "")) == 6,
           "bands: every band spans both columns")
 
     -- A popout row is fixedRowHeight, so ResolveRowHeight takes the kit's own
