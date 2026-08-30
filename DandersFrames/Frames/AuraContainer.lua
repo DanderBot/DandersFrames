@@ -756,42 +756,105 @@ local function auraCountOn(unit, filterStr)
     if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return nil end
     return n
 end
-local function auraCount(filterStr) return auraCountOn("player", filterStr) end
+-- (Removed) `auraCount(filterStr)` — the player-only wrapper. Every check takes a unit
+-- now, and leaving a convenience that silently means "player" is how this probe came to
+-- ask the one unit least able to expose a context-dependent parse in the first place.
+-- ☠ THE ANSWER MAY DEPEND ON THE UNIT, NOT THE CLOCK (Krathe, 2026-08-30: "it might be
+-- that it changes again when you can't assist"). The first version of this probe asked
+-- only "player" — a unit that is always assistable, always visible, always in your
+-- instance, i.e. the single unit least likely to expose a context-dependent parse. It
+-- reported the park string matching while an experiment on a party frame minutes later
+-- rendered nothing, and that conflict is still open precisely because the probe could
+-- not say what was different about the unit.
+-- So: every finding now carries the unit's CONTEXT, and the sweep walks the group.
+--
+-- ⚠ ROUND-ROBIN, ONE GROUP UNIT PER SWEEP. Probing every unit each sweep would be five
+-- C calls x 40 in a raid, every 30s, forever — the exact "cost everyone pays for nobody"
+-- the OOR watch is channel-gated to avoid. One rotating unit keeps this ALWAYS-ON at
+-- constant cost and still covers a full raid inside ~20 minutes, which is far faster than
+-- a field report.
+local sentinelCursor = 0
+local function nextGroupUnit()
+    local n = (GetNumGroupMembers and GetNumGroupMembers()) or 0
+    if n <= 1 then return nil end
+    local raid = IsInRaid and IsInRaid()
+    local count = raid and n or (n - 1)   -- party tokens exclude you; raid tokens include you
+    if count < 1 then return nil end
+    sentinelCursor = (sentinelCursor % count) + 1
+    return (raid and "raid" or "party") .. sentinelCursor
+end
+
+-- The context that plausibly changes a C-side parse. Recorded on EVERY finding so the
+-- log can be read as a correlation rather than a mystery — "assist=0" appearing on every
+-- drift line would name the trigger outright.
+-- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix at :844).
+local function sentinelCtx(unit)
+    local parts = { "exists=" .. (UnitExists(unit) and 1 or 0) }
+    local oka, a = pcall(UnitCanAssist, "player", unit)
+    local aSecret = issecretvalue and issecretvalue(a) or false
+    parts[#parts + 1] = "assist=" .. ((oka and not aSecret) and (a and 1 or 0) or "?")
+    local okv, v = pcall(UnitIsVisible, unit)
+    local vSecret = issecretvalue and issecretvalue(v) or false
+    parts[#parts + 1] = "vis=" .. ((okv and not vSecret) and (v and 1 or 0) or "?")
+    return table.concat(parts, " ")
+end
+
+-- One polarity's self-contradiction, with the DISCRIMINATOR the first version lacked.
+-- ★ Comparing the contradiction's count against the PLAIN polarity's separates two
+-- different faults that look identical in a bare count:
+--   equal   -> the "!" component was DROPPED ("HARMFUL|!HARMFUL" degraded to "HARMFUL")
+--   unequal -> the contradiction resolved to something else entirely
+-- The old line asserted the second without ever measuring the first, and 12 matches on a
+-- unit carrying 12 debuffs is exactly what a dropped negation looks like.
+local function checkContradiction(unit, polarity)
+    local str = polarity .. "|!" .. polarity
+    local contra = auraCountOn(unit, str)
+    if not contra or contra == 0 then return end
+    local plain = auraCountOn(unit, polarity)
+    local ctx = sentinelCtx(unit)
+    -- Latched per polarity PER CONTEXT, not once per session: a drift that only appears
+    -- when you cannot assist must still be reported the first time that context occurs,
+    -- and a global latch would have swallowed exactly the case we are hunting.
+    local latch = "contra:" .. polarity .. "|" .. ctx
+    if sentinelWarned[latch] then return end
+    sentinelWarned[latch] = true
+    DF:DebugWarn(DBG,
+        "PARK/POLARITY DRIFT on %s: %q matched %d (plain %s=%s) — %s [%s]. The CF lock"
+        .. " (maxDuration = 0) is what keeps parked slots dark; the string is a canary only.",
+        tostring(unit), str, contra, polarity, tostring(plain),
+        (plain and contra == plain) and "NEGATION IGNORED (equals plain)"
+            or "contradiction resolved to something else",
+        ctx)
+end
+
+local function checkPartition(unit)
+    local all    = auraCountOn(unit, "HELPFUL")
+    local mine   = auraCountOn(unit, "HELPFUL|PLAYER")
+    local others = auraCountOn(unit, "HELPFUL|!PLAYER")
+    if not (all and mine and others) or (mine + others == all) then return end
+    local ctx = sentinelCtx(unit)
+    local latch = "partition|" .. ctx
+    if sentinelWarned[latch] then return end
+    sentinelWarned[latch] = true
+    DF:DebugWarn(DBG,
+        "PLAYER-token partition broken on %s: HELPFUL=%d but PLAYER=%d + !PLAYER=%d [%s] —"
+        .. " the '!' negation machinery has drifted; every negation-token dedup lattice"
+        .. " (debuff row, debuff groups, othersOnly, dispel gap) is suspect.",
+        tostring(unit), all, mine, others, ctx)
+end
+
 local function checkParkSentinel()
     if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
-    local pf = AuraContainer.SLOT_PARK_FILTER
-    if pf and not sentinelWarned.park then
-        local n = auraCount(pf)
-        if n and n > 0 then
-            sentinelWarned.park = true
-            DF:DebugWarn(DBG,
-                "PARK STRING FAILED OPEN: %q matched %d aura(s) on the player — the engine's"
-                .. " parser has drifted again (this would be the THIRD convention). The CF lock"
-                .. " (maxDuration = 0) is what is keeping parked slots dark; the string needs"
-                .. " replacing, not trusting.", tostring(pf), n)
-        end
-    end
-    if not sentinelWarned.harmfulPark then
-        local n = auraCount("HARMFUL|!HARMFUL")
-        if n and n > 0 then
-            sentinelWarned.harmfulPark = true
-            DF:DebugWarn(DBG,
-                "HARMFUL-side contradiction matched %d aura(s) on the player — the polarity"
-                .. " axis has drifted (mirror of the park-string failure).", n)
-        end
-    end
-    if not sentinelWarned.partition then
-        local all = auraCount("HELPFUL")
-        local mine = auraCount("HELPFUL|PLAYER")
-        local others = auraCount("HELPFUL|!PLAYER")
-        if all and mine and others and (mine + others ~= all) then
-            sentinelWarned.partition = true
-            DF:DebugWarn(DBG,
-                "PLAYER-token partition broken: HELPFUL=%d but PLAYER=%d + !PLAYER=%d —"
-                .. " the '!' negation machinery has drifted; every negation-token dedup"
-                .. " lattice (debuff row, debuff groups, othersOnly, dispel gap) is suspect.",
-                all, mine, others)
-        end
+    -- The player every sweep (cheap, and the baseline every other reading is compared
+    -- against), plus one rotating group member.
+    local units = { "player" }
+    local g = nextGroupUnit()
+    if g and UnitExists(g) then units[#units + 1] = g end
+    for i = 1, #units do
+        local u = units[i]
+        checkContradiction(u, "HELPFUL")
+        checkContradiction(u, "HARMFUL")
+        checkPartition(u)
     end
 end
 
@@ -939,6 +1002,40 @@ local function checkSlotAccumulation()
     end
 end
 
+-- ★★ THE DARK MISMATCH — the precondition of the debuff-bleed bug, moved onto the sweep.
+-- A slot that BELIEVES it is dark (parked / death-latched / vis-latched) but has not got
+-- the CF park lock recorded against it is a slot the engine may still be filling. That is
+-- exactly the state Drasvin's report and Krathe's repro were in, and until now it could
+-- only be seen by running the idgate dump AT THE MOMENT it was happening — which nobody
+-- does, because the symptom is noticed later.
+-- ☠ The CF lock is the ONLY test now: since the park string stopped being pushed, a dark
+-- slot's filter string is indistinguishable from a live one (see _pushFilter).
+-- ⚠ Latched per SLOT KEY, not once per session: several slots failing is a different and
+-- worse story than one, and collapsing them would hide it. _pushOK == false is called out
+-- separately because a REFUSED push with a replay queued is expected in combat and is not
+-- the same fault as a push that was never made.
+local darkWarned = {}
+local function checkDarkMismatch()
+    local parkCF = AuraContainer.SLOT_PARK_CF
+    if not parkCF then return end
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        local dark = h.parked or h._deathLatched or h._visLatched
+        if dark and h._cfPushed ~= parkCF and not darkWarned[h.key] then
+            darkWarned[h.key] = true
+            DF:DebugWarn(DBG,
+                "SLOT BELIEVED DARK BUT NOT LOCKED: slot %s on %s — parked=%s death=%s vis=%s,"
+                .. " CF lock NOT recorded (pushOK=%s%s). This is the precondition of auras"
+                .. " rendering at a retired indicator's position.",
+                tostring(h.key), tostring(h.owner and h.owner.unit),
+                tostring(h.parked and true or false),
+                tostring(h._deathLatched and true or false),
+                tostring(h._visLatched and true or false),
+                tostring(h._pushOK),
+                h._pendingTuning and ", replay queued" or "")
+        end
+    end
+end
+
 C_Timer.NewTicker(SWEEP_INTERVAL, function()
     syncFlowWatch()
     samplePoolGrowth()
@@ -948,6 +1045,7 @@ C_Timer.NewTicker(SWEEP_INTERVAL, function()
     checkParkSentinel()
     checkOutOfRangeAttribution()
     checkSlotAccumulation()
+    checkDarkMismatch()
     if not anyLiveContainers() then return end
     AuraContainer._kickLiveParse("safety sweep")
 end)
