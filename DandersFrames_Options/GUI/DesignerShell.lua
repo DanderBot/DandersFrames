@@ -54,6 +54,37 @@ local BANNER_H = 68
 local TABBAR_H = 28
 local TAB_GAP  = 4
 
+-- ============================================================
+-- THE BAND RHYTHM -- ONE NUMBER
+-- ------------------------------------------------------------
+-- The layout pass stacks bands FLUSH (y = y - h), so a page built from nothing
+-- but bands has no vertical rhythm at all: the banner touches the tabs, the tabs
+-- touch the canvas, the canvas touches the scope row. In game that read as
+-- "everything looks so crampted together", and it is not any one band's fault --
+-- it is the absence of a grid.
+--
+-- So the gap is the SHELL's, declared once and spent between band GROUPS, rather
+-- than a spacer sprinkled at each site by whoever noticed. 10 is not a new
+-- number: it is what the Filter Designer's own column already uses
+-- (FilterRegistry/UI/Options.lua's BAND_GAP), so the three designer pages share
+-- one rhythm instead of three near-misses. That file now READS this one.
+--
+-- ☠ NOT UNIFORM, AND THE EXCEPTION IS THE DESIGN. The preview is THREE bands --
+-- the folder tabs, the fold header, the canvas -- drawn as one panel: the
+-- selected tab drops its bottom edge so it runs continuous into the header below
+-- it (GUI:StyleFolderTab). A gap anywhere inside that group would open the join
+-- the tabs exist to make, so the group's internal gap is 0 and the rhythm goes
+-- between groups. That is the "larger between groups, smaller within" shape, with
+-- the within-group number pinned at 0 by a drawn continuity rather than by taste.
+--
+-- ⚠ A GAP IS ITS OWN BAND, NOT SLOT PADDING ON THE ONE ABOVE IT. The canvas band
+-- is HIDDEN when the fold is shut and the layout pass skips hidden children
+-- outright -- so a gap living in the canvas's slot would vanish with it and the
+-- fold header would go back to touching the scope row. A band of its own is
+-- always there, at both fold states, which is the only shape that holds.
+local BAND_GAP = 10
+GUI.DESIGNER_BAND_GAP = BAND_GAP
+
 -- opts:
 --   tools        REQUIRED  the page's GUI:CreatePopoutPageTools(page) table
 --   Add          REQUIRED  BuildPage's own Add(widget, height, col)
@@ -106,12 +137,35 @@ function GUI:BuildDesignerShell(page, opts)
     end
     shell.Band = Band
 
+    -- The rhythm, as a verb. Emits one BAND_GAP band, and NOTHING before the
+    -- first real band -- a page whose banner is omitted must not open with a gap
+    -- where the banner would have been.
+    local emitted = false
+    local function Gap()
+        if not emitted then return nil end
+        local g = Band(BAND_GAP)
+        Add(g, BAND_GAP, "both")
+        return g
+    end
+    local function AddBand(widget, h, col)
+        Add(widget, h, col or "both")
+        emitted = true
+        return widget
+    end
+    -- ⚠ NOT PUBLISHED ON THE SHELL, and that is a refusal rather than an omission.
+    -- This rhythm is spent between the page's STRUCTURAL bands; inside a tab the
+    -- objects already carry their own spacing (a popout row's band ends with the
+    -- kit's 6px gap, a head area starts its cursor at -4), so a caller reaching for
+    -- a gap verb would be doubling a seam that already breathes. A page that
+    -- genuinely needs the number -- the Filter Designer's column, which took the
+    -- column without the shell -- reads GUI.DESIGNER_BAND_GAP.
+
     -- ── 1. THE ENABLE BANNER ──
     if opts.banner then
         local w, h = opts.banner(page.child, shell)
         if w then
             shell.banner = w
-            Add(w, h or BANNER_H, "both")
+            AddBand(w, h or BANNER_H)
         end
     end
 
@@ -134,12 +188,17 @@ function GUI:BuildDesignerShell(page, opts)
     -- The bands abut -- the layout pass stacks them flush (y = y - h) -- so what
     -- is built here touches the top of the fold header, which is what lets a tab
     -- be drawn continuous with it.
+    --
+    -- ⚠ THE GAP GOES BEFORE THIS STRIP AND NOWHERE AFTER IT. The tabs, the fold
+    -- header and the canvas are ONE group, joined edge to edge on purpose; the
+    -- rhythm resumes below the whole preview. See the BAND_GAP note above.
+    if (opts.canvasTabs and opts.canvasTabs.build) or opts.canvas then Gap() end
     if opts.canvasTabs and opts.canvasTabs.build then
         local h = opts.canvasTabs.height or 30
         local host = Band(h)
         shell.canvasTabHost = host
         opts.canvasTabs.build(host, shell)
-        Add(host, h, "both")
+        AddBand(host, h)
     end
 
     -- ── 3. THE CANVAS ──
@@ -173,12 +232,12 @@ function GUI:BuildDesignerShell(page, opts)
             section = GUI:CreateCollapsibleSection(page.child, fold.title, true, bandW,
                                                    { collapseKey = fold.collapseKey })
             shell.canvasSection = section
-            Add(section, 28, "both")
+            AddBand(section, 28)
         end
         local host = Band(h)
         shell.canvasHost = host
         shell.canvas = opts.canvas(host, shell)
-        Add(host, h, "both")
+        AddBand(host, h)
         -- The band is the section's ONE child, so the page's own state pass hides
         -- it when the header is folded and the bands below close up over it.
         if section then section:RegisterChild(host) end
@@ -208,13 +267,15 @@ function GUI:BuildDesignerShell(page, opts)
     -- puts another strip of tabs here is rebuilding the confusion.
     for _, strip in ipairs(opts.strips or {}) do
         local h = strip.height or 30
+        Gap()
         local host = Band(h)
         strip.build(host, shell)
-        Add(host, h, "both")
+        AddBand(host, h)
     end
 
     -- ── 5. THE TAB STRIP ──
     if opts.tabs and #opts.tabs > 0 then
+        Gap()
         local bar = Band(TABBAR_H)
         shell.tabBar = bar
 
@@ -278,13 +339,21 @@ function GUI:BuildDesignerShell(page, opts)
             end
         end)
 
-        Add(bar, TABBAR_H, "both")
+        AddBand(bar, TABBAR_H)
     end
 
     -- ── 6. THE ACTIVE TAB ──
     -- The caller adds its own bands into the SAME column, so a row inside a tab
     -- and the canvas above it share the page's two edges.
-    if opts.buildTab then opts.buildTab(shell.activeTab, shell) end
+    --
+    -- ⚠ AND ONE GAP UNDER THE STRIP, from here rather than from the caller. The
+    -- tab bar draws a 1px baseline on its own bottom edge; the first thing a tab
+    -- builds would otherwise sit straight on that line. The caller's own bands
+    -- keep the same rhythm through shell.Gap().
+    if opts.buildTab then
+        Gap()
+        opts.buildTab(shell.activeTab, shell)
+    end
 
     return shell
 end

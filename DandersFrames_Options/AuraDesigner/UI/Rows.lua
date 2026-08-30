@@ -1032,16 +1032,78 @@ local function BuildLayoutTabRows(ctx, shell)
     local page, tools, Add = ctx.page, ctx.tools, ctx.Add
     local isDebuffs = IsDebuffTab()
 
-    -- The intro, the choice cards and the dedup hint -- the same furniture the
-    -- card layout puts above its list, mounted as one full-width object. One
-    -- definition, two hosts, exactly as the Effects tab's head area is.
+    -- ── + ADD LAYOUT GROUP ──
+    -- ☠ THE ROW THIS TAB NEVER GOT. Phase 5 turned the Effects tab's 230px card
+    -- block into a single "+ Add Indicator" row with the cards inside its panel,
+    -- and this tab was simply missed -- it kept the block standing permanently
+    -- above the list. Same shape, same rules: it holds no settings, so it takes
+    -- neither a modified tick nor a footer.
+    --
+    -- ⚠ BOTH POOLS, AND THEY ARE DIFFERENT BUILDERS. My Buffs / Any Buff make two
+    -- kinds of group and the Debuffs pool makes one, out of two separate head
+    -- areas (spec section 16). The ROW is one shape; which panel it opens and what
+    -- it is called are the pool's business.
+    local addLabel = isDebuffs and L["Add Debuff Group"] or L["Add Layout Group"]
+    local BuildAddPane = isDebuffs and S.BuildAddDebuffGroupPane or S.BuildAddLayoutGroupPane
+    local addBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
+    local addRow
+    local addMount = tools.PopoutContent(function(g, holder)
+        local pane = CreateFrame("Frame", nil, holder)
+        pane:SetWidth(PopoutWidth())
+        -- ☠ THE HEIGHT THE BUILDER ASKED FOR, REMEMBERED -- the Add Indicator
+        -- panel's own bug, and this row is the same shape. Every SetHeight below
+        -- is swallowed while `ready` is false, which is the whole build; without
+        -- keeping the number, the AddWidget under it measures a pane nothing has
+        -- sized and hands it a 1px slot. That panel opened EMPTY.
+        local ready, wantH = false, nil
+        BuildAddPane(pane, {
+            width = PopoutWidth(),
+            -- ⚠ SILENT UNTIL THE PANE IS IN THE GROUP: a height reported before
+            -- AddWidget has run has no slot to land in, and GUI:RelayoutHost would
+            -- re-run the PAGE's state pass in the middle of the page's own build.
+            SetHeight = function(h)
+                wantH = h
+                if ready then GUI:RelayoutHost(pane, h) end
+            end,
+            Close = function()
+                if addRow and addRow.ClosePopout then addRow:ClosePopout("api") end
+            end,
+        })
+        -- wantH FIRST: the builder reports through the callback, so its own
+        -- GetHeight is the fallback and not the answer.
+        g:AddWidget(pane, max(wantH or pane:GetHeight() or 1, 1))
+        ready = true
+        -- And once the slot exists, honour anything the build asked for while it
+        -- did not.
+        if wantH then GUI:RelayoutHost(pane, wantH) end
+    end)
+    addRow = addBand:AddWidget(GUI:CreatePopoutRow(page.child, {
+        label  = addLabel,
+        title  = addLabel,
+        window = DF.GUIFrame,
+        clipTo = page,
+        build  = addMount,
+    }))
+    if not ctx.adEnabled then addRow.disableOn = function() return true end end
+    Add(addBand, nil, "both")
+    -- ⚠ NO shell.Gap() HERE, DELIBERATELY. The band rhythm is the SHELL's, spent
+    -- between the page's structural bands; inside a tab the objects already carry
+    -- their own spacing -- a popout row's band ends with the kit's 6px gap and the
+    -- head area below starts its cursor at -4. Adding the shell's 10 on top would
+    -- make this seam 20px where the Effects tab's identical one is 10, which is a
+    -- rhythm with an exception rather than a rhythm.
+
+    -- The intro and the dedup hint -- the same furniture the card layout puts
+    -- above its list, mounted as one full-width object. One definition, two hosts,
+    -- exactly as the Effects tab's head area is. The CARDS are skipped: they are
+    -- in the row's panel above.
     GUI:AddDesignerLegacyTab(shell, function(host)
         host:SetWidth(tools.BandWidth())
         local yPos
         if isDebuffs then
-            yPos = S.BuildDebuffGroupsHeadArea(host, -4)
+            yPos = S.BuildDebuffGroupsHeadArea(host, -4, { skipAddBlock = true })
         else
-            yPos = S.BuildLayoutGroupsHeadArea(host, -4)
+            yPos = S.BuildLayoutGroupsHeadArea(host, -4, { skipAddBlock = true })
         end
         host:SetHeight(max(-(yPos or 0) + 4, 1))
     end)
@@ -1049,9 +1111,9 @@ local function BuildLayoutTabRows(ctx, shell)
     local groups = isDebuffs and DebuffGroupsRead() or CurrentLayoutGroups()
 
     -- ⚠ NO SEPARATE EMPTY STATE. The head area above already IS one when the
-    -- list is empty: it swaps in the teaching sentence and the choice cards that
-    -- create the first group, which is what an empty state is for. A banner under
-    -- it would repeat the same sentence twice on the same screen.
+    -- list is empty: it swaps in the teaching sentence that says what this tab
+    -- makes, and the row above it is how one gets made. A banner under it would
+    -- repeat the same sentence twice on the same screen.
     if #groups == 0 then return end
 
     for _, group in ipairs(groups) do

@@ -434,7 +434,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local FILTERROW_H = 50
     -- The gap the island puts between its stacked pieces, kept so the band arm has
     -- the same rhythm rather than a second set of numbers.
-    local BAND_GAP = 10
+    --
+    -- ☠ AND IT IS NOW THE DESIGNER SHELL'S NUMBER, NOT A SECOND COPY OF IT. The
+    -- shell gained the same rhythm for the Aura and Text Designers (the bands used
+    -- to stack flush and read as "crampted together"), and it took THIS value
+    -- because this page had already chosen it. Read rather than re-typed, so the
+    -- three designer pages cannot drift into three near-identical gaps. Read here,
+    -- inside the builder, rather than at file scope: this file loads before nothing
+    -- in particular, and a page builds long after every file has.
+    local BAND_GAP = GUI.DESIGNER_BAND_GAP or 10
 
     -- Shared helpers from FilterRegistry/SpellPicker.lua (loads after this
     -- file — safe here because pages build long after load time)
@@ -3488,8 +3496,30 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- widget at the top of its slot and only forces the widget's own height when
         -- it carries a `text` field, so a slot one BAND_GAP taller than its frame is
         -- how a band gets air under it without a spacer per band.
+        -- ☠ THE ONE FLUSH SEAM IN THIS COLUMN, AND IT NEEDS A BAND OF ITS OWN. Four
+        -- of the five seams already breathe -- the chip row and the detail carry
+        -- BAND_GAP in their slots, the master row carries the kit's own 6 -- but the
+        -- banner's slot is `banner.layoutHeight`, and that number is written by
+        -- CreateInfoBanner's own deferred re-measure (RelayoutHost). Anything added
+        -- to it there is discarded on the next re-wrap, so the gap goes in a band the
+        -- banner does not own.
+        --
+        -- ⚠ BUILT ONCE, OUTSIDE AdoptBands. That function runs on EVERY build --
+        -- DoBuild retires every Add()ed child and the rebuild guard calls it again --
+        -- and frames cannot be garbage-collected in this client, so a frame created
+        -- in there is one frame leaked per rebuild.
+        --
+        -- ⚠ AND THE PANEL SIZER NEEDS NO EDIT. In the band arm it computes its own
+        -- chrome (`(chipRow:GetHeight() or CHIP_H) + FILTERROW_H + BAND_GAP * 3`),
+        -- which already reserves three gaps above the detail where only two stood;
+        -- this is the third. PANEL_CHROME_H is the ISLAND's sum and must not move --
+        -- the island anchors its pieces directly and has no band gaps at all.
+        local bannerGap = CreateFrame("Frame", nil, parent)
+        bannerGap:SetSize(tools.BandWidth(), BAND_GAP)
+
         local function AdoptBands(addFn)
             addFn(banner, banner.layoutHeight, "both")
+            addFn(bannerGap, BAND_GAP, "both")
             addFn(chipRow, (chipRow:GetHeight() or CHIP_H) + BAND_GAP, "both")
             -- nil: a popout row is fixedRowHeight, so ResolveRowHeight takes the
             -- kit's own plate + gap rather than a number copied out of it.

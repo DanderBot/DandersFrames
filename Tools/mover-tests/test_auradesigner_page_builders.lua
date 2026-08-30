@@ -624,10 +624,17 @@ do
     -- Phase 3's two: the Layout Groups and Debuffs choice-card blocks, lifted out
     -- of the tab builders they used to be welded into.
     for _, name in ipairs({ "BuildLayoutGroupsHeadArea", "BuildDebuffGroupsHeadArea" }) do
-        check(EDIT:find("S." .. name .. " = function(parent, yPos)", 1, true) ~= nil,
+        check(EDIT:find("S." .. name .. " = function(parent, yPos, opts)", 1, true) ~= nil,
               "head: " .. name .. " is declared once")
-        check(ROWS:find("S." .. name .. "(host, -4)", 1, true) ~= nil,
-              "head: ...and the row page mounts it as a band")
+        -- ☠ AND THE ROW LAYOUT ASKS IT TO SKIP THE CARDS. They moved into the
+        -- "+ Add Layout Group" row's panel, exactly as the Effects tab's three
+        -- scope cards moved into "+ Add Indicator" -- the block this tab kept
+        -- standing permanently above its list is the thing section 23.2 takes away.
+        check(ROWS:find("S." .. name .. "(host, -4, { skipAddBlock = true })", 1, true) ~= nil,
+              "head: ...and the row page mounts it as a band, without its card block")
+        check(EDIT:find("S." .. name .. " = function(parent, yPos, opts)\n    local skipAdd = opts and opts.skipAddBlock or false",
+                        1, true) ~= nil,
+              "head: ...which is the first thing that builder reads (" .. name .. ")")
         local n = 0
         for _ in EDIT:gmatch("S%." .. name) do n = n + 1 end
         eq(n, 2, "head: ...declared once and mounted once by the card (" .. name .. ")")
@@ -649,6 +656,121 @@ do
           "head: Layout Groups is built as rows")
     check(ROWS:find("BuildGlobalTabRows(ctx, shell)", 1, true) ~= nil,
           "head: ...and so is Global")
+end
+
+-- ============================================================
+-- 8a. LAYOUT GROUPS GETS ITS ADD PANEL
+-- Phase 5 turned the Effects tab's 230px choice-card block into a single
+-- "+ Add Indicator" row with the cards inside its panel. Layout Groups was
+-- missed and kept the block standing permanently above its list -- on BOTH its
+-- arms, which are two different builders (spec section 16).
+-- ============================================================
+print("-- Aura Designer: Layout Groups gets its own add panel")
+do
+    -- ── ONE ROW, TWO POOLS ──
+    -- The row is one shape; which panel it opens and what it is called are the
+    -- pool's business. Read off the branch itself so a pool losing its arm shows.
+    local BODY = ROWS:match("local function BuildLayoutTabRows%(ctx, shell%)(.-)\nlocal groups")
+                 or ROWS:match("local function BuildLayoutTabRows%(ctx, shell%)(.-)\n    local groups")
+    check(BODY ~= nil, "addgroup: the Layout Groups tab builder can be read")
+    BODY = BODY or ""
+    check(BODY:find([==[local addLabel = isDebuffs and L["Add Debuff Group"] or L["Add Layout Group"]]==],
+                    1, true) ~= nil,
+          "addgroup: the row names itself after the pool it is adding to")
+    check(BODY:find("local BuildAddPane = isDebuffs and S.BuildAddDebuffGroupPane or S.BuildAddLayoutGroupPane",
+                    1, true) ~= nil,
+          "addgroup: ...and opens that pool's own panel -- both arms have one")
+    -- ☠ READ AT CALL TIME, NOT ALIASED AT LOAD. Editor.lua declares both panes and
+    -- loads AFTER this file, so a file-scope local would freeze nil -- silently,
+    -- because a nil upvalue only errors when the tab is opened.
+    check(ROWS:find("local BuildAddLayoutGroupPane", 1, true) == nil,
+          "addgroup: ...neither of which is aliased at load, where it would be nil")
+    check(BODY:find("GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })",
+                    1, true) ~= nil,
+          "addgroup: the row rides a chromeless band at the page's own width")
+    check(BODY:find("build  = addMount,", 1, true) ~= nil,
+          "addgroup: ...and it is a popout row, like + Add Indicator")
+    -- It holds no settings, so it takes neither a modified tick nor a footer --
+    -- the same refusal the Add Indicator row makes.
+    check(BODY:find("tools.WireModifiedTick(addRow)", 1, true) == nil,
+          "addgroup: ...with no modified tick, because it holds no setting")
+    check(BODY:find("tools.WireFooter(addRow", 1, true) == nil,
+          "addgroup: ...and no footer, for the same reason")
+    check(BODY:find("if not ctx.adEnabled then addRow.disableOn = function() return true end end",
+                    1, true) ~= nil,
+          "addgroup: ...and it greys with the rest of the page")
+
+    -- ☠ THE HEIGHT THE BUILDER ASKED FOR, REMEMBERED. This row is the same shape
+    -- as + Add Indicator, which shipped opening EMPTY: every SetHeight the builder
+    -- reported was swallowed while `ready` was false -- the whole build -- and the
+    -- AddWidget under it then measured a pane nothing had sized and gave it a 1px
+    -- slot. Pinned here so the second panel cannot repeat the first one's bug.
+    check(BODY:find("local ready, wantH = false, nil", 1, true) ~= nil,
+          "addgroup: the panel remembers the height reported while its verb is silent")
+    check(BODY:find("wantH = h", 1, true) ~= nil,
+          "addgroup: ...written on every report, not only the last")
+    local slotAt  = BODY:find("g:AddWidget(pane, max(wantH or pane:GetHeight() or 1, 1))", 1, true)
+    local readyAt = BODY:find("ready = true", 1, true)
+    check(slotAt ~= nil,
+          "addgroup: ...and the slot takes that number, not the pane's own")
+    check(slotAt and readyAt and slotAt < readyAt,
+          "addgroup: ...with the flag armed after the add, never before")
+    local applyAt = BODY:find("if wantH then GUI:RelayoutHost(pane, wantH) end", 1, true)
+    check(applyAt and readyAt and applyAt > readyAt,
+          "addgroup: ...and anything asked for during the silence lands once it is")
+
+    -- ── THE TWO PANES ──
+    for _, pane in ipairs({ { fn = "S.BuildAddLayoutGroupPane", cards = "LayoutGroupCards" },
+                            { fn = "S.BuildAddDebuffGroupPane", cards = "DebuffGroupCards"  } }) do
+        local SRC = EDIT:match(pane.fn:gsub("%.", "%%.") .. " = function%(host, opts%)(.-)\nend")
+        check(SRC ~= nil, "addgroup: " .. pane.fn .. " can be read")
+        SRC = SRC or ""
+        -- ONE declaration of the cards, two hosts: the split panel's block and
+        -- this panel. A second copy is how Cards.lua ended up with three
+        -- duplicated FRAME_ITEMS lists.
+        check(SRC:find("for _, def in ipairs(" .. pane.cards .. "())", 1, true) ~= nil,
+              "addgroup: ...and builds from the shared card list")
+        check(EDIT:find("local function " .. pane.cards .. "()", 1, true) ~= nil,
+              "addgroup: ...which is a verb, so its labels cannot freeze on enUS")
+        check(EDIT:find("local " .. pane.cards .. " = {", 1, true) == nil,
+              "addgroup: ...rather than a table built at load")
+        -- ☠ BARE CARDS, NOT A CHOICE CARD *GROUP*. CreateChoiceCardGroup wraps its
+        -- cards in a collapsible header keyed by TITLE TEXT in the account-wide
+        -- collapsed store -- a second header inside a panel that already has one,
+        -- and a profile key for a fold nobody can usefully close.
+        check(SRC:find("GUI:CreateChoiceCard(host, {", 1, true) ~= nil,
+              "addgroup: ...as bare cards")
+        check(SRC:find("CreateChoiceCardGroup", 1, true) == nil,
+              "addgroup: ...with no second collapsible header inside the panel")
+        -- ...and it REPORTS its height rather than only sizing itself, which is the
+        -- half the caller's wantH is waiting for.
+        check(SRC:find("if opts.SetHeight then opts.SetHeight(h) end", 1, true) ~= nil,
+              "addgroup: ...and reports its height instead of assuming one")
+        -- ⚠ CLOSED FIRST, THEN CREATED. Creating a group rebuilds the page, which
+        -- retires the row this panel is docked to.
+        local closeAt = SRC:find("if opts.Close then opts.Close() end", 1, true)
+        local pickAt  = SRC:find("onPick()", 1, true)
+        check(closeAt and pickAt and closeAt < pickAt,
+              "addgroup: ...and shuts itself before the rebuild that retires its row")
+    end
+
+    -- The split panel keeps its block: it is the one surface with standing room.
+    check(EDIT:find([[title    = L["ADD A LAYOUT GROUP"],]], 1, true) ~= nil,
+          "addgroup: the split panel still draws its card block")
+    check(EDIT:find([[title    = L["ADD A DEBUFF GROUP"],]], 1, true) ~= nil,
+          "addgroup: ...on both pools")
+
+    -- The order the Effects tab already draws: add, then the list.
+    local addAt  = BODY:find("local addBand = GUI:CreateSettingsGroup", 1, true)
+    local headAt = BODY:find("GUI:AddDesignerLegacyTab(shell, function(host)", 1, true)
+    check(addAt and headAt and addAt < headAt,
+          "addgroup: the add row comes first, then whatever the head area still says")
+
+    local EN = df_file_source("Locales/enUS.lua")
+    check(EN:find("L[\"Add Layout Group\"] = true", 1, true) ~= nil,
+          "addgroup: the row's label is in the source locale")
+    check(EN:find("L[\"Add Debuff Group\"] = true", 1, true) ~= nil,
+          "addgroup: ...and so is the Debuffs pool's")
 end
 
 -- ============================================================
@@ -1554,6 +1676,25 @@ do
           "showing: ...and it holds the same eight chips, at the popout's own width")
     check(POP:find([[pop:Follow(btn, { outsideOf = DF.GUIFrame })]], 1, true) ~= nil,
           "showing: ...docked outside the settings window, like every other panel")
+
+    -- ☠ THE RE-SYNC, WHICH SHIPPED MISSING AND WITHOUT A TEST. A pooled popout's
+    -- `build` runs EXACTLY ONCE, so the chips set their active state at that
+    -- moment and never again -- the panel showed "All" forever, however the list
+    -- was really filtered. The fix was a second return from the chip builder and a
+    -- call on every open; only the source changed, so nothing here caught it.
+    -- Pinned now, on both halves.
+    local chipsSrc = CARDS:match("S%.BuildFilterChips = function%(host, width%)(.-)\nend")
+    check(chipsSrc ~= nil, "showing: the chip builder can be read")
+    check((chipsSrc or ""):find("local function SyncActive()", 1, true) ~= nil,
+          "showing: the builder hands back a re-sync verb")
+    check((chipsSrc or ""):find("return LayoutChips, SyncActive", 1, true) ~= nil,
+          "showing: ...as its SECOND return, so the split panel still gets the re-flow first")
+    check(POP:find("po.dfSyncChips = SyncActive", 1, true) ~= nil,
+          "showing: ...which the panel keeps")
+    local syncAt   = POP:find("if pop.dfSyncChips then pop.dfSyncChips() end", 1, true)
+    local followAt = POP:find("pop:Follow(btn, { outsideOf = DF.GUIFrame })", 1, true)
+    check(syncAt and followAt and syncAt > followAt,
+          "showing: ...and calls on EVERY open, after the dock -- not only in build")
     -- A second click on the glyph shuts it, like any toggle.
     check(POP:find([[open:Close("api")]], 1, true) ~= nil,
           "showing: a second click on the glyph closes it")
@@ -2113,6 +2254,91 @@ do
           "fold: ...and so does the Text Designer")
 end
 
+print("-- The designer shell: one band rhythm, declared once")
+do
+    -- ☠ THE BANDS USED TO STACK FLUSH. The layout pass runs y = y - h with no gap
+    -- of its own, so a page built entirely from bands had no vertical grid at all
+    -- -- "everything looks so crampted together". The fix is the SHELL's, one
+    -- number, not a spacer sprinkled per site by whoever noticed.
+    check(SHELL:find("local BAND_GAP = ", 1, true) ~= nil,
+          "rhythm: the shell declares the gap once")
+    check(SHELL:find("GUI.DESIGNER_BAND_GAP = BAND_GAP", 1, true) ~= nil,
+          "rhythm: ...and publishes it, so the other designer pages read rather than copy it")
+    local FDOPT = options_file_source("FilterRegistry/UI/Options.lua")
+    -- The Filter Designer never took the shell (it is a master/detail, not a
+    -- preview-plus-tabs), so its column carries its own band arithmetic -- but it
+    -- must carry the SAME number, or the three designer pages breathe differently.
+    check(FDOPT:find("local BAND_GAP = GUI.DESIGNER_BAND_GAP or 10", 1, true) ~= nil,
+          "rhythm: the Filter Designer's column reads that number")
+    check(FDOPT:find("local BAND_GAP = 10\n", 1, true) == nil,
+          "rhythm: ...rather than keeping a second copy of it")
+
+    -- ⚠ A GAP IS ITS OWN BAND. Slot padding on the band above would be skipped
+    -- with that band, and the one band on this page that HIDES is the canvas --
+    -- so the gap under the preview would vanish at exactly the fold state where
+    -- the page is tightest. Emitted through a verb, which is also what makes the
+    -- "nothing before the first band" rule a single line.
+    local gapFn = SHELL:match("local function Gap%(%)(.-)\n    end")
+    check(gapFn ~= nil, "rhythm: the gap is emitted by a verb")
+    gapFn = gapFn or ""
+    check(gapFn:find("if not emitted then return nil end", 1, true) ~= nil,
+          "rhythm: ...which emits nothing above the first band")
+    check(gapFn:find("Add(g, BAND_GAP, \"both\")", 1, true) ~= nil,
+          "rhythm: ...and adds a band of its own, not padding on somebody's slot")
+
+    -- ☠ AND THE PREVIEW IS ONE GROUP. The folder tabs drop their bottom edge to
+    -- run continuous into the fold header (GUI:StyleFolderTab); a gap anywhere
+    -- inside tabs / header / canvas opens the join those tabs exist to make. So
+    -- the group takes ONE leading gap and none internally -- the "larger between
+    -- groups, smaller within" shape, with the within-group number pinned at 0 by a
+    -- drawn continuity rather than by taste.
+    check(SHELL:find("if (opts.canvasTabs and opts.canvasTabs.build) or opts.canvas then Gap() end",
+                     1, true) ~= nil,
+          "rhythm: one gap before the preview group, whichever of its bands leads")
+    local previewBlock = SHELL:match("if opts%.canvasTabs and opts%.canvasTabs%.build then(.-)\n    %-%- \226\148\128\226\148\128 4%.")
+    check(previewBlock ~= nil, "rhythm: the preview group's own bands can be read")
+    previewBlock = previewBlock or ""
+    check(previewBlock:find("Gap()", 1, true) == nil,
+          "rhythm: ...and nothing inside the preview group breaks its join")
+
+    -- The rest of the column: one gap above each strip, above the tab bar, and
+    -- above whatever the active tab builds. That last one is the shell's rather
+    -- than the caller's because the tab bar draws a baseline on its own bottom
+    -- edge and the first row would otherwise sit on the line.
+    local stripBlock = SHELL:match("for _, strip in ipairs%(opts%.strips or {}%) do(.-)\n    end")
+    check(stripBlock and stripBlock:find("Gap()", 1, true) ~= nil,
+          "rhythm: each strip takes a gap above it")
+    local tabBlock = SHELL:match("if opts%.tabs and #opts%.tabs > 0 then(.-)local bar = Band")
+    check(tabBlock and tabBlock:find("Gap()", 1, true) ~= nil,
+          "rhythm: ...so does the tab strip")
+    local buildBlock = SHELL:match("if opts%.buildTab then(.-)\n    end")
+    check(buildBlock and buildBlock:find("Gap()", 1, true) ~= nil,
+          "rhythm: ...and so does the tab's own content, under the strip's baseline")
+
+    -- ☠ AND NOT PUBLISHED ON THE SHELL. Inside a tab the objects already carry
+    -- their own spacing -- a popout row's band ends with the kit's 6px gap, a head
+    -- area starts its cursor at -4 -- so a tab builder reaching for a gap verb
+    -- would double a seam that already breathes, and the two tabs' identical seams
+    -- would come out 10 and 20. The one page that genuinely needs the number took
+    -- the column WITHOUT the shell, and reads the published constant.
+    --
+    -- ⚠ COMMENTS STRIPPED FIRST. Every one of these three files EXPLAINS that it
+    -- does not call shell.Gap(), in prose containing the literal -- so a raw find
+    -- answers "is this string anywhere" and is a guaranteed false positive, which
+    -- is exactly how the first version of this failed against correct source.
+    local function codeOnly(src) return (src:gsub("%-%-[^\n]*", "")) end
+    local TDR = options_file_source("TextDesigner/UI/Rows.lua")
+    check(codeOnly(SHELL):find("shell.Gap", 1, true) == nil,
+          "rhythm: the verb is the shell's own, not a knob on the tabs")
+    check(codeOnly(ROWS):find("shell.Gap()", 1, true) == nil,
+          "rhythm: ...so no tab doubles a seam that already breathes")
+    check(codeOnly(TDR):find("shell.Gap()", 1, true) == nil,
+          "rhythm: ...on either designer")
+    -- ...and the strip is doing something: the prose IS there in both.
+    check(ROWS:find("shell.Gap()", 1, true) ~= nil,
+          "rhythm: ...which the source says out loud, in a comment the strip removes")
+end
+
 print("-- Aura Designer: what the chrome now costs, band by band")
 do
     -- ☠ THE POINT OF THE WHOLE DIET, AS A NUMBER. Every figure is READ OUT OF
@@ -2126,8 +2352,11 @@ do
     local tabbar  = tonumber(SHELL:match("local TABBAR_H = (%d+)"))
     local F, PAD, DY = CARDS:match("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = (%d+), (%d+), (%d+)")
     F, PAD, DY = tonumber(F), tonumber(PAD), tonumber(DY)
-    local foldHeader = tonumber(SHELL:match("Add%(section, (%d+), \"both\"%)"))
-    check(banner and scope and pool and pooltabs and tabbar and F and PAD and DY and foldHeader,
+    local foldHeader = tonumber(SHELL:match("AddBand%(section, (%d+)%)"))
+    -- The band rhythm, read from the shell's own declaration rather than restated.
+    local bandGap = tonumber(SHELL:match("local BAND_GAP = (%d+)"))
+    check(banner and scope and pool and pooltabs and tabbar and F and PAD and DY and foldHeader
+          and bandGap,
           "chrome: every band's height can be read from the source")
 
     -- The canvas at the scale the complaint was measured at.
@@ -2158,17 +2387,40 @@ do
     check(startY and caption, "chrome: ...and what the caption band costs")
     local head = (startY or 0) + (caption or 0) + 4
 
+    -- ☠ AND THE RHYTHM IS PART OF THE SUM. The bands used to stack FLUSH -- the
+    -- banner touching the pool tabs, the canvas touching the scope row -- which is
+    -- what "everything looks so crampted together" was. Four gaps buy the grid:
+    -- under the banner, under the preview, under the scope row, under the tab
+    -- strip. There is no fifth INSIDE the preview: the folder tabs, the fold
+    -- header and the canvas are drawn joined, and a gap there would open the very
+    -- seam the tabs exist to close.
+    local GAPS = 4
     local open   = banner + pooltabs + foldHeader + canvas + scope + tabbar + popoutRow + head
+                 + GAPS * bandGap
+    -- ⚠ THE SAME FOUR WHEN THE CANVAS IS SHUT. A gap is its own band, not padding
+    -- on the slot above it, precisely so the one under the preview survives the
+    -- fold -- the layout pass skips hidden children outright, so slot padding on
+    -- the canvas would disappear with it and the header would touch the scope row
+    -- again at exactly the moment the page is most compressed.
     local folded = banner + pooltabs + foldHeader + scope + tabbar + popoutRow + head
+                 + GAPS * bandGap
 
     -- Was 542 at the start of the diet (banner 68, canvas 160, pool 30, spec 26,
     -- tabs 28, add block 230), on a basis that counted neither the caption band
-    -- nor a filter row, and 406 counted honestly at the end of section 20.
-    -- On THIS basis: 68 + 30 + 28 + 132 + 26 + 28 + 50 + 24.
-    check(open <= 386,
-          "chrome: the page above the first indicator is under 386px with the canvas open")
-    check(folded <= 254,
-          "chrome: ...and under 254px with it folded")
+    -- nor a filter row; 406 counted honestly at the end of section 20, and 386
+    -- once the filter became a glyph. The rhythm adds 40 back, deliberately and
+    -- once: 386 -> 426 open, 254 -> 294 folded.
+    -- On THIS basis: 68 + 10 + 30 + 28 + 132 + 10 + 26 + 10 + 28 + 10 + 50 + 24.
+    check(open <= 426,
+          "chrome: the page above the first indicator is under 426px with the canvas open")
+    check(folded <= 294,
+          "chrome: ...and under 294px with it folded")
+    -- ...and the rhythm is the whole of the difference from the flush page. Stated
+    -- as a subtraction so a band growing back cannot hide behind the new gaps.
+    check(open - GAPS * bandGap <= 386,
+          "chrome: ...which is the 386px page plus the rhythm, and nothing else")
+    check(folded - GAPS * bandGap <= 254,
+          "chrome: ...folded, the 254px page plus the same rhythm")
     check(canvas <= 132,
           "chrome: the canvas at 1.5x is back to its 132px floor")
 
