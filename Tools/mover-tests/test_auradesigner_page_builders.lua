@@ -2188,8 +2188,8 @@ do
     local compactArm = CARDS:match("local scaleBtn = GUI:CreateGlyphButton%(container,(.-)local scaleSlider = GUI:CreateSlider%(container,")
     check(compactArm ~= nil, "scale: ...and the arm before it can be read")
     compactArm = compactArm or ""
-    check(compactArm:find("\n    else\n", 1, true) ~= nil,
-          "scale: ...reached only when the band form did NOT take the glyph")
+    check(compactArm:find("\n    elseif not thumb then\n", 1, true) ~= nil,
+          "scale: ...reached only when the form is neither the glyph nor a thumbnail")
 
     -- ☠ THE PANEL IS POOLED BY KEY, so its build runs once and keeps whatever
     -- table it captured. The preview-scale table is the current PRESET's, which a

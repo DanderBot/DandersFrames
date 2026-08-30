@@ -1415,13 +1415,27 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
         container:HookScript("OnHide", function()
             if pop and not pop.closed then pop:Close("source") end
         end)
-    else
-    local scaleSlider = GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, scaleDB, "previewScale",
-        ApplyPreviewScale,   -- on release
-        ApplyPreviewScale    -- during drag
-    )
-    scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
-    scaleSlider:SetSize(220, 30)
+    elseif not thumb then
+        -- ☠ NOT ON A THUMBNAIL, AND THIS ARM IS WHY THE TILES BROKE TWICE OVER.
+        -- A thumbnail is not `compact` -- it is its own form -- so it fell through
+        -- to here and every 82px tile in the add panel built a 220x30 Preview
+        -- Scale slider. The LABEL it anchors to is hidden for a thumbnail; the
+        -- slider is not, so "Preview Scale" was written across every tile.
+        --
+        -- ☠ AND IT ATE THE CLICKS. A 220x30 frame laid over a 76x44 picture takes
+        -- the mouse across the whole image, so the tiles could only be clicked in
+        -- the margin AROUND the art -- reported as "none of the images are
+        -- clickable, i have to click somewhere outside the image". One arm, both
+        -- symptoms.
+        --
+        -- ⚠ A thumbnail HAS no scale control by design: it is sized to its box on
+        -- both axes and ignores the user's Preview Scale, which is about the canvas.
+        local scaleSlider = GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, scaleDB, "previewScale",
+            ApplyPreviewScale,   -- on release
+            ApplyPreviewScale    -- during drag
+        )
+        scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
+        scaleSlider:SetSize(220, 30)
     end
 
     -- Drag-state hint text (shows contextual guidance during drag operations).
