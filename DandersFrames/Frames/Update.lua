@@ -18,6 +18,7 @@ local L = DF.L
 -- Matching pattern: Frames/Bars.lua:8-19 already uses this pattern
 -- for its own unit API calls.
 local pairs, type = pairs, type
+local pcall = pcall
 local InCombatLockdown = InCombatLockdown
 -- Unit health / power / state APIs (hot path in UpdateHealthFast + UpdatePower)
 local UnitExists = UnitExists
@@ -27,6 +28,11 @@ local UnitIsDead = UnitIsDead
 local UnitIsGhost = UnitIsGhost
 local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
+local UnitIsUnit = UnitIsUnit
+local UnitIsVisible = UnitIsVisible
+-- ⚠ May be nil on a client without it; every call site guards with
+-- `issecretvalue and issecretvalue(x)`, so the alias being nil is fine.
+local issecretvalue = issecretvalue
 
 -- (Removed) a "shared default tables (avoid per-call allocation)" banner with no
 -- tables under it -- whatever it introduced is long gone, and it read as a promise
@@ -522,6 +528,42 @@ function DF:UpdateUnitFrame(frame, source)
     -- offline player: "Offline" status text, forced-full grey bar. Worse, no
     -- UNIT_CONNECTION ever fires for an NPC, so nothing but a roster refresh
     -- re-evaluated the frame. Only a player can be offline.
+
+    -- ★★ VISIBILITY LATCH EDGE (restored 2026-08-30 — see
+    -- AuraContainer.SetUnitVisibilityLatched for the whole story). Sits ABOVE the
+    -- offline and dead branches on purpose: both return early, and a unit in another
+    -- instance can be alive, dead or offline — gating the probe behind either branch
+    -- would miss most of the cases it exists for.
+    --
+    -- ⚠ FULL-UPDATE PATH ONLY, deliberately NOT UpdateHealthFast's twin (where the death
+    -- latch does have a belt). An instance crossing is not a health event; it arrives
+    -- with roster/zone traffic, which drives this path. Probing UnitIsVisible on every
+    -- UNIT_HEALTH tick for up to 40 units would be a real per-tick cost for a state that
+    -- changes a handful of times per session. Cost of that choice: the latch can be one
+    -- full-update cycle late, which is acceptable for a persistent condition.
+    --
+    -- ☠ FAIL-SAFE, WHICH IS THE OPPOSITE OF THE ASSIST GATE'S RULE: latch ONLY on a
+    -- definite, non-secret FALSE. Any doubt — pcall failure, a secret value, the API
+    -- missing — leaves the unit SHOWN. Blanking a healthy player's auras on a bad read
+    -- is far worse than the leak this closes.
+    -- ⚠ issecretvalue FIRST, as its own statement: `okv and not vis` would boolean-test a
+    -- secret before the guard could run — the exact bug fixed in AuraContainer.lua:844.
+    -- ⚠ You are always visible to yourself, so the own-unit case never latches. UnitIsUnit,
+    -- not a string compare: in raid layouts your own token is "raidN", so `unit ==
+    -- "player"` silently never matched your own frame.
+    if DF.AuraContainer and DF.AuraContainer.SetUnitVisibilityLatched and UnitExists(unit) then
+        local invisible = false
+        if not UnitIsUnit(unit, "player") then
+            local okv, vis = pcall(UnitIsVisible, unit)
+            local secret = issecretvalue and issecretvalue(vis) or false
+            if okv and not secret and not vis then invisible = true end
+        end
+        if invisible ~= (frame.dfLastKnownInvisible or false) then
+            frame.dfLastKnownInvisible = invisible or nil
+            DF.AuraContainer.SetUnitVisibilityLatched(unit, invisible or nil)
+        end
+    end
+
     local isConnected = UnitIsConnected(unit)
     if not isConnected and UnitIsPlayer(unit) then
         -- Show offline state

@@ -4142,6 +4142,14 @@ function NativeBackend:build()
         and not (handle.config and handle.config.parentDrivenVisibility) then
         pcall(function() handle:_setDeathLatch(true) end)
     end
+    -- ☠ SEED THE VISIBILITY LATCH TOO, for the identical reason: it is edge-driven, and
+    -- a container built while the unit is already in another instance would otherwise
+    -- come up open and stay open — reload beside a cross-instance member and every row
+    -- came back, which is the exact 5.0.0 shape this latch was written for.
+    if dlu and AuraContainer._invisibleUnits[dlu]
+        and not (handle.config and handle.config.parentDrivenVisibility) then
+        pcall(function() handle:_setVisLatch(true) end)
+    end
 end
 
 function NativeBackend:setUnit(unit)
@@ -5936,6 +5944,7 @@ function Handle:_applyVisibility()
     -- gate's hide and the cinematic latch used to sit here — see the demolition note
     -- above SetUnitDeathLatched.)
     local want = (self._intendedShown ~= false) and not self._deathLatched
+        and not self._visLatched
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
     -- ping-pong against the park's own deferred hide.
@@ -5989,6 +5998,20 @@ function Handle:_setDeathLatch(on)
         -- back to a mark-dirty that the next aura event flushes).
         self:Refresh()
     end
+end
+
+-- ★★ VISIBILITY LATCH, handle half — RESTORED 2026-08-30. Deliberately a SEPARATE
+-- flag from the death latch rather than a second writer of it: a unit can be dead,
+-- invisible, both or neither, and clearing one condition must never clear the other.
+-- Same actuation, same re-parse on clear (a unit that was outside your world produced
+-- no aura events while it was away, so the standing parse is stale by definition).
+-- See AuraContainer.SetUnitVisibilityLatched for what drives it and why it exists.
+function Handle:_setVisLatch(on)
+    on = on or nil
+    if self._visLatched == on then return end
+    self._visLatched = on
+    self:_applyVisibility()
+    if not on then self:Refresh() end
 end
 
 -- ============================================================
@@ -6050,6 +6073,9 @@ function Handle:SetUnit(unit)
     -- an already-dead unit never comes, so a clear-only retarget onto a ghost rendered
     -- the corpse's auras until an unrelated edge swept (2026-08-18 audit).
     self:_setDeathLatch(AuraContainer._deathLatchedUnits[unit] or nil)
+    -- Same re-seed for visibility: the new unit may already be outside your world, and
+    -- that edge will not fire again just because a handle changed hands.
+    self:_setVisLatch(AuraContainer._invisibleUnits[unit] or nil)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
     if InCombatLockdown() then self:_queueOp("retarget"); return end
@@ -7495,6 +7521,9 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     if AuraContainer._deathLatchedUnits[spec.unit] then
         pcall(function() handle:_setDeathLatch(true) end)
     end
+    if AuraContainer._invisibleUnits[spec.unit] then
+        pcall(function() handle:_setVisLatch(true) end)
+    end
 
     -- Enabled defaults true on the template, but assert it once the container actually
     -- has a slot: registration needs HasAnyAuraSlots, which only became true just now.
@@ -7636,7 +7665,7 @@ function SlotHandle:_pushFilter()
     -- (The identity-gate terms that used to sit here — _gateHidden, _cineLatched,
     -- _pendingGateReparse — died with the gate; see the demolition note above
     -- SetUnitDeathLatched.)
-    local unitHidden = self._deathLatched and true or false
+    local unitHidden = (self._deathLatched or self._visLatched) and true or false
     local anchor = self.owner.anchor
     if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
     local dark = (self.parked or unitHidden) and true or false
@@ -7712,6 +7741,21 @@ function SlotHandle:_setDeathLatch(on)
     on = on or nil
     if self._deathLatched == on then return end
     self._deathLatched = on
+    local ok = self:_pushFilter()
+    if not ok or InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+    end
+end
+
+-- VISIBILITY LATCH, slot half — the twin of Handle:_setVisLatch, actuating the same
+-- way the death latch does (owner anchor + park string + the CF park lock, all through
+-- _pushFilter, whose dark->live transition carries the re-parse on clear).
+-- ⚠ A separate flag, NOT a second writer of _deathLatched — see the handle half.
+function SlotHandle:_setVisLatch(on)
+    on = on or nil
+    if self._visLatched == on then return end
+    self._visLatched = on
     local ok = self:_pushFilter()
     if not ok or InCombatLockdown() then
         self._pendingTuning = true
@@ -7974,8 +8018,10 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     -- will never fire again. _setDeathLatch is transition-gated and its push decides
     -- the owner ANCHOR, so this also un-hides an anchor left dark by the OLD unit.
     local latched = AuraContainer._deathLatchedUnits[unit] or nil
+    local invis = AuraContainer._invisibleUnits[unit] or nil
     for _, h in pairs(owner.slots) do
         pcall(function() h:_setDeathLatch(latched) end)
+        pcall(function() h:_setVisLatch(invis) end)
     end
     return ok
 end
@@ -8175,6 +8221,68 @@ function AuraContainer.SetUnitDeathLatched(unit, on)
     for s in pairs(AuraContainer._slotHandles or {}) do
         if s.owner and s.owner.unit == unit then
             pcall(function() s:_setDeathLatch(on) end)
+        end
+    end
+end
+
+-- ============================================================
+-- ★★ VISIBILITY LATCH — RESTORED 2026-08-30
+-- ============================================================
+-- ☠ THIS IS NOT THE IDENTITY GATE, and it must never grow back into one. It is ONE
+-- probe with ONE actuation, restored on its own merits after the demolition took it
+-- out as collateral.
+--
+-- WHAT IT IS FOR. `UnitIsVisible` is INSTANCE-scoped, not range-scoped: TRUE for a
+-- same-instance member far outside 40yd, FALSE only across instances and phases
+-- (field-verified 3-case probe, 2026-07-23). A unit reading false is not in your world
+-- at all, so the engine cannot attribute casters for it — and the PLAYER filter token
+-- then FAILS OPEN, rendering every caster's aura through an "only mine" pool.
+--
+-- ✅ THAT FAIL-OPEN IS MEASURED ON THE CURRENT CLIENT, not inherited belief: with the
+-- viewer outside an instance from a party member, "HELPFUL|PLAYER" rendered a shaman's
+-- Earth Shield the viewer never cast (/df debug auraexp caster, Krathe, 2026-08-30).
+--
+-- ☠☠ WHY IT CAME BACK. This is a 5.0.0 fix (07088555, hardened by e03405cf) that the
+-- identity-gate demolition deleted along with the gate (f5073f42, 13 UnitIsVisible
+-- lines) on the premise that build 69465 made secondary protection unnecessary. That
+-- premise was TRUE for the identity gate — which governs includeSpellIDs/excludeSpellIDs
+-- and nothing else — and FALSE here: the PLAYER token is a filter STRING, evaluated in
+-- C through IsAuraFilteredOutByInstanceID, in a code path 69465 never touched. One
+-- commit removed two guards on one justification. The 5.0.0 bug came straight back.
+--
+-- ⚠ NOT A COMPLETE CATCH-ALL, and the old code said so in a note worth keeping: a unit
+-- in another PHASE, layer or Chromie time can read UnitIsVisible TRUE and still be
+-- unattributable, so the token fails open with this probe perfectly happy.
+-- UnitPhaseReason covers that but is only reliable within ~250yd. VuhDo pairs the two
+-- (VuhDoToolbox.lua:656) which is the known technique if we ever need the phase half —
+-- it was never implemented here, and pretending otherwise is how this became a gate
+-- last time. This latch closes the instance boundary. That is all it claims.
+--
+-- ⚠ WHY A LATCH AND NOT A FILTER FIX: nothing in readable Lua can express "cast by me"
+-- — DoesAuraPassCandidateFilters has 13 fields and not one tests caster identity. When
+-- a unit is out of your world EVERY pool it renders is stale, not just source-relative
+-- ones; restricting the response to "mine" filters once left a cross-instance unit
+-- showing a full debuff row and dispel overlay while its buff bar was correctly blanked
+-- (Krathe, 2026-08-18). So the actuation is per UNIT, like the death latch.
+AuraContainer._invisibleUnits = AuraContainer._invisibleUnits or {}
+
+function AuraContainer.SetUnitVisibilityLatched(unit, on)
+    if type(unit) ~= "string" then return end
+    -- Test mode fabricates units that are not really in your world; latching them would
+    -- blank every preview row. Same exemption the death latch takes, same reason.
+    if AuraContainer._testMode then return end
+    AuraContainer._invisibleUnits[unit] = on and true or nil
+    -- Edge-driven from Frames/Update.lua, so this is one line per instance crossing.
+    GateLog("visibility latch %s unit=%s", on and "ON" or "OFF", unit)
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and h.config and h.config.unit == unit
+            and not h.config.parentDrivenVisibility then
+            pcall(function() h:_setVisLatch(on) end)
+        end
+    end
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        if s.owner and s.owner.unit == unit then
+            pcall(function() s:_setVisLatch(on) end)
         end
     end
 end
