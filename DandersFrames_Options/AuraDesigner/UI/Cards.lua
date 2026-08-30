@@ -1486,6 +1486,10 @@ end
 -- the active tab when an add landed while the picker stayed open.
 local function ADPickerClosed()
     S.spellPickerBlockedIDs = nil -- recomputed on next open (memo wiped with it)
+    -- ...and every open panel goes back to outlining its own row: the surface
+    -- they were all pointing at while the picker covered it is gone. Restores
+    -- whatever each one had, which the kit stashed on the way in.
+    GUI:ClearPopoutTetherOverride()
     if S.tabBar then S.tabBar:Show() end
     if S.tabScrollFrame then S.tabScrollFrame:Show() end
     if S.adPickerDirty then
@@ -1531,6 +1535,14 @@ local function OpenADPicker(opts)
         opts.emptyText = L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."]
     end
     S.adPickerHandle = DF.FilterRegistry:OpenSpellPicker(opts)
+    -- ☠ THE PICKER COVERS THE SURFACE EVERY OPEN PANEL IS TETHERED TO. It fills
+    -- opts.parent edge to edge, so a panel still outlining the row it was opened
+    -- from draws an accent ring around whichever spell rows happen to sit in that
+    -- slot -- which reads as "these two rows are selected" and means nothing.
+    -- Point them at the covered surface instead, so the outline says "this is the
+    -- focus now". AFTER the open, so a picker that failed to open leaves nothing
+    -- to restore. Undone by ADPickerClosed, which fires on ANY close.
+    GUI:SetPopoutTetherOverride(opts.parent)
 end
 
 -- ── PICKER RECORDS ──
