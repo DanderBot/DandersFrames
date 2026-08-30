@@ -838,11 +838,20 @@ local function checkOutOfRangeAttribution()
             -- ⚠ Range from UnitInRange's SECOND return (checkedRange): a false with
             -- checked=false means "could not test", not "out of range", and counting
             -- those as distant would poison the out-of-range half with units that are
-            -- simply untestable. Secrecy-guarded like every other range read.
+            -- simply untestable.
+            -- ☠☠ TEST SECRECY BEFORE TRUTHINESS, NOT IN THE SAME EXPRESSION. UnitInRange
+            -- is documented SecretReturns, and this shipped as
+            -- `okR and checked and not issecretvalue(...)` — where `and checked` performs
+            -- a BOOLEAN TEST on a secret the guard had not reached yet, which throws
+            -- ("attempt to perform boolean test on local 'checked'", 6x in the field
+            -- minutes after shipping). `and`/`or` evaluate truthiness left to right, so a
+            -- secrecy guard placed after the value in one expression is already too late.
+            -- Call issecretvalue FIRST (a call, not a truth test), bail, and only then
+            -- read the booleans.
             local okR, inRange, checked = pcall(UnitInRange, unit)
-            local readable = okR and checked
-                and not (issecretvalue and (issecretvalue(inRange) or issecretvalue(checked)))
-            if readable then
+            local secret = issecretvalue
+                and (issecretvalue(inRange) or issecretvalue(checked)) or false
+            if okR and not secret and checked then
                 local all  = auraCountOn(unit, "HELPFUL")
                 local mine = auraCountOn(unit, "HELPFUL|PLAYER")
                 if all and mine and all > 0 then
