@@ -26,6 +26,12 @@
 
 ### Changes
 
+- (Aura Designer) Redesigned. The preview, the settings and the indicator list are now one column that fits the normal settings window instead of forcing it wider, and each effect's settings open in their own panel rather than filling the page.
+- (Aura Designer) Adding an indicator now starts with the spell: search for the aura first, then pick what it does on the frame.
+- (Aura Designer) The frame preview can be folded away, scales up to fill the space it needs, and its zoom moved to a button in its corner.
+- (Text Designer) Redesigned to match, and it now uses the same frame preview as the Aura Designer.
+- (Aura Filters) Redesigned to match the other two, and it no longer forces the settings window wider.
+
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
