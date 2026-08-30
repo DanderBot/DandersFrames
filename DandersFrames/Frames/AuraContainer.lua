@@ -7673,9 +7673,21 @@ AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
 -- permanent one fails `duration == 0` (Blizzard_AuraContainerUtil.lua,
 -- DoesAuraPassCandidateFilters — readable LUA in the secure env, not invisible C, and
 -- evaluated OUTSIDE CanApplyIdentityCandidateFilters, so no identity-gate state can skip
--- it). A parked slot pushes BOTH locks; either alone parks, and the CF lock's semantics
--- can be re-verified against dumped source on every build. One shared constant — the
--- inbound securecopies it, so no aliasing.
+-- it). The CF lock's semantics can be re-verified against dumped source on every build.
+-- One shared constant — the inbound securecopies it, so no aliasing.
+--
+-- ✅✅ VERIFIED IN GAME 2026-08-30 (Krathe, /df debug auraexp park). Against a unit
+-- carrying EIGHT live buffs — timed and permanent — the maxDuration = 0 row rendered
+-- NOTHING while the unfiltered row rendered all eight. Source and field agree, and this
+-- lock is now the sole thing parking a slot (the string is no longer pushed), so it
+-- needed to be measured rather than reasoned about.
+--
+-- ☠ AND THE STRING IS INTERMITTENT, WHICH IS WORSE THAN BROKEN. In that same run
+-- "HELPFUL|!HELPFUL" also rendered nothing — yet ninety minutes earlier the parser probe
+-- caught it matching 1 helpful aura, and its HARMFUL twin matching 12, on the same
+-- client and the same session. A park that works most of the time and silently fails on
+-- some parses is not a fallback, it is a coin flip; that is the whole case for parking on
+-- the CF lock alone and keeping the string only as a drift canary.
 local SLOT_PARK_CF = { maxDuration = 0 }
 AuraContainer.SLOT_PARK_CF = SLOT_PARK_CF
 
