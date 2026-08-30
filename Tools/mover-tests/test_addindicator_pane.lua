@@ -900,7 +900,8 @@ do
         -- on a tall screen and shaved on a short one. This panel is over that cap
         -- already, so the wrapped case is the ordinary one, not the exotic one.
         eq(r:GetWidth(), 260, "outline: section " .. i .. "'s ring is the pane's width")
-        local _, _, ry = r:GetPoint(1)
+        local _, rx, ry = r:GetPoint(1)
+        eq(rx, 0, "outline: ...starting on the pane's own left edge")
         check(type(ry) == "number" and ry <= 0,
               "outline: ...anchored inside the pane's top edge")
         check(type(ry) == "number" and (ry - r:GetHeight()) >= -(paneH2 or 0),
@@ -921,19 +922,114 @@ do
         eq(#(rawget(r, "_kids") or {}), 0,
            "outline: ...being textures on one frame, with nothing clickable in it")
     end
-    -- ...and the three do not overlap each other, which is what the gaps between
-    -- the sections were widened for. Read off the anchors rather than asserted as
-    -- literals: the spans are the layout's own running offsets.
-    for i = 1, 2 do
+    -- ☠ A RING COVERS ITS OWN HEADING AND NO OTHER, which is the claim that
+    -- replaces "ring i clears ring i+1". Two rings overlapping is UNOBSERVABLE --
+    -- exactly one is ever drawn, which the shownRings checks above pin -- so
+    -- ring-against-ring was asking for twice the gap the eye can see the need
+    -- for, and with the gutter widening both pads it is unpayable: at
+    -- SECTION_RING_PAD 6 it would demand a 14px drop between sections on a panel
+    -- already over the popout's scroll cap. What a reader CAN catch is a ring
+    -- reaching over the next section's heading, so that is what is asserted --
+    -- against every heading, both ways, off the layout's own anchors.
+    --
+    -- ⚠ CLEAR OF, NOT MERELY NOT-OVERLAPPING. A first pass asked for no
+    -- overlap and a mutant that dropped the section gap to exactly the ring's own
+    -- pad SURVIVED it: the ring's bottom edge landed ON the next heading's top
+    -- edge, which shares no pixel and looks like a mistake. The comparisons are
+    -- strict for that reason -- the claim is a gap, not an absence of collision.
+    local HEAD_H = 16
+    for i = 1, 3 do
         local _, _, top = rings[i]:GetPoint(1)
-        local _, _, nextTop = rings[i + 1]:GetPoint(1)
-        check(type(top) == "number" and type(nextTop) == "number"
-              and (top - rings[i]:GetHeight()) > nextTop,
-              "outline: section " .. i .. "'s ring clears section " .. (i + 1) .. "'s")
+        local bottom = top - rings[i]:GetHeight()
+        for j = 1, 3 do
+            local _, _, hy = heads[j]:GetPoint(1)
+            if i == j then
+                check((top > hy - HEAD_H) and (bottom < hy),
+                      "outline: section " .. i .. "'s ring is drawn round its own heading")
+            else
+                check((bottom > hy) or (top < hy - HEAD_H),
+                      "outline: ...and stands clear of section " .. j .. "'s heading")
+            end
+        end
     end
+    -- ---- the gutter the ring is drawn in ---------------------------
+    print("-- Add Indicator: one left edge, and the ring in the space it leaves")
+    -- ☠ THE RING COULD NOT GROW OUTWARDS, SO THE CONTENT STEPPED INWARDS. Every
+    -- control shipped flush 0..260 and the ring was drawn ON the outer tiles' own
+    -- 1px edges -- "the border needs more space, it feels too cramped and too
+    -- close to the content" (spec section 29). The ring still cannot be widened
+    -- (the scroll wrap clips at exactly the pane's width, asserted above), so the
+    -- space comes from the controls -- and what makes that a GUTTER rather than
+    -- three separate insets is that all three sections use the SAME one.
+    local gutter
+    for i = 1, 3 do
+        local _, hx = heads[i]:GetPoint(1)
+        if i == 1 then gutter = hx end
+        eq(hx, gutter, "gutter: section " .. i .. "'s heading starts on the one left edge")
+    end
+    check(type(gutter) == "number" and gutter > 0,
+          "gutter: ...and that edge is inside the pane, not flush against it")
+    -- ...and every control the three sections hold respects it, on BOTH sides.
+    -- ⚠ WALKED, NOT LISTED, for the reason DisableMouseTree is a walk: a list of
+    -- the controls that were inset rots the first time a tenth tile, a second
+    -- note or a third source button is added, and it rots SILENTLY -- the panel
+    -- would simply have one control back on the ring again.
+    local walked, flush, proud = 0, {}, {}
+    for _, k in ipairs(rawget(host2, "_kids") or {}) do
+        if not rawget(k, "SetSpan") then          -- the rings are the exception
+            walked = walked + 1
+            local p1, x1 = k:GetPoint(1)
+            if p1 ~= "TOPLEFT" or type(x1) ~= "number" or x1 < gutter then
+                flush[#flush + 1] = tostring(p1) .. "@" .. tostring(x1)
+            end
+            if k:GetNumPoints() > 1 then
+                -- Pinned by both edges, so its right edge is an OFFSET, not a width.
+                local p2, x2 = k:GetPoint(2)
+                if p2 ~= "TOPRIGHT" or x2 ~= -gutter then
+                    proud[#proud + 1] = tostring(p2) .. "@" .. tostring(x2)
+                end
+            else
+                local w = k:GetWidth() or 0
+                if w > 0 and (x1 or 0) + w > 260 - gutter then
+                    proud[#proud + 1] = "w" .. tostring(w) .. "@" .. tostring(x1)
+                end
+            end
+        end
+    end
+    check(walked >= 15, "gutter: the walk reached the panel's controls")
+    eq(#flush, 0, "gutter: not one of them starts before the gutter")
+    eq(#proud, 0, "gutter: ...nor ends past it on the right")
+    -- ☠ AND THE RING IS WIDER THAN THE CONTENT IT TRACES, which is the whole
+    -- claim. Read off the widest control the walk saw rather than off the
+    -- constant: a gutter that existed only in the arithmetic and not on any
+    -- frame would still satisfy every check above.
+    local widest = 0
+    for _, k in ipairs(rawget(host2, "_kids") or {}) do
+        if not rawget(k, "SetSpan") and k:GetNumPoints() == 1 then
+            widest = math.max(widest, k:GetWidth() or 0)
+        end
+    end
+    check(widest > 0 and rings[1]:GetWidth() - widest >= gutter * 2,
+          "gutter: the ring is a full gutter clear of the content on each side")
+    -- ☠ AND THE SAME CLEARANCE ABOVE, or the gutter is only half a fix. A ring
+    -- 6px clear at the sides and 3px clear top and bottom is the complaint turned
+    -- ninety degrees, so the pad above each heading is measured against the same
+    -- number -- section 1's included, which is what the panel's top margin is FOR
+    -- (the ring clamps at the pane's top edge, so without that margin section 1
+    -- would silently get a tighter box than its two siblings).
+    for i = 1, 3 do
+        local _, _, top = rings[i]:GetPoint(1)
+        local _, _, hy = heads[i]:GetPoint(1)
+        check(type(top) == "number" and type(hy) == "number" and (top - hy) >= gutter,
+              "gutter: section " .. i .. "'s ring stands the same clear above its heading")
+    end
+
     -- ☠ RAISED ABOVE THE CONTENT, because a texture cannot draw over a SIBLING
-    -- frame at the same level -- draw layer loses to frame level, and the ring's
-    -- left and right runs land on the outer tiles' own edges. Taken off ring 1,
+    -- frame at the same level -- draw layer loses to frame level. The gutter above
+    -- means no run lands on a control TODAY, but it is the layout that guarantees
+    -- that and not the drawing, so the lift stays: a ring that loses one side to a
+    -- control that grew is not a failure anyone would trace back here. Taken off
+    -- ring 1,
     -- which the panel lifted on its very first Sync (see `liftedLevel` above,
     -- captured while it was the one on screen).
     local tileLevel
