@@ -52,6 +52,8 @@ local RefreshPreviewEffects = P.RefreshPreviewEffects
 local CreateEnableBanner = P.CreateEnableBanner
 local CreateSpecDropdown = P.CreateSpecDropdown
 local CreateFramePreview = P.CreateFramePreview
+local CreateFrameTile = P.CreateFrameTile
+local CreateNumberedHeading = P.CreateNumberedHeading
 local UpdateLayoutTabState = P.UpdateLayoutTabState
 local UpdateSpecDropdownState = P.UpdateSpecDropdownState
 local SetMainTab = P.SetMainTab
@@ -754,6 +756,104 @@ local function LayoutGroupCards()
 end
 
 -- ============================================================
+-- THE ADD PANELS' PICTURES AND FOOTER
+-- ------------------------------------------------------------
+-- ☠ THE SAME TREATMENT THE ADD INDICATOR PANEL GOT (spec section 26 item 6).
+-- Both kinds of group PRODUCE a row of icons on the frame, so both are drawn as
+-- exactly that -- one of the player's own frames in miniature, with the row on
+-- it -- rather than as a fat card with an abstract art blob beside two lines of
+-- text. Two compact segments side by side where two 60px cards stood.
+--
+-- ⚠ ONE PICTURE, TWO FILLS. What separates the kinds is what fills the row: a
+-- set picked by hand reads as mixed, one drawn from a single filter reads as
+-- uniform. That was the choice cards' whole lesson and it survives the move.
+-- ============================================================
+
+-- The group defaults a fresh group is actually created with (Options.lua's
+-- CreateLayoutGroup): TOPLEFT, four icons at 24px, 2px apart.
+local GROUP_ICON_SIZE, GROUP_ICON_GAP, GROUP_ICON_MAX = 24, 2, 4
+
+local function PaintIconRowOnThumb(pv, colors, ghost)
+    local mock = pv and pv.mockFrame
+    if not mock then return end
+    local x = 0
+    for i = 1, GROUP_ICON_MAX do
+        local col = colors[i]
+        if not col and not (ghost and i == #colors + 1) then break end
+        local ring = mock:CreateTexture(nil, "OVERLAY", nil, 1)
+        ring:SetColorTexture(0, 0, 0, 0.85)
+        ring:SetSize(GROUP_ICON_SIZE + 2, GROUP_ICON_SIZE + 2)
+        ring:SetPoint("TOPLEFT", mock, "TOPLEFT", x, 0)
+        local sq = mock:CreateTexture(nil, "OVERLAY", nil, 2)
+        sq:SetSize(GROUP_ICON_SIZE, GROUP_ICON_SIZE)
+        sq:SetPoint("CENTER", ring, "CENTER", 0, 0)
+        if col then
+            sq:SetColorTexture(col[1], col[2], col[3], 1)
+        else
+            -- One unfilled slot: a group's row grows and shrinks with what is
+            -- actually up, and an empty space says that faster than a sentence.
+            sq:SetColorTexture(1, 1, 1, 0.10)
+        end
+        x = x + GROUP_ICON_SIZE + GROUP_ICON_GAP
+    end
+end
+
+-- "Create Filter" -- jump to the Filter Designer and pulse its New Filter button.
+-- ☠ ONE DEFINITION. The filter-links section inside a group card had the only
+-- copy; the add panel's footer is the second consumer, and a second copy of a
+-- 10-line navigation closure is how the three duplicated effect lists in
+-- Cards.lua came about.
+local function JumpToNewFilter()
+    if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return end
+    GUI.SelectTab("auras_filterdesigner")
+    -- Page content builds on first show (inside SelectTab), so the button
+    -- reference exists by now. The add action is a row inside the Filter
+    -- Designer's scrolling left list, so the page scrolls it into view and
+    -- pulses it itself rather than handing back a bare widget.
+    local fdPage = GUI.Pages["auras_filterdesigner"]
+    if fdPage and fdPage._fdFocusNewFilter then fdPage._fdFocusNewFilter() end
+end
+P.JumpToNewFilter = JumpToNewFilter
+
+-- The two filter verbs, as the panel's FOOTER rather than as a 24px glyph in one
+-- card's corner. A button in a card corner is a button inside a button -- the
+-- card's own note admits as much -- and it claimed a scope it did not have: it
+-- sat on the Filter Group card while being about the filter library as a whole.
+-- Down here it is about the panel, which is where it always belonged.
+local function BuildFilterFooter(host, y, W)
+    local sep = host:CreateTexture(nil, "ARTWORK")
+    sep:SetColorTexture(1, 1, 1, 0.08)
+    sep:SetHeight(1)
+    sep:SetPoint("TOPLEFT", 0, y)
+    sep:SetPoint("TOPRIGHT", 0, y)
+    y = y - 9
+
+    local half = floor((W - 6) / 2)
+    local createBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    createBtn:SetSize(half, 22)
+    createBtn:SetPoint("TOPLEFT", 0, y)
+    GUI:StyleButton(createBtn, { width = half, height = 22, text = L["Create Filter"] })
+    createBtn:SetScript("OnClick", JumpToNewFilter)
+
+    local manageBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    manageBtn:SetSize(W - half - 6, 22)
+    manageBtn:SetPoint("TOPLEFT", half + 6, y)
+    GUI:StyleButton(manageBtn, { width = W - half - 6, height = 22, text = L["Manage Filters"] })
+    manageBtn:SetScript("OnClick", function()
+        if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner() end
+    end)
+    manageBtn:HookScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, {
+            title = L["Manage Filters"],
+            lines = { L["Build and edit your buff filters in the Filter Designer."] },
+        })
+    end)
+    manageBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+
+    return y - 26
+end
+
+-- ============================================================
 -- THE "+ ADD LAYOUT GROUP" PANEL
 -- ------------------------------------------------------------
 -- The popout layout's answer to the split panel's permanent card block, and the
@@ -764,8 +864,12 @@ end
 -- ☠ NO CHOICE CARD *GROUP* IN HERE. GUI:CreateChoiceCardGroup wraps its cards in
 -- a collapsible header keyed by its TITLE TEXT in the account-wide collapsed
 -- store -- a second header inside a panel that already has one, and a profile key
--- for a fold nobody can usefully close. The cards go in bare; the panel's own
--- title is the header.
+-- for a fold nobody can usefully close.
+--
+-- ☠ AND NO FAT CARDS EITHER, since spec section 26 item 6: two SEGMENTS side by
+-- side, each a picture of the row of icons the group produces, drawn on one of
+-- the player's own frames. Two 60px cards stacked cost 122px of panel; two
+-- segments cost 68.
 --
 -- ☠ AND THE HEIGHT IS REPORTED, NOT ASSUMED. The caller mounts this into a
 -- popout pane whose slot is measured right after this returns, so a builder that
@@ -777,30 +881,50 @@ end
 --   opts.SetHeight(h)  report it
 --   opts.Close()       shut the panel once something has been added
 -- ============================================================
+local GROUP_TILE_PIC_H, GROUP_TILE_GAP = 40, 6
+
 S.BuildAddLayoutGroupPane = function(host, opts)
     opts = opts or {}
     local W = opts.width or 260
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
 
     local y = 0
-    for _, def in ipairs(LayoutGroupCards()) do
+    CreateNumberedHeading(host, 1, L["WHICH KIND OF GROUP?"], y, W)
+    y = y - 20
+
+    local defs = LayoutGroupCards()
+    local tileW = floor((W - GROUP_TILE_GAP * (#defs - 1)) / #defs)
+    local rowH = 0
+    for i, def in ipairs(defs) do
         local onPick = def.onClick
-        local card = GUI:CreateChoiceCard(host, {
-            title = def.title, desc = def.desc, art = def.art,
-            accent = gc, width = W, action = def.action,
+        local colors, ghost = def.art.colors, def.art.ghost
+        local tile = CreateFrameTile(host, {
+            width = tileW, picHeight = GROUP_TILE_PIC_H,
+            label = def.title, accent = gc,
+            tooltip = { title = def.title, lines = { def.desc } },
+            Paint = function(pv) PaintIconRowOnThumb(pv, colors, ghost) end,
             -- ⚠ CLOSED FIRST, THEN CREATED. Creating a group rebuilds the page,
             -- which retires the row this panel is docked to; shutting it on the
             -- way out is what the Add Indicator panel's own Finish() does, and for
             -- the same reason.
+            --
+            -- ⚠ AND ONE CLICK, NOT TWO. Section 26 says "two segments", and a
+            -- segment IS the answer here: this panel asks ONE question, so a
+            -- primary button under it would confirm a form that is already
+            -- complete. The one primary button belongs to the panel with three
+            -- sections.
             onClick = function()
                 if opts.Close then opts.Close() end
                 onPick()
             end,
         })
-        card:SetPoint("TOPLEFT", 0, y)
-        card:SetPoint("RIGHT", host, "RIGHT", 0, 0)
-        y = y - ((card.layoutHeight or 58) + 6)
+        tile:SetPoint("TOPLEFT", (i - 1) * (tileW + GROUP_TILE_GAP), y)
+        rowH = max(rowH, tile.layoutHeight or 68)
     end
+    y = y - (rowH + 10)
+
+    -- The filter verbs, off the Filter Group card's corner and onto the panel.
+    y = BuildFilterFooter(host, y, W)
 
     local h = max(-y + 2, 1)
     host:SetHeight(h)
@@ -1325,20 +1449,32 @@ S.BuildAddDebuffGroupPane = function(host, opts)
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
 
     local y = 0
-    for _, def in ipairs(DebuffGroupCards()) do
+    CreateNumberedHeading(host, 1, L["WHICH KIND OF GROUP?"], y, W)
+    y = y - 20
+
+    -- ⚠ NO FILTER FOOTER HERE. Debuff groups are Blizzard's categories, not the
+    -- addon's filters, so a Create/Manage Filters pair would point at a library
+    -- this panel cannot use.
+    local defs = DebuffGroupCards()
+    local tileW = floor((W - GROUP_TILE_GAP * (#defs - 1)) / #defs)
+    local rowH = 0
+    for i, def in ipairs(defs) do
         local onPick = def.onClick
-        local card = GUI:CreateChoiceCard(host, {
-            title = def.title, desc = def.desc, art = def.art,
-            accent = gc, width = W, action = def.action,
+        local colors, ghost = def.art.colors, def.art.ghost
+        local tile = CreateFrameTile(host, {
+            width = tileW, picHeight = GROUP_TILE_PIC_H,
+            label = def.title, accent = gc,
+            tooltip = { title = def.title, lines = { def.desc } },
+            Paint = function(pv) PaintIconRowOnThumb(pv, colors, ghost) end,
             onClick = function()
                 if opts.Close then opts.Close() end
                 onPick()
             end,
         })
-        card:SetPoint("TOPLEFT", 0, y)
-        card:SetPoint("RIGHT", host, "RIGHT", 0, 0)
-        y = y - ((card.layoutHeight or 58) + 6)
+        tile:SetPoint("TOPLEFT", (i - 1) * (tileW + GROUP_TILE_GAP), y)
+        rowH = max(rowH, tile.layoutHeight or 68)
     end
+    y = y - (rowH + 2)
 
     local h = max(-y + 2, 1)
     host:SetHeight(h)

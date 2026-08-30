@@ -29,12 +29,12 @@
 ### Changes
 
 - (Aura Designer) Redesigned. The preview, the settings and the indicator list are now one column that fits the normal settings window instead of forcing it wider, and each effect's settings open in their own panel rather than filling the page.
-- (Aura Designer) Adding an indicator now starts with the spell: search for the aura first, then pick what it does on the frame.
+- (Aura Designer) Adding an indicator is now one panel showing the whole job at once: pick the aura, pick how it should look, pick where it goes. Every look is drawn as a small picture of your own frame with that effect on it, and anything the aura already has is greyed out so you cannot add it twice. Starting from a filter sits beside the spell search instead of being a route of its own.
 - (Aura Designer) The frame preview can be folded away, scales up to fill the space it needs, and its zoom moved to a button in its corner.
 - (Text Designer) Redesigned to match, and it now uses the same frame preview as the Aura Designer.
 - (Aura Filters) Redesigned to match the other two, and it no longer forces the settings window wider.
 - (Aura Designer, Text Designer, Aura Filters) The redesigned pages now have breathing room between their sections instead of everything sitting flush against everything else.
-- (Aura Designer) Layout Groups now has an "Add Layout Group" button that opens its choices in a panel, the same way adding an indicator works, instead of the choices taking up room above the list at all times.
+- (Aura Designer) Layout Groups now has an "Add Layout Group" button that opens its choices in a panel, the same way adding an indicator works, instead of the choices taking up room above the list at all times. The two kinds are drawn as pictures side by side, with Create Filter and Manage Filters at the foot of the panel.
 - (Text Designer) The category filter is now a button on the Text Elements heading that opens the choices in a panel, matching the Aura Designer. It lights up and names the filter whenever you are not showing everything.
 - (Aura Filters) The Buff Bar / Defensive Icon / Aura Designer buttons now open in a panel from a Used By row, so their names and filter counts are readable instead of being cut short. "How this works" moved in with them.
 

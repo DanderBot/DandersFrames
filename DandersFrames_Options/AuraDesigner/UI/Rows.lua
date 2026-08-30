@@ -667,13 +667,17 @@ local function BuildEffectsTabRows(ctx, shell)
 
     -- ── + ADD INDICATOR ──
     -- ☠ ONE ROW WHERE A 230px BLOCK STOOD. The three scope cards were permanent
-    -- furniture at the top of this tab; they are now the second step inside this
-    -- row's panel, behind the spell search that is the first (Cards.lua's
-    -- S.BuildAddIndicatorPane). It holds no settings, so it takes neither a
-    -- modified tick nor a footer -- the same rule the Members and Linked Filters
-    -- rows follow.
+    -- furniture at the top of this tab; the panel behind this row now asks the
+    -- whole question on one surface -- which aura, what it should look like, and
+    -- where (Cards.lua's S.BuildAddIndicatorPane). It holds no settings, so it
+    -- takes neither a modified tick nor a footer -- the same rule the Members and
+    -- Linked Filters rows follow.
     local addBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
     local addRow
+    -- ⚠ A LIST, NOT ONE HANDLE. PopoutContent is a FACTORY: pin a panel and click
+    -- the row again and a SECOND instance is built through this same builder, so
+    -- keeping only the latest would leave the pinned one stale.
+    local addPanes = {}
     local addMount = tools.PopoutContent(function(g, holder)
         local pane = CreateFrame("Frame", nil, holder)
         pane:SetWidth(PopoutWidth())
@@ -682,11 +686,11 @@ local function BuildEffectsTabRows(ctx, shell)
         -- without keeping the number the AddWidget under it measured a pane that
         -- had never been sized and gave it a 1px slot. The panel opened EMPTY.
         local ready, wantH = false, nil
-        S.BuildAddIndicatorPane(pane, {
+        local api = S.BuildAddIndicatorPane(pane, {
             width = PopoutWidth(),
-            -- ⚠ SILENT UNTIL THE PANE IS IN THE GROUP. The builder shows its
-            -- first step as it finishes, and a height reported before AddWidget
-            -- has run has no slot to land in: GUI:RelayoutHost would walk straight
+            -- ⚠ SILENT UNTIL THE PANE IS IN THE GROUP. The builder reports its
+            -- height as it finishes, and a height reported before AddWidget has
+            -- run has no slot to land in: GUI:RelayoutHost would walk straight
             -- past the group this has not joined yet and re-run the PAGE's state
             -- pass in the middle of the page's own build.
             SetHeight = function(h)
@@ -697,6 +701,13 @@ local function BuildEffectsTabRows(ctx, shell)
                 if addRow and addRow.ClosePopout then addRow:ClosePopout("api") end
             end,
         })
+        -- ☠ THE VERB THE OPENER CALLS. A popout's content is built ONCE per
+        -- (panel, row) and the panel is pooled, so everything this one says about
+        -- the live world -- which effects the chosen aura already has, what the
+        -- pool and the spec are -- is stale the second time it is opened. Same
+        -- shape as S.BuildFilterChips's SyncActive, and the filter panel shipped
+        -- broken for want of it (spec section 23).
+        if api and api.Sync then addPanes[#addPanes + 1] = api end
         -- wantH FIRST: the builder reports through the callback, not by sizing the
         -- pane, so its own GetHeight is the fallback and not the answer.
         g:AddWidget(pane, max(wantH or pane:GetHeight() or 1, 1))
@@ -712,6 +723,16 @@ local function BuildEffectsTabRows(ctx, shell)
         clipTo = page,
         build  = addMount,
     }))
+    -- ...and where Sync is called FROM. The kit exposes no per-open hook, so the
+    -- row's own OpenPopout is wrapped: it is the one door every open goes through,
+    -- the raise of a panel already up about this row included.
+    do
+        local openPopout = addRow.OpenPopout
+        addRow.OpenPopout = function(self, ...)
+            for _, api in ipairs(addPanes) do api.Sync() end
+            return openPopout(self, ...)
+        end
+    end
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
 
