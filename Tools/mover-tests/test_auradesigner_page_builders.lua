@@ -2445,3 +2445,48 @@ do
     check(banner + pooltabs + foldHeader + scope + tabbar + popoutRow <= 230,
           "chrome: ...folded, 230px")
 end
+
+print("-- Aura Designer: the spell picker retargets every open panel's tether")
+do
+    -- ☠ IN GAME: opening the picker left the Add Indicator panel's outline drawn
+    -- around two unrelated rows of the spell list. The picker fills opts.parent
+    -- edge to edge, so the surface every open panel was tethered to is under it.
+    --
+    -- ⚠ SCOPED TO THE TWO FUNCTION BODIES, AND WITH COMMENTS STRIPPED. A file-wide
+    -- find answers "is this string anywhere in Cards.lua", which the comment
+    -- explaining the fix satisfies on its own -- so the assertion would pass with
+    -- both calls deleted.
+    local function body(src, head, tail)
+        local a = src:find(head, 1, true)
+        check(a ~= nil, "adpicker: " .. head .. " exists")
+        if not a then return "" end
+        local b = src:find(tail, a + #head, true)
+        check(b ~= nil, "adpicker: ...and it closes")
+        return (src:sub(a, b or a):gsub("%-%-[^\n]*", ""))
+    end
+
+    local open = body(CARDS, "local function OpenADPicker(opts)", "\nend")
+    local iOpen = open:find("DF.FilterRegistry:OpenSpellPicker(opts)", 1, true)
+    local iSet  = open:find("GUI:SetPopoutTetherOverride(opts.parent)", 1, true)
+    check(iSet ~= nil,
+          "adpicker: the open prelude points every panel at the surface the picker covers")
+    check(iOpen ~= nil and iSet ~= nil and iOpen < iSet,
+          "adpicker: ...AFTER the open, so a picker that failed to open leaves nothing to restore")
+
+    local closed = body(CARDS, "local function ADPickerClosed()", "\nend")
+    local iClear = closed:find("GUI:ClearPopoutTetherOverride()", 1, true)
+    local iTab   = closed:find("S.SwitchTab(", 1, true)
+    check(iClear ~= nil,
+          "adpicker: the restore hook puts every panel's own target back")
+    check(iClear ~= nil and iTab ~= nil and iClear < iTab,
+          "adpicker: ...before the tab rebuild, which can close panels out from under it")
+
+    -- The kit half, which is where the exactness lives: the consumer never names
+    -- what it is restoring, so it cannot get a function target wrong. The verb
+    -- takes a bare region and has no idea what kind of thing is covering.
+    local PO = ui_file_source("Popout.lua")
+    check(PO:find("function Popout:SetTetherOverride(region)", 1, true) ~= nil,
+          "adpicker: the kit verb is general -- a region, and nothing about a picker")
+    check(PO:find("function UI:SetPopoutTetherOverride(region)", 1, true) ~= nil,
+          "adpicker: ...and the host sweep is the same verb over the open set")
+end

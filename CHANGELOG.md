@@ -15,6 +15,7 @@
 ### Bug Fixes
 
 - (Aura Designer) Fix the Add Indicator panel opening empty.
+- (Aura Designer) Fix an open panel's highlight staying on the page behind the spell picker, so it looked like two random spells in the list were selected. It now outlines the spell list while the picker is up.
 - (Aura Designer) Fix indicators showing another player's auras after the group changed — someone leaving, a sort, or entering an arena. Long-lasting buffs could stay stuck on the wrong frame until a reload.
 - (Settings) Fix the settings window freezing the game for several seconds every time you opened or closed it after using the search box.
 - (Settings) Fix a long pause when opening the Changed Settings page, or searching, for the first time.

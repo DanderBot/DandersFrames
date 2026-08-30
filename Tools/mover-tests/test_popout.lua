@@ -2848,4 +2848,176 @@ do
     p:Close()
 end
 
+-- ============================================================
+-- 18. THE TETHER OVERRIDE -- when something COVERS the surface
+-- ------------------------------------------------------------
+-- ☠ REPORTED IN GAME. Opening the Aura Designer's spell picker draws an overlay
+-- across the whole settings content area -- the surface every open panel's row
+-- lives on. The panels went on outlining those rows, so the accent ring landed
+-- on whichever spell rows happened to sit in that slot and read as "these two
+-- rows are selected". It was a true statement about a rect nobody could see.
+--
+-- The override points every panel at the COVERING region instead, and the three
+-- readers of _TetherRegion move together because they are one rect by contract:
+-- the outline, the beam, and -- the one that can silently make the fix look like
+-- it did nothing -- the CLIP GATE.
+-- ============================================================
+
+print("-- Popout: an override moves the outline, the beam and the clip gate as one")
+do
+    local row  = source(80, 40, CX, CY)
+    -- The covering overlay, and the PAGE the row scrolls in, which is inside it.
+    -- That is the real geometry: the picker fills the content area, the row is
+    -- clipped against a scroll frame within it.
+    local over = source(600, 400, CX - 300, CY)
+    local page = source(560, 380, CX - 300, CY)
+
+    local p = popout({ key = "ovr", tetherSource = row })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(row)
+    p.clipTo = page
+    check(not p:_TetherClipped(), "override: unclipped on the row to begin with")
+    eq(p.srcOutline._points[1][2], row, "override: the outline starts on the row")
+    eq(p.beam.core._end.x, 40, "override: ...and the beam on the row's near face")
+
+    p:SetTetherOverride(over)
+    eq(p:_TetherRegion(), over, "override: the resolver answers the covering region")
+    eq(p.srcOutline._points[1][2], over, "override: the outline moves onto it")
+    eq(p.beam.core._end.x, 0, "override: the beam moves with it -- one rect, not two")
+    -- ☠ THE ASSERTION THE FIX LIVES OR DIES ON. _TetherClipped reads the same
+    -- resolver, so an override onto a region the clipper misses hides the outline
+    -- instead of moving it, and the whole change looks like a no-op in game.
+    check(not p:_TetherClipped(), "override: the page still overlaps it, so nothing is gated")
+    check(p.srcOutline:IsShown(), "override: ...and the outline is actually drawn")
+
+    -- ...and that gate is not vacuous: a clipper the covering region misses does
+    -- gate, so the pass above is the geometry and not a dead branch. ALL THREE
+    -- pieces go down with it -- the connection point included, which is the one
+    -- _UpdateBeam does NOT take with it when it bails out early.
+    p.clipTo = source(40, 40, CX + 900, CY + 900)
+    check(p:_TetherClipped(), "override: a clipper the covering region misses still gates")
+    p:SetTetherOverride(over)                  -- re-run the chrome in that state
+    check(not p.beam:IsShown(), "override: gated, the beam goes")
+    check(not p.notch:IsShown(), "override: ...so does the connection point")
+    check(not p.srcOutline:IsShown(), "override: ...and the outline")
+    p.clipTo = page
+    p:SetTetherOverride(over)
+    check(p.notch:IsShown(), "override: back inside the clipper, the chrome returns")
+
+    p:ClearTetherOverride()
+    eq(p.tetherSource, row, "override: a FRAME target comes back exactly")
+    eq(p.srcOutline._points[1][2], row, "override: the outline goes home")
+    eq(p.beam.core._end.x, 40, "override: ...and the beam with it")
+    p:Close()
+end
+
+print("-- Popout: the restore is EXACT -- a function comes back a function")
+do
+    local row = source(80, 40, CX, CY)
+    local over = source(600, 400, CX - 300, CY)
+    -- ⚠ THE CASE A `= nil` RESTORE GETS WRONG AND NOTHING ELSE CATCHES.
+    -- tetherSource may be a FUNCTION, resolved afresh on every draw so one pooled
+    -- panel can be re-pointed down a column of rows. Put nil back and the panel
+    -- silently falls through to whatever it happens to be docked to, for ever.
+    local calls = 0
+    local fn = function() calls = calls + 1 return row end
+    local p = popout({ key = "ovrfn", tetherSource = fn })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(row)
+    p:SetTetherOverride(over)
+    eq(p.tetherSource, over, "override(fn): the function is replaced while the overlay is up")
+    p:ClearTetherOverride()
+    eq(p.tetherSource, fn, "override(fn): the FUNCTION comes back, not nil")
+    local before = calls
+    eq(p:_TetherRegion(), row, "override(fn): ...and the resolver runs it again")
+    check(calls > before, "override(fn): ...it is the same function, still being called")
+    p:Close()
+end
+
+print("-- Popout: ...and a nil target comes back nil, not a stale region")
+do
+    local row = source(80, 40, CX, CY)
+    local over = source(600, 400, CX - 300, CY)
+    local p = popout({ key = "ovrnil" })          -- declares no tetherSource at all
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(row)
+    eq(p.tetherSource, nil, "override(nil): it starts with none")
+    p:SetTetherOverride(over)
+    eq(p:_TetherRegion(), over, "override(nil): the overlay is what it points at")
+    p:ClearTetherOverride()
+    eq(p.tetherSource, nil, "override(nil): nil comes back as nil")
+    eq(p:_TetherRegion(), row, "override(nil): ...so the resolver falls back to the dock source")
+    p:Close()
+end
+
+print("-- Popout: one override, not a stack")
+do
+    local row = source(80, 40, CX, CY)
+    local over, other = source(600, 400, CX - 300, CY), source(300, 200, CX - 200, CY)
+    local p = popout({ key = "ovrtwice", tetherSource = row })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(row)
+    -- A consumer's open path can run twice without a close in between. A stack
+    -- would owe two pops where the consumer only ever fires one close, and the
+    -- panel would be left tethered to an overlay that has gone.
+    p:SetTetherOverride(over)
+    p:SetTetherOverride(other)
+    eq(p.tetherSource, other, "override: installing twice replaces the target")
+    p:ClearTetherOverride()
+    eq(p.tetherSource, row, "override: ...and ONE clear still lands, because the first stash is kept")
+
+    -- ...and a clear with nothing installed is a no-op rather than a wipe.
+    p:ClearTetherOverride()
+    eq(p.tetherSource, row, "override: clearing without an install changes nothing")
+    p:Close()
+end
+
+print("-- Popout: the host sweep reaches every panel that is up, and only those")
+do
+    local rowA, rowB = source(80, 40, CX, CY), source(80, 40, CX, CY - 60)
+    local over = source(600, 400, CX - 300, CY)
+    -- An overlay covers a SURFACE, not one panel: every panel whose source is
+    -- under it is equally wrong, and the one that opened the overlay is not
+    -- necessarily among them. So the sweep is the whole open set.
+    local a = popout({ key = "sweepa", tetherSource = rowA })
+    local b = popout({ key = "sweepb", tetherSource = rowB })
+    a:Follow(rowA)
+    b:Follow(rowB)
+    host:SetPopoutTetherOverride(over)
+    eq(a.tetherSource, over, "sweep: it reaches the first panel")
+    eq(b.tetherSource, over, "sweep: ...and the second")
+    host:ClearPopoutTetherOverride()
+    eq(a.tetherSource, rowA, "sweep: and puts each panel's OWN target back")
+    eq(b.tetherSource, rowB, "sweep: ...its own, not the other's")
+
+    -- A panel that has already closed is out of the live set, so the sweep does
+    -- not reach it -- and must not, since the pool may hand it to another row.
+    b:Close()
+    host:SetPopoutTetherOverride(over)
+    eq(a.tetherSource, over, "sweep: the panel still up is retargeted")
+    eq(b.tetherSource, rowB, "sweep: ...and a closed one is left alone")
+    host:ClearPopoutTetherOverride()
+    a:Close()
+end
+
+print("-- Popout: an adopt VOIDS an outstanding stash")
+do
+    local rowA, rowB = source(80, 40, CX, CY), source(80, 40, CX, CY - 60)
+    local over = source(600, 400, CX - 300, CY)
+    -- ☠ THE POOL OUTLIVES THE OVERLAY. A panel that closed while an override was
+    -- standing carries a stash describing the PREVIOUS row's target; handed to
+    -- the next row, a later clear would drag that dead rect back and outline it.
+    local p = popout({ key = "ovradopt", tetherSource = rowA })
+    p.frame:SetFakeCenter(dockedRightOfCentre())
+    p:Follow(rowA)
+    p:SetTetherOverride(over)
+    p:Close()
+    local again = popout({ key = "ovradopt", tetherSource = rowB })
+    check(again == p, "adopt: the pool hands the same instance back")
+    eq(again.tetherSource, rowB, "adopt: it takes the new row's target")
+    again:ClearTetherOverride()
+    eq(again.tetherSource, rowB, "adopt: ...and a stale clear cannot drag the previous row's back")
+    again:Close()
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

@@ -2088,6 +2088,96 @@ function Popout:_TetherRegion()
     return t or self.source
 end
 
+-- ---- the tether override -----------------------------------------
+
+-- ☠ WHEN SOMETHING COVERS THE SURFACE THE SOURCES LIVE ON. A consumer that
+-- draws a full-surface overlay over its page takes every panel's source under it,
+-- and the three things that read _TetherRegion -- the source outline, the beam
+-- and the clip gate -- go on describing a rect nobody can see. The outline is the
+-- one that shows: it lands on whatever the overlay happens to be drawing in that
+-- slot, so it reads as a claim ABOUT THE OVERLAY'S OWN CONTENT. (In game: a spell
+-- picker covering the settings content area left an open panel's outline traced
+-- round two unrelated rows of the spell list, which read as "these two rows are
+-- selected".)
+--
+-- So the consumer that puts the overlay up says so, and the panels point at the
+-- COVERING region for as long as it is there. That is the honest claim -- the
+-- overlay is the focus now -- and it keeps outline, beam and clip gate describing
+-- ONE rect, which is the contract _TetherRegion exists to hold.
+--
+-- ONE OVERRIDE, NOT A STACK, and that is deliberate. A consumer's open path can
+-- run twice without a close in between (an overlay re-opened for a second context
+-- while it is still up), and a stack would then owe two pops where the consumer
+-- only ever fires one close -- leaving panels tethered to an overlay that has
+-- gone. Installing twice replaces the target and keeps the FIRST stash, so one
+-- Clear always lands.
+--
+-- The stash is EXACTLY what was there, which may be nil, a region, or a function.
+function Popout:SetTetherOverride(region)
+    if region == nil then return self:ClearTetherOverride() end
+    -- `false` stands in for a nil tetherSource, so "is an override installed" is
+    -- one test against nil -- a consumer that never declared a tetherSource must
+    -- not be mistaken for one that has not been overridden yet.
+    --
+    -- ☠ SPELT OUT, NOT `(x == nil) and false or x`. That idiom cannot yield
+    -- false -- the `and` hands on false and the `or` walks straight past it to x
+    -- -- so the nil case stashed nil, read back as "nothing installed", and the
+    -- restore silently no-opped. Caught by the nil-target assertion, which is the
+    -- whole reason it is there.
+    if self._tetherHeld == nil then
+        local held = self.tetherSource
+        if held == nil then held = false end
+        self._tetherHeld = held
+    end
+    self.tetherSource = region
+    self:_RetetherChrome()
+    return self
+end
+
+-- Nothing to pass back in: the whole point of the stash is that the consumer
+-- never has to know what it is restoring.
+function Popout:ClearTetherOverride()
+    local held = self._tetherHeld
+    if held == nil then return self end
+    self._tetherHeld = nil
+    if held == false then held = nil end
+    self.tetherSource = held
+    self:_RetetherChrome()
+    return self
+end
+
+-- The three, in the order _Present runs them. All three, every time: they
+-- describe one rect, and moving only some of them draws the join between two
+-- different ones.
+function Popout:_RetetherChrome()
+    self:_UpdateNotch()
+    self:_UpdateBeam()
+    self:_UpdateSourceOutline()
+end
+
+-- ...and the same across every panel this host currently has up. THE OPEN SET IS
+-- HOST STATE (see PER-HOST STORE), so a consumer cannot walk it itself -- and it
+-- should not have to: an overlay covers a SURFACE, not one panel. Every panel
+-- whose source is under it is equally wrong, and the panel that opened the
+-- overlay is not necessarily one of them.
+function UI:SetPopoutTetherOverride(region)
+    local s = rawget(self, "_popouts")
+    if not s then return self end
+    -- No `closed` guard, and none is possible: Close takes a panel OUT of this
+    -- list on its way down (see PER-HOST STORE), so a closed member cannot be
+    -- reached from here and a guard against one would be untestable code
+    -- crediting itself with work.
+    for _, po in ipairs(s.live) do po:SetTetherOverride(region) end
+    return self
+end
+
+function UI:ClearPopoutTetherOverride()
+    local s = rawget(self, "_popouts")
+    if not s then return self end
+    for _, po in ipairs(s.live) do po:ClearTetherOverride() end
+    return self
+end
+
 -- The popout's own rect, in the same UIParent-centre units as everything else
 -- here. Its own method rather than a bare rectOf(self.frame) because a GLIDING
 -- popout is authoritative about where it is: the anchor it was just handed will
@@ -2392,6 +2482,13 @@ local function adopt(po, opts)
     po.onUnpin     = opts.onUnpin          -- accepted; v1 never unpins
     po.canAutoPin  = opts.canAutoPin
     po.tetherSource = opts.tetherSource
+    -- ...and any override standing over it is VOID. The panel belongs to whoever
+    -- just asked for it, so a stash taken while the PREVIOUS consumer's overlay
+    -- was up describes a rect that is not this row's, and restoring it would be
+    -- worse than never having overridden at all. (Nothing can adopt while a
+    -- full-surface overlay is up -- it eats the click -- but the pool outlives
+    -- the overlay and the residue would not.)
+    po._tetherHeld = nil
     -- Reserved. Accepted and ignored so the call sites that will want a count
     -- badge can be written before the shell grows one.
     po.badge       = opts.badge
@@ -2435,7 +2532,10 @@ end
 --   onClose(popout, reason)  reason: "cross"|"family"|"source"|"api"
 --   onPin(popout) / onUnpin(popout)
 --   canAutoPin    boolean or function(popout); false makes AutoPin a no-op
---   tetherSource  region or function -> region; the beam's far end
+--   tetherSource  region or function -> region; the beam's far end. Temporarily
+--                 REPLACED, and exactly restored, by SetTetherOverride while a
+--                 consumer's overlay covers the surface the source lives on --
+--                 see THE TETHER OVERRIDE
 --   accent        {r,g,b[,a]} overriding the HOST accent for this popout's
 --                 border, connection point, beam and source outline
 --   surface       the SURFACE STYLE this panel wears (Theme.lua's
