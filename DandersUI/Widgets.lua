@@ -654,11 +654,29 @@ end
 --
 -- This is the other kind. A folder tab sits directly ON TOP of a panel and says
 -- what that panel is SHOWING, so it has to read as part of it: the selected tab
--- is the same fill as the panel, joined to it with no seam, and the ones that
--- are not selected are set BACK -- shorter, darker, outlined, so they read as
--- sheets behind the front one. That is a different sentence from an underline
--- tab, and the two can then stand on the same page without reading as "tabs
--- inside tabs", which is the complaint that produced this helper.
+-- is the same fill as the panel, joined to it with no seam, carrying the accent
+-- along its top edge, and the ones that are not selected are set BACK -- shorter,
+-- outlined, dim-labelled, so they read as sheets behind the front one. That is a
+-- different sentence from an underline tab, and the two can then stand on the
+-- same page without reading as "tabs inside tabs", which is the complaint that
+-- produced this helper.
+--
+-- ☠ "SET BACK" IS NOT "DARKER", AND ON A DARK GROUND IT CANNOT BE. Work the
+-- composites out over the ground these actually stand on -- a consumer's content
+-- panel, C_PANEL at 0.3 over C_BACKGROUND at 0.95, about 0.089:
+--
+--     page ground                             0.089
+--     selected == panel   C_PANEL  @ 0.80  -> 0.114
+--     unselected          C_ELEMENT@ 0.85  -> 0.166
+--
+-- The selected tab's fill is PINNED to the panel's by the join, and the panel is
+-- only 0.025 above the ground. So "unselected sits between the ground and the
+-- panel" is a 0.025-wide window: any value in it is invisible, and anything below
+-- the ground is near-black. There is no legible third step underneath. The
+-- unselected tab therefore sits ABOVE the panel, exactly where a dark-theme
+-- editor puts an inactive tab, and the front sheet is marked by the ACCENT rather
+-- than by being the brightest thing in the strip. Height, label brightness and
+-- that accent carry "selected"; fill luminance cannot and was never going to.
 --
 -- ☠ THE SELECTED TAB HAS NO RING, and that is the whole of "joined". A ring is
 -- a closed loop -- the baked `top` shape rounds the two upper corners but still
@@ -689,6 +707,9 @@ end
 --               anchored to the strip's BOTTOM, so this is also how far its top
 --               edge sits below the selected one's.
 --   activeFill / inactiveFill / border   {r,g,b,a}, defaulted from the theme
+--   accent      a fixed {r,g,b} for the selected tab's top edge. Omit and it
+--               follows the host's accent, and keeps following it.
+--   accentHeight  that edge's thickness (default 2)
 --   onClick     fn(btn)
 --   tooltip     a ShowTooltip spec { title=, lines= }
 --
@@ -707,7 +728,17 @@ function UI:StyleFolderTab(btn, opts)
     -- same page ground, so the join is invisible rather than nearly invisible.
     local activeFill   = opts.activeFill   or { C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8 }
     local inactiveFill = opts.inactiveFill or { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.85 }
-    local edge         = opts.border       or { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 }
+    -- ☠ THE EDGE ALPHA IS DERIVED, NOT EYEBALLED, and 0.5 was too low BECAUSE of
+    -- the fill it sits on. A ring composites over its OWN fill, not over the page:
+    -- C_BORDER at 0.5 over the panel's 0.114 gives 0.182 -- a 0.068 step, which is
+    -- what makes a panel's edge legible -- but the same 0.5 over this tab's
+    -- LIGHTER 0.166 fill gives 0.208, a 0.042 step, and the outline that is
+    -- supposed to say "this is a sheet behind the front one" is most of the way to
+    -- invisible. Solving C_BORDER*a + (1-a)*0.166 = 0.166 + 0.068 gives a = 0.81,
+    -- so an unselected tab's edge reads exactly as far off its fill as the panel's
+    -- own does off its.
+    local EDGE_ALPHA   = 0.8
+    local edge         = opts.border       or { C_BORDER.r, C_BORDER.g, C_BORDER.b, EDGE_ALPHA }
 
     if opts.text ~= nil then
         if not btn.Text then
@@ -717,6 +748,54 @@ function UI:StyleFolderTab(btn, opts)
         btn.Text:SetText(opts.text)
         btn.Text:ClearAllPoints()
         btn.Text:SetPoint("CENTER", 0, 0)
+    end
+
+    -- ☠ THE SELECTED TAB CANNOT SAY SO WITH ITS FILL, so it says so with the
+    -- accent. Its fill is PINNED to the panel's -- that is the whole of "joined"
+    -- and it is not negotiable -- and a panel is only ~0.025 off the page ground
+    -- it stands on, so the front sheet has, on its own, no edge and almost no
+    -- contrast. Height and a brighter label were carrying the entire "which one am
+    -- I on" question. A coloured top edge is the folder tab's own idiom for it,
+    -- and it is the edge FURTHEST from the join, so nothing about it re-draws the
+    -- seam the selected tab exists to lose.
+    --
+    -- ⚠ INSET BY THE RADIUS AT BOTH ENDS, which is exactly the span of straight
+    -- top edge a top-rounded rect has. A bar run corner to corner would put two
+    -- square ends back over the two arcs -- the same trap the native hover layer
+    -- sets, and the reason this factory does not use one.
+    --
+    -- ARTWORK, so it clears BOTH of the rounded surface's layers (the fill and the
+    -- ring live at negative BACKGROUND sublevels) without competing with the
+    -- OVERLAY label, which does not overlap it anyway.
+    local accentH = opts.accentHeight or 2
+    local accentBar = btn.dfFolderAccent
+    if not accentBar then
+        accentBar = btn:CreateTexture(nil, "ARTWORK")
+        accentBar:SetTexture("Interface\\Buttons\\WHITE8x8")
+        btn.dfFolderAccent = accentBar
+    end
+    accentBar:SetHeight(accentH)
+    accentBar:ClearAllPoints()
+    accentBar:SetPoint("TOPLEFT", btn, "TOPLEFT", radius, 0)
+    accentBar:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -radius, 0)
+    accentBar:Hide()
+
+    -- The accent is per host and changes for the session (a consumer flips it on a
+    -- mode switch), so the bar follows it rather than freezing on whatever was
+    -- live when the strip was built.
+    --
+    -- ⚠ REGISTERED AGAINST THE BUTTON, and only once. A bare closure is something
+    -- nothing can ever take back off the list, and a tab strip is rebuilt on every
+    -- page refresh -- naming the owner makes the entry droppable, and the guard
+    -- stops a re-style of the same button stacking a second one.
+    local function paintAccent(c)
+        c = c or opts.accent or host:GetAccent()
+        accentBar:SetColorTexture(c.r, c.g, c.b, 1)
+    end
+    paintAccent()
+    if not opts.accent and not btn._folderAccentListener then
+        btn._folderAccentListener = function(c) paintAccent(c) end
+        host:RegisterAccentListener(btn._folderAccentListener, btn)
     end
 
     -- ☠ THE SQUARE BACKDROP HAS TO COME DOWN, and ApplyRoundedChrome is the one
@@ -731,6 +810,7 @@ function UI:StyleFolderTab(btn, opts)
             fill    = on and activeFill or inactiveFill,
             border  = (not on) and edge or false,
         })
+        accentBar:SetShown(on)
     end
 
     -- Selected: full height, top-anchored, so its bottom edge IS the strip's
