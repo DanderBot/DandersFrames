@@ -1207,12 +1207,36 @@ end
 --
 -- ☠☠ WHAT THIS LOCK IS AND IS NOT — READ BEFORE TRUSTING IT.
 -- `isFromPlayerOrPlayerPet` does NOT mean "cast by you". It means "cast by SOME player or
--- player pet" — Features/Auras.lua's non-player debuff record documents this, and
--- Blizzard's own target frame proves it: TargetFrameAuraContainer.lua:395-408 handles
--- YOUR auras first and separately (`sourceUnit` + UnitIsUnit("player", caster)), and only
--- afterwards tests `isFromPlayerOrPlayerPet` — a test that would be dead code if the
--- field already meant "you". It is therefore NOT interchangeable with the PLAYER token,
--- and this lock does not re-implement "only mine".
+-- player pet". It is therefore NOT interchangeable with the PLAYER token, and this lock
+-- does not re-implement "only mine".
+--
+-- ⚠ THE EVIDENCE BASE, IN FULL, because it is thinner than it looks and the field is
+-- worth re-testing rather than re-arguing (audited 2026-08-30 against the live 12.1
+-- client dump). The field is UNDOCUMENTED — zero entries across every
+-- Blizzard_APIDocumentationGenerated aura file — and has exactly ONE semantic consumer
+-- in the whole client: TargetFrameAuraContainer.lua:406. Everything else merely carries
+-- it (AuraUtil packs it, CustomAuraContainer lists it as a boolean candidate field,
+-- AuraContainerUtil:95 compares it, EditModeAuraDataProvider stubs it true).
+--   1. THE STRONGEST ARGUMENT IS OUR OWN SHIPPED FEATURE, not Blizzard's code. The
+--      "Non-Player Debuffs" category is nothing but isFromPlayerOrPlayerPet = false, and
+--      what it promises users is dropping OTHER PLAYERS' Sated and Forbearance. It
+--      shipped in 5.2.0 and no report has ever said those still show. Under a "cast by
+--      you" reading that option could not work at all.
+--   2. The one consumer is coherent only under this reading. Line 406 hides player-
+--      sourced auras on a hostile NPC target — the long-standing "don't show every
+--      raider's DoTs on the boss" rule. Under a "you" reading it would instead HIDE YOUR
+--      OWN aura, contradicting line 396 three lines above it, which exists precisely to
+--      show yours.
+--   ☠ 3. THE COUNTER-ARGUMENT, recorded so nobody thinks this is settled: the field NAME
+--      mirrors AuraUtil.AuraFilters.Player almost word for word ("auras that were cast by
+--      the player, or by the player's pet or vehicle"). Naming alone argues the other way.
+--   ⚠ An earlier version of this note claimed line 406 would be DEAD CODE under the "you"
+--      reading. That is not airtight and should not be repeated: 406 is still reachable
+--      when sourceUnit is nil, so the branch would be reachable either way. The
+--      self-contradiction in (2), not deadness, is what does the work.
+-- ✅ DECISIVE TEST IF IT EVER MATTERS: a container filtered "HELPFUL" with NO PLAYER
+--      token plus candidateFilters { isFromPlayerOrPlayerPet = true }, on an ally
+--      carrying another player's buff. It renders -> ANY player. It stays empty -> you.
 --
 -- ★ SO WHY DOES IT FIX THE BUG? Because of WHERE the token fails. In the field case every
 -- one of those four auras was player-cast (a shaman's), yet the field still read FALSE —
