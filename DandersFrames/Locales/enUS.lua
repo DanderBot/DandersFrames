@@ -2627,6 +2627,12 @@ L["Editing custom filter"] = true
 -- one with a noun argument: a "%d %s" sentence would take the plural rule away from
 -- the translator. Filters on the buff side; categories and Aura Designer debuff
 -- groups on the debuff side.
+-- The BAND ARM puts the same three consumers behind a popout row instead of on
+-- the page: at every width the window can be, three chips sharing that band
+-- ellipsise their own counts away. This is the label on that row. Its SUMMARY is
+-- the names of the consumers in use, joined — and "Not in use" below doubles as
+-- the empty state there, rather than a second way of saying nothing uses this.
+L["Used By"] = true
 L["Not in use"] = true
 L["1 filter"] = true
 L["%d filters"] = true

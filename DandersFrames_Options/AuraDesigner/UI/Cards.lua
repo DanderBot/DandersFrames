@@ -3073,6 +3073,32 @@ S.BuildAddIndicatorPane = function(host, opts)
         return p
     end
 
+    -- ☠ A STEP'S HEIGHT IS THE FRAME'S, NOT JUST A FIELD ON IT -- AND THAT IS
+    -- WHAT MADE THIS PANEL OPEN EMPTY. Every card on a step is pinned with
+    -- SetPoint("TOPLEFT", 0, y) AND SetPoint("RIGHT", pane, "RIGHT", 0, 0), and
+    -- RIGHT is (right edge, VERTICAL MIDDLE). On a frame that was given a width
+    -- and never a height that middle IS the top edge, so the second anchor pins
+    -- the card's own mid-height to the top of the step while the first puts its
+    -- top edge `y` below it. Two vertical constraints that disagree: the card is
+    -- dragged up out of the panel and stretched to twice its offset instead of
+    -- sitting at its own height. Steps 2 and 3 are nothing BUT cards, which is
+    -- why the panel drew nothing at all.
+    --
+    -- ⚠ THE PANE'S OWN HEIGHT WAS NEVER THE FAULT. `Show` has always sized the
+    -- host, so the slot AddWidget measured was always the real ~120 -- which is
+    -- why two successive height fixes changed nothing. The Layout Groups panel
+    -- beside this one takes the same RIGHT anchor and works, because its cards
+    -- hang off the host, which IS sized.
+    --
+    -- One writer for both numbers, so what the flow reads and what the anchors
+    -- resolve against can never drift apart.
+    local function SetPaneHeight(p, h)
+        h = max(h or 1, 1)
+        p.paneHeight = h
+        p:SetHeight(h)
+        return h
+    end
+
     -- A step's back line: one click to the step before, and the answer already
     -- given. Built as a FRAME with the string inside it, never as a bare
     -- FontString on the pane -- a region cannot be shown and hidden with its step.
@@ -3180,7 +3206,7 @@ S.BuildAddIndicatorPane = function(host, opts)
         })
         fcard:SetPoint("TOPLEFT", 0, y)
         fcard:SetPoint("RIGHT", spellPane, "RIGHT", 0, 0)
-        spellPane.paneHeight = -y + (fcard.layoutHeight or 58) + 2
+        SetPaneHeight(spellPane, -y + (fcard.layoutHeight or 58) + 2)
     end
 
     -- ── STEP 2: WHICH KIND OF EFFECT ──
@@ -3202,7 +3228,7 @@ S.BuildAddIndicatorPane = function(host, opts)
             card:SetPoint("RIGHT", scopePane, "RIGHT", 0, 0)
             y = y - ((card.layoutHeight or 58) + 6)
         end
-        scopePane.paneHeight = -y + 2
+        SetPaneHeight(scopePane, -y + 2)
     end
 
     -- ── STEP 3: WHICH ONE ──
@@ -3278,7 +3304,7 @@ S.BuildAddIndicatorPane = function(host, opts)
             card:SetPoint("RIGHT", pane, "RIGHT", 0, 0)
             y = y - ((card.layoutHeight or 58) + 6)
         end
-        pane.paneHeight = -y + 2
+        SetPaneHeight(pane, -y + 2)
         typePanes[key] = pane
         panes["type:" .. key] = pane
         return pane

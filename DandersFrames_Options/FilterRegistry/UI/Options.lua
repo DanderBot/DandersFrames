@@ -1084,6 +1084,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- the placeholder is a space rather than "". With "" there is no fontstring and
     -- the first refresh errors on b.Text.
     local chipButtons = {}
+    -- ...and the BAND ARM's copy of the same three, which live in a panel rather
+    -- than on a row. Declared here so the refresh below can reach them: the row
+    -- itself is built ~2,000 lines down, inside the `rowsMode` arm.
+    local consumerButtons = {}
+    -- Assigned in that same arm. Forward-declared so RefreshAll -- which is
+    -- written before it -- can call it without capturing a nil upvalue.
+    local RefreshConsumers
     for i = 1, CHIP_POOL_N do
         local b = CreateFrame("Button", nil, chipRow, "BackdropTemplate")
         GUI:StyleButton(b, { width = CHIP_MIN_W, height = CHIP_H, text = " " })
@@ -1181,6 +1188,24 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         local n = 0
         for _ in pairs(set) do n = n + 1 end
         return FilterCountText(n)
+    end
+
+    -- Which consumers are actually drawing on the library, as one line. This is the
+    -- BAND ARM's row summary: the chips answer "how many filters each" and a row
+    -- summary has space for neither three labels nor three counts, so it answers
+    -- the shorter question -- WHO -- and the panel behind it carries the numbers.
+    --
+    -- ⚠ Reuses L["Not in use"], the chips' own zero state, rather than adding a
+    -- second way to say nothing is using this.
+    local function ConsumerSummary()
+        local names = {}
+        for _, def in ipairs(CHIP_DEFS_BUFF) do
+            if ChipDetail(def.key) ~= L["Not in use"] then
+                names[#names + 1] = def.label
+            end
+        end
+        if #names == 0 then return L["Not in use"] end
+        return table.concat(names, ", ")
     end
 
     -- Share the row between the chips and the help button pinned to its right edge.
@@ -1301,24 +1326,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- ⚠ ICON ONLY, so it MUST carry a tooltip: a glyph with no label and no hover
     -- text is a control the reader has to click to identify. StyleButton omits the
     -- label fontstring entirely when no text is passed, and centres the icon.
-    local helpBtn = CreateFrame("Button", nil, chipRow, "BackdropTemplate")
-    GUI:StyleButton(helpBtn, {
-        width  = CHIP_HELP_W,
-        height = CHIP_H,
-        icon   = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\question.png", size = 13 },
-    })
-    -- ⚠ TOPRIGHT, not RIGHT. The row GROWS DOWNWARD when the chips wrap, and a
-    -- centre anchor would slide the glyph down with it, away from the first row of
-    -- chips it belongs beside.
-    helpBtn:SetPoint("TOPRIGHT", 0, 0)
-    helpBtn:HookScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, {
-            title = L["How this works"],
-            lines = { L["A short guide to filters and the displays that use them."] },
-        })
-    end)
-    helpBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-    helpBtn:SetScript("OnClick", function()
+    -- ☠ A VERB, NOT A HANDLER BODY. Two surfaces open this popup now -- the
+    -- island's "?" glyph and the band arm's full-width button inside the
+    -- consumers panel -- and a second copy of a five-slot format() is a second
+    -- place for the argument order to rot.
+    local function ShowFilterHelp()
         -- TWO colour languages in this one popup, and they mean different things:
         --   hl (gold)          -- a DESTINATION, i.e. a page you can go to. Three of
         --                         them, listed. Not a link -- a popup cannot dispatch
@@ -1340,7 +1352,26 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 format(hl, L["Aura Designer"]),
                 fdEmph(L["Debuff Filters"], EMPH_DEBUFF)),
         })
+    end
+
+    local helpBtn = CreateFrame("Button", nil, chipRow, "BackdropTemplate")
+    GUI:StyleButton(helpBtn, {
+        width  = CHIP_HELP_W,
+        height = CHIP_H,
+        icon   = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\question.png", size = 13 },
+    })
+    -- ⚠ TOPRIGHT, not RIGHT. The row GROWS DOWNWARD when the chips wrap, and a
+    -- centre anchor would slide the glyph down with it, away from the first row of
+    -- chips it belongs beside.
+    helpBtn:SetPoint("TOPRIGHT", 0, 0)
+    helpBtn:HookScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, {
+            title = L["How this works"],
+            lines = { L["A short guide to filters and the displays that use them."] },
+        })
     end)
+    helpBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+    helpBtn:SetScript("OnClick", ShowFilterHelp)
 
     -- ========== LEFT COLUMN: FILTER LIST ==========
     local leftPanel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -2845,6 +2876,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         for _, b in ipairs(chipButtons) do
             if b.UpdateTheme then b.UpdateTheme() end
         end
+        -- ...and the band arm's, whose parent is a popout pane rather than the page
+        -- child. Same rule, same list, stated rather than assumed.
+        for _, b in ipairs(consumerButtons) do
+            if b.UpdateTheme then b.UpdateTheme() end
+        end
 
         -- ⚠ The label TEXT is set once, at creation, and no longer here -- it is
         -- static, and the pair of SetText calls that used to live at this spot only
@@ -3316,6 +3352,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- including from another page, which is why this rides RefreshAll rather
         -- than the tick handlers.
         RefreshChips()
+        -- ...and the band arm's copy of the same three, which live in a panel.
+        -- Guarded: it is only assigned in that arm.
+        if RefreshConsumers then RefreshConsumers() end
         UpdateActionStates()
         -- Keep the picker coherent: hide it when the selection moved off its
         -- target custom filter (or the filter was deleted); otherwise
@@ -3418,6 +3457,109 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             build   = filterMount,
         })
         pageRef._fdFilterRow = filterRow
+
+        -- ── THE CONSUMERS GO BEHIND A ROW TOO ──
+        -- ☠ THE CHIPS TRUNCATE AT EVERY WIDTH THIS WINDOW CAN BE, and that is a
+        -- different fault from the one already fixed. They wrap and they re-report
+        -- their height (LayoutChips), so nothing overlaps any more -- but the LABELS
+        -- still ellipsise: at the 640 default the band is ~410, which leaves ~382 for
+        -- three chips and their gutters, so each gets ~123px with ~113 for text, and
+        -- "Defensive Icon  2 filters" needs half as much again. At the 520 minimum
+        -- they wrap to two rows of ~133 and truncate there as well. A chip with an
+        -- ellipsis where its count should be is a control that has stopped answering
+        -- the question it exists for.
+        --
+        -- The all-rows rule already says where this belongs: several options go in a
+        -- panel. At the popout's own content width each consumer gets a full row and
+        -- writes its name and its count out in full, at any window size, in any
+        -- locale -- because the panel's width does not depend on the window's.
+        --
+        -- ⚠ AND "HOW THIS WORKS" COMES WITH THEM. On the band it was a 22px glyph
+        -- eating a chip's worth of the row it was explaining, identifiable only by
+        -- hovering it. In the panel it is a labelled button with room for its name.
+        local consumerMount = tools.PopoutContent(function(group, holder)
+            -- ⚠ FRAMES, NOT REGIONS. PopoutContent builds into a HIDDEN holder and
+            -- moves FRAMES into the group; a FontString made on that holder stays
+            -- behind and is never drawn, in silence.
+            --
+            -- ⚠ AND NOTHING IS HAND-ANCHORED. AddWidget gives the group both axes,
+            -- so no child takes SetPoint("RIGHT", host, "RIGHT", ...) against a host
+            -- whose height has not been settled -- which is the anchor that emptied
+            -- the Aura Designer's own add panel.
+            wipe(consumerButtons)
+            for i = 1, CHIP_POOL_N do
+                local def = CHIP_DEFS_BUFF[i]
+                local b = CreateFrame("Button", nil, holder, "BackdropTemplate")
+                -- The label is passed at build so StyleButton creates btn.Text at all
+                -- -- it omits the fontstring entirely for an empty string, and the
+                -- refresh below writes through it.
+                GUI:StyleButton(b, { width = paneW, height = CHIP_H, text = def.label })
+                b.chipDef = def
+                b:SetScript("OnClick", function(self)
+                    if self.chipDef then fdBannerLinkClick(self.chipDef.pageId) end
+                end)
+                b:HookScript("OnEnter", function(self)
+                    if self.chipDef then
+                        GUI:ShowTooltip(self, { title = self.chipDef.label,
+                                                lines = { self.chipDef.tip } })
+                    end
+                end)
+                b:HookScript("OnLeave", function() GUI:HideTooltip() end)
+                -- ☠ THE COUNT IS READ BY A VERB, NOT IN THE BUILDER. A pooled panel's
+                -- build runs ONCE, so a number written here is the number that was
+                -- true the first time it opened -- the shape that shipped the Aura
+                -- Designer's filter panel always showing "All". `refreshContent` is
+                -- the kit's own name for it: the group re-asks every child on each
+                -- re-flow, and RefreshAll calls it as well for the writes that happen
+                -- on other pages entirely.
+                b.refreshContent = function(self)
+                    if self.chipDef and self.Text then
+                        self.Text:SetText(format("%s  |cff8a8f9f%s|r",
+                                                 self.chipDef.label,
+                                                 ChipDetail(self.chipDef.key)))
+                    end
+                end
+                b:refreshContent()
+                consumerButtons[#consumerButtons + 1] = b
+                group:AddWidget(b, CHIP_H + 6)
+            end
+
+            local help = CreateFrame("Button", nil, holder, "BackdropTemplate")
+            -- ☠ ".png" IS PART OF THE PATH -- see the island's glyph for why. The
+            -- icon rides along with the label here rather than standing in for it.
+            GUI:StyleButton(help, {
+                width  = paneW,
+                height = CHIP_H,
+                text   = L["How this works"],
+                icon   = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\question.png", size = 13 },
+            })
+            help:SetScript("OnClick", ShowFilterHelp)
+            consumerButtons[#consumerButtons + 1] = help
+            group:AddWidget(help, CHIP_H + 6)
+        end)
+        local consumerRow = GUI:CreatePopoutRow(parent, {
+            label   = L["Used By"],
+            db      = tools.RowDB,
+            -- WHO, not how many: see ConsumerSummary.
+            summary = function() return ConsumerSummary() end,
+            window  = DF.GUIFrame,
+            clipTo  = pageRef,
+            build   = consumerMount,
+        })
+        -- ⚠ NO ClaimKeys AND NO FOOTER, for the reason the master row gives: this
+        -- page owns no per-mode db keys, so there is nothing for a modified tick to
+        -- test and nothing a Reset Group could write.
+
+        -- Both halves of the row, re-asked. The counts come from the buff selection,
+        -- the Defensive Icon's selection and the whole Aura Designer config, every
+        -- one of which is edited on another page -- which is why this rides RefreshAll
+        -- rather than any tick handler here.
+        RefreshConsumers = function()
+            for _, b in ipairs(consumerButtons) do
+                if b.refreshContent then b:refreshContent() end
+            end
+            if consumerRow.Refresh then consumerRow:Refresh() end
+        end
         -- ⚠ NO ClaimKeys AND NO FOOTER, and both are refusals rather than omissions.
         -- This page owns no per-mode db keys at all -- CreateCopyButton is called with
         -- an empty list for exactly that reason (see GUI/Pages/Auras.lua) -- and what
@@ -3483,7 +3625,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 if pageRef.RefreshStates then pageRef:RefreshStates() end
             end
         end
-        chipRow.dfSetHeight   = BandHeight(chipRow)
+        -- ⚠ NO dfSetHeight ON THE CHIP ROW. It is not a band in this arm -- the
+        -- consumers are behind a popout row -- and a re-report verb on a frame the
+        -- layout pass never places would call the page's whole state pass for a
+        -- height nothing reads.
         rightArea.dfSetHeight = BandHeight(rightArea)
         if freshHost then freshHost.dfSetHeight = BandHeight(freshHost) end
 
@@ -3520,7 +3665,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         local function AdoptBands(addFn)
             addFn(banner, banner.layoutHeight, "both")
             addFn(bannerGap, BAND_GAP, "both")
-            addFn(chipRow, (chipRow:GetHeight() or CHIP_H) + BAND_GAP, "both")
+            -- nil for the same reason the master's row takes nil: a popout row is
+            -- fixedRowHeight, so ResolveRowHeight uses the kit's own plate + gap.
+            addFn(consumerRow, nil, "both")
             -- nil: a popout row is fixedRowHeight, so ResolveRowHeight takes the
             -- kit's own plate + gap rather than a number copied out of it.
             addFn(filterRow, nil, "both")
@@ -3540,8 +3687,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- island anchor (banner -> parent, chip row -> banner) would be a lie in the
         -- meantime about who owns this frame's geometry.
         banner:ClearAllPoints()
+        -- ☠ AND IT IS TAKEN DOWN, not merely un-anchored. Its island anchors point
+        -- at the banner, which IS a band here, so leaving it visible would draw the
+        -- old truncating row on top of the one that replaced it.
         chipRow:ClearAllPoints()
-        chipRow:SetHeight(CHIP_H)
+        chipRow:Hide()
         rightArea:ClearAllPoints()
     end
 
@@ -3581,7 +3731,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             -- between the four bands; in the island it is the fixed chrome sum.
             local chromeH = PANEL_CHROME_H
             if rowsMode then
-                chromeH = (chipRow:GetHeight() or CHIP_H) + FILTERROW_H + BAND_GAP * 3
+                -- TWO popout rows above the detail now -- the consumers and the
+                -- master -- where a wrapping chip band and the master used to stand.
+                chromeH = FILTERROW_H * 2 + BAND_GAP * 3
             end
             local available = viewport - chromeH - belowH - bannerH
             h = mmax(PANEL_H_MIN, mfloor(available * PANEL_H_FRACTION))

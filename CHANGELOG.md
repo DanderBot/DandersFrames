@@ -14,6 +14,7 @@
 
 ### Bug Fixes
 
+- (Aura Designer) Fix the Add Indicator panel opening empty.
 - (Aura Designer) Fix indicators showing another player's auras after the group changed — someone leaving, a sort, or entering an arena. Long-lasting buffs could stay stuck on the wrong frame until a reload.
 - (Settings) Fix the settings window freezing the game for several seconds every time you opened or closed it after using the search box.
 - (Settings) Fix a long pause when opening the Changed Settings page, or searching, for the first time.
@@ -34,6 +35,7 @@
 - (Aura Designer, Text Designer, Aura Filters) The redesigned pages now have breathing room between their sections instead of everything sitting flush against everything else.
 - (Aura Designer) Layout Groups now has an "Add Layout Group" button that opens its choices in a panel, the same way adding an indicator works, instead of the choices taking up room above the list at all times.
 - (Text Designer) The category filter is now a button on the Text Elements heading that opens the choices in a panel, matching the Aura Designer. It lights up and names the filter whenever you are not showing everything.
+- (Aura Filters) The Buff Bar / Defensive Icon / Aura Designer buttons now open in a panel from a Used By row, so their names and filter counts are readable instead of being cut short. "How this works" moved in with them.
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.

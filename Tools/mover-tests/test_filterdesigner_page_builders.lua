@@ -94,16 +94,24 @@ do
     adopt = adopt or ""
 
     local atBanner = adopt:find("addFn(banner,", 1, true)
-    local atChips  = adopt:find("addFn(chipRow,", 1, true)
+    local atUsedBy = adopt:find("addFn(consumerRow,", 1, true)
     local atRow    = adopt:find("addFn(filterRow,", 1, true)
     local atDetail = adopt:find("addFn(rightArea,", 1, true)
     local atFresh  = adopt:find("addFn(freshHost,", 1, true)
-    check(atBanner and atChips and atRow and atDetail and atFresh,
+    check(atBanner and atUsedBy and atRow and atDetail and atFresh,
           "bands: all five roots are added")
-    check(atBanner < atChips, "bands: the banner is first...")
-    check(atChips < atRow,    "bands: ...then the consumer chips...")
+    check(atBanner < atUsedBy, "bands: the banner is first...")
+    check(atUsedBy < atRow,    "bands: ...then the consumers' own row...")
     check(atRow < atDetail,   "bands: ...then the MASTER, before the detail it selects...")
     check(atDetail < atFresh, "bands: ...then the detail, then the database note")
+
+    -- ☠ AND THE CHIP ROW IS NOT ONE OF THEM. It stayed a band for one release
+    -- after it learned to wrap, and wrapping was never the whole fault: three
+    -- chips sharing a band ellipsise their own counts at every width this window
+    -- can be. Asserted as an ABSENCE, because that is the only thing that fails
+    -- if somebody adds it back beside the row that replaced it.
+    check(adopt:find("addFn(chipRow,", 1, true) == nil,
+          "bands: ...and the chip row is not a band, it is behind the Used By row")
 
     -- ☠ AND THE ONE FLUSH SEAM GOT ITS OWN BAND. The other four already breathe
     -- (the chip row and the detail carry BAND_GAP in their slots, the master row
@@ -111,8 +119,8 @@ do
     -- CreateInfoBanner's deferred re-measure rewrites, so a gap folded into it is
     -- discarded on the next re-wrap. It is a band the banner does not own.
     local atGap = adopt:find("addFn(bannerGap,", 1, true)
-    check(atGap and atBanner < atGap and atGap < atChips,
-          "bands: ...with the rhythm's own band between the banner and the chips")
+    check(atGap and atBanner < atGap and atGap < atUsedBy,
+          "bands: ...with the rhythm's own band between the banner and the row below it")
     -- ⚠ BUILT ONCE, OUTSIDE THE ADOPT PASS. It runs on EVERY build, and frames
     -- cannot be garbage-collected in this client -- a frame created in there is one
     -- leaked per rebuild.
@@ -154,6 +162,84 @@ do
           "bands: the banner drops its island anchor")
     check(SRC:find("rightArea:ClearAllPoints()", 1, true) ~= nil,
           "bands: ...and so does the detail")
+end
+
+-- ============================================================
+-- 2b. THE CONSUMERS GO BEHIND A ROW
+-- ------------------------------------------------------------
+-- The band arm only. The island keeps its chip row -- it has the two fixed
+-- columns the chips were sized for -- so every assertion here is about the
+-- `rowsMode` half and the island's own is left alone above.
+-- ============================================================
+print("-- Filter Designer: the consumers move into a panel")
+do
+    -- SCOPED TO THE MOUNT'S OWN BODY. `CHIP_DEFS_BUFF`, `ChipDetail` and
+    -- `refreshContent` all appear elsewhere in this file, so a file-wide find
+    -- answers "does this page mention it" and never "does the PANEL build it".
+    local mount = SRC:match("local consumerMount = tools%.PopoutContent%(function%(group, holder%)(.-)\n        end%)")
+    check(mount ~= nil, "panel: the consumers' mount can be read on its own")
+    mount = mount or ""
+
+    -- ☠ THROUGH THE GROUP, NOT BY HAND. Every child is AddWidget'ed, so the
+    -- group owns both axes -- which is what keeps this panel clear of the anchor
+    -- that emptied the Aura Designer's add panel: a card pinned
+    -- SetPoint("RIGHT", host, "RIGHT", 0, 0) against a host whose height was
+    -- never settled has its mid-height pinned to that host's TOP edge.
+    check(mount:find("group:AddWidget(b, CHIP_H + 6)", 1, true) ~= nil,
+          "panel: each consumer takes a slot in the group...")
+    -- ⚠ CODE ONLY. An ABSENCE claim over source that still carries its comments
+    -- is answered by the comment EXPLAINING the absence -- which is how this
+    -- assertion first failed. Strip them, then ask.
+    local mountCode = mount:gsub("%-%-[^\n]*", "")
+    check(mountCode:find('SetPoint("RIGHT"', 1, true) == nil,
+          "panel: ...and nothing in here anchors to a host's vertical middle")
+
+    -- ☠ THE COUNT IS A VERB, NOT A NUMBER WRITTEN AT BUILD. A pooled panel's
+    -- builder runs ONCE; the Aura Designer's filter panel shipped showing "All"
+    -- forever for exactly this reason. `refreshContent` is the kit's own name --
+    -- RefreshChildStates re-asks every shown child on each re-flow.
+    check(mount:find("b.refreshContent = function(self)", 1, true) ~= nil,
+          "panel: the count is written by a verb the refresh can call again")
+    check(mount:find("ChipDetail(self.chipDef.key)", 1, true) ~= nil,
+          "panel: ...reading the live count, not one captured in the builder")
+
+    -- ...and the writes that happen on OTHER pages reach it. The counts come from
+    -- the buff selection, the Defensive Icon's and the whole AD config, none of
+    -- which this page owns -- which is why this rides RefreshAll.
+    local all = SRC:match("RefreshAll = function%(%)(.-)\n    end")
+    check(all ~= nil, "panel: the page's refresh can be read on its own")
+    all = all or ""
+    check(all:find("if RefreshConsumers then RefreshConsumers() end", 1, true) ~= nil,
+          "panel: ...and the page's own refresh re-asks them")
+    -- Guarded, because it is only assigned in the band arm -- and forward-declared,
+    -- because RefreshAll is written ~2,000 lines before that arm. A `local` after
+    -- the reader would capture nothing and the guard would be permanently false.
+    local declAt = SRC:find("local RefreshConsumers\r\n", 1, true)
+                   or SRC:find("local RefreshConsumers\n", 1, true)
+    local useAt  = SRC:find("if RefreshConsumers then RefreshConsumers() end", 1, true)
+    check(declAt and useAt and declAt < useAt,
+          "panel: ...through a forward declaration, not a nil upvalue")
+
+    -- The help popup is now opened from two places, so it is a verb.
+    check(SRC:find("local function ShowFilterHelp()", 1, true) ~= nil,
+          "panel: the how-this-works popup is one verb...")
+    check(SRC:find('helpBtn:SetScript("OnClick", ShowFilterHelp)', 1, true) ~= nil,
+          "panel: ...called by the island's glyph...")
+    check(mount:find('help:SetScript("OnClick", ShowFilterHelp)', 1, true) ~= nil,
+          "panel: ...and by the panel's own labelled button")
+
+    -- ☠ AND THE OLD ROW IS TAKEN DOWN, not merely un-anchored. Its island anchors
+    -- point at the banner, which IS a band here, so a chip row left showing would
+    -- draw the truncating row on top of the one that replaced it.
+    check(SRC:find("chipRow:Hide()", 1, true) ~= nil,
+          "panel: the band arm hides the chip row it replaced")
+    check(SRC:find("chipRow.dfSetHeight   = BandHeight(chipRow)", 1, true) == nil,
+          "panel: ...and stops giving it a band's re-report verb")
+
+    -- The panel sizer counts what actually stands above the detail: two popout
+    -- rows now, where a wrapping chip band and the master used to.
+    check(SRC:find("chromeH = FILTERROW_H * 2 + BAND_GAP * 3", 1, true) ~= nil,
+          "panel: the page height counts two rows above the detail, not a chip band")
 end
 
 -- ============================================================
@@ -303,7 +389,10 @@ do
     check(bandW > 290 and bandW < 315,
           "narrow: the band at the window's minimum is ~301px")
 
-    -- ---- the consumer chips ----
+    -- ---- the consumer chips: the ISLAND's copy, which still shares a row ----
+    -- The band arm no longer draws these (see "the consumers move into a panel"
+    -- below); the island does, at the width its two fixed columns give it, so the
+    -- wrap and its re-report are still the thing that keeps them off each other.
     local chipMin  = num(SRC, "local CHIP_MIN_W  = (%d+)")
     local chipGap  = num(SRC, "local CHIP_GAP  = (%d+)")
     local chipH    = num(SRC, "local CHIP_H = (%d+)")
@@ -349,6 +438,27 @@ do
     -- down as the row grows, away from the chips it belongs beside.
     check(SRC:find('helpBtn:SetPoint("TOPRIGHT", 0, 0)', 1, true) ~= nil,
           "narrow: ...and the help glyph stays beside the FIRST row of chips")
+
+    -- ---- ...AND THE BAND ARM STOPPED SHARING A ROW AT ALL ----
+    -- ☠ WRAPPING WAS NOT THE WHOLE FAULT, AND THIS IS THE ARITHMETIC THAT SAYS SO.
+    -- Above, three chips at the floor are shown not to fit the narrowest band. But
+    -- the DEFAULT band is ~410 and they "fit" it -- each getting (410 - 22 - 6 - 12)
+    -- / 3 = ~123px, with ~113 left for text once the plate's own inset is taken --
+    -- while a label like "Defensive Icon  2 filters" is half as long again. Fitting
+    -- and being readable are different claims, and only the first was ever tested.
+    local defaultBand = 410
+    local perChip = math.floor((defaultBand - chipH - chipGap - 2 * chipGap) / 3)
+    check(perChip < 150,
+          "panel: three chips on the DEFAULT band get less than a label's width each")
+    -- Which is why they are behind a row now. The panel's width does not depend on
+    -- the window's at all -- it is the kit's own content width -- so a consumer
+    -- there writes its name and its count out in full at any window size.
+    -- READ FROM THE PAGE'S OWN DECLARATION, not asserted against a literal: the
+    -- number is the kit's (GUI.PopoutContentWidth) and this is its floor.
+    local paneW = num(SRC, "local paneW = GUI.PopoutContentWidth or (%d+)")
+    check(paneW ~= nil, "panel: the pane's width can be read from the page")
+    check(paneW and paneW > perChip,
+          "panel: ...where the panel gives each one more room than the band did")
 
     -- ---- CLASS TWO: header row 3, a row of fixed-width children ----
     -- The Spell ID box, the Add button and the Add-from-Database button are all
