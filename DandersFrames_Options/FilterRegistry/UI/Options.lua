@@ -434,7 +434,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local FILTERROW_H = 50
     -- The gap the island puts between its stacked pieces, kept so the band arm has
     -- the same rhythm rather than a second set of numbers.
-    local BAND_GAP = 10
+    --
+    -- ☠ AND IT IS NOW THE DESIGNER SHELL'S NUMBER, NOT A SECOND COPY OF IT. The
+    -- shell gained the same rhythm for the Aura and Text Designers (the bands used
+    -- to stack flush and read as "crampted together"), and it took THIS value
+    -- because this page had already chosen it. Read rather than re-typed, so the
+    -- three designer pages cannot drift into three near-identical gaps. Read here,
+    -- inside the builder, rather than at file scope: this file loads before nothing
+    -- in particular, and a page builds long after every file has.
+    local BAND_GAP = GUI.DESIGNER_BAND_GAP or 10
 
     -- Shared helpers from FilterRegistry/SpellPicker.lua (loads after this
     -- file — safe here because pages build long after load time)

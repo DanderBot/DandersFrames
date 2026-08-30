@@ -2113,6 +2113,75 @@ do
           "fold: ...and so does the Text Designer")
 end
 
+print("-- The designer shell: one band rhythm, declared once")
+do
+    -- ☠ THE BANDS USED TO STACK FLUSH. The layout pass runs y = y - h with no gap
+    -- of its own, so a page built entirely from bands had no vertical grid at all
+    -- -- "everything looks so crampted together". The fix is the SHELL's, one
+    -- number, not a spacer sprinkled per site by whoever noticed.
+    check(SHELL:find("local BAND_GAP = ", 1, true) ~= nil,
+          "rhythm: the shell declares the gap once")
+    check(SHELL:find("GUI.DESIGNER_BAND_GAP = BAND_GAP", 1, true) ~= nil,
+          "rhythm: ...and publishes it, so the other designer pages read rather than copy it")
+    local FDOPT = options_file_source("FilterRegistry/UI/Options.lua")
+    -- The Filter Designer never took the shell (it is a master/detail, not a
+    -- preview-plus-tabs), so its column carries its own band arithmetic -- but it
+    -- must carry the SAME number, or the three designer pages breathe differently.
+    check(FDOPT:find("local BAND_GAP = GUI.DESIGNER_BAND_GAP or 10", 1, true) ~= nil,
+          "rhythm: the Filter Designer's column reads that number")
+    check(FDOPT:find("local BAND_GAP = 10\n", 1, true) == nil,
+          "rhythm: ...rather than keeping a second copy of it")
+
+    -- ⚠ A GAP IS ITS OWN BAND. Slot padding on the band above would be skipped
+    -- with that band, and the one band on this page that HIDES is the canvas --
+    -- so the gap under the preview would vanish at exactly the fold state where
+    -- the page is tightest. Emitted through a verb, which is also what makes the
+    -- "nothing before the first band" rule a single line.
+    local gapFn = SHELL:match("local function Gap%(%)(.-)\n    end")
+    check(gapFn ~= nil, "rhythm: the gap is emitted by a verb")
+    gapFn = gapFn or ""
+    check(gapFn:find("if not emitted then return nil end", 1, true) ~= nil,
+          "rhythm: ...which emits nothing above the first band")
+    check(gapFn:find("Add(g, BAND_GAP, \"both\")", 1, true) ~= nil,
+          "rhythm: ...and adds a band of its own, not padding on somebody's slot")
+
+    -- ☠ AND THE PREVIEW IS ONE GROUP. The folder tabs drop their bottom edge to
+    -- run continuous into the fold header (GUI:StyleFolderTab); a gap anywhere
+    -- inside tabs / header / canvas opens the join those tabs exist to make. So
+    -- the group takes ONE leading gap and none internally -- the "larger between
+    -- groups, smaller within" shape, with the within-group number pinned at 0 by a
+    -- drawn continuity rather than by taste.
+    check(SHELL:find("if (opts.canvasTabs and opts.canvasTabs.build) or opts.canvas then Gap() end",
+                     1, true) ~= nil,
+          "rhythm: one gap before the preview group, whichever of its bands leads")
+    local previewBlock = SHELL:match("if opts%.canvasTabs and opts%.canvasTabs%.build then(.-)\n    %-%- \226\148\128\226\148\128 4%.")
+    check(previewBlock ~= nil, "rhythm: the preview group's own bands can be read")
+    previewBlock = previewBlock or ""
+    check(previewBlock:find("Gap()", 1, true) == nil,
+          "rhythm: ...and nothing inside the preview group breaks its join")
+
+    -- The rest of the column: one gap above each strip, above the tab bar, and
+    -- above whatever the active tab builds. That last one is the shell's rather
+    -- than the caller's because the tab bar draws a baseline on its own bottom
+    -- edge and the first row would otherwise sit on the line.
+    local stripBlock = SHELL:match("for _, strip in ipairs%(opts%.strips or {}%) do(.-)\n    end")
+    check(stripBlock and stripBlock:find("Gap()", 1, true) ~= nil,
+          "rhythm: each strip takes a gap above it")
+    local tabBlock = SHELL:match("if opts%.tabs and #opts%.tabs > 0 then(.-)local bar = Band")
+    check(tabBlock and tabBlock:find("Gap()", 1, true) ~= nil,
+          "rhythm: ...so does the tab strip")
+    local buildBlock = SHELL:match("if opts%.buildTab then(.-)\n    end")
+    check(buildBlock and buildBlock:find("Gap()", 1, true) ~= nil,
+          "rhythm: ...and so does the tab's own content, under the strip's baseline")
+
+    -- Published for the tabs' own bands, so a caller keeping the rhythm reads the
+    -- number instead of typing 10 again.
+    check(SHELL:find("shell.BandGap = BAND_GAP", 1, true) ~= nil,
+          "rhythm: the number reaches the callers")
+    check(SHELL:find("shell.Gap     = Gap", 1, true) ~= nil,
+          "rhythm: ...and so does the verb")
+end
+
 print("-- Aura Designer: what the chrome now costs, band by band")
 do
     -- ☠ THE POINT OF THE WHOLE DIET, AS A NUMBER. Every figure is READ OUT OF
@@ -2126,8 +2195,11 @@ do
     local tabbar  = tonumber(SHELL:match("local TABBAR_H = (%d+)"))
     local F, PAD, DY = CARDS:match("local CANVAS_FURNITURE, CANVAS_PAD, CANVAS_DY = (%d+), (%d+), (%d+)")
     F, PAD, DY = tonumber(F), tonumber(PAD), tonumber(DY)
-    local foldHeader = tonumber(SHELL:match("Add%(section, (%d+), \"both\"%)"))
-    check(banner and scope and pool and pooltabs and tabbar and F and PAD and DY and foldHeader,
+    local foldHeader = tonumber(SHELL:match("AddBand%(section, (%d+)%)"))
+    -- The band rhythm, read from the shell's own declaration rather than restated.
+    local bandGap = tonumber(SHELL:match("local BAND_GAP = (%d+)"))
+    check(banner and scope and pool and pooltabs and tabbar and F and PAD and DY and foldHeader
+          and bandGap,
           "chrome: every band's height can be read from the source")
 
     -- The canvas at the scale the complaint was measured at.
@@ -2158,17 +2230,40 @@ do
     check(startY and caption, "chrome: ...and what the caption band costs")
     local head = (startY or 0) + (caption or 0) + 4
 
+    -- ☠ AND THE RHYTHM IS PART OF THE SUM. The bands used to stack FLUSH -- the
+    -- banner touching the pool tabs, the canvas touching the scope row -- which is
+    -- what "everything looks so crampted together" was. Four gaps buy the grid:
+    -- under the banner, under the preview, under the scope row, under the tab
+    -- strip. There is no fifth INSIDE the preview: the folder tabs, the fold
+    -- header and the canvas are drawn joined, and a gap there would open the very
+    -- seam the tabs exist to close.
+    local GAPS = 4
     local open   = banner + pooltabs + foldHeader + canvas + scope + tabbar + popoutRow + head
+                 + GAPS * bandGap
+    -- ⚠ THE SAME FOUR WHEN THE CANVAS IS SHUT. A gap is its own band, not padding
+    -- on the slot above it, precisely so the one under the preview survives the
+    -- fold -- the layout pass skips hidden children outright, so slot padding on
+    -- the canvas would disappear with it and the header would touch the scope row
+    -- again at exactly the moment the page is most compressed.
     local folded = banner + pooltabs + foldHeader + scope + tabbar + popoutRow + head
+                 + GAPS * bandGap
 
     -- Was 542 at the start of the diet (banner 68, canvas 160, pool 30, spec 26,
     -- tabs 28, add block 230), on a basis that counted neither the caption band
-    -- nor a filter row, and 406 counted honestly at the end of section 20.
-    -- On THIS basis: 68 + 30 + 28 + 132 + 26 + 28 + 50 + 24.
-    check(open <= 386,
-          "chrome: the page above the first indicator is under 386px with the canvas open")
-    check(folded <= 254,
-          "chrome: ...and under 254px with it folded")
+    -- nor a filter row; 406 counted honestly at the end of section 20, and 386
+    -- once the filter became a glyph. The rhythm adds 40 back, deliberately and
+    -- once: 386 -> 426 open, 254 -> 294 folded.
+    -- On THIS basis: 68 + 10 + 30 + 28 + 132 + 10 + 26 + 10 + 28 + 10 + 50 + 24.
+    check(open <= 426,
+          "chrome: the page above the first indicator is under 426px with the canvas open")
+    check(folded <= 294,
+          "chrome: ...and under 294px with it folded")
+    -- ...and the rhythm is the whole of the difference from the flush page. Stated
+    -- as a subtraction so a band growing back cannot hide behind the new gaps.
+    check(open - GAPS * bandGap <= 386,
+          "chrome: ...which is the 386px page plus the rhythm, and nothing else")
+    check(folded - GAPS * bandGap <= 254,
+          "chrome: ...folded, the 254px page plus the same rhythm")
     check(canvas <= 132,
           "chrome: the canvas at 1.5x is back to its 132px floor")
 

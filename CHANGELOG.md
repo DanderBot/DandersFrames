@@ -31,6 +31,7 @@
 - (Aura Designer) The frame preview can be folded away, scales up to fill the space it needs, and its zoom moved to a button in its corner.
 - (Text Designer) Redesigned to match, and it now uses the same frame preview as the Aura Designer.
 - (Aura Filters) Redesigned to match the other two, and it no longer forces the settings window wider.
+- (Aura Designer, Text Designer, Aura Filters) The redesigned pages now have breathing room between their sections instead of everything sitting flush against everything else.
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
