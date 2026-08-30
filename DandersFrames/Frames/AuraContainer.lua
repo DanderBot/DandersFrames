@@ -319,17 +319,35 @@ local function setContainerProviderDeaf(c, deaf)
     -- c.RegisterEvent`: that idiom falls through to RegisterEvent when
     -- UnregisterEvent is nil, i.e. it would REGISTER the event while reporting
     -- that it had deafened the container. Exactly backwards.
+    -- ☠☠ LOG LEVELS ARE LOAD-BEARING HERE. This probe has exactly one EXPECTED outcome on
+    -- every current build — a hard refusal — and it used to shout it at WARN once per UI
+    -- load. A warning that fires in every single session is not a signal, it is a tax on
+    -- every future log read: it cost a real investigation on 2026-08-30 when it was the
+    -- only WARN in a clean log and read as a new fault, and it is exactly the noise that
+    -- teaches people to skim past the lines that matter.
+    -- So the levels now follow what a reader should DO about each outcome:
+    --   expected refusal  -> INFO. Documented, the rebirth fallback covers it, act on nothing.
+    --   SILENT refusal    -> WARN. We believe we are deaf and we are NOT. Dangerous.
+    --   it actually WORKED -> WARN. The engine's rule changed under us; the Edit Mode
+    --                         fallback and a pile of comments are now describing a build
+    --                         that no longer exists, and someone must re-check them.
     local why
     if not c.UnregisterEvent then
         AuraContainer._providerDeafOK, AuraContainer._providerDeafWhy =
             false, "UnregisterEvent missing on the container"
+        DF:Debug(DBG, "provider deafening: UnregisterEvent missing (expected on this build)")
         return
     end
     local ok, err = pcall(c.UnregisterEvent, c, PROVIDER_EVENT)
     if not ok then
         AuraContainer._providerDeafOK = false
         AuraContainer._providerDeafWhy = "UnregisterEvent errored: " .. tostring(err)
-        DF:DebugWarn(DBG, "provider deafening refused: %s", tostring(err))
+        -- EXPECTED since 68914: the container carries ForbiddenAspect.EventRegistrations
+        -- from birth (Blizzard's own OnLoad_Intrinsic registers the event), so there is no
+        -- window in which this can succeed. INFO, not WARN — the rebirth fallback is the
+        -- real mechanism and nothing here needs acting on.
+        DF:Debug(DBG, "provider deafening refused (EXPECTED, rebirth fallback owns"
+            .. " Edit Mode): %s", tostring(err))
         return
     end
 
@@ -344,7 +362,17 @@ local function setContainerProviderDeaf(c, deaf)
         AuraContainer._providerDeafOK, why = true, "confirmed deaf"
     end
     AuraContainer._providerDeafWhy = why
-    DF:Debug(DBG, "provider deafening: %s", why)
+    -- Both surviving outcomes are worth a WARN, for opposite reasons: a silent refusal
+    -- means we believe we are deaf and are not, and a SUCCESS means the engine stopped
+    -- refusing — which invalidates the 68914 finding this whole section is built on.
+    if AuraContainer._providerDeafOK then
+        DF:DebugWarn(DBG, "provider deafening SUCCEEDED (%s) — the 68914 refusal no longer"
+            .. " holds on this build. Re-check the Edit Mode rebirth fallback and the"
+            .. " forbidden-aspect notes above; they describe a build that has changed.", why)
+    else
+        DF:DebugWarn(DBG, "provider deafening %s — containers are NOT deaf while we believe"
+            .. " they are; Edit Mode may render live auras.", why)
+    end
 end
 
 -- ============================================================
