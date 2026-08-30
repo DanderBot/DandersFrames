@@ -708,9 +708,12 @@ function DF:UpdateUnitFrame(frame, source)
         -- fast path — edge-detect here too so the corpse never shows the
         -- previous occupant's (or pre-death) icon set. Same flag as the fast
         -- path, so the alive edge there clears both.
-        if not frame.dfLastKnownDead then
-            frame.dfLastKnownDead = true
-            if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+        frame.dfLastKnownDead = true
+        -- ☠ THE LATCH EDGE IS KEYED ON THE UNIT, the frame flag only on the FRAME.
+        -- See the fast path's alive edge for the failure this prevents.
+        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+            local reg = DF.AuraContainer._deathLatchedUnits
+            if not (reg and reg[unit]) then
                 DF.AuraContainer.SetUnitDeathLatched(unit, true)
             end
         end
@@ -724,14 +727,16 @@ function DF:UpdateUnitFrame(frame, source)
 
     -- Unit is alive and connected - reset dead fade if it was applied
     DF:ResetDeadFade(frame)
-    if frame.dfLastKnownDead then
-        -- Alive edge (full-update twin of the fast path's): clear the death
-        -- latch so the rows come back re-parsed.
-        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+    -- Alive edge (full-update twin of the fast path's): clear the death latch so the
+    -- rows come back re-parsed. ☠ Gated on the REGISTRY, not on frame.dfLastKnownDead —
+    -- see the fast path's alive edge for why the frame flag cannot decide this.
+    if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+        local reg = DF.AuraContainer._deathLatchedUnits
+        if reg and reg[unit] then
             DF.AuraContainer.SetUnitDeathLatched(unit, nil)
         end
-        frame.dfLastKnownDead = nil
     end
+    frame.dfLastKnownDead = nil
     frame.dfLastKnownConnected = true
     -- ☠ RE-ASK THE MISSING-BUFF GATE ON THE ALIVE PATH — see the fast path's alive
     -- edge for the wipe mechanism (rez with no buffs = no aura event = nothing else
@@ -993,14 +998,21 @@ function DF:UpdateHealthFast(frame)
         -- UNIT_AURA on death so the cache stays stale; flushing once is enough.
         -- The edge-detect flag prevents re-running the full AD engine on every
         -- subsequent UNIT_HEALTH tick while the unit stays dead (e.g. wipe spam).
+        -- ⚠ TWO DIFFERENT JOBS, TWO DIFFERENT KEYS. The frame flag stays FRAME-local:
+        -- it throttles the full AD engine to the first dead tick (wipe spam would
+        -- otherwise re-run it every UNIT_HEALTH). The LATCH is unit state and is keyed
+        -- on the unit — see the alive edge below.
         if not frame.dfLastKnownDead then
             frame.dfLastKnownDead = true
             if DF.UpdateAuras_Enhanced then DF:UpdateAuras_Enhanced(frame) end
-            -- ☠ DEATH LATCH (#1043): death strips auras with NO aura event, so
-            -- the native containers keep painting the pre-death icon set on the
-            -- corpse. Latch this unit's aura handles hidden; the alive edge
-            -- below clears the latch and re-parses.
-            if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+        end
+        -- ☠ DEATH LATCH (#1043): death strips auras with NO aura event, so
+        -- the native containers keep painting the pre-death icon set on the
+        -- corpse. Latch this unit's aura handles hidden; the alive edge
+        -- below clears the latch and re-parses.
+        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+            local reg = DF.AuraContainer._deathLatchedUnits
+            if not (reg and reg[unit]) then
                 DF.AuraContainer.SetUnitDeathLatched(unit, true)
             end
         end
@@ -1025,10 +1037,24 @@ function DF:UpdateHealthFast(frame)
     -- Edge-gated HERE because this is the per-tick path; the full-update twin calls
     -- it unconditionally (event-driven, and the function no-ops when unchanged).
     local wasGone = frame.dfLastKnownDead or frame.dfLastKnownConnected == false
-    if frame.dfLastKnownDead then
-        -- Alive edge: clear the death latch — the rows come back re-parsed
-        -- (the latch clear bounces the containers; see _setDeathLatch).
-        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+    -- Alive edge: clear the death latch — the rows come back re-parsed (the latch
+    -- clear bounces the containers; see _setDeathLatch).
+    --
+    -- ☠☠ GATED ON THE REGISTRY, NOT ON frame.dfLastKnownDead. The latch is UNIT state
+    -- and the frame flag is FRAME state, and frames are REUSED — a roster shuffle or a
+    -- sort hands a frame to a different unit and the two desynchronise. The dying half
+    -- self-heals (any frame seeing a dead unit re-latches), but reviving did NOT: a unit
+    -- latched while on frame A, then moved to frame B, revives with frame B's flag
+    -- never having been set, so the old `if frame.dfLastKnownDead` never fired and the
+    -- unit stayed latched — its auras hidden after the rez until a reload.
+    -- ⚠ Found by analogy, not in the field: the VISIBILITY latch shipped with the exact
+    -- same two-source defect and was caught in one session by an orphaned "latch ON" in
+    -- the gate trail (party3, 2026-08-30). This is the same shape, one branch over.
+    -- ⚠ One table lookup per tick on the live path. Cheap, and the alternative is a
+    -- class of bug that only a reload clears.
+    if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+        local reg = DF.AuraContainer._deathLatchedUnits
+        if reg and reg[unit] then
             DF.AuraContainer.SetUnitDeathLatched(unit, nil)
         end
     end
