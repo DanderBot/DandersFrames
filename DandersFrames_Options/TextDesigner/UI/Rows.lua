@@ -348,13 +348,21 @@ local function BuildElementListTab(ctx, shell, wantGroups)
     -- ⚠ STILL THE SPLIT PANEL'S OWN FURNITURE, mounted as one full-width object.
     -- The add flow is a later phase of the rework; when it lands it lands for both
     -- layouts at once, because there is one copy of it.
+    --
+    -- ☠ EXCEPT THE CHIPS. The Texts tab's seven category chips are a glyph on its
+    -- caption here, opening a pooled panel -- the arrangement the Aura Designer's
+    -- eight already have, and the all-rows rule the chips predate. It also retires
+    -- the one flowing element in this band, so the height it reports can no longer
+    -- be wrong.
     GUI:AddDesignerLegacyTab(shell, function(host)
         host:SetWidth(tools.BandWidth())
         local h
         if wantGroups then
             h = BuildGroupsHeadArea(GUI, host, state, tdDB, page, 0)
         else
-            h = BuildTextsHeadArea(GUI, host, state, tdDB, page, 0)
+            h = BuildTextsHeadArea(GUI, host, state, tdDB, page, 0,
+                                   { skipChips = true, filterGlyph = true,
+                                     filterGlyphEnabled = ctx.tdEnabled })
         end
         host:SetHeight(max(h or 1, 1))
     end)

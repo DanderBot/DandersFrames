@@ -2140,6 +2140,10 @@ L["The same frame changes, driven by a whole filter"] = true
 L["The spell's own artwork"] = true
 L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."] = true
 L["Which kinds of indicator are listed below."] = true
+-- The Text Designer's filter glyph says the same thing about its own list. Kept
+-- BESIDE its twin rather than filed under the Text Designer, so a translator sees
+-- the pair together and cannot render one of them differently by accident.
+L["Which kinds of text are listed below."] = true
 L["Which incoming heals the bar shows: all sources, only yours, or only from others."] = true
 L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."] = true
 L["While in a raid group you can only edit the active layout. Leave the raid group to edit other layouts."] = true

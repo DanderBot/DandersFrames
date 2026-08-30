@@ -2132,6 +2132,170 @@ end
 
 
 -- ============================================================
+-- THE CATEGORY FILTER -- ONE DECLARATION, TWO HOSTS
+-- ------------------------------------------------------------
+-- A wrapping chip row inside the split panel's column, and the pane behind the
+-- popout layout's filter glyph. Exactly the shape the Aura Designer's eight
+-- chips already have (AuraDesigner/UI/Cards.lua's S.BuildFilterChips), for the
+-- same reasons: the chips predate the all-rows rule they break, and in a panel
+-- they also stop being a flow with nothing to flow against -- a pane's width is
+-- the popout's own content width, known before a single chip is placed.
+--
+-- ⚠ A FUNCTION, NOT A FILE-SCOPE TABLE. Every label is an L[...] lookup, and a
+-- table built at load freezes whatever locale was live then -- which is why
+-- CONTENT_CATEGORY_LABELS itself is rebuilt through DF:RegisterLocaleRefresh.
+-- Read it at CALL time or the chips ship in English.
+-- ============================================================
+local CHIP_H, CHIP_GAP, CHIP_ROW_GAP = 24, 4, 4
+
+local function TextFilterChips()
+    local out = { { key = "_all", label = L["All"] } }
+    for _, cat in ipairs(CONTENT_CATEGORIES) do
+        if cat ~= "group" then  -- groups have their own tab
+            out[#out + 1] = { key = cat, label = CONTENT_CATEGORY_LABELS[cat] }
+        end
+    end
+    return out
+end
+
+-- What the filter glyph writes beside itself when a filter is on. Read off the
+-- SAME list the chips are built from, so a category added there cannot summarise
+-- as its own raw key here.
+local function ActiveTextFilterLabel(state)
+    local active = (state and state.activeFilter) or "_all"
+    for _, chip in ipairs(TextFilterChips()) do
+        if chip.key == active then return chip.label end
+    end
+    return L["All"]
+end
+
+-- Flow the chips into `host` and size it to what they took. `width` is the
+-- column they wrap against, passed IN rather than measured off the host: at build
+-- time the host's own width is a number the layout pass has not reached yet.
+--
+-- Returns the re-flow verb (for a host whose width can still move -- the split
+-- panel's column does, a pane's does not) and the RE-SYNC verb.
+local function BuildTextFilterChips(GUI, host, state, width, page, tdDB)
+    local chips = {}
+    for _, chip in ipairs(TextFilterChips()) do
+        local c = CreateFrame("Button", nil, host, "BackdropTemplate")
+        local fs = c:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(fs, 10, "OUTLINE")
+        fs:SetPoint("CENTER")
+        fs:SetText(chip.label)
+        -- Shared styler: rest + accent-wash hover + SetActive selection look.
+        -- Keep the manual (custom-sized) label; only pass the height.
+        DF.GUI:StyleButton(c, { height = CHIP_H })
+        c:SetWidth(fs:GetStringWidth() + 18)
+        c.key = chip.key
+        c.fs = fs
+        c:SetScript("OnClick", function(self)
+            state.activeFilter = self.key
+            -- Same two-layout branch as FullRebuildCards, and NOT that verb: a
+            -- filter chip changes what is listed, not what any frame renders, so
+            -- it must not drag every live frame through a refresh.
+            if state.rowsMode then
+                if P.RowsRedraw then P.RowsRedraw(page) end
+            elseif DF.TextDesigner.RenderCardList then
+                DF.TextDesigner.RenderCardList(GUI, page, tdDB, state)
+            end
+        end)
+        chips[#chips + 1] = c
+    end
+
+    local function LayoutChips(w)
+        local maxW = tonumber(w) or host:GetWidth() or 0
+        if maxW <= 0 then maxW = width or 260 end
+        local cx, cy = 0, 0
+        for _, c in ipairs(chips) do
+            local bw = c:GetWidth()
+            if cx > 0 and (cx + bw) > maxW then
+                cx = 0
+                cy = cy - (CHIP_H + CHIP_ROW_GAP)
+            end
+            c:ClearAllPoints()
+            c:SetPoint("TOPLEFT", host, "TOPLEFT", cx, cy)
+            cx = cx + bw + CHIP_GAP
+        end
+        host:SetHeight(math.max(-cy + CHIP_H, CHIP_H))
+    end
+    LayoutChips(width)
+
+    -- ☠ A SECOND RETURN: RE-SYNC, BECAUSE THE PANEL IS POOLED AND THIS RUNS ONCE.
+    -- GUI:CreatePopout pools by key, so reopening REUSES the panel and never
+    -- re-runs this builder -- the chips would keep whatever was active the FIRST
+    -- time it was opened, which reads as "All is always selected" however the list
+    -- is actually filtered. That is exactly what shipped on the Aura Designer's
+    -- own filter panel (rework spec section 23). The opener calls this on every
+    -- open.
+    local function SyncActive()
+        local active = (state and state.activeFilter) or "_all"
+        for k = 1, #chips do
+            local c = chips[k]
+            if c and c.SetActive then
+                local on = c.key == active
+                c:SetActive(on)
+                c.fs:SetTextColor(on and 1 or 0.75, on and 1 or 0.75, on and 1 or 0.75)
+            end
+        end
+    end
+    SyncActive()
+    return LayoutChips, SyncActive
+end
+P.BuildTextFilterChips = BuildTextFilterChips
+
+-- ── THE FILTER GLYPH'S PANEL ──
+-- ☠ A FREE-STANDING POPOUT, NOT A ROW'S PANE, and the same bargain the Aura
+-- Designer's filter struck: a whole popout row is 50px of page (a 44px plate plus
+-- its 6px gap) for ONE filter, more than the chip row it would replace. Behind a
+-- glyph on a caption the page already pays for, it costs nothing.
+--
+-- The kit owns the stacking, so nothing here has to know about _ApplyStackLevel.
+local TD_FILTER_POPOUT_KEY = "df.filter.textdesigner"
+-- ☠ DOUBLE BACKSLASHES. Lua 5.1 passes an unrecognised escape through as the bare
+-- character, so the single-backslash form is a path to nothing and the client
+-- draws an empty square. It does not error, which is why it shipped once; run.py
+-- bans it now.
+local TD_FILTER_ICON = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list"
+
+local function OpenTextFilterPopout(btn, GUI, state, page, tdDB)
+    -- Second click on the glyph shuts it, like any toggle.
+    local open = state.filterPopout
+    if open and not open.closed and open:IsShown() then
+        open:Close("api")
+        return
+    end
+    local width = GUI.PopoutContentWidth or 260
+    local pop = GUI:CreatePopout({
+        key   = TD_FILTER_POPOUT_KEY,
+        title = L["Showing"],
+        icon  = TD_FILTER_ICON,
+        width = width,
+        build = function(po, content)
+            local pane = CreateFrame("Frame", nil, content)
+            pane:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+            pane:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+            -- ⚠ THE FLOW IS TOLD ITS WIDTH, not asked for it. Two horizontal
+            -- anchors own the pane's width, and at build time that number has not
+            -- resolved -- reading it off the pane is the mistake that made the
+            -- chips wrap at a hardcoded 260 on the page.
+            local _, SyncActive = BuildTextFilterChips(GUI, pane, state, width, page, tdDB)
+            po.dfSyncChips = SyncActive
+            -- The shell derives the panel's height from what build mounted
+            -- (Popout:_Resize), so the content strip states its own.
+            content:SetHeight(math.max(pane:GetHeight() or CHIP_H, CHIP_H))
+        end,
+    })
+    pop:Follow(btn, { outsideOf = DF.GUIFrame })
+    -- After Follow, and on EVERY open: a pooled panel builds once, so this is the
+    -- only thing that makes the ticked chip match the live filter.
+    if pop.dfSyncChips then pop.dfSyncChips() end
+    state.filterPopout = pop
+    return pop
+end
+P.OpenTextFilterPopout = OpenTextFilterPopout
+
+-- ============================================================
 -- THE TEXTS TAB'S HEAD AREA
 -- ------------------------------------------------------------
 -- The "+ Add Text Element" CTA, the ELEMENT list caption and the category filter
@@ -2144,9 +2308,17 @@ end
 -- edge: 22 inside the split panel, to clear its scrollbar, and 0 in a band, which
 -- has no scrollbar to clear. Returns the height consumed, so a band can size
 -- itself to what was actually built.
+--
+-- ⚠ opts.skipChips / opts.filterGlyph: THE ROW LAYOUT'S FILTER IS NOT A CHIP FLOW.
+-- The seven chips live in a popout there, reached by a glyph on the caption --
+-- the Aura Designer's own arrangement, and the all-rows rule the chips predate.
+-- Opt-in, so the split panel keeps its chips; it is the one surface with the
+-- standing room for them.
 -- ============================================================
-local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset)
+local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)
     local RIGHT_INSET = rightInset or 22
+    local skipChips   = opts and opts.skipChips or false
+    local filterGlyph = opts and opts.filterGlyph or false
     -- ☠ THE COLUMN THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED --
     -- see the Aura Designer's matching note in AuraDesigner/UI/Cards.lua. The
     -- host was given an explicit width by the caller a line before this ran; a
@@ -2171,115 +2343,113 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset)
     -- ── Section caption ──
     -- Mirrors AuraDesigner/Options.lua:5025-5030 (the ACTIVE INDICATORS heading
     -- between the Add CTA and the chip row).
+    --
+    -- ⚠ NAMED, because THREE things read it: the caption's own anchor, the filter
+    -- glyph that rides the same line, and Measure below. It was two literals and a
+    -- third would have been the drift.
+    local CAPTION_GAP = 10
     local textsCaption = parent:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(textsCaption, 9, "")
     textsCaption:SetText(L["Text Elements"]:upper())
     textsCaption:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    textsCaption:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -10)
+    textsCaption:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -CAPTION_GAP)
     state.textsCaption = textsCaption
-
-    -- ── Filter chip row ──
-    local chipRow = CreateFrame("Frame", nil, parent)
-    chipRow:SetPoint("TOPLEFT", textsCaption, "BOTTOMLEFT", 0, -4)
-    -- Right edge matches the add button + element list (scroll box, inset -22) so
-    -- the button / filters / rows form one aligned column (mirrors Aura Designer).
-    chipRow:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
-    chipRow:SetHeight(24)
-    state.chipRow = chipRow
 
     state.activeFilter = state.activeFilter or "_all"
 
-    local CHIP_H, CHIP_GAP, CHIP_ROW_GAP = 24, 4, 4
-    local chips = {}
-
-    local function MakeChip(label, key)
-        local c = CreateFrame("Button", nil, chipRow, "BackdropTemplate")
-        local fs = c:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(fs, 10, "OUTLINE")
-        fs:SetPoint("CENTER")
-        fs:SetText(label)
-        -- Shared styler: rest + accent-wash hover + SetActive selection look.
-        -- Keep the manual (custom-sized) label; only pass the height.
-        DF.GUI:StyleButton(c, { height = CHIP_H })
-        c:SetWidth(fs:GetStringWidth() + 18)
-        c.key = key
-        c.fs = fs
-        return c
-    end
-
-    local function ApplyChipState()
-        for _, c in ipairs(chips) do
-            local active = c.key == state.activeFilter
-            c:SetActive(active)  -- shared toggle look (accent border + fill)
-            if active then
-                c.fs:SetTextColor(1, 1, 1)
-            else
-                c.fs:SetTextColor(0.75, 0.75, 0.75)
-            end
-        end
-    end
-    state.ApplyChipState = ApplyChipState
-
-    -- ☠ A FLOW, AND THEREFORE A HEIGHT NOBODY KNOWS YET -- see the Aura
-    -- Designer's LayoutChips. Flow against the column the host was explicitly
-    -- sized to, so the build-time shape IS the final shape; the height half is
-    -- Remeasure at the end of this function.
-    local function LayoutChips()
-        local maxW = chipRow:GetWidth() or 0
-        if maxW <= 0 then maxW = COL_W or 260 end
-        local cx, cy = 0, 0
-        for _, c in ipairs(chips) do
-            local bw = c:GetWidth()
-            if cx > 0 and (cx + bw) > maxW then
-                cx = 0
-                cy = cy - (CHIP_H + CHIP_ROW_GAP)
-            end
-            c:ClearAllPoints()
-            c:SetPoint("TOPLEFT", chipRow, "TOPLEFT", cx, cy)
-            cx = cx + bw + CHIP_GAP
-        end
-        chipRow:SetHeight(math.max(-cy + CHIP_H, CHIP_H))
-    end
-
-    local function AddChip(label, key)
-        local c = MakeChip(label, key)
-        chips[#chips+1] = c
-        c:SetScript("OnClick", function(self)
-            state.activeFilter = self.key
-            ApplyChipState()
-            -- Same two-layout branch as FullRebuildCards, and NOT that verb: a
-            -- filter chip changes what is listed, not what any frame renders, so
-            -- it must not drag every live frame through a refresh.
-            if state.rowsMode then
-                if P.RowsRedraw then P.RowsRedraw(page) end
-            elseif DF.TextDesigner.RenderCardList then
-                DF.TextDesigner.RenderCardList(GUI, page, tdDB, state)
-            end
+    -- ── THE FILTER GLYPH, ON THAT CAPTION ──
+    if filterGlyph then
+        -- ☠ A FILTER THAT LOOKS THE SAME WHETHER IT IS ON OR OFF IS HOW PEOPLE
+        -- LOSE THEIR WORK. Showing only Health hides six other categories, and a
+        -- glyph identical to the one that means "showing everything" reads as
+        -- "they have been deleted". So the ACTIVE state is said TWICE: the glyph
+        -- goes accent, and the filter's own name is written beside it. Neither
+        -- alone survives a glance.
+        local tc = GUI:GetThemeColor()
+        local active = (state.activeFilter or "_all") ~= "_all"
+        local glyph = GUI:CreateGlyphButton(parent, {
+            size = 18, iconSize = 14,
+            texture = TD_FILTER_ICON,
+            color   = active and tc or C_TEXT_DIM,
+            tooltip = {
+                title = L["Showing"],
+                lines = {
+                    L["Which kinds of text are listed below."],
+                    active and string.format(L["Showing: %s"], ActiveTextFilterLabel(state)) or nil,
+                },
+            },
+            onClick = function(btn) OpenTextFilterPopout(btn, GUI, state, page, tdDB) end,
+        })
+        -- Right-aligned on the CTA's own right edge -- the one object above this
+        -- that already spans the column -- and lifted by half the difference
+        -- between an 18px button and the ~11px caption line so the two centres
+        -- land together.
+        glyph:SetPoint("TOPRIGHT", addBtn, "BOTTOMRIGHT", 0, -CAPTION_GAP + 4)
+        -- ☠ THE PANEL IS DOCKED TO THIS BUTTON, so it goes when this button does.
+        -- Picking a chip rewrites the list, which rebuilds the page and retires the
+        -- glyph underneath it -- and a panel left up would be following a frame
+        -- that is no longer on screen.
+        glyph:HookScript("OnHide", function()
+            local pop = state.filterPopout
+            if pop and not pop.closed then pop:Close("source") end
         end)
-    end
 
-    AddChip(L["All"], "_all")
-    for _, cat in ipairs(CONTENT_CATEGORIES) do
-        if cat ~= "group" then  -- groups have their own tab
-            AddChip(CONTENT_CATEGORY_LABELS[cat], cat)
+        local name
+        if active then
+            name = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            name:SetPoint("RIGHT", glyph, "LEFT", -4, 0)
+            name:SetText(ActiveTextFilterLabel(state))
+            name:SetTextColor(tc.r, tc.g, tc.b)
+        end
+
+        -- ⚠ GREY WITH THE REST OF THE PAGE. Every row on this page dims when the
+        -- Text Designer is off; a glyph that stayed lit would be the one live
+        -- control on a page of dead ones. SetGlyphEnabled does all three halves of
+        -- it -- clicks off, hover off, the 0.4 dim -- and the name beside it
+        -- follows.
+        if opts and opts.filterGlyphEnabled == false then
+            glyph:SetGlyphEnabled(false)
+            if name then name:SetAlpha(0.4) end
         end
     end
-    LayoutChips()
-    -- What a band host has to reserve, as a verb rather than a number:
-    -- the CTA's own top gap, the CTA, the gap to the caption, the caption, and
-    -- the chip row -- which WRAPS, so it is measured rather than assumed.
+
+    -- ── Filter chip row (wrapping layout, split panel only) ──
+    local chipRow
+    local LayoutChips
+    if not skipChips then
+        chipRow = CreateFrame("Frame", nil, parent)
+        chipRow:SetPoint("TOPLEFT", textsCaption, "BOTTOMLEFT", 0, -4)
+        -- Right edge matches the add button + element list (scroll box, inset -22)
+        -- so the button / filters / rows form one aligned column (mirrors Aura
+        -- Designer).
+        chipRow:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
+        chipRow:SetHeight(CHIP_H)
+        state.chipRow = chipRow
+        -- ONE definition of the chips, two hosts -- this row and the glyph's pane.
+        local Relayout, SyncActive = BuildTextFilterChips(GUI, chipRow, state, COL_W, page, tdDB)
+        LayoutChips = Relayout
+        state.ApplyChipState = SyncActive
+    end
+
+    -- What a band host has to reserve, as a verb rather than a number: the CTA's
+    -- own top gap, the CTA, the gap to the caption, the caption, and -- where
+    -- there is one -- the chip row, which WRAPS and so is measured rather than
+    -- assumed.
     local function Measure()
-        return 10 + 32 + 10 + 12 + 4 + (chipRow:GetHeight() or 24) + 6
+        local base = 10 + 32 + CAPTION_GAP + 12
+        if not chipRow then return base + 6 end
+        return base + 4 + (chipRow:GetHeight() or CHIP_H) + 6
     end
     -- ...and re-reported when the flow changes. A band host carries dfSetHeight
     -- (GUI/DesignerShell.lua): without it the height below is spent once, on the
     -- first pass, and a re-wrap moves nothing. The split panel has no such verb
     -- and never needed one -- it scrolls a fixed-width column.
-    chipRow:SetScript("OnSizeChanged", function()
-        LayoutChips()
-        if parent.dfSetHeight then parent.dfSetHeight(Measure()) end
-    end)
-    ApplyChipState()
+    if chipRow then
+        chipRow:SetScript("OnSizeChanged", function()
+            if LayoutChips then LayoutChips() end
+            if parent.dfSetHeight then parent.dfSetHeight(Measure()) end
+        end)
+    end
     -- ── Wire the Add button to the picker ──
     -- Reuse BuildPicker (the same one used by group-item adds). Caches the
     -- picker on state.addPicker so repeated clicks reuse the same frame.

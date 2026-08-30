@@ -33,6 +33,7 @@
 - (Aura Filters) Redesigned to match the other two, and it no longer forces the settings window wider.
 - (Aura Designer, Text Designer, Aura Filters) The redesigned pages now have breathing room between their sections instead of everything sitting flush against everything else.
 - (Aura Designer) Layout Groups now has an "Add Layout Group" button that opens its choices in a panel, the same way adding an indicator works, instead of the choices taking up room above the list at all times.
+- (Text Designer) The category filter is now a button on the Text Elements heading that opens the choices in a panel, matching the Aura Designer. It lights up and names the filter whenever you are not showing everything.
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
