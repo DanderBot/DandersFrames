@@ -4789,7 +4789,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- keys back. The helper returns a zero-height placeholder for an empty list,
         -- so no dead Copy/Sync/Reset row is drawn.
         Add(CreateCopyButton(self.child, {}, L["Filter Designer"], "auras_filterdesigner"), 0, 2)
-        if DF.BuildFilterDesignerPage then DF.BuildFilterDesignerPage(GUI, self, db) end
+        -- ☠ Add IS THE TELL, the same one DF.BuildAuraDesignerPage takes below: a
+        -- caller holding the harness's own Add can be served bands, one that does
+        -- not can only have the island. Handing it over is what takes this page off
+        -- the 850px floor.
+        if DF.BuildFilterDesignerPage then
+            DF.BuildFilterDesignerPage(GUI, self, db, Add, AddSpace)
+        end
 
         -- See Also, after the page's own content. This page positions its panels
         -- absolutely and reports its height through an Add()ed spacer, so anything

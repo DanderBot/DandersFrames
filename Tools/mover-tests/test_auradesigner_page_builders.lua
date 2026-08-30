@@ -1657,9 +1657,15 @@ do
           "wide: the Aura Designer no longer forces the window to 850")
     check(WIDE:find("text_designer", 1, true) == nil,
           "wide: ...and neither does the Text Designer")
+    -- ☠ INVERTED DELIBERATELY, NOT DELETED. This assertion pinned the Filter
+    -- Designer's floor while it was still a two-column island; it has since been
+    -- converted, so the same line now says the opposite and the aura family owns no
+    -- entry in this table at all. Deleting it would have left the page's floor
+    -- unpinned in either direction. Its own census is in
+    -- test_filterdesigner_page_builders.lua.
+    check(WIDE:find("auras_filterdesigner", 1, true) == nil,
+          "wide: ...and neither does the Filter Designer, the last aura page here")
     -- ⚠ The ones that are still islands must NOT have been swept out with them.
-    check(WIDE:find("auras_filterdesigner", 1, true) ~= nil,
-          "wide: the Filter Designer keeps its floor -- it is still a two-column list")
     check(WIDE:find("general_pinnedframes", 1, true) ~= nil,
           "wide: ...as does Pinned Frames")
     check(WIDE:find("general_nicknames", 1, true) ~= nil,
