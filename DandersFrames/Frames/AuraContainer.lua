@@ -1245,9 +1245,23 @@ end
 --      reading. That is not airtight and should not be repeated: 406 is still reachable
 --      when sourceUnit is nil, so the branch would be reachable either way. The
 --      self-contradiction in (2), not deadness, is what does the work.
--- ✅ DECISIVE TEST IF IT EVER MATTERS: a container filtered "HELPFUL" with NO PLAYER
---      token plus candidateFilters { isFromPlayerOrPlayerPet = true }, on an ally
---      carrying another player's buff. It renders -> ANY player. It stays empty -> you.
+-- ✅✅ SETTLED IN GAME, 2026-08-30 (Krathe, /df debug auraexp caster, 5-man party).
+--      A shaman's Earth Shield, on the shaman AND on the mage, rendered in the
+--      isFromPlayerOrPlayerPet = true row while the HELPFUL|PLAYER row showed only the
+--      viewer's own Fortitude. A buff nobody in the viewer's control cast passed the
+--      flag ⇒ **ANY player**, confirmed by measurement rather than by argument. The
+--      true/false rows also summed exactly to the unfiltered row on all five units, so
+--      the instrument itself was reading correctly. Stop re-deriving this.
+--
+-- ★★ AND THE SAME RUN EXPLAINS THE LOCK. In that healthy state Earth Shield read
+--      TRUE. In the stale out-of-range/cross-instance state that started this, the
+--      SAME aura from the SAME caster read FALSE (Krathe's per-aura probe: "Earth
+--      Shield false / Virulent Mucus false / Skyfury false / Lightning Shield false").
+--      Same aura, same caster, opposite value. So the field is part of what goes
+--      UNATTRIBUTED when a unit's aura data goes stale — which is exactly why a lock
+--      built on it catches the failure while the PLAYER token, evaluated in the C
+--      matcher, fails open through it. That contrast is the rationale; it is measured
+--      at both ends now, not inferred from one.
 --
 -- ★ SO WHY DOES IT FIX THE BUG? Because of WHERE the token fails. In the field case every
 -- one of those four auras was player-cast (a shaman's), yet the field still read FALSE —
