@@ -741,8 +741,21 @@ local function BuildDirectDebuffFilters(db, claimed)
             if claimed.dispellable then
                 -- Mirrors the category-mode split: the token when the build has
                 -- it, else the dispel-type map (same semantics, no token).
-                if AuraFilters.Dispellable then
-                    filterStr = filterStr .. "|!" .. AuraFilters.Dispellable
+                --
+                -- ☠ MODE-MATCHED TOKEN (2026-08-30). This used to negate
+                -- DISPELLABLE unconditionally, which is only correct when the
+                -- claiming group actually shows the whole superset. A PLAYER-mode
+                -- group ("only dispellable by you") shows a strict SUBSET of it, so
+                -- negating the superset deleted every dispellable-by-SOMEONE-ELSE
+                -- debuff from the row while no group displayed it — the aura showed
+                -- NOWHERE. Show All is the default mode, so that hole was open on
+                -- ordinary setups. claimed.dispellableAll is set only when a
+                -- claiming group runs ALL/ANY; otherwise subtract the by-me token,
+                -- which is exactly the set the group renders.
+                local claimTok = claimed.dispellableAll and AuraFilters.Dispellable
+                    or (AuraFilters.Raid or "RAID")
+                if claimTok then
+                    filterStr = filterStr .. "|!" .. claimTok
                 else
                     need().excludeDispelTypes = DISPEL_TYPES
                 end
@@ -908,6 +921,93 @@ local function BuildDirectDebuffFilters(db, claimed)
         return cf
     end
 
+    -- ★★ CLAIM SUBTRACTION — the OTHER half of the row/Aura-Designer dedup, and the
+    -- half that was missing (2026-08-30).
+    --
+    -- Dropping a claimed category's RECORD is only half the job. The row's SURVIVING
+    -- records still match auras the AD group displays whenever the ROW does not
+    -- itself enable that category, because every exclusion neg() emits is keyed on
+    -- the row's OWN flag (dispelOn / ccToken / raidOn) — a category the row never
+    -- ticked contributes no negation at all, so there is nothing to "keep".
+    -- ☠ Field shape: row = boss + role + raid, group = dispels + CC + priority, with
+    -- Hide Duplicate Debuffs ON. A boss debuff that is also dispellable rendered in
+    -- the row's bossrole record AND in the group's dispel record; a raid-flagged CC
+    -- rendered in the row's raid record AND the group's cc record (Jânine, live
+    -- 5.3.1). Nothing about the toggle was broken — it only ever covered the case
+    -- where BOTH sides ticked the same category.
+    -- ⚠ ALL mode has always done this (its claim block builds these very
+    -- subtractions into the blanket cf); category mode is being brought into line,
+    -- so the two modes finally dedup the same way.
+    -- ⚠ ACCEPTED, unchanged from the record-drop that shipped before it: a claiming
+    -- group with Hide Long Debuffs on displays only the SHORT half of its category,
+    -- but claims all of it — so a long one is now subtracted from the row too. The
+    -- record-drop already had this hole; widening the subtraction widens the hole
+    -- rather than opening a new one. Fix it at the CLAIM if it bites.
+    local claimNegStr, claimNegCF
+    if claimed then
+        local s = ""
+        local function needCF() claimNegCF = claimNegCF or {}; return claimNegCF end
+        if claimed.dispellable then
+            -- Mode-matched, exactly as the ALL-mode block above: negate the by-me
+            -- token unless a claiming group runs ALL/ANY and therefore renders the
+            -- whole DISPELLABLE superset.
+            local t = claimed.dispellableAll and AuraFilters.Dispellable or dispelToken
+            if t then s = s .. "|!" .. t end
+        end
+        if claimed.crowdControl and AuraFilters.CrowdControl then
+            s = s .. "|!" .. AuraFilters.CrowdControl
+        end
+        if claimed.raid then s = s .. "|!RAID" end
+        -- Boolean categories invert through candidateFilters (the group ANDs them).
+        -- Boss/role narrowing on the row's OWN important record is already handled by
+        -- effBoss/effRole below; these cover every OTHER record, where a claimed
+        -- boss/role/priority aura would otherwise ride in on a token record.
+        if claimed.boss and claimed.role then needCF().isBossOrRoleAura = false
+        elseif claimed.boss then needCF().isBossAura = false
+        elseif claimed.role then needCF().isRoleAura = false end
+        if claimed.priority then needCF().isPriorityAura = false end
+        if s ~= "" then claimNegStr = s end
+    end
+
+    local function filterHasComponent(filter, component)
+        for own in filter:gmatch("[^|]+") do
+            if own == component then return true end
+        end
+        return false
+    end
+
+    -- Apply the claim subtraction to ONE record, skipping any token the record
+    -- already asserts POSITIVELY.
+    -- ☠☠ THE SKIP IS NOT AN OPTIMISATION — it is the whole safety of this pass.
+    -- By-me dispel rides the "RAID" token (see the dispelToken note above), so the
+    -- dispel record's own string is "HARMFUL|RAID". A raid claim would append
+    -- "|!RAID" to it and the record would then match NOTHING — the row would lose
+    -- every dispellable debuff rather than one duplicate.
+    -- ⚠ RESIDUAL, deliberately left: that same token identity means a PLAYER-mode
+    -- dispel claim cannot be subtracted from the row's own raid record either (it
+    -- includes RAID positively), so a by-me-dispellable raid debuff still renders
+    -- twice in that one pairing. Emptying the record is strictly worse than the
+    -- duplicate, and there is no third token that separates them.
+    local function applyClaimSubtraction(rec)
+        if claimNegStr then
+            local add = ""
+            for component in claimNegStr:gmatch("[^|]+") do
+                if not filterHasComponent(rec.filter, component:sub(2)) then
+                    add = add .. "|" .. component
+                end
+            end
+            if add ~= "" then rec.filter = rec.filter .. add end
+        end
+        if claimNegCF then
+            local cf = rec.candidateFilters
+            if not cf then cf = {}; rec.candidateFilters = cf end
+            -- Never overwrite a positive assertion the record made about itself.
+            for k, v in pairs(claimNegCF) do
+                if cf[k] == nil then cf[k] = v end
+            end
+        end
+    end
+
     -- CATEGORY mode: the boss/role and priority records below already exist and are
     -- already declared FIRST, so "important debuffs lead the row" needs no sort work —
     -- importantStyle (declared at the top of this function) only styles them.
@@ -965,7 +1065,28 @@ local function BuildDirectDebuffFilters(db, claimed)
         filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true),
                                   key = "raid", candidateFilters = cfFor(false, notImportant()) }
     end
-    if dispelOn and not (claimed and claimed.dispellable) then
+    -- ★★ DROP ONLY WHEN THE CLAIM COVERS THE ROW (2026-08-30). A dispellable claim
+    -- used to drop this record whatever mode either side ran — the "simplest rule"
+    -- the claim builder still documents. It is wrong in exactly one direction:
+    --   row ALL + group PLAYER -> the group renders only what YOU can dispel, so
+    --   dropping the row's record deleted every dispellable-by-someone-ELSE debuff
+    --   from the display entirely. Not a duplicate — a disappearance.
+    -- Blizzard's own token table is the authority here (Blizzard_FrameXMLUtil/
+    -- AuraUtil.lua, AuraUtil.AuraFilters):
+    --   RAID        = "harmful auras the player can dispel"          <- by-me, a SUBSET
+    --   DISPELLABLE = "dispellable, REGARDLESS of whether the        <- the superset
+    --                  player's raid can dispel them"
+    -- so RAID ⊂ DISPELLABLE and the two are not interchangeable.
+    -- ⚠ NARROWING IS NOT DONE HERE. Keeping the record is the whole edit: the claim
+    -- subtraction pass at the end of this function appends the by-me negation to it
+    -- (claimNegStr is "|!RAID" for a PLAYER-mode claim, and this record's own string
+    -- is "HARMFUL|DISPELLABLE", so the self-collision skip lets it through). The
+    -- result is "dispellable, but not by me" — the exact complement of the group.
+    -- Every other pairing still drops, because the group's set then covers the row's:
+    --   row ALL + group ALL -> same set; row PLAYER + group either -> group ⊇ row.
+    local dispelClaimed = claimed and claimed.dispellable
+    local dispelCovered = dispelClaimed and (playerMode or claimed.dispellableAll)
+    if dispelOn and not dispelCovered then
         if playerMode then
             -- ☠ SAME TALENT OVER-REPORT AS THE OVERLAY, SAME SUBTRACTION. This record and
             -- the overlay's main slot ride the identical engine flag, so a priest without
@@ -1052,6 +1173,14 @@ local function BuildDirectDebuffFilters(db, claimed)
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "nonplayer",
                                   candidateFilters = cfFor(false, npCf) }
     end
+    -- Subtract everything the Aura Designer groups claim from every record that
+    -- survived the drop above. Runs LAST so each record's own tokens are already in
+    -- place for the self-collision skip, and before the empty-list check so a record
+    -- is never both dropped and subtracted.
+    if claimNegStr or claimNegCF then
+        for i = 1, #filters do applyClaimSubtraction(filters[i]) end
+    end
+
     if #filters == 0 then
         -- Claims emptied a NON-empty selection: EMPTY array = render nothing
         -- (DriveDebuffFactory intercepts — see the header comment).

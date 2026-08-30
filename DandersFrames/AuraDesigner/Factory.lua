@@ -783,6 +783,20 @@ function DF:GetClaimedDebuffCategories(frame, db)
                     claimed[k] = true
                 end
             end
+            -- ★ DISPEL MODE rides along with the claim (2026-08-30). The claim
+            -- itself stays mode-AGNOSTIC as documented above, but the consumer has
+            -- to know WHICH TOKEN to subtract: a PLAYER-mode group shows only what
+            -- you can dispel, a strict subset of DISPELLABLE, so negating the
+            -- superset would delete every dispellable-by-someone-else debuff from
+            -- the row and leave it displayed nowhere at all. Set when ANY claiming
+            -- group runs ALL/ANY — that group renders the whole superset, so the
+            -- superset becomes safe to negate.
+            -- ⚠ "ANY" is a retired stored value that imported profiles still carry
+            -- (see the dispelTypeToken note in BuildDirectDebuffFilters) — accept it.
+            if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
+                claimed = claimed or {}
+                claimed.dispellableAll = true
+            end
         end
     end
     return claimed   -- nil when no group claims anything -> row builds untouched
@@ -3616,6 +3630,11 @@ local function claimCtx(claimed)
         local k = CLAIMABLE_CATEGORIES[i]
         if claimed[k] then s = s .. k .. "," end
     end
+    -- ☠ NOT a category, but it CHANGES THE RECORDS (which dispel token the claim
+    -- subtraction negates), so it has to move the cache key — otherwise flipping a
+    -- group between "dispellable by you" and "all dispellable" would serve records
+    -- built for the other mode until the next version bump.
+    if claimed.dispellableAll then s = s .. "dispellableAll," end
     return s
 end
 local function resolveDebuffGroup(group, claimed)
@@ -6023,6 +6042,12 @@ function Factory:SyncFrame(frame)
                                 claimedSoFar = claimedSoFar or {}
                                 claimedSoFar[ck] = true
                             end
+                        end
+                        -- Mode travels with the claim here too — see the same fold in
+                        -- GetClaimedDebuffCategories for why the token must match.
+                        if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
+                            claimedSoFar = claimedSoFar or {}
+                            claimedSoFar.dispellableAll = true
                         end
                     end
                     if records then
