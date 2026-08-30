@@ -30,6 +30,17 @@ local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
 local UnitIsUnit = UnitIsUnit
 local UnitIsVisible = UnitIsVisible
+-- ★ LATCH REGISTRIES, cached as upvalues. Frames\AuraContainer.lua is line 96 of the
+-- .toc and this file is line 99, so both tables exist by now; each is created once with
+-- `X = X or {}` and never replaced, so holding the reference is safe.
+-- ⚠ THIS IS A PER-TICK PATH. Reading DF.AuraContainer._deathLatchedUnits inline cost
+-- three table lookups on every UNIT_HEALTH for every unit; an upvalue makes the live-path
+-- check one hash lookup — the same as the frame flag it replaced, so keying the latch
+-- edge on the UNIT (which is what makes it correct) costs nothing over the old code.
+-- The SetUnit*Latched lookups stay inline at the call sites: those run only on a real
+-- transition, where a lookup is free.
+local deathLatchedUnits = DF.AuraContainer and DF.AuraContainer._deathLatchedUnits
+local invisibleUnits    = DF.AuraContainer and DF.AuraContainer._invisibleUnits
 -- ⚠ May be nil on a client without it; every call site guards with
 -- `issecretvalue and issecretvalue(x)`, so the alias being nil is fine.
 local issecretvalue = issecretvalue
@@ -571,8 +582,7 @@ function DF:UpdateUnitFrame(frame, source)
         -- that never had an ON — the same desync in both directions.
         -- Comparing against the registry makes the state single-sourced and
         -- self-healing: whichever frame asks next reaches the same answer.
-        local reg = DF.AuraContainer._invisibleUnits
-        local wasLatched = (reg and reg[unit]) and true or false
+        local wasLatched = (invisibleUnits and invisibleUnits[unit]) and true or false
         if invisible ~= wasLatched then
             DF.AuraContainer.SetUnitVisibilityLatched(unit, invisible or nil)
         end
@@ -711,11 +721,9 @@ function DF:UpdateUnitFrame(frame, source)
         frame.dfLastKnownDead = true
         -- ☠ THE LATCH EDGE IS KEYED ON THE UNIT, the frame flag only on the FRAME.
         -- See the fast path's alive edge for the failure this prevents.
-        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
-            local reg = DF.AuraContainer._deathLatchedUnits
-            if not (reg and reg[unit]) then
-                DF.AuraContainer.SetUnitDeathLatched(unit, true)
-            end
+        if deathLatchedUnits and not deathLatchedUnits[unit] then
+            local set = DF.AuraContainer.SetUnitDeathLatched
+            if set then set(unit, true) end
         end
         -- See the note on the offline branch above: this return skips the TD
         -- render and the missing-buff gate, which is why "Dead" never appeared
@@ -730,11 +738,9 @@ function DF:UpdateUnitFrame(frame, source)
     -- Alive edge (full-update twin of the fast path's): clear the death latch so the
     -- rows come back re-parsed. ☠ Gated on the REGISTRY, not on frame.dfLastKnownDead —
     -- see the fast path's alive edge for why the frame flag cannot decide this.
-    if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
-        local reg = DF.AuraContainer._deathLatchedUnits
-        if reg and reg[unit] then
-            DF.AuraContainer.SetUnitDeathLatched(unit, nil)
-        end
+    if deathLatchedUnits and deathLatchedUnits[unit] then
+        local set = DF.AuraContainer.SetUnitDeathLatched
+        if set then set(unit, nil) end
     end
     frame.dfLastKnownDead = nil
     frame.dfLastKnownConnected = true
@@ -1010,11 +1016,9 @@ function DF:UpdateHealthFast(frame)
         -- the native containers keep painting the pre-death icon set on the
         -- corpse. Latch this unit's aura handles hidden; the alive edge
         -- below clears the latch and re-parses.
-        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
-            local reg = DF.AuraContainer._deathLatchedUnits
-            if not (reg and reg[unit]) then
-                DF.AuraContainer.SetUnitDeathLatched(unit, true)
-            end
+        if deathLatchedUnits and not deathLatchedUnits[unit] then
+            local set = DF.AuraContainer.SetUnitDeathLatched
+            if set then set(unit, true) end
         end
         -- Same early-return gap as UpdateUnitFrame. Note the comment above: WoW
         -- does not fire UNIT_AURA on death, which is exactly why the aura-driven
@@ -1052,11 +1056,9 @@ function DF:UpdateHealthFast(frame)
     -- the gate trail (party3, 2026-08-30). This is the same shape, one branch over.
     -- ⚠ One table lookup per tick on the live path. Cheap, and the alternative is a
     -- class of bug that only a reload clears.
-    if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
-        local reg = DF.AuraContainer._deathLatchedUnits
-        if reg and reg[unit] then
-            DF.AuraContainer.SetUnitDeathLatched(unit, nil)
-        end
+    if deathLatchedUnits and deathLatchedUnits[unit] then
+        local set = DF.AuraContainer.SetUnitDeathLatched
+        if set then set(unit, nil) end
     end
     frame.dfLastKnownDead = nil
     frame.dfLastKnownConnected = true
