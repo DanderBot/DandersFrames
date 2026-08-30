@@ -74,13 +74,34 @@ local function rowPitch() return AE.iconSize + 4 end
 
 -- Tokens that combine with a category. RAID is context-dependent (castable buffs
 -- vs dispellable debuffs) and is the single most useful one to eyeball.
+-- ☠ THE THREE DISPEL TIERS ARE NESTED AND THE NAMES DO NOT SAY SO. Blizzard's own
+-- comments in AuraUtil.AuraFilters, on HARMFUL auras:
+--   RAID                    "harmful auras THE PLAYER can dispel"            by ME
+--   RAID_PLAYER_DISPELLABLE "auras SOMEONE IN THE PLAYER'S RAID can dispel"  by MY GROUP
+--   DISPELLABLE             "dispellable, REGARDLESS of whether the          by ANYONE
+--                            player's raid can dispel them"
+-- Stack all three on one unit and the nesting is visible in one screenshot. DISPELLABLE
+-- was missing from this list entirely, which is why the standing "All Dispellable shows
+-- nothing" report could never be probed here.
 AE.TOKENS = {
     "RAID",
+    "!RAID",
     "PLAYER",
     "!PLAYER",
+    "DISPELLABLE",
+    "!DISPELLABLE",
     "CROWD_CONTROL",
+    "!CROWD_CONTROL",
     "RAID_IN_COMBAT",
     "RAID_PLAYER_DISPELLABLE",
+    "IMPORTANT",
+    -- ☠ Self-contradicting components, kept ONLY so the retired string park is
+    -- reproducible: "HELPFUL|!HELPFUL" was a park convention that FAILED OPEN on live
+    -- 5.3.1 and rendered debuffs on parked slots. Valid to the parser (a negated known
+    -- component), meaningless to a human, and the whole reason DF's park is a
+    -- candidateFilter lock now instead of a filter string.
+    "!HELPFUL",
+    "!HARMFUL",
     "INCLUDE_NAME_PLATE_ONLY",
     "CANCELABLE",
     "BIG_DEFENSIVE",
@@ -204,10 +225,24 @@ end
 function AE:CandidateFilters(row)
     local cf, any = {}, false
 
+    -- ☠ TRI-STATE, and the FALSE half is the half that matters. Every one of these is
+    -- an EQUALITY test in DoesAuraPassCandidateFilters
+    -- (`auraData[f] ~= candidateFilters[f] -> reject`), so `false` is not "don't care",
+    -- it actively selects the auras where the flag is off. DF's own shipped
+    -- "Non-Player Debuffs" category is nothing but isFromPlayerOrPlayerPet = FALSE, and
+    -- until now this tool could not express it at all — nil and false were stored the
+    -- same way, so the whole negative half of the vocabulary was unreachable.
+    -- ⚠ Hence `~= nil`, never a truth test: `if row.flags[flag] then` is exactly the
+    -- bug that hid this, because it cannot tell false from unset.
     for _, flag in ipairs(AE.FLAGS) do
-        if row.flags and row.flags[flag] then cf[flag] = true; any = true end
+        if row.flags and row.flags[flag] ~= nil then cf[flag] = row.flags[flag]; any = true end
     end
-    if row.maxDuration then cf.maxDuration = row.maxDuration; any = true end
+    -- ⚠ 0 IS A REAL VALUE HERE, not "off". maxDuration = 0 is DF's own slot park lock
+    -- (see AuraContainer.SLOT_PARK_CF) and it must match NOTHING — the engine's own
+    -- comment is that a max-duration filter "implicitly always filters out permanent
+    -- auras", and 0 additionally fails every timed aura. Testing `~= nil` rather than
+    -- truthiness is what lets this tool prove that park actually parks.
+    if row.maxDuration ~= nil then cf.maxDuration = row.maxDuration; any = true end
     if row.includeDispel and next(row.includeDispel) then
         cf.includeDispelTypes = row.includeDispel; any = true
     end
@@ -250,9 +285,13 @@ end
 function AE:RowSummary(row)
     local bits = {}
     for _, flag in ipairs(AE.FLAGS) do
-        if row.flags and row.flags[flag] then bits[#bits + 1] = flag end
+        -- Tri-state: "flag" for true, "NOT flag" for false, absent for unset. Reading
+        -- the gutter has to distinguish the two constraints or the screenshot is
+        -- ambiguous about which half of the test produced the icons.
+        local v = row.flags and row.flags[flag]
+        if v ~= nil then bits[#bits + 1] = (v and flag or ("NOT " .. flag)) end
     end
-    if row.maxDuration then bits[#bits + 1] = "maxDuration " .. row.maxDuration end
+    if row.maxDuration ~= nil then bits[#bits + 1] = "maxDuration " .. row.maxDuration end
     if row.includeDispel and next(row.includeDispel) then
         local t = {}
         for k in pairs(row.includeDispel) do t[#t + 1] = k end
@@ -887,7 +926,10 @@ function AE:ShowRowEditor(index)
     local ed = self._editor
     if not ed then
         ed = CreateFrame("Frame", "DFAuraExplorerRowEditor", UIParent, "BackdropTemplate")
-        ed:SetSize(608, 560)
+        -- Width is for THREE columns now (see the column note below); the height is
+        -- recomputed from the tallest column at the end of every build, so this is only
+        -- the starting size.
+        ed:SetSize(920, 560)
         ed:SetFrameStrata("FULLSCREEN_DIALOG")
         ed:SetMovable(true)
         ed:EnableMouse(true)
@@ -916,12 +958,13 @@ function AE:ShowRowEditor(index)
     for _, w in ipairs(ed.widgets) do w:Hide(); w:SetParent(nil) end
     wipe(ed.widgets)
 
-    -- TWO COLUMNS. Single-column, the full vocabulary (11 tokens + 9 flags + 4
-    -- dispel types + 13 DF categories) is ~950px tall — off the bottom of a lot of
-    -- screens. Two columns keeps every option visible at once, which is the whole
-    -- point of a checklist over nested dropdowns.
-    local COL_X = { 14, 310 }
-    local colY  = { -46, -46 }
+    -- THREE COLUMNS (was two). Single-column the full vocabulary is ~1400px tall — off
+    -- the bottom of any screen — and the candidate-filter block doubled when the FALSE
+    -- half became expressible, which pushed two columns over as well. Keeping every
+    -- option visible at once is the whole point of a checklist over nested dropdowns.
+    --   1 tokens · 2 candidate filters (both polarities) + maxDuration · 3 dispel + DF
+    local COL_X = { 14, 310, 606 }
+    local colY  = { -46, -46, -46 }
     local col   = 1
     local function useColumn(n) col = n end
     local function header(text)
@@ -945,14 +988,38 @@ function AE:ShowRowEditor(index)
             function(v) row.tokens = row.tokens or {}; row.tokens[tok] = v or nil end)
     end
 
-    header("Candidate filters")
+    useColumn(2)
+    -- ☠ TWO BLOCKS, ONE PER POLARITY, and they are mutually exclusive per flag.
+    -- The candidate filters are EQUALITY tests, so "= false" is a real query
+    -- ("auras where this is off"), not the absence of a query. Ticking one polarity
+    -- clears the other because a flag cannot be constrained both ways at once.
+    header("Candidate filters  = true")
     for _, flag in ipairs(AE.FLAGS) do
         check(flag,
-            function() return row.flags and row.flags[flag] end,
-            function(v) row.flags = row.flags or {}; row.flags[flag] = v or nil end)
+            function() return row.flags and row.flags[flag] == true end,
+            function(v) row.flags = row.flags or {}; row.flags[flag] = v and true or nil end)
     end
 
-    useColumn(2)
+    header("Candidate filters  = false")
+    for _, flag in ipairs(AE.FLAGS) do
+        check("NOT " .. flag,
+            function() return row.flags and row.flags[flag] == false end,
+            function(v) row.flags = row.flags or {}; row.flags[flag] = v and false or nil end)
+    end
+
+    -- Fixed probe values rather than a free number box: these are the three that answer
+    -- a question we actually have. 0 is DF's own slot park lock and must match nothing;
+    -- the other two are ordinary Hide Long Debuffs values, for confirming the filter
+    -- works at all before reading anything into the 0 row.
+    header("maxDuration")
+    for _, v in ipairs({ 0, 60, 300 }) do
+        local val = v
+        check("maxDuration = " .. val .. (val == 0 and "  (park lock)" or "s"),
+            function() return row.maxDuration == val end,
+            function(on) row.maxDuration = on and val or nil end)
+    end
+
+    useColumn(3)
     header("Dispel types")
     for _, dt in ipairs(AE.DISPEL_TYPES) do
         check("include " .. dt,
@@ -993,13 +1060,137 @@ function AE:ShowRowEditor(index)
         end
     end
 
-    ed:SetHeight(math.max(-colY[1], -colY[2]) + 30)
+    ed:SetHeight(math.max(-colY[1], -colY[2], -colY[3]) + 30)
     ed:Show()
 end
 
 -- (Removed) DF FILTER PICKER — AE:SetRowDFPreset and AE:SetRowDFCustom. Neither had
 -- a caller: the row editor sets row.dfPreset / row.dfCustom inline and calls
 -- Rebuild itself. This section banner headed nothing else.
+
+-- ============================================================
+-- EXPERIMENTS  —  /df debug auraexp <key>
+-- ============================================================
+-- Hand-building four rows to answer one question is exactly the friction that makes
+-- people guess instead of measure. Each entry below is a question we have actually
+-- argued about, laid out as the row set that settles it, with the reading rule printed
+-- alongside so the screenshot interprets itself.
+--
+-- ☠ EVERY ONE OF THESE IS A MEASUREMENT, NOT A DEMONSTRATION. If a result contradicts
+-- what DF's comments claim, the comment is what is wrong. Several have been already.
+--
+-- `where` names the unit the reading depends on — most of these say nothing at all on
+-- the wrong target, and a row set that renders nothing is indistinguishable from a
+-- filter that matches nothing.
+AE.EXPERIMENTS = {
+    {
+        key = "caster",
+        title = "isFromPlayerOrPlayerPet: ANY player, or only you?",
+        where = "an ALLY carrying buffs from OTHER players that you did not cast",
+        read = "Row 2 is your own casts. If row 3 shows buffs row 2 does NOT, the flag "
+            .. "matches any player. If rows 2 and 3 are identical, it means 'cast by you'.",
+        rows = {
+            { category = "HELPFUL" },
+            { category = "HELPFUL", tokens = { PLAYER = true } },
+            { category = "HELPFUL", flags = { isFromPlayerOrPlayerPet = true } },
+            { category = "HELPFUL", flags = { isFromPlayerOrPlayerPet = false } },
+        },
+    },
+    {
+        key = "dispel",
+        title = "The three dispel tiers, and 'All Dispellable shows nothing'",
+        where = "a unit carrying several debuff types (a trash pack does nicely)",
+        read = "Expect nesting: row 2 within row 3 within row 4. Row 5 is the map form "
+            .. "of row 4 and should match it. Row 4 EMPTY while row 5 has icons "
+            .. "reproduces the standing undiagnosed report.",
+        rows = {
+            { category = "HARMFUL" },
+            { category = "HARMFUL", tokens = { RAID = true } },
+            { category = "HARMFUL", tokens = { RAID_PLAYER_DISPELLABLE = true } },
+            { category = "HARMFUL", tokens = { DISPELLABLE = true } },
+            { category = "HARMFUL", includeDispel = { Magic = true, Curse = true,
+                                                      Disease = true, Poison = true } },
+        },
+    },
+    {
+        key = "park",
+        title = "Does a parked slot actually render nothing?",
+        where = "anyone with buffs — row 1 must show icons or the test proves nothing",
+        read = "Row 2 is DF's live park lock and MUST be empty. Row 3 is the retired "
+            .. "string park; icons there are the 5.3.1 fail-open reproduced, and the "
+            .. "reason the lock is a candidateFilter now.",
+        rows = {
+            { category = "HELPFUL" },
+            { category = "HELPFUL", maxDuration = 0 },
+            { category = "HELPFUL", tokens = { ["!HELPFUL"] = true } },
+        },
+    },
+    {
+        key = "dedup",
+        title = "Do the dedup negations actually subtract?",
+        where = "a unit with a boss or role debuff that is also dispellable",
+        read = "Row 3 is row 2 with the claim subtraction the debuff row now emits. It "
+            .. "should be row 2 MINUS anything dispellable. Identical rows mean the "
+            .. "negation is not biting and the dedup is not working.",
+        rows = {
+            { category = "HARMFUL" },
+            { category = "HARMFUL", flags = { isBossOrRoleAura = true } },
+            { category = "HARMFUL", tokens = { ["!DISPELLABLE"] = true },
+              flags = { isBossOrRoleAura = true } },
+        },
+    },
+}
+
+function AE:ExperimentKeys()
+    local keys = {}
+    for _, e in ipairs(AE.EXPERIMENTS) do keys[#keys + 1] = e.key end
+    return keys
+end
+
+-- Replace the row set with an experiment's, switch on, and print the reading rule.
+-- ☠ REPLACES, and says so: the rows are the tool's whole state, so loading an
+-- experiment discards whatever was being built. Silently merging into existing rows
+-- would produce a strip nobody could interpret.
+function AE:LoadExperiment(key)
+    local exp
+    for _, e in ipairs(AE.EXPERIMENTS) do
+        if e.key == key then exp = e break end
+    end
+    if not exp then return false end
+
+    wipe(self.rows)
+    for i, spec in ipairs(exp.rows) do
+        -- Copy, never alias: the spec tables live in AE.EXPERIMENTS for the session and
+        -- the row editor mutates rows in place. Handing out the spec itself would let
+        -- one run's edits rewrite the experiment for every later run.
+        local r = { enabled = true, category = spec.category or "HELPFUL",
+                    tokens = {}, flags = {} }
+        if spec.tokens then for k, v in pairs(spec.tokens) do r.tokens[k] = v end end
+        if spec.flags  then for k, v in pairs(spec.flags)  do r.flags[k]  = v end end
+        if spec.maxDuration ~= nil then r.maxDuration = spec.maxDuration end
+        if spec.includeDispel then
+            r.includeDispel = {}
+            for k, v in pairs(spec.includeDispel) do r.includeDispel[k] = v end
+        end
+        self.rows[i] = r
+    end
+
+    -- ⚠ SetActive(true) rebuilds unconditionally, including when the tool is already
+    -- on — so no Rebuild() here. A second call is not free: every rebuild tears down
+    -- and recreates one container PER ROW PER UNIT (see the header), which is the one
+    -- cost this tool has to stay honest about.
+    self:SetActive(true)
+
+    DF:Say("Aura Explorer", exp.title, "NEUTRAL")
+    DF:Say("Aura Explorer", "Look at: " .. exp.where, "NEUTRAL")
+    DF:Say("Aura Explorer", exp.read, "NEUTRAL")
+    for i, spec in ipairs(exp.rows) do
+        local r = self.rows[i]
+        DF:Say("Aura Explorer", format("row %d: %s   %s", i,
+            self:FilterString(r), self:RowSummary(r) or ""), "NEUTRAL")
+    end
+    return true
+end
 
 -- ============================================================
 -- EVENTS
@@ -1031,6 +1222,17 @@ SlashCmdList["DFAURAEXP"] = function(msg)
     elseif msg == "rebuild" then
         AE:Rebuild()
         DF:Say("Aura Explorer", "rebuilt", "NEUTRAL")
+        return
+    elseif msg ~= "" then
+        -- An experiment key loads its row set; anything else lists what exists rather
+        -- than silently falling through to the panel, which would look like the key
+        -- had been accepted.
+        if AE:LoadExperiment(msg) then return end
+        DF:Say("Aura Explorer", "experiments: "
+            .. table.concat(AE:ExperimentKeys(), ", "), "NEUTRAL")
+        for _, e in ipairs(AE.EXPERIMENTS) do
+            DF:Say("Aura Explorer", format("  %s — %s", e.key, e.title), "NEUTRAL")
+        end
         return
     end
     local p = AE:CreatePanel()
