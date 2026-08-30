@@ -1196,12 +1196,29 @@ end
 -- accounts for the other two), and the same cure: move the load-bearing claim onto
 -- something evaluated in READABLE Blizzard Lua.
 --
--- `isFromPlayerOrPlayerPet` is checked in DoesAuraPassCandidateFilters
--- (Blizzard_AuraContainerUtil.lua:95) — OUTSIDE the identity-gate block (which closes ~45
--- lines earlier, so no gate state can skip it), as a strict equality: a nil or false
--- REJECTS. That fails CLOSED, which for "only mine" is the right direction — briefly hide
--- one of yours rather than show somebody else's. Blizzard's own target frame filters on
--- this same field for its equivalent decision (TargetFrameAuraContainer.lua:406).
+-- ☠☠ WHAT THIS LOCK IS AND IS NOT — READ BEFORE TRUSTING IT.
+-- `isFromPlayerOrPlayerPet` does NOT mean "cast by you". It means "cast by SOME player or
+-- player pet" — Features/Auras.lua's non-player debuff record documents this, and
+-- Blizzard's own target frame proves it: TargetFrameAuraContainer.lua:395-408 handles
+-- YOUR auras first and separately (`sourceUnit` + UnitIsUnit("player", caster)), and only
+-- afterwards tests `isFromPlayerOrPlayerPet` — a test that would be dead code if the
+-- field already meant "you". It is therefore NOT interchangeable with the PLAYER token,
+-- and this lock does not re-implement "only mine".
+--
+-- ★ SO WHY DOES IT FIX THE BUG? Because of WHERE the token fails. In the field case every
+-- one of those four auras was player-cast (a shaman's), yet the field still read FALSE —
+-- which under the correct reading can only mean the caster was not resolvable at all in
+-- that state. The lock catches the failure by failing CLOSED on unresolved caster data,
+-- not by identifying auras as yours. It is checked in DoesAuraPassCandidateFilters
+-- (Blizzard_AuraContainerUtil.lua:95), OUTSIDE the identity-gate block (which closes ~45
+-- lines earlier, so no gate state can skip it), as a strict equality — nil or false
+-- REJECTS.
+--
+-- ⚠ THE RESIDUAL GAP, stated so nobody re-derives a false sense of safety: a failure
+-- where the token fails open while the caster IS resolved to another player would leave
+-- the field TRUE and this lock would not catch it. The observed case was not that, but
+-- nothing rules it out. What the lock cannot do is hide something wrongly — a buff of
+-- yours in range has a resolved, player caster, so it passes.
 --
 -- ★ WHY HERE AND NOT AT THE CONSUMERS. This resolver is the ONE place every record's
 -- filter string and candidate filters meet, on BOTH the build path and the live-tuning
@@ -1213,12 +1230,13 @@ end
 -- ☠ EXACT COMPONENT MATCH, never a substring: "HELPFUL|!PLAYER" (othersOnly) CONTAINS
 -- "PLAYER" and means the precise opposite. Filter strings are "|"-separated, so the test
 -- is per component.
--- ☠ AND THE AURA DESIGNER'S SELF_ONLY POOL MUST NOT BE CAUGHT. A few buffs sit on the
--- caster but are credited to the linked ally (Symbiotic Relationship — sourceUnit is the
--- ally), so that pool deliberately drops to a bare "HELPFUL" with no PLAYER token; its
--- aura genuinely is not from the player and this lock would hide it outright. Keying off
--- the token rather than off a "is this a mine pool" flag is what keeps that safe — the
--- pool already says what it means in the string.
+-- ⚠ The Aura Designer's SELF_ONLY pool is untouched either way: it deliberately drops to
+-- a bare "HELPFUL" with no PLAYER token (a few buffs sit on the caster but are credited
+-- to the linked ally — Symbiotic Relationship), so this never fires for it. Keying off
+-- the TOKEN rather than off a "is this a mine pool" flag is what keeps that automatic:
+-- the pool already says what it means in its filter string, so there is no second place
+-- to remember. (Its aura is player-cast, so the lock would probably have passed it
+-- anyway — but "probably" is not a thing to build on.)
 local function filterHasPlayerToken(f)
     if type(f) ~= "string" then return false end
     for component in f:gmatch("[^|]+") do
