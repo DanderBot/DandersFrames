@@ -2008,7 +2008,7 @@ do
           "add: ...behind one row on the page")
     check(ROWS:find("build  = addMount,", 1, true) ~= nil,
           "add: ...whose panel is that builder")
-    -- """ + SK + """ NO TICK AND NO FOOTER. The row holds no settings -- it is a verb --
+    -- ☠ NO TICK AND NO FOOTER. The row holds no settings -- it is a verb --
     -- and a footer that quietly wrote nothing is the failure phase 0 was blocked
     -- on. Same rule the Members and Linked Filters rows follow.
     local addBlock = ROWS:match("local addBand = GUI:CreateSettingsGroup(.-)Add%(addBand, nil, \"both\"%)")
@@ -2097,7 +2097,7 @@ do
     -- slot. The panel opened EMPTY, which is what shipped.
     check(ROWS:find("wantH = h", 1, true) ~= nil,
           "add: ...and the height is remembered even while the verb is silent")
-    -- """ + WA + """ AND IT IS SILENT UNTIL THE PANE HAS JOINED ITS GROUP. The builder shows
+    -- ⚠ AND IT IS SILENT UNTIL THE PANE HAS JOINED ITS GROUP. The builder shows
     -- its first step as it finishes; a height reported before AddWidget has run
     -- would walk past the group and re-run the PAGE's state pass mid-build.
     check(ROWS:find("ready = true", 1, true) ~= nil,
@@ -2156,7 +2156,7 @@ do
     check(pane:find("ADResolveByID(idNum, idText)", 1, true) ~= nil,
           "add: ...so typing a spell ID still works on the spell step")
 
-    -- """ + WA + """ SPELL-FIRST CREATES A STATE THE OLD ORDER COULD NOT REACH: a spell that
+    -- ⚠ SPELL-FIRST CREATES A STATE THE OLD ORDER COULD NOT REACH: a spell that
     -- already has THIS type of effect. The old picker greyed those rows because it
     -- knew the type; this one cannot, so the type card says so instead of
     -- silently doing nothing.
@@ -2180,7 +2180,7 @@ do
           "scale: the compact canvas carries a glyph, not a slider")
     check(CARDS:find('scaleBtn:SetPoint("TOPRIGHT", container, "TOPRIGHT", -6, -2)', 1, true) ~= nil,
           "scale: ...in the top-right of its own label strip")
-    -- """ + SK + """ EXACTLY ONE INLINE SLIDER IN THE FILE, and it is the split panel's.
+    -- ☠ EXACTLY ONE INLINE SLIDER IN THE FILE, and it is the split panel's.
     -- If a second appears the 30px CANVAS_FURNITURE gave back is being drawn over.
     local inline = 0
     for _ in CARDS:gmatch("GUI:CreateSlider%(container,") do inline = inline + 1 end
@@ -2191,7 +2191,7 @@ do
     check(compactArm:find("\n    else\n", 1, true) ~= nil,
           "scale: ...reached only when the band form did NOT take the glyph")
 
-    -- """ + SK + """ THE PANEL IS POOLED BY KEY, so its build runs once and keeps whatever
+    -- ☠ THE PANEL IS POOLED BY KEY, so its build runs once and keeps whatever
     -- table it captured. The preview-scale table is the current PRESET's, which a
     -- template or mode switch replaces -- so the slider binds to an indirection.
     check(CARDS:find("local function ScaleProxy(key)", 1, true) ~= nil,
@@ -2220,7 +2220,7 @@ do
           "row: ...which takes the right end the four used to chain from")
     check(SW:find('ddBtn:SetPoint("RIGHT", overflowBtn, "LEFT", -6, 0)', 1, true) ~= nil,
           "row: ...and the dropdown spans everything left of it")
-    -- """ + SK + """ THE MENU ITEM PRESSES THE BUTTON. Four prompts, two confirmations and
+    -- ☠ THE MENU ITEM PRESSES THE BUTTON. Four prompts, two confirmations and
     -- the Default-template guard live on those buttons; a second copy in the menu
     -- is a second place for "Delete asks first" to stop being true.
     local ov = SW:match("if opts.overflowActions then(.-)\n    end\n\n    %-%-")
@@ -2277,7 +2277,7 @@ do
     check(SHELL:find("if section and not section.expanded then return end", 1, true) ~= nil,
           "fold: ...and a folded canvas is not regrown by a pinned scale slider")
 
-    -- """ + SK + """ THE HAZARD THIS EXISTS FOR. CreateCollapsibleSection persists a fold
+    -- ☠ THE HAZARD THIS EXISTS FOR. CreateCollapsibleSection persists a fold
     -- under the section's TITLE TEXT unless told otherwise -- so a localised title
     -- writes a second profile key and a reworded one orphans the first. Section
     -- 14's correction 7 of the rework spec is the same trap, found the hard way.
