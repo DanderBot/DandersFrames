@@ -1249,9 +1249,12 @@ end
 --      A shaman's Earth Shield, on the shaman AND on the mage, rendered in the
 --      isFromPlayerOrPlayerPet = true row while the HELPFUL|PLAYER row showed only the
 --      viewer's own Fortitude. A buff nobody in the viewer's control cast passed the
---      flag ⇒ **ANY player**, confirmed by measurement rather than by argument. The
---      true/false rows also summed exactly to the unfiltered row on all five units, so
---      the instrument itself was reading correctly. Stop re-deriving this.
+--      flag ⇒ **ANY player**, confirmed by measurement rather than by argument.
+--      ⚠ Sanity check, stated at the strength it actually has: on the two units whose
+--      strips could be counted off the screenshot, the true and false rows summed to
+--      the unfiltered row — consistent with the two being exact complements. That is a
+--      spot check on two units, NOT a verified invariant across the party.
+--      Stop re-deriving the semantics; the Earth Shield observation alone is decisive.
 --
 -- ★★ AND THE SAME RUN EXPLAINS THE LOCK. In that healthy state Earth Shield read
 --      TRUE. In the stale out-of-range/cross-instance state that started this, the
