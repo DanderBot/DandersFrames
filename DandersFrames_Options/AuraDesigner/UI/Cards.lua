@@ -3581,10 +3581,14 @@ local SEC_NA       = "na"
 P.SectionStates = { TODO = SEC_TODO, ACTIVE = SEC_ACTIVE,
                     ANSWERED = SEC_ANSWERED, NA = SEC_NA }
 
-local function CreateNumberedHeading(parent, number, caption, y, width)
+-- `x` is the caller's own left gutter and defaults to none. The Add Indicator
+-- panel insets every section by PANE_GUTTER so its outline has somewhere to be
+-- drawn (see THE GUTTER below); the Layout Groups panels have no outline and
+-- keep the pane's own left edge.
+local function CreateNumberedHeading(parent, number, caption, y, width, x)
     local head = CreateFrame("Frame", nil, parent)
     head:SetSize(width, SECTION_HEAD_H)
-    head:SetPoint("TOPLEFT", 0, y)
+    head:SetPoint("TOPLEFT", x or 0, y)
 
     local num = head:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(num, 9, "")
@@ -3664,19 +3668,53 @@ P.CreateNumberedHeading = CreateNumberedHeading
 -- buttons and a nine-cell grid at once. MakeMouseInert walks it AFTER the
 -- surface exists, so anything the surface added is covered too.
 --
--- ☠ 2. IT IS RAISED ABOVE THE CONTENT, because it has to be. The ring's left and
--- right runs land on the outer tiles' own edges (see 3), and a texture can never
--- draw over a SIBLING frame whose level is not lower -- draw layer loses to frame
--- level. Re-asserted in Sync rather than only at build: a popout's frame level is
--- its slot in the stack, and anything levelled once at construction falls behind
--- the first time a second panel opens (spec section 15's standing lesson).
+-- ☠ 2. IT IS RAISED ABOVE THE CONTENT. A texture can never draw over a SIBLING
+-- frame whose level is not lower -- draw layer loses to frame level -- and the
+-- gutter (see 3) only guarantees the ring clears the controls THIS panel holds
+-- today. A tenth tile, a wider button or a rounded corner reaching a pixel
+-- further would put a run back under a sibling, and the failure mode is a ring
+-- that silently loses a side. Re-asserted in Sync rather than only at build: a
+-- popout's frame level is its slot in the stack, and anything levelled once at
+-- construction falls behind the first time a second panel opens (spec section
+-- 15's standing lesson).
 --
 -- ☠ 3. IT NEVER OVERHANGS THE PANE. Horizontally it is the pane's own width,
 -- flush, and that is not a taste: PopoutRow wraps a pane taller than 60% of the
 -- screen in a ScrollFrame of exactly the pane's width, which CLIPS -- and this
--- panel is within a few pixels of that cap already. A ring drawn 4px proud would
--- be whole on a tall screen and shaved on a short one.
-local SECTION_RING_PAD = 3
+-- panel is over that cap already. A ring drawn 4px proud would be whole on a
+-- tall screen and shaved on a short one.
+--
+-- ⚠ SO THE SPACE COMES FROM THE CONTENT, NOT FROM THE RING. The ring cannot
+-- grow outwards, so the panel steps inwards: THE GUTTER below insets every
+-- control by PANE_GUTTER, and the ring keeps the pane's full width and lands in
+-- the space that frees. It shipped flush because there was no gutter to inset
+-- into, and its left and right runs sat on the outer tiles' own 1px edges -- "too
+-- cramped and too close to the content" (spec section 29).
+
+-- ── THE GUTTER ──
+-- ONE number, used four ways: the left inset, the right inset, and the ring's
+-- pad above and below. Three sections insetting by different amounts is how a
+-- page stops having one left edge, and a ring 6px clear at the sides but 3px
+-- clear top and bottom is the same failure turned ninety degrees.
+--
+-- ⚠ AND 6 IS ARITHMETIC, NOT TASTE. The three tile columns divide the content
+-- width exactly only on a MULTIPLE OF 3 (260 - 2G - 2*7 ≡ 0 mod 3 needs G ≡ 0),
+-- and 6 is the smallest such inset that is actually a gutter: 3 is what the ring
+-- already had above and below and is the amount that was judged cramped, and 0 is
+-- what shipped. At 6 the tiles are 78 wide and 3*78 + 14 lands exactly on the
+-- right gutter; at 5 they are still 78 and the row stops 2px short of it.
+local PANE_GUTTER = 6
+local SECTION_RING_PAD = PANE_GUTTER
+-- The drop between one section's last control and the next one's heading. It has
+-- to EXCEED the ring's pad, or a shown ring would reach over the heading below
+-- it; PANE_GUTTER + 2 is that, derived rather than a literal tuned by hand.
+--
+-- ⚠ IT IS NOT "SO ADJACENT RINGS CLEAR EACH OTHER", which is what section 28
+-- raised it for. Exactly one ring is ever drawn (Sync outlines the section
+-- awaiting an answer and no other), so two rings overlapping is unobservable;
+-- what the eye can catch is a ring crossing the NEXT SECTION'S CONTENT, and that
+-- is what this number is sized against.
+local SECTION_GAP = PANE_GUTTER + 2
 local SECTION_RING_LIFT = 6
 
 local function CreateSectionOutline(parent, width)
@@ -3753,6 +3791,12 @@ end
 S.BuildAddIndicatorPane = function(host, opts)
     opts = opts or {}
     local W = opts.width or 260
+    -- ☠ TWO WIDTHS, AND EVERY CONTROL BELOW USES THE SECOND ONE. G is the left
+    -- edge of everything the user can see or click; CW is what is left for it.
+    -- The RINGS are the one exception -- they keep W and start at 0, because the
+    -- gutter is the space they are drawn IN.
+    local G = PANE_GUTTER
+    local CW = W - G * 2
     local tc = GetThemeColor()
     local EFFECTS = AddFlowEffects()
     local EFFECT_BY_TYPE = {}
@@ -3875,12 +3919,13 @@ S.BuildAddIndicatorPane = function(host, opts)
     -- outline is drawn SECTION_RING_PAD above its heading, and the ring may not
     -- leave the pane (see CreateSectionOutline's point 3) -- so the heading has
     -- to start that far down or the clamp would give section 1 a tighter box
-    -- than its two siblings.
+    -- than its two siblings. It is the gutter turned through ninety degrees, and
+    -- the ONLY vertical the gutter costs.
     local y = -SECTION_RING_PAD
 
     -- ── 1 · WHICH AURA? ──
     secTop[1] = y
-    sec1Head = CreateNumberedHeading(host, 1, L["WHICH AURA?"], y, W)
+    sec1Head = CreateNumberedHeading(host, 1, L["WHICH AURA?"], y, CW, G)
     y = y - (SECTION_HEAD_H + 4)
 
     local function OpenSpellStep()
@@ -3963,10 +4008,10 @@ S.BuildAddIndicatorPane = function(host, opts)
     -- kit documents this opt-out for precisely this case: where equal widths are
     -- the point, clipping one is better than moving both.
     local SRC_GAP = 7
-    local SRC_W = floor((W - SRC_GAP) / 2)
+    local SRC_W = floor((CW - SRC_GAP) / 2)
 
     spellBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
-    spellBtn:SetPoint("TOPLEFT", 0, y)
+    spellBtn:SetPoint("TOPLEFT", G, y)
     GUI:StyleButton(spellBtn, {
         width = SRC_W, height = 30, primary = true, align = "left", fitText = false,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
@@ -3975,9 +4020,9 @@ S.BuildAddIndicatorPane = function(host, opts)
     spellBtn:SetScript("OnClick", OpenSpellStep)
 
     filterBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
-    filterBtn:SetPoint("TOPLEFT", SRC_W + SRC_GAP, y)
+    filterBtn:SetPoint("TOPLEFT", G + SRC_W + SRC_GAP, y)
     GUI:StyleButton(filterBtn, {
-        width = W - SRC_W - SRC_GAP, height = 30, primary = true, align = "left",
+        width = CW - SRC_W - SRC_GAP, height = 30, primary = true, align = "left",
         fitText = false,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list", size = 14 },
         text = L["Select a filter"], font = "DFFontHighlight",
@@ -3989,8 +4034,8 @@ S.BuildAddIndicatorPane = function(host, opts)
     -- into a hidden holder and moves FRAMES; a region left on the parent stays
     -- behind and is never drawn (spec section 16).
     local srcBox = CreateFrame("Frame", nil, host)
-    srcBox:SetSize(W, SOURCE_LINE_H)
-    srcBox:SetPoint("TOPLEFT", 0, y)
+    srcBox:SetSize(CW, SOURCE_LINE_H)
+    srcBox:SetPoint("TOPLEFT", G, y)
     sourceText = srcBox:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(sourceText, 10, "")
     sourceText:SetPoint("LEFT", 0, 0)
@@ -3998,15 +4043,15 @@ S.BuildAddIndicatorPane = function(host, opts)
     sourceText:SetJustifyH("LEFT")
     sourceText:SetWordWrap(false)
     secEnd[1] = y - SOURCE_LINE_H
-    y = y - (SOURCE_LINE_H + 8)
+    y = y - (SOURCE_LINE_H + SECTION_GAP)
 
     -- ── 2 · HOW SHOULD IT SHOW? ──
     secTop[2] = y
-    sec2Head = CreateNumberedHeading(host, 2, L["HOW SHOULD IT SHOW?"], y, W)
+    sec2Head = CreateNumberedHeading(host, 2, L["HOW SHOULD IT SHOW?"], y, CW, G)
     y = y - (SECTION_HEAD_H + 4)
 
     local TILE_COLS, TILE_GAP = 3, 7
-    local TILE_W = floor((W - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
+    local TILE_W = floor((CW - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
     local rowTop, rowH = y, 0
     for i, eff in ipairs(EFFECTS) do
         local col = (i - 1) % TILE_COLS
@@ -4019,7 +4064,7 @@ S.BuildAddIndicatorPane = function(host, opts)
             Paint = function(pv) PaintEffectOnThumb(pv, capturedType) end,
             onClick = function() SelectType(capturedType) end,
         })
-        tile:SetPoint("TOPLEFT", col * (TILE_W + TILE_GAP), rowTop)
+        tile:SetPoint("TOPLEFT", G + col * (TILE_W + TILE_GAP), rowTop)
         rowH = max(rowH, tile.layoutHeight or 72)
         tiles[eff.type] = tile
         if col == TILE_COLS - 1 or i == #EFFECTS then
@@ -4029,11 +4074,13 @@ S.BuildAddIndicatorPane = function(host, opts)
     end
     -- The last row's trailing gap is not spent.
     secEnd[2] = rowTop + TILE_GAP
-    y = rowTop + TILE_GAP - 10
+    -- ⚠ THE SAME DROP AS SECTION 1'S, not the 10 it used to be. Two different
+    -- gaps between three sections is the same defect as two different left edges.
+    y = rowTop + TILE_GAP - SECTION_GAP
 
     -- ── 3 · WHERE? ──
     secTop[3] = y
-    sec3Head = CreateNumberedHeading(host, 3, L["WHERE?"], y, W)
+    sec3Head = CreateNumberedHeading(host, 3, L["WHERE?"], y, CW, G)
     y = y - (SECTION_HEAD_H + 4)
 
     -- ☠ THE PICKER'S ANSWER IS TAKEN, NOT JUST NOTED. Sync re-asserts the
@@ -4044,14 +4091,14 @@ S.BuildAddIndicatorPane = function(host, opts)
         anchor = point
         Sync()
     end })
-    grid:SetPoint("TOPLEFT", 0, y)
+    grid:SetPoint("TOPLEFT", G, y)
 
     -- ⚠ INSIDE A FRAME, not a bare FontString on the pane -- see
     -- CreateNumberedHeading. It also has to be hideable with its own state.
     local noteBox = CreateFrame("Frame", nil, host)
-    noteBox:SetSize(W - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2) - 10,
+    noteBox:SetSize(CW - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2) - 10,
                     ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2)
-    noteBox:SetPoint("TOPLEFT", ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + 10, y)
+    noteBox:SetPoint("TOPLEFT", G + ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + 10, y)
     gridNote = noteBox:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(gridNote, 10, "")
     gridNote:SetPoint("TOPLEFT", 0, 0)
@@ -4060,7 +4107,9 @@ S.BuildAddIndicatorPane = function(host, opts)
     gridNote:SetWordWrap(true)
     gridNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     secEnd[3] = y - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2)
-    y = y - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + 8)
+    -- The pointer below is not a section, but section 3's ring still has to clear
+    -- it, so it is dropped by the same amount for the same reason.
+    y = y - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + SECTION_GAP)
 
     -- ── THE COMPLETION POINTER ──
     -- ☠ IT IS NOT THE "NOT NEEDED" CASE'S DECORATION. Section 28 asks for an
@@ -4072,11 +4121,13 @@ S.BuildAddIndicatorPane = function(host, opts)
     -- ⚠ A RESERVED SLOT, SHOWN AND HIDDEN RATHER THAN GROWN. The pane is pooled
     -- and reports its height ONCE; a pointer that added its own height would
     -- have to re-report through a chain the builder has already finished with.
-    -- 16px, spent whether or not it is drawn.
-    local POINTER_H = 16
+    -- Spent whether or not it is drawn -- which is why it is sized to the one
+    -- 10pt line it holds rather than to the 16 it was, part of paying for the
+    -- gutter's own vertical (spec section 29).
+    local POINTER_H = 14
     pointer = CreateFrame("Frame", nil, host)
-    pointer:SetSize(W, POINTER_H)
-    pointer:SetPoint("TOPLEFT", 0, y)
+    pointer:SetSize(CW, POINTER_H)
+    pointer:SetPoint("TOPLEFT", G, y)
     local ptrText = pointer:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(ptrText, 10, "")
     ptrText:SetPoint("CENTER", pointer, "CENTER", -9, 0)
@@ -4098,8 +4149,8 @@ S.BuildAddIndicatorPane = function(host, opts)
 
     -- ── ONE PRIMARY BUTTON ──
     addBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
-    addBtn:SetPoint("TOPLEFT", 0, y)
-    addBtn:SetPoint("TOPRIGHT", 0, y)
+    addBtn:SetPoint("TOPLEFT", G, y)
+    addBtn:SetPoint("TOPRIGHT", -G, y)
     GUI:StyleButton(addBtn, {
         height = 30, primary = true,
         text = L["Add to my frames"], font = "DFFontHighlight",
@@ -4115,6 +4166,11 @@ S.BuildAddIndicatorPane = function(host, opts)
     -- decoration laid over the sections, so building them last means they are
     -- created after the frames they cover -- and their span is read from the
     -- offsets the layout above recorded as it went, never re-derived.
+    --
+    -- ☠ W AND NOT CW, and that is the whole point of the gutter. The ring takes
+    -- the pane's full width -- the most it can have without being clipped -- while
+    -- every control above stopped G short of both edges, so the G between them is
+    -- the space the ring was missing.
     sec1Ring = CreateSectionOutline(host, W)
     sec1Ring:SetSpan(secTop[1], secEnd[1])
     sec2Ring = CreateSectionOutline(host, W)
