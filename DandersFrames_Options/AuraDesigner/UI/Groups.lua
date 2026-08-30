@@ -878,28 +878,21 @@ local function OpenFilterPicker(opts)
     local anchor = opts.anchor
     local isLinked = opts.isLinked or function() return false end
 
+    -- ☠ WHICH FILTERS, AND IN WHAT ORDER, IS THE REGISTRY'S ANSWER. Presets in
+    -- Categories order then customs name-sorted was written out here and again in
+    -- the full-overlay filter list (FilterRegistry/UI/SpellPicker.lua), and an
+    -- order is a decision that two copies of will drift. R:ListFilters owns it;
+    -- the LABELS stay here, because markup is this surface's business and the
+    -- registry has no business localising anything.
     local candidates = {}
-    for _, cat in ipairs(R.Categories) do
-        if not isLinked("preset", cat.key) then
-            local enabled, total = R:PresetCounts(cat.key)
-            tinsert(candidates, { kind = "preset", key = cat.key,
-                label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
+    for _, e in ipairs(R:ListFilters(isLinked)) do
+        local label
+        if e.custom then
+            label = format("%s |c%s(%s)|r", e.name, GUI:ToneHex("info"), L["Custom"])
+        else
+            label = format("%s |cff888888(%d/%d)|r", L[e.name], e.enabled, e.total)
         end
-    end
-    local freeCustoms = {}
-    for cfId in pairs(R:ReadStore().customFilters) do
-        if not isLinked("custom", cfId) then tinsert(freeCustoms, cfId) end
-    end
-    sort(freeCustoms, function(a, b)
-        local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
-        local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
-        if na ~= nb then return na < nb end
-        return a < b
-    end)
-    for _, cfId in ipairs(freeCustoms) do
-        local cf = R:GetCustomFilter(cfId)
-        tinsert(candidates, { kind = "custom", key = cfId,
-            label = format("%s |c%s(%s)|r", (cf and cf.name) or cfId, GUI:ToneHex("info"), L["Custom"]) })
+        tinsert(candidates, { kind = e.kind, key = e.key, label = label })
     end
 
     local dropName = "DFADFilterGroupPicker"

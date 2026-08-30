@@ -575,19 +575,25 @@ local function SubmitAddByID(inst, action)
     end
 end
 
--- ── INSTANCE CONSTRUCTION (lazy, one per host parent) ──
-local function BuildInstance(parent)
+-- ============================================================
+-- THE OVERLAY SHELL
+-- ------------------------------------------------------------
+-- What "opens the way the spell database does" actually IS: a panel filling the
+-- settings content area, with a title, a close cross, a search box, and a
+-- scrolling list under them. TWO overlays now wear it -- the spell database, and
+-- the filter list the Aura Designer's add panel opens beside it -- so it is one
+-- constructor rather than a second hand-built copy that drifts.
+--
+-- ⚠ THE SHELL OWNS NO ROWS. Everything below the search box is the caller's:
+-- the spell picker fills the list with class-grouped spell rows and adds its own
+-- class/category dropdowns and add-by-id box; the filter picker fills it with
+-- expandable filter rows. Extracting further would mean branching one render
+-- loop on which overlay it was, which is the fork this avoids.
+--
+-- `inst.Render(inst)` is the caller's render pass; the shell calls it whenever
+-- the search text changes, and nothing else.
+local function BuildOverlayShell(parent, inst)
     local GUI = DF.GUI
-    local inst = {
-        rows = {},
-        headers = {},
-        addBtns = {},
-        search = "",
-        classFilter = PICKER_ALL_CLASSES,
-        catFilter = PICKER_ALL_CATS,
-        echoGen = 0,
-        classOptions = {},
-    }
 
     local picker = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     GUI:CreatePanelBackdrop(picker, { bgAlpha = 0.98, borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
@@ -652,8 +658,111 @@ local function BuildInstance(parent)
         local q = (eb:GetText() or ""):lower()
         if q == inst.search then return end
         inst.search = q
-        if picker:IsShown() then RefreshInstance(inst) end
+        if picker:IsShown() and inst.Render then inst.Render(inst) end
     end)
+
+    -- List background: top offset set per open (what stands between the search
+    -- box and the list differs per overlay).
+    local listBg = CreateFrame("Frame", nil, picker, "BackdropTemplate")
+    GUI:CreatePanelBackdrop(listBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
+    inst.listBg = listBg
+
+    local scroll = CreateFrame("ScrollFrame", nil, listBg, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 4, -4)
+    scroll:SetPoint("BOTTOMRIGHT", -24, 4)
+    DF.GUI.StyleScrollBar(scroll)
+    inst.scroll = scroll
+
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(400, 1)
+    scroll:SetScrollChild(content)
+    scroll:SetScript("OnSizeChanged", function(_, w)
+        if w and w > 0 then content:SetWidth(w) end
+    end)
+    inst.content = content
+
+    inst.empty = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
+    inst.empty:SetPoint("CENTER", listBg, "CENTER", 0, 0)
+    inst.empty:SetJustifyH("CENTER") -- opts.emptyText messages can be multi-line
+    inst.empty:SetText(L["No results found"])
+    inst.empty:Hide()
+
+    function inst:Close()
+        self.frame:Hide()
+    end
+    function inst:IsOpen()
+        return self.frame:IsShown()
+    end
+    function inst:Refresh()
+        if self.frame:IsShown() and self.Render then self.Render(self) end
+    end
+
+    return inst
+end
+
+-- The half of an open that is the shell's: where the overlay sits, how high in
+-- the stack, what it is called, and a search box cleared back to empty. The
+-- caller owns everything from `listTop` down, which is why that number is its
+-- argument rather than a constant here.
+local function OpenOverlayShell(inst, opts, listTop)
+    local picker = inst.frame
+    local parent = opts.parent
+
+    -- Instances are cached per parent, so one BUILT mid-combat skipped its
+    -- keyboard setup and would never get ESC-close. Retry at every open:
+    -- EnableKeyboard is not the protected call (only
+    -- SetPropagateKeyboardInput is, and the OnKeyDown handler already
+    -- combat-guards those).
+    if not picker:IsKeyboardEnabled() and not InCombatLockdown() then
+        picker:EnableKeyboard(true)
+        picker:SetPropagateKeyboardInput(true)
+    end
+
+    picker:ClearAllPoints()
+    if opts.points then
+        for _, p in ipairs(opts.points) do
+            picker:SetPoint(p[1], p[2], p[3], p[4], p[5])
+        end
+    else
+        picker:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+        picker:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+    end
+    picker:SetFrameLevel(parent:GetFrameLevel() + 30)
+
+    inst.title:SetText(opts.title or L["Add from Database"])
+    local sc = opts.subtitleColor
+    inst.subtitle:SetTextColor(sc and sc.r or 0.5, sc and sc.g or 0.5, sc and sc.b or 0.5)
+    local sub = opts.subtitle
+    if type(sub) == "function" then sub = sub() end
+    inst.subtitle:SetText(sub or "")
+
+    -- Fresh transient state per open: clear the search (state BEFORE
+    -- SetText so the OnTextChanged guard skips a redundant refresh).
+    inst.search = ""
+    if inst.searchBox.EditBox:GetText() ~= "" then
+        inst.searchBox.EditBox:SetText("")
+    end
+
+    inst.listBg:ClearAllPoints()
+    inst.listBg:SetPoint("TOPLEFT", 10, listTop)
+    inst.listBg:SetPoint("BOTTOMRIGHT", -10, 10)
+end
+
+-- ── INSTANCE CONSTRUCTION (lazy, one per host parent) ──
+local function BuildInstance(parent)
+    local GUI = DF.GUI
+    local inst = BuildOverlayShell(parent, {
+        rows = {},
+        headers = {},
+        addBtns = {},
+        search = "",
+        classFilter = PICKER_ALL_CLASSES,
+        catFilter = PICKER_ALL_CATS,
+        echoGen = 0,
+        classOptions = {},
+    })
+    inst.Render = RefreshInstance
+    local picker = inst.frame
 
     -- Filter row under the search box: Class + Category dropdowns, side by
     -- side. They combine with the search text (row shows only if it matches
@@ -707,41 +816,9 @@ local function BuildInstance(parent)
     echoText:Hide()
     inst.echoText = echoText
 
-    -- List background: top offset set per open (the add-by-ID row is only
-    -- there when the consumer asks for it)
-    local listBg = CreateFrame("Frame", nil, picker, "BackdropTemplate")
-    GUI:CreatePanelBackdrop(listBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
-    inst.listBg = listBg
-
-    local scroll = CreateFrame("ScrollFrame", nil, listBg, "ScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 4, -4)
-    scroll:SetPoint("BOTTOMRIGHT", -24, 4)
-    DF.GUI.StyleScrollBar(scroll)
-
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(400, 1)
-    scroll:SetScrollChild(content)
-    scroll:SetScript("OnSizeChanged", function(_, w)
-        if w and w > 0 then content:SetWidth(w) end
-    end)
-    inst.content = content
-
-    inst.empty = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
-    inst.empty:SetPoint("CENTER", listBg, "CENTER", 0, 0)
-    inst.empty:SetJustifyH("CENTER") -- opts.emptyText messages can be multi-line
-    inst.empty:SetText(L["No results found"])
-    inst.empty:Hide()
-
     -- ── HANDLE METHODS ──
-    function inst:Close()
-        self.frame:Hide()
-    end
-    function inst:IsOpen()
-        return self.frame:IsShown()
-    end
-    function inst:Refresh()
-        if self.frame:IsShown() then RefreshInstance(self) end
-    end
+    -- (Close / IsOpen / Refresh are the shell's; these two are the spell
+    -- picker's own.)
     function inst:RefreshRecords()
         if self.frame:IsShown() then
             self.indexSource = nil -- force the provider re-run
@@ -773,38 +850,12 @@ function R:OpenSpellPicker(opts)
     inst.opts = opts
     local picker = inst.frame
 
-    -- Instances are cached per parent, so one BUILT mid-combat skipped its
-    -- keyboard setup and would never get ESC-close. Retry at every open:
-    -- EnableKeyboard is not the protected call (only
-    -- SetPropagateKeyboardInput is, and the OnKeyDown handler already
-    -- combat-guards those).
-    if not picker:IsKeyboardEnabled() and not InCombatLockdown() then
-        picker:EnableKeyboard(true)
-        picker:SetPropagateKeyboardInput(true)
-    end
+    -- The list top is the one number the shell cannot know: the ad-hoc "#id"
+    -- row stands between the filter dropdowns and the list only when the
+    -- consumer asks for it.
+    OpenOverlayShell(inst, opts, opts.allowAddByID and -120 or -92)
 
-    picker:ClearAllPoints()
-    if opts.points then
-        for _, p in ipairs(opts.points) do
-            picker:SetPoint(p[1], p[2], p[3], p[4], p[5])
-        end
-    else
-        picker:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-        picker:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
-    end
-    picker:SetFrameLevel(parent:GetFrameLevel() + 30)
-
-    inst.title:SetText(opts.title or L["Add from Database"])
-    local sc = opts.subtitleColor
-    inst.subtitle:SetTextColor(sc and sc.r or 0.5, sc and sc.g or 0.5, sc and sc.b or 0.5)
-
-    -- Fresh transient state per open: clear the search (state BEFORE
-    -- SetText so the OnTextChanged guard skips a redundant refresh) and
-    -- reset both filters — every open starts unfiltered.
-    inst.search = ""
-    if inst.searchBox.EditBox:GetText() ~= "" then
-        inst.searchBox.EditBox:SetText("")
-    end
+    -- ...and both filters reset too — every open starts unfiltered.
     if inst.classFilter ~= PICKER_ALL_CLASSES or inst.catFilter ~= PICKER_ALL_CATS then
         inst.classFilter = PICKER_ALL_CLASSES
         inst.catFilter = PICKER_ALL_CATS
@@ -827,9 +878,7 @@ function R:OpenSpellPicker(opts)
     -- button carrying its label, e.g. Add; two = Icon / Square).
     inst.echoGen = inst.echoGen + 1
     inst.echoText:Hide()
-    local listTop = -92
     if opts.allowAddByID then
-        listTop = -120
         inst.addBox:Show()
         inst.addBox.EditBox:SetText("")
         local actions = opts.rowActions or {}
@@ -872,12 +921,286 @@ function R:OpenSpellPicker(opts)
         inst.addBox:Hide()
         for _, btn in ipairs(inst.addBtns) do btn:Hide() end
     end
-    inst.listBg:ClearAllPoints()
-    inst.listBg:SetPoint("TOPLEFT", 10, listTop)
-    inst.listBg:SetPoint("BOTTOMRIGHT", -10, 10)
 
     BuildIndex(inst)
     picker:Show()
     RefreshInstance(inst)
+    return inst
+end
+
+-- ============================================================
+-- SHARED FILTER-LIST PICKER
+-- ------------------------------------------------------------
+-- The registry's filters, in the SAME overlay the spell database opens in
+-- (BuildOverlayShell above). Spec section 27.2: "start from a filter" is not a
+-- footnote under the spell button, it is the other way of answering the same
+-- question, so it opens onto the same surface at the same size rather than into
+-- a 240px anchored dropdown.
+--
+-- ⚠ A SIBLING OPENER, NOT A MODE OF THE SPELL PICKER, and the reason is the
+-- render loop rather than the chrome. OpenSpellPicker's is class-grouped over
+-- SpellDB records with a fixed row shape -- icon, class-coloured name, blocked
+-- check, per-action buttons -- driven by a class dropdown, a category dropdown
+-- and an add-by-id box. A filter is none of those things and wants none of those
+-- controls. Making it a mode would mean an `if` through BuildIndex, BindRow and
+-- RefreshInstance in a component five consumers depend on, and the two lists
+-- would end up sharing a file and nothing else. What they DO share is the shell,
+-- and that is now one constructor -- so "it opens the way the spell database
+-- does" is a fact about the code rather than a resemblance.
+--
+-- ☠ AND THE PEEK LIVES IN THE ROWS, NOT IN A SPLIT (spec section 27.3). A
+-- master/detail inside this overlay does not fit the window's 520px minimum: the
+-- content area is 333px there and the list ~285px, so a filter column wide
+-- enough for "External Defensives" with its chevron and count (~150px) leaves
+-- ~135 for a spell column that has to carry a 16px icon and "Blessing of
+-- Protection". That is section 25's mistake again -- fitting and being readable
+-- are different claims, and only the first would have been tested. Expanding IN
+-- PLACE gives both lists the whole width at every window size, and the overlay
+-- is already the scrolling surface a 75-spell filter needs.
+--
+-- opts = {
+--   parent       (Frame, required) host the overlay covers
+--   title        (optional) header text, default L["Filters"]
+--   subtitle / subtitleColor  as OpenSpellPicker
+--   isLinked     (optional) function(kind, key) -> true to leave out
+--   actionLabel  (optional) the per-row button's text, default L["Select"]
+--   onPick       function(kind, key, name); the picker closes itself first
+--   emptyText    (optional) override for the no-candidates line
+--   onClose      (optional) as OpenSpellPicker
+-- }
+-- Returned handle: :Close() :Refresh() :IsOpen().
+-- ============================================================
+
+local FILTER_ROW_H = 26
+local PEEK_ROW_H   = 22
+local PEEK_INDENT  = 22
+local ICON_PATH    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
+local filterInstances = {} -- [parentFrame] = instance
+
+-- Forward-declared because both row pools close over it and it closes over
+-- them: a row's OnClick re-renders the list it lives in.
+local RefreshFilterInstance
+
+-- ── ROW POOLS ──
+-- Two shapes, two pools. A peek row is not a filter row with things hidden -- it
+-- carries no count and no button -- and sharing one pool would mean every bind
+-- undoing the other kind's furniture.
+local function AcquireFilterRow(inst, i)
+    local row = inst.filterRows[i]
+    if row then
+        row:Show()
+        return row
+    end
+    local GUI = DF.GUI
+    row = CreateFrame("Button", nil, inst.content, "BackdropTemplate")
+    row:SetHeight(FILTER_ROW_H - 2)
+    GUI:CreateElementBackdrop(row, { outline = false, bgColor = { 0.08, 0.08, 0.08, 0.6 } })
+
+    row.chevron = row:CreateTexture(nil, "ARTWORK")
+    row.chevron:SetSize(12, 12)
+    row.chevron:SetPoint("LEFT", 6, 0)
+    row.chevron:SetVertexColor(0.65, 0.65, 0.65)
+
+    -- ☠ ITS OWN SLOT AT THE RIGHT, NEVER A CONTROL LAID OVER THE ROW. A widget
+    -- drawn on top of another control's art takes the mouse across the whole of
+    -- it -- which is how a 220px scale slider over a 76px tile made the add
+    -- panel's pictures unclickable (the bug spec section 27 opens with). The
+    -- button owns its rectangle, the row owns everything left of it.
+    row.action = GUI:CreateButton(row, "", 52, 18, function(self)
+        local r = self:GetParent()
+        local e = r._entry
+        if not e then return end
+        local o = inst.opts
+        inst.frame:Hide()
+        if o and o.onPick then o.onPick(e.kind, e.key, r._label) end
+    end)
+    row.action:SetPoint("RIGHT", -6, 0)
+
+    row.count = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    row.count:SetJustifyH("RIGHT")
+    row.count:SetWordWrap(false)
+    row.count:SetTextColor(0.55, 0.55, 0.55)
+    row.count:SetPoint("RIGHT", row.action, "LEFT", -6, 0)
+
+    row.name = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    row.name:SetJustifyH("LEFT")
+    row.name:SetWordWrap(false)
+    row.name:SetPoint("LEFT", row.chevron, "RIGHT", 6, 0)
+    row.name:SetPoint("RIGHT", row.count, "LEFT", -6, 0)
+
+    row:SetScript("OnClick", function(self)
+        local e = self._entry
+        if not e then return end
+        inst.expanded[e.key] = (not inst.expanded[e.key]) or nil
+        RefreshFilterInstance(inst)
+    end)
+    row:SetScript("OnEnter", function(self) self:SetBackdropColor(0.12, 0.12, 0.12, 0.8) end)
+    row:SetScript("OnLeave", function(self) self:SetBackdropColor(0.08, 0.08, 0.08, 0.6) end)
+
+    inst.filterRows[i] = row
+    return row
+end
+
+local function AcquirePeekRow(inst, i)
+    local row = inst.peekRows[i]
+    if row then
+        row:Show()
+        return row
+    end
+    row = CreateFrame("Button", nil, inst.content)
+    row:SetHeight(PEEK_ROW_H - 2)
+
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(16, 16)
+    row.icon:SetPoint("LEFT", 4, 0)
+    row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    row.state = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    row.state:SetPoint("RIGHT", -8, 0)
+    row.state:SetJustifyH("RIGHT")
+    row.state:SetWordWrap(false)
+    row.state:SetTextColor(0.5, 0.5, 0.5)
+
+    row.name = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    row.name:SetJustifyH("LEFT")
+    row.name:SetWordWrap(false)
+    row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+    row.name:SetPoint("RIGHT", row.state, "LEFT", -6, 0)
+
+    row:SetScript("OnEnter", function(self)
+        if self._spellID then
+            ShowSpellTooltip(self, self._spellID, self._name, nil, nil)
+        end
+    end)
+    row:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
+
+    inst.peekRows[i] = row
+    return row
+end
+
+-- ── REFRESH (render pass) ──
+RefreshFilterInstance = function(inst)
+    local opts = inst.opts or {}
+    local GUI = DF.GUI
+    local tc = GUI.GetThemeColor()
+    inst.title:SetTextColor(tc.r, tc.g, tc.b)
+    local sub = opts.subtitle
+    if type(sub) == "function" then sub = sub() end
+    inst.subtitle:SetText(sub or "")
+
+    -- ☠ RE-ASKED ON EVERY REFRESH, NEVER CACHED AT OPEN. A preset's enabled
+    -- count moves the moment somebody toggles a spell in the Filter Designer,
+    -- and a custom filter can be created or deleted while this list is up.
+    local entries = R:ListFilters(opts.isLinked)
+    local search = inst.search or ""
+
+    local y, usedFilter, usedPeek = 4, 0, 0
+    local function PeekRow(indentY)
+        usedPeek = usedPeek + 1
+        local prow = AcquirePeekRow(inst, usedPeek)
+        prow:ClearAllPoints()
+        prow:SetPoint("TOPLEFT", PEEK_INDENT, -indentY)
+        prow:SetPoint("TOPRIGHT", 0, -indentY)
+        return prow
+    end
+
+    for _, e in ipairs(entries) do
+        -- A preset's name is a locale key; a custom filter's is what the user
+        -- typed. R:ListFilters says which, and refuses to guess.
+        local label = e.custom and e.name or L[e.name]
+        if search == "" or label:lower():find(search, 1, true) then
+            usedFilter = usedFilter + 1
+            local row = AcquireFilterRow(inst, usedFilter)
+            local open = inst.expanded[e.key] and true or false
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", 0, -y)
+            row:SetPoint("TOPRIGHT", 0, -y)
+            row._entry, row._label = e, label
+            row.chevron:SetTexture(ICON_PATH .. (open and "expand_less" or "expand_more"))
+            row.name:SetText(label)
+            row.name:SetTextColor(0.90, 0.90, 0.90)
+            -- A preset says how much of itself is switched on; a custom filter is
+            -- all of itself, so "12/12" there would be noise dressed as
+            -- information.
+            row.count:SetText(e.custom and format("%d %s", e.total, L["Spells"])
+                                        or format("%d/%d", e.enabled, e.total))
+            row.action.Text:SetText(opts.actionLabel or L["Select"])
+            row:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+            y = y + FILTER_ROW_H
+
+            if open then
+                local list = R:FilterSpellList(e.key)
+                if list and #list > 0 then
+                    for _, item in ipairs(list) do
+                        local prow = PeekRow(y)
+                        prow.icon:SetTexture(item.icon or FALLBACK_ICON)
+                        prow.icon:SetAlpha(item.enabled and 1 or 0.4)
+                        prow.icon:SetDesaturated(not item.enabled)
+                        prow.name:SetText(item.name)
+                        prow.name:SetAlpha(item.enabled and 1 or 0.5)
+                        ApplyNameColor(prow.name, item.class, not item.enabled)
+                        -- BOTH halves of what the user came to see: what is in the
+                        -- filter, and which of it is switched off.
+                        prow.state:SetText(item.enabled and "" or L["Disabled"])
+                        prow._spellID = (not item.raw) and item.id or nil
+                        prow._name = item.name
+                        y = y + PEEK_ROW_H
+                    end
+                else
+                    local prow = PeekRow(y)
+                    prow.icon:SetTexture(nil)
+                    prow.name:SetText(L["This filter is empty."])
+                    prow.name:SetAlpha(1)
+                    prow.name:SetTextColor(0.55, 0.55, 0.55)
+                    prow.state:SetText("")
+                    prow._spellID, prow._name = nil, nil
+                    y = y + PEEK_ROW_H
+                end
+                y = y + 4
+            end
+        end
+    end
+
+    for j = usedFilter + 1, #inst.filterRows do inst.filterRows[j]:Hide() end
+    for j = usedPeek + 1, #inst.peekRows do inst.peekRows[j]:Hide() end
+
+    -- Nothing to offer at all reads differently from a search that matched
+    -- nothing, the same distinction the spell picker's empty line draws.
+    inst.empty:SetText((#entries == 0 and (opts.emptyText or L["No filters available"]))
+                       or L["No results found"])
+    inst.empty:SetShown(usedFilter == 0)
+    inst.content:SetHeight(mmax(1, y + 4))
+end
+
+function R:OpenFilterPicker(opts)
+    local parent = opts and opts.parent
+    if not parent then return nil end
+    local inst = filterInstances[parent]
+    if not inst then
+        inst = BuildOverlayShell(parent, {
+            filterRows = {},
+            peekRows = {},
+            expanded = {},
+            search = "",
+        })
+        inst.Render = RefreshFilterInstance
+        filterInstances[parent] = inst
+    end
+    inst.opts = opts
+
+    -- Nothing stands between the search box and the list here -- no class
+    -- dropdown, no category dropdown, no add-by-id row -- so the list starts
+    -- straight under it.
+    OpenOverlayShell(inst, opts, -50)
+    if not opts.title then inst.title:SetText(L["Filters"]) end
+
+    -- ⚠ FRESH FOLD STATE PER OPEN, like the search box beside it. A peek is a
+    -- glance at one filter on the way to choosing it, not a setting; carrying it
+    -- over means the next open starts with the list scrolled past its own rows.
+    for k in pairs(inst.expanded) do inst.expanded[k] = nil end
+
+    inst.frame:Show()
+    RefreshFilterInstance(inst)
     return inst
 end
