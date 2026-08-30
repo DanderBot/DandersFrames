@@ -20,6 +20,8 @@ local tinsert = table.insert
 local tsort = table.sort
 local mmax = math.max
 local mfloor = math.floor
+-- Added for the chip row's wrap arithmetic; see LayoutChips.
+local mceil = math.ceil
 local CreateFrame = CreateFrame
 local C_Timer = C_Timer
 local GetBuildInfo = GetBuildInfo
@@ -365,7 +367,7 @@ end
 -- MAIN PAGE BUILD
 -- ============================================================
 
-function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
+function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- Build frames once; subsequent calls just refresh widget data.
     -- DoBuild wipes child.ThemeListeners and retires Add()ed children on every
     -- rebuild, so the guard path re-adopts the height spacer and re-registers
@@ -374,7 +376,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         local p = pageRef.child
         p.ThemeListeners = p.ThemeListeners or {}
         table.insert(p.ThemeListeners, pageRef._fdThemeListener)
-        if pageRef._fdSpacer and pageRef.children then
+        -- ☠ THE BANDS ARE RE-ADOPTED EXACTLY AS THE SPACER IS, and for the same
+        -- reason: DoBuild retires every Add()ed child on a rebuild -- hides it,
+        -- clears its points, reparents it to the trash -- so a page that builds its
+        -- frames ONCE has to hand its roots back afterwards. Add() is the call that
+        -- re-parents and re-inserts them, and it arrives fresh on every invocation,
+        -- which is why the adopt pass takes it as an argument rather than closing
+        -- over the first one it ever saw.
+        if pageRef._fdAdoptBands and Add then
+            pageRef._fdAdoptBands(Add)
+        elseif pageRef._fdSpacer and pageRef.children then
             pageRef._fdSpacer:SetParent(p)
             table.insert(pageRef.children, pageRef._fdSpacer)
         end
@@ -390,6 +401,40 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local GUI = guiRef
     local parent = pageRef.child
     local R = DF.FilterRegistry
+
+    -- ============================================================
+    -- WHICH LAYOUT THIS IS
+    -- ------------------------------------------------------------
+    -- `Add` is the tell, and it is the same tell the Aura Designer uses
+    -- (Editor.lua's DF.BuildAuraDesignerPage): a caller holding BuildPage's own Add
+    -- can be served BANDS; one that does not -- an older call site, or classic --
+    -- can only have the island.
+    --
+    -- ☠ THIS PAGE IS NOT A DESIGNER SHELL, WHICH IS WHY IT DOES NOT BUILD ONE.
+    -- GUI:BuildDesignerShell is a preview-plus-tabs shape -- a canvas, a strip
+    -- saying what the canvas is showing, a view switcher, then the caller's bands.
+    -- The Filter Designer has none of those three: it is a MASTER/DETAIL, a list of
+    -- filters and the spells inside the one you picked. Handed the shell it would
+    -- use one of its six slots. So what this borrows from the rework is the COLUMN,
+    -- not the shell: the master collapses into a popout row -- the all-rows rule,
+    -- which is exactly "more than one option goes in a panel" -- and the detail
+    -- becomes the page.
+    --
+    -- ☠ NOTHING BELOW THIS POINT IS BRANCHED ON IT. The island builds exactly as it
+    -- always did, anchored off `parent`, and the band arm RE-HOMES its five roots
+    -- at the end (AdoptBands, at the foot of this function). Threading a layout
+    -- test through 2,700 lines of one closure would fork every site it touched;
+    -- re-anchoring five frames forks none of them, and the two layouts cannot
+    -- drift apart because there is only one build.
+    local tools = (Add and GUI.CreatePopoutPageTools and not DF:IsClassicSettingsLayout())
+                  and GUI:CreatePopoutPageTools(pageRef) or nil
+    local rowsMode = (Add ~= nil) and (tools ~= nil)
+    -- DandersUI's own numbers for a popout row: a 44px plate and the 6px gap under
+    -- it. Named because the page-height arithmetic has to spend it.
+    local FILTERROW_H = 50
+    -- The gap the island puts between its stacked pieces, kept so the band arm has
+    -- the same rhythm rather than a second set of numbers.
+    local BAND_GAP = 10
 
     -- Shared helpers from FilterRegistry/SpellPicker.lua (loads after this
     -- file — safe here because pages build long after load time)
@@ -1037,11 +1082,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- Non-wrapping with a width, set in LayoutChips: a label too long for its
         -- chip then ellipsises inside it instead of drawing past its own edge.
         if b.Text then b.Text:SetWordWrap(false) end
-        if i == 1 then
-            b:SetPoint("LEFT", 0, 0)
-        else
-            b:SetPoint("LEFT", chipButtons[i - 1], "RIGHT", CHIP_GAP, 0)
-        end
+        -- Anchored by LayoutChips, which owns the wrap; see its header. A build-time
+        -- chain LEFT-of-the-previous cannot express a second row.
+        b:SetPoint("TOPLEFT", chipRow, "TOPLEFT", 0, 0)
         -- Same dispatcher as the banner links, so the Defensive Icon chip scrolls to
         -- and pulses that page's filter section exactly as the banner's link does.
         b:SetScript("OnClick", function(self)
@@ -1138,19 +1181,63 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- ⚠ Divides by the SHOWN count, not the pool size. The Debuffs tab uses two of
     -- the three, and sizing for three there would leave a chip's width of dead space
     -- before the help button.
+    -- ☠ AND THEY WRAP, BECAUSE ONE ROW HAS A FLOOR THIS PAGE CAN NO LONGER PAY.
+    -- The help glyph is pinned to the row's right edge and CHIP_MIN_W is the point
+    -- past which a label like "Defensive Icon  2 filters" stops being readable, so
+    -- three chips need 3*92 + 2*6 + 6 + 22 = 316px. That fitted only because this
+    -- page forced the window to 850; at the 520px minimum the band is ~280 and the
+    -- third chip ran underneath the help button. Below the floor they take as many
+    -- rows as they need instead of overlapping.
+    --
+    -- ⚠ THE CHIPS ARE ANCHORED HERE, NOT AT BUILD. They used to chain LEFT off each
+    -- other, which cannot express a second row; this owns both axes so the wrap has
+    -- one writer.
     local function LayoutChips()
         local rowW = chipRow:GetWidth() or 0
         if rowW < 60 then return end   -- not laid out yet; OnSizeChanged re-runs us
-        local shown = 0
+        local shown = {}
         for _, b in ipairs(chipButtons) do
-            if b:IsShown() then shown = shown + 1 end
+            if b:IsShown() then shown[#shown + 1] = b end
         end
-        if shown == 0 then return end
-        local avail = rowW - CHIP_HELP_W - CHIP_GAP - (CHIP_GAP * (shown - 1))
-        local w = mmax(CHIP_MIN_W, mfloor(avail / shown))
-        for _, b in ipairs(chipButtons) do
+        local n = #shown
+        if n == 0 then return end
+        -- What the chips have, once the help glyph and its gutter are taken out.
+        local avail = rowW - CHIP_HELP_W - CHIP_GAP
+        -- How many fit at the floor. mmax(1, ...) rather than a guard: one chip per
+        -- row is the honest answer at a width that cannot hold two, and a zero here
+        -- would divide by nothing below.
+        local perRow = mmax(1, mfloor((avail + CHIP_GAP) / (CHIP_MIN_W + CHIP_GAP)))
+        if perRow > n then perRow = n end
+        local rows = mceil(n / perRow)
+        -- ⚠ Divides by what is on THIS row, not by the shown count: the last row of
+        -- a wrap holds fewer, and sizing every chip to the short row's share would
+        -- leave the full rows with a chip's worth of dead space on the end.
+        local w = mmax(CHIP_MIN_W, mfloor((avail - CHIP_GAP * (perRow - 1)) / perRow))
+        for i, b in ipairs(shown) do
+            local col   = (i - 1) % perRow
+            local rowIx = mfloor((i - 1) / perRow)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", chipRow, "TOPLEFT",
+                       col * (w + CHIP_GAP), -(rowIx * (CHIP_H + CHIP_GAP)))
             b:SetWidth(w)
             if b.Text then b.Text:SetWidth(w - 10) end
+        end
+        local h = rows * CHIP_H + (rows - 1) * CHIP_GAP
+        -- ⚠ AND THE BAND IS TOLD. A height measured before layout and then SPENT is
+        -- the Class-1 trap this rework has already paid for twice; this runs from
+        -- OnSizeChanged, which is when the real width finally arrives, and re-reports
+        -- through layoutHeight + RefreshStates rather than leaving every band below
+        -- it sitting at a stale offset.
+        --
+        -- ☠ ONE WRITER, EITHER WAY. In the band arm the frame IS the band, so
+        -- dfSetHeight owns its height and the gap to the next band rides in the
+        -- SLOT -- the chips are top-anchored, so the extra is air at the bottom.
+        -- Setting the height here as WELL would have this fighting dfSetHeight
+        -- across an OnSizeChanged that each of them fires.
+        if chipRow.dfSetHeight then
+            chipRow.dfSetHeight(h + BAND_GAP, h)
+        else
+            chipRow:SetHeight(h)
         end
     end
     chipRow:SetScript("OnSizeChanged", LayoutChips)
@@ -1212,7 +1299,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         height = CHIP_H,
         icon   = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\question.png", size = 13 },
     })
-    helpBtn:SetPoint("RIGHT", 0, 0)
+    -- ⚠ TOPRIGHT, not RIGHT. The row GROWS DOWNWARD when the chips wrap, and a
+    -- centre anchor would slide the glyph down with it, away from the first row of
+    -- chips it belongs beside.
+    helpBtn:SetPoint("TOPRIGHT", 0, 0)
     helpBtn:HookScript("OnEnter", function(self)
         GUI:ShowTooltip(self, {
             title = L["How this works"],
@@ -1617,7 +1707,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         if selKind ~= "custom" or not R:GetCustomFilter(selKey) then return end
         OpenPicker(selKey)
     end)
-    dbBtn:SetPoint("TOPRIGHT", -10, -(ROW3_Y + BTN_ON_EB))
+    -- Anchored by LayoutHeaderRows below, which owns whether this shares row 3 or
+    -- takes a row of its own.
 
     -- List background sits below the header panel
     local listBg = CreateFrame("Frame", nil, rightArea, "BackdropTemplate")
@@ -1740,8 +1831,47 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- Anchored to dbBtn rather than the panel edge, which is what it used to use --
     -- with the picker on this row now, a panel-edge anchor would run the message
     -- straight under it.
-    echoText:SetPoint("LEFT", addBtn, "RIGHT", 10, 0)
-    echoText:SetPoint("RIGHT", dbBtn, "LEFT", -8, 0)
+    -- ☠ ROW 3 IS A ROW OF FIXED-WIDTH CHILDREN, AND ITS SUM IS WIDER THAN THE
+    -- NARROWEST BAND. The Spell ID box (90), the Add button (50) and the
+    -- Add-from-Database button (130) are all fixed, so even with the echo squeezed
+    -- to nothing the row costs 10 + 90 + 6 + 50 + 8 + 130 + 10 = 304px. At the
+    -- window's 520px minimum the band is ~280 and the picker drew straight over the
+    -- Add button -- the same Class-2 failure the designer preset bar had, a row that
+    -- only ever fitted because the page forced the window to 850.
+    --
+    -- ☠ SO THE PICKER DROPS TO A ROW OF ITS OWN, and the header grows by that row.
+    -- Shrinking the three instead was the alternative and it is worse: the echo is
+    -- the ONLY feedback an add-by-ID gives, and taking it to zero width fails
+    -- silently -- you type an id, nothing happens, and nothing says why.
+    --
+    -- ⚠ RE-TAKEN ON RESIZE, not decided once. The band is whatever the window is,
+    -- and the threshold is DERIVED from the parts above rather than being a second
+    -- magic number: 10 + 90 + 6 + 50 + 8 + 130 + 10.
+    local ROW3_ONE_LINE_W = 10 + 90 + 6 + 50 + 8 + 130 + 10
+    local ROW4_H = 26
+    local function LayoutHeaderRows()
+        local w = headerPanel:GetWidth() or 0
+        if w < 10 then return end
+        local oneLine = w >= ROW3_ONE_LINE_W
+        dbBtn:ClearAllPoints()
+        echoText:ClearAllPoints()
+        echoText:SetPoint("LEFT", addBtn, "RIGHT", 10, 0)
+        if oneLine then
+            dbBtn:SetPoint("TOPRIGHT", -10, -(ROW3_Y + BTN_ON_EB))
+            echoText:SetPoint("RIGHT", dbBtn, "LEFT", -8, 0)
+        else
+            dbBtn:SetPoint("TOPLEFT", 10, -(ROW3_Y + BTN_ON_EB + ROW4_H))
+            -- With the picker gone from this row the echo takes what is left of it,
+            -- which is the whole point of moving the button rather than shrinking it.
+            echoText:SetPoint("RIGHT", headerPanel, "RIGHT", -10, 0)
+        end
+        -- ⚠ ONLY WHEN IT MOVED. This is called FROM OnSizeChanged, and a height
+        -- written back unconditionally is a size change answering a size change.
+        local wantH = HEADER_H + (oneLine and 0 or ROW4_H)
+        if (headerPanel:GetHeight() or 0) ~= wantH then headerPanel:SetHeight(wantH) end
+    end
+    headerPanel:SetScript("OnSizeChanged", LayoutHeaderRows)
+    LayoutHeaderRows()
 
     -- ========== LEFT COLUMN ACTION BUTTONS ==========
     -- Created after the search box on purpose: SelectFilter clears the active
@@ -1811,7 +1941,20 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- so scrolling it into view is part of the cue. A pulse below the fold is no
     -- cue at all, and it would fail silently.
     local addRowY = 0   -- set by RefreshLeft, which owns the list's geometry
+    -- ☠ IN THE BAND LAYOUT THE MASTER IS BEHIND A ROW, so "scroll it into view and
+    -- pulse it" has to OPEN that row's panel first. A pulse inside a shut panel is
+    -- no cue at all -- which is the same argument that made the scroll part of these
+    -- two entry points in the first place.
+    --
+    -- ⚠ READS pageRef._fdFilterRow AT CALL TIME. The row is built by the adopt pass
+    -- at the foot of this function, long after this closure is created; an upvalue
+    -- captured here would freeze nil. A no-op in the island, which has no row.
+    local function OpenFilterList()
+        local row = pageRef._fdFilterRow
+        if row and row.OpenPopout then row:OpenPopout() end
+    end
     pageRef._fdFocusNewFilter = function()
+        OpenFilterList()
         local range = leftScroll:GetVerticalScrollRange() or 0
         leftScroll:SetVerticalScroll(math.max(0, math.min(addRowY - 8, range)))
         if DF.HighlightWidget then DF:HighlightWidget(addRow) end
@@ -1969,6 +2112,40 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     exportBtn:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 30)
     delBtn:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -6, 30)
     resetBtn:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 6)
+
+    -- ☠ AND THEIR WIDTH IS THE PANEL'S, NOT A NUMBER DERIVED FROM LEFT_W. Two
+    -- 127px buttons plus the 6px margins and the 4px gutter need 266px, which is
+    -- exactly what the island's 270px panel has and 6px MORE than the 260 a popout
+    -- pane gives. Anchored from opposite corners at a fixed width they do not
+    -- shrink -- they overlap in the middle -- which is the same Class-2 failure the
+    -- designer preset bar had, a row of fixed-width children sized against the one
+    -- width the page used to be guaranteed.
+    --
+    -- ⚠ Re-taken on resize rather than computed once, for the reason every other
+    -- repair in this pass is: the panel is whatever its host is.
+    local function LayoutActionStrip()
+        local w = leftPanel:GetWidth() or 0
+        if w < 40 then return end
+        local bw = mfloor((w - 12 - 4) / 2)
+        dupBtn:SetWidth(bw)
+        renameBtn:SetWidth(bw)
+        exportBtn:SetWidth(bw)
+        delBtn:SetWidth(bw)
+        resetBtn:SetWidth(bw)
+    end
+    leftPanel:SetScript("OnSizeChanged", LayoutActionStrip)
+    LayoutActionStrip()
+
+    -- ☠ ...AND THE LIST'S ROWS FOLLOW THE VIEWPORT, WHICH THEY NEVER DID. Every
+    -- filter row spans leftContent corner to corner, and leftContent was fixed at
+    -- LEFT_W - 28 -- a number that only matched the scroll frame while the panel was
+    -- exactly 270 wide. Narrower, the rows overhang the viewport and each row's
+    -- spell COUNT, which sits at its right edge, is clipped away. The right-hand
+    -- spell list has had this sync since it was built; the left one was simply
+    -- never asked to be any width but one.
+    leftScroll:SetScript("OnSizeChanged", function(_, w)
+        if w and w > 0 then leftContent:SetWidth(w) end
+    end)
 
     -- Rule above the strip: without it the buttons read as more rows of the list
     -- they sit under, rather than as a toolbar acting on that list's selection.
@@ -2246,6 +2423,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- the pool before that and you get the row a different filter used to occupy.
     pageRef._fdFocusFilter = function(kind, key)
         if not (kind and key) then return end
+        OpenFilterList()
         SelectFilter(kind, key)
         for _, row in ipairs(leftRows) do
             if row:IsShown() and row._kind == kind and row._key == key then
@@ -3181,16 +3359,164 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     tinsert(parent.ThemeListeners, themeListener)
     pageRef._fdThemeListener = themeListener
 
+    -- ============================================================
+    -- THE BAND ARM -- FIVE ROOTS, RE-HOMED
+    -- ------------------------------------------------------------
+    -- Everything above built the island: five frames chained off `parent` --
+    -- banner, chip row, left panel, right area, freshness note -- with every
+    -- control inside them anchored to its own root. That last part is what makes
+    -- this cheap: re-anchor the five roots and their contents follow.
+    --
+    -- The column, top to bottom:
+    --
+    --     [ info banner                     ]
+    --     [ consumer chips           [?]    ]   wraps below ~316px
+    --     [ Filters   <the one you picked> >]   THE MASTER, behind a row
+    --     [ header + spell list             ]   THE DETAIL, the page's own band
+    --     [ spell database: ...             ]
+    --
+    -- ☠ THE MASTER GOES IN A POPOUT, NOT A SECOND BAND. Two tall lists stacked in
+    -- one column is a page you scroll to change what you are looking at. Behind a
+    -- row it is the all-rows rule -- more than one option opens a panel -- and DF
+    -- popouts dock OUTSIDE the window, so a docked filter list standing beside a
+    -- narrow window is the old two-column view with the window's width back.
+    --
+    -- ☠ ITS HEIGHT IS FIXED, and PANEL_H does not reach it. A pane taller than 60%
+    -- of the screen grows a scroll frame of its own (DandersUI's PopoutRow cap), and
+    -- the master already HAS one -- leftScroll -- so a viewport-sized master would
+    -- be a list scrolling inside a list.
+    local PANE_MASTER_H = PANEL_H_MIN
+    if rowsMode then
+        local paneW = GUI.PopoutContentWidth or 260
+        local filterMount = tools.PopoutContent(function(group, holder)
+            -- ☠ A FRAME, WHICH IS THE ONLY REASON THIS TRAVELS. PopoutContent builds
+            -- into a HIDDEN holder and moves FRAMES into the group; a REGION made on
+            -- that holder -- a FontString -- stays behind and is never drawn, in
+            -- silence. Everything the master owns is inside leftPanel, and leftPanel
+            -- is a Frame, so the whole thing moves as one object.
+            leftPanel:SetParent(holder)
+            leftPanel:ClearAllPoints()
+            leftPanel:SetSize(paneW, PANE_MASTER_H)
+            group:AddWidget(leftPanel, PANE_MASTER_H)
+        end)
+        local filterRow = GUI:CreatePopoutRow(parent, {
+            label   = L["Filters"],
+            db      = tools.RowDB,
+            -- The summary IS the answer to "which one am I editing", which is the
+            -- question the left column used to answer by having a highlighted row.
+            summary = function() return CurrentDisplayName() end,
+            window  = DF.GUIFrame,
+            clipTo  = pageRef,
+            build   = filterMount,
+        })
+        pageRef._fdFilterRow = filterRow
+        -- ⚠ NO ClaimKeys AND NO FOOTER, and both are refusals rather than omissions.
+        -- This page owns no per-mode db keys at all -- CreateCopyButton is called with
+        -- an empty list for exactly that reason (see GUI/Pages/Auras.lua) -- and what
+        -- the panel edits is a per-ACCOUNT custom-filter store and a per-PROFILE
+        -- override diff. There is no key for a modified tick to test and nothing a
+        -- Reset Group could write.
+
+        -- The freshness note needs a host of its own: it is a FontString, and the
+        -- layout pass hands out SetPoint and SetWidth to FRAMES.
+        local freshHost
+        if dbFreshLabel then
+            freshHost = CreateFrame("Frame", nil, parent)
+            freshHost:SetSize(tools.BandWidth(), BELOW_PANELS_H)
+            dbFreshLabel:SetParent(freshHost)
+            dbFreshLabel:ClearAllPoints()
+            dbFreshLabel:SetPoint("TOPLEFT", freshHost, "TOPLEFT", 0, 0)
+            dbFreshLabel:SetPoint("TOPRIGHT", freshHost, "TOPRIGHT", 0, 0)
+            -- ⚠ AND ITS BAND IS MEASURED. BELOW_PANELS_H is the island's allowance
+            -- for one line of this note under a fixed 270px panel; on a ~280px band
+            -- the same sentence runs to three, and a band that kept the one-line
+            -- number would let the See Also footer draw over it -- which is the exact
+            -- bug BELOW_PANELS_H was introduced to fix, back when the note hung
+            -- outside the height arithmetic entirely.
+            freshHost:SetScript("OnSizeChanged", function(self)
+                local h = mmax((dbFreshLabel:GetStringHeight() or 0) + 6, BELOW_PANELS_H)
+                if self.dfSetHeight then self.dfSetHeight(h) end
+            end)
+        end
+
+        -- Re-report a band's height in place: set layoutHeight, set the height,
+        -- re-run the page's layout pass. The same verb the designer shell's canvas
+        -- and its legacy-tab host carry, and for the same reason -- a height that
+        -- changes after the layout pass has spent it mispositions everything below.
+        --
+        -- ☠ TWO NUMBERS, NOT ONE, AND THE SECOND IS WHY. The SLOT carries the gap to
+        -- the next band; the FRAME is only as tall as what it draws. Collapsing them
+        -- -- letting the frame grow to the slot -- makes AdoptBands' `GetHeight() +
+        -- BAND_GAP` read a height that already contains a gap, so every rebuild adds
+        -- another one. It self-corrects on the next re-flow, which is exactly the
+        -- kind of transient nobody reports and nobody can reproduce.
+        local function BandHeight(host)
+            return function(slotH, frameH)
+                slotH  = mmax(tonumber(slotH) or 1, 1)
+                frameH = mmax(tonumber(frameH) or slotH, 1)
+                if host.layoutHeight == slotH and (host:GetHeight() or 0) == frameH then
+                    return
+                end
+                host.layoutHeight = slotH
+                host:SetHeight(frameH)
+                if pageRef.RefreshStates then pageRef:RefreshStates() end
+            end
+        end
+        chipRow.dfSetHeight   = BandHeight(chipRow)
+        rightArea.dfSetHeight = BandHeight(rightArea)
+        if freshHost then freshHost.dfSetHeight = BandHeight(freshHost) end
+
+        -- ☠ RUN ON EVERY BUILD, NOT ONCE. DoBuild retires every Add()ed child -- it
+        -- hides them, clears their points and reparents them to the trash -- so the
+        -- rebuild guard at the top of this function calls this again with the fresh
+        -- Add it was handed. Add() is what puts them back.
+        --
+        -- ⚠ THE GAP IS IN THE SLOT, NOT IN THE FRAME. The layout pass positions a
+        -- widget at the top of its slot and only forces the widget's own height when
+        -- it carries a `text` field, so a slot one BAND_GAP taller than its frame is
+        -- how a band gets air under it without a spacer per band.
+        local function AdoptBands(addFn)
+            addFn(banner, banner.layoutHeight, "both")
+            addFn(chipRow, (chipRow:GetHeight() or CHIP_H) + BAND_GAP, "both")
+            -- nil: a popout row is fixedRowHeight, so ResolveRowHeight takes the
+            -- kit's own plate + gap rather than a number copied out of it.
+            addFn(filterRow, nil, "both")
+            addFn(rightArea, (rightArea:GetHeight() or PANEL_H_MIN) + BAND_GAP, "both")
+            if freshHost then addFn(freshHost, BELOW_PANELS_H, "both") end
+        end
+        pageRef._fdAdoptBands = AdoptBands
+        AdoptBands(Add)
+
+        -- The banner is an Add()ed child here rather than a frame anchored to the
+        -- page, so its own deferred re-measure (CreateInfoBanner -> RelayoutHost)
+        -- finally reaches the layout it is in. In the island it reached nothing,
+        -- which is what the deferred pass at the foot of this function exists for.
+        -- ⚠ POINTS ONLY CLEARED, NEVER RE-SET. The layout pass ClearAllPoints()es
+        -- every child it places and issues its own TOPLEFT and SetWidth, so a point
+        -- written here is discarded on the next RefreshStates -- and a leftover
+        -- island anchor (banner -> parent, chip row -> banner) would be a lie in the
+        -- meantime about who owns this frame's geometry.
+        banner:ClearAllPoints()
+        chipRow:ClearAllPoints()
+        chipRow:SetHeight(CHIP_H)
+        rightArea:ClearAllPoints()
+    end
+
     -- ========== PAGE HEIGHT SPACER ==========
     -- The page's scroll height comes from RefreshStates summing Add()ed
-    -- children; this page anchors its frames directly, so an invisible spacer
-    -- carries the total height through the standard layout pass.
-    local spacer = CreateFrame("Frame", nil, parent)
-    spacer:SetSize(1, 1)
-    spacer.layoutCol = "both"
-    pageRef._fdSpacer = spacer
-    if pageRef.children then
-        tinsert(pageRef.children, spacer)
+    -- children; the ISLAND anchors its frames directly, so an invisible spacer
+    -- carries the total height through the standard layout pass. The band arm
+    -- above has no use for one: every band is an Add()ed child that carries its
+    -- own height, which is the whole difference between the two layouts.
+    local spacer
+    if not rowsMode then
+        spacer = CreateFrame("Frame", nil, parent)
+        spacer:SetSize(1, 1)
+        spacer.layoutCol = "both"
+        pageRef._fdSpacer = spacer
+        if pageRef.children then
+            tinsert(pageRef.children, spacer)
+        end
     end
 
     -- Size the two panels to whatever the window currently offers, and keep the
@@ -3207,12 +3533,23 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
         local h = PANEL_H_MIN
         if viewport > 0 then
-            local available = viewport - PANEL_CHROME_H - belowH - bannerH
+            -- What stands above the detail. In the band layout that is the chip band
+            -- -- ASKED, not assumed, because it wraps -- the filter row and the gaps
+            -- between the four bands; in the island it is the fixed chrome sum.
+            local chromeH = PANEL_CHROME_H
+            if rowsMode then
+                chromeH = (chipRow:GetHeight() or CHIP_H) + FILTERROW_H + BAND_GAP * 3
+            end
+            local available = viewport - chromeH - belowH - bannerH
             h = mmax(PANEL_H_MIN, mfloor(available * PANEL_H_FRACTION))
         end
         if h ~= PANEL_H then
             PANEL_H = h
-            leftPanel:SetHeight(PANEL_H)
+            -- ☠ THE MASTER DOES NOT FOLLOW IT IN THE BAND LAYOUT. It sits in a popout
+            -- pane at PANE_MASTER_H; growing it with the viewport would push the pane
+            -- past the kit's 60%-of-screen ceiling and wrap the master's own scroll
+            -- frame in a second one.
+            if not rowsMode then leftPanel:SetHeight(PANEL_H) end
             rightArea:SetHeight(PANEL_H)
         end
         -- Always re-assert: the banner can change height independently of the
@@ -3222,7 +3559,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- ⚠ belowH is part of the total. Leaving it out is what let the See Also
         -- footer -- which flows AFTER this spacer -- draw on top of the freshness
         -- note: the page claimed to end where the panels end.
-        spacer.layoutHeight = PANEL_CHROME_H + bannerH + PANEL_H + belowH
+        if rowsMode then
+            -- Bands carry their own heights; the detail re-reports through the same
+            -- layoutHeight + RefreshStates idiom the chip band uses.
+            if rightArea.dfSetHeight then rightArea.dfSetHeight(PANEL_H + BAND_GAP, PANEL_H) end
+        else
+            spacer.layoutHeight = PANEL_CHROME_H + bannerH + PANEL_H + belowH
+        end
     end
     pageRef._fdResolvePanelHeight = ResolvePanelHeight
 
@@ -3267,6 +3610,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- CreateInfoBanner. One deferred pass, matching the banner's own single converge.
     -- Safe to call RefreshStates from here -- SetHTML is idempotent, which is what
     -- stops the refresh -> rebuild -> refresh freeze it guards against.
+    --
+    -- ⚠ STILL RUN IN THE BAND LAYOUT, and not because the banner needs it there.
+    -- An Add()ed banner re-measures into the layout it is in, which is the half this
+    -- pass existed for; what the bands still need is the CHIP ROW's wrap and the
+    -- freshness note's, both of which are resolved from OnSizeChanged and so are
+    -- also a frame late. One deferred pass answers all three.
     if C_Timer and C_Timer.After then
         C_Timer.After(0, function()
             if pageRef._fdResolvePanelHeight then

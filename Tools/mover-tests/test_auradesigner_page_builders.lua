@@ -1425,6 +1425,86 @@ do
     -- is rebuilt under a stationary mouse on every page refresh.
     check(body:find([[btn:HookScript("OnHide", leave)]], 1, true) ~= nil,
           "folder: a tab hidden under the cursor does not come back stuck lit")
+
+    -- ============================================================
+    -- THE THREE FILLS, AND WHY THE SELECTED ONE NEEDS THE ACCENT
+    -- ------------------------------------------------------------
+    -- "The three tabs at the top kinda blend in to the background now." The
+    -- diagnosis that came with it -- that the unselected tabs are drawn DARKER
+    -- than the panel -- is the opposite of what the palette actually says, and
+    -- these numbers are read out of Theme.lua so nobody has to take that on
+    -- trust or re-derive it by eye.
+    -- ============================================================
+    local TH = ui_file_source("Theme.lua")
+    local function themeGrey(name)
+        return tonumber(TH:match("local " .. name .. "%s*=%s*{r = ([%d%.]+)"))
+    end
+    local bg, panel, element = themeGrey("C_BACKGROUND"), themeGrey("C_PANEL"), themeGrey("C_ELEMENT")
+    check(bg and panel and element, "folder: the three theme greys can be read out of Theme.lua")
+    bg, panel, element = bg or 0, panel or 0, element or 0
+    -- C_ELEMENT is LIGHTER than C_PANEL. That single fact is what makes "set the
+    -- unselected tab back by darkening it" impossible here: the tab already sits
+    -- above the panel, and putting it below would put it under the page ground.
+    check(element > panel, "folder: the element grey is LIGHTER than the panel grey...")
+    check(panel > bg, "folder: ...and the panel grey lighter than the page background")
+    -- The ground the strip stands on: a consumer's content panel, C_PANEL at 0.3
+    -- over C_BACKGROUND at 0.95.
+    local ground     = 0.3 * panel + 0.7 * (0.95 * bg)
+    local selected   = 0.8 * panel + 0.2 * ground
+    local unselected = 0.85 * element + 0.15 * ground
+    check(ground < selected, "folder: the selected tab composites above the page ground")
+    check(selected < unselected, "folder: ...and the unselected one above the selected/panel")
+    -- THE WINDOW BETWEEN THE GROUND AND THE PANEL IS 0.025 WIDE, which is the
+    -- whole argument for marking the selected tab with an accent instead of with
+    -- a third fill. If the palette ever opens that gap up, this fails and the
+    -- design decision is worth taking again.
+    check(selected - ground < 0.03,
+          "folder: there is no legible third step between the ground and the panel")
+
+    -- The accent, on the selected tab only, on the edge FURTHEST from the join.
+    check(body:find([[accentBar = btn:CreateTexture(nil, "ARTWORK")]], 1, true) ~= nil,
+          "folder: the selected tab carries an accent bar")
+    check(body:find([[accentBar:SetPoint("TOPLEFT", btn, "TOPLEFT", radius, 0)]], 1, true) ~= nil,
+          "folder: ...on its TOP edge, which is the one the join does not use")
+    -- INSET BY THE RADIUS. Run corner to corner it would put two square ends back
+    -- over the two arcs -- the same trap that keeps a native hover layer off this
+    -- factory.
+    check(body:find([[accentBar:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -radius, 0)]], 1, true) ~= nil,
+          "folder: ...inset by the radius, so it never reaches the two arcs")
+    -- SCOPED TO paint()'S OWN BODY, not the factory's. `accentBar` is declared,
+    -- anchored and coloured elsewhere in the same body, so a body-wide find
+    -- answers "is this name anywhere" and stays green with the show/hide gutted --
+    -- which would leave the bar painted on all three tabs at once.
+    check(paint:find("accentBar:SetShown(on)", 1, true) ~= nil,
+          "folder: ...and the resting paint is what turns it on and off")
+
+    -- The accent is per host and changes on a mode switch, so the bar follows it
+    -- rather than freezing on whatever was live when the strip was built.
+    check(body:find("host:RegisterAccentListener(btn._folderAccentListener, btn)", 1, true) ~= nil,
+          "folder: the bar follows the host accent...")
+    -- OWNED BY THE BUTTON, AND REGISTERED ONCE. A bare closure is something
+    -- nothing can take back off the list, and a tab strip is rebuilt on every page
+    -- refresh; the guard also stops a re-style of the same button stacking a
+    -- second entry on it.
+    check(body:find("if not opts.accent and not btn._folderAccentListener then", 1, true) ~= nil,
+          "folder: ...registered once, and owned by the button so it can be dropped")
+
+    -- THE UNSELECTED EDGE IS DERIVED FROM THE FILL IT SITS ON. A ring composites
+    -- over its OWN fill: C_BORDER at 0.5 reads as a 0.068 step off the panel and
+    -- only 0.042 off this tab's lighter one, so the outline that says "sheet
+    -- behind the front one" was most of the way to gone.
+    check(body:find("local EDGE_ALPHA   = 0.8", 1, true) ~= nil,
+          "folder: the unselected tab's edge alpha is raised to match the panel's")
+    check(body:find("local edge         = opts.border       or { C_BORDER.r, C_BORDER.g, C_BORDER.b, EDGE_ALPHA }", 1, true) ~= nil,
+          "folder: ...and the edge is built from it")
+    check(body:find("C_BORDER.b, 0.5 }", 1, true) == nil,
+          "folder: ...not from the 0.5 that was too low for this fill")
+    -- The derivation itself, so the number cannot drift back without the reason
+    -- going with it: C_BORDER at EDGE_ALPHA over the unselected fill must land a
+    -- panel's-worth of step (0.068) above that fill.
+    local border = themeGrey("C_BORDER") or 0
+    check(math.abs((0.8 * border + 0.2 * unselected) - (unselected + 0.068)) < 0.01,
+          "folder: 0.8 is the alpha that puts the tab's edge a panel's-step off its fill")
 end
 -- ============================================================
 -- 11b. THE ACTIVE INDICATORS FILTER IS A GLYPH ON THE CAPTION
@@ -1577,9 +1657,15 @@ do
           "wide: the Aura Designer no longer forces the window to 850")
     check(WIDE:find("text_designer", 1, true) == nil,
           "wide: ...and neither does the Text Designer")
+    -- ☠ INVERTED DELIBERATELY, NOT DELETED. This assertion pinned the Filter
+    -- Designer's floor while it was still a two-column island; it has since been
+    -- converted, so the same line now says the opposite and the aura family owns no
+    -- entry in this table at all. Deleting it would have left the page's floor
+    -- unpinned in either direction. Its own census is in
+    -- test_filterdesigner_page_builders.lua.
+    check(WIDE:find("auras_filterdesigner", 1, true) == nil,
+          "wide: ...and neither does the Filter Designer, the last aura page here")
     -- ⚠ The ones that are still islands must NOT have been swept out with them.
-    check(WIDE:find("auras_filterdesigner", 1, true) ~= nil,
-          "wide: the Filter Designer keeps its floor -- it is still a two-column list")
     check(WIDE:find("general_pinnedframes", 1, true) ~= nil,
           "wide: ...as does Pinned Frames")
     check(WIDE:find("general_nicknames", 1, true) ~= nil,
