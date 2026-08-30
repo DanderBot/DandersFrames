@@ -850,6 +850,24 @@ P.CreateSpecDropdown = CreateSpecDropdown
 --   opts.unitText   the mock's own name and health strings. A host that draws its
 --                   OWN text onto the mock (TextDesigner/Preview.lua) would
 --                   otherwise get both, overlapping.
+--
+-- ☠ AND A FOURTH: opts.thumb, THE ADD PANEL'S PICTURE CARDS. The approved add
+-- panel draws each effect choice as a PICTURE of the result, and the only honest
+-- picture of "what this does to your frame" is this canvas -- the same green
+-- fill, the same missing-health remainder, the same power bar, the same name and
+-- health strings, read from the same frameDB. A hand-drawn thumbnail was tried
+-- and the verdict was "this looks nothing like one of our frames".
+--   opts.thumb   { w = <px>, h = <px> } -- an EXPLICIT box instead of the
+--                four-sided anchor the band form uses, for two reasons:
+--                  * a frame anchored on four sides has no resolved width until
+--                    the layout pass, so RefreshGeometry's fit would run against
+--                    a zero and take the early exit -- and a thumbnail has no
+--                    OnSizeChanged to rescue it, because the box never changes;
+--                  * the panel is a fixed 260px popout, so the box IS a constant.
+--                The user's Preview Scale is IGNORED here: a thumbnail is sized
+--                to its tile, not to a slider on another page. Everything else
+--                (the label strip, the anchor dots, the container chrome) is off
+--                -- the tile draws its own frame around this.
 -- THE COMPACT CANVAS'S GEOMETRY, in screen pixels, named once because the height
 -- verb and the canvas itself must agree exactly -- they are two halves of one
 -- sum, and a literal in each is how the frame ends up cut off at the bottom.
@@ -895,11 +913,15 @@ local function ScaleProxy(key)
     return proxy
 end
 
+-- The thumbnail box's own padding, so the mock never touches the tile's edge.
+local THUMB_PAD = 4
+
 local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     local compact = opts and opts.compact or false
     -- See the header: each defaults to the Aura Designer's own canvas.
     local placement = not (opts and opts.placement == false)
     local unitText  = not (opts and opts.unitText == false)
+    local thumb     = opts and opts.thumb or nil
     -- Read current frame settings for the preview
     local mode = (GUI and GUI.SelectedMode) or "party"
     local frameDB = DF:GetDB(mode) or DF.PartyDefaults
@@ -915,6 +937,14 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    if thumb then
+        -- ☠ AN EXPLICIT BOX, NOT FOUR ANCHORS. See opts.thumb in the header: the
+        -- fit below has to be computable NOW, and a four-sided anchor answers 0
+        -- until the layout pass. It also means a thumbnail cannot repeat the
+        -- zero-height anchor bug (spec section 24) -- both numbers are set here.
+        container:SetSize(thumb.w or 76, thumb.h or 44)
+        container:SetPoint("TOPLEFT", parent, "TOPLEFT", thumb.x or 0, yOffset)
+    else
     local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 0
     container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
     container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
@@ -931,6 +961,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     local cbColor = cbInfo and cbInfo.class and RAID_CLASS_COLORS[cbInfo.class]
     if cbColor then
         container:SetBackdropBorderColor(cbColor.r, cbColor.g, cbColor.b, 0.5)
+    end
     end
 
     -- ☠ THE CANVAS MASKS ITS OWN CONTENTS. The mock is scaled by the user and
@@ -950,7 +981,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- a collapsible FRAME PREVIEW header would print the same two words twice, six
     -- pixels apart. The strip itself STAYS -- the scale glyph lives in it, which is
     -- why CANVAS_FURNITURE does not move -- only the second copy of the title goes.
-    if opts and opts.hideLabel then previewLabel:Hide() end
+    if thumb or (opts and opts.hideLabel) then previewLabel:Hide() end
 
     -- Mock unit frame (centered in container)
     local mockFrame = CreateFrame("Frame", nil, container, "BackdropTemplate")
@@ -958,7 +989,10 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- -20 in the compact form: with the instruction rows gone the free space runs
     -- from under the scale slider to the bottom edge, so the box's own centre is
     -- 20-odd pixels above the centre of what is actually free.
-    mockFrame:SetPoint("CENTER", container, "CENTER", 0, compact and -CANVAS_DY or -4)
+    -- A thumbnail's box holds nothing but the mock, so it is centred dead centre;
+    -- the two band forms nudge down to clear the label strip above them.
+    mockFrame:SetPoint("CENTER", container, "CENTER", 0,
+                       thumb and 0 or (compact and -CANVAS_DY or -4))
     mockFrame:SetScale(previewScale)
     ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
     container.mockFrame = mockFrame
@@ -998,10 +1032,25 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
             end
         end
 
+        local cw, ch = container:GetWidth() or 0, container:GetHeight() or 0
+
+        -- ☠ A THUMBNAIL FITS ITS BOX AND NOTHING ELSE. `want` is the Preview
+        -- Scale slider on the designer page, which is about the CANVAS; obeying
+        -- it here would blow a 76px tile up to 2.5x the user's frame width and
+        -- clip everything but the middle. The box is an explicit size set at
+        -- construction, so this is exact on the first pass -- no early exit and
+        -- no OnSizeChanged rescue is needed, which is the point of the explicit
+        -- box.
+        if thumb then
+            if cw < 2 or ch < 2 then place(0.5) return end
+            place(math.max(0.1, math.min((cw - THUMB_PAD * 2) / w,
+                                         (ch - THUMB_PAD * 2) / h)))
+            return
+        end
+
         -- Before the first layout pass the container has no size yet; honour the
         -- user's scale rather than clamping against a zero and collapsing the mock.
         -- OnSizeChanged below re-runs this the moment it has one.
-        local cw, ch = container:GetWidth() or 0, container:GetHeight() or 0
         if cw < 2 or ch < 2 then
             place(want)
             return
@@ -1033,6 +1082,13 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- No loop: the mock is a child, so scaling it and re-anchoring it cannot
     -- resize the container, which takes its height from the band.
     container:SetScript("OnSizeChanged", function() container.RefreshGeometry() end)
+
+    -- ⚠ A THUMBNAIL HAS NO SIZE EVENT TO WAIT FOR. Its box was set at the top of
+    -- this function, BEFORE the hook above existed, and it never changes again --
+    -- so nothing would ever run the fit, and the mock would keep the construction
+    -- scale (the user's Preview Scale, which for a thumbnail is simply wrong).
+    -- The band forms are left alone: theirs arrives with the layout pass.
+    if thumb then container.RefreshGeometry() end
 
     -- What the host band must be for the mock to clear the furniture above it and
     -- the padding below. Derived from the mock's own anchor: it is centred at
@@ -1736,12 +1792,18 @@ P.SetMainTab = SetMainTab
 -- instance (or the frame-level type config, mode = "frame") and pre-expand
 -- its effect card. Used by both the row handler and add-by-ID so the two
 -- entry points can never drift apart.
-local function AddPickedSpell(auraName, typeKey, mode)
+-- ⚠ `anchor` IS OPTIONAL AND ADDITIVE. The add panel asks WHERE before it
+-- commits (its section 3), so the one caller that has an answer passes it; every
+-- other caller omits it and the instance keeps the type's own default, exactly as
+-- before. It writes the field CreateIndicatorInstance already seeds -- no new
+-- shape, nothing to migrate.
+local function AddPickedSpell(auraName, typeKey, mode, anchor)
     -- Card keys embed the B1 pool prefix in the name segment
     -- ("placed:other:<name>#<id>" / "frame:<type>:other:<name>").
     if mode == "placed" then
         local instance = CreateIndicatorInstance(auraName, typeKey)
         if instance then
+            if anchor and ANCHOR_POSITIONS[anchor] then instance.anchor = anchor end
             expandedCards["placed:" .. PoolKeyPrefix() .. auraName .. "#" .. instance.id] = true
         end
     else
@@ -2982,35 +3044,57 @@ end
 -- Buffs hint. Everything above the list of effects, and nothing of the list.
 --
 -- ============================================================
--- THE ADD FLOW  (designer rework, phase 5)
+-- THE ADD FLOW  (designer rework, section 26)
 -- ------------------------------------------------------------
--- ☠ THE SCOPE CARDS ARE A STEP, NOT FURNITURE. They used to be pinned to the
--- top of the Effects tab: a ~230px block standing in front of the list the page
--- exists to show, on every visit, forever. Against a 600px window that block was
--- the single largest slice of the 542px of chrome between the top of the page and
--- the first indicator. They are questions asked once per add, so they now live
--- where the add lives: behind one "+ Add Indicator" row, in a panel.
+-- ☠ ONE PANEL, THREE NUMBERED SECTIONS, ALL VISIBLE AT ONCE. This shipped once
+-- as a three-step WIZARD -- spell, then a scope (Placed on Frame / Frame-Level /
+-- From a Filter), then a type -- and the scope step is precisely what the
+-- approved design removes. The taxonomy was the problem, not a list length: with
+-- it gone the effects are nine tiles on one surface, and a person can see the
+-- whole task before starting it instead of discovering step 3 by finishing
+-- step 2.
 --
--- ☠ AND THE SPELL IS ASKED FIRST. The old order was scope, then type, then
--- spell. The approved shape is spell, then scope, then type, because the spell is
--- what the user arrives already knowing and the other two are decisions about it.
+-- ☠ AND THE CHOICES ARE PICTURES, NOT LABELS WITH ART BLOBS. Each tile draws one
+-- of the player's OWN frames in miniature -- CreateFramePreview's `thumb` arm,
+-- so the same green fill, missing-health remainder, power bar and name/health
+-- strings, read from the same frameDB -- with the effect applied to it. An
+-- earlier synthetic thumbnail drew a generic unit frame and the verdict was
+-- "this looks nothing like one of our frames".
 --
--- ⚠ ONE SCOPE CANNOT BE SPELL-FIRST, and it is not made to pretend. "From a
--- Filter" hangs the effect off a whole filter rather than off one aura, so there
--- is no spell to have picked -- it is offered on the FIRST step as the other way
--- in, and takes its own route to the same type cards.
+-- ⚠ SECTIONS 2 AND 3 START DIMMED, NOT HIDDEN. Showing the shape of the whole
+-- task is the point; a section that appears only once you have answered the one
+-- above it is a wizard with the seams painted over.
 --
--- ☠ EVERY STEP IS BUILT ONCE AND THEN SHOWN OR HIDDEN. The popout kit builds a
--- pane's contents once, and frames cannot be garbage-collected in this client, so
--- re-drawing a step on each click would leak a card set per click. What changes
--- per step is which container is showing and how tall the pane says it is --
--- reported through GUI:RelayoutHost, which re-flows the group, the pane and the
--- panel around it in one call.
+-- ⚠ WHY "FROM A FILTER" IS IN SECTION 1 AND NOT A SCOPE. A filter cannot be
+-- reached spell-first -- its effect hangs off a whole filter, so a spell picked
+-- first would be discarded -- but that is an argument for where the CHOICE OF
+-- SOURCE lives, not for restoring a step. Section 1 asks "which aura?", and a
+-- filter is a saved answer to exactly that question: one section, one question,
+-- two ways to answer it. Choosing a filter dims the tiles a filter cannot drive
+-- (the three placed types, and Sound -- the native sound path registers per
+-- spell id, so a 600-spell filter would mean 600 registrations).
+--
+-- ☠ EVERY TILE IS BUILT ONCE. The popout kit builds a pane's contents once and
+-- frames cannot be garbage-collected in this client, so nothing here rebuilds on
+-- a click: what changes is each tile's STATE. What it costs is nine miniature
+-- frames per page build, which is the price of the pictures and is paid
+-- deliberately -- the fourteen choice cards this replaces were memoised at up to
+-- eleven per panel for the same reason.
+--
+-- ☠ AND A POOLED PANEL CANNOT READ LIVE STATE IN ITS BUILDER. "Already added" is
+-- true or false per tile and changes underneath a panel that is merely closed,
+-- so it is re-derived by a `Sync` verb the opener calls -- the same shape as
+-- S.BuildFilterChips's SyncActive, and the same bug both designer panels shipped
+-- with before it (spec section 23).
 -- ============================================================
 
 -- The three scopes and the type lists behind them. A VERB rather than a file-scope
 -- table because every label in here is an L[...] lookup, and a table built at file
 -- scope freezes on whatever locale was loaded when the file parsed.
+--
+-- ⚠ STILL LIVE, FOR THE SPLIT PANEL ONLY. The island layout keeps its three
+-- pinned scope cards and the picker column they open, in its own head area at
+-- the foot of this file; the popout layout's panel is flat and does not read it.
 local function AddFlowScopes()
     local PLACED_ITEMS = {
         { label = L["Icon"],   type = "icon",   desc = L["The spell's own artwork"]          },
@@ -3045,87 +3129,372 @@ local function AddFlowScopes()
 end
 P.AddFlowScopes = AddFlowScopes
 
+-- ── THE FLAT EFFECT LIST ──
+-- ☠ ONE LIST, NO CLASSIFICATION. The same nine effects the three scopes above
+-- hold between them, with the taxonomy taken off: `mode` is still what the store
+-- needs (a placed indicator instance, or a frame-level type config) but it is
+-- carried BY the choice rather than asked before it.
+--
+-- ⚠ NINE, NOT THE DESIGN'S SIX. The drawing lists "Icon | Square | Bar |
+-- Recolour | Border | Sound", and "Recolour" is one word standing for FOUR
+-- distinct effects with four distinct records -- health bar, background, name
+-- text, health text. Collapsing them would either drop three of them or ask a
+-- second question, which is the step this panel exists to remove; and a card
+-- that is a PICTURE of the result is exactly what makes four of them cheap to
+-- tell apart, where four words would not be. Flat is the principle; six was the
+-- sketch's shorthand.
+--
+-- A VERB, not a file-scope table: every label is an L[...] lookup and a table
+-- built at load freezes on the locale that was live then.
+local function AddFlowEffects()
+    return {
+        { type = "icon",       mode = "placed", label = L["Icon"],
+          desc = L["The spell's own artwork"],          filterable = false },
+        { type = "square",     mode = "placed", label = L["Square"],
+          desc = L["A small coloured square"],          filterable = false },
+        { type = "bar",        mode = "placed", label = L["Bar"],
+          desc = L["A bar that drains as it expires"],  filterable = false },
+        { type = "border",     mode = "frame",  label = L["Border"],
+          desc = L["Outlines the whole frame"],         filterable = true  },
+        { type = "healthbar",  mode = "frame",  label = L["Health Bar Color"],
+          desc = L["Recolours the health bar"],         filterable = true  },
+        { type = "background", mode = "frame",  label = L["Background Color"],
+          desc = L["Recolours the frame background"],   filterable = true  },
+        { type = "nametext",   mode = "frame",  label = L["Name Text Color"],
+          desc = L["Recolours the player's name"],      filterable = true  },
+        { type = "healthtext", mode = "frame",  label = L["Health Text Color"],
+          desc = L["Recolours the health numbers"],     filterable = true  },
+        -- Sound is not filterable: see AddFlowScopes above for why.
+        { type = "sound",      mode = "frame",  label = L["Sound Alert"],
+          desc = L["Plays a sound. Nothing changes on the frame."], filterable = false },
+    }
+end
+P.AddFlowEffects = AddFlowEffects
+
+-- ── THE EFFECT, PAINTED ONTO A MINIATURE FRAME ──
+-- What each tile's picture actually IS. Everything is drawn in the mock's OWN
+-- units -- a 24px icon on a 125x64 frame -- and the whole mock is then scaled to
+-- the tile, so the proportions are the player's real ones rather than a guess.
+-- The sizes and anchors come from TYPE_DEFAULTS, which is what a fresh indicator
+-- of that type is actually created with.
+local DEFAULT_TILE_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+local function PaintEffectOnThumb(pv, typeKey)
+    local mock = pv.mockFrame
+    if not mock then return end
+    local c = BADGE_COLORS[typeKey] or GetThemeColor()
+    local defs = TYPE_DEFAULTS and TYPE_DEFAULTS[typeKey] or nil
+    local anchorName = (defs and defs.anchor) or "TOPLEFT"
+    local pos = ANCHOR_POSITIONS[anchorName] or ANCHOR_POSITIONS.TOPLEFT
+
+    if typeKey == "icon" then
+        local size = (defs and defs.size) or 24
+        local ring = mock:CreateTexture(nil, "OVERLAY", nil, 1)
+        ring:SetColorTexture(0, 0, 0, 0.85)
+        ring:SetSize(size + 2, size + 2)
+        ring:SetPoint(pos.ax, mock, pos.ay, 0, 0)
+        local ico = mock:CreateTexture(nil, "OVERLAY", nil, 2)
+        ico:SetSize(size, size)
+        ico:SetPoint("CENTER", ring, "CENTER", 0, 0)
+        ico:SetTexture(DEFAULT_TILE_ICON)
+        ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        -- Swapped for the chosen spell's own artwork once section 1 is answered:
+        -- "the spell's own artwork" is the whole of what this effect does, so the
+        -- picture is only honest when it is that spell's.
+        pv.spellIcon = ico
+
+    elseif typeKey == "square" then
+        local size = (defs and defs.size) or 24
+        local ring = mock:CreateTexture(nil, "OVERLAY", nil, 1)
+        ring:SetColorTexture(0, 0, 0, 1)
+        ring:SetSize(size + 2, size + 2)
+        ring:SetPoint(pos.ax, mock, pos.ay, 0, 0)
+        local sq = mock:CreateTexture(nil, "OVERLAY", nil, 2)
+        sq:SetColorTexture(c.r, c.g, c.b, 1)
+        sq:SetSize(size, size)
+        sq:SetPoint("CENTER", ring, "CENTER", 0, 0)
+
+    elseif typeKey == "bar" then
+        -- matchFrameWidth is on by default, so a fresh bar spans the frame.
+        local barH = (defs and defs.height) or 6
+        local bg = mock:CreateTexture(nil, "OVERLAY", nil, 1)
+        bg:SetColorTexture(0, 0, 0, 0.5)
+        bg:SetHeight(barH)
+        bg:SetPoint("BOTTOMLEFT", mock, "BOTTOMLEFT", 1, 1)
+        bg:SetPoint("BOTTOMRIGHT", mock, "BOTTOMRIGHT", -1, 1)
+        local fill = mock:CreateTexture(nil, "OVERLAY", nil, 2)
+        fill:SetColorTexture(c.r, c.g, c.b, 1)
+        fill:SetHeight(barH)
+        fill:SetPoint("BOTTOMLEFT", bg, "BOTTOMLEFT", 0, 0)
+        fill:SetPoint("TOPLEFT", bg, "TOPLEFT", 0, 0)
+        -- Two thirds drained, so it reads as a bar that empties rather than a
+        -- second health bar.
+        fill:SetWidth(((mock:GetWidth() or 125) - 2) * 0.66)
+
+    elseif typeKey == "border" then
+        -- Four edges rather than a backdrop swap: the mock already HAS a border,
+        -- and this has to read as sitting on top of it.
+        local T = 2
+        for _, e in ipairs({ { "TOPLEFT", "TOPRIGHT", nil, T }, { "BOTTOMLEFT", "BOTTOMRIGHT", nil, T },
+                             { "TOPLEFT", "BOTTOMLEFT", T, nil }, { "TOPRIGHT", "BOTTOMRIGHT", T, nil } }) do
+            local t = mock:CreateTexture(nil, "OVERLAY", nil, 3)
+            t:SetColorTexture(c.r, c.g, c.b, 1)
+            t:SetPoint(e[1], mock, e[1], 0, 0)
+            t:SetPoint(e[2], mock, e[2], 0, 0)
+            if e[3] then t:SetWidth(e[3]) end
+            if e[4] then t:SetHeight(e[4]) end
+        end
+
+    elseif typeKey == "healthbar" then
+        -- The recolour IS the picture: the same fill the canvas draws, in the
+        -- effect's colour instead of the health green.
+        if pv.healthFill then pv.healthFill:SetVertexColor(c.r, c.g, c.b, 1) end
+
+    elseif typeKey == "background" then
+        -- The canvas tints healthBg and nothing else for this effect
+        -- (AuraDesigner/UI/Groups.lua's RefreshPreviewEffects); the picture says
+        -- the same thing the live preview would.
+        if pv.healthBg then pv.healthBg:SetColorTexture(c.r, c.g, c.b, 0.85) end
+
+    elseif typeKey == "nametext" then
+        if pv.nameText then pv.nameText:SetTextColor(c.r, c.g, c.b, 1) end
+
+    elseif typeKey == "healthtext" then
+        if pv.hpText then pv.hpText:SetTextColor(c.r, c.g, c.b, 1) end
+
+    end
+    -- ⚠ NO ARM FOR "sound", DELIBERATELY. A sound alert changes nothing on the
+    -- frame, so an untouched frame is the honest picture of it -- the same
+    -- decision the choice cards this replaces already made.
+end
+
+-- ── ONE PICTURE TILE ──
+-- A compact choice drawn as a miniature frame with the result on it, a one-line
+-- label under it, and three states: normal, selected, and dimmed.
+--
+-- ☠ IT SETS BOTH OF ITS OWN DIMENSIONS. Everything inside is anchored to this
+-- frame, and a frame given a width and no height is what made this panel draw
+-- nothing at all for two days (spec section 24) -- RIGHT is (right edge,
+-- vertical MIDDLE), and the middle of a zero-height frame is its top.
+--
+--   opts.width      the tile's width
+--   opts.picHeight  the picture box's height
+--   opts.label      one short line under the picture (wraps to two)
+--   opts.accent     selection colour
+--   opts.tooltip    a GUI:ShowTooltip spec
+--   opts.Paint(pv)  paints the picture onto the CreateFramePreview thumbnail
+--   opts.onClick
+local TILE_PAD, TILE_PIC_H, TILE_LABEL_H = 3, 44, 22
+
+local function CreateFrameTile(parent, opts)
+    opts = opts or {}
+    local W = opts.width or 82
+    local picH = opts.picHeight or TILE_PIC_H
+    local accent = opts.accent or GetThemeColor()
+
+    local tile = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    tile:SetSize(W, TILE_PAD * 2 + picH + TILE_LABEL_H)
+    GUI:StyleButton(tile, { accent = accent })
+    -- Read back rather than assumed: StyleButton lands a button's height on an
+    -- even number of device pixels, so the number the caller must lay out
+    -- against is the one the button ended up with.
+    tile.layoutHeight = tile:GetHeight()
+
+    local pv = CreateFramePreview(tile, -TILE_PAD, nil, {
+        thumb     = { w = W - TILE_PAD * 2, h = picH, x = TILE_PAD },
+        placement = false,
+        hideLabel = true,
+    })
+    tile.preview = pv
+    if opts.Paint then opts.Paint(pv) end
+
+    local lbl = tile:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(lbl, 10, "")
+    lbl:SetPoint("TOPLEFT", TILE_PAD, -(TILE_PAD + picH))
+    lbl:SetPoint("TOPRIGHT", -TILE_PAD, -(TILE_PAD + picH))
+    lbl:SetHeight(TILE_LABEL_H)
+    lbl:SetJustifyH("CENTER")
+    lbl:SetJustifyV("TOP")
+    lbl:SetWordWrap(true)
+    lbl:SetText(opts.label or "")
+    lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    tile.label = lbl
+
+    -- ☠ ORDER MATTERS BETWEEN THE TWO KIT VERBS. SetDisabled paints the dim rest
+    -- backdrop and SetActive paints the accent one, each unconditionally -- so
+    -- whichever runs LAST wins the fill. Disabled has to be the last word, and
+    -- an enabled tile has to leave disabled first or the accent is painted over.
+    tile.SetTileState = function(self, state)
+        self.dfTileState = state
+        if state == "disabled" then
+            self:SetActive(false)
+            self:SetDisabled(true)
+        else
+            self:SetDisabled(false)
+            self:SetActive(state == "selected")
+        end
+        local a = (state == "disabled") and 0.35 or 1
+        if pv then pv:SetAlpha(a) end
+        lbl:SetAlpha(a)
+    end
+    tile:SetTileState("normal")
+
+    tile:SetScript("OnClick", function(self)
+        if self.dfDisabled then return end
+        if opts.onClick then opts.onClick(self) end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end)
+
+    -- Hooked, not set: StyleButton owns OnEnter/OnLeave for the hover wash.
+    tile.dfTooltip = opts.tooltip
+    tile:HookScript("OnEnter", function(self)
+        local t = self.dfTooltip
+        if type(t) == "table" then GUI:ShowTooltip(self, t) end
+    end)
+    tile:HookScript("OnLeave", function() GUI:HideTooltip() end)
+
+    return tile
+end
+P.CreateFrameTile = CreateFrameTile
+
+-- ── THE 9-POINT ANCHOR PICKER ──
+-- Which corner of the frame a placed indicator starts at. Pre-picked to the
+-- type's own default, so the panel always has an answer and the section is a
+-- confirmation rather than a demand.
+local ANCHOR_GRID_ROWS = {
+    { "TOPLEFT",    "TOP",    "TOPRIGHT"    },
+    { "LEFT",       "CENTER", "RIGHT"       },
+    { "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" },
+}
+local ANCHOR_CELL, ANCHOR_GUTTER = 18, 2
+
+local function CreateAnchorPicker(parent, opts)
+    opts = opts or {}
+    local grid = CreateFrame("Frame", nil, parent)
+    local span = ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2
+    -- Both dimensions, for the reason CreateFrameTile spells out.
+    grid:SetSize(span, span)
+
+    local btns, current = {}, nil
+    local function Paint()
+        for point, b in pairs(btns) do
+            b:SetActive(point == current)
+        end
+    end
+
+    for row = 1, 3 do
+        for col = 1, 3 do
+            local point = ANCHOR_GRID_ROWS[row][col]
+            local b = CreateFrame("Button", nil, grid, "BackdropTemplate")
+            b:SetPoint("TOPLEFT", grid, "TOPLEFT",
+                       (col - 1) * (ANCHOR_CELL + ANCHOR_GUTTER),
+                       -((row - 1) * (ANCHOR_CELL + ANCHOR_GUTTER)))
+            GUI:StyleButton(b, { width = ANCHOR_CELL, height = ANCHOR_CELL })
+            btns[point] = b
+            b:SetScript("OnClick", function(self)
+                if self.dfDisabled then return end
+                current = point
+                Paint()
+                if opts.onChanged then opts.onChanged(point) end
+                PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+            end)
+            b:HookScript("OnEnter", function(self)
+                GUI:ShowTooltip(self, { title = (OPTS.ANCHOR_OPTIONS or {})[point] or point })
+            end)
+            b:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        end
+    end
+
+    grid.Get = function() return current end
+    grid.Set = function(_, point)
+        current = point
+        Paint()
+    end
+    grid.SetGridEnabled = function(_, enabled)
+        for _, b in pairs(btns) do b:SetDisabled(not enabled) end
+        -- SetDisabled repaints the rest backdrop, so the selection has to be
+        -- re-asserted after it or re-enabling loses which cell was chosen.
+        if enabled then Paint() end
+    end
+    grid.buttons = btns
+    return grid
+end
+
+-- ── ONE NUMBERED SECTION HEADING ──
+-- ⚠ A FRAME WITH THE STRINGS INSIDE IT, never bare FontStrings on the pane:
+-- PopoutContent builds into a HIDDEN holder and moves FRAMES into the group, so
+-- a region left on the parent stays behind and is never drawn (spec section 16).
+local SECTION_HEAD_H = 16
+
+local function CreateNumberedHeading(parent, number, caption, y, width)
+    local head = CreateFrame("Frame", nil, parent)
+    head:SetSize(width, SECTION_HEAD_H)
+    head:SetPoint("TOPLEFT", 0, y)
+
+    local num = head:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(num, 9, "")
+    num:SetPoint("LEFT", 0, 0)
+    num:SetText(tostring(number))
+    local tc = GetThemeColor()
+    num:SetTextColor(tc.r, tc.g, tc.b)
+
+    local cap = head:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(cap, 9, "")
+    cap:SetPoint("LEFT", num, "RIGHT", 6, 0)
+    cap:SetPoint("RIGHT", head, "RIGHT", 0, 0)
+    cap:SetJustifyH("LEFT")
+    cap:SetWordWrap(false)
+    cap:SetText(caption)
+    cap:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    head.caption = cap
+    head.SetHeadEnabled = function(_, enabled)
+        local a = enabled and 1 or 0.4
+        num:SetAlpha(a)
+        cap:SetAlpha(a)
+    end
+    return head
+end
+P.CreateNumberedHeading = CreateNumberedHeading
+
 -- One "+ Add Indicator" panel, start to finish.
 --   host        the container frame the popout row's pane holds, ALREADY sized to
 --               the pane's width by the caller
 --   opts.width  that width. Fixed (GUI.PopoutContentWidth), which is why the
 --               wrapped note below can be measured at build: inside a pane there
---               is no later width for it to re-wrap against
---   opts.SetHeight(h)  report a step change, normally GUI:RelayoutHost
+--               is no later width for it to re-wrap against. It is also why this
+--               panel is unaffected by the window's 520px minimum -- a popout is
+--               a fixed-width panel docked OUTSIDE the window
+--   opts.SetHeight(h)  report the pane's height, normally GUI:RelayoutHost
 --   opts.Close()       shut the panel once something has been added
+--
+-- Returns the panel's own verbs: Sync (call on every open -- see the header),
+-- and the four state transitions, which are the real entry points its own
+-- controls use.
 S.BuildAddIndicatorPane = function(host, opts)
     opts = opts or {}
     local W = opts.width or 260
-    local SCOPES = AddFlowScopes()
     local tc = GetThemeColor()
     local FILTER_GREEN = { r = 0.51, g = 0.86, b = 0.51 }
+    local EFFECTS = AddFlowEffects()
+    local EFFECT_BY_TYPE = {}
+    for _, e in ipairs(EFFECTS) do EFFECT_BY_TYPE[e.type] = e end
 
-    -- The spell this add is about. nil on the filter route, which has none.
-    local picked
-    local panes = {}
-    local Show   -- every step reaches every other step, so this is forward-declared
+    -- What section 1 was answered with: { kind = "spell", auraName, display }
+    -- or { kind = "filter", ref, display }. nil until it is answered.
+    local source
+    -- What section 2 was answered with: an effect type key.
+    local selected
+    -- What section 3 was answered with. Seeded from the chosen type's own
+    -- default every time the type changes, so it is never empty.
+    local anchor
+    local Sync   -- every control asks for a re-state, so this is forward-declared
 
-    local function NewPane()
-        local p = CreateFrame("Frame", nil, host)
-        p:SetPoint("TOPLEFT", 0, 0)
-        p:SetWidth(W)
-        p:Hide()
-        return p
-    end
+    local tiles = {}
+    local sec2Head, sec3Head, grid, gridNote, addBtn, spellBtn, filterBtn
 
-    -- ☠ A STEP'S HEIGHT IS THE FRAME'S, NOT JUST A FIELD ON IT -- AND THAT IS
-    -- WHAT MADE THIS PANEL OPEN EMPTY. Every card on a step is pinned with
-    -- SetPoint("TOPLEFT", 0, y) AND SetPoint("RIGHT", pane, "RIGHT", 0, 0), and
-    -- RIGHT is (right edge, VERTICAL MIDDLE). On a frame that was given a width
-    -- and never a height that middle IS the top edge, so the second anchor pins
-    -- the card's own mid-height to the top of the step while the first puts its
-    -- top edge `y` below it. Two vertical constraints that disagree: the card is
-    -- dragged up out of the panel and stretched to twice its offset instead of
-    -- sitting at its own height. Steps 2 and 3 are nothing BUT cards, which is
-    -- why the panel drew nothing at all.
-    --
-    -- ⚠ THE PANE'S OWN HEIGHT WAS NEVER THE FAULT. `Show` has always sized the
-    -- host, so the slot AddWidget measured was always the real ~120 -- which is
-    -- why two successive height fixes changed nothing. The Layout Groups panel
-    -- beside this one takes the same RIGHT anchor and works, because its cards
-    -- hang off the host, which IS sized.
-    --
-    -- One writer for both numbers, so what the flow reads and what the anchors
-    -- resolve against can never drift apart.
-    local function SetPaneHeight(p, h)
-        h = max(h or 1, 1)
-        p.paneHeight = h
-        p:SetHeight(h)
-        return h
-    end
-
-    -- A step's back line: one click to the step before, and the answer already
-    -- given. Built as a FRAME with the string inside it, never as a bare
-    -- FontString on the pane -- a region cannot be shown and hidden with its step.
-    local function Crumb(pane, backTo)
-        local bar = CreateFrame("Frame", nil, pane)
-        bar:SetHeight(20)
-        bar:SetPoint("TOPLEFT", 0, 0)
-        bar:SetPoint("TOPRIGHT", 0, 0)
-        local back = GUI:CreateGlyphButton(bar, {
-            size = 16, iconSize = 11,
-            texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_left",
-            tooltip = { title = L["Back"] },
-        })
-        back:SetPoint("LEFT", 0, 0)
-        back:SetScript("OnClick", function() Show(backTo) end)
-        local fs = bar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        fs:SetPoint("LEFT", back, "RIGHT", 4, 0)
-        fs:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
-        fs:SetJustifyH("LEFT")
-        fs:SetWordWrap(false)
-        fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        bar.text = fs
-        pane.crumb = bar
-        return bar
-    end
-
-    -- What a finished add costs: the same three verbs every other add path runs.
+    -- ── WHAT A FINISHED ADD COSTS ──
+    -- The same three verbs every other add path runs.
     local function Finish()
         if opts.Close then opts.Close() end
         S.SwitchTab("effects")
@@ -3133,8 +3502,96 @@ S.BuildAddIndicatorPane = function(host, opts)
         RefreshPreviewEffects()
     end
 
-    -- ── STEP 1: WHICH SPELL ──
-    local spellPane = NewPane()
+    -- Is this effect already on the chosen source? Asked per tile, which is the
+    -- whole reason the spell picker cannot answer it: it is a question about a
+    -- TYPE, and with the flat list every type is on screen at once.
+    local function AlreadyHas(typeKey)
+        if not source then return false end
+        if source.kind == "filter" then
+            return HasFrameEffect(source.ref, typeKey)
+        end
+        local eff = EFFECT_BY_TYPE[typeKey]
+        if eff and eff.mode == "placed" then
+            return IsAuraTypePlaced(source.auraName, typeKey)
+        end
+        return HasFrameEffect(source.auraName, typeKey)
+    end
+
+    -- Can this effect be driven by the source at all? A filter drives the
+    -- frame-level recolours and the border and nothing else.
+    local function Available(typeKey)
+        if not source then return false end
+        if source.kind ~= "filter" then return true end
+        local eff = EFFECT_BY_TYPE[typeKey]
+        return (eff and eff.filterable) or false
+    end
+
+    -- ⚠ IT REFUSES UP FRONT RATHER THAN ACCEPTING AND THEN DROPPING. Sync clears
+    -- a selection the source cannot carry, so a SelectType that set it anyway
+    -- would report success for a choice that never survived the next line -- and
+    -- the "already added" case would go silent, which is the state spell-first
+    -- created and the one the old flow said out loud (spec section 19).
+    local function SelectType(typeKey)
+        if not EFFECT_BY_TYPE[typeKey] then return false end
+        if not source then return false end
+        if not Available(typeKey) then return false end
+        if AlreadyHas(typeKey) then
+            DF:Say(L["Already added."])
+            return false
+        end
+        selected = typeKey
+        local defs = TYPE_DEFAULTS and TYPE_DEFAULTS[typeKey] or nil
+        anchor = (defs and defs.anchor) or "TOPLEFT"
+        Sync()
+        return true
+    end
+
+    local function PickSpell(auraName, display)
+        if not auraName then return false end
+        source = { kind = "spell", auraName = auraName, display = display or auraName }
+        -- A type chosen against the previous source may be unavailable or
+        -- already present on this one; Sync decides, and clears it if so.
+        Sync()
+        return true
+    end
+
+    local function PickFilter(kind, key)
+        local ref = DF:MakeADFilterRef(kind, key)
+        if not ref then return false end
+        source = { kind = "filter", ref = ref,
+                   display = DF:ADFilterRefDisplayName(ref) or ref }
+        Sync()
+        return true
+    end
+
+    local function Commit()
+        if not (source and selected) then return false end
+        if not Available(selected) then return false end
+        if AlreadyHas(selected) then
+            -- ⚠ SAID, NOT SILENTLY SWALLOWED. The tile is dimmed for this, so
+            -- reaching here means the world moved under an open panel -- which is
+            -- exactly what Sync exists for, and this is the belt to its braces.
+            DF:Say(L["Already added."])
+            Sync()
+            return false
+        end
+        local eff = EFFECT_BY_TYPE[selected]
+        if source.kind == "filter" then
+            AddPickedSpell(source.ref, selected, "frame")
+        else
+            AddPickedSpell(source.auraName, selected, eff.mode,
+                           (eff.mode == "placed") and anchor or nil)
+        end
+        Finish()
+        return true
+    end
+
+    local y = 0
+
+    -- ── 1 · WHICH AURA? ──
+    CreateNumberedHeading(host, 1, L["WHICH AURA?"], y, W)
+    y = y - (SECTION_HEAD_H + 4)
+
     local function OpenSpellStep()
         local isOther = IsOtherTab()
         local spec = (not isOther) and ResolveSpec() or nil
@@ -3146,17 +3603,16 @@ S.BuildAddIndicatorPane = function(host, opts)
             records = function() return BuildADPickerRecords(false) end,
             classLock = (not isOther) and specInfo and specInfo.class or nil,
             -- ⚠ ONLY THE CROSS-POOL BLOCK CAN BE ANSWERED HERE. "Already added"
-            -- is a question about a TYPE, and no type has been chosen yet -- so it
-            -- is asked on the type cards instead, where it can be true of one card
-            -- and false of the five beside it.
+            -- is a question about a TYPE, and every type is a tile on the panel
+            -- behind this picker -- so it is answered there, where it can be true
+            -- of one tile and false of the eight beside it.
             isBlocked = ADCrossBlockText,
             rowActions = {
                 {
                     label = L["Select"],
                     handler = function(rec, _, picker)
-                        picked = { auraName = rec.auraName, display = rec.display or rec.auraName }
+                        PickSpell(rec.auraName, rec.display or rec.auraName)
                         picker:Close()
-                        Show("scope")
                     end,
                 },
             },
@@ -3165,176 +3621,200 @@ S.BuildAddIndicatorPane = function(host, opts)
                 local auraName, display, _, blocked = ADResolveByID(idNum, idText)
                 if blocked then picker:Echo(blocked) return end
                 if not auraName then return end
-                picked = { auraName = auraName, display = display or auraName }
+                PickSpell(auraName, display or auraName)
                 picker:Close()
-                Show("scope")
                 return true
             end,
         })
     end
-    do
-        local note = spellPane:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        note:SetPoint("TOPLEFT", 0, 0)
-        -- ☠ AN EXPLICIT WIDTH, so the wrap is settled HERE. The height below is
-        -- spent on the next line and never re-measured; a string left to derive its
-        -- width from an anchor would wrap against a number the layout pass has not
-        -- produced yet. Inside a pane the width is a constant, so this is exact.
-        note:SetWidth(W)
-        note:SetJustifyH("LEFT")
-        note:SetWordWrap(true)
-        note:SetText(L["Pick the aura first, then choose what it does on the frame."])
-        note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
-        local noteH = max(note:GetStringHeight() or 12, 12)
 
-        local pickBtn = CreateFrame("Button", nil, spellPane, "BackdropTemplate")
-        pickBtn:SetPoint("TOPLEFT", 0, -(noteH + 8))
-        pickBtn:SetPoint("TOPRIGHT", 0, -(noteH + 8))
-        GUI:StyleButton(pickBtn, {
-            height = 30, primary = true,
-            icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
-            text = L["Select a spell"], font = "DFFontHighlight",
+    spellBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    spellBtn:SetPoint("TOPLEFT", 0, y)
+    spellBtn:SetPoint("TOPRIGHT", 0, y)
+    GUI:StyleButton(spellBtn, {
+        height = 30, primary = true, align = "left",
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
+        text = L["Select a spell"], font = "DFFontHighlight",
+    })
+    spellBtn:SetScript("OnClick", OpenSpellStep)
+    y = y - 34
+
+    -- ...and the other way to answer the SAME question. See the header for why
+    -- this is a second source rather than a scope.
+    filterBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    filterBtn:SetPoint("TOPLEFT", 0, y)
+    filterBtn:SetPoint("TOPRIGHT", 0, y)
+    GUI:StyleButton(filterBtn, {
+        height = 20, ghost = true, align = "left", leftPad = 2,
+        accent = FILTER_GREEN,
+        text = L["Or start from a filter"],
+    })
+    filterBtn:SetScript("OnClick", function(self)
+        OpenFilterPicker({
+            anchor = self,
+            -- Every filter is offerable: which EFFECTS it already carries is a
+            -- per-tile question, and the tiles answer it.
+            isLinked = function() return false end,
+            onPick = function(kind, key) PickFilter(kind, key) end,
         })
-        pickBtn:SetScript("OnClick", OpenSpellStep)
+    end)
+    y = y - 30
 
-        local y = -(noteH + 8 + 30 + 10)
-        -- ...and the one scope that has no spell to pick.
-        local fcard = GUI:CreateChoiceCard(spellPane, {
-            title = SCOPES.filter.title, desc = SCOPES.filter.desc,
-            art = { kind = "border", color = { FILTER_GREEN.r, FILTER_GREEN.g, FILTER_GREEN.b } },
-            accent = FILTER_GREEN, width = W,
-            onClick = function() Show("type:filter") end,
+    -- ── 2 · HOW SHOULD IT SHOW? ──
+    sec2Head = CreateNumberedHeading(host, 2, L["HOW SHOULD IT SHOW?"], y, W)
+    y = y - (SECTION_HEAD_H + 4)
+
+    local TILE_COLS, TILE_GAP = 3, 7
+    local TILE_W = floor((W - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
+    local rowTop, rowH = y, 0
+    for i, eff in ipairs(EFFECTS) do
+        local col = (i - 1) % TILE_COLS
+        local capturedType = eff.type
+        local tile = CreateFrameTile(host, {
+            width = TILE_W,
+            label = eff.label,
+            accent = BADGE_COLORS[eff.type] or tc,
+            tooltip = { title = eff.label, lines = { eff.desc } },
+            Paint = function(pv) PaintEffectOnThumb(pv, capturedType) end,
+            onClick = function() SelectType(capturedType) end,
         })
-        fcard:SetPoint("TOPLEFT", 0, y)
-        fcard:SetPoint("RIGHT", spellPane, "RIGHT", 0, 0)
-        SetPaneHeight(spellPane, -y + (fcard.layoutHeight or 58) + 2)
-    end
-
-    -- ── STEP 2: WHICH KIND OF EFFECT ──
-    local scopePane = NewPane()
-    do
-        Crumb(scopePane, "spell")
-        local y = -24
-        for _, key in ipairs({ "placed", "frame" }) do
-            local scope = SCOPES[key]
-            local capturedKey = key
-            local card = GUI:CreateChoiceCard(scopePane, {
-                title = scope.title, desc = scope.desc,
-                art = { kind = (key == "placed") and "icon" or "border",
-                        color = { tc.r, tc.g, tc.b } },
-                accent = tc, width = W,
-                onClick = function() Show("type:" .. capturedKey) end,
-            })
-            card:SetPoint("TOPLEFT", 0, y)
-            card:SetPoint("RIGHT", scopePane, "RIGHT", 0, 0)
-            y = y - ((card.layoutHeight or 58) + 6)
+        tile:SetPoint("TOPLEFT", col * (TILE_W + TILE_GAP), rowTop)
+        rowH = max(rowH, tile.layoutHeight or 72)
+        tiles[eff.type] = tile
+        if col == TILE_COLS - 1 or i == #EFFECTS then
+            rowTop = rowTop - (rowH + TILE_GAP)
+            rowH = 0
         end
-        SetPaneHeight(scopePane, -y + 2)
     end
+    -- The last row's trailing gap is not spent.
+    y = rowTop + TILE_GAP - 6
 
-    -- ── STEP 3: WHICH ONE ──
-    -- ☠ AND THIS STEP IS THE ONE THING BUILT ON DEMAND. The pane above it is
-    -- constructed EAGERLY, on every page build (the popout kit says why: the
-    -- settings-search registry re-runs every builder), and this step is fourteen
-    -- choice cards across three scopes -- five times the rest of the panel. A
-    -- rebuild happens on every tab switch, pool switch, preset switch and add, and
-    -- frames cannot be garbage-collected in this client, so building all fourteen
-    -- every time is fourteen cards retained per rebuild for a step most rebuilds
-    -- never reach. Memoised rather than lazy-and-forgotten: at most three ever
-    -- exist per panel instance, so this cannot leak per click either.
-    local typePanes = {}
-    local function TypePane(key)
-        if typePanes[key] then return typePanes[key] end
-        local scope = SCOPES[key]
-        local pane = NewPane()
-        -- Filter effects were never about a spell, so their back button goes all
-        -- the way out rather than to a scope step they skipped.
-        Crumb(pane, (key == "filter") and "spell" or "scope")
-        pane.crumb.text:SetText(scope.title)
-        local y = -24
-        for _, item in ipairs(scope.items) do
-            local bc = BADGE_COLORS[item.type]
-            local capturedType, capturedScope = item.type, key
-            -- Sound changes nothing on the frame, so it gets the untouched mock
-            -- frame -- which is the honest picture of what it does.
-            local art = (item.type ~= "sound")
-                and { kind = item.type, color = { bc.r, bc.g, bc.b } } or nil
-            local card = GUI:CreateChoiceCard(pane, {
-                title = item.label, desc = item.desc, art = art, accent = bc, width = W,
-                onClick = function(self)
-                    if capturedScope == "filter" then
-                        OpenFilterPicker({
-                            anchor = self,
-                            isLinked = function(kind, fkey)
-                                local ref = DF:MakeADFilterRef(kind, fkey)
-                                return ref ~= nil and HasFrameEffect(ref, capturedType) or false
-                            end,
-                            onPick = function(kind, fkey)
-                                local ref = DF:MakeADFilterRef(kind, fkey)
-                                if not ref then return end
-                                AddPickedSpell(ref, capturedType, "frame")
-                                Finish()
-                            end,
-                        })
-                        return
-                    end
-                    if not (picked and picked.auraName) then
-                        Show("spell")
-                        return
-                    end
-                    local mode = (capturedScope == "placed") and "placed" or "frame"
-                    local already
-                    if mode == "placed" then
-                        already = IsAuraTypePlaced(picked.auraName, capturedType)
-                    else
-                        already = HasFrameEffect(picked.auraName, capturedType)
-                    end
-                    -- ⚠ SAID, NOT SILENTLY SWALLOWED. The old flow could not reach
-                    -- this state -- the spell picker greyed the rows it had already
-                    -- placed -- and spell-first can, because the spell is chosen
-                    -- before the type that makes it a duplicate.
-                    if already then
-                        DF:Say(L["Already added."])
-                        return
-                    end
-                    AddPickedSpell(picked.auraName, capturedType, mode)
-                    Finish()
-                end,
-            })
-            card:SetPoint("TOPLEFT", 0, y)
-            card:SetPoint("RIGHT", pane, "RIGHT", 0, 0)
-            y = y - ((card.layoutHeight or 58) + 6)
+    -- ── 3 · WHERE? ──
+    sec3Head = CreateNumberedHeading(host, 3, L["WHERE?"], y, W)
+    y = y - (SECTION_HEAD_H + 4)
+
+    -- ☠ THE PICKER'S ANSWER IS TAKEN, NOT JUST NOTED. Sync re-asserts the
+    -- grid's selection from `anchor` on every pass, so a handler that dropped
+    -- the point would put the cell straight back where it was and the user
+    -- would watch their click undo itself.
+    grid = CreateAnchorPicker(host, { onChanged = function(point)
+        anchor = point
+        Sync()
+    end })
+    grid:SetPoint("TOPLEFT", 0, y)
+
+    -- ⚠ INSIDE A FRAME, not a bare FontString on the pane -- see
+    -- CreateNumberedHeading. It also has to be hideable with its own state.
+    local noteBox = CreateFrame("Frame", nil, host)
+    noteBox:SetSize(W - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2) - 10,
+                    ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2)
+    noteBox:SetPoint("TOPLEFT", ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + 10, y)
+    gridNote = noteBox:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(gridNote, 10, "")
+    gridNote:SetPoint("TOPLEFT", 0, 0)
+    gridNote:SetPoint("TOPRIGHT", 0, 0)
+    gridNote:SetJustifyH("LEFT")
+    gridNote:SetWordWrap(true)
+    gridNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    y = y - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + 10)
+
+    -- ── ONE PRIMARY BUTTON ──
+    addBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    addBtn:SetPoint("TOPLEFT", 0, y)
+    addBtn:SetPoint("TOPRIGHT", 0, y)
+    GUI:StyleButton(addBtn, {
+        height = 30, primary = true,
+        text = L["Add to my frames"], font = "DFFontHighlight",
+    })
+    addBtn:SetScript("OnClick", function(self)
+        if self.dfDisabled then return end
+        Commit()
+    end)
+    y = y - 32
+
+    local paneH = max(-y + 2, 1)
+
+    -- ── THE ONE RE-STATE ──
+    -- ☠ EVERY LIVE READ IN THIS PANEL HAPPENS HERE, not in the builder. The panel
+    -- is pooled and its build runs once, so "already added", the pool, the spec
+    -- and the source's own display name are all things that can move underneath
+    -- an open panel. Called by every transition above AND by the opener on every
+    -- open (AuraDesigner/UI/Rows.lua).
+    Sync = function()
+        -- A type that the current source cannot drive, or already has, is not a
+        -- selection any more.
+        if selected and (not Available(selected) or AlreadyHas(selected)) then
+            selected = nil
         end
-        SetPaneHeight(pane, -y + 2)
-        typePanes[key] = pane
-        panes["type:" .. key] = pane
-        return pane
+
+        if source then
+            spellBtn.Text:SetText(source.display or "")
+        else
+            spellBtn.Text:SetText(L["Select a spell"])
+        end
+        -- The spell's own artwork, on the tile that is about the spell's own
+        -- artwork. Filters have no single icon; the shared filter glyph stands in.
+        local iconTile = tiles.icon
+        local iconTex = iconTile and iconTile.preview and iconTile.preview.spellIcon
+        if iconTex then
+            if source and source.kind == "spell" then
+                iconTex:SetTexture(GetAuraIcon(ResolveSpec(), source.auraName)
+                                   or DEFAULT_TILE_ICON)
+            else
+                iconTex:SetTexture(DEFAULT_TILE_ICON)
+            end
+        end
+
+        for _, eff in ipairs(EFFECTS) do
+            local tile = tiles[eff.type]
+            if tile then
+                local state = "normal"
+                if not source or not Available(eff.type) or AlreadyHas(eff.type) then
+                    state = "disabled"
+                elseif selected == eff.type then
+                    state = "selected"
+                end
+                tile:SetTileState(state)
+                -- ☠ THE TOOLTIP IS WHERE A DIM TILE EXPLAINS ITSELF. A greyed
+                -- control with no reason given is the one people read as broken.
+                local lines = { eff.desc }
+                if not source then
+                    lines = { eff.desc, L["Choose an aura first."] }
+                elseif not Available(eff.type) then
+                    lines = { eff.desc, L["A filter cannot drive this effect."] }
+                elseif AlreadyHas(eff.type) then
+                    lines = { eff.desc, L["Already added."] }
+                end
+                tile.dfTooltip = { title = eff.label, lines = lines }
+            end
+        end
+
+        local placedPick = selected and EFFECT_BY_TYPE[selected]
+                           and EFFECT_BY_TYPE[selected].mode == "placed"
+        sec2Head:SetHeadEnabled(source ~= nil)
+        sec3Head:SetHeadEnabled(placedPick and true or false)
+        -- ☠ SELECTION FIRST, THEN THE GATE. Both kit verbs repaint the rest
+        -- backdrop unconditionally, so whichever runs last wins: greying and then
+        -- re-asserting the selection would paint the accent back over the dim.
+        grid:Set(placedPick and anchor or nil)
+        grid:SetGridEnabled(placedPick and true or false)
+        if placedPick then
+            gridNote:SetText((OPTS.ANCHOR_OPTIONS or {})[anchor] or anchor or "")
+        else
+            gridNote:SetText(selected and L["This effect changes the whole frame."]
+                                       or L["Pick a look above."])
+        end
+        addBtn:SetDisabled(not (source and selected))
     end
 
-    panes = {
-        spell = spellPane,
-        scope = scopePane,
+    Sync()
+    host:SetHeight(paneH)
+    if opts.SetHeight then opts.SetHeight(paneH) end
+
+    return {
+        Sync = Sync, PickSpell = PickSpell, PickFilter = PickFilter,
+        SelectType = SelectType, Commit = Commit,
     }
-
-    Show = function(key)
-        -- A type step is built the first time it is asked for, and kept.
-        local scopeKey = key:match("^type:(%a+)$")
-        if scopeKey then TypePane(scopeKey) end
-        local pane = panes[key] or spellPane
-        for _, p in pairs(panes) do p:Hide() end
-        -- The crumb repeats the answer already given, so it is written on the way
-        -- in rather than at build: the spell is not known until step 1 is done.
-        if key == "scope" and pane.crumb then
-            pane.crumb.text:SetText(picked and picked.display or "")
-        elseif (key == "type:placed" or key == "type:frame") and pane.crumb then
-            pane.crumb.text:SetText(picked and picked.display or "")
-        end
-        pane:Show()
-        local h = pane.paneHeight or 1
-        host:SetHeight(h)
-        if opts.SetHeight then opts.SetHeight(h) end
-    end
-    Show("spell")
-    return { Show = Show }
 end
 
 -- ============================================================

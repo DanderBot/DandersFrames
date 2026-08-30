@@ -728,18 +728,26 @@ do
         -- ONE declaration of the cards, two hosts: the split panel's block and
         -- this panel. A second copy is how Cards.lua ended up with three
         -- duplicated FRAME_ITEMS lists.
-        check(SRC:find("for _, def in ipairs(" .. pane.cards .. "())", 1, true) ~= nil,
+        check(SRC:find("local defs = " .. pane.cards .. "()", 1, true) ~= nil,
               "addgroup: ...and builds from the shared card list")
         check(EDIT:find("local function " .. pane.cards .. "()", 1, true) ~= nil,
               "addgroup: ...which is a verb, so its labels cannot freeze on enUS")
         check(EDIT:find("local " .. pane.cards .. " = {", 1, true) == nil,
               "addgroup: ...rather than a table built at load")
-        -- ☠ BARE CARDS, NOT A CHOICE CARD *GROUP*. CreateChoiceCardGroup wraps its
-        -- cards in a collapsible header keyed by TITLE TEXT in the account-wide
-        -- collapsed store -- a second header inside a panel that already has one,
-        -- and a profile key for a fold nobody can usefully close.
-        check(SRC:find("GUI:CreateChoiceCard(host, {", 1, true) ~= nil,
-              "addgroup: ...as bare cards")
+        -- ☠ SEGMENTS, NOT CARDS -- the identical treatment the Add Indicator
+        -- panel got (spec section 26 item 6). Each is a PICTURE of the row of
+        -- icons the group produces, drawn on one of the player's own frames, and
+        -- the two sit side by side where two 60px cards used to stack.
+        check(SRC:find("CreateFrameTile(host, {", 1, true) ~= nil,
+              "addgroup: ...as picture tiles")
+        check(SRC:find("Paint = function(pv) PaintIconRowOnThumb(pv, colors, ghost) end,",
+                       1, true) ~= nil,
+              "addgroup: ...whose picture is that row of icons, on a real frame")
+        check(SRC:find('tile:SetPoint("TOPLEFT", (i - 1) * (tileW + GROUP_TILE_GAP), y)',
+                       1, true) ~= nil,
+              "addgroup: ...laid out side by side, not stacked")
+        check(SRC:find("GUI:CreateChoiceCard(host, {", 1, true) == nil,
+              "addgroup: ...and no fat card survives in the panel")
         check(SRC:find("CreateChoiceCardGroup", 1, true) == nil,
               "addgroup: ...with no second collapsible header inside the panel")
         -- ...and it REPORTS its height rather than only sizing itself, which is the
@@ -2013,51 +2021,74 @@ do
     check(addBlock:find("if not ctx.adEnabled then addRow.disableOn", 1, true) ~= nil,
           "add: ...but it greys with the designer, like every other row here")
 
-    -- """ + SK + """ SPELL FIRST. The old order was scope, then type, then spell; the panel
-    -- asks for the spell first and the scope cards are its SECOND step.
+    -- ☠ NO WIZARD. Three numbered sections stand on ONE surface -- which
+    -- aura, what it should look like, where -- and the scope step that stood
+    -- between them is gone, which is exactly what spec section 26's approved
+    -- drawing removes. Any step machinery reappearing here is the regression.
     local pane = CARDS:match("S%.BuildAddIndicatorPane = function%(host, opts%)(.-)\nend\n")
     check(pane ~= nil, "add: the panel builder's body can be read")
     pane = pane or ""
-    -- The bare call appears three times -- both back routes reach it -- so this
-    -- names the builder's LAST statement, which is the one that decides which step
-    -- the panel opens on.
-    check(pane:find('Show("spell")\n    return { Show = Show }', 1, true) ~= nil,
-          "add: the panel opens on the spell step")
-    local spellAt = pane:find("local spellPane = NewPane()", 1, true)
-    local scopeAt = pane:find("local scopePane = NewPane()", 1, true)
-    local typeAt  = pane:find("local typePanes = {}", 1, true)
-    check(spellAt and scopeAt and typeAt and spellAt < scopeAt and scopeAt < typeAt,
-          "add: ...then the scope cards, then the types -- spell, scope, type")
-    check(pane:find('Crumb(scopePane, "spell")', 1, true) ~= nil,
-          "add: the scope step can go back to the spell it was given")
+    check(pane:find("NewPane", 1, true) == nil,
+          "add: the panel builds no steps")
+    check(pane:find("Crumb(", 1, true) == nil,
+          "add: ...so there is no back-crumb to a step it never left")
+    check(pane:find('Show("', 1, true) == nil,
+          "add: ...and nothing shows one step by hiding the others")
+    local s1 = pane:find('CreateNumberedHeading(host, 1, L["WHICH AURA?"]', 1, true)
+    local s2 = pane:find('CreateNumberedHeading(host, 2, L["HOW SHOULD IT SHOW?"]', 1, true)
+    local s3 = pane:find('CreateNumberedHeading(host, 3, L["WHERE?"]', 1, true)
+    check(s1 and s2 and s3 and s1 < s2 and s2 < s3,
+          "add: the three sections are numbered and in order on one surface")
 
-    -- """ + WA + """ THE FILTER SCOPE IS NOT SPELL-FIRST AND DOES NOT PRETEND TO BE. It hangs
-    -- the effect off a whole filter, so it is offered on step ONE and skips the
-    -- scope step entirely -- including on the way back out.
-    check(pane:find('onClick = function() Show("type:filter") end', 1, true) ~= nil,
-          "add: the filter route is offered on the FIRST step")
-    check(pane:find('Crumb(pane, (key == "filter") and "spell" or "scope")', 1, true) ~= nil,
-          "add: ...and its back button skips the scope step it never took")
+    -- ⚠ THE FILTER ROUTE IS A SECOND ANSWER TO SECTION 1, NOT A SCOPE. Its
+    -- effect hangs off a whole filter rather than one aura -- a real reason it
+    -- cannot be spell-first, and NOT a reason to put the taxonomy back. Section 1
+    -- asks "which aura?", and a filter is a saved answer to that question.
+    check(pane:find('text = L["Or start from a filter"],', 1, true) ~= nil,
+          "add: the filter route is offered beside the spell search, in section 1")
+    check(pane:find("onPick = function(kind, key) PickFilter(kind, key) end,", 1, true) ~= nil,
+          "add: ...and answers the same section rather than opening a branch of its own")
+    -- ...and it DIMS the effects a filter cannot drive rather than hiding them
+    -- behind a list of its own, which is what a scope step was.
+    check(pane:find('if source.kind ~= "filter" then return true end', 1, true) ~= nil,
+          "add: only a filter source narrows what section 2 offers")
+    check(pane:find("return (eff and eff.filterable) or false", 1, true) ~= nil,
+          "add: ...to the effects the list itself declares filterable")
 
-    -- """ + SK + """ THE STEPS ARE BUILT ONCE AND SHOWN OR HIDDEN. Frames cannot be
-    -- garbage-collected in this client and a pane's contents are built once, so a
-    -- step that re-drew itself would leak a card set per click.
-    check(pane:find("for _, p in pairs(panes) do p:Hide() end", 1, true) ~= nil,
-          "add: changing step hides the others rather than rebuilding them")
-    -- ☠ ...AND THE FOURTEEN TYPE CARDS ARE THE ONE THING NOT BUILT EAGERLY.
-    -- A pane's contents are constructed on EVERY page build -- a tab switch, a
-    -- pool switch, a preset switch, an add -- and frames cannot be
-    -- garbage-collected here, so fourteen cards for a step most rebuilds never
-    -- reach is fourteen frames retained per rebuild. MEMOISED, not merely lazy:
-    -- at most three exist per panel, so it cannot leak per click either.
-    check(pane:find("local function TypePane(key)", 1, true) ~= nil,
-          "add: the type cards are built on demand")
-    check(pane:find("if typePanes[key] then return typePanes[key] end", 1, true) ~= nil,
-          "add: ...and kept, so a second visit builds nothing")
-    check(pane:find("if scopeKey then TypePane(scopeKey) end", 1, true) ~= nil,
-          "add: ...built by the step change that asks for them")
-    check(pane:find("if opts.SetHeight then opts.SetHeight(h) end", 1, true) ~= nil,
-          "add: ...and reports the new height instead of assuming one")
+    -- ☠ THE TILES ARE BUILT ONCE AND RE-STATED, NEVER REBUILT. A pane's
+    -- contents are constructed on EVERY page build and frames cannot be
+    -- garbage-collected in this client, so a section that re-drew itself on a
+    -- click would leak nine miniature frames per click.
+    check(pane:find("tile:SetTileState(state)", 1, true) ~= nil,
+          "add: a click changes each tile's STATE")
+    check(pane:find("CreateFrameTile(host, {", 1, true) ~= nil,
+          "add: ...on tiles built once, in the builder")
+    check(pane:find("if opts.SetHeight then opts.SetHeight(paneH) end", 1, true) ~= nil,
+          "add: ...and the pane reports its height instead of assuming one")
+
+    -- ☠ AND A POOLED PANEL CANNOT READ LIVE STATE IN ITS BUILDER. Everything
+    -- the panel says about the world -- which effects the chosen aura already has,
+    -- the pool, the spec -- is re-derived by a verb the OPENER calls. Both of the
+    -- designer bugs in spec section 23 were the other shape.
+    check(pane:find("Sync = Sync,", 1, true) ~= nil,
+          "add: the panel hands back a Sync verb")
+    check(ROWS:find("for _, api in ipairs(addPanes) do api.Sync() end", 1, true) ~= nil,
+          "add: ...and the row calls it on every open")
+    check(ROWS:find("local openPopout = addRow.OpenPopout", 1, true) ~= nil,
+          "add: ...by wrapping the one door every open goes through")
+    check(ROWS:find("if api and api.Sync then addPanes[#addPanes + 1] = api end", 1, true) ~= nil,
+          "add: ...for EVERY instance, since a pinned panel builds a second one")
+
+    -- ☠ SECTION 3 WRITES THE ANCHOR THE PANEL ASKED FOR. Every placed instance
+    -- already carries `anchor`, so this is one extra argument on the shared add
+    -- verb and no new shape in the store.
+    check(CARDS:find("local function AddPickedSpell(auraName, typeKey, mode, anchor)", 1, true) ~= nil,
+          "add: the shared add verb takes the anchor section 3 chose")
+    check(CARDS:find("if anchor and ANCHOR_POSITIONS[anchor] then instance.anchor = anchor end",
+                     1, true) ~= nil,
+          "add: ...and writes it onto the instance it just minted")
+    check(pane:find('(eff.mode == "placed") and anchor or nil)', 1, true) ~= nil,
+          "add: ...only for a placed effect, which is the only kind with a position")
     check(ROWS:find("if ready then GUI:RelayoutHost(pane, h) end", 1, true) ~= nil,
           "add: ...through the shared re-flow verb, which re-sizes pane and panel")
     -- ☠ AND THE NUMBER IS KEPT WHEN THE VERB IS SILENT. `ready` is false for the
@@ -2082,15 +2113,39 @@ do
     check(applyAt and readyAt and applyAt > readyAt,
           "add: the remembered height is applied AFTER the flag is armed")
 
-    -- The three type lists are ONE declaration now: the panel and the split
-    -- panel's block both build their cards from it.
+    -- ☠ TWO LISTS, EACH WITH ONE READER. The split panel still asks the scope
+    -- question, so AddFlowScopes stays and is ITS list; the panel's list is FLAT
+    -- and is the only thing the panel reads. Both are verbs, so neither freezes on
+    -- whatever locale was live at load.
     check(CARDS:find("local function AddFlowScopes()", 1, true) ~= nil,
           "add: the scopes and their type lists are declared once")
     check(CARDS:find("local SCOPES = AddFlowScopes()", 1, true) ~= nil,
           "add: ...and read as a verb, so the labels are not frozen on enUS")
     local scopeReads = 0
     for _ in CARDS:gmatch("AddFlowScopes%(%)") do scopeReads = scopeReads + 1 end
-    eq(scopeReads, 3, "add: ...by the panel and the split panel's block, off one list")
+    eq(scopeReads, 2, "add: ...by the split panel's block alone, now the panel is flat")
+    check(CARDS:find("local function AddFlowEffects()", 1, true) ~= nil,
+          "add: the panel's own list is flat and declared once")
+    check(CARDS:find("local EFFECTS = AddFlowEffects()", 1, true) ~= nil,
+          "add: ...and is read as a verb too")
+    -- ☠ NINE, AND EVERY ONE THE THREE SCOPES HELD. The design sketch wrote six
+    -- because it said "Recolour" once for FOUR distinct records; collapsing them
+    -- would drop three effects or ask a second question, which is the step this
+    -- panel exists to remove.
+    local effects = CARDS:match("local function AddFlowEffects%(%)(.-)\nend\n") or ""
+    local nEff = 0
+    for _ in effects:gmatch('type = "') do nEff = nEff + 1 end
+    eq(nEff, 9, "add: ...listing every effect the three scopes held between them")
+    for _, t in ipairs({ "icon", "square", "bar", "border", "healthbar",
+                         "background", "nametext", "healthtext", "sound" }) do
+        check(effects:find('type = "' .. t .. '"', 1, true) ~= nil,
+              "add: ...including " .. t)
+    end
+    -- Sound is not filterable: the native sound path registers per spell ID, so a
+    -- 600-spell filter would mean 600 registrations.
+    local soundAt = effects:find('type = "sound"', 1, true)
+    check(soundAt ~= nil and effects:find("filterable = false", soundAt, true) ~= nil,
+          "add: ...and sound is not offered for a filter source")
 
     -- The add-by-ID path survives the reordering: the half of ADAddByID that
     -- NAMES a spell had to come out, because the flow has no type yet.
@@ -2246,7 +2301,8 @@ do
 
     -- One title, not two: the fold header says FRAME PREVIEW, so the canvas
     -- underneath it must not print the same two words six pixels lower.
-    check(CARDS:find("if opts and opts.hideLabel then previewLabel:Hide() end", 1, true) ~= nil,
+    check(CARDS:find("if thumb or (opts and opts.hideLabel) then previewLabel:Hide() end",
+                     1, true) ~= nil,
           "fold: a canvas under a fold header drops its own duplicate caption")
     check(ROWS:find("hideLabel = true", 1, true) ~= nil,
           "fold: ...which the Aura Designer asks for")
