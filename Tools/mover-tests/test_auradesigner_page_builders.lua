@@ -1676,6 +1676,25 @@ do
           "showing: ...and it holds the same eight chips, at the popout's own width")
     check(POP:find([[pop:Follow(btn, { outsideOf = DF.GUIFrame })]], 1, true) ~= nil,
           "showing: ...docked outside the settings window, like every other panel")
+
+    -- ☠ THE RE-SYNC, WHICH SHIPPED MISSING AND WITHOUT A TEST. A pooled popout's
+    -- `build` runs EXACTLY ONCE, so the chips set their active state at that
+    -- moment and never again -- the panel showed "All" forever, however the list
+    -- was really filtered. The fix was a second return from the chip builder and a
+    -- call on every open; only the source changed, so nothing here caught it.
+    -- Pinned now, on both halves.
+    local chipsSrc = CARDS:match("S%.BuildFilterChips = function%(host, width%)(.-)\nend")
+    check(chipsSrc ~= nil, "showing: the chip builder can be read")
+    check((chipsSrc or ""):find("local function SyncActive()", 1, true) ~= nil,
+          "showing: the builder hands back a re-sync verb")
+    check((chipsSrc or ""):find("return LayoutChips, SyncActive", 1, true) ~= nil,
+          "showing: ...as its SECOND return, so the split panel still gets the re-flow first")
+    check(POP:find("po.dfSyncChips = SyncActive", 1, true) ~= nil,
+          "showing: ...which the panel keeps")
+    local syncAt   = POP:find("if pop.dfSyncChips then pop.dfSyncChips() end", 1, true)
+    local followAt = POP:find("pop:Follow(btn, { outsideOf = DF.GUIFrame })", 1, true)
+    check(syncAt and followAt and syncAt > followAt,
+          "showing: ...and calls on EVERY open, after the dock -- not only in build")
     -- A second click on the glyph shuts it, like any toggle.
     check(POP:find([[open:Close("api")]], 1, true) ~= nil,
           "showing: a second click on the glyph closes it")
