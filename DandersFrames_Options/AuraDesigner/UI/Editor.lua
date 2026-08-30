@@ -693,14 +693,136 @@ end
 P.CollectLayoutGroupSections = CollectLayoutGroupSections
 
 -- ============================================================
+-- THE TWO KINDS OF LAYOUT GROUP -- ONE DECLARATION
+-- ------------------------------------------------------------
+-- Both thumbnails are a row of icons because both PRODUCE a row of icons; that
+-- they differ only in what fills the row is the whole lesson. The colours carry
+-- that difference -- a set picked by hand reads as mixed, one drawn from a single
+-- filter reads as uniform.
+--
+-- ☠ A VERB, NOT A FILE-SCOPE TABLE. Every label is an L[...] lookup and a table
+-- built at load freezes on whatever locale was live then -- the trap
+-- DF:RegisterLocaleRefresh exists for, and the same reason Cards.lua's
+-- AddFlowScopes is a function.
+--
+-- ⚠ ONE DECLARATION, TWO HOSTS: the split panel's choice-card BLOCK and the
+-- popout layout's "+ Add Layout Group" PANEL. A second copy is how the three
+-- duplicated FRAME_ITEMS lists in Cards.lua came about.
+-- ============================================================
+local function AddGroupOfKind(kind)
+    local group = CreateLayoutGroup(nil, kind)
+    if group then
+        expandedGroups[GroupExpandKey(group.id)] = true
+        S.SwitchTab("layout")
+        RefreshPlacedIndicators()
+    end
+end
+
+local function LayoutGroupCards()
+    return {
+        {
+            title = L["Spell Group"],
+            desc  = L["Spells you choose yourself"],
+            art   = { kind = "iconRow", ghost = true,
+                      colors = { {0.45,0.45,0.95}, {0.30,0.61,0.36}, {0.91,0.66,0.25} } },
+            onClick = function() AddGroupOfKind(nil) end,
+        },
+        {
+            title = L["Filter Group"],
+            desc  = L["Follows one of your filters"],
+            art   = { kind = "iconRow", ghost = true,
+                      colors = { {0.30,0.61,0.36}, {0.30,0.61,0.36}, {0.30,0.61,0.36} } },
+            onClick = function() AddGroupOfKind("filter") end,
+            -- The filter card in this block, matching the Effects tab's "From a
+            -- Filter". No filter argument: nothing is chosen until the group
+            -- exists, so this opens the library rather than one filter. Once the
+            -- group HAS links, each chip inside it carries its own pencil.
+            action = {
+                -- ☠ Extension included -- see the matching note on the Effects
+                -- tab's card. A PNG path without ".png" fails silently.
+                icon    = "filter_list.png",
+                tooltip = {
+                    title = L["Manage Filters"],
+                    lines = { L["Build and edit your buff filters in the Filter Designer."] },
+                },
+                onClick = function()
+                    if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner() end
+                end,
+            },
+        },
+    }
+end
+
+-- ============================================================
+-- THE "+ ADD LAYOUT GROUP" PANEL
+-- ------------------------------------------------------------
+-- The popout layout's answer to the split panel's permanent card block, and the
+-- same shape the Effects tab's "+ Add Indicator" row already has: one row on the
+-- page, the choice behind it. The Effects tab got that in phase 5 and this tab
+-- was simply missed.
+--
+-- ☠ NO CHOICE CARD *GROUP* IN HERE. GUI:CreateChoiceCardGroup wraps its cards in
+-- a collapsible header keyed by its TITLE TEXT in the account-wide collapsed
+-- store -- a second header inside a panel that already has one, and a profile key
+-- for a fold nobody can usefully close. The cards go in bare; the panel's own
+-- title is the header.
+--
+-- ☠ AND THE HEIGHT IS REPORTED, NOT ASSUMED. The caller mounts this into a
+-- popout pane whose slot is measured right after this returns, so a builder that
+-- only sized itself would be handed whatever the pane happened to be -- which is
+-- exactly how the Add Indicator panel shipped opening EMPTY (spec section 23).
+-- Say the number; the caller remembers it.
+--   host        the pane's container, already at the pane's width
+--   opts.width  that width
+--   opts.SetHeight(h)  report it
+--   opts.Close()       shut the panel once something has been added
+-- ============================================================
+S.BuildAddLayoutGroupPane = function(host, opts)
+    opts = opts or {}
+    local W = opts.width or 260
+    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
+
+    local y = 0
+    for _, def in ipairs(LayoutGroupCards()) do
+        local onPick = def.onClick
+        local card = GUI:CreateChoiceCard(host, {
+            title = def.title, desc = def.desc, art = def.art,
+            accent = gc, width = W, action = def.action,
+            -- ⚠ CLOSED FIRST, THEN CREATED. Creating a group rebuilds the page,
+            -- which retires the row this panel is docked to; shutting it on the
+            -- way out is what the Add Indicator panel's own Finish() does, and for
+            -- the same reason.
+            onClick = function()
+                if opts.Close then opts.Close() end
+                onPick()
+            end,
+        })
+        card:SetPoint("TOPLEFT", 0, y)
+        card:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+        y = y - ((card.layoutHeight or 58) + 6)
+    end
+
+    local h = max(-y + 2, 1)
+    host:SetHeight(h)
+    if opts.SetHeight then opts.SetHeight(h) end
+    return h
+end
+
+-- ============================================================
 -- THE LAYOUT GROUPS TAB'S HEAD AREA
 -- ------------------------------------------------------------
 -- The teaching sentence, the two choice cards and the "debuff rows live over
 -- there" hint -- everything above the list. ONE definition, two hosts: the split
 -- panel's own column and the row layout's band, exactly as S.BuildEffectsHeadArea
 -- is for the Effects tab.
+--
+-- ⚠ opts.skipAddBlock: THE ROW LAYOUT HAS NO CARD BLOCK ON THE PAGE. Its two
+-- cards live in the "+ Add Layout Group" row's panel above this area, exactly as
+-- the Effects tab's three scope cards moved into "+ Add Indicator". The split
+-- panel keeps the block: it is the one surface with the standing room for it.
 -- ============================================================
-S.BuildLayoutGroupsHeadArea = function(parent, yPos)
+S.BuildLayoutGroupsHeadArea = function(parent, yPos, opts)
+    local skipAdd = opts and opts.skipAddBlock or false
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
 
     -- The column every object below is anchored 8px inside on both sides -- the
@@ -735,61 +857,18 @@ S.BuildLayoutGroupsHeadArea = function(parent, yPos)
     -- The two kinds, always. These REPLACE the old "+ Create Group" / "+ Filter
     -- Group" pair rather than sitting above it -- a card is itself the create
     -- action, and running both would be two paths to the same thing.
-    --
-    -- Both thumbnails are a row of icons because both PRODUCE a row of icons;
-    -- that they differ only in what fills the row is the whole lesson. The
-    -- colours carry that difference -- a set picked by hand reads as mixed, one
-    -- drawn from a single filter reads as uniform.
-    local function AddGroupOfKind(kind)
-        local group = CreateLayoutGroup(nil, kind)
-        if group then
-            expandedGroups[GroupExpandKey(group.id)] = true
-            S.SwitchTab("layout")
-            RefreshPlacedIndicators()
-        end
+    if not skipAdd then
+        local addBlock = GUI:CreateChoiceCardGroup(parent, {
+            title    = L["ADD A LAYOUT GROUP"],
+            accent   = gc,
+            width    = COL_W,
+            onToggle = function() S.SwitchTab("layout") end,
+            cards    = LayoutGroupCards(),
+        })
+        addBlock:SetPoint("TOPLEFT", 8, yPos)
+        addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        yPos = yPos - (addBlock.layoutHeight + 10)
     end
-
-    local addBlock = GUI:CreateChoiceCardGroup(parent, {
-        title    = L["ADD A LAYOUT GROUP"],
-        accent   = gc,
-        width    = COL_W,
-        onToggle = function() S.SwitchTab("layout") end,
-        cards = {
-            {
-                title = L["Spell Group"],
-                desc  = L["Spells you choose yourself"],
-                art   = { kind = "iconRow", ghost = true,
-                          colors = { {0.45,0.45,0.95}, {0.30,0.61,0.36}, {0.91,0.66,0.25} } },
-                onClick = function() AddGroupOfKind(nil) end,
-            },
-            {
-                title = L["Filter Group"],
-                desc  = L["Follows one of your filters"],
-                art   = { kind = "iconRow", ghost = true,
-                          colors = { {0.30,0.61,0.36}, {0.30,0.61,0.36}, {0.30,0.61,0.36} } },
-                onClick = function() AddGroupOfKind("filter") end,
-                -- The filter card in this block, matching the Effects tab's "From a
-                -- Filter". No filter argument: nothing is chosen until the group
-                -- exists, so this opens the library rather than one filter. Once the
-                -- group HAS links, each chip inside it carries its own pencil.
-                action = {
-                    -- ☠ Extension included -- see the matching note on the Effects
-                    -- tab's card. A PNG path without ".png" fails silently.
-                    icon    = "filter_list.png",
-                    tooltip = {
-                        title = L["Manage Filters"],
-                        lines = { L["Build and edit your buff filters in the Filter Designer."] },
-                    },
-                    onClick = function()
-                        if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner() end
-                    end,
-                },
-            },
-        },
-    })
-    addBlock:SetPoint("TOPLEFT", 8, yPos)
-    addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    yPos = yPos - (addBlock.layoutHeight + 10)
 
     if not hasGroups then
         -- No third card for debuff rows. They are a separate store reached from
@@ -1185,13 +1264,97 @@ end
 P.CollectDebuffGroupSections = CollectDebuffGroupSections
 
 -- ============================================================
+-- THE ONE KIND OF DEBUFF GROUP -- ONE DECLARATION
+-- ------------------------------------------------------------
+-- Red icons because the row it builds is made of debuffs, and the mixed palette
+-- next door means "spells you picked"; keeping the two distinguishable matters
+-- more than either thumbnail looking good in isolation.
+--
+-- ⚠ ONE CARD, NOT TWO, AND THAT IS WHY THIS IS A SEPARATE LIST. The Debuffs pool
+-- is served by a DIFFERENT builder from My Buffs / Any Buff (spec section 16),
+-- and it makes exactly one kind of thing. A single list with a `kinds` flag would
+-- be one list pretending to be two.
+--
+-- ☠ A VERB, NOT A FILE-SCOPE TABLE -- see LayoutGroupCards above.
+-- ============================================================
+local function AddDebuffGroup()
+    local group = CreateDebuffGroup()
+    if group then
+        expandedGroups["dgroup:" .. group.id] = true
+        -- A new group claims Boss + Role by default, so the main debuff bar drops
+        -- them immediately: full structural chain, not just a tab rebuild.
+        S.SwitchTab("layout")
+        RefreshPlacedIndicators()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
+            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        end
+    end
+end
+
+local function DebuffGroupCards()
+    return {
+        {
+            title = L["Debuff Group"],
+            desc  = L["Blizzard's debuff categories"],
+            art   = { kind = "iconRow", ghost = true,
+                      colors = { {0.66,0.27,0.25}, {0.66,0.27,0.25}, {0.66,0.27,0.25} } },
+            onClick = AddDebuffGroup,
+        },
+    }
+end
+
+-- ============================================================
+-- THE "+ ADD DEBUFF GROUP" PANEL
+-- ------------------------------------------------------------
+-- The Debuffs pool's half of section 23.2, built to the same shape as
+-- S.BuildAddLayoutGroupPane and for the same reason -- the tab is ONE tab, and a
+-- pool that opened a panel next to a pool that fired on click would be two
+-- different controls wearing one label.
+--
+-- ⚠ ONE CARD BEHIND A PANEL IS STILL WORTH IT, and this is the one place to
+-- argue with that. The card is not just a button: it carries the thumbnail and
+-- "Blizzard's debuff categories", which is the only sentence in the addon that
+-- says what this kind of group IS. A bare row would be one click cheaper and
+-- would drop that sentence on the floor.
+-- ============================================================
+S.BuildAddDebuffGroupPane = function(host, opts)
+    opts = opts or {}
+    local W = opts.width or 260
+    local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
+
+    local y = 0
+    for _, def in ipairs(DebuffGroupCards()) do
+        local onPick = def.onClick
+        local card = GUI:CreateChoiceCard(host, {
+            title = def.title, desc = def.desc, art = def.art,
+            accent = gc, width = W, action = def.action,
+            onClick = function()
+                if opts.Close then opts.Close() end
+                onPick()
+            end,
+        })
+        card:SetPoint("TOPLEFT", 0, y)
+        card:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+        y = y - ((card.layoutHeight or 58) + 6)
+    end
+
+    local h = max(-y + 2, 1)
+    host:SetHeight(h)
+    if opts.SetHeight then opts.SetHeight(h) end
+    return h
+end
+
+-- ============================================================
 -- THE DEBUFFS TAB'S HEAD AREA
 -- ------------------------------------------------------------
 -- The teaching sentence, the one choice card and the dedup explainer --
 -- everything above the list. ONE definition, two hosts, exactly as the Layout
--- Groups tab's is.
+-- Groups tab's is -- opts.skipAddBlock included, for the same reason.
 -- ============================================================
-S.BuildDebuffGroupsHeadArea = function(parent, yPos)
+S.BuildDebuffGroupsHeadArea = function(parent, yPos, opts)
+    local skipAdd = opts and opts.skipAddBlock or false
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
 
     -- The column every object below is anchored 8px inside on both sides -- the
@@ -1221,43 +1384,19 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos)
     end
 
     -- The one kind this tab makes, always -- replaces "+ Debuff Group" outright.
-    -- Red icons because the row it builds is made of debuffs, and the mixed
-    -- palette next door means "spells you picked"; keeping the two distinguishable
-    -- matters more than either thumbnail looking good in isolation.
     -- The debuffGroups array is born lazily on the first add.
-    local addBlock = GUI:CreateChoiceCardGroup(parent, {
-        title    = L["ADD A DEBUFF GROUP"],
-        accent   = gc,
-        width    = COL_W,
-        onToggle = function() S.SwitchTab("layout") end,
-        cards = {
-            {
-                title = L["Debuff Group"],
-                desc  = L["Blizzard's debuff categories"],
-                art   = { kind = "iconRow", ghost = true,
-                          colors = { {0.66,0.27,0.25}, {0.66,0.27,0.25}, {0.66,0.27,0.25} } },
-                onClick = function()
-                    local group = CreateDebuffGroup()
-                    if group then
-                        expandedGroups["dgroup:" .. group.id] = true
-                        -- A new group claims Boss + Role by default, so the main
-                        -- debuff bar drops them immediately: full structural
-                        -- chain, not just a tab rebuild.
-                        S.SwitchTab("layout")
-                        RefreshPlacedIndicators()
-                        DF:InvalidateAuraLayout()
-                        DF:UpdateAllFrames()
-                        if DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
-                            DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-                        end
-                    end
-                end,
-            },
-        },
-    })
-    addBlock:SetPoint("TOPLEFT", 8, yPos)
-    addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    yPos = yPos - (addBlock.layoutHeight + 10)
+    if not skipAdd then
+        local addBlock = GUI:CreateChoiceCardGroup(parent, {
+            title    = L["ADD A DEBUFF GROUP"],
+            accent   = gc,
+            width    = COL_W,
+            onToggle = function() S.SwitchTab("layout") end,
+            cards    = DebuffGroupCards(),
+        })
+        addBlock:SetPoint("TOPLEFT", 8, yPos)
+        addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        yPos = yPos - (addBlock.layoutHeight + 10)
+    end
 
     if hasGroups then
         -- Dedup explainer (§11.1 mock): how the row-claim handoff behaves.

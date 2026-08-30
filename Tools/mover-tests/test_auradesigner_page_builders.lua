@@ -624,10 +624,17 @@ do
     -- Phase 3's two: the Layout Groups and Debuffs choice-card blocks, lifted out
     -- of the tab builders they used to be welded into.
     for _, name in ipairs({ "BuildLayoutGroupsHeadArea", "BuildDebuffGroupsHeadArea" }) do
-        check(EDIT:find("S." .. name .. " = function(parent, yPos)", 1, true) ~= nil,
+        check(EDIT:find("S." .. name .. " = function(parent, yPos, opts)", 1, true) ~= nil,
               "head: " .. name .. " is declared once")
-        check(ROWS:find("S." .. name .. "(host, -4)", 1, true) ~= nil,
-              "head: ...and the row page mounts it as a band")
+        -- ☠ AND THE ROW LAYOUT ASKS IT TO SKIP THE CARDS. They moved into the
+        -- "+ Add Layout Group" row's panel, exactly as the Effects tab's three
+        -- scope cards moved into "+ Add Indicator" -- the block this tab kept
+        -- standing permanently above its list is the thing section 23.2 takes away.
+        check(ROWS:find("S." .. name .. "(host, -4, { skipAddBlock = true })", 1, true) ~= nil,
+              "head: ...and the row page mounts it as a band, without its card block")
+        check(EDIT:find("S." .. name .. " = function(parent, yPos, opts)\n    local skipAdd = opts and opts.skipAddBlock or false",
+                        1, true) ~= nil,
+              "head: ...which is the first thing that builder reads (" .. name .. ")")
         local n = 0
         for _ in EDIT:gmatch("S%." .. name) do n = n + 1 end
         eq(n, 2, "head: ...declared once and mounted once by the card (" .. name .. ")")
@@ -649,6 +656,121 @@ do
           "head: Layout Groups is built as rows")
     check(ROWS:find("BuildGlobalTabRows(ctx, shell)", 1, true) ~= nil,
           "head: ...and so is Global")
+end
+
+-- ============================================================
+-- 8a. LAYOUT GROUPS GETS ITS ADD PANEL
+-- Phase 5 turned the Effects tab's 230px choice-card block into a single
+-- "+ Add Indicator" row with the cards inside its panel. Layout Groups was
+-- missed and kept the block standing permanently above its list -- on BOTH its
+-- arms, which are two different builders (spec section 16).
+-- ============================================================
+print("-- Aura Designer: Layout Groups gets its own add panel")
+do
+    -- ── ONE ROW, TWO POOLS ──
+    -- The row is one shape; which panel it opens and what it is called are the
+    -- pool's business. Read off the branch itself so a pool losing its arm shows.
+    local BODY = ROWS:match("local function BuildLayoutTabRows%(ctx, shell%)(.-)\nlocal groups")
+                 or ROWS:match("local function BuildLayoutTabRows%(ctx, shell%)(.-)\n    local groups")
+    check(BODY ~= nil, "addgroup: the Layout Groups tab builder can be read")
+    BODY = BODY or ""
+    check(BODY:find([==[local addLabel = isDebuffs and L["Add Debuff Group"] or L["Add Layout Group"]]==],
+                    1, true) ~= nil,
+          "addgroup: the row names itself after the pool it is adding to")
+    check(BODY:find("local BuildAddPane = isDebuffs and S.BuildAddDebuffGroupPane or S.BuildAddLayoutGroupPane",
+                    1, true) ~= nil,
+          "addgroup: ...and opens that pool's own panel -- both arms have one")
+    -- ☠ READ AT CALL TIME, NOT ALIASED AT LOAD. Editor.lua declares both panes and
+    -- loads AFTER this file, so a file-scope local would freeze nil -- silently,
+    -- because a nil upvalue only errors when the tab is opened.
+    check(ROWS:find("local BuildAddLayoutGroupPane", 1, true) == nil,
+          "addgroup: ...neither of which is aliased at load, where it would be nil")
+    check(BODY:find("GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })",
+                    1, true) ~= nil,
+          "addgroup: the row rides a chromeless band at the page's own width")
+    check(BODY:find("build  = addMount,", 1, true) ~= nil,
+          "addgroup: ...and it is a popout row, like + Add Indicator")
+    -- It holds no settings, so it takes neither a modified tick nor a footer --
+    -- the same refusal the Add Indicator row makes.
+    check(BODY:find("tools.WireModifiedTick(addRow)", 1, true) == nil,
+          "addgroup: ...with no modified tick, because it holds no setting")
+    check(BODY:find("tools.WireFooter(addRow", 1, true) == nil,
+          "addgroup: ...and no footer, for the same reason")
+    check(BODY:find("if not ctx.adEnabled then addRow.disableOn = function() return true end end",
+                    1, true) ~= nil,
+          "addgroup: ...and it greys with the rest of the page")
+
+    -- ☠ THE HEIGHT THE BUILDER ASKED FOR, REMEMBERED. This row is the same shape
+    -- as + Add Indicator, which shipped opening EMPTY: every SetHeight the builder
+    -- reported was swallowed while `ready` was false -- the whole build -- and the
+    -- AddWidget under it then measured a pane nothing had sized and gave it a 1px
+    -- slot. Pinned here so the second panel cannot repeat the first one's bug.
+    check(BODY:find("local ready, wantH = false, nil", 1, true) ~= nil,
+          "addgroup: the panel remembers the height reported while its verb is silent")
+    check(BODY:find("wantH = h", 1, true) ~= nil,
+          "addgroup: ...written on every report, not only the last")
+    local slotAt  = BODY:find("g:AddWidget(pane, max(wantH or pane:GetHeight() or 1, 1))", 1, true)
+    local readyAt = BODY:find("ready = true", 1, true)
+    check(slotAt ~= nil,
+          "addgroup: ...and the slot takes that number, not the pane's own")
+    check(slotAt and readyAt and slotAt < readyAt,
+          "addgroup: ...with the flag armed after the add, never before")
+    local applyAt = BODY:find("if wantH then GUI:RelayoutHost(pane, wantH) end", 1, true)
+    check(applyAt and readyAt and applyAt > readyAt,
+          "addgroup: ...and anything asked for during the silence lands once it is")
+
+    -- ── THE TWO PANES ──
+    for _, pane in ipairs({ { fn = "S.BuildAddLayoutGroupPane", cards = "LayoutGroupCards" },
+                            { fn = "S.BuildAddDebuffGroupPane", cards = "DebuffGroupCards"  } }) do
+        local SRC = EDIT:match(pane.fn:gsub("%.", "%%.") .. " = function%(host, opts%)(.-)\nend")
+        check(SRC ~= nil, "addgroup: " .. pane.fn .. " can be read")
+        SRC = SRC or ""
+        -- ONE declaration of the cards, two hosts: the split panel's block and
+        -- this panel. A second copy is how Cards.lua ended up with three
+        -- duplicated FRAME_ITEMS lists.
+        check(SRC:find("for _, def in ipairs(" .. pane.cards .. "())", 1, true) ~= nil,
+              "addgroup: ...and builds from the shared card list")
+        check(EDIT:find("local function " .. pane.cards .. "()", 1, true) ~= nil,
+              "addgroup: ...which is a verb, so its labels cannot freeze on enUS")
+        check(EDIT:find("local " .. pane.cards .. " = {", 1, true) == nil,
+              "addgroup: ...rather than a table built at load")
+        -- ☠ BARE CARDS, NOT A CHOICE CARD *GROUP*. CreateChoiceCardGroup wraps its
+        -- cards in a collapsible header keyed by TITLE TEXT in the account-wide
+        -- collapsed store -- a second header inside a panel that already has one,
+        -- and a profile key for a fold nobody can usefully close.
+        check(SRC:find("GUI:CreateChoiceCard(host, {", 1, true) ~= nil,
+              "addgroup: ...as bare cards")
+        check(SRC:find("CreateChoiceCardGroup", 1, true) == nil,
+              "addgroup: ...with no second collapsible header inside the panel")
+        -- ...and it REPORTS its height rather than only sizing itself, which is the
+        -- half the caller's wantH is waiting for.
+        check(SRC:find("if opts.SetHeight then opts.SetHeight(h) end", 1, true) ~= nil,
+              "addgroup: ...and reports its height instead of assuming one")
+        -- ⚠ CLOSED FIRST, THEN CREATED. Creating a group rebuilds the page, which
+        -- retires the row this panel is docked to.
+        local closeAt = SRC:find("if opts.Close then opts.Close() end", 1, true)
+        local pickAt  = SRC:find("onPick()", 1, true)
+        check(closeAt and pickAt and closeAt < pickAt,
+              "addgroup: ...and shuts itself before the rebuild that retires its row")
+    end
+
+    -- The split panel keeps its block: it is the one surface with standing room.
+    check(EDIT:find([[title    = L["ADD A LAYOUT GROUP"],]], 1, true) ~= nil,
+          "addgroup: the split panel still draws its card block")
+    check(EDIT:find([[title    = L["ADD A DEBUFF GROUP"],]], 1, true) ~= nil,
+          "addgroup: ...on both pools")
+
+    -- The order the Effects tab already draws: add, then the list.
+    local addAt  = BODY:find("local addBand = GUI:CreateSettingsGroup", 1, true)
+    local headAt = BODY:find("GUI:AddDesignerLegacyTab(shell, function(host)", 1, true)
+    check(addAt and headAt and addAt < headAt,
+          "addgroup: the add row comes first, then whatever the head area still says")
+
+    local EN = df_file_source("Locales/enUS.lua")
+    check(EN:find("L[\"Add Layout Group\"] = true", 1, true) ~= nil,
+          "addgroup: the row's label is in the source locale")
+    check(EN:find("L[\"Add Debuff Group\"] = true", 1, true) ~= nil,
+          "addgroup: ...and so is the Debuffs pool's")
 end
 
 -- ============================================================
