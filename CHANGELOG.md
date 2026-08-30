@@ -29,7 +29,9 @@
 ### Changes
 
 - (Aura Designer) Redesigned. The preview, the settings and the indicator list are now one column that fits the normal settings window instead of forcing it wider, and each effect's settings open in their own panel rather than filling the page.
-- (Aura Designer) Adding an indicator is now one panel showing the whole job at once: pick the aura, pick how it should look, pick where it goes. Every look is drawn as a small picture of your own frame with that effect on it, and anything the aura already has is greyed out so you cannot add it twice. Starting from a filter sits beside the spell search instead of being a route of its own.
+- (Aura Designer) Adding an indicator is now one panel showing the whole job at once: pick the aura, pick how it should look, pick where it goes. Every look is drawn as a small picture of your own frame with that effect on it, and anything the aura already has is greyed out so you cannot add it twice. Starting from a filter is offered as an equal choice beside the spell search.
+- (Aura Designer) Choosing a filter for a new indicator now opens the full filter list, the same way the spell search does. Open any filter in that list to scroll through the spells inside it — the switched-off ones included — before you pick it.
+- (Aura Designer) The Sound choice now carries a note on its picture. It was the one look that changes nothing about the frame, so its picture was easy to mistake for nothing being chosen.
 - (Aura Designer) The frame preview can be folded away, scales up to fill the space it needs, and its zoom moved to a button in its corner.
 - (Text Designer) Redesigned to match, and it now uses the same frame preview as the Aura Designer.
 - (Aura Filters) Redesigned to match the other two, and it no longer forces the settings window wider.

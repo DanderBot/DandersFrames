@@ -2044,10 +2044,26 @@ do
     -- effect hangs off a whole filter rather than one aura -- a real reason it
     -- cannot be spell-first, and NOT a reason to put the taxonomy back. Section 1
     -- asks "which aura?", and a filter is a saved answer to that question.
-    check(pane:find('text = L["Or start from a filter"],', 1, true) ~= nil,
+    --
+    -- ☠ AND IT IS DRAWN AS A PEER, NOT A GHOST LINE UNDER THE SPELL BUTTON
+    -- (spec section 27.2). Both routes take `primary`, both take the same
+    -- height, and the filter one no longer takes `ghost` -- which is the whole
+    -- of what "it almost looks like an afterthought" was describing.
+    check(pane:find('text = L["Select a filter"],', 1, true) ~= nil,
           "add: the filter route is offered beside the spell search, in section 1")
+    check(pane:find("ghost = true", 1, true) == nil,
+          "add: ...at the same weight as it, not as a ghost line beneath it")
     check(pane:find("onPick = function(kind, key) PickFilter(kind, key) end,", 1, true) ~= nil,
           "add: ...and answers the same section rather than opening a branch of its own")
+    -- ☠ AND IT OPENS THE FULL OVERLAY, THE WAY THE SPELL DATABASE DOES. The
+    -- anchored dropdown is the thing it stopped being: that one hangs off a
+    -- button and takes `anchor`, and both of those must be gone from this panel.
+    check(pane:find("OpenADFilterPicker({", 1, true) ~= nil,
+          "add: ...through the shared overlay opener")
+    check(pane:find("OpenFilterPicker({", 1, true) == nil,
+          "add: ...and not through the anchored dropdown it replaced")
+    check(pane:find("anchor = self", 1, true) == nil,
+          "add: ...so nothing in the panel is hung off a button any more")
     -- ...and it DIMS the effects a filter cannot drive rather than hiding them
     -- behind a list of its own, which is what a scope step was.
     check(pane:find('if source.kind ~= "filter" then return true end', 1, true) ~= nil,

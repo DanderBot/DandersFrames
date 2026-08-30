@@ -1615,6 +1615,26 @@ local function OpenADPicker(opts)
     GUI:SetPopoutTetherOverride(opts.parent)
 end
 
+-- ...and the same prelude for the OTHER way of answering "which aura?". The
+-- filter list is a sibling overlay in the same shell over the same host
+-- (FilterRegistry/UI/SpellPicker.lua), so it hides the same tab surfaces,
+-- retargets the same outlines and restores through the same close hook.
+--
+-- ☠ IT SHARES S.adPickerHandle DELIBERATELY. CloseADPicker is called on every
+-- pool, sub-tab and spec switch precisely because a picker's handlers capture
+-- the context they were opened in; a second handle would be a second thing to
+-- remember to close, and the one nobody remembered would be the one that leaked.
+-- Only one of the two overlays can be up at a time -- both cover the whole host.
+local function OpenADFilterPicker(opts)
+    S.adPickerDirty = false
+    if S.tabBar then S.tabBar:Hide() end
+    if S.tabScrollFrame then S.tabScrollFrame:Hide() end
+    opts.parent = S.rightPanel or (GUI and GUI.contentFrame)
+    opts.onClose = ADPickerClosed
+    S.adPickerHandle = DF.FilterRegistry:OpenFilterPicker(opts)
+    GUI:SetPopoutTetherOverride(opts.parent)
+end
+
 -- ── PICKER RECORDS ──
 -- Shared-picker record list for the ACTIVE tab. My Buffs adapts the spec's
 -- merged trackable list (curated Config entries + the SpellDB class pool +
@@ -3288,10 +3308,34 @@ local function PaintEffectOnThumb(pv, typeKey)
     elseif typeKey == "healthtext" then
         if pv.hpText then pv.hpText:SetTextColor(c.r, c.g, c.b, 1) end
 
+    elseif typeKey == "sound" then
+        -- ☠ THE FRAME STAYS UNTOUCHED, AND THAT IS THE PROBLEM THIS SOLVES. A
+        -- sound alert changes nothing about the frame, so an untouched frame is
+        -- the honest picture of it -- but an untouched frame is ALSO exactly what
+        -- "nothing chosen" looks like, and in a grid of eight tiles that all show
+        -- a change, the one that shows none reads as empty rather than as silent
+        -- (spec section 27.1). The note is laid OVER the mock rather than
+        -- altering it, so the picture stays honest and gains the one word it was
+        -- missing.
+        --
+        -- ⚠ TEXTURES, NOT A WIDGET. Anything on a tile that can take the mouse
+        -- takes it across the whole picture -- a 220x30 slider over a 76x44
+        -- thumbnail is what made every tile unclickable except in its margin. A
+        -- texture has no mouse to take.
+        local size = 26
+        -- The plate is what makes it legible over the health fill; the same
+        -- trick the icon and square arms use behind their own artwork.
+        local plate = mock:CreateTexture(nil, "OVERLAY", nil, 1)
+        plate:SetColorTexture(0, 0, 0, 0.55)
+        plate:SetSize(size + 6, size + 6)
+        plate:SetPoint("CENTER", mock, "CENTER", 0, 0)
+        local note = mock:CreateTexture(nil, "OVERLAY", nil, 2)
+        note:SetSize(size, size)
+        note:SetPoint("CENTER", plate, "CENTER", 0, 0)
+        note:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\music_note")
+        note:SetVertexColor(c.r, c.g, c.b, 1)
+
     end
-    -- ⚠ NO ARM FOR "sound", DELIBERATELY. A sound alert changes nothing on the
-    -- frame, so an untouched frame is the honest picture of it -- the same
-    -- decision the choice cards this replaces already made.
 end
 
 -- ── ONE PICTURE TILE ──
@@ -3451,6 +3495,8 @@ end
 -- PopoutContent builds into a HIDDEN holder and moves FRAMES into the group, so
 -- a region left on the parent stays behind and is never drawn (spec section 16).
 local SECTION_HEAD_H = 16
+-- Section 1's answer line: what the two source buttons above it chose.
+local SOURCE_LINE_H = 18
 
 local function CreateNumberedHeading(parent, number, caption, y, width)
     local head = CreateFrame("Frame", nil, parent)
@@ -3501,7 +3547,6 @@ S.BuildAddIndicatorPane = function(host, opts)
     opts = opts or {}
     local W = opts.width or 260
     local tc = GetThemeColor()
-    local FILTER_GREEN = { r = 0.51, g = 0.86, b = 0.51 }
     local EFFECTS = AddFlowEffects()
     local EFFECT_BY_TYPE = {}
     for _, e in ipairs(EFFECTS) do EFFECT_BY_TYPE[e.type] = e end
@@ -3517,7 +3562,7 @@ S.BuildAddIndicatorPane = function(host, opts)
     local Sync   -- every control asks for a re-state, so this is forward-declared
 
     local tiles = {}
-    local sec2Head, sec3Head, grid, gridNote, addBtn, spellBtn, filterBtn
+    local sec2Head, sec3Head, grid, gridNote, addBtn, spellBtn, filterBtn, sourceText
 
     -- ── WHAT A FINISHED ADD COSTS ──
     -- The same three verbs every other add path runs.
@@ -3654,37 +3699,85 @@ S.BuildAddIndicatorPane = function(host, opts)
         })
     end
 
+    -- ...and the other way to answer the SAME question. See the header for why
+    -- this is a second source rather than a scope.
+    --
+    -- ☠ IT OPENS THE FILTER LIST IN THE FULL OVERLAY, NOT A DROPDOWN. Same shell
+    -- as the spell database, over the same host, and inside it a filter's own
+    -- spells expand in place so you can read one before committing to it (spec
+    -- section 27.2/27.3). Safe from inside a panel: the overlay covers the
+    -- settings content area while the panel docks OUTSIDE the window, so the
+    -- panel stays open, and an open panel's outline retargets to the overlay
+    -- while it is up.
+    local function OpenFilterStep()
+        OpenADFilterPicker({
+            title = L["Filters"],
+            subtitle = L["Add Indicator"],
+            subtitleColor = tc,
+            -- No isLinked: every filter is offerable here. Which EFFECTS one
+            -- already carries is a question about a TYPE, and the nine tiles
+            -- below answer it one at a time.
+            actionLabel = L["Select"],
+            onPick = function(kind, key) PickFilter(kind, key) end,
+        })
+    end
+
+    -- ☠ TWO PEERS, NOT A BUTTON AND A FOOTNOTE (spec section 27.2). The filter
+    -- route was a 20px ghost line under a 30px primary button, which is the
+    -- drawing for "and also, if you must" -- and the user read it exactly that
+    -- way: "it almost looks like an afterthought". Section 1 asks ONE question
+    -- and there are TWO ways to answer it, so the two answers are the same size,
+    -- the same weight and on the same line. Neither is the default.
+    --
+    -- ⚠ AND THE ANSWER MOVES OFF THE BUTTON. The spell button used to double as
+    -- the display for whatever had been chosen, which is what forced it
+    -- full-width; at half a pane it would truncate the very name it exists to
+    -- confirm. It goes on its own line below, where both routes can write to it.
+    --
+    -- ☠ fitText = false ON BOTH, AND THIS IS THE HALF THAT IS NOT COSMETIC. A
+    -- declared width is a MINIMUM to StyleButton: it measures the rendered label
+    -- and GROWS the button rather than let a long translation clip. That is the
+    -- right default for a button standing on its own, and exactly wrong for two
+    -- pinned side by side -- the German label would push the left one under the
+    -- right one, and the right one is pinned by offset so it would not move. The
+    -- kit documents this opt-out for precisely this case: where equal widths are
+    -- the point, clipping one is better than moving both.
+    local SRC_GAP = 7
+    local SRC_W = floor((W - SRC_GAP) / 2)
+
     spellBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
     spellBtn:SetPoint("TOPLEFT", 0, y)
-    spellBtn:SetPoint("TOPRIGHT", 0, y)
     GUI:StyleButton(spellBtn, {
-        height = 30, primary = true, align = "left",
+        width = SRC_W, height = 30, primary = true, align = "left", fitText = false,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search", size = 14 },
         text = L["Select a spell"], font = "DFFontHighlight",
     })
     spellBtn:SetScript("OnClick", OpenSpellStep)
+
+    filterBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
+    filterBtn:SetPoint("TOPLEFT", SRC_W + SRC_GAP, y)
+    GUI:StyleButton(filterBtn, {
+        width = W - SRC_W - SRC_GAP, height = 30, primary = true, align = "left",
+        fitText = false,
+        icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list", size = 14 },
+        text = L["Select a filter"], font = "DFFontHighlight",
+    })
+    filterBtn:SetScript("OnClick", OpenFilterStep)
     y = y - 34
 
-    -- ...and the other way to answer the SAME question. See the header for why
-    -- this is a second source rather than a scope.
-    filterBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
-    filterBtn:SetPoint("TOPLEFT", 0, y)
-    filterBtn:SetPoint("TOPRIGHT", 0, y)
-    GUI:StyleButton(filterBtn, {
-        height = 20, ghost = true, align = "left", leftPad = 2,
-        accent = FILTER_GREEN,
-        text = L["Or start from a filter"],
-    })
-    filterBtn:SetScript("OnClick", function(self)
-        OpenFilterPicker({
-            anchor = self,
-            -- Every filter is offerable: which EFFECTS it already carries is a
-            -- per-tile question, and the tiles answer it.
-            isLinked = function() return false end,
-            onPick = function(kind, key) PickFilter(kind, key) end,
-        })
-    end)
-    y = y - 30
+    -- ⚠ INSIDE A FRAME, not a bare FontString on the pane. PopoutContent builds
+    -- into a hidden holder and moves FRAMES; a region left on the parent stays
+    -- behind and is never drawn (spec section 16).
+    local srcBox = CreateFrame("Frame", nil, host)
+    srcBox:SetSize(W, SOURCE_LINE_H)
+    srcBox:SetPoint("TOPLEFT", 0, y)
+    sourceText = srcBox:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(sourceText, 10, "")
+    sourceText:SetPoint("LEFT", 0, 0)
+    sourceText:SetPoint("RIGHT", 0, 0)
+    sourceText:SetJustifyH("LEFT")
+    sourceText:SetWordWrap(false)
+    y = y - (SOURCE_LINE_H + 4)
 
     -- ── 2 · HOW SHOULD IT SHOW? ──
     sec2Head = CreateNumberedHeading(host, 2, L["HOW SHOULD IT SHOW?"], y, W)
@@ -3773,11 +3866,21 @@ S.BuildAddIndicatorPane = function(host, opts)
             selected = nil
         end
 
+        -- ☠ THE ANSWER, AND WHICH ROUTE GAVE IT. The two buttons keep their own
+        -- labels -- they are the question, and a question that renames itself to
+        -- its own answer stops being offerable -- so the chosen source is written
+        -- on the line below them, and the route that produced it carries the
+        -- selection. Neither is dimmed: picking a filter must not make the spell
+        -- route look unavailable, because changing your mind is one click.
         if source then
-            spellBtn.Text:SetText(source.display or "")
+            sourceText:SetText(source.display or "")
+            sourceText:SetTextColor(tc.r, tc.g, tc.b)
         else
-            spellBtn.Text:SetText(L["Select a spell"])
+            sourceText:SetText(L["Choose an aura first."])
+            sourceText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         end
+        spellBtn:SetActive(source ~= nil and source.kind == "spell")
+        filterBtn:SetActive(source ~= nil and source.kind == "filter")
         -- The spell's own artwork, on the tile that is about the spell's own
         -- artwork. Filters have no single icon; the shared filter glyph stands in.
         local iconTile = tiles.icon

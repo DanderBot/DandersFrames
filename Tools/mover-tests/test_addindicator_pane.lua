@@ -110,6 +110,17 @@ CreateFrame = function(kind, _, parent)
         if type(p) == "table" and rawget(p, "_kids") then p._kids[#p._kids + 1] = self end
     end
     f.GetChildren = function(self) return unpack(rawget(self, "_kids") or {}) end
+    -- ...and font strings are RECORDED, which the shim does not do. A pane
+    -- reports section 1's answer through one, and "the panel says what it was
+    -- answered with" is otherwise unobservable in a headless run.
+    f._fs = {}
+    local baseCreateFontString = f.CreateFontString
+    f.CreateFontString = function(self, ...)
+        local fs = baseCreateFontString(self, ...)
+        local t = rawget(self, "_fs")
+        if t then t[#t + 1] = fs end
+        return fs
+    end
     if type(parent) == "table" and rawget(parent, "_kids") then
         parent._kids[#parent._kids + 1] = f
     end
@@ -142,6 +153,10 @@ function GUI:HideTooltip() end
 -- last put in.
 function GUI:StyleButton(btn, opts)
     opts = opts or {}
+    -- Kept, because one of them is load-bearing: a declared width is a MINIMUM to
+    -- the real helper, which grows the button to fit a long label unless the
+    -- caller opts out.
+    btn._styleOpts = opts
     if opts.width or opts.height then
         btn:SetSize(opts.width or btn:GetWidth(), opts.height or btn:GetHeight())
     end
@@ -220,6 +235,7 @@ end
 local S = { SwitchTab = function() end }
 local P = {}
 local added = {}          -- every AddPickedSpell call, in order
+local adFilterOpens = {}  -- ...and every filter-overlay open, with its opts
 local placed, frameEff = {}, {}   -- the world the panel asks about
 local cardsEnv = {
     CreateFrame = CreateFrame, max = math.max, floor = math.floor,
@@ -245,6 +261,12 @@ local cardsEnv = {
     OPTS = { ANCHOR_OPTIONS = {} },
     CreateFramePreview = FakeFramePreview,
     OpenADPicker = function() end, BuildADPickerRecords = function() return {} end,
+    -- The filter route's opener. Recorded rather than stubbed blind: what the
+    -- panel hands it is the whole of "the filter list opens the way the spell
+    -- database does", and the alternative -- an anchored dropdown -- is a
+    -- DIFFERENT call with a DIFFERENT argument (`anchor`).
+    adFilterOpens = adFilterOpens,
+    OpenADFilterPicker = function(o) adFilterOpens[#adFilterOpens + 1] = o end,
     ADCrossBlockText = function() end, ADResolveByID = function() end,
     IsOtherTab = function() return false end, ResolveSpec = function() return nil end,
     GetAuraIcon = function() return "Interface\\Icons\\Spell" end,
@@ -356,6 +378,148 @@ do
     local strays = 0
     for _, t in ipairs(tiles) do if t:GetParent() ~= host then strays = strays + 1 end end
     eq(strays, 0, "tiles: ...and every one is a direct child of the one pane")
+end
+
+print("-- Add Indicator: section 1's two routes are peers, and open the same way")
+do
+    -- ☠ TWO ANSWERS TO ONE QUESTION, DRAWN THE SAME SIZE (spec section 27.2).
+    -- The filter route was a 20px ghost line under a 30px primary button and the
+    -- user read it as exactly what that draws: "it almost looks like an
+    -- afterthought". Measured rather than read, because "equal billing" is a
+    -- claim about geometry and a source grep would only prove the words changed.
+    local btns = {}
+    for _, k in ipairs(rawget(host, "_kids") or {}) do
+        local t = rawget(k, "Text")
+        local txt = t and t.GetText and t:GetText() or nil
+        if txt == "Select a spell" or txt == "Select a filter" then
+            btns[txt] = k
+        end
+    end
+    check(btns["Select a spell"] ~= nil, "peers: section 1 offers the spell route")
+    check(btns["Select a filter"] ~= nil, "peers: ...and the filter route beside it")
+    if btns["Select a spell"] and btns["Select a filter"] then
+        eq(btns["Select a filter"]:GetHeight(), btns["Select a spell"]:GetHeight(),
+           "peers: ...at the same height, so neither reads as the footnote")
+        -- Half a pane each, less the gutter between them. Asserted as "within a
+        -- pixel of each other" rather than as a literal: which half absorbs an
+        -- odd pane width is layout arithmetic, and equal billing is the claim.
+        local dw = (btns["Select a filter"]:GetWidth() or 0)
+                 - (btns["Select a spell"]:GetWidth() or 0)
+        check(dw >= -1 and dw <= 1, "peers: ...and the same width")
+
+        -- ☠ AND NEITHER MAY GROW TO FIT ITS OWN LABEL. A declared width is a
+        -- MINIMUM to the kit: it measures the rendered text and widens the button
+        -- rather than clip a long translation. On a button standing alone that is
+        -- right; on two pinned side by side it is a collision, because the right
+        -- one is pinned by offset and cannot move out of the way. The kit
+        -- documents the opt-out for exactly this shape, and both take it.
+        local optedOut = 0
+        for _, b in pairs(btns) do
+            if rawget(b, "_styleOpts") and b._styleOpts.fitText == false then
+                optedOut = optedOut + 1
+            end
+        end
+        eq(optedOut, 2, "peers: ...which neither may grow out of for a long translation")
+    end
+
+    -- ☠ AND IT OPENS THE FULL OVERLAY, NOT AN ANCHORED DROPDOWN. The two are
+    -- told apart by their ARGUMENTS, which is the only difference a headless run
+    -- can see: a dropdown is hung under a button and takes `anchor`; the overlay
+    -- covers the host the spell database covers and takes none.
+    local fb = btns["Select a filter"]
+    eq(#adFilterOpens, 0, "peers: nothing is open before the click")
+    if fb then fb:GetScript("OnClick")(fb) end
+    eq(#adFilterOpens, 1, "peers: clicking the filter route opens the shared overlay")
+    local o = adFilterOpens[1] or {}
+    eq(o.anchor, nil, "peers: ...with no anchor, because it is not a dropdown")
+    check(type(o.onPick) == "function", "peers: ...and a way to take the answer")
+
+    -- ...and that answer lands in section 1, not in a branch of its own. Read
+    -- off the TILES, because "it answered section 1" and "it opened something
+    -- else" differ precisely in whether section 2 woke: five live tiles -- the
+    -- border and the four recolours -- is what a filter source looks like.
+    if type(o.onPick) == "function" then o.onPick("preset", "healing") end
+    local live = 0
+    for _, k in ipairs(rawget(host, "_kids") or {}) do
+        if rawget(k, "SetTileState") and not rawget(k, "dfDisabled") then live = live + 1 end
+    end
+    eq(live, 5, "peers: the overlay's pick answers section 1 and wakes section 2")
+    -- Back to a spell, so the tests below start where they always did.
+    api.PickSpell("Renew", "Renew")
+end
+
+print("-- Add Indicator: section 1 says what it was answered with")
+do
+    -- ⚠ THE ANSWER MOVED OFF THE BUTTON. It used to be the spell button's own
+    -- label, which is what forced that button to span the pane; at half a pane it
+    -- would truncate the very name it exists to confirm. Its own line can hold
+    -- it, and both routes can write to it.
+    --
+    -- Read by SWEEPING every font string the pane built rather than by position:
+    -- which frame the line lives on is layout, and the claim is that section 1
+    -- reports its answer somewhere a reader can see.
+    local function PaneSaid(text)
+        for _, k in ipairs(rawget(host, "_kids") or {}) do
+            for _, fs in ipairs(rawget(k, "_fs") or {}) do
+                if fs:GetText() == text then return true end
+            end
+        end
+        return false
+    end
+    check(PaneSaid("Renew"), "answer: the chosen spell is written under the two routes")
+    -- ...and the buttons keep their own labels, because a question that renames
+    -- itself to its own answer stops being offerable.
+    local kept = 0
+    for _, k in ipairs(rawget(host, "_kids") or {}) do
+        local t = rawget(k, "Text")
+        local txt = t and t.GetText and t:GetText() or nil
+        if txt == "Select a spell" or txt == "Select a filter" then kept = kept + 1 end
+    end
+    eq(kept, 2, "answer: ...and both routes still say what they are")
+
+    -- ...and with nothing chosen it says so, in the panel's own words -- the same
+    -- sentence the dimmed tiles give as their reason, rather than a second
+    -- phrasing of it for translators to keep in step.
+    api.PickSpell(nil)
+    check(PaneSaid("Renew"), "answer: a refused pick does not clear the answer")
+    api.PickFilter("preset", "healing")
+    check(PaneSaid("Filter @preset:healing"),
+          "answer: ...and the filter route writes to the same line")
+    api.PickSpell("Renew", "Renew")
+end
+
+print("-- Add Indicator: the Sound tile carries a mark")
+do
+    -- ☠ AN UNTOUCHED FRAME IS ALSO WHAT "NOTHING CHOSEN" LOOKS LIKE (spec
+    -- section 27.1). Sound is the one effect that changes nothing about the
+    -- frame, so its tile honestly draws an unaltered one -- and in a grid of
+    -- eight tiles that all show a change, honest read as empty.
+    local soundTile
+    for _, k in ipairs(rawget(host, "_kids") or {}) do
+        local lbl = rawget(k, "label")
+        if rawget(k, "SetTileState") and lbl and lbl:GetText() == "Sound Alert" then
+            soundTile = k
+        end
+    end
+    check(soundTile ~= nil, "sound: the Sound tile is reachable")
+    local mock = soundTile and soundTile.preview and soundTile.preview.mockFrame
+    check(mock ~= nil, "sound: ...and draws one of our own frames, like its eight siblings")
+    local note
+    for _, t in ipairs(mock and rawget(mock, "_textures") or {}) do
+        -- ⚠ rawget, NOT GetTexture(). The shim answers any unknown field with a
+        -- no-op FUNCTION, so a colour-only texture's GetTexture returns one of
+        -- those rather than nil and `or ""` never fires.
+        local path = rawget(t, "_texture")
+        if type(path) == "string" and path:find("music_note", 1, true) then note = t end
+    end
+    check(note ~= nil, "sound: ...with a note laid over it, so the tile says what it is")
+    -- ☠ A TEXTURE, NOT A WIDGET. Anything on a tile that can take the mouse takes
+    -- it across the whole picture -- which is the bug spec section 27 opens with,
+    -- where a 220x30 slider over a 76x44 thumbnail made every tile clickable only
+    -- in its margin. A texture is not a frame and cannot be clicked.
+    local strays = 0
+    for _, k in ipairs(rawget(mock, "_kids") or {}) do strays = strays + 1 end
+    eq(strays, 0, "sound: ...and nothing clickable was added to the picture")
 end
 
 print("-- Add Indicator: a spell wakes section 2, and section 3 follows the type")

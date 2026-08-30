@@ -10,6 +10,7 @@ local addonName, DF = ...
 
 local pairs, ipairs, type, next = pairs, ipairs, type, next
 local format = string.format
+local tsort = table.sort
 
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
@@ -717,6 +718,114 @@ function R:GetSpellByName(name)
         end
     end
     return byName[name]
+end
+
+-- ------------------------------------------------------------
+-- WHICH FILTERS THERE ARE, AND IN WHAT ORDER
+-- ------------------------------------------------------------
+-- Presets in Categories order, then customs name-sorted. Both surfaces that
+-- offer a filter -- the Aura Designer's anchored dropdown and the full-overlay
+-- filter list beside the spell database -- ask this rather than each walking the
+-- store, because the ORDER is a decision and two copies of it drift.
+--
+-- `isLinked(kind, key)` leaves a candidate out; a consumer that already owns a
+-- filter has no business offering it again.
+--
+-- ⚠ `name` IS NOT DISPLAY-READY FOR A PRESET. A category's name is a locale KEY
+-- (`"External Defensives"`); a custom filter's is text the user typed. `custom`
+-- says which, and the caller does `entry.custom and entry.name or L[entry.name]`
+-- -- localisation is the presenter's job and this file has no business doing it.
+--
+-- `enabled` / `total` are the preset's live counts; for a custom filter both are
+-- its size, because everything listed in one is in it.
+function R:ListFilters(isLinked)
+    local out = {}
+    for _, cat in ipairs(R.Categories) do
+        if not (isLinked and isLinked("preset", cat.key)) then
+            local enabled, total = self:PresetCounts(cat.key)
+            out[#out + 1] = { kind = "preset", key = cat.key, name = cat.name,
+                              enabled = enabled, total = total }
+        end
+    end
+    local customs = {}
+    for cfId in pairs(self:ReadStore().customFilters) do
+        if not (isLinked and isLinked("custom", cfId)) then customs[#customs + 1] = cfId end
+    end
+    tsort(customs, function(a, b)
+        local fa, fb = self:GetCustomFilter(a), self:GetCustomFilter(b)
+        local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
+        if na ~= nb then return na < nb end
+        return a < b
+    end)
+    for _, cfId in ipairs(customs) do
+        local cf = self:GetCustomFilter(cfId)
+        local n = 0
+        if cf then
+            for _ in pairs(cf.spells) do n = n + 1 end
+            for _ in pairs(cf.rawIDs) do n = n + 1 end
+        end
+        out[#out + 1] = { kind = "custom", key = cfId, custom = true,
+                          name = (cf and cf.name) or cfId, enabled = n, total = n }
+    end
+    return out
+end
+
+-- ------------------------------------------------------------
+-- WHAT IS IN A FILTER (read-only, for anything that SHOWS one)
+-- ------------------------------------------------------------
+-- ☠ THE ENABLED RULE LIVES HERE, ONCE. A preset's rows are the shipped
+-- category records with the profile's overrides applied on top; a custom
+-- filter's are whatever the user put in it, plus the raw ids the database has
+-- no record for. Both halves already existed -- inside the Filter Designer
+-- page's own 3,000-line closure, where they are welded to a pooled row list
+-- with muting, child rows, chips and toggles. That list cannot be lifted out as
+-- a widget, so what is shared is the DERIVATION rather than the drawing, and
+-- this is it: one place that answers "which spells, and which of them are off".
+--
+-- Returns nil for a ref that resolves to neither a custom filter nor a preset
+-- category -- a deleted custom id is exactly that, and a caller showing a stale
+-- reference needs to know rather than to render an empty list.
+--
+-- Entry shape: { id, name, icon, class, enabled, raw }. `raw` marks an id the
+-- database does not carry (custom filters only); those sort last, the way the
+-- Filter Designer's own list orders them.
+function R:FilterSpellList(ref)
+    local out = {}
+    local custom = self:GetCustomFilter(ref)
+    if custom then
+        for sid in pairs(custom.spells) do
+            local rec = R.ByID[sid]
+            if rec then
+                local name, icon = self:GetSpellDisplay(rec)
+                out[#out + 1] = { id = sid, name = name, icon = icon,
+                                  class = rec.class, enabled = true }
+            else
+                -- A known id orphaned by a database update reads as a raw id,
+                -- because that is now all it is.
+                out[#out + 1] = { id = sid, name = "#" .. self:FormatSpellID(sid),
+                                  enabled = true, raw = true }
+            end
+        end
+        for rid in pairs(custom.rawIDs) do
+            out[#out + 1] = { id = rid, name = "#" .. self:FormatSpellID(rid),
+                              enabled = true, raw = true }
+        end
+    elseif R.ByCategory[ref] then
+        for _, rec in ipairs(R.ByCategory[ref]) do
+            local name, icon = self:GetSpellDisplay(rec)
+            out[#out + 1] = { id = rec.id, name = name, icon = icon,
+                              class = rec.class,
+                              enabled = self:IsSpellEnabled(ref, rec) }
+        end
+    else
+        return nil
+    end
+    tsort(out, function(a, b)
+        if (a.raw or false) ~= (b.raw or false) then return not a.raw end
+        if a.name ~= b.name then return a.name < b.name end
+        return a.id < b.id
+    end)
+    return out
 end
 
 -- ------------------------------------------------------------

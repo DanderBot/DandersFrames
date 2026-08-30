@@ -2074,6 +2074,7 @@ L["Units"] = true
 -- (SetText) and never passed through format(). Do not start formatting them.
 L["Units + %"] = true
 L["Select"] = true
+L["Select a filter"] = true
 L["Select a spell"] = true
 L["Select indicator..."] = true
 L["Select trigger for %s"] = true
@@ -2128,7 +2129,6 @@ L["items"] = true
 L["No effects configured yet.\nPick a style above to get started."] = true
 L["No effects configured yet.\nUse Add Indicator above to place your first one."] = true
 L["No sound file selected. Choose a sound from the dropdown or enter a custom path."] = true
-L["Or start from a filter"] = true
 L["Outlines the whole frame"] = true
 L["Pick a look above."] = true
 L["Placed on the Frame"] = true
