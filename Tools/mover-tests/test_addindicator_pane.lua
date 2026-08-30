@@ -113,10 +113,20 @@ CreateFrame = function(kind, _, parent)
     -- ...and font strings are RECORDED, which the shim does not do. A pane
     -- reports section 1's answer through one, and "the panel says what it was
     -- answered with" is otherwise unobservable in a headless run.
+    --
+    -- ⚠ AND SO IS TEXT COLOUR, for the reason test_control_row and test_popout_row
+    -- already record it the same way: the shim has no SetTextColor, so the
+    -- __index fallback swallows it into a no-op and "this line is legible rather
+    -- than dimmed to nothing" -- the whole of spec section 28's third state --
+    -- would be unobservable. Recorded here rather than in shim.lua so no other
+    -- suite's frames change shape.
     f._fs = {}
     local baseCreateFontString = f.CreateFontString
     f.CreateFontString = function(self, ...)
         local fs = baseCreateFontString(self, ...)
+        fs.SetTextColor = function(s, r, g, b, a)
+            s._textColor = { r = r, g = g, b = b, a = a }
+        end
         local t = rawget(self, "_fs")
         if t then t[#t + 1] = fs end
         return fs
@@ -143,6 +153,22 @@ local GUI = {
 function GUI:CreateSettingsGroup(parent, width, opts)
     return kitHost:CreateSettingsGroup(parent, width, opts)
 end
+-- ☠ THE REAL ONE. The add panel's section outline is a RING-ONLY rounded surface
+-- (`fill = false`), which is the kit's documented shape for "an outline traced
+-- over something that has to stay visible under it" -- so nothing new went into
+-- DandersUI, and stubbing it here would leave that claim untested. The shim
+-- carries SetTextureSliceMargins/SetTextureSliceMode, so the sliced path is the
+-- one taken.
+function GUI:CreateRoundedSurface(frame, opts)
+    return kitHost:CreateRoundedSurface(frame, opts)
+end
+-- ...and the host is OPTED IN to the rounded style, as DandersFrames' real one is
+-- (GUI.lua's SetSurfaceStyle call). The outline reads its curve off this token
+-- rather than carrying a number of its own, so the opted-in path is the one worth
+-- driving.
+UI.SurfaceStyle = { style = "rounded", radius = 8, borderWidth = 2, rowBorderWidth = 1 }
+kitHost:SetSurfaceStyle(UI.SurfaceStyle)
+function GUI:GetSurfaceStyle() return kitHost:GetSurfaceStyle() end
 function GUI:CloseAllPopoutRows() end
 function GUI:CreateGlyphButton(parent) return CreateFrame("Button", nil, parent) end
 function GUI:SetSettingsFont() end
@@ -237,9 +263,30 @@ local P = {}
 local added = {}          -- every AddPickedSpell call, in order
 local adFilterOpens = {}  -- ...and every filter-overlay open, with its opts
 local placed, frameEff = {}, {}   -- the world the panel asks about
+-- The mouse-strip walk, which lives ~2,700 lines ABOVE the slice this file
+-- lifts (it is shared with the canvas's thumbnail arm) and is therefore a global
+-- to the chunk. A faithful copy rather than a no-op, because the property under
+-- test is that the panel CALLS it on its decoration -- a mutant that drops the
+-- call leaves a mouse-enabled frame here exactly as it would in game. The REAL
+-- walk is pinned by source, in "a tile's picture takes no mouse" at the foot.
+local function MakeMouseInert(f)
+    if not f then return end
+    if f.EnableMouse then f:EnableMouse(false) end
+    if f.EnableMouseMotion then f:EnableMouseMotion(false) end
+    if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
+    if f.SetMouseMotionEnabled then f:SetMouseMotionEnabled(false) end
+    if f.GetChildren then
+        for i = 1, select("#", f:GetChildren()) do
+            MakeMouseInert((select(i, f:GetChildren())))
+        end
+    end
+end
+
 local cardsEnv = {
-    CreateFrame = CreateFrame, max = math.max, floor = math.floor,
+    CreateFrame = CreateFrame, max = math.max, min = math.min, floor = math.floor,
     ipairs = ipairs, pairs = pairs, type = type, tostring = tostring,
+    -- WoW publishes these as globals; the slice reads them as such.
+    MakeMouseInert = MakeMouseInert,
     L = setmetatable({}, { __index = function(_, k) return k end }),
     GUI = GUI, S = S, P = P, DF = DF,
     C_TEXT_DIM = UI.Colors.textDim, C_TEXT = UI.Colors.text,
@@ -662,6 +709,317 @@ do
     local n = #added
     check(api.Commit() == false, "sync: ...with nothing left to commit")
     eq(#added, n, "sync: ...so nothing reached the store")
+end
+
+-- ============================================================
+-- 2b. THREE STATES, NOT TWO
+-- ------------------------------------------------------------
+-- ☠ DIM WAS CARRYING TWO MEANINGS AND SAYING NEITHER (spec section 28). "Not
+-- yet -- answer the section above" and "not needed -- a recolour has no
+-- position" looked identical, and the second is the COMMON case: six of the
+-- nine effects are frame-level, so for two thirds of choices section 3 is moot
+-- and simply sat there grey, looking broken.
+--
+-- ⚠ AND "NOT NEEDED" IS NOT THE GREY-WHEN-DISABLED CONVENTION. That convention
+-- is for a control that is switched off and could be switched on. A section that
+-- does not apply to the choice just made will NEVER apply to it, so dimming it
+-- to illegibility hides the fact instead of stating it.
+--
+-- Driven on a panel of its own: the blocks above have walked the shared one
+-- through a dozen sources, and "what does this look like before anything has
+-- been answered" is only askable of a fresh build.
+-- ============================================================
+print("-- Add Indicator: three states -- active, answered, not applicable")
+do
+    local holder2 = CreateFrame("Frame", nil, nil)
+    holder2:Hide()
+    local host2 = CreateFrame("Frame", nil, holder2)
+    host2:SetWidth(260)
+    local paneH2
+    local api2 = S.BuildAddIndicatorPane(host2, {
+        width = 260,
+        SetHeight = function(h) paneH2 = h end,
+        Close = function() end,
+    })
+
+    local heads, rings, pointer = {}, {}, nil
+    for _, k in ipairs(rawget(host2, "_kids") or {}) do
+        if rawget(k, "SetHeadState") then heads[#heads + 1] = k end
+        if rawget(k, "SetSpan") then rings[#rings + 1] = k end
+        for _, t in ipairs(rawget(k, "_textures") or {}) do
+            -- ⚠ rawget, NOT GetTexture(): the shim answers any unset field with a
+            -- truthy no-op FUNCTION, so `or ""` would never fire on a texture that
+            -- has only ever been given a colour.
+            local path = rawget(t, "_texture")
+            if type(path) == "string" and path:find("expand_more", 1, true) then
+                pointer = k
+            end
+        end
+    end
+    -- ☠ AND A HEADING NOBODY DRIVES KEEPS THE LOOK IT HAS ALWAYS HAD. The two
+    -- Layout Groups panels (Editor.lua) build one of these, ask their single
+    -- question and never call the state verb -- so a construction default of
+    -- "not yet" would silently dim both of them for no reason.
+    local lone = P.CreateNumberedHeading(CreateFrame("Frame", nil, nil), 1, "X", 0, 260)
+    eq(lone.caption:GetAlpha(), 1,
+       "states: a heading nobody drives is not dimmed by this verb existing")
+
+    eq(#heads, 3, "states: all three numbered sections carry a state")
+    eq(#rings, 3, "states: ...and one outline each")
+    check(pointer ~= nil, "states: ...and the panel has an arrow toward the commit")
+
+    -- Section 3's reason line, found by what it says rather than by where it is:
+    -- which frame it hangs on is layout, and the claim is about its legibility.
+    local function GridNote()
+        for _, k in ipairs(rawget(host2, "_kids") or {}) do
+            for _, fs in ipairs(rawget(k, "_fs") or {}) do
+                local t = fs:GetText()
+                if t == "This effect changes the whole frame."
+                   or t == "Pick a look above." or t == "TOPLEFT" or t == "BOTTOM" then
+                    return fs
+                end
+            end
+        end
+    end
+
+    local function stateOf(i) return rawget(heads[i] or {}, "dfHeadState") end
+    local function activeHeads()
+        local n = 0
+        for i = 1, 3 do if stateOf(i) == "active" then n = n + 1 end end
+        return n
+    end
+    local function shownRings()
+        local n = 0
+        for _, r in ipairs(rings) do if r:IsShown() then n = n + 1 end end
+        return n
+    end
+
+    -- ---- nothing answered ------------------------------------------
+    eq(stateOf(1), "active", "states: with nothing chosen section 1 is the one to look at")
+    eq(stateOf(2), "todo",   "states: ...section 2 is not yet")
+    eq(stateOf(3), "todo",   "states: ...and so is section 3")
+    eq(activeHeads(), 1, "states: EXACTLY one section is active at a time")
+    eq(shownRings(), 1, "states: ...and exactly one outline is drawn")
+    check(rings[1]:IsShown(), "states: ...the one round the section awaiting an answer")
+    -- Kept for the frame-level check further down: the ring is lifted as it is
+    -- shown, so this is the only moment ring 1 is the active one.
+    local liftedLevel = rings[1]:GetFrameLevel()
+    check(not pointer:IsShown(),
+          "states: nothing points at the commit while the form is unanswered")
+    -- ☠ "NOT YET" IS THE ONE STATE THAT MAY DIM, because it is the only one where
+    -- dim is honest -- answer the section above and this wakes.
+    local todoAlpha = heads[3].caption:GetAlpha()
+    eq(todoAlpha, 0.4, "states: a not-yet section dims, which is what dim means here")
+    -- ...and the active one is BRIGHT, which is the user's own suggestion: "maybe
+    -- that text can highlight instead of being grey on grey".
+    eq(rawget(heads[1].caption, "_textColor").r, UI.Colors.text.r,
+       "states: the active section's heading is highlighted, not grey on grey")
+    eq(rawget(heads[2].caption, "_textColor").r, UI.Colors.textDim.r,
+       "states: ...where a not-yet one is not")
+
+    -- ---- section 1 answered ----------------------------------------
+    api2.PickSpell("Regrowth", "Regrowth")
+    eq(stateOf(1), "answered", "states: answering section 1 marks it answered...")
+    eq(stateOf(2), "active",   "states: ...and moves the outline to section 2")
+    eq(stateOf(3), "todo",     "states: ...with section 3 still not yet")
+    eq(activeHeads(), 1, "states: still exactly one active")
+    check(rings[2]:IsShown() and not rings[1]:IsShown(),
+          "states: ...and the outline moved rather than multiplied")
+    check(not pointer:IsShown(), "states: the form is not answerable yet")
+
+    -- ---- a PLACED effect: section 3 arrives ANSWERED ----------------
+    -- ☠ NOT ACTIVE, AND NOT MERELY BECAUSE IT IS LAST. `anchor` is seeded from
+    -- TYPE_DEFAULTS every time the type changes and the grid cannot clear it, so
+    -- a placed effect reaches section 3 with its answer already in it. Outlining
+    -- it would send the reader to a question nobody asked.
+    check(api2.SelectType("square") == true, "states: a placed effect is chosen")
+    eq(stateOf(3), "answered", "states: section 3 was PRE-PICKED, so it is answered")
+    eq(activeHeads(), 0, "states: with nothing left to answer, no section is active")
+    eq(shownRings(), 0, "states: ...and no outline is drawn")
+    -- ☠ THE POINTER IS NOT THE NOT-APPLICABLE CASE'S DECORATION. A placed effect
+    -- with a pre-picked anchor is just as finished as a recolour that never had
+    -- one, and section 28 says so explicitly.
+    check(pointer:IsShown(),
+          "states: the arrow points at the commit whenever the form is answerable")
+    check(heads[3].caption:GetAlpha() > todoAlpha,
+          "states: ...and an ANSWERED section is not dimmed like a not-yet one")
+
+    -- ---- a FRAME-LEVEL effect: section 3 does not apply -------------
+    check(api2.SelectType("border") == true, "states: a frame-level effect is chosen")
+    eq(stateOf(3), "na", "states: a border has no position, so section 3 does not apply")
+    eq(activeHeads(), 0, "states: ...which is not something to go and answer")
+    eq(shownRings(), 0, "states: ...so nothing is outlined")
+    check(pointer:IsShown(), "states: ...and the form is finished, so the arrow shows")
+    -- ☠ LEGIBLE, NOT DIMMED TO NOTHING. This is the whole complaint -- "grey on
+    -- grey" -- and the fix is that the heading keeps full opacity and the reason
+    -- is stated, rather than the section fading out of readability.
+    eq(heads[3].caption:GetAlpha(), 1,
+       "states: a not-applicable heading stays fully legible")
+    check(heads[3].caption:GetAlpha() > todoAlpha,
+          "states: ...which is what tells it apart from a not-yet one at a glance")
+    eq(heads[3].tag:GetText(), "Not needed",
+       "states: ...and it says so, beside the heading")
+    -- ...while the sections that ARE answered keep the tag empty, so "not needed"
+    -- is never written on a section that simply has its answer.
+    eq(heads[1].tag:GetText(), "", "states: an answered section carries no such tag")
+    eq(heads[2].tag:GetText(), "", "states: ...nor does the one that was just chosen")
+    -- ☠ AND THE REASON ITSELF IS AT FULL TEXT COLOUR. "A recolour has no
+    -- position" is the fact the reader needs; writing it in the same secondary
+    -- grey as an ordinary hint is the half-fix that leaves the section reading
+    -- as broken.
+    local note = GridNote()
+    check(note ~= nil, "states: the section's reason line is reachable")
+    eq(note:GetText(), "This effect changes the whole frame.",
+       "states: ...and it says WHY, not just that it is unavailable")
+    eq(rawget(note, "_textColor").r, UI.Colors.text.r,
+       "states: ...in full text colour, so it is legible")
+    -- ...and the caption treatments differ from each other, not only from dim.
+    eq(rawget(heads[3].caption, "_textColor").r, UI.Colors.text.r,
+       "states: a not-applicable heading is drawn bright, not grey on grey")
+    eq(rawget(heads[1].caption, "_textColor").r, UI.Colors.textDim.r,
+       "states: ...where an answered one stays the quieter secondary colour")
+
+    -- ...and it goes AWAY again for a placed effect. The pair is the claim: a
+    -- source assertion could show the branch exists without ever showing that
+    -- both sides of it are reachable.
+    check(api2.SelectType("bar") == true, "states: back to a placed effect")
+    eq(stateOf(3), "answered", "states: ...and section 3 applies again")
+    eq(heads[3].tag:GetText(), "", "states: ...with the not-needed tag withdrawn")
+    local note2 = GridNote()
+    eq(note2 and rawget(note2, "_textColor").r, UI.Colors.textDim.r,
+       "states: ...and the line goes back to being an ordinary hint")
+    eq(rawget(heads[3].caption, "_textColor").r, UI.Colors.textDim.r,
+       "states: ...as does the heading it belongs to")
+
+    -- ---- the outline itself ----------------------------------------
+    print("-- Add Indicator: the outline takes no mouse and never leaves the pane")
+    for i, r in ipairs(rings) do
+        -- ☠ EXACTLY THE PANE'S WIDTH. PopoutRow wraps a pane taller than 60% of
+        -- the screen in a ScrollFrame of exactly the pane's width, and a
+        -- ScrollFrame CLIPS -- so a ring drawn a few pixels proud would be whole
+        -- on a tall screen and shaved on a short one. This panel is over that cap
+        -- already, so the wrapped case is the ordinary one, not the exotic one.
+        eq(r:GetWidth(), 260, "outline: section " .. i .. "'s ring is the pane's width")
+        local _, _, ry = r:GetPoint(1)
+        check(type(ry) == "number" and ry <= 0,
+              "outline: ...anchored inside the pane's top edge")
+        check(type(ry) == "number" and (ry - r:GetHeight()) >= -(paneH2 or 0),
+              "outline: ...and ending inside its bottom one")
+        -- ☠ NOTHING DRAWN OVER A CONTROL MAY TAKE ITS CLICKS. This frame covers
+        -- nine tiles, two buttons and a nine-cell grid; a slider laid over a tile
+        -- made the whole picture unclickable twice (spec section 27).
+        -- ...and its curve is the kit's ONE surface token, not a number of its
+        -- own. An inner surface carrying its own radius is the site left behind
+        -- when the token is retuned.
+        local surf = UI:GetRoundedSurface(r)
+        check(surf ~= nil, "outline: ...drawn as a kit rounded surface")
+        eq(surf and surf.radius, UI.SurfaceStyle.radius,
+           "outline: ...at the host's own radius")
+        eq(surf and surf.borderWidth, UI.SurfaceStyle.rowBorderWidth,
+           "outline: ...and the inner-surface ring weight")
+        eq(rawget(r, "_flags").mouse, false, "outline: ...and it takes no mouse")
+        eq(#(rawget(r, "_kids") or {}), 0,
+           "outline: ...being textures on one frame, with nothing clickable in it")
+    end
+    -- ...and the three do not overlap each other, which is what the gaps between
+    -- the sections were widened for. Read off the anchors rather than asserted as
+    -- literals: the spans are the layout's own running offsets.
+    for i = 1, 2 do
+        local _, _, top = rings[i]:GetPoint(1)
+        local _, _, nextTop = rings[i + 1]:GetPoint(1)
+        check(type(top) == "number" and type(nextTop) == "number"
+              and (top - rings[i]:GetHeight()) > nextTop,
+              "outline: section " .. i .. "'s ring clears section " .. (i + 1) .. "'s")
+    end
+    -- ☠ RAISED ABOVE THE CONTENT, because a texture cannot draw over a SIBLING
+    -- frame at the same level -- draw layer loses to frame level, and the ring's
+    -- left and right runs land on the outer tiles' own edges. Taken off ring 1,
+    -- which the panel lifted on its very first Sync (see `liftedLevel` above,
+    -- captured while it was the one on screen).
+    local tileLevel
+    for _, k in ipairs(rawget(host2, "_kids") or {}) do
+        if rawget(k, "SetTileState") then tileLevel = k:GetFrameLevel() end
+    end
+    check(tileLevel ~= nil and liftedLevel ~= nil and liftedLevel > tileLevel,
+          "outline: the active ring is raised above the controls it is drawn over")
+
+    -- ☠ THE POINTER IS PURE DECORATION TOO. It sits directly over the panel's one
+    -- primary button's approach, and a widget there would be the tile bug again.
+    eq(rawget(pointer, "_flags").mouse, false, "pointer: the arrow takes no mouse")
+    eq(#(rawget(pointer, "_kids") or {}), 0,
+       "pointer: ...and is a texture and a string, not a control")
+    -- ⚠ A RESERVED SLOT, not a grown one. The pane is pooled and reports its
+    -- height ONCE; showing and hiding the pointer must not change that number.
+    local before = paneH2
+    api2.PickSpell("Regrowth", "Regrowth")
+    api2.SelectType("border")
+    check(pointer:IsShown(), "pointer: shown once the form is answerable")
+    eq(paneH2, before, "pointer: ...without the pane re-reporting its height")
+    eq(host2:GetHeight(), before, "pointer: ...or resizing itself")
+end
+
+-- ============================================================
+-- 2c. THE STATES ARE DISTINGUISHABLE, AND ONLY ONE OF THEM DIMS
+-- ------------------------------------------------------------
+-- Colour is the half a headless run cannot see: the shim has no SetTextColor, so
+-- the three treatments are indistinguishable to a driven assertion beyond their
+-- alpha. Pinned by source instead -- and SCOPED to the verb's own body with its
+-- comments stripped, because a file-wide search for "C_TEXT" answers "is this
+-- token anywhere in 4,900 lines" and would pass however the verb was written.
+-- ============================================================
+print("-- Add Indicator: the three treatments differ, in the verb that draws them")
+do
+    local function StripComments(src)
+        local out = {}
+        for line in (src .. "\n"):gmatch("([^\n]*)\n") do
+            if not line:match("^%s*%-%-") then out[#out + 1] = line end
+        end
+        return table.concat(out, "\n")
+    end
+    local function Body(startNeedle, endNeedle)
+        local a = CARDS:find(startNeedle, 1, true)
+        if not a then return "" end
+        local b = CARDS:find(endNeedle, a, true)
+        if not b then return "" end
+        return StripComments(CARDS:sub(a, b))
+    end
+
+    local verb = Body("head.SetHeadState = function(self, state, tagText)",
+                      "\n    head:SetHeadState(")
+    check(verb ~= "", "treatment: the heading's state verb is reachable in source")
+    check(verb:find("SEC_TODO", 1, true) ~= nil and verb:find("0.4", 1, true) ~= nil,
+          "treatment: only the not-yet state dims")
+    check(verb:find("SEC_ACTIVE", 1, true) ~= nil and verb:find("SEC_NA", 1, true) ~= nil,
+          "treatment: active and not-applicable are named states, not one 'enabled'")
+    check(verb:find("C_TEXT%.") ~= nil and verb:find("C_TEXT_DIM%.") ~= nil,
+          "treatment: ...and they are drawn in two different colours")
+    -- ☠ THE OLD BOOLEAN IS GONE. A SetHeadEnabled left standing beside the state
+    -- verb is a second way to draw a section, and it can only ever draw two of
+    -- the four -- the two that were being confused.
+    check(CARDS:find("SetHeadEnabled", 1, true) == nil,
+          "treatment: the two-state verb it replaces is gone, not left beside it")
+
+    -- ...and the reason a not-applicable section gives stays readable. Scoped to
+    -- the state block inside Sync for the same reason.
+    local sync = Body("local sec3NA = (pick ~= nil) and not placedPick", "\n    end\n")
+    check(sync ~= "", "treatment: Sync's state derivation is reachable")
+    check(sync:find("sec3NA", 1, true) ~= nil and sync:find("SEC_NA", 1, true) ~= nil,
+          "treatment: a frame-level effect makes section 3 not-applicable, not not-yet")
+    check(sync:find("gridNote:SetTextColor(C_TEXT.r", 1, true) ~= nil,
+          "treatment: ...and its reason is written in full text colour, not the dim one")
+
+    -- ☠ AND THE OUTLINE IS THE KIT'S RING, NOT A HAND-ROLLED BOX. `fill = false`
+    -- is CreateRoundedSurface's documented shape for "an outline traced over
+    -- something that has to stay visible under it", so nothing new was added to
+    -- DandersUI for this.
+    local ring = Body("local function CreateSectionOutline(parent, width)",
+                      "\nP.CreateSectionOutline")
+    check(ring ~= "", "treatment: the outline factory is reachable")
+    check(ring:find("GUI:CreateRoundedSurface", 1, true) ~= nil
+          and ring:find("fill        = false", 1, true) ~= nil,
+          "treatment: the outline is the kit's ring-only surface")
+    check(ring:find("MakeMouseInert(ring)", 1, true) ~= nil,
+          "treatment: ...walked mouse-inert after the surface exists")
 end
 
 -- ============================================================

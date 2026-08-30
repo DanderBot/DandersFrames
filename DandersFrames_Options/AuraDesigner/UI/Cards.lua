@@ -913,6 +913,40 @@ local function ScaleProxy(key)
     return proxy
 end
 
+-- ── NOTHING DECORATIVE MAY TAKE THE MOUSE ──
+-- ☠ ANYTHING DRAWN OVER A CONTROL TAKES ITS CLICKS. A picture inside a tile and
+-- an accent outline over a section are both pure decoration, and both cover
+-- things the user has to be able to click; one mouse-enabled frame anywhere
+-- under them swallows the press across everything they cover -- and the control
+-- never even lights, because the hover never reaches it. Reported twice in game
+-- for the tiles alone (spec section 27).
+--
+-- ⚠ A WALK, NOT A LIST. The first fix chased ONE taker (the canvas's scale
+-- slider) and the tiles stayed dead, because a preview builds a backdrop, a
+-- mock, a border overlay and whatever the effect paints on top -- any of which
+-- may enable the mouse now or later. Naming them is a list that rots; walking
+-- the subtree cannot.
+--
+-- ⚠ AND IT COVERS ONLY WHAT EXISTS WHEN IT RUNS. Anything parented in later is
+-- not stripped, which is why the tile calls it AFTER its own Paint.
+--
+-- ONE walk, two consumers: the shared canvas's thumbnail arm below, and the add
+-- panel's section outlines (spec section 28).
+local function MakeMouseInert(f)
+    if not f then return end
+    if f.EnableMouse then f:EnableMouse(false) end
+    if f.EnableMouseMotion then f:EnableMouseMotion(false) end
+    -- Retail splits click from motion; older shims have neither.
+    if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
+    if f.SetMouseMotionEnabled then f:SetMouseMotionEnabled(false) end
+    if f.GetChildren then
+        for i = 1, select("#", f:GetChildren()) do
+            MakeMouseInert((select(i, f:GetChildren())))
+        end
+    end
+end
+P.MakeMouseInert = MakeMouseInert
+
 -- The thumbnail box's own padding, so the mock never touches the tile's edge.
 local THUMB_PAD = 4
 
@@ -1088,30 +1122,15 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef, opts)
     -- never reaches it. Reported twice: "none of the images are clickable, i have
     -- to click somewhere outside the image", then "dont even get a hover highlight".
     --
-    -- ⚠ A WALK, NOT A LIST. The first fix chased ONE taker (the canvas's scale
-    -- slider) and the tiles stayed dead, because the preview builds a backdrop, a
-    -- mock, a border overlay and whatever the effect paints on top -- any of which
-    -- may enable the mouse now or later. Naming them is a list that rots; walking
-    -- the subtree cannot.
+    -- ⚠ A WALK, NOT A LIST -- see MakeMouseInert above, which is the walk. This
+    -- is only the container's own handle on it, kept because the tile has to be
+    -- able to say "strip THIS preview" without knowing what is in it.
     --
     -- ⚠ CALLED BY THE TILE AFTER ITS Paint, NOT HERE: the effect art is added
     -- once this builder has returned, so a walk run here would miss exactly the
     -- frames drawn over the picture.
     function container.DisableMouseTree()
-        local function strip(f)
-            if not f then return end
-            if f.EnableMouse then f:EnableMouse(false) end
-            if f.EnableMouseMotion then f:EnableMouseMotion(false) end
-            -- Retail splits click from motion; older shims have neither.
-            if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
-            if f.SetMouseMotionEnabled then f:SetMouseMotionEnabled(false) end
-            if f.GetChildren then
-                for i = 1, select("#", f:GetChildren()) do
-                    strip((select(i, f:GetChildren())))
-                end
-            end
-        end
-        strip(container)
+        MakeMouseInert(container)
     end
 
     container:SetScript("OnSizeChanged", function() container.RefreshGeometry() end)
@@ -3534,6 +3553,34 @@ local SECTION_HEAD_H = 16
 -- Section 1's answer line: what the two source buttons above it chose.
 local SOURCE_LINE_H = 18
 
+-- ── THE FOUR THINGS A NUMBERED SECTION CAN BE, AND WHY DIM IS NOT TWO OF THEM ──
+-- ☠ THIS IS NOT THE GREY-WHEN-DISABLED CONVENTION, and it must not be read as
+-- it. That convention is for a CONTROL that is switched off and could be
+-- switched on: grey means "turn something on to reach this". A section that
+-- does not apply to the choice just made will NEVER apply to it, and dimming it
+-- to illegibility hides a fact the reader needs -- it needs "this does not
+-- apply, and here is why" (spec section 28).
+--
+-- The panel shipped with only NORMAL and DIM, and dim was carrying both "not
+-- yet" and "not needed" while saying neither. "Not needed" is the COMMON case,
+-- not an edge one: of the nine effects, SIX are frame-level, so for two thirds
+-- of choices section 3 is moot -- and it just sat there grey, looking broken.
+--
+--   TODO      not yet. Answer the section above and this wakes. The ONLY state
+--             that dims, because it is the only one where dim is honest.
+--   ACTIVE    the section awaiting you, and the one place to look. Bright
+--             caption, and the builder draws an accent outline round it.
+--   ANSWERED  normal weight, no outline. It shows what you chose.
+--   NA        legible, NOT dimmed to nothing: full alpha, a bright caption and
+--             a quiet tag saying it is not needed. The REASON goes beside it,
+--             in whatever the section keeps for that.
+local SEC_TODO     = "todo"
+local SEC_ACTIVE   = "active"
+local SEC_ANSWERED = "answered"
+local SEC_NA       = "na"
+P.SectionStates = { TODO = SEC_TODO, ACTIVE = SEC_ACTIVE,
+                    ANSWERED = SEC_ANSWERED, NA = SEC_NA }
+
 local function CreateNumberedHeading(parent, number, caption, y, width)
     local head = CreateFrame("Frame", nil, parent)
     head:SetSize(width, SECTION_HEAD_H)
@@ -3546,24 +3593,148 @@ local function CreateNumberedHeading(parent, number, caption, y, width)
     local tc = GetThemeColor()
     num:SetTextColor(tc.r, tc.g, tc.b)
 
+    -- ⚠ THE TAG IS ANCHORED FIRST AND THE CAPTION IS BOUNDED BY IT. Two strings
+    -- growing toward each other from opposite edges of one row is spec section
+    -- 17's class 3, and a caption with a free right edge would push a long
+    -- translation's tag off the row. The tag is EMPTY in every state but NA, and
+    -- an empty string is zero wide, so the caption keeps effectively the whole
+    -- row the rest of the time.
+    local tag = head:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(tag, 9, "")
+    tag:SetPoint("RIGHT", head, "RIGHT", 0, 0)
+    tag:SetJustifyH("RIGHT")
+    tag:SetWordWrap(false)
+    tag:SetText("")
+    tag:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
     local cap = head:CreateFontString(nil, "OVERLAY")
     GUI:SetSettingsFont(cap, 9, "")
     cap:SetPoint("LEFT", num, "RIGHT", 6, 0)
-    cap:SetPoint("RIGHT", head, "RIGHT", 0, 0)
+    cap:SetPoint("RIGHT", tag, "LEFT", -6, 0)
     cap:SetJustifyH("LEFT")
     cap:SetWordWrap(false)
     cap:SetText(caption)
     cap:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     head.caption = cap
-    head.SetHeadEnabled = function(_, enabled)
-        local a = enabled and 1 or 0.4
+    head.tag = tag
+    -- ☠ ONE STATE VERB, NOT AN ENABLED FLAG. A boolean can only ever draw two of
+    -- the four states above, and the two it collapses -- "not yet" and "not
+    -- needed" -- are precisely the pair the reader has to be able to tell apart.
+    head.SetHeadState = function(self, state, tagText)
+        state = state or SEC_TODO
+        -- Alpha is the ONE thing reserved for "not yet". Everything else stays
+        -- at full opacity and says what it is with colour and words instead.
+        local a = (state == SEC_TODO) and 0.4 or 1
         num:SetAlpha(a)
         cap:SetAlpha(a)
+        tag:SetAlpha(a)
+        -- Bright for the section you are meant to read RIGHT NOW -- the one
+        -- awaiting you, and the one that has just told you it is not needed.
+        if state == SEC_ACTIVE or state == SEC_NA then
+            cap:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        else
+            cap:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        end
+        -- ...and the tag is QUIETER than the caption it sits beside, not louder:
+        -- "keep the heading readable" is the instruction, and a bright tag beside
+        -- a dim heading inverts it.
+        tag:SetText((state == SEC_NA) and (tagText or "") or "")
+        self.dfHeadState = state
     end
+    -- ⚠ ANSWERED IS THE CONSTRUCTION DEFAULT, and deliberately so: it is exactly
+    -- what this heading has always looked like, so the Layout Groups panels
+    -- (Editor.lua), which ask ONE question and never drive a state, are untouched
+    -- by this verb existing. Only the add panel's Sync moves them off it.
+    head:SetHeadState(SEC_ANSWERED)
     return head
 end
 P.CreateNumberedHeading = CreateNumberedHeading
+
+-- ── THE ACTIVE SECTION'S OUTLINE ──
+-- A ring traced round the section awaiting an answer, so "where do I look now"
+-- is answerable at a glance. The DRAWING is the kit's -- CreateRoundedSurface
+-- with `fill = false` is documented as exactly this, "an outline traced over
+-- something that has to stay visible under it" -- so nothing new goes into
+-- DandersUI. What is local is the three decisions below, and all three are about
+-- THIS pane.
+--
+-- ☠ 1. IT TAKES NO MOUSE. A slider laid over a tile made the whole picture
+-- unclickable, twice (spec section 27), and this frame covers nine tiles, two
+-- buttons and a nine-cell grid at once. MakeMouseInert walks it AFTER the
+-- surface exists, so anything the surface added is covered too.
+--
+-- ☠ 2. IT IS RAISED ABOVE THE CONTENT, because it has to be. The ring's left and
+-- right runs land on the outer tiles' own edges (see 3), and a texture can never
+-- draw over a SIBLING frame whose level is not lower -- draw layer loses to frame
+-- level. Re-asserted in Sync rather than only at build: a popout's frame level is
+-- its slot in the stack, and anything levelled once at construction falls behind
+-- the first time a second panel opens (spec section 15's standing lesson).
+--
+-- ☠ 3. IT NEVER OVERHANGS THE PANE. Horizontally it is the pane's own width,
+-- flush, and that is not a taste: PopoutRow wraps a pane taller than 60% of the
+-- screen in a ScrollFrame of exactly the pane's width, which CLIPS -- and this
+-- panel is within a few pixels of that cap already. A ring drawn 4px proud would
+-- be whole on a tall screen and shaved on a short one.
+local SECTION_RING_PAD = 3
+local SECTION_RING_LIFT = 6
+
+local function CreateSectionOutline(parent, width)
+    local ring = CreateFrame("Frame", nil, parent)
+    ring:SetWidth(width)
+    -- Both dimensions, always. A frame with a width and no height puts its own
+    -- vertical middle on its top edge, which is what drew this panel empty for
+    -- two days (spec section 24).
+    ring:SetHeight(1)
+    local tc = GetThemeColor()
+    -- ⚠ THE CURVE AND THE RING WEIGHT COME FROM THE KIT'S ONE SURFACE TOKEN, and
+    -- from the same two fields a settings group's own box takes them from -- this
+    -- is an inner surface inside a panel, exactly as a group box is. A hardcoded
+    -- radius here is the site left behind when the token is retuned, which is the
+    -- failure Theme.lua's SurfaceStyle exists to prevent.
+    local style = GUI.GetSurfaceStyle and GUI:GetSurfaceStyle() or nil
+    GUI:CreateRoundedSurface(ring, {
+        radius      = style and style.radius or 6,
+        borderWidth = style and (style.rowBorderWidth or style.borderWidth) or 1,
+        fill        = false,
+        border      = { tc.r, tc.g, tc.b, 1 },
+    })
+    MakeMouseInert(ring)
+    ring:Hide()
+    -- topY/bottomY are the builder's own running offsets, both negative-down from
+    -- the pane's top -- so the span is the difference and the pad grows it both
+    -- ways. Clamped at the pane's top for the same reason the width is: section
+    -- 1 starts there, and 3px above it is 3px outside the scroll frame.
+    ring.SetSpan = function(self, topY, bottomY)
+        local top = min(topY + SECTION_RING_PAD, 0)
+        local h = max((top - bottomY) + SECTION_RING_PAD, 1)
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", 0, top)
+        self:SetHeight(h)
+    end
+    ring.Lift = function(self)
+        local p = self:GetParent()
+        local lvl = (p and p.GetFrameLevel and p:GetFrameLevel()) or 0
+        self:SetFrameLevel(lvl + SECTION_RING_LIFT)
+    end
+    return ring
+end
+P.CreateSectionOutline = CreateSectionOutline
+
+-- ⚠ A NAMED HELPER RATHER THAN A LOOP OVER A LITERAL. Sync runs on every open
+-- and every tile click, and a `{ {ring, state}, ... }` written inline would
+-- allocate a table and three more on each of them.
+local function SetOutlineActive(ring, active)
+    if active then
+        -- Re-levelled on every pass, not only at build: a popout's frame level is
+        -- its slot in the stack, so anything levelled once at construction falls
+        -- behind the first time a second panel opens (spec section 15).
+        ring:Lift()
+        ring:Show()
+    else
+        ring:Hide()
+    end
+end
 
 -- One "+ Add Indicator" panel, start to finish.
 --   host        the container frame the popout row's pane holds, ALREADY sized to
@@ -3598,7 +3769,14 @@ S.BuildAddIndicatorPane = function(host, opts)
     local Sync   -- every control asks for a re-state, so this is forward-declared
 
     local tiles = {}
-    local sec2Head, sec3Head, grid, gridNote, addBtn, spellBtn, filterBtn, sourceText
+    local sec1Head, sec2Head, sec3Head, grid, gridNote, addBtn, spellBtn, filterBtn, sourceText
+    -- One outline per section and one pointer at the foot -- see THE ACTIVE
+    -- SECTION'S OUTLINE and THE COMPLETION POINTER below.
+    local sec1Ring, sec2Ring, sec3Ring, pointer
+    -- Where each section's band starts and ends, in the same running `y` the
+    -- layout below is written in. Filled as the layout walks past, so the rings
+    -- cannot drift from the content: nothing here is a second copy of a number.
+    local secTop, secEnd = {}, {}
 
     -- ── WHAT A FINISHED ADD COSTS ──
     -- The same three verbs every other add path runs.
@@ -3693,10 +3871,16 @@ S.BuildAddIndicatorPane = function(host, opts)
         return true
     end
 
-    local y = 0
+    -- ⚠ A TOP MARGIN, AND IT IS LOAD-BEARING RATHER THAN COSMETIC. Section 1's
+    -- outline is drawn SECTION_RING_PAD above its heading, and the ring may not
+    -- leave the pane (see CreateSectionOutline's point 3) -- so the heading has
+    -- to start that far down or the clamp would give section 1 a tighter box
+    -- than its two siblings.
+    local y = -SECTION_RING_PAD
 
     -- ── 1 · WHICH AURA? ──
-    CreateNumberedHeading(host, 1, L["WHICH AURA?"], y, W)
+    secTop[1] = y
+    sec1Head = CreateNumberedHeading(host, 1, L["WHICH AURA?"], y, W)
     y = y - (SECTION_HEAD_H + 4)
 
     local function OpenSpellStep()
@@ -3813,9 +3997,11 @@ S.BuildAddIndicatorPane = function(host, opts)
     sourceText:SetPoint("RIGHT", 0, 0)
     sourceText:SetJustifyH("LEFT")
     sourceText:SetWordWrap(false)
-    y = y - (SOURCE_LINE_H + 4)
+    secEnd[1] = y - SOURCE_LINE_H
+    y = y - (SOURCE_LINE_H + 8)
 
     -- ── 2 · HOW SHOULD IT SHOW? ──
+    secTop[2] = y
     sec2Head = CreateNumberedHeading(host, 2, L["HOW SHOULD IT SHOW?"], y, W)
     y = y - (SECTION_HEAD_H + 4)
 
@@ -3842,9 +4028,11 @@ S.BuildAddIndicatorPane = function(host, opts)
         end
     end
     -- The last row's trailing gap is not spent.
-    y = rowTop + TILE_GAP - 6
+    secEnd[2] = rowTop + TILE_GAP
+    y = rowTop + TILE_GAP - 10
 
     -- ── 3 · WHERE? ──
+    secTop[3] = y
     sec3Head = CreateNumberedHeading(host, 3, L["WHERE?"], y, W)
     y = y - (SECTION_HEAD_H + 4)
 
@@ -3871,7 +4059,42 @@ S.BuildAddIndicatorPane = function(host, opts)
     gridNote:SetJustifyH("LEFT")
     gridNote:SetWordWrap(true)
     gridNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    y = y - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + 10)
+    secEnd[3] = y - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2)
+    y = y - (ANCHOR_CELL * 3 + ANCHOR_GUTTER * 2 + 8)
+
+    -- ── THE COMPLETION POINTER ──
+    -- ☠ IT IS NOT THE "NOT NEEDED" CASE'S DECORATION. Section 28 asks for an
+    -- arrow toward the commit wherever the form is ANSWERABLE -- and a placed
+    -- effect whose anchor arrived pre-picked is just as finished as a recolour
+    -- that never had one. So this is driven by "is there anything left to
+    -- answer", not by whether section 3 applies.
+    --
+    -- ⚠ A RESERVED SLOT, SHOWN AND HIDDEN RATHER THAN GROWN. The pane is pooled
+    -- and reports its height ONCE; a pointer that added its own height would
+    -- have to re-report through a chain the builder has already finished with.
+    -- 16px, spent whether or not it is drawn.
+    local POINTER_H = 16
+    pointer = CreateFrame("Frame", nil, host)
+    pointer:SetSize(W, POINTER_H)
+    pointer:SetPoint("TOPLEFT", 0, y)
+    local ptrText = pointer:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(ptrText, 10, "")
+    ptrText:SetPoint("CENTER", pointer, "CENTER", -9, 0)
+    ptrText:SetJustifyH("CENTER")
+    ptrText:SetWordWrap(false)
+    ptrText:SetText(L["Ready to add"])
+    ptrText:SetTextColor(tc.r, tc.g, tc.b)
+    -- The arrow itself, pointing DOWN at the button on the next line. A texture,
+    -- not a glyph button: nothing here is clickable, and the button below is what
+    -- the whole row exists to send you to.
+    local ptrArrow = pointer:CreateTexture(nil, "OVERLAY")
+    ptrArrow:SetSize(12, 12)
+    ptrArrow:SetPoint("LEFT", ptrText, "RIGHT", 4, 0)
+    ptrArrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
+    ptrArrow:SetVertexColor(tc.r, tc.g, tc.b, 1)
+    MakeMouseInert(pointer)
+    pointer:Hide()
+    y = y - (POINTER_H + 2)
 
     -- ── ONE PRIMARY BUTTON ──
     addBtn = CreateFrame("Button", nil, host, "BackdropTemplate")
@@ -3886,6 +4109,18 @@ S.BuildAddIndicatorPane = function(host, opts)
         Commit()
     end)
     y = y - 32
+
+    -- ── THE OUTLINES, BUILT LAST ──
+    -- ⚠ AFTER EVERY CONTROL, and nothing is anchored TO them. They are pure
+    -- decoration laid over the sections, so building them last means they are
+    -- created after the frames they cover -- and their span is read from the
+    -- offsets the layout above recorded as it went, never re-derived.
+    sec1Ring = CreateSectionOutline(host, W)
+    sec1Ring:SetSpan(secTop[1], secEnd[1])
+    sec2Ring = CreateSectionOutline(host, W)
+    sec2Ring:SetSpan(secTop[2], secEnd[2])
+    sec3Ring = CreateSectionOutline(host, W)
+    sec3Ring:SetSpan(secTop[3], secEnd[3])
 
     local paneH = max(-y + 2, 1)
 
@@ -3954,10 +4189,36 @@ S.BuildAddIndicatorPane = function(host, opts)
             end
         end
 
-        local placedPick = selected and EFFECT_BY_TYPE[selected]
-                           and EFFECT_BY_TYPE[selected].mode == "placed"
-        sec2Head:SetHeadEnabled(source ~= nil)
-        sec3Head:SetHeadEnabled(placedPick and true or false)
+        local pick = selected and EFFECT_BY_TYPE[selected] or nil
+        local placedPick = (pick and pick.mode == "placed") and true or false
+
+        -- ── THE THREE STATES, DERIVED IN ONE PLACE ──
+        -- ☠ SECTION 3 IS "NOT APPLICABLE", NOT "NOT YET", THE MOMENT A
+        -- FRAME-LEVEL EFFECT IS CHOSEN -- and six of the nine effects are
+        -- frame-level, so this is the ordinary case rather than a corner of it.
+        -- A recolour has no position and never will have one; dimming section 3
+        -- to illegibility for it hides that fact instead of stating it.
+        local sec3NA = (pick ~= nil) and not placedPick
+        -- ⚠ SECTION 3 IS NEVER ACTIVE, and that is deliberate rather than an
+        -- oversight. `anchor` is seeded from TYPE_DEFAULTS every time the type
+        -- changes and CreateAnchorPicker cannot clear it, so a placed effect
+        -- reaches section 3 ALREADY ANSWERED -- outlining it merely because it
+        -- is last would send the reader to a question nobody asked.
+        local s1 = source and SEC_ANSWERED or SEC_ACTIVE
+        local s2 = (not source) and SEC_TODO
+                   or (selected and SEC_ANSWERED or SEC_ACTIVE)
+        local s3 = sec3NA and SEC_NA
+                   or (placedPick and SEC_ANSWERED or SEC_TODO)
+        sec1Head:SetHeadState(s1)
+        sec2Head:SetHeadState(s2)
+        sec3Head:SetHeadState(s3, L["Not needed"])
+
+        -- Exactly one outline at a time, and only ever on the section awaiting an
+        -- answer.
+        SetOutlineActive(sec1Ring, s1 == SEC_ACTIVE)
+        SetOutlineActive(sec2Ring, s2 == SEC_ACTIVE)
+        SetOutlineActive(sec3Ring, s3 == SEC_ACTIVE)
+
         -- ☠ SELECTION FIRST, THEN THE GATE. Both kit verbs repaint the rest
         -- backdrop unconditionally, so whichever runs last wins: greying and then
         -- re-asserting the selection would paint the accent back over the dim.
@@ -3969,7 +4230,20 @@ S.BuildAddIndicatorPane = function(host, opts)
             gridNote:SetText(selected and L["This effect changes the whole frame."]
                                        or L["Pick a look above."])
         end
-        addBtn:SetDisabled(not (source and selected))
+        -- ...and the REASON is the one line that must stay readable when the
+        -- section does not apply. Full text colour there, the usual secondary
+        -- grey everywhere else.
+        if sec3NA then
+            gridNote:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        else
+            gridNote:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        end
+
+        local ready = (source and selected) and true or false
+        addBtn:SetDisabled(not ready)
+        -- The panel saying the form is finished. Shown for a pre-picked placed
+        -- effect exactly as for a recolour -- both are answerable.
+        if ready then pointer:Show() else pointer:Hide() end
     end
 
     Sync()
