@@ -2886,7 +2886,6 @@ P.BuildGroupItemsSection    = BuildGroupItemsSection
 P.BuildAppearanceSection    = BuildAppearanceSection
 P.BuildPositionSection      = BuildPositionSection
 P.BuildGlobalTab            = BuildGlobalTab
-P.CreateEnableBanner        = CreateEnableBanner
 P.BuildTextsHeadArea        = BuildTextsHeadArea
 P.BuildGroupsHeadArea       = BuildGroupsHeadArea
 P.GetState                  = GetState
@@ -2941,6 +2940,13 @@ local function CreateEnableBanner(GUI, parent, tdDB, onToggle)
     bar.enableCheck = enableCheck
     return bar
 end
+
+-- ☠ PUBLISHED HERE, NOT IN THE BLOCK WITH ITS SIBLINGS. Every other name in
+-- that block is declared ABOVE it; this one is declared BELOW, so `P.X = X`
+-- up there assigned the local's value at that point -- nil. Nothing errored at
+-- load: Rows.lua aliased the nil, and the page died on its first open with
+-- "attempt to call a nil value". A publish must follow its declaration.
+P.CreateEnableBanner        = CreateEnableBanner
 
 -- ============================================================
 -- THE SPLIT-PANEL PAGE

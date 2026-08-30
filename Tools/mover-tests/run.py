@@ -167,6 +167,45 @@ for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
             _c = _line.split("--", 1)[0]
             if _tex.search(_c):
                 _texviol.append(f"{_f.relative_to(HERE.parents[1])}:{_n}: {_line.strip()[:96]}")
+# ============================================================
+# STATIC BAN: a module cannot publish a function it has not declared yet.
+# `P.Foo = Foo` assigns whatever the local holds AT THAT POINT. Put it above the
+# `local function Foo`, and it publishes nil -- silently. Nothing errors at load;
+# the consumer aliases the nil and dies on its first call, several files away
+# from the mistake. The Text Designer's CreateEnableBanner shipped exactly this:
+# the publish sat with its siblings 22 lines above its own declaration, so
+# opening the page threw "attempt to call a nil value" (2026-08-30).
+# ============================================================
+_pub = _re.compile(r"^\s*(P|S)\.([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*$")
+_dcl = _re.compile(r"^\s*local (?:function )?([A-Za-z_]\w*)\s*(?:=\s*function)?")
+_fwd = []
+for _root in ("DandersFrames", "DandersFrames_Options", "DandersUI"):
+    _base = HERE.parents[1] / _root
+    if not _base.is_dir():
+        continue
+    for _f in sorted(_base.rglob("*.lua")):
+        if "Libs" in _f.parts:
+            continue
+        _lines = _f.read_text(encoding="utf-8", errors="replace").splitlines()
+        _where = {}
+        for _n, _l in enumerate(_lines, 1):
+            _m = _re.match(r"^\s*local function ([A-Za-z_]\w*)", _l) or                  _re.match(r"^\s*local ([A-Za-z_]\w*)\s*=\s*function", _l)
+            if _m and _m.group(1) not in _where:
+                _where[_m.group(1)] = _n
+        for _n, _l in enumerate(_lines, 1):
+            _m = _pub.match(_l.split("--", 1)[0])
+            if _m:
+                _d = _where.get(_m.group(3))
+                if _d and _d > _n:
+                    _fwd.append(f"{_f.relative_to(HERE.parents[1])}:{_n}: "
+                                f"publishes {_m.group(1)}.{_m.group(2)} = {_m.group(3)}, "
+                                f"declared at line {_d} -- this assigns nil")
+if _fwd:
+    print("FORWARD-PUBLISH BAN: a module published a function before declaring it:")
+    for _v in _fwd:
+        print("  " + _v)
+    raise SystemExit(1)
+
 if _texviol:
     print("TEXTURE PATH BAN: single-backslash Interface paths resolve to nothing:")
     for _v in _texviol:
