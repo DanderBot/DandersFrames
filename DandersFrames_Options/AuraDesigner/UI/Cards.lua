@@ -3378,6 +3378,7 @@ S.BuildFilterChips = function(host, width)
         -- Shared styling: standard hover + an active (selected) state marked by a
         -- prominent accent border. The surface rebuilds on click, so set active here.
         GUI:StyleButton(chipBtn)
+        chipBtn.dfChipKey = chip.key
         chipBtn:SetActive((S.activeFilter or "all") == chip.key)
 
         local capturedKey = chip.key
@@ -3411,7 +3412,22 @@ S.BuildFilterChips = function(host, width)
         host:SetHeight(max(-cy + CHIP_H, CHIP_H))
     end
     LayoutChips(width)
-    return LayoutChips
+    -- ☠ A SECOND RETURN: RE-SYNC, BECAUSE THE PANEL IS POOLED AND THIS RUNS ONCE.
+    -- The filter popout is created with a key, so reopening REUSES it and never
+    -- re-runs this builder -- the chips kept whatever was active the FIRST time it
+    -- was opened, which read as "All is always selected" however the list was
+    -- actually filtered. The opener calls this on every open.
+    --
+    -- ⚠ SECOND, not instead: the card layout's caller wants LayoutChips (it
+    -- re-flows the row on resize) and must keep getting it as the first value.
+    local function SyncActive()
+        local active = S.activeFilter or "all"
+        for k = 1, #chipBtns do
+            local b = chipBtns[k]
+            if b and b.SetActive then b:SetActive(b.dfChipKey == active) end
+        end
+    end
+    return LayoutChips, SyncActive
 end
 
 -- ── THE FILTER GLYPH'S PANEL ──
@@ -3449,13 +3465,17 @@ local function OpenFilterPopout(btn)
             -- anchors own the pane's width, and at build time that number has not
             -- resolved -- reading it off the pane is the mistake that made the
             -- chips wrap at a hardcoded 260 on the page.
-            S.BuildFilterChips(pane, width)
+            local _, SyncActive = S.BuildFilterChips(pane, width)
+            po.dfSyncChips = SyncActive
             -- The shell derives the panel's height from what build mounted
             -- (Popout:_Resize), so the content strip states its own.
             content:SetHeight(max(pane:GetHeight() or CHIP_H, CHIP_H))
         end,
     })
     pop:Follow(btn, { outsideOf = DF.GUIFrame })
+    -- After Follow, and on EVERY open: a pooled panel builds once, so this is
+    -- the only thing that makes the ticked chip match the live filter.
+    if pop.dfSyncChips then pop.dfSyncChips() end
     S.filterPopout = pop
 end
 P.OpenFilterPopout = OpenFilterPopout

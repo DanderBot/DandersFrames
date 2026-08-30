@@ -677,7 +677,11 @@ local function BuildEffectsTabRows(ctx, shell)
     local addMount = tools.PopoutContent(function(g, holder)
         local pane = CreateFrame("Frame", nil, holder)
         pane:SetWidth(PopoutWidth())
-        local ready = false
+        -- ☠ THE HEIGHT THE BUILDER ASKED FOR, REMEMBERED. Every SetHeight below
+        -- is swallowed while `ready` is false -- which is the whole build -- so
+        -- without keeping the number the AddWidget under it measured a pane that
+        -- had never been sized and gave it a 1px slot. The panel opened EMPTY.
+        local ready, wantH = false, nil
         S.BuildAddIndicatorPane(pane, {
             width = PopoutWidth(),
             -- ⚠ SILENT UNTIL THE PANE IS IN THE GROUP. The builder shows its
@@ -685,13 +689,21 @@ local function BuildEffectsTabRows(ctx, shell)
             -- has run has no slot to land in: GUI:RelayoutHost would walk straight
             -- past the group this has not joined yet and re-run the PAGE's state
             -- pass in the middle of the page's own build.
-            SetHeight = function(h) if ready then GUI:RelayoutHost(pane, h) end end,
+            SetHeight = function(h)
+                wantH = h
+                if ready then GUI:RelayoutHost(pane, h) end
+            end,
             Close     = function()
                 if addRow and addRow.ClosePopout then addRow:ClosePopout("api") end
             end,
         })
-        g:AddWidget(pane, max(pane:GetHeight() or 1, 1))
+        -- wantH FIRST: the builder reports through the callback, not by sizing the
+        -- pane, so its own GetHeight is the fallback and not the answer.
+        g:AddWidget(pane, max(wantH or pane:GetHeight() or 1, 1))
         ready = true
+        -- And once the slot exists, honour anything the build asked for while it
+        -- did not.
+        if wantH then GUI:RelayoutHost(pane, wantH) end
     end)
     addRow = addBand:AddWidget(GUI:CreatePopoutRow(page.child, {
         label  = L["Add Indicator"],

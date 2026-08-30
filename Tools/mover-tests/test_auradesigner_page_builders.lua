@@ -1917,17 +1917,29 @@ do
           "add: ...built by the step change that asks for them")
     check(pane:find("if opts.SetHeight then opts.SetHeight(h) end", 1, true) ~= nil,
           "add: ...and reports the new height instead of assuming one")
-    check(ROWS:find("SetHeight = function(h) if ready then GUI:RelayoutHost(pane, h) end end", 1, true) ~= nil,
+    check(ROWS:find("if ready then GUI:RelayoutHost(pane, h) end", 1, true) ~= nil,
           "add: ...through the shared re-flow verb, which re-sizes pane and panel")
+    -- ☠ AND THE NUMBER IS KEPT WHEN THE VERB IS SILENT. `ready` is false for the
+    -- whole build, so every height the builder reported was dropped -- and the
+    -- AddWidget below then measured a pane nothing had sized and handed it a 1px
+    -- slot. The panel opened EMPTY, which is what shipped.
+    check(ROWS:find("wantH = h", 1, true) ~= nil,
+          "add: ...and the height is remembered even while the verb is silent")
     -- """ + WA + """ AND IT IS SILENT UNTIL THE PANE HAS JOINED ITS GROUP. The builder shows
     -- its first step as it finishes; a height reported before AddWidget has run
     -- would walk past the group and re-run the PAGE's state pass mid-build.
     check(ROWS:find("ready = true", 1, true) ~= nil,
           "add: ...armed only after the pane is in the group")
-    local addPaneAt  = ROWS:find("g:AddWidget(pane, max(pane:GetHeight() or 1, 1))", 1, true)
+    local addPaneAt  = ROWS:find("g:AddWidget(pane, max(wantH or pane:GetHeight() or 1, 1))", 1, true)
     local readyAt    = ROWS:find("ready = true", 1, true)
+    check(addPaneAt ~= nil,
+          "add: the slot takes the height the builder ASKED for, not the pane's own")
     check(addPaneAt and readyAt and addPaneAt < readyAt,
           "add: ...which is what makes the flag true after the add, not before")
+    -- ...and once there is a slot, anything asked for during the silence lands.
+    local applyAt = ROWS:find("if wantH then GUI:RelayoutHost(pane, wantH) end", 1, true)
+    check(applyAt and readyAt and applyAt > readyAt,
+          "add: the remembered height is applied AFTER the flag is armed")
 
     -- The three type lists are ONE declaration now: the panel and the split
     -- panel's block both build their cards from it.
