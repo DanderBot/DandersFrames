@@ -7682,12 +7682,23 @@ AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
 -- lock is now the sole thing parking a slot (the string is no longer pushed), so it
 -- needed to be measured rather than reasoned about.
 --
--- ☠ AND THE STRING IS INTERMITTENT, WHICH IS WORSE THAN BROKEN. In that same run
--- "HELPFUL|!HELPFUL" also rendered nothing — yet ninety minutes earlier the parser probe
--- caught it matching 1 helpful aura, and its HARMFUL twin matching 12, on the same
--- client and the same session. A park that works most of the time and silently fails on
--- some parses is not a fallback, it is a coin flip; that is the whole case for parking on
--- the CF lock alone and keeping the string only as a drift canary.
+-- ⚠ TWO MEASUREMENTS OF THE STRING DISAGREE, AND THE CONFLICT IS UNRESOLVED.
+--   * The sentinel probe, 20:01:05, queried the PLAYER directly: "HELPFUL|!HELPFUL"
+--     matched 1 aura and "HARMFUL|!HARMFUL" matched 12.
+--   * The auraexp park row, ~90 min later, rendered NOTHING for the same string.
+-- The probe is not measuring a different parser — `GetAllAuraInstanceIDs` returns
+-- hasMatchedFilterString = TRUE, and Blizzard_AuraContainerGroups.lua:507 only calls
+-- ShouldIncludeAuraForFilterString when that is FALSE — so for the public source the
+-- container's whole filter-string decision IS the probe's call. Candidate explanations,
+-- neither confirmed: different UNITS (the probe asks "player"; the row rendered on a
+-- frame), or the row's group was REJECTED at AddAuraGroup and rendered nothing for an
+-- unrelated reason (AuraExplorer logs that; the session log would say).
+-- ☠ DO NOT CALL IT "INTERMITTENT" — that was an inference with nothing under it, and the
+-- 12-match reading is equally consistent with the polarity negation being IGNORED
+-- outright (HARMFUL|!HARMFUL -> HARMFUL -> every debuff), which is a different fault.
+-- ★ THE DECISION TO STOP PUSHING THE STRING DOES NOT REST ON THIS. It rests on the FIELD
+-- REPRO — parked slots rendering live debuffs (Drasvin, then Krathe's own frames) — plus
+-- the CF lock being verified above. The probe corroborates; it does not carry the case.
 local SLOT_PARK_CF = { maxDuration = 0 }
 AuraContainer.SLOT_PARK_CF = SLOT_PARK_CF
 
