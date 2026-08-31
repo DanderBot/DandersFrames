@@ -12,6 +12,8 @@
 * (Aura Designer) Fix layout and filter group indicators staying at full brightness on out-of-range players when element-specific fading is on — placed indicators faded, groups next to them did not. (by Krathe)
 * (Dispel) "Only Dispellable by You" now follows your talents everywhere, live. A Shaman's poison dispel appears and disappears with Poison Cleansing Totem, a Priest without Improved Purify no longer sees diseases they cannot cure, and talent changes apply to the overlay and the debuff row without a reload. (by Krathe)
 * (Dispel) Fix a Dwarf's bleed dispel lighting up on other players' frames after roster changes — Stoneform only cleanses yourself, so bleeds now show as dispellable only on your own frame. (by Krathe)
+* (Auras) **Fix "Only My Buffs" showing other players' buffs on someone in a different instance** — a Shaman's Earth Shield on a party member appearing on your frames while you stood outside the dungeon, for example. The game cannot say who cast an aura on a unit that is not in your world, so the "my buffs" filter quietly fell back to showing everybody's. Those pools now hide for such a unit and come back, freshly read, the moment they are with you again. Group members merely far out of range are unaffected. (by Krathe)
+* (Auras) **Fix a player's auras staying hidden until a reload.** Most often seen after they died and were resurrected, or after they crossed back into your instance, with the group re-sorting in between — their buffs, debuffs and Aura Designer icons all stayed blank on that one frame while everyone else was fine. (by Krathe)
 
 ## [5.3.1]
 
