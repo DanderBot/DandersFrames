@@ -2209,7 +2209,9 @@ local FLASH_INTRO_DUR   = 0.8         -- full intro length (the classic glow run
                                       -- icons). Glows land at 60%, hand-off fills the rest.
                                       -- ⚠ Briefly 0.5 during the 2026-08-27 LCG-parity pass,
                                       -- reverted to the shipped value for a clean A/B
-                                      -- baseline (/df debug lcgflash) before re-judging.
+                                      -- baseline before re-judging. (The side-by-side
+                                      -- harness it was judged against is local-only and
+                                      -- is deliberately not part of the shipped addon.)
 local FLASH_FRAME_SCALE = 1.4         -- F: glow frame = icon + 20% each side
 -- Crop rectangles inside the IconAlert sheet (facts of the asset's layout):
 local FLASH_UV_SPARK    = { 0.00781250, 0.61718750, 0.00390625, 0.26953125 }
@@ -2258,8 +2260,8 @@ local function setupFlashGlow(border, anim)
     -- (128x256 IconAlert pulled from the client; band/inner contrast 1.10 tinted vs
     -- 1.04 desaturated) showed the gain was marginal anyway. So: white renders the
     -- native art, everything else desaturates and tints, exactly as before
-    -- 2026-08-27. Re-judge against /df debug lcgflash before touching this again —
-    -- LCG passes no colour at all on its default path.
+    -- 2026-08-27. Re-judge side by side against the real thing before touching this
+    -- again — LCG passes no colour at all on its default path.
     local spark     = flashSheetTexture(border, "flashSpark",     "BACKGROUND", 0, FLASH_UV_SPARK)
     local inner     = flashSheetTexture(border, "flashInner",     "ARTWORK",    0, FLASH_UV_GLOW)
     local innerOver = flashSheetTexture(border, "flashInnerOver", "ARTWORK",    1, FLASH_UV_GLOWOVER)
