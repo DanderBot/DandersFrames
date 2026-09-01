@@ -816,11 +816,17 @@ function DF:CreateGUI()
     local layoutBtn
     local function PaintLayoutButton()
         local classic = DF:IsClassicSettingsLayout()
+        -- The glyph SHOWS the active layout (widget block = classic inline,
+        -- rows = popout), it does not depict the action -- the tooltip carries
+        -- the action. Reorder-arrows read as neither.
+        local tex = classic
+            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\widget_small"
+            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu"
         if classic then
             local tc = GetThemeColor()
-            layoutBtn:SetGlyph(nil, { r = tc.r, g = tc.g, b = tc.b })
+            layoutBtn:SetGlyph(tex, { r = tc.r, g = tc.g, b = tc.b })
         else
-            layoutBtn:SetGlyph(nil, C_TEXT_DIM)
+            layoutBtn:SetGlyph(tex, C_TEXT_DIM)
         end
         layoutTooltip.lines[1] = classic
             and L["Classic inline layout is active. Click to switch to popout rows."]
