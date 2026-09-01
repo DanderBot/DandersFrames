@@ -179,6 +179,8 @@ Features\PinnedFrames.lua
 Features\FlatRaidFrames.lua
 
 # Debug (Profiler.lua is loaded earlier so its SetScript hook is in place)
+# TEMPORARY: wrong-unit / stuck-hidden scanner. Remove with the file.
+Debug\AuraUnitScan.lua
 
 # Click-Casting System
 ClickCasting\Core.lua
