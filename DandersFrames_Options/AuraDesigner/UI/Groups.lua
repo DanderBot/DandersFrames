@@ -1545,7 +1545,10 @@ local function CollectAllEffects()
                     tinsert(effects, {
                         source      = "placed",
                         auraName    = auraName,
-                        displayName = displayName,
+                        -- Same derivation as the frame-level rows below: a marked indicator
+                        -- (a helper Icon or Square) names itself, from the mark.
+                        displayName = (indicator.pihSignal and P.PIH_SignalLabel
+                            and P.PIH_SignalLabel(indicator.pihSignal)) or displayName,
                         indicatorID = indicator.id,
                         typeKey     = indicator.type,
                         config      = indicator,
@@ -1563,7 +1566,14 @@ local function CollectAllEffects()
                     tinsert(effects, {
                         source      = "frame",
                         auraName    = auraName,
-                        displayName = displayName,
+                        -- A marked effect names ITSELF. Without this every effect built on one
+                        -- filter reads identically in the list -- distinguishable only by its
+                        -- type badge, which says what it draws and not what it means.
+                        -- ⚠ DERIVED FROM THE MARK, never a stored string: a saved label
+                        -- is a translated string frozen into the profile, so it would keep the
+                        -- locale it was created in while every other name followed the client.
+                        displayName = (auraCfg[typeKey].pihSignal and P.PIH_SignalLabel
+                            and P.PIH_SignalLabel(auraCfg[typeKey].pihSignal)) or displayName,
                         typeKey     = typeKey,
                         config      = auraCfg[typeKey],
                     })

@@ -473,6 +473,13 @@ function DF:SetProfile(name)
     -- the new profile directly with no stale overlay
     DF:FullProfileRefresh()
 
+    -- The Power Infusion Helper's gate, role exclusions and sound registrations follow the
+    -- profile's own settings; without this the OLD profile's sound kept playing after a
+    -- switch, for a helper the new profile may not even have.
+    if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.PIH_ApplySaved then
+        DF.AuraDesigner.Engine:PIH_ApplySaved()
+    end
+
     -- ★ THE COMPLETION MARKER. PROFILE logged the START of a switch and nothing else, with
     -- eleven one-time migrations and a full refresh running in between -- so a log showing
     -- "cleared runtime state before switching" and then nothing was indistinguishable from

@@ -2905,4 +2905,71 @@ L["Interrupted: %s"] = true
 -- are unique to this tooltip.
 L["Left-Click:"] = true
 L["Right-Click:"] = true
+
+-- Power Infusion Helper (Aura Designer, priest only). One block, one card, and the card
+-- flips between adding and removing -- so the two titles are a pair and must stay one
+-- verb apart in every locale.
+L["POWER INFUSION HELPER"] = true
+L["Add the helper"] = true
+L["Remove the helper"] = true
+L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] = true
+L["Deletes its indicators and its spell lists. Nothing else is touched."] = true
+-- The three signals. Adding the helper turns on the first one only; the other two are ticked
+-- on afterwards, so each label has to stand alone with just the line beneath it for context.
+L["What to Show"] = true
+L["Big cooldown"] = true
+-- How the surface pickers behave. What the controls cannot show on their own: which
+-- surfaces stack, and which pick one winner.
+L["Health Bar and Background can show several indicators at once."] = true
+L["Border and Text colours show only one at a time."] = true
+-- Surface picker. Every surface is listed; one already held by a signal on the same spell list
+-- says what picking it does, because the two trade places rather than one being refused.
+L["%s (swap with %s)"] = true
+L["Big cooldown with a trinket or potion"] = true
+L["Already has active Power Infusion"] = true
+-- Clash warnings. Shown only on the three surfaces that take a single winner, and each names
+-- the remedy that already exists rather than describing the problem.
+-- The offender is NAMED: "something else colours the border" sends someone hunting through
+-- their own effects list, where a name turns the warning into an instruction. %s is that name,
+-- or the "%s and %d more" form when several contend.
+-- The second %s is L["Give this aura its own border"] -- the checkbox's own label key rides
+-- as a placeholder so a translator renders it once and the sentence can never drift from the
+-- control it points at.
+L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."] = true
+L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."] = true
+L["%s and %d more"] = true
+L["Another effect"] = true
+-- Shared settings. These live on the helper, not on each effect: they are statements about
+-- who you would infuse, and there is only one answer per player.
+L["Combat potions"] = true
+L["On-use trinkets"] = true
+L["Trinkets and Potions"] = true
+L["Never Show On"] = true
+L["Only applies when the group has roles."] = true
+L["Hide the helper while Power Infusion is on cooldown"] = true
+-- Only watch. Classes rather than specs because the spell data records a class and nothing
+-- finer; the pointer names the editor that does go spell by spell, so the limit is not a
+-- dead end.
+L["Classes to Watch"] = true
+L["Tick what makes someone worth infusing. It shows on your group frames."] = true
+L["To add or remove single spells, open the list itself."] = true
+L["Untick a class to ignore its cooldowns."] = true
+-- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
+-- on a filter-owned record, so it offers no row and no delete button for it either.
+L["Play a sound when someone becomes worth infusing"] = true
+L["Only plays while the helper is showing."] = true
+-- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
+-- missing-mode render path is the one place the helper's cooldown gate cannot reach.
+L["Not available on a Power Infusion Helper signal."] = true
+-- The icons controls: an "As icons" tick beside the colour dropdown on the two signals that
+-- can be a list ("No colour" in the menu is what makes icons-only reachable), plus the
+-- amplifiers include nested under burst's tick.
+L["As icons"] = true
+L["Their trinkets and potions as icons"] = true
+L["Move and size the icons under Layout Groups."] = true
+-- Row labels. The first two share one spell list on purpose, so without these the
+-- rows read identically -- distinguishable only by their type badge.
+L["PI Helper — Big cooldown"] = true
+L["PI Helper — Big cooldown with a trinket or potion"] = true
+L["PI Helper — Already has active Power Infusion"] = true
 --@end-do-not-package@
