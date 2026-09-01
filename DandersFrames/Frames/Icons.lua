@@ -208,24 +208,50 @@ end
 -- ⚠ Its SINGULAR sibling above, DF:UpdateExternalDefIcon, is a different matter and
 -- stays: that one has seven real call sites.
 
--- Update auras on all frames (used when entering/leaving combat)
+-- Update auras on all frames (combat transitions and the full profile refresh).
+--
+-- ☠☠ CHUNKED, and the reason is a HARD FAILURE, not a hitch. Run synchronously this
+-- walks every party, raid and pinned frame and rebuilds the whole Aura Designer
+-- signature set for each — placedCoSig/placedStructSig per indicator per member group,
+-- string-built. On a full raid with a busy Aura Designer profile that is enough for
+-- Blizzard's watchdog to fire "script ran too long", and the watchdog does not warn, it
+-- ABORTS THE EXECUTION. Field report 2026-08-30, via an auto-profile switch:
+--     Factory.lua:890 script ran too long
+--     ... SyncFrame -> UpdateAuras -> IterateRaidFrames -> UpdateAllAuras
+--         -> FullProfileRefresh -> ApplyRuntimeProfile -> EvaluateAndApply
+-- Everything in FullProfileRefresh AFTER this call — the rested indicator, name
+-- truncation, the rest of the pass — never ran. A profile switch could half-apply and
+-- leave frames stale with nothing to re-drive them.
+--
+-- ⚠ THE WATCHDOG MEASURES ONE EXECUTION, so splitting the walk across frames removes the
+-- failure outright rather than just making it less likely. Same shape as
+-- AuraContainer._kickLiveParse (read its header): the work list is SNAPSHOTTED up front
+-- because the iterators walk live registries that churn, each frame is RE-VALIDATED at
+-- execution time, and a generation token lets a newer call supersede a pending one
+-- instead of two walks interleaving.
+--
+-- ⚠ The caller returns immediately now. That is the point — FullProfileRefresh completes
+-- and the aura pass lands over the next few frames. Nothing downstream reads aura state
+-- back out of this call; both call sites treat it as fire-and-forget.
+local AURA_CHUNK = 8      -- frames refreshed per tick
+local updateAllGen = 0
+
 function DF:UpdateAllAuras()
-    local function updateFrame(frame)
-        if frame and frame:IsShown() then
-            DF:UpdateAuras(frame)
-        end
+    local work = {}
+    local function collect(frame)
+        if frame then work[#work + 1] = frame end
     end
-    
+
     -- Party frames via iterator
     if DF.IteratePartyFrames then
-        DF:IteratePartyFrames(updateFrame)
+        DF:IteratePartyFrames(collect)
     end
-    
+
     -- Raid frames via iterator
     if DF.IterateRaidFrames then
-        DF:IterateRaidFrames(updateFrame)
+        DF:IterateRaidFrames(collect)
     end
-    
+
     -- Pinned frames
     if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
         for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
@@ -234,7 +260,7 @@ function DF:UpdateAllAuras()
                 for i = 1, 40 do
                     local child = header:GetAttribute("child" .. i)
                     if child then
-                        updateFrame(child)
+                        collect(child)
                     end
                 end
             end
@@ -247,10 +273,33 @@ function DF:UpdateAllAuras()
             local frames = DF.PinnedFrames.bossFrames[setIndex]
             if frames then
                 for i = 1, 8 do
-                    updateFrame(frames[i])
+                    collect(frames[i])
                 end
             end
         end
     end
+
+    if #work == 0 then return end
+
+    updateAllGen = updateAllGen + 1
+    local gen, i = updateAllGen, 0
+    local function step()
+        -- A newer call has taken over: drop this walk rather than interleave two.
+        if gen ~= updateAllGen then return end
+        local stop = math.min(i + AURA_CHUNK, #work)
+        while i < stop do
+            i = i + 1
+            local frame = work[i]
+            -- ⚠ RE-VALIDATED HERE, not at snapshot time: a frame can be recycled,
+            -- hidden or retargeted between chunks, and IsShown was always the gate.
+            if frame:IsShown() then
+                DF:UpdateAuras(frame)
+            end
+        end
+        if i < #work then C_Timer.After(0, step) end
+    end
+    -- First chunk runs INLINE, so the common small-group case (a 5-man is one chunk)
+    -- behaves exactly as it did before and nothing is deferred that never needed to be.
+    step()
 end
 
