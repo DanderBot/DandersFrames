@@ -740,9 +740,10 @@ local function BuildEffectsTabRows(ctx, shell)
     -- The classic layout draws this block inline in its Effects head area; here
     -- it is a BAND OF POPOUT ROWS mounting the same shared parts (Cards.lua's
     -- S.BuildPIHelperCard and S.PIHelperSections): the card row is always
-    -- present, and while a helper exists each section stands behind a sibling
-    -- row of its own -- one pane per section, because the whole panel in one
-    -- pane outgrew the page ("extends off the page"). The pool gate is the
+    -- present and is the family's collapsible HEADER, and while a helper
+    -- exists (and the header is unfolded) each section stands behind an
+    -- INDENTED sibling row of its own -- one pane per section, because the
+    -- whole panel in one pane outgrew the page ("extends off the page"). The pool gate is the
     -- classic one's: the helper watches OTHER people's cooldowns, so Any Buff
     -- is the only pool where its records can match anything (the head area's
     -- gate comment says why at length). The panes hold whole-feature verbs and
@@ -776,8 +777,22 @@ local function BuildEffectsTabRows(ctx, shell)
         -- cannot add or retire a ROW, so those go straight to the deferred
         -- page:Refresh -- the panel closing at that moment is correct: the
         -- surface being edited is being restructured.
+        -- ⚠ THE FAMILY FOLDS, AND THE FOLD IS ACCOUNT STATE UNDER A LITERAL KEY.
+        -- Eight section rows under one card is a lot of column; the card row is
+        -- the family's header and carries an expander, and the section rows are
+        -- only BUILT while it is open -- the same "a collapsed thing builds no
+        -- rows" rule the effect sections above follow. The store is the shared
+        -- collapsed-groups map (DandersFramesDB_v2.collapsedGroups -- account
+        -- level, not the profile, like every other remembered fold), and the key
+        -- is a LITERAL: no spell name or user-typed text may reach that store
+        -- (see MountEffect's expandedCards note). Absent key = expanded, which
+        -- is the default a fresh helper gets.
+        local pihSaved = GUI:GetCollapsedGroups()
+        local PIH_FOLD_KEY = "ad_pihelper"
+        local function PIHCollapsed() return pihSaved[PIH_FOLD_KEY] and true or false end
         local function PIHRowSet()
             return tostring(P.PIH_Exists()) .. "|" .. tostring(P.PIH_SignalOn("strong"))
+                .. "|" .. tostring(PIHCollapsed())
         end
         local function PIHDeferredPageRefresh()
             -- The page rebuild is the catch-up, so the close that follows it
@@ -839,8 +854,8 @@ local function BuildEffectsTabRows(ctx, shell)
                 g:AddWidget(pane, BuildContent())
             end)
         end
-        local function AddPIHRow(label, mount)
-            local row = pihBand:AddWidget(GUI:CreatePopoutRow(page.child, {
+        local function AddPIHRow(band, label, mount)
+            local row = band:AddWidget(GUI:CreatePopoutRow(page.child, {
                 label  = label,
                 title  = label,
                 window = DF.GUIFrame,
@@ -873,23 +888,59 @@ local function BuildEffectsTabRows(ctx, shell)
             if not ctx.adEnabled then row.disableOn = function() return true end end
             return row
         end
-        -- The card row -- ONLY the add/remove card. Its Refresh always crosses
-        -- a row-set boundary (the card's one verb creates or deletes the
-        -- helper), so it lands in PIHDeferredPageRefresh; the card's own
-        -- fold/unfold arrives with an unchanged row set and redraws in place.
-        AddPIHRow(L["POWER INFUSION HELPER"], PIHMount(function(pane, Refresh)
+        -- The card row -- ONLY the add/remove card, and the family's HEADER.
+        -- Its Refresh always crosses a row-set boundary (the card's one verb
+        -- creates or deletes the helper), so it lands in PIHDeferredPageRefresh;
+        -- the card's own fold/unfold arrives with an unchanged row set and
+        -- redraws in place.
+        local cardRow = AddPIHRow(pihBand, L["POWER INFUSION HELPER"],
+                                  PIHMount(function(pane, Refresh)
             local yEnd = S.BuildPIHelperCard(pane, { startY = -4, Refresh = Refresh })
             return max(-(yEnd or 0) + 4, 1)
         end))
-        -- ...and one row per section while the helper exists. Titles are the
-        -- sections' own locale keys; `gated` is each row's existence test,
-        -- re-run on every page build. indent 8 (the pane's content inset) and
-        -- no in-pane header -- the row already says the name.
+        Add(pihBand, nil, "both")
+        -- The expander, only while there are section rows to fold. A glyph
+        -- BUTTON rather than the section factory's surface-click toggle,
+        -- because this row's surface already has a verb -- it opens the card
+        -- pane -- and the two gestures must stay separate (CreateRowToggle's
+        -- rule). Same glyph pair as every fold in the kit. The toggle is
+        -- structural -- it decides which rows exist -- so it goes through
+        -- PIHDeferredPageRefresh like every other row-set change.
         if P.PIH_Exists() then
+            local foldBtn = GUI:CreateGlyphButton(cardRow.plate or cardRow, {
+                size = 18, iconSize = 12,
+                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+                    .. (PIHCollapsed() and "chevron_right" or "expand_more"),
+            })
+            foldBtn:SetPoint("RIGHT", cardRow.gear, "LEFT", -8, 0)
+            foldBtn:SetScript("OnClick", function()
+                -- Only-store-true, the collapsed-groups convention: expanded
+                -- rows leave no key behind.
+                pihSaved[PIH_FOLD_KEY] = not PIHCollapsed() or nil
+                PIHDeferredPageRefresh()
+            end)
+            if not ctx.adEnabled then foldBtn:SetGlyphEnabled(false) end
+        end
+        -- ...and one row per section while the helper exists AND the family is
+        -- unfolded -- a collapsed family builds no section rows at all, exactly
+        -- as a collapsed effect section builds none. Titles are the sections'
+        -- own locale keys; `gated` is each row's existence test, re-run on
+        -- every page build. indent 8 (the pane's content inset) and no in-pane
+        -- header -- the row already says the name.
+        --
+        -- ⚠ A BAND OF THEIR OWN, INDENTED. `indent` is the page engine's flag
+        -- (Panel.lua's layout pass: x + 20 per level, width narrowed to match)
+        -- -- the addon's one indent mechanism, the same step the classic tab's
+        -- PIH_INDENT borrows -- so the sub-rows read as belonging to the header
+        -- row above them.
+        if P.PIH_Exists() and not PIHCollapsed() then
+            local pihSecBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth() - 20,
+                                                       { chromeless = true })
+            pihSecBand.indent = true
             for _, sec in ipairs(S.PIHelperSections) do
                 if not sec.gated or sec.gated() then
                     local build = sec.build
-                    AddPIHRow(L[sec.title], PIHMount(function(pane, Refresh)
+                    AddPIHRow(pihSecBand, L[sec.title], PIHMount(function(pane, Refresh)
                         local yEnd = build(pane, {
                             startY = -4, Refresh = Refresh,
                             indent = 8, header = false,
@@ -898,8 +949,8 @@ local function BuildEffectsTabRows(ctx, shell)
                     end))
                 end
             end
+            Add(pihSecBand, nil, "both")
         end
-        Add(pihBand, nil, "both")
     end
 
     -- ── THE ACTIVE INDICATORS HEADING, AND THE FILTER ON IT ──

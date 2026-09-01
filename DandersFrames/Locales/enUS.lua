@@ -62,6 +62,7 @@ L["Auto-create profiles enabled."] = true
 -- rest of the chat line. The caller wraps the substituted name instead.
 L["Auto-created profile: %s"] = true
 L["Auto-profile evaluation and runtime overlay"] = true
+L["Classic Layout"] = true
 L["Classic inline layout is active. Click to switch to popout rows."] = true
 L["Identity gate: park/hide verdicts with reasons, latches, recovery"] = true
 L["Indicator Info"] = true

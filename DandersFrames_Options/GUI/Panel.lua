@@ -838,45 +838,53 @@ function DF:CreateGUI()
     -- identity, like the profile chip beside it — it shapes every page, so it is
     -- reachable from every page rather than buried on the Options page (whose
     -- checkbox stays; both read the same SV root field, so they cannot drift).
-    -- Theme-tinted glyph = classic active; dim = popout. The tooltip table is
-    -- mutated in place — GlyphTooltipSpec reads it at hover, so the lines stay
+    --
+    -- ⚠ A LABELLED CHECKBOX, NOT A GLYPH. The glyph read as a sibling of the
+    -- changelog icon and said nothing about what it did; a ticked "Classic
+    -- Layout" box is the state AND the verb in one control. The shared factory
+    -- is used with noSearch (see CreateCheckbox: the title bar is on no page,
+    -- so a search hit here would have nowhere to navigate). The tooltip table
+    -- is mutated in place — the attach reads it at hover, so the lines stay
     -- current without re-attaching anything.
     local layoutTooltip = { title = L["Settings Layout"], lines = { "", "" } }
-    local layoutBtn
+    local layoutCheck = GUI:CreateCheckbox(
+        frame, L["Classic Layout"],
+        nil, nil,
+        function()
+            -- The one shared flip -- see GUI:FlipSettingsLayout above. The
+            -- factory's customSet has already written the field, so the value
+            -- passed restates it and the SEQUENCE is the point (same contract
+            -- as the Options page's checkbox). It ends by calling
+            -- GUI.PaintLayoutButton, this checkbox's own repaint.
+            GUI:FlipSettingsLayout(DF:IsClassicSettingsLayout())
+        end,
+        function() return DF:IsClassicSettingsLayout() end,
+        function(val) DF:SetClassicSettingsLayout(val) end,
+        nil,
+        { noSearch = true }
+    )
+    -- Sized for the title bar, not the 220x24 settings-row slot the factory
+    -- builds: the box plus the measured label, capped so a long translation
+    -- clips against the profile chip instead of pushing it off the bar.
+    local labelW = layoutCheck.label and layoutCheck.label:GetStringWidth() or 76
+    layoutCheck:SetSize(math.min(140, math.max(90, 24 + math.ceil(labelW))), 20)
+    layoutCheck:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
+    layoutCheck:SetFrameStrata("FULLSCREEN_DIALOG")
+    layoutCheck:SetFrameLevel(210)
+    layoutCheck.tooltip = layoutTooltip
     local function PaintLayoutButton()
         local classic = DF:IsClassicSettingsLayout()
-        -- The glyph SHOWS the active layout (widget block = classic inline,
-        -- rows = popout), it does not depict the action -- the tooltip carries
-        -- the action. Reorder-arrows read as neither.
-        local tex = classic
-            and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\widget_small"
-            or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\menu"
-        if classic then
-            local tc = GetThemeColor()
-            layoutBtn:SetGlyph(tex, { r = tc.r, g = tc.g, b = tc.b })
-        else
-            layoutBtn:SetGlyph(tex, C_TEXT_DIM)
-        end
         layoutTooltip.lines[1] = classic
             and L["Classic inline layout is active. Click to switch to popout rows."]
             or  L["Popout rows layout is active. Click to switch to classic inline."]
         layoutTooltip.lines[2] = L["Applies to the whole account."]
+        -- Refresh re-reads customGet and repaints the box -- the checkbox's
+        -- own refresh mechanism, so the Options-page flip lands here too.
+        layoutCheck:Refresh()
     end
-    layoutBtn = GUI:CreateGlyphButton(frame, {
-        texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder",
-        width = 20, height = 20, iconSize = 15,
-        color    = C_TEXT_DIM,
-        tooltip  = layoutTooltip,
-        -- The one shared flip -- see GUI:FlipSettingsLayout above. It ends by
-        -- calling GUI.PaintLayoutButton, which is this button's own painter.
-        onClick  = function() GUI:FlipSettingsLayout() end,
-    })
-    layoutBtn:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -4, 0)
-    layoutBtn:SetFrameStrata("FULLSCREEN_DIALOG")
-    layoutBtn:SetFrameLevel(210)
-    GUI.LayoutButton = layoutBtn
+    GUI.LayoutButton = layoutCheck
     -- Exposed so the Options-page checkbox (which flips the same field) can
-    -- repaint the glyph. hooksecurefunc on RefreshCurrentPage was the first
+    -- repaint this one. hooksecurefunc on RefreshCurrentPage was the first
     -- cut — it is assigned AFTER this runs and reassigned by AutoProfiles, so
     -- the hook would either error or be silently bypassed.
     GUI.PaintLayoutButton = PaintLayoutButton
@@ -914,7 +922,7 @@ function DF:CreateGUI()
         { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
     )
     profileChip:SetSize(126, 20)
-    profileChip:SetPoint("TOPRIGHT", layoutBtn, "TOPLEFT", -6, 0)
+    profileChip:SetPoint("TOPRIGHT", layoutCheck, "TOPLEFT", -6, 0)
     profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
     GUI.ProfileChip = profileChip
 

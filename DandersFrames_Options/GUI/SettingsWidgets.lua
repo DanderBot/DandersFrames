@@ -1899,7 +1899,7 @@ function GUI:CreateCheckRow(parent, opts)
     return cb
 end
 
-function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey)
+function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey, opts)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
     container.preferredHeight = GUI.RowHeight.checkbox   -- factory-owned slot height (see GUI.RowHeight)
@@ -2040,7 +2040,12 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     UpdateState()
     
     -- SEARCH: Register this setting
-    if DF.Search then
+    -- ⚠ opts.noSearch exists for the ONE checkbox that lives outside any page --
+    -- the title bar's Classic Layout toggle (GUI/Panel.lua) -- because a search
+    -- result must be able to navigate to the widget it names, and that widget is
+    -- on no page. Page-resident checkboxes must NEVER pass it: skipping the
+    -- registration makes the setting invisible to settings search.
+    if DF.Search and not (opts and opts.noSearch) then
         local hasCustomGetSet = (customGet ~= nil or customSet ~= nil)
         if dbKey and type(dbKey) == "string" then
             container.searchEntry = DF.Search:RegisterCheckbox(label, dbKey, nil, false, callback)

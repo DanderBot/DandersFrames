@@ -580,8 +580,17 @@ do
           "expand: the fold state is read from the card layout's own table")
     check(ROWS:find("section.Toggle = function(self)", 1, true) ~= nil,
           "expand: ...and Toggle is REPLACED, so the factory's own write never runs")
-    check(ROWS:find("GUI:GetCollapsedGroups", 1, true) == nil,
-          "expand: ...no spell name reaches the persisted collapsed-groups store")
+    -- ⚠ The store IS reached on this page now -- ONCE, by the PI Helper family
+    -- fold, under the literal "ad_pihelper" key. So the assertion is the TD
+    -- page's shape: every touch of the store is through that stable literal,
+    -- which is how "no spell name reaches it" stays guaranteed.
+    check(ROWS:find('local PIH_FOLD_KEY = "ad_pihelper"', 1, true) ~= nil,
+          "expand: the one persisted fold key on this page is a literal")
+    do
+        local gcg = 0
+        for _ in ROWS:gmatch("GetCollapsedGroups") do gcg = gcg + 1 end
+        eq(gcg, 1, "expand: the collapsed-groups store is reached in exactly one place (the literal-key fold)")
+    end
 
     -- The row page never opens a panel on the effect itself.
     check(ROWS:find("GUI:CreatePopoutRow(page.child, {\n            label   = label,", 1, true) ~= nil,
@@ -804,8 +813,18 @@ do
           "group: the fold state is read from the card layout's own in-memory table")
     check(ROWS:find("expandedGroups[cardKey] = not self.expanded or nil", 1, true) ~= nil,
           "group: ...and Toggle is REPLACED, so the factory's own write never runs")
-    check(ROWS:find("GUI:GetCollapsedGroups", 1, true) == nil,
-          "group: ...no user-typed group name reaches the persisted collapsed-groups store")
+    -- ⚠ Same store note as section 7: the one GetCollapsedGroups reach on this
+    -- page is the PI Helper family fold's, under its "ad_pihelper" literal
+    -- (counted there). What this section still asserts is that every index into
+    -- that store's handle is through the literal key -- so no user-typed group
+    -- name (nor any other dynamic key) can reach the persisted store.
+    do
+        local idx, lit = 0, 0
+        for _ in ROWS:gmatch("pihSaved%[") do idx = idx + 1 end
+        for _ in ROWS:gmatch("pihSaved%[PIH_FOLD_KEY%]") do lit = lit + 1 end
+        check(idx > 0 and idx == lit,
+              "group: ...no user-typed group name reaches the persisted collapsed-groups store")
+    end
     -- ☠ REPLACED, NOT HOOKED, AND THE DIFFERENCE IS INVISIBLE FROM THE OUTSIDE.
     -- A Toggle that captured the factory's own and called it would still keep the
     -- in-memory state -- and would ALSO run the factory's write into
