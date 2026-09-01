@@ -2107,6 +2107,13 @@ function CC:SetupSecureHandlers(frame)
     -- Track current hovered frame for click-casting + diagnostic logging
     frame:HookScript("OnEnter", function(self)
         CC.currentHoveredFrame = self
+        -- ★ STICKY, AND NEVER CLEARED — that is the whole point of it existing beside the
+        -- one above. currentHoveredFrame nils on OnLeave, which makes it useless to a slash
+        -- command: moving the cursor to the chat box to type IS the leave, so `mouseover`
+        -- and any live hover record are always empty by the time you press enter. This
+        -- remembers the last DF frame the mouse was on so `/dfauras last` can dump a frame
+        -- you were just looking at. Diagnostics only; nothing renders from it.
+        DF._lastHoverFrame = self
 
         -- Debug: verify WrapScript set up bindings and check attribute state
         local bindingsActive = self:GetAttribute("dfBindingsActive")

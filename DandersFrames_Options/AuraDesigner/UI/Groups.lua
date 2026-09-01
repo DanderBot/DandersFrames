@@ -2633,9 +2633,13 @@ local function RefreshPreviewEffects()
     -- Every type skips hidden blocks (eye toggle, enabled == false) — same as pickWinner.
     if auraCfg.border and auraCfg.border.enabled ~= false and auraCfg.border.ShowBorder ~= false then
         local spec = DF.Border:BuildSpec(auraCfg.border, "")
-        spec.animation = nil   -- AD border animation retired on 12.1; the preview must match the
-                               -- live render (which strips it at the container chokepoint) so a
-                               -- stuck-on BorderAnimationType from an old profile doesn't animate here.
+        -- ANIMATION: kept, because the live frame-level border animates again (the
+        -- AuraContainer ANIMATION FILTER reopened OVERLAY mode, 2026-08-27) and a preview
+        -- that stripped it would show something the live render does not — the one thing
+        -- previews must never do. The overlay here is an editor-owned frame, not a slot
+        -- child, so it is a plain DF.Border with no restriction to worry about, and the
+        -- reset at the top of this refresh (`Apply { enabled = false }` -> StopAnimation)
+        -- is what stops a previously-animated preview when the effect is turned off.
         if not spec.color then spec.color = { r = 1, g = 1, b = 1, a = 1 } end
         spec.enabled = true
         if auraCfg.border.borderMode == "custom" then

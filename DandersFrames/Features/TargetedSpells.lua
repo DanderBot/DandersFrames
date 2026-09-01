@@ -1144,6 +1144,7 @@ end
 -- Show/Hide/SetAlpha(1) on icon.highlightFrame two lines later: two computations of one
 -- visual with the second silently winning, which is the shape the live-pathway rule
 -- exists to prevent. The fabricated flag is DATA and belongs here, in the live decision.
+
 local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
     -- No borderColor read here: the colour comes from DF.Border:BuildSpec via the
     -- canonical personalTargetedSpell* keys, so a second local read went unused.
