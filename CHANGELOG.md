@@ -1,6 +1,6 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [5.4.0]
 
 ### New Features
 
@@ -51,6 +51,7 @@
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
+- (Settings) Prefer the old settings look? A "Classic Layout" switch in the settings window's title bar (also under Options) swaps between the new popout-panel layout and the classic inline one, for the whole account.
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
 
 ## [5.3.1]
