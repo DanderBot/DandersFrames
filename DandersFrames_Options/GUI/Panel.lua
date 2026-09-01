@@ -805,6 +805,55 @@ function DF:CreateGUI()
     scaleBtn:SetFrameLevel(210)
     GUI.ScaleButton = scaleBtn
 
+    -- ⇄ SETTINGS LAYOUT TOGGLE. Which layout the panel draws in is account
+    -- identity, like the profile chip beside it — it shapes every page, so it is
+    -- reachable from every page rather than buried on the Options page (whose
+    -- checkbox stays; both read the same SV root field, so they cannot drift).
+    -- Theme-tinted glyph = classic active; dim = popout. The tooltip table is
+    -- mutated in place — GlyphTooltipSpec reads it at hover, so the lines stay
+    -- current without re-attaching anything.
+    local layoutTooltip = { title = L["Settings Layout"], lines = { "", "" } }
+    local layoutBtn
+    local function PaintLayoutButton()
+        local classic = DF:IsClassicSettingsLayout()
+        if classic then
+            local tc = GetThemeColor()
+            layoutBtn:SetGlyph(nil, { r = tc.r, g = tc.g, b = tc.b })
+        else
+            layoutBtn:SetGlyph(nil, C_TEXT_DIM)
+        end
+        layoutTooltip.lines[1] = classic
+            and L["Classic inline layout is active. Click to switch to popout rows."]
+            or  L["Popout rows layout is active. Click to switch to classic inline."]
+        layoutTooltip.lines[2] = L["Applies to the whole account."]
+    end
+    layoutBtn = GUI:CreateGlyphButton(frame, {
+        texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\reorder",
+        width = 20, height = 20, iconSize = 15,
+        color    = C_TEXT_DIM,
+        tooltip  = layoutTooltip,
+        onClick  = function()
+            DF:SetClassicSettingsLayout(not DF:IsClassicSettingsLayout())
+            -- Same flip sequence as the Options-page checkbox, same order: the
+            -- open panels first (they belong to the layout being left), then
+            -- every page's build cache, then the page on screen.
+            if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("layoutFlip") end
+            if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
+            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+            PaintLayoutButton()
+        end,
+    })
+    layoutBtn:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -4, 0)
+    layoutBtn:SetFrameStrata("FULLSCREEN_DIALOG")
+    layoutBtn:SetFrameLevel(210)
+    GUI.LayoutButton = layoutBtn
+    -- Exposed so the Options-page checkbox (which flips the same field) can
+    -- repaint the glyph. hooksecurefunc on RefreshCurrentPage was the first
+    -- cut — it is assigned AFTER this runs and reassigned by AutoProfiles, so
+    -- the hook would either error or be silently bypassed.
+    GUI.PaintLayoutButton = PaintLayoutButton
+    PaintLayoutButton()
+
     -- THE PROFILE CHIP. Which profile am I editing is identity, not a setting,
     -- and it used to be answerable only by walking to the Profiles page. The
     -- chip is the shared inline dropdown -- same opener, same menu, same
@@ -837,7 +886,7 @@ function DF:CreateGUI()
         { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
     )
     profileChip:SetSize(126, 20)
-    profileChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -6, 0)
+    profileChip:SetPoint("TOPRIGHT", layoutBtn, "TOPLEFT", -6, 0)
     profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
     GUI.ProfileChip = profileChip
 

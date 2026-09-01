@@ -3107,9 +3107,10 @@ end
 -- ============================================================
 -- CLASSIC SETTINGS LAYOUT
 -- ------------------------------------------------------------
--- Transition toggle for the settings-panel redesign: checkbox-gated groups now
--- render as popout rows, and this falls the panel back to the old inline
--- rendering. Temporary — it goes once the redesign has settled.
+-- The settings panel's two layouts: checkbox-gated groups render as popout
+-- rows by default, and this switches the panel to the classic inline
+-- rendering. PERMANENT (ruled 2026-09-01) — both layouts are supported, every
+-- new settings surface must build in both, and the mover-tests assert both.
 --
 -- It lives at the ROOT of the SavedVariable, not in .global and not in a
 -- profile: it is how the panel is DRAWN, so it has to be one answer per

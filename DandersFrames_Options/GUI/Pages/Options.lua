@@ -3873,11 +3873,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     -- page's build cache, then rebuild the one on screen right now.
                     if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
                     if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                    -- The title-bar toggle shows the same state; keep its tint honest.
+                    if GUI.PaintLayoutButton then GUI.PaintLayoutButton() end
                 end,
                 function() return DF:IsClassicSettingsLayout() end,
                 function(val) DF:SetClassicSettingsLayout(val) end
             ), 30)
-            classicCheck.tooltip = L["Show settings groups in the old inline layout instead of the new popout rows. A temporary aid while the redesign settles in — this option will be removed in a later update."]
+            classicCheck.tooltip = L["Show settings groups in the classic inline layout instead of the popout rows. Applies to the whole account, and can also be switched from the button in the window's title bar."]
         end
 
         if classicLayout then
