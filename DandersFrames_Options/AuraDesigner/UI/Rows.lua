@@ -738,90 +738,167 @@ local function BuildEffectsTabRows(ctx, shell)
 
     -- ── POWER INFUSION HELPER (priest only, Any Buff pool only) ──
     -- The classic layout draws this block inline in its Effects head area; here
-    -- it is one popout row mounting the SAME shared builder
-    -- (Cards.lua's S.BuildPIHelperPane). The pool gate is the classic one's:
-    -- the helper watches OTHER people's cooldowns, so Any Buff is the only pool
-    -- where its records can match anything (the head area's gate comment says
-    -- why at length). The pane holds whole-feature verbs and per-signal state
-    -- the builder redraws itself, so like the add rows it takes neither a
-    -- modified tick nor a footer.
+    -- it is a BAND OF POPOUT ROWS mounting the same shared parts (Cards.lua's
+    -- S.BuildPIHelperCard and S.PIHelperSections): the card row is always
+    -- present, and while a helper exists each section stands behind a sibling
+    -- row of its own -- one pane per section, because the whole panel in one
+    -- pane outgrew the page ("extends off the page"). The pool gate is the
+    -- classic one's: the helper watches OTHER people's cooldowns, so Any Buff
+    -- is the only pool where its records can match anything (the head area's
+    -- gate comment says why at length). The panes hold whole-feature verbs and
+    -- per-signal state the builders redraw themselves, so like the add rows
+    -- they take neither a modified tick nor a footer.
     if select(2, UnitClass("player")) == "PRIEST" and IsOtherTab() then
         local pihBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(),
                                                 { chromeless = true })
-        -- ☠ A TICK IN THE PANE MUST NOT REBUILD THE PAGE. The first cut routed
+        -- ☠ A TICK IN A PANE MUST NOT REBUILD THE PAGE. The first cut routed
         -- the builder's Refresh to page:Refresh(), and a page rebuild retires
         -- the row the panel is docked to -- so every checkbox slammed the panel
-        -- shut ("it should stay until ur done editing"). The pane now redraws
-        -- ITSELF in place, and the page -- whose Active Indicators list the
-        -- helper's signals feed -- refreshes ONCE, from the row's onClose, and
-        -- only when something in here actually changed.
+        -- shut ("it should stay until ur done editing"). A pane redraws ITSELF
+        -- in place, and the page -- whose Active Indicators list the helper's
+        -- signals feed, and whose sibling panes read state this one just moved
+        -- -- refreshes ONCE, from the row's onClose, and only when something in
+        -- here actually changed. ONE dirty flag across the whole band: a change
+        -- made in any pane is caught up on whichever helper panel closes.
         local pihDirty = false
-        local pihMount = tools.PopoutContent(function(g, holder)
-            local pane = CreateFrame("Frame", nil, holder)
-            pane:SetWidth(PopoutWidth())
-            -- ⚠ NO ready/wantH DANCE, unlike the add panes above: the shared
-            -- builder is synchronous and RETURNS its y cursor rather than
-            -- reporting through a SetHeight callback, so the height exists
-            -- before AddWidget needs it.
-            local BuildContent
-            local function RebuildPane()
-                -- Retire the previous build the way the classic arm's
-                -- ClearTabContent does: hide and unanchor. The retired frames
-                -- stay PARKED on the pane -- WoW never releases frames -- which
-                -- is the same cost profile as the classic arm's SwitchTab
-                -- rebuild (that arm re-runs this same builder on every tick).
-                for _, child in ipairs({ pane:GetChildren() }) do
-                    child:Hide()
-                    child:ClearAllPoints()
-                end
-                for _, region in ipairs({ pane:GetRegions() }) do
-                    region:Hide()
-                end
-                local h = BuildContent()
-                -- The panel re-measures the pane's slot -- the same verb the
-                -- Add Indicator pane's SetHeight reports through above.
-                GUI:RelayoutHost(pane, h)
+        -- ⭐ ...AND ONE OPEN-PANEL COUNT beside it. The catch-up refresh
+        -- rebuilds the page, which retires every row -- including one whose
+        -- panel the user JUST opened. Edit in pane A, open pane B: A's close
+        -- fired the refresh and B died in the user's hand. So the deferred
+        -- refresh yields while ANY helper panel is still open (re-arming the
+        -- dirty flag), and the LAST close is the one that pays it.
+        local pihOpenPanes = 0
+        -- ☠ ...EXCEPT A CHANGE THAT DECIDES WHICH ROWS EXIST. Adding or
+        -- removing the helper gates every section row; the strong signal gates
+        -- the Trinkets and Potions row (through any door -- its tick, its
+        -- surface dropdown's None, the last amplifier untick, the icons tick
+        -- that keeps an otherwise-empty helper alive). An in-place rebuild
+        -- cannot add or retire a ROW, so those go straight to the deferred
+        -- page:Refresh -- the panel closing at that moment is correct: the
+        -- surface being edited is being restructured.
+        local function PIHRowSet()
+            return tostring(P.PIH_Exists()) .. "|" .. tostring(P.PIH_SignalOn("strong"))
+        end
+        local function PIHDeferredPageRefresh()
+            -- The page rebuild is the catch-up, so the close that follows it
+            -- must not schedule a second one.
+            pihDirty = false
+            if C_Timer and C_Timer.After then
+                C_Timer.After(0, function()
+                    if page:IsShown() and page.Refresh then page:Refresh() end
+                end)
             end
-            BuildContent = function()
-                local yEnd = S.BuildPIHelperPane(pane, {
-                    startY  = -4,
-                    -- The pane's redraw verb: itself, in place -- see the note
-                    -- on the band above for why this is not page:Refresh().
-                    Refresh = function()
-                        pihDirty = true
-                        RebuildPane()
-                    end,
-                })
-                local h = max(-(yEnd or 0) + 4, 1)
-                pane:SetHeight(h)
-                return h
-            end
-            g:AddWidget(pane, BuildContent())
-        end)
-        local pihRow = pihBand:AddWidget(GUI:CreatePopoutRow(page.child, {
-            label  = L["POWER INFUSION HELPER"],
-            title  = L["POWER INFUSION HELPER"],
-            window = DF.GUIFrame,
-            clipTo = page,
-            build  = pihMount,
-            -- "Done editing" is the panel closing, and that is when the page
-            -- catches up on what the pane changed. Deferred a frame: this fires
-            -- inside the popout's own close path (a teardown's
-            -- CloseAllPopoutRows included), and a synchronous rebuild would
-            -- retire frames mid-close. Skipped when nothing changed, and when
-            -- the page has left the screen (a window close or layout flip runs
-            -- its own rebuild).
-            onClose = function()
-                if not pihDirty then return end
-                pihDirty = false
-                if C_Timer and C_Timer.After then
-                    C_Timer.After(0, function()
-                        if page:IsShown() and page.Refresh then page:Refresh() end
-                    end)
+        end
+        -- The shared mount: every helper row's pane goes through here --
+        -- buildPane(pane, Refresh) -> height. Generalised from the single-pane
+        -- version so the rebuild machinery exists ONCE, not once per row.
+        local function PIHMount(buildPane)
+            return tools.PopoutContent(function(g, holder)
+                local pane = CreateFrame("Frame", nil, holder)
+                pane:SetWidth(PopoutWidth())
+                -- ⚠ NO ready/wantH DANCE, unlike the add panes above: the
+                -- shared builders are synchronous and RETURN their y cursor
+                -- rather than reporting through a SetHeight callback, so the
+                -- height exists before AddWidget needs it.
+                local builtRowSet
+                local BuildContent
+                local function RebuildPane()
+                    -- Retire the previous build the way the classic arm's
+                    -- ClearTabContent does: hide and unanchor. The retired
+                    -- frames stay PARKED on the pane -- WoW never releases
+                    -- frames -- which is the same cost profile as the classic
+                    -- arm's SwitchTab rebuild (that arm re-runs its builder on
+                    -- every tick).
+                    for _, child in ipairs({ pane:GetChildren() }) do
+                        child:Hide()
+                        child:ClearAllPoints()
+                    end
+                    for _, region in ipairs({ pane:GetRegions() }) do
+                        region:Hide()
+                    end
+                    local h = BuildContent()
+                    -- The panel re-measures the pane's slot -- the same verb
+                    -- the Add Indicator pane's SetHeight reports through above.
+                    GUI:RelayoutHost(pane, h)
                 end
-            end,
-        }))
-        if not ctx.adEnabled then pihRow.disableOn = function() return true end end
+                local function Refresh()
+                    if PIHRowSet() ~= builtRowSet then
+                        PIHDeferredPageRefresh()
+                        return
+                    end
+                    pihDirty = true
+                    RebuildPane()
+                end
+                BuildContent = function()
+                    builtRowSet = PIHRowSet()
+                    local h = buildPane(pane, Refresh)
+                    pane:SetHeight(h)
+                    return h
+                end
+                pihOpenPanes = pihOpenPanes + 1
+                g:AddWidget(pane, BuildContent())
+            end)
+        end
+        local function AddPIHRow(label, mount)
+            local row = pihBand:AddWidget(GUI:CreatePopoutRow(page.child, {
+                label  = label,
+                title  = label,
+                window = DF.GUIFrame,
+                clipTo = page,
+                build  = mount,
+                -- "Done editing" is the panel closing, and that is when the
+                -- page catches up on what the pane changed. Deferred a frame:
+                -- this fires inside the popout's own close path (a teardown's
+                -- CloseAllPopoutRows included), and a synchronous rebuild would
+                -- retire frames mid-close. Skipped when nothing changed, and
+                -- when the page has left the screen (a window close or layout
+                -- flip runs its own rebuild).
+                onClose = function()
+                    if pihOpenPanes > 0 then pihOpenPanes = pihOpenPanes - 1 end
+                    if not pihDirty then return end
+                    pihDirty = false
+                    if C_Timer and C_Timer.After then
+                        C_Timer.After(0, function()
+                            -- A sibling helper panel is open (or opened in this
+                            -- same click): stand down and re-arm -- its own
+                            -- close will pay the catch-up. Checked in the
+                            -- deferred frame so both click orders (close-then-
+                            -- open, open-then-close) resolve the same way.
+                            if pihOpenPanes > 0 then pihDirty = true return end
+                            if page:IsShown() and page.Refresh then page:Refresh() end
+                        end)
+                    end
+                end,
+            }))
+            if not ctx.adEnabled then row.disableOn = function() return true end end
+            return row
+        end
+        -- The card row -- ONLY the add/remove card. Its Refresh always crosses
+        -- a row-set boundary (the card's one verb creates or deletes the
+        -- helper), so it lands in PIHDeferredPageRefresh; the card's own
+        -- fold/unfold arrives with an unchanged row set and redraws in place.
+        AddPIHRow(L["POWER INFUSION HELPER"], PIHMount(function(pane, Refresh)
+            local yEnd = S.BuildPIHelperCard(pane, { startY = -4, Refresh = Refresh })
+            return max(-(yEnd or 0) + 4, 1)
+        end))
+        -- ...and one row per section while the helper exists. Titles are the
+        -- sections' own locale keys; `gated` is each row's existence test,
+        -- re-run on every page build. indent 8 (the pane's content inset) and
+        -- no in-pane header -- the row already says the name.
+        if P.PIH_Exists() then
+            for _, sec in ipairs(S.PIHelperSections) do
+                if not sec.gated or sec.gated() then
+                    local build = sec.build
+                    AddPIHRow(L[sec.title], PIHMount(function(pane, Refresh)
+                        local yEnd = build(pane, {
+                            startY = -4, Refresh = Refresh,
+                            indent = 8, header = false,
+                        })
+                        return max(-(yEnd or 0) + 4, 1)
+                    end))
+                end
+            end
+        end
         Add(pihBand, nil, "both")
     end
 

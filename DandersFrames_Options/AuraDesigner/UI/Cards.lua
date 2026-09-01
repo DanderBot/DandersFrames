@@ -457,6 +457,93 @@ function P.PIH_Apply()
 end
 
 -- ─────────────────────────────────────────────────────────────
+-- RETAINED CUSTOMISATIONS -- remove-and-re-add keeps the user's edits
+-- ─────────────────────────────────────────────────────────────
+-- ☠ DELETING A SIGNAL USED TO DELETE THE USER'S WORK WITH IT. The recipe creates
+-- ordinary effects, the user customises them through the effect's own card (border
+-- style, thickness, animation, any typeCfg field), and a remove-then-re-add came back
+-- with the recipe's defaults -- everything they had done, silently gone. So every
+-- delete path stashes a DEEP COPY of the doomed cfg into the helper's own settings
+-- table first (adDB.pihelper.retainedCfg -- the one piece of helper state that
+-- SURVIVES a remove), and every create path restores from it.
+--
+-- ⚠ DEEP COPIES BOTH WAYS. The stash lives in the profile beside the live pools, and
+-- a shared table reference between the two is exactly what profile export and the
+-- AD's shared-table conventions punish: edit one, silently edit the other.
+local function pihDeepCopy(src)
+    if type(src) ~= "table" then return src end
+    local out = {}
+    for k, v in pairs(src) do out[k] = pihDeepCopy(v) end
+    return out
+end
+
+-- ☠ WHAT THE RECIPE OWNS, IN ONE TABLE, because scattered re-stamps are how a field
+-- gets restored that must not be. These are the fields the create path MUST write for
+-- the helper to be correct -- everything else on a stashed cfg is the user's and is
+-- restored verbatim:
+--   pihSignal  -- the mark: ownership itself, the field every PIH_* question reads
+--   othersOnly -- the caster rule; per-signal correctness (infused deliberately inverts it)
+--   enabled    -- a re-added signal must be live, or "on" would show nothing
+--   conditions -- strong's chain names filter IDS, and the lists are re-minted on
+--                 every create; a restored chain would point at deleted filters
+--   id, type   -- placed-instance identity, minted fresh per placement
+-- NOT owned, deliberately: colour, healthbar mode, and every other appearance field.
+-- The recipe writes them as DEFAULTS on a fresh create; a stashed copy is the user's
+-- choice and outranks them.
+local PIH_RECIPE_OWNED = {
+    pihSignal = true, othersOnly = true, enabled = true, conditions = true,
+    id = true, type = true,
+}
+
+local function pihStash(key, hit)
+    local s = P.PIH_Settings()
+    if not (s and hit and type(hit.cfg) == "table") then return end
+    s.retainedCfg = s.retainedCfg or {}
+    -- The surface rides along: a stash is only restored onto the SAME surface,
+    -- because the five surfaces do not share a settings vocabulary (see pihCapture).
+    s.retainedCfg[key] = { surface = hit.typeKey, cfg = pihDeepCopy(hit.cfg) }
+end
+
+-- Overlay the stash onto a freshly created cfg. Runs AFTER the recipe's default
+-- stamps, so a stashed field wins over a default -- and the owned list keeps it from
+-- touching anything the recipe must control (those were stamped before this runs and
+-- are skipped here, so they stand).
+local function pihRestoreInto(cfg, key, surface)
+    local s = P.PIH_Settings()
+    local kept = s and s.retainedCfg and s.retainedCfg[key]
+    if not (kept and kept.surface == surface and type(kept.cfg) == "table") then return end
+    for k, v in pairs(kept.cfg) do
+        if not PIH_RECIPE_OWNED[k] then cfg[k] = pihDeepCopy(v) end
+    end
+end
+
+-- The icon groups get the same treatment: position, size, per-group appearance are
+-- the user's; the mark, the caster rule, the ticked lists and the group's identity
+-- are the recipe's (filterSelection is DERIVED state -- the icon ticks read and
+-- write it live, and restoring a stale copy would re-tick lists the user turned off).
+local PIH_GROUP_OWNED = {
+    id = true, name = true, pihSignal = true, othersOnly = true, filterSelection = true,
+}
+
+local function pihStashGroup(g)
+    local s = P.PIH_Settings()
+    if not (s and type(g) == "table" and g.pihSignal) then return end
+    s.retainedCfg = s.retainedCfg or {}
+    s.retainedCfg.iconGroups = s.retainedCfg.iconGroups or {}
+    s.retainedCfg.iconGroups[g.pihSignal] = pihDeepCopy(g)
+end
+
+local function pihRestoreGroup(g)
+    local s = P.PIH_Settings()
+    local kept = s and s.retainedCfg and s.retainedCfg.iconGroups
+        and s.retainedCfg.iconGroups[g.pihSignal]
+    if type(kept) ~= "table" then return end
+    for k, v in pairs(kept) do
+        if not PIH_GROUP_OWNED[k] then g[k] = pihDeepCopy(v) end
+    end
+end
+
+-- ─────────────────────────────────────────────────────────────
 -- BUILDING AND UNBUILDING ONE SIGNAL
 -- ─────────────────────────────────────────────────────────────
 local function pihRefresh()
@@ -497,9 +584,13 @@ local function pihCreateSignal(key, surfaceOverride)
     local def = PIH_SIGNALS[key]
     if not def then return false, "no such signal" end
     if pihFound()[key] then return true, "already on" end
-    local tgt = surfaceOverride or def.surface
 
     local s = P.PIH_Settings()
+    -- ⭐ A RE-ADDED SIGNAL COMES BACK WHERE THE USER LEFT IT. The surface is derived
+    -- from where the mark is found, so after a remove nothing else remembers it --
+    -- the stash is the only memory. An explicit dropdown choice still outranks it.
+    local kept = s.retainedCfg and s.retainedCfg[key] or nil
+    local tgt = surfaceOverride or (kept and kept.surface) or def.surface
 
     local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
     if not cdId then return false, "could not build the cooldown list" end
@@ -557,6 +648,8 @@ local function pihCreateSignal(key, surfaceOverride)
         if tgt == "square" then
             inst.color = { r = def.color[1], g = def.color[2], b = def.color[3], a = 1 }
         end
+        -- The user's customisations come back over the defaults; see the stash block.
+        pihRestoreInto(inst, key, tgt)
         return true
     end
 
@@ -588,12 +681,18 @@ local function pihCreateSignal(key, surfaceOverride)
     cfg.othersOnly = (key ~= "infused") or nil
     cfg.enabled = true
     cfg.conditions = conditions   -- nil on purpose for the unchained signals: clears a stale chain
+    -- ⭐ LAST, OVER THE DEFAULTS. Everything above is either recipe-owned (and the
+    -- overlay skips it) or a default the user's stashed edit is entitled to replace
+    -- -- the colour and the healthbar mode included.
+    pihRestoreInto(cfg, key, tgt)
     return true
 end
 
 local function pihDeleteSignal(key)
     local hit = pihFound()[key]
     if not hit then return false end
+    -- Before anything is deleted: the doomed cfg is the user's work (see the stash block).
+    pihStash(key, hit)
     local pool = pihOtherPoolRead()
     local auraCfg = pool and pool[hit.auraName]
     if hit.indicatorID and auraCfg and type(auraCfg.indicators) == "table" then
@@ -1080,7 +1179,10 @@ function P.PIH_SetIconsShow(which, on)
     if which == "infused" then
         local ig = pihIconGroup("infused")
         if not on then
-            if ig and P.DeleteLayoutGroup then P.DeleteLayoutGroup(ig.id) end
+            if ig and P.DeleteLayoutGroup then
+                pihStashGroup(ig)
+                P.DeleteLayoutGroup(ig.id)
+            end
             pihRefresh()
             return true
         end
@@ -1095,6 +1197,8 @@ function P.PIH_SetIconsShow(which, on)
         ig.iconsPerRow = 1
         -- The other corner, so the two icon groups never overlap at their defaults.
         ig.anchor = "TOPRIGHT"
+        -- The user's group edits come back over those defaults; see the stash block.
+        pihRestoreGroup(ig)
         ig.filterSelection.customs[id] = true
         pihRefresh()
         return true
@@ -1113,7 +1217,10 @@ function P.PIH_SetIconsShow(which, on)
         -- sweeps the expanded-card key -- its tab-routed store is safe here because this
         -- panel only exists on the Other Buffs tab.
         if g.filterSelection and not next(g.filterSelection.customs or {}) then
-            if P.DeleteLayoutGroup then P.DeleteLayoutGroup(g.id) end
+            if P.DeleteLayoutGroup then
+                pihStashGroup(g)
+                P.DeleteLayoutGroup(g.id)
+            end
         end
         pihRefresh()
         return true
@@ -1156,6 +1263,8 @@ function P.PIH_SetIconsShow(which, on)
         -- priest's own cooldowns lighting icons on their own frame. The exact trap the first
         -- group test found on the effects, closed here at create time.
         g.othersOnly = true
+        -- The user's group edits come back over the defaults; see the stash block.
+        pihRestoreGroup(g)
     end
     g.filterSelection.customs[id] = true
     pihRefresh()
@@ -1183,7 +1292,11 @@ function P.PIH_Remove()
     local pool = pihOtherPoolRead()
     local found = pihFound()
     local names, n = {}, 0
-    for _, hit in pairs(found) do names[hit.auraName] = true; n = n + 1 end
+    for key, hit in pairs(found) do
+        -- Wholesale removal skips pihDeleteSignal, so the stash write goes here.
+        pihStash(key, hit)
+        names[hit.auraName] = true; n = n + 1
+    end
 
     -- ☠ THE WHOLE RECORD GOES, not only the marked surfaces. A helper record can carry a
     -- `sound` entry that the generic effects list refuses to show on a filter-owned record
@@ -1239,6 +1352,7 @@ function P.PIH_Remove()
     -- helper that no longer exists must not leave icons running.
     local ig = pihAnyIconGroup()
     while ig and P.DeleteLayoutGroup do
+        pihStashGroup(ig)   -- position, size, appearance survive a remove
         P.DeleteLayoutGroup(ig.id)
         ig = pihAnyIconGroup()
     end
@@ -5766,7 +5880,13 @@ P.OpenFilterPopout = OpenFilterPopout
 --
 -- ☠ The card becomes REMOVE once a helper exists on this preset, so there is one place to
 -- look for both. Create and remove are the same feature seen from either side.
-S.BuildPIHelperPane = function(parent, opts)
+-- ⚠ SPLIT INTO PARTS 2026-09-01, ONE DEFINITION STILL. The popout layout's pane
+-- outgrew its page, so the builder is now: the CARD on its own
+-- (S.BuildPIHelperCard), a shared section toolkit (pihMakeTools), one body
+-- function per section, and TWO compositions -- S.BuildPIHelperPane stacks all
+-- of them for the classic tab exactly as before, and S.PIHelperSections hands
+-- the row page (AuraDesigner/UI/Rows.lua) the same bodies one popout row each.
+S.BuildPIHelperCard = function(parent, opts)
     opts = opts or {}
     local yPos = opts.startY or 0
     local Refresh = opts.Refresh or function() end
@@ -5801,474 +5921,609 @@ S.BuildPIHelperPane = function(parent, opts)
     pihBlock:SetPoint("TOPLEFT", 8, yPos)
     pihBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
     yPos = yPos - (pihBlock.layoutHeight + GUI.Space.section)
+    -- ☠ THE SECOND RETURN GATES THE CLASSIC SECTIONS -- exists AND pihBlock.expanded.
+    -- The card group carries its own collapsing header and publishes whether it is
+    -- open; without asking, folding the header away would hide the card and leave its
+    -- settings stranded below a closed section, attached to nothing visible. One
+    -- header, the whole helper. (The row page ignores it: there each section sits
+    -- behind its own row, and the ROW is the fold.)
+    return yPos, (exists and pihBlock.expanded) and true or false
+end
+
+-- ── THE SECTION TOOLKIT ──
+-- ☠ SHARED BEHAVIOUR LIVES IN THESE SECTIONS, NOT ON EACH EFFECT ROW. The mockup put
+-- "Never mark", "Only watch" and the gating cooldown on every effect. It was drawn
+-- before the engine existed, and the engine made them ONE switch for the whole
+-- helper. Three copies of "never on tanks" that can disagree is not flexibility --
+-- it is four states where one is meaningful and three are bug reports.
+-- Appearance (colour, border style, which surface) stays on the effect rows, because
+-- that genuinely differs per signal and is where the AD already puts appearance.
+--
+-- ☠ INDENTED IN THE CLASSIC TAB, AND THAT IS THE WHOLE POINT OF THE INDENT. These
+-- boxes used to start at the same left edge as "Add an indicator" and "Active
+-- indicators", so a column of five same-level boxes read as five sections rather
+-- than as one section and the four boxes belonging to it. Nothing said which header
+-- owned them. Ten pixels of indent is what says it -- the hierarchy was always
+-- there, it just was not drawn.
+-- ⚠ 20 IS THE ADDON'S INDENT STEP, not a number picked here: the page layout engine
+-- reads `widget.indent` and multiplies by 20 per level. That flag cannot be used
+-- directly -- this column lays itself out by hand rather than going through the page
+-- engine -- so the step is borrowed instead of the mechanism, which at least keeps
+-- one indent width in the addon rather than two.
+-- ⚠ The ROW PAGE passes opts.indent = 8 instead: inside a popout pane each section
+-- IS the surface, there is no owning header to indent under, and 8 is the pane's
+-- own content inset.
+local PIH_INDENT = 20
+-- ...and the note metrics the estimator below leans on. Their full story is on
+-- pihMakeTools; they sit at file scope so both layouts read the same numbers.
+local PIH_NOTE_LINE = 13
+local PIH_CB_TEXT = 24   -- the 16px box plus the 8px label gap
+
+-- One toolkit per BUILD, not per file: everything in here derives from the parent's
+-- width and the caller's Refresh, which differ per layout and per open. The bodies
+-- below take (group, tools) and never touch a layout global.
+local function pihMakeTools(parent, opts)
+    opts = opts or {}
+    local t = {}
+    t.Refresh = opts.Refresh or function() end
+    t.indent  = opts.indent or PIH_INDENT
+    t.groupW  = (parent:GetWidth() or 320) - (t.indent + 18)
+    t.parent  = parent
+
+    -- Builds ONE settings group at startY and returns the y below it.
+    function t.group(header, buildFn, startY, gopts)
+        local group = GUI:CreateSettingsGroup(parent, t.groupW, gopts)
+        group.padding = 10
+        if header then
+            group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
+        end
+        buildFn(group, t)
+        local h = group:LayoutChildren()
+        group:SetPoint("TOPLEFT", t.indent, startY)
+        group:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        -- The named scale, not a number that looks about right. GUI.Space carries a note
+        -- about an audit that found 58 spacers using 9 different values for two intents,
+        -- and three files each inventing their own for the same one.
+        return startY - (h + GUI.Space.section)
+    end
+
+    -- ☠☠ EVERY NOTE IN THESE SECTIONS TAKES AN EXPLICIT HEIGHT, which inverts CreateLabel's
+    -- usual advice on purpose -- and getting that inversion wrong cost three rounds of
+    -- the user's time, so here is the whole mechanism.
+    --
+    -- A label builds itself 380px wide, measures, and gets a ONE-LINE answer. The group
+    -- then narrows it to the real width and the text wraps to three or four lines. The
+    -- label notices and fires a correction -- but only when the call site left the height
+    -- alone, and that correction re-flows the GROUP, then asks the COLUMN, which stacks
+    -- its children at fixed offsets and does nothing. So the group keeps the one-line
+    -- height, the label spills out of its bottom edge, and the next box is drawn on top
+    -- of it. That is how the note went "missing" and the boxes overlapped in the same
+    -- breath: the same fault, seen from two ends.
+    --
+    -- ⭐ CreateLabel's own comment names the escape hatch without calling it one: labels
+    -- "with a call-site height are exactly the ones nothing else ever touches again". A
+    -- pinned height is the ONLY safe kind of note here, because pinning is what stops the
+    -- converge that this column cannot absorb.
+    --
+    -- ⚠ AND MEASURING INSTEAD IS NOT AVAILABLE. CreateLabel's own note records the
+    -- attempt: "Do NOT try to Reflow()+Remeasure() synchronously here to get a correct
+    -- height at creation. Tried 2026-08-05 and it does not work: nothing has been drawn
+    -- yet at card build time, so GetStringHeight still returns 0". So the height has to
+    -- be predicted, and the only question is how well.
+    --
+    -- ⚠ DERIVED FROM THE REAL WIDTH, not a constant. The first version used a flat 38
+    -- characters per line "to be safe"; the truth at this panel's width is nearer 68, so
+    -- every note claimed twice the lines it needed and left visible gaps above the first
+    -- tick and below the last note -- field-reported with a screenshot 2026-08-24.
+    -- The per-character width is deliberately a shade wider than the font renders, so the
+    -- count errs toward MORE lines, which is the safe direction; and because it reads the
+    -- panel width it stays right when the panel is resized, not only at one size. The
+    -- measured figure and why it is rounded up are on PIH_NOTE_LINE above.
+    -- The byte count makes an em dash worth three, which errs the same way.
+    -- Delete all of this the day the column publishes a `dfAD_ReflowWidgets` seam.
+    t.noteW = t.groupW - 24
+    -- ⭐ 6 PIXELS PER CHARACTER, AND THAT NUMBER WAS MEASURED, NOT PICKED.
+    -- It was 8, which is where seven rounds of gaps came from: at a note width of 400 the
+    -- panel fits ~74 characters on a line, so 400/74 is about 5.4 -- and reserving for 50
+    -- meant every long note claimed half again as many lines as it needed. The big one
+    -- asked for 8 lines to hold 5.
+    -- ⚠ 6 rather than 5.4 on purpose: it still errs long, by roughly a line on a
+    -- paragraph, and that line is the margin a longer translation gets to grow into.
+    -- ☠ Do NOT try to verify this from the widget. A probe that dumped every note's
+    -- measured height reported 30 for all of them whatever the text, because a pinned
+    -- label's frame never grows -- the FontString simply draws past it. The slot IS the
+    -- layout here; the frame height is not evidence of anything.
+    -- Parameterised on the wrap width, because the checkbox helper below
+    -- estimates against a NARROWER column than the notes (its text starts
+    -- past the box). t.lines keeps its one argument -- the note call sites
+    -- are many and their width is one number.
+    function t.linesAt(text, w)
+        local cpl = math.max(20, math.floor(w / 6))
+        -- ⚠ Colour escapes are not characters anyone can see. Counting them would add
+        -- twelve bytes per highlighted word and inflate the box by a line or two of pure
+        -- whitespace, which is the fault this estimator exists to avoid.
+        local plain = tostring(text):gsub("||r", "")
+        return math.max(1, math.ceil(#plain / cpl))
+    end
+    function t.lines(text) return t.linesAt(text, t.noteW) end
+    -- ⭐ GUI:CreateNote, not a hand-coloured CreateLabel. It IS the toned-note widget --
+    -- a label with the tone's own accent baked in through ToneHex, so a caution note here
+    -- is the same yellow as every caution note in the addon rather than three numbers
+    -- typed at this call site. `tone` names come from INFO_BANNER_TONES: info, caution,
+    -- danger, success. (The tone adds a colour escape to the string, which the byte count
+    -- below then treats as a dozen characters -- harmless, and it errs long.)
+    -- Notes are prose: fullRow, so the Classes section's two-track grid never
+    -- narrows one (a no-op everywhere else -- a one-track group is all full rows).
+    function t.note(g, text, tone)
+        if not text or text == "" then return end
+        local w = tone and GUI:CreateNote(parent, text, { tone = tone })
+            or GUI:CreateLabel(parent, text)
+        w.fullRow = true
+        g:AddWidget(w, t.lines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
+        return w
+    end
+
+    -- ☠ CHECKBOX LABELS ARE SINGLE-LINE AND UNBOUNDED. CreateCheckbox
+    -- anchors its label LEFT-only off the box, so a long label simply runs
+    -- right at its natural width -- invisible in the classic tab's column,
+    -- where the longest fits, and straight off the edge of the 260px popout
+    -- pane ("text runs off the edge"). So every tick in these sections goes
+    -- through here: the label gets a right edge on its own row, wraps, and
+    -- the SLOT grows by the same estimator the notes use (measuring is not
+    -- available at build time -- see the note above). At the classic width
+    -- every label estimates one line and nothing moves.
+    -- ⚠ Checkboxes are fixedRowHeight widgets: ResolveRowHeight ignores a
+    -- call-site number for them, so the taller slot goes through
+    -- preferredHeight instead. The container grows by the same lines so the
+    -- box and the centred label keep tracking each other.
+    -- wrapW is the Classes grid's narrower track; everything else omits it.
+    function t.check(g, label, get, set, wrapW)
+        local w = GUI:CreateCheckbox(parent, label, nil, nil, nil, get, set)
+        w.label:SetPoint("RIGHT", w, "RIGHT", 0, 0)
+        w.label:SetJustifyH("LEFT")
+        w.label:SetWordWrap(true)
+        local lines = t.linesAt(label, (wrapW or t.noteW) - PIH_CB_TEXT)
+        if lines > 1 then
+            w:SetHeight(24 + (lines - 1) * PIH_NOTE_LINE)
+            w.preferredHeight = (GUI.RowHeight.checkbox or 35)
+                + (lines - 1) * PIH_NOTE_LINE
+        end
+        g:AddWidget(w)
+        return w
+    end
+
+    -- ☠☠ NOT A BANNER, AND THE REASON IS A RACE RATHER THAN A SIZE.
+    -- Six shapes were tried and the symptom alternated between an overlap and a large
+    -- gap FROM THE SAME BUILD -- "half the time it's overlap, the other half it's a huge
+    -- gap". That is not a wrong constant; a wrong constant is wrong the same way every
+    -- time. It is a timing race, and no number can win one.
+    --
+    -- ⭐ Verified, and the asymmetry is the whole story: AddWidget stamps
+    -- `_slotHeightExplicit` when a call site pins a height (Sections.lua:125).
+    -- CreateLabel CHECKS it (Sections.lua:479) and skips its re-measure entirely, so a
+    -- pinned label is fixed at build and never corrects itself. CreateInfoBanner never
+    -- checks it -- its DoRecomputeHeight and TriggerHostRelayout run whatever you passed.
+    -- So the box's final height depends on when the panel happened to be built relative
+    -- to the banner's TWO measure passes: before it settles, the column reserved too
+    -- little and the next group is overlapped; after, the group shrinks under a
+    -- reservation already spent and the space becomes a gap.
+    --
+    -- ⚠ A box therefore cannot be made deterministic from this side. Getting one back
+    -- means CreateInfoBanner honouring `_slotHeightExplicit` the way CreateLabel does --
+    -- Danders' file, a real request with a checked premise, and NOT the reflow seam we
+    -- nearly asked for and withdrew.
+
+    -- Each tick creates or deletes one ordinary effect, which is why the signal rows
+    -- also appear in Active Indicators: they ARE indicators, and hiding them there
+    -- would mean a row you can see the colour of but cannot find.
+    function t.signalRow(g, key, label)
+        local Refresh = t.Refresh
+        t.check(g, label,
+            function() return P.PIH_SignalOn(key) end,
+            function(v)
+                P.PIH_SetSignal(key, v)
+                Refresh()   -- the dependent groups appear and vanish with it
+            end)
+
+        -- ⚠ GREYED, NOT HIDDEN. The signal tick is a FEATURE TOGGLE, and the
+        -- house rule is grey-in-place for those; hiding is for mode choices, where a
+        -- control genuinely does not apply. A vanished dropdown also loses the one
+        -- thing worth seeing while the signal is off: where it WOULD draw.
+        -- (The Trinkets and Potions section stays hidden, deliberately, and says
+        -- why -- greying that pair would imply strong window works without them.)
+        local surface = P.PIH_SurfaceOf(key)
+        local signalOff = (surface == nil)
+        if signalOff then surface = "none" end
+
+        -- Inline, so the checkbox above is its label. A second heading saying
+        -- "Surface" over every row would triple the words for no added meaning.
+        local dd = GUI:CreateDropdown(parent, label, P.PIH_SurfaceOptions(key),
+            nil, nil, nil,
+            -- ⚠ NEVER nil: this widget survives a profile switch for one frame,
+            -- and the shared dropdown's display refresh treats a nil answer as "try
+            -- the saved-variable fallback", which was never given -- a Lua error on
+            -- every profile switch away from the helper. "none" is a value the menu
+            -- owns, so a dying row reads honestly until it is rebuilt away.
+            function() return P.PIH_SurfaceOf(key) or "none" end,
+            function(v)
+                local ok, why = P.PIH_SetSurface(key, v)
+                if not ok then DF:DebugWarn("AURADESIGNER",
+                    "PIH: surface %s refused -- %s", tostring(v), tostring(why)) end
+                Refresh()   -- the other rows' menus re-grey around it
+            end,
+            -- ⚠ An INLINE dropdown does not own its slot: CreateDropdown only stamps
+            -- fixedRowHeight on the standalone form, so this literal is authoritative and
+            -- a hand-guessed one gets read. Content is 24 tall; the tight gap is right
+            -- because hiding the label makes it a compact row -- its control sits beside
+            -- its name (the checkbox above) rather than under it.
+            { inline = true })
+        if signalOff and dd.SetEnabled then dd:SetEnabled(false) end
+        g:AddWidget(dd, 24 + GUI.RowGapTight)
+
+        -- ⚠ THE CLASH WARNING, AND IT IS SCOPED ON PURPOSE. pickWinner decides from
+        -- config alone and never asks what is on the unit, so a clash is fully knowable
+        -- while someone is setting it up -- no guessing, no "this might happen".
+        -- It appears only on the three surfaces that actually take a single winner, and
+        -- it names the fix that exists rather than describing the problem.
+        -- ⚠ Only while OUR effect is actually in the contest: the named fix
+        -- can be applied to our own signal too (custom-mode border), and the warning
+        -- must go when it is.
+        local selfIn = P.PIH_SelfContends(surface, key)
+        local clashes, who = 0, nil
+        if selfIn then clashes, who = P.PIH_ClashOn(surface) end
+        -- ⚠ OUR OWN SIBLING COUNTS TOO, on a contended surface across records.
+        -- PIH_ClashOn skips anything carrying a helper mark, because two signals on one
+        -- record are prevented outright rather than warned about. "Already infused" is
+        -- on its own record though, so it can genuinely lose a border or a text to one
+        -- of the other two -- a real contest that would otherwise go unwarned precisely
+        -- because it was ours.
+        local sibling = selfIn and P.PIH_SiblingContends
+            and P.PIH_SiblingContends(surface, key) or nil
+        if sibling then
+            clashes = clashes + 1
+            who = who or pihLabel(sibling)
+        end
+        if clashes > 0 then
+            who = who or L["Another effect"]
+            -- More than one contender: naming only the first would read as "fix this
+            -- one and you are done", which would not be true.
+            if clashes > 1 then who = format(L["%s and %d more"], who, clashes - 1) end
+            -- A CAUTION BOX, the addon's own construct for a warning panel -- the same
+            -- one the click-casting dialog and the profiler use. It briefly became gold
+            -- text on the belief that the box was what broke the layout; it was not, and
+            -- a warning that looks like every other warning is worth the box.
+            -- The checkbox's own label key rides as a placeholder so a translator
+            -- renders it ONCE -- hardcoding the words here let the sentence and the
+            -- control it points at drift apart in any other language.
+            t.note(g, (surface == "border")
+                and format(L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."], who, L["Give this aura its own border"])
+                or  format(L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."], who),
+                "caution")
+        end
+
+        -- Icons sit BESIDE the colour dropdown, equal weight: with "None" in the
+        -- menu, one row enumerates colour-only / icons-only / both. Every row has
+        -- the same flow -- tick, dropdown, icons -- which is what three earlier
+        -- shapes kept breaking by parking the trinkets control under the wrong
+        -- signal. ⚠ Strong's tick is labelled by what it SHOWS -- its
+        -- amplifier half -- because icons cannot make its cooldown-AND-amplifier
+        -- judgement; a bare "As icons" there would over-promise. The colour tint
+        -- stays the only display that judges.
+        local which = PIH_ICON_OF[key]
+        local iconLabel = (key == "strong")
+            and L["Their trinkets and potions as icons"] or L["As icons"]
+        t.check(g, iconLabel,
+            function() return P.PIH_IconsShow(which) end,
+            function(v)
+                P.PIH_SetIconsShow(which, v)
+                Refresh()
+            end)
+    end
+
+    return t
+end
+
+-- ── THE SECTION BODIES ──
+-- Each takes (group, tools) and adds its widgets; which GROUP it lands in is the
+-- composition's business -- classic folds several into one box, the row page gives
+-- each its own pane.
+
+local function pihAddIntro(g, t)
+    -- ☠ A LABEL IN THE FIRST BOX, NOT A FREE-FLOATING INFO BANNER. The banner was
+    -- built and removed the same day: it measures its own height a frame after it is
+    -- drawn, and this column stacks its children at fixed offsets with no reflow
+    -- seam -- so the banner grew from its 34px placeholder and landed on top of the
+    -- box below it. That failure is documented in GUI:RelayoutHost, which names the
+    -- same symptom on the indicator cards ("the Duration Bar header overlapping the
+    -- Pandemic section's collapse bar") and fixes it through `dfAD_ReflowWidgets`,
+    -- a seam the indicator cards publish and this column does not.
+    -- ⚠ Inside a group, a measured label re-flows its host and settles. Outside one
+    -- it has nothing to tell. Same converge, different owner.
+    t.note(g,
+        L["Tick what makes someone worth infusing. It shows on your group frames."])
+end
+
+local function pihAddGateAndNotes(g, t)
+    -- ☠ A LABEL, NOT AN INFO BANNER, AND THIS IS THE SECOND TIME THE SAME TRAP HAS
+    -- CAUGHT US. A banner starts life 34px tall and measures its real height a frame
+    -- after it draws, then asks its host to re-flow. Inside a settings group the
+    -- GROUP does re-flow -- which is why putting it in one looked like the fix -- but
+    -- the group then asks the COLUMN, and this column publishes no
+    -- `dfAD_ReflowWidgets` seam, so every box below it stays where the old height
+    -- put it. Four lines of prose starting from a 34px estimate is a big enough jump
+    -- to land on the next box: "Trinkets and Potions is being overlapped by What to
+    -- Show", field-reported 2026-08-24.
+    --
+    -- ⚠ THE DIFFERENCE IS THE SIZE OF THE LIE, not the widget. CreateLabel measures
+    -- itself too, but it starts at 40px, which already covers the two-line notes
+    -- these boxes use -- so its correction is small or zero and nothing visibly
+    -- moves. A banner's is not. Until the column grows a reflow seam (raised with
+    -- Danders), prose here has to be short enough that its first guess is right.
+    --
+    -- ⚠ AND THE TEXT SHRANK FOR THE SAME REASON IT COULD AFFORD TO: two of the three
+    -- facts it carried are already on screen where they matter. The swap is written
+    -- into the dropdown entry itself ("Health Bar (swap with Big cooldown)"), and
+    -- the single-winner warning appears, naming the offender, exactly when it
+    -- applies. Only the stacking rule had nowhere else to live.
+    -- ☠ A TOGGLE, NOT A SPELL PICKER. An earlier pass let the user choose which
+    -- cooldown gates the helper. The machinery is not priest-specific so it was
+    -- easy -- but nobody asked for it, and "which spell hides this" is a question
+    -- about plumbing rather than about the feature. The helper exists to say who is
+    -- worth infusing; it hides when you cannot infuse. One idea, one switch.
+    -- (The capability stays underneath for testing.)
+    --
+    -- ⚠ IT SITS HERE RATHER THAN IN A BOX OF ITS OWN. A whole titled group around a
+    -- single checkbox is more chrome than the setting is worth, and this label says
+    -- what it does without a header to lean on -- which is the test for whether a
+    -- control can live under a heading that does not quite describe it.
+    t.check(g, L["Hide the helper while Power Infusion is on cooldown"],
+        function() return P.PIH_Settings().gateEnabled ~= false end,
+        function(v) P.PIH_SetGateEnabled(v) end)
+
+
+    -- ☠☠ TWO ONE-LINE NOTES, AND THE LENGTH IS THE WHOLE POINT.
+    -- Seven attempts went into sizing one long paragraph here, and the readout that
+    -- finally produced evidence said this: notes of 38-53 characters reserved their
+    -- space to within 2px, while the 359-character one was out by 93. Short notes are
+    -- exact; long ones drift, whatever constant is used. So the fix is not a better
+    -- estimate, it is text that fits on one line -- where ceil() has nothing to round
+    -- up and the estimate cannot be wrong.
+    --
+    -- ⚠ WHAT WAS CUT, AND WHY THESE TWO SURVIVED. The paragraph had four sentences.
+    -- The swap rule is already written into the dropdown entry itself ("Health Bar
+    -- (swap with Big cooldown)"), and it appears at the moment it matters rather than
+    -- in advance. That "Already has active Power Infusion" can share follows from the
+    -- two lines below. These two are the only facts nothing else on the panel ever
+    -- states, so they are the two that had to stay.
+    --
+    -- ⚠ No inline highlighting left either: these name display types, not
+    -- indicators, and the display-type names are short and already capitalised.
+    t.note(g, L["Health Bar and Background can show several indicators at once."])
+    t.note(g, L["Border and Text colours show only one at a time."])
+    -- The one navigational fact text is genuinely needed for. Only while the
+    -- icon group exists: position is not a question about icons that are not there.
+    if pihAnyIconGroup() then
+        t.note(g, L["Move and size the icons under Layout Groups."])
+    end
+end
+
+-- ☠ ONLY WHILE STRONG WINDOW IS ON (the composers gate it). These two are what the
+-- signal MEANS, so on their own they are a question about nothing. Shown rather than
+-- greyed, because a greyed pair would invite the reading that strong window works
+-- without them.
+local function pihAddAmplifiers(g, t)
+    -- ☠ UNTICKING BOTH TAKES THE SIGNAL WITH IT. Strong window is "a cooldown
+    -- AND (a potion OR a trinket)". With neither ticked the amplifier group is
+    -- empty, resolveConditions skips it, bails on fewer than two groups, and the
+    -- effect silently degrades into a duplicate of the burst signal. So the
+    -- recipe deletes it instead, and ticking one back brings it into existence.
+    local Refresh = t.Refresh
+    t.check(g, L["Combat potions"],
+        function() return P.PIH_Settings().potions == true end,
+        function(v) P.PIH_SetAmplifier("potions", v); Refresh() end)
+    t.check(g, L["On-use trinkets"],
+        function() return P.PIH_Settings().trinkets == true end,
+        function(v) P.PIH_SetAmplifier("trinkets", v); Refresh() end)
+end
+
+local function pihAddRoles(g, t)
+    -- ⚠ FAILS OPEN. A group with no assigned roles reads as "no role" for everyone
+    -- and nothing is excluded. Marking a tank you did not want is a smaller failure
+    -- than silently hiding the signal on the damage dealers you did.
+    t.check(g, L["Tanks"],
+        function() return (P.PIH_Settings().roles or {}).TANK == true end,
+        function(v) P.PIH_SetRole("TANK", v) end)
+    t.check(g, L["Healers"],
+        function() return (P.PIH_Settings().roles or {}).HEALER == true end,
+        function(v) P.PIH_SetRole("HEALER", v) end)
+    t.note(g,
+        L["Only applies when the group has roles."])
+end
+
+local function pihAddClasses(g, t)
+    local parent = t.parent
+    -- ☠ ABOVE THE TICKS, NOT BELOW THEM. Fourteen rows is far enough that a line
+    -- underneath is a line nobody reads -- it arrives after the reader has already
+    -- decided what the box does. The one sentence that explains the box goes where
+    -- the reader still needs it.
+    t.note(g, L["Untick a class to ignore its cooldowns."])
+
+    -- ☠ ABOVE THE LIST, NOT UNDER IT. Fourteen ticks is far enough that a button at
+    -- the bottom is a button nobody scrolls to -- and this is the escape hatch for
+    -- the thing the list cannot do (single spells), so it has to be visible while
+    -- someone is still deciding the list is not enough.
+    --
+    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
+    -- scrolls to this filter, selects it and pulses it. Its own comment records why:
+    -- the hand-written version "landed you on the page with nothing indicated, which
+    -- is indistinguishable from a broken link" -- which is exactly what was here.
+    t.note(g,
+        L["To add or remove single spells, open the list itself."])
+    local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+    local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
+        GUI:OpenFilterInDesigner("custom", cfID)
+        -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
+        -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
+        -- that range is still 0 -- so the clamp pins the scroll at the top and the
+        -- row it selected and pulsed is somewhere below the fold. The second call
+        -- runs after layout, when the range is real. The proper fix is a deferred
+        -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
+        -- list for him rather than edited from here.
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
+        end
+    end)
+    if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
+        -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
+        -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
+        -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
+        -- backdrop with grey text, visibly unlike every other disabled button in the
+        -- addon. Caught in Danders' PR review.
+        if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
+        else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
+    end
+    -- Prose-width like the notes: only the class TICKS flow the popout's two tracks.
+    fdBtn.fullRow = true
+    g:AddWidget(fdBtn, 28)
+
+    -- ⚠ THE POPOUT PANE FLOWS THESE ACROSS TWO TRACKS (t.classColumns; the classes
+    -- section's own build passes innerColumns = 2 to the group). Fourteen 35px rows
+    -- single-file is a 490px column -- taller than the whole page the pane must fit
+    -- -- and class names are the shortest labels this panel has, so they are the one
+    -- list that can afford the narrower track. The wrap estimate is told the track's
+    -- width for the same reason the notes are told theirs.
+    local wrapW
+    if t.classColumns and t.classColumns > 1 then
+        -- The group's content width less the grid gutter, split per track --
+        -- the same arithmetic LayoutChildren runs (Sections.lua's colWidth).
+        wrapW = ((t.groupW - 20) - (GUI.SettingsBox and GUI.SettingsBox.innerGap or 10)
+            * (t.classColumns - 1)) / t.classColumns
+    end
+    for _, token in ipairs(P.PIH_ClassList()) do
+        local classFile = token
+        -- Read at call time: SpellPicker.lua loads after this file, so the display
+        -- helper does not exist yet at file scope.
+        local name = (classFile == "@racials") and L["Racials"]
+            or ((DF.FilterRegistry and DF.FilterRegistry.ClassDisplayName
+                and DF.FilterRegistry.ClassDisplayName(classFile)) or classFile)
+        t.check(g, name,
+            function() return P.PIH_ClassOn(classFile) end,
+            function(v) P.PIH_SetClassOn(classFile, v) end,
+            wrapW)
+    end
+end
+
+local function pihAddSound(g, t)
+    local parent, Refresh = t.parent, t.Refresh
+    -- ☠ TWO SETTINGS, NOT ONE. The key remembers WHICH sound, the switch remembers
+    -- WHETHER -- so turning it off and back on does not make anyone hunt for their
+    -- sound a second time. Silent until chosen, either way: a cue nobody asked for
+    -- is the fastest route to the whole feature being switched off.
+    t.check(g, L["Play a sound when someone becomes worth infusing"],
+        function() return P.PIH_Settings().soundOn == true end,
+        function(v) P.PIH_SetSoundOn(v); Refresh() end)
+    if P.PIH_Settings().soundOn then
+        g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"],
+            P.PIH_Settings(), "soundLSMKey",
+            function() P.PIH_ApplySound() end), GUI.RowHeight.dropdown)
+        -- ⚠ Stated rather than discovered in a fight: sound rides the same gate as
+        -- the visuals, and it announces new windows only -- a window already open
+        -- when the gate re-opens stays silent, because the visuals already carry it.
+        t.note(g,
+            L["Only plays while the helper is showing."])
+    end
+end
+
+-- ── THE ROW PAGE'S SECTION LIST ──
+-- One entry per POPOUT ROW, in row order. `title` is the LOCALE KEY, resolved at
+-- mount time (a file-scope L[...] would freeze on enUS -- the locale-refresh rule).
+-- `gated` says whether the row EXISTS at all; the row page re-evaluates it on every
+-- page build, which is why a gate flip must go through page:Refresh rather than an
+-- in-place pane rebuild (Rows.lua owns that distinction).
+-- build(parent, o) -> yEnd; o = { startY, Refresh, indent, header } -- the same
+-- contract S.BuildPIHelperPane hands the bodies, minus the card.
+--
+-- ⚠ FINER THAN THE CLASSIC GROUPS ON PURPOSE. Classic's "What to Show" box (intro,
+-- three signal rows, the gate, the display notes) measures ~600px at the pane's
+-- 260px width -- taller than the whole page a popout pane must fit. So the popout
+-- splits it four ways: an overview row and one row per signal. The classic composer
+-- below does NOT iterate this list -- it folds the same bodies back into the same
+-- boxes as ever, which is what keeps that layout byte-comparable.
+local function pihSection(bodyFn, gopts)
+    return function(parent, o)
+        o = o or {}
+        local t = pihMakeTools(parent, o)
+        local header = (o.header == false) and nil or (o.headerText or nil)
+        return t.group(header, bodyFn, o.startY or 0, gopts)
+    end
+end
+
+S.PIHelperSections = {
+    { key = "overview", title = "What to Show",
+      build = pihSection(function(g, t) pihAddIntro(g, t); pihAddGateAndNotes(g, t) end) },
+    { key = "burst", title = "Big cooldown",
+      build = pihSection(function(g, t) t.signalRow(g, "burst", L["Big cooldown"]) end) },
+    { key = "strong", title = "Big cooldown with a trinket or potion",
+      build = pihSection(function(g, t)
+          t.signalRow(g, "strong", L["Big cooldown with a trinket or potion"]) end) },
+    -- Right under the signal it is the meaning of, rather than classic's
+    -- after-the-box slot -- with the signals split into rows, "under strong" and
+    -- "after What to Show" stopped being the same place.
+    { key = "amplifiers", title = "Trinkets and Potions",
+      gated = function() return P.PIH_SignalOn("strong") end,
+      build = pihSection(pihAddAmplifiers) },
+    { key = "infused", title = "Already has active Power Infusion",
+      build = pihSection(function(g, t)
+          t.signalRow(g, "infused", L["Already has active Power Infusion"]) end) },
+    { key = "roles", title = "Never Show On",
+      build = pihSection(pihAddRoles) },
+    { key = "classes", title = "Classes to Watch",
+      build = function(parent, o)
+          o = o or {}
+          local t = pihMakeTools(parent, o)
+          t.classColumns = 2   -- see pihAddClasses; popout only
+          return t.group((o.header == false) and nil or (o.headerText or nil),
+              pihAddClasses, o.startY or 0, { innerColumns = 2 })
+      end },
+    { key = "sound", title = "Sound Alert",
+      build = pihSection(pihAddSound) },
+}
+
+-- ── THE CLASSIC COMPOSITION -- every section, one column, unchanged ──
+S.BuildPIHelperPane = function(parent, opts)
+    opts = opts or {}
+    local yPos, open = S.BuildPIHelperCard(parent, opts)
 
     -- ── THE SETTINGS, FOLDED WITH THE CARD ──
-    -- ☠ GATED ON pihBlock.expanded, NOT ONLY ON THE HELPER EXISTING. The card group carries
-    -- its own collapsing header and publishes whether it is open; without asking, folding
-    -- the header away would hide the card and leave its settings stranded below a closed
-    -- section, attached to nothing visible. One header, the whole helper.
-    --
-    -- ☠ SHARED BEHAVIOUR LIVES HERE, NOT ON EACH EFFECT ROW. The mockup put "Never mark",
-    -- "Only watch" and the gating cooldown on every effect. It was drawn before the engine
-    -- existed, and the engine made them ONE switch for the whole helper. Three copies of
-    -- "never on tanks" that can disagree is not flexibility -- it is four states where one
-    -- is meaningful and three are bug reports.
-    -- Appearance (colour, border style, which surface) stays on the effect rows, because
-    -- that genuinely differs per signal and is where the AD already puts appearance.
-    if exists and pihBlock.expanded then
-        -- ☠ INDENTED, AND THAT IS THE WHOLE POINT OF THE CHANGE. These boxes used to start at
-        -- the same left edge as "Add an indicator" and "Active indicators", so a column of
-        -- five same-level boxes read as five sections rather than as one section and the
-        -- four boxes belonging to it. Nothing said which header owned them. Ten pixels of
-        -- indent is what says it -- the hierarchy was always there, it just was not drawn.
-        -- ⚠ 20 IS THE ADDON'S INDENT STEP, not a number picked here: the page layout engine
-        -- reads `widget.indent` and multiplies by 20 per level. That flag cannot be used
-        -- directly -- this column lays itself out by hand rather than going through the page
-        -- engine -- so the step is borrowed instead of the mechanism, which at least keeps
-        -- one indent width in the addon rather than two.
-        local PIH_INDENT = 20
-        local function pihGroup(header, buildFn, opts)
-            local group = GUI:CreateSettingsGroup(parent,
-                (parent:GetWidth() or 320) - (PIH_INDENT + 18), opts)
-            group.padding = 10
-            group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
-            buildFn(group)
-            local h = group:LayoutChildren()
-            group:SetPoint("TOPLEFT", PIH_INDENT, yPos)
-            group:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-            -- The named scale, not a number that looks about right. GUI.Space carries a note
-            -- about an audit that found 58 spacers using 9 different values for two intents,
-            -- and three files each inventing their own for the same one.
-            yPos = yPos - (h + GUI.Space.section)
-        end
+    -- ☠ GATED ON THE CARD'S OWN expanded, NOT ONLY ON THE HELPER EXISTING -- see
+    -- S.BuildPIHelperCard's return.
+    if open then
+        local t = pihMakeTools(parent, opts)
+        yPos = t.group(L["What to Show"], function(g)
+            pihAddIntro(g, t)
+            t.signalRow(g, "burst", L["Big cooldown"])
+            t.signalRow(g, "strong", L["Big cooldown with a trinket or potion"])
+            t.signalRow(g, "infused", L["Already has active Power Infusion"])
+            pihAddGateAndNotes(g, t)
+        end, yPos)
 
-        -- ☠☠ EVERY NOTE IN THIS COLUMN TAKES AN EXPLICIT HEIGHT, which inverts CreateLabel's
-        -- usual advice on purpose -- and getting that inversion wrong cost three rounds of
-        -- the user's time, so here is the whole mechanism.
-        --
-        -- A label builds itself 380px wide, measures, and gets a ONE-LINE answer. The group
-        -- then narrows it to the real width and the text wraps to three or four lines. The
-        -- label notices and fires a correction -- but only when the call site left the height
-        -- alone, and that correction re-flows the GROUP, then asks the COLUMN, which stacks
-        -- its children at fixed offsets and does nothing. So the group keeps the one-line
-        -- height, the label spills out of its bottom edge, and the next box is drawn on top
-        -- of it. That is how the note went "missing" and the boxes overlapped in the same
-        -- breath: the same fault, seen from two ends.
-        --
-        -- ⭐ CreateLabel's own comment names the escape hatch without calling it one: labels
-        -- "with a call-site height are exactly the ones nothing else ever touches again". A
-        -- pinned height is the ONLY safe kind of note here, because pinning is what stops the
-        -- converge that this column cannot absorb.
-        --
-        -- ⚠ AND MEASURING INSTEAD IS NOT AVAILABLE. CreateLabel's own note records the
-        -- attempt: "Do NOT try to Reflow()+Remeasure() synchronously here to get a correct
-        -- height at creation. Tried 2026-08-05 and it does not work: nothing has been drawn
-        -- yet at card build time, so GetStringHeight still returns 0". So the height has to
-        -- be predicted, and the only question is how well.
-        --
-        -- ⚠ DERIVED FROM THE REAL WIDTH, not a constant. The first version used a flat 38
-        -- characters per line "to be safe"; the truth at this panel's width is nearer 68, so
-        -- every note claimed twice the lines it needed and left visible gaps above the first
-        -- tick and below the last note -- field-reported with a screenshot 2026-08-24.
-        -- The per-character width is deliberately a shade wider than the font renders, so the
-        -- count errs toward MORE lines, which is the safe direction; and because it reads the
-        -- panel width it stays right when the panel is resized, not only at one size. The
-        -- measured figure and why it is rounded up are on the constant below.
-        -- The byte count makes an em dash worth three, which errs the same way.
-        -- Delete all of this the day the column publishes a `dfAD_ReflowWidgets` seam.
-        local PIH_NOTE_LINE = 13
-        local PIH_NOTE_W = (parent:GetWidth() or 320) - (PIH_INDENT + 18) - 24
-        -- ⭐ 6 PIXELS PER CHARACTER, AND THAT NUMBER WAS MEASURED, NOT PICKED.
-        -- It was 8, which is where seven rounds of gaps came from: at a note width of 400 the
-        -- panel fits ~74 characters on a line, so 400/74 is about 5.4 -- and reserving for 50
-        -- meant every long note claimed half again as many lines as it needed. The big one
-        -- asked for 8 lines to hold 5.
-        -- ⚠ 6 rather than 5.4 on purpose: it still errs long, by roughly a line on a
-        -- paragraph, and that line is the margin a longer translation gets to grow into.
-        -- ☠ Do NOT try to verify this from the widget. A probe that dumped every note's
-        -- measured height reported 30 for all of them whatever the text, because a pinned
-        -- label's frame never grows -- the FontString simply draws past it. The slot IS the
-        -- layout here; the frame height is not evidence of anything.
-        -- Parameterised on the wrap width, because the checkbox helper below
-        -- estimates against a NARROWER column than the notes (its text starts
-        -- past the box). pihLines keeps its name and its one argument -- the
-        -- note call sites are many and their width is one number.
-        local function pihLinesAt(text, w)
-            local cpl = math.max(20, math.floor(w / 6))
-            -- ⚠ Colour escapes are not characters anyone can see. Counting them would add
-            -- twelve bytes per highlighted word and inflate the box by a line or two of pure
-            -- whitespace, which is the fault this estimator exists to avoid.
-            local plain = tostring(text):gsub("||r", "")
-            return math.max(1, math.ceil(#plain / cpl))
-        end
-        local function pihLines(text) return pihLinesAt(text, PIH_NOTE_W) end
-        -- ⭐ GUI:CreateNote, not a hand-coloured CreateLabel. It IS the toned-note widget --
-        -- a label with the tone's own accent baked in through ToneHex, so a caution note here
-        -- is the same yellow as every caution note in the addon rather than three numbers
-        -- typed at this call site. `tone` names come from INFO_BANNER_TONES: info, caution,
-        -- danger, success. (The tone adds a colour escape to the string, which the byte count
-        -- below then treats as a dozen characters -- harmless, and it errs long.)
-        local function pihNote(g, text, tone)
-            if not text or text == "" then return end
-            local w = tone and GUI:CreateNote(parent, text, { tone = tone })
-                or GUI:CreateLabel(parent, text)
-            g:AddWidget(w, pihLines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
-        end
-
-        -- ☠ CHECKBOX LABELS ARE SINGLE-LINE AND UNBOUNDED. CreateCheckbox
-        -- anchors its label LEFT-only off the box, so a long label simply runs
-        -- right at its natural width -- invisible in the classic tab's column,
-        -- where the longest fits, and straight off the edge of the 260px popout
-        -- pane ("text runs off the edge"). So every tick in this column goes
-        -- through here: the label gets a right edge on its own row, wraps, and
-        -- the SLOT grows by the same estimator the notes use (measuring is not
-        -- available at build time -- see the note above). At the classic width
-        -- every label estimates one line and nothing moves.
-        -- ⚠ Checkboxes are fixedRowHeight widgets: ResolveRowHeight ignores a
-        -- call-site number for them, so the taller slot goes through
-        -- preferredHeight instead. The container grows by the same lines so the
-        -- box and the centred label keep tracking each other.
-        local PIH_CB_TEXT = 24   -- the 16px box plus the 8px label gap
-        local function pihCheck(g, label, get, set)
-            local w = GUI:CreateCheckbox(parent, label, nil, nil, nil, get, set)
-            w.label:SetPoint("RIGHT", w, "RIGHT", 0, 0)
-            w.label:SetJustifyH("LEFT")
-            w.label:SetWordWrap(true)
-            local lines = pihLinesAt(label, PIH_NOTE_W - PIH_CB_TEXT)
-            if lines > 1 then
-                w:SetHeight(24 + (lines - 1) * PIH_NOTE_LINE)
-                w.preferredHeight = (GUI.RowHeight.checkbox or 35)
-                    + (lines - 1) * PIH_NOTE_LINE
-            end
-            g:AddWidget(w)
-            return w
-        end
-
-        -- ☠☠ NOT A BANNER, AND THE REASON IS A RACE RATHER THAN A SIZE.
-        -- Six shapes were tried and the symptom alternated between an overlap and a large
-        -- gap FROM THE SAME BUILD -- "half the time it's overlap, the other half it's a huge
-        -- gap". That is not a wrong constant; a wrong constant is wrong the same way every
-        -- time. It is a timing race, and no number can win one.
-        --
-        -- ⭐ Verified, and the asymmetry is the whole story: AddWidget stamps
-        -- `_slotHeightExplicit` when a call site pins a height (Sections.lua:125).
-        -- CreateLabel CHECKS it (Sections.lua:479) and skips its re-measure entirely, so a
-        -- pinned label is fixed at build and never corrects itself. CreateInfoBanner never
-        -- checks it -- its DoRecomputeHeight and TriggerHostRelayout run whatever you passed.
-        -- So the box's final height depends on when the panel happened to be built relative
-        -- to the banner's TWO measure passes: before it settles, the column reserved too
-        -- little and the next group is overlapped; after, the group shrinks under a
-        -- reservation already spent and the space becomes a gap.
-        --
-        -- ⚠ A box therefore cannot be made deterministic from this side. Getting one back
-        -- means CreateInfoBanner honouring `_slotHeightExplicit` the way CreateLabel does --
-        -- Danders' file, a real request with a checked premise, and NOT the reflow seam we
-        -- nearly asked for and withdrew.
-
-        -- Each tick creates or deletes one ordinary effect, which is why the rows below
-        -- also appear in Active Indicators: they ARE indicators, and hiding them there
-        -- would mean a row you can see the colour of but cannot find.
-        local function signalRow(g, key, label)
-            pihCheck(g, label,
-                function() return P.PIH_SignalOn(key) end,
-                function(v)
-                    P.PIH_SetSignal(key, v)
-                    Refresh()   -- the dependent groups appear and vanish with it
-                end)
-
-            -- ⚠ GREYED, NOT HIDDEN. The signal tick is a FEATURE TOGGLE, and the
-            -- house rule is grey-in-place for those; hiding is for mode choices, where a
-            -- control genuinely does not apply. A vanished dropdown also loses the one
-            -- thing worth seeing while the signal is off: where it WOULD draw.
-            -- (The Trinkets and Potions group below stays hidden, deliberately, and says
-            -- why -- greying that pair would imply strong window works without them.)
-            local surface = P.PIH_SurfaceOf(key)
-            local signalOff = (surface == nil)
-            if signalOff then surface = "none" end
-
-            -- Inline, so the checkbox above is its label. A second heading saying
-            -- "Surface" over every row would triple the words for no added meaning.
-            local dd = GUI:CreateDropdown(parent, label, P.PIH_SurfaceOptions(key),
-                nil, nil, nil,
-                -- ⚠ NEVER nil: this widget survives a profile switch for one frame,
-                -- and the shared dropdown's display refresh treats a nil answer as "try
-                -- the saved-variable fallback", which was never given -- a Lua error on
-                -- every profile switch away from the helper. "none" is a value the menu
-                -- owns, so a dying row reads honestly until it is rebuilt away.
-                function() return P.PIH_SurfaceOf(key) or "none" end,
-                function(v)
-                    local ok, why = P.PIH_SetSurface(key, v)
-                    if not ok then DF:DebugWarn("AURADESIGNER",
-                        "PIH: surface %s refused -- %s", tostring(v), tostring(why)) end
-                    Refresh()   -- the other rows' menus re-grey around it
-                end,
-                -- ⚠ An INLINE dropdown does not own its slot: CreateDropdown only stamps
-                -- fixedRowHeight on the standalone form, so this literal is authoritative and
-                -- a hand-guessed one gets read. Content is 24 tall; the tight gap is right
-                -- because hiding the label makes it a compact row -- its control sits beside
-                -- its name (the checkbox above) rather than under it.
-                { inline = true })
-            if signalOff and dd.SetEnabled then dd:SetEnabled(false) end
-            g:AddWidget(dd, 24 + GUI.RowGapTight)
-
-            -- ⚠ THE CLASH WARNING, AND IT IS SCOPED ON PURPOSE. pickWinner decides from
-            -- config alone and never asks what is on the unit, so a clash is fully knowable
-            -- while someone is setting it up -- no guessing, no "this might happen".
-            -- It appears only on the three surfaces that actually take a single winner, and
-            -- it names the fix that exists rather than describing the problem.
-            -- ⚠ Only while OUR effect is actually in the contest: the named fix
-            -- can be applied to our own signal too (custom-mode border), and the warning
-            -- must go when it is.
-            local selfIn = P.PIH_SelfContends(surface, key)
-            local clashes, who = 0, nil
-            if selfIn then clashes, who = P.PIH_ClashOn(surface) end
-            -- ⚠ OUR OWN SIBLING COUNTS TOO, on a contended surface across records.
-            -- PIH_ClashOn skips anything carrying a helper mark, because two signals on one
-            -- record are prevented outright rather than warned about. "Already infused" is
-            -- on its own record though, so it can genuinely lose a border or a text to one
-            -- of the other two -- a real contest that would otherwise go unwarned precisely
-            -- because it was ours.
-            local sibling = selfIn and P.PIH_SiblingContends
-                and P.PIH_SiblingContends(surface, key) or nil
-            if sibling then
-                clashes = clashes + 1
-                who = who or pihLabel(sibling)
-            end
-            if clashes > 0 then
-                who = who or L["Another effect"]
-                -- More than one contender: naming only the first would read as "fix this
-                -- one and you are done", which would not be true.
-                if clashes > 1 then who = format(L["%s and %d more"], who, clashes - 1) end
-                -- A CAUTION BOX, the addon's own construct for a warning panel -- the same
-                -- one the click-casting dialog and the profiler use. It briefly became gold
-                -- text on the belief that the box was what broke the layout; it was not, and
-                -- a warning that looks like every other warning is worth the box.
-                -- The checkbox's own label key rides as a placeholder so a translator
-                -- renders it ONCE -- hardcoding the words here let the sentence and the
-                -- control it points at drift apart in any other language.
-                pihNote(g, (surface == "border")
-                    and format(L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."], who, L["Give this aura its own border"])
-                    or  format(L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."], who),
-                    "caution")
-            end
-
-            -- Icons sit BESIDE the colour dropdown, equal weight: with "None" in the
-            -- menu, one row enumerates colour-only / icons-only / both. Every row has
-            -- the same flow -- tick, dropdown, icons -- which is what three earlier
-            -- shapes kept breaking by parking the trinkets control under the wrong
-            -- signal. ⚠ Strong's tick is labelled by what it SHOWS -- its
-            -- amplifier half -- because icons cannot make its cooldown-AND-amplifier
-            -- judgement; a bare "As icons" there would over-promise. The colour tint
-            -- stays the only display that judges.
-            local which = PIH_ICON_OF[key]
-            local iconLabel = (key == "strong")
-                and L["Their trinkets and potions as icons"] or L["As icons"]
-            pihCheck(g, iconLabel,
-                function() return P.PIH_IconsShow(which) end,
-                function(v)
-                    P.PIH_SetIconsShow(which, v)
-                    Refresh()
-                end)
-        end
-
-        pihGroup(L["What to Show"], function(g)
-            -- ☠ A LABEL IN THE FIRST BOX, NOT A FREE-FLOATING INFO BANNER. The banner was
-            -- built and removed the same day: it measures its own height a frame after it is
-            -- drawn, and this column stacks its children at fixed offsets with no reflow
-            -- seam -- so the banner grew from its 34px placeholder and landed on top of the
-            -- box below it. That failure is documented in GUI:RelayoutHost, which names the
-            -- same symptom on the indicator cards ("the Duration Bar header overlapping the
-            -- Pandemic section's collapse bar") and fixes it through `dfAD_ReflowWidgets`,
-            -- a seam the indicator cards publish and this column does not.
-            -- ⚠ Inside a group, a measured label re-flows its host and settles. Outside one
-            -- it has nothing to tell. Same converge, different owner.
-            pihNote(g,
-                L["Tick what makes someone worth infusing. It shows on your group frames."])
-
-            signalRow(g, "burst", L["Big cooldown"])
-            signalRow(g, "strong", L["Big cooldown with a trinket or potion"])
-            signalRow(g, "infused", L["Already has active Power Infusion"])
-
-
-            -- ☠ A LABEL, NOT AN INFO BANNER, AND THIS IS THE SECOND TIME THE SAME TRAP HAS
-            -- CAUGHT US. A banner starts life 34px tall and measures its real height a frame
-            -- after it draws, then asks its host to re-flow. Inside a settings group the
-            -- GROUP does re-flow -- which is why putting it in one looked like the fix -- but
-            -- the group then asks the COLUMN, and this column publishes no
-            -- `dfAD_ReflowWidgets` seam, so every box below it stays where the old height
-            -- put it. Four lines of prose starting from a 34px estimate is a big enough jump
-            -- to land on the next box: "Trinkets and Potions is being overlapped by What to
-            -- Show", field-reported 2026-08-24.
-            --
-            -- ⚠ THE DIFFERENCE IS THE SIZE OF THE LIE, not the widget. CreateLabel measures
-            -- itself too, but it starts at 40px, which already covers the two-line notes
-            -- these boxes use -- so its correction is small or zero and nothing visibly
-            -- moves. A banner's is not. Until the column grows a reflow seam (raised with
-            -- Danders), prose here has to be short enough that its first guess is right.
-            --
-            -- ⚠ AND THE TEXT SHRANK FOR THE SAME REASON IT COULD AFFORD TO: two of the three
-            -- facts it carried are already on screen where they matter. The swap is written
-            -- into the dropdown entry itself ("Health Bar (swap with Big cooldown)"), and
-            -- the single-winner warning appears, naming the offender, exactly when it
-            -- applies. Only the stacking rule had nowhere else to live.
-            -- ☠ A TOGGLE, NOT A SPELL PICKER. An earlier pass let the user choose which
-            -- cooldown gates the helper. The machinery is not priest-specific so it was
-            -- easy -- but nobody asked for it, and "which spell hides this" is a question
-            -- about plumbing rather than about the feature. The helper exists to say who is
-            -- worth infusing; it hides when you cannot infuse. One idea, one switch.
-            -- (The capability stays underneath for testing.)
-            --
-            -- ⚠ IT SITS HERE RATHER THAN IN A BOX OF ITS OWN. A whole titled group around a
-            -- single checkbox is more chrome than the setting is worth, and this label says
-            -- what it does without a header to lean on -- which is the test for whether a
-            -- control can live under a heading that does not quite describe it.
-            pihCheck(g, L["Hide the helper while Power Infusion is on cooldown"],
-                function() return P.PIH_Settings().gateEnabled ~= false end,
-                function(v) P.PIH_SetGateEnabled(v) end)
-
-
-            -- ☠☠ TWO ONE-LINE NOTES, AND THE LENGTH IS THE WHOLE POINT.
-            -- Seven attempts went into sizing one long paragraph here, and the readout that
-            -- finally produced evidence said this: notes of 38-53 characters reserved their
-            -- space to within 2px, while the 359-character one was out by 93. Short notes are
-            -- exact; long ones drift, whatever constant is used. So the fix is not a better
-            -- estimate, it is text that fits on one line -- where ceil() has nothing to round
-            -- up and the estimate cannot be wrong.
-            --
-            -- ⚠ WHAT WAS CUT, AND WHY THESE TWO SURVIVED. The paragraph had four sentences.
-            -- The swap rule is already written into the dropdown entry itself ("Health Bar
-            -- (swap with Big cooldown)"), and it appears at the moment it matters rather than
-            -- in advance. That "Already has active Power Infusion" can share follows from the
-            -- two lines below. These two are the only facts nothing else on the panel ever
-            -- states, so they are the two that had to stay.
-            --
-            -- ⚠ No inline highlighting left either: these name display types, not
-            -- indicators, and the display-type names are short and already capitalised.
-            pihNote(g, L["Health Bar and Background can show several indicators at once."])
-            pihNote(g, L["Border and Text colours show only one at a time."])
-            -- The one navigational fact text is genuinely needed for. Only while the
-            -- icon group exists: position is not a question about icons that are not there.
-            if pihAnyIconGroup() then
-                pihNote(g, L["Move and size the icons under Layout Groups."])
-            end
-        end)
-
-        -- ☠ ONLY WHILE STRONG WINDOW IS ON. These two are what the signal MEANS, so on
-        -- their own they are a question about nothing. Shown rather than greyed, because a
-        -- greyed pair would invite the reading that strong window works without them.
         if P.PIH_SignalOn("strong") then
-            pihGroup(L["Trinkets and Potions"], function(g)
-                -- ☠ UNTICKING BOTH TAKES THE SIGNAL WITH IT. Strong window is "a cooldown
-                -- AND (a potion OR a trinket)". With neither ticked the amplifier group is
-                -- empty, resolveConditions skips it, bails on fewer than two groups, and the
-                -- effect silently degrades into a duplicate of the burst signal. So the
-                -- recipe deletes it instead, and ticking one back brings it into existence.
-                pihCheck(g, L["Combat potions"],
-                    function() return P.PIH_Settings().potions == true end,
-                    function(v) P.PIH_SetAmplifier("potions", v); Refresh() end)
-                pihCheck(g, L["On-use trinkets"],
-                    function() return P.PIH_Settings().trinkets == true end,
-                    function(v) P.PIH_SetAmplifier("trinkets", v); Refresh() end)
-            end)
+            yPos = t.group(L["Trinkets and Potions"], pihAddAmplifiers, yPos)
         end
 
-        pihGroup(L["Never Show On"], function(g)
-            -- ⚠ FAILS OPEN. A group with no assigned roles reads as "no role" for everyone
-            -- and nothing is excluded. Marking a tank you did not want is a smaller failure
-            -- than silently hiding the signal on the damage dealers you did.
-            pihCheck(g, L["Tanks"],
-                function() return (P.PIH_Settings().roles or {}).TANK == true end,
-                function(v) P.PIH_SetRole("TANK", v) end)
-            pihCheck(g, L["Healers"],
-                function() return (P.PIH_Settings().roles or {}).HEALER == true end,
-                function(v) P.PIH_SetRole("HEALER", v) end)
-            pihNote(g,
-                L["Only applies when the group has roles."])
-        end)
+        yPos = t.group(L["Never Show On"], pihAddRoles, yPos)
 
-        -- ☠ COLLAPSIBLE, AND THIRTEEN ROWS IS WHY. Everything else in this panel is two or
-        -- three ticks; a class list is as long as the game has classes, and most people
-        -- will never open it. The summary on the header carries the state while it is
-        -- folded, so the box does not have to be open to be honest.
-        pihGroup(L["Classes to Watch"], function(g)
-            -- ☠ ABOVE THE TICKS, NOT BELOW THEM. Fourteen rows is far enough that a line
-            -- underneath is a line nobody reads -- it arrives after the reader has already
-            -- decided what the box does. The one sentence that explains the box goes where
-            -- the reader still needs it.
-            pihNote(g, L["Untick a class to ignore its cooldowns."])
+        -- ☠ COLLAPSIBLE, AND THIRTEEN ROWS IS WHY. Everything else in this panel is
+        -- two or three ticks; a class list is as long as the game has classes, and
+        -- most people will never open it.
+        -- ⚠ NO showSummary. The collapsed summary concatenates every child label,
+        -- which for thirteen classes and a two-line note is a wall of text rather
+        -- than a summary. The header alone says what is folded away, which is what
+        -- a summary was for.
+        yPos = t.group(L["Classes to Watch"], pihAddClasses, yPos,
+            { collapsible = true, collapseKey = "pihelper:onlywatch" })
 
-            -- ☠ ABOVE THE LIST, NOT UNDER IT. Fourteen ticks is far enough that a button at
-            -- the bottom is a button nobody scrolls to -- and this is the escape hatch for
-            -- the thing the list cannot do (single spells), so it has to be visible while
-            -- someone is still deciding the list is not enough.
-            --
-            -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
-            -- scrolls to this filter, selects it and pulses it. Its own comment records why:
-            -- the hand-written version "landed you on the page with nothing indicated, which
-            -- is indistinguishable from a broken link" -- which is exactly what was here.
-            pihNote(g,
-                L["To add or remove single spells, open the list itself."])
-            local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-            local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
-                GUI:OpenFilterInDesigner("custom", cfID)
-                -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
-                -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
-                -- that range is still 0 -- so the clamp pins the scroll at the top and the
-                -- row it selected and pulsed is somewhere below the fold. The second call
-                -- runs after layout, when the range is real. The proper fix is a deferred
-                -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
-                -- list for him rather than edited from here.
-                if C_Timer and C_Timer.After then
-                    C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
-                end
-            end)
-            if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
-                -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
-                -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
-                -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
-                -- backdrop with grey text, visibly unlike every other disabled button in the
-                -- addon. Caught in Danders' PR review.
-                if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
-                else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
-            end
-            g:AddWidget(fdBtn, 28)
-
-            for _, token in ipairs(P.PIH_ClassList()) do
-                local classFile = token
-                -- Read at call time: SpellPicker.lua loads after this file, so the display
-                -- helper does not exist yet at file scope.
-                local name = (classFile == "@racials") and L["Racials"]
-                    or ((DF.FilterRegistry and DF.FilterRegistry.ClassDisplayName
-                        and DF.FilterRegistry.ClassDisplayName(classFile)) or classFile)
-                pihCheck(g, name,
-                    function() return P.PIH_ClassOn(classFile) end,
-                    function(v) P.PIH_SetClassOn(classFile, v) end)
-            end
-        -- ⚠ NO showSummary. The collapsed summary concatenates every child label, which for
-        -- thirteen classes and a two-line note is a wall of text rather than a summary. The
-        -- header alone says what is folded away, which is what a summary was for.
-        end, { collapsible = true, collapseKey = "pihelper:onlywatch" })
-
-        pihGroup(L["Sound Alert"], function(g)
-            -- ☠ TWO SETTINGS, NOT ONE. The key remembers WHICH sound, the switch remembers
-            -- WHETHER -- so turning it off and back on does not make anyone hunt for their
-            -- sound a second time. Silent until chosen, either way: a cue nobody asked for
-            -- is the fastest route to the whole feature being switched off.
-            pihCheck(g, L["Play a sound when someone becomes worth infusing"],
-                function() return P.PIH_Settings().soundOn == true end,
-                function(v) P.PIH_SetSoundOn(v); Refresh() end)
-            if P.PIH_Settings().soundOn then
-                g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"],
-                    P.PIH_Settings(), "soundLSMKey",
-                    function() P.PIH_ApplySound() end), GUI.RowHeight.dropdown)
-                -- ⚠ Stated rather than discovered in a fight: sound rides the same gate as
-                -- the visuals, and it announces new windows only -- a window already open
-                -- when the gate re-opens stays silent, because the visuals already carry it.
-                pihNote(g,
-                    L["Only plays while the helper is showing."])
-            end
-        end)
-
+        yPos = t.group(L["Sound Alert"], pihAddSound, yPos)
     end
     return yPos
 end
