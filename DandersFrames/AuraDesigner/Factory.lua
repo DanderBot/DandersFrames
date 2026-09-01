@@ -800,6 +800,20 @@ function DF:GetClaimedDebuffCategories(frame, db)
                     claimed[k] = true
                 end
             end
+            -- ★ DISPEL MODE rides along with the claim (2026-08-30). The claim
+            -- itself stays mode-AGNOSTIC as documented above, but the consumer has
+            -- to know WHICH TOKEN to subtract: a PLAYER-mode group shows only what
+            -- you can dispel, a strict subset of DISPELLABLE, so negating the
+            -- superset would delete every dispellable-by-someone-else debuff from
+            -- the row and leave it displayed nowhere at all. Set when ANY claiming
+            -- group runs ALL/ANY — that group renders the whole superset, so the
+            -- superset becomes safe to negate.
+            -- ⚠ "ANY" is a retired stored value that imported profiles still carry
+            -- (see the dispelTypeToken note in BuildDirectDebuffFilters) — accept it.
+            if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
+                claimed = claimed or {}
+                claimed.dispellableAll = true
+            end
         end
     end
     return claimed   -- nil when no group claims anything -> row builds untouched
@@ -1093,6 +1107,10 @@ local function buildBorderConfig(unit, map, spec, filter, drawAbove, pandemicSpe
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = (drawAbove ~= false) and 11 or 9,
+        -- Opt this container into the DF-owned border animations. The AuraContainer
+        -- ANIMATION FILTER honours the flag for OVERLAY mode only, which is what keeps
+        -- the reopening bounded to one ring per frame — see the comment there.
+        adBorderAnim = true,
         style = { border = { spec = spec, pandemicSpec = pandemicSpec } },
     }
 end
@@ -1122,9 +1140,10 @@ end
 -- live aura), mirroring the legacy Indicators:ApplyBorderToOverlay (module removed): canonical keys via BuildSpec (the
 -- border-key fold ran in SyncFrame), black default colour. Returns nil when the border
 -- resolves disabled (ShowBorder=false) — the caller then renders no container. Animations
--- are NO LONGER dropped here: the AuraContainer allowlist (SAFE_OVERLAY_ANIM) is the single
--- filter, keeping the DF-owned overlay animations and stripping the taint-prone LCG glows.
--- The GUI restricts the AD dropdown to the recoverable types, so only safe types reach here.
+-- are not dropped here: the AuraContainer ANIMATION FILTER is the single gate, and it keeps
+-- an overlay-mode animation whose type is in SAFE_OVERLAY_ANIM. Every type the GUI currently
+-- offers is in that set (the LCG glows it used to exclude no longer exist), so the allowlist
+-- now only defends against a stale or imported profile naming an effect we do not own.
 local function buildBorderSpec(frame, borderCfg)
     if not DF.Border then return nil end
     local spec = DF.Border:BuildSpec(borderCfg, "")
@@ -1231,6 +1250,22 @@ local function borderSpecSig(spec)
         end
     end
     return tconcat(parts, "|")
+end
+
+-- ☠ ANIMATION IS STRUCTURAL ON A CONTAINER BORDER, not cosmetic.
+-- The frame-level ring renders on an overlay-mode container slot, and its animation is a
+-- declarative AnimationGroup built inside the slot's SECURE init and never touched again
+-- (Frames/Border.lua, "DF_ORBIT, DECLARATIVE") — because a per-frame Lua driver is refused
+-- on a button subtree once auras are secret. Creation-frozen means a retune is impossible,
+-- so changing the effect, its speed, particle count, colour or inset has to hand over a
+-- FRESH button: this token rides the STRUCT signature, where a change forces a Rebuild.
+-- Same contract as the pandemic FLASH.
+-- ⚠ It also stays inside borderSpecSig (the cosmetic sig), which is harmless — a change
+-- moves both and the structural branch wins.
+local function borderAnimStructToken(spec)
+    local a = spec and spec.animation
+    if not a or not a.type or a.type == "NONE" then return "off" end
+    return subSig(a)
 end
 
 -- Pick the single highest-priority configured indicator of `typeKey` across all configured
@@ -1633,6 +1668,37 @@ local function placedBorderRawSig(indicator, borderOn)
         parts[#parts + 1] = colSig(indicator[kk])
     end
     return tconcat(parts, ",")
+end
+
+-- ☠ ANIMATION IS STRUCTURAL ON EVERY CONTAINER BORDER, buttons included (2026-08-29,
+-- row-mode reopened) — same contract as borderAnimStructToken below, raw-config and
+-- alloc-free for the per-tick sig paths (FIX C). The declarative AnimationGroups are
+-- built once in the slot's secure init and can never be retuned on a live (restricted)
+-- button, so ANY animation key change must hand over fresh buttons via Rebuild.
+-- EMPTY when no animation is configured, so every pre-animation profile sigs
+-- byte-identically and nothing rebuilds on upgrade (the durationFmtKey removals
+-- document why that stability matters). The keys mirror what BuildSpec("") folds into
+-- spec.animation — colour included: it is baked into the anim textures at build.
+-- `t` is whichever table BuildSpec reads: the indicator (placed/bar) or the group's
+-- style table (filter/debuff groups via buildGroupBorderSpec).
+local function rawBorderAnimStructTok(t, borderOn)
+    if not borderOn then return "" end
+    local ty = t.BorderAnimationType
+    if not ty or ty == "NONE" then return "" end
+    return "|an=" .. tostring(ty)
+        .. "," .. tostring(t.BorderAnimationFrequency)
+        .. "," .. tostring(t.BorderAnimationParticles)
+        .. "," .. tostring(t.BorderAnimationLength)
+        .. "," .. tostring(t.BorderAnimationThickness)
+        .. "," .. tostring(t.BorderAnimationScale)
+        .. "," .. tostring(t.BorderAnimationInset)
+        .. "," .. tostring(t.BorderAnimationOffsetX)
+        .. "," .. tostring(t.BorderAnimationOffsetY)
+        .. "," .. tostring(t.BorderAnimationMask)
+        .. "," .. tostring(t.BorderAnimationSidesAxis)
+        .. "," .. tostring(t.BorderAnimationCornerLength)
+        .. "," .. tostring(t.BorderAnimationProcStart)
+        .. "," .. colSig(t.BorderAnimationColor)
 end
 
 -- Native stack-count TextStyle spec from the AD stack config keys (font/scale/outline/
@@ -2240,6 +2306,10 @@ local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, bor
         -- create-once, so a type change (or the master toggle) rebuilds. Everything else
         -- about it hot-applies and rides placedCoSig. "" when off.
         .. "|pd=" .. pandemicStructKey(indicator)
+        -- Border animation: creation-frozen declarative groups — see rawBorderAnimStructTok.
+        -- (The keys also stay in placedBorderRawSig's cosmetic hash, harmlessly: a change
+        -- moves both sigs and the structural branch wins.)
+        .. rawBorderAnimStructTok(indicator, borderOn)
 end
 
 -- TUNING signature: the live-mutable half of what placedStructSig used to carry. The
@@ -3013,6 +3083,7 @@ local function barStructSig(indicator, borderOn, defs)
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
         .. "|pd=" .. pandemicStructKey(indicator)   -- see placedStructSig
+        .. rawBorderAnimStructTok(indicator, borderOn)   -- creation-frozen — see the helper
 end
 
 -- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
@@ -3225,6 +3296,10 @@ local function groupStyleStructSig(group)
         -- style is absent, {}, or carries durationBarEnabled = false.
         .. "|" .. (s.durationBarEnabled == true and "bar" or "")
         -- (No pandemic entry — see buildFilterGroupStyle for why groups don't carry it yet.)
+        -- Border animation: the group border reads the SAME BorderAnimation* keys off the
+        -- group's style table (buildGroupBorderSpec -> buildPlacedBorderSpec(s)), and the
+        -- declarative groups are creation-frozen — see rawBorderAnimStructTok.
+        .. rawBorderAnimStructTok(s, s.ShowBorder == true)
 end
 
 -- EDITOR PREVIEW CONFIG for one SAMPLE slot of a filter/debuff group: the same
@@ -3561,8 +3636,17 @@ end
 
 -- Facade scratch (module-level, wiped per build): BuildDebuffFilterRecords only
 -- READS flat scalar keys synchronously, so one shared table serves every group.
+-- `claimed` (2026-08-29, cross-group dedup): the union of categories selected by
+-- enabled groups EARLIER in the config order — the same claim machinery the ROW
+-- consumes, now folded group-over-group. The old "never pass a claim set — circular"
+-- rule was about feeding the row's OWN derived set back in; an ORDERED fold is not
+-- circular: group 1 resolves unclaimed, group 2 sees group 1's categories, and so on.
+-- First group in the list wins a contested category; a later group's claimed record
+-- is dropped while its negations survive in that group's remaining records — exactly
+-- the row's semantics. Field driver: one debuff rendered once per overlapping group
+-- ("the same 1 debuff x 4/5", Drasvin, 5.3.1).
 local dgroupFacade = {}
-local function buildDebuffGroupRecords(group)
+local function buildDebuffGroupRecords(group, claimed)
     local sel = group.selection
     if type(sel) ~= "table" then return nil end
     wipe(dgroupFacade)
@@ -3579,7 +3663,11 @@ local function buildDebuffGroupRecords(group)
     -- minutes -> maxDur nil, exactly as on the row (no duplicate guard here).
     dgroupFacade.debuffMaxDurationMinutes     = sel.hideLongMinutes or 5
     dgroupFacade.debuffMaxDurationKeepImportant = sel.keepImportant ~= false
-    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade) or nil
+    -- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the resolver's own
+    -- `== false` opt-out can never fire here — the CALLER gates: the sync loop passes
+    -- claimed only while adDB.debuffGroupDedup (the Debuff Groups tab's own toggle,
+    -- independent of the row's) is on.
+    return DF.BuildDebuffFilterRecords and DF:BuildDebuffFilterRecords(dgroupFacade, claimed) or nil
 end
 
 -- Version-keyed record cache (mirror of fgroupResCache): building records walks
@@ -3591,14 +3679,42 @@ end
 -- Signed in SPLIT halves (Wave 1, the row serializers via DF): struct = record
 -- strings + keys (Rebuild), tuning = per-record candidateFilters (in-place).
 local dgroupResCache = setmetatable({}, { __mode = "k" })
-local function resolveDebuffGroup(group)
+-- Serialize a claim set for the cache context. CLAIMABLE_CATEGORIES order, so equal
+-- sets always produce equal strings. "" = no claims (dedup off, or first group).
+local function claimCtx(claimed)
+    if not claimed then return "" end
+    local s = ""
+    for i = 1, #CLAIMABLE_CATEGORIES do
+        local k = CLAIMABLE_CATEGORIES[i]
+        if claimed[k] then s = s .. k .. "," end
+    end
+    -- ☠ NOT a category, but it CHANGES THE RECORDS (which dispel token the claim
+    -- subtraction negates), so it has to move the cache key — otherwise flipping a
+    -- group between "dispellable by you" and "all dispellable" would serve records
+    -- built for the other mode until the next version bump.
+    if claimed.dispellableAll then s = s .. "dispellableAll," end
+    return s
+end
+local function resolveDebuffGroup(group, claimed)
     local ver = DF.auraLayoutVersion or 0
+    -- Claims join the cache key: a group's records now depend on the groups ABOVE it.
+    -- The fold derives purely from adDB (groups list + the preset-level
+    -- debuffGroupDedup toggle), so within one auraLayoutVersion it is deterministic
+    -- for every frame and mode; the ctx guard covers the one edit the version bump
+    -- can miss (a toggle write racing a sync before its refresh chain lands).
+    local ctx = claimCtx(claimed)
     local c = dgroupResCache[group]
-    if c and c.version == ver then return c.records, c.structSig, c.tuningSig end
-    local records = buildDebuffGroupRecords(group)
+    if c and c.version == ver and c.ctx == ctx then return c.records, c.structSig, c.tuningSig end
+    local records = buildDebuffGroupRecords(group, claimed)
+    -- ☠ EMPTY IS NOT NIL DOWNSTREAM. When claims swallow a non-empty selection the
+    -- resolver returns an EMPTY ARRAY (render nothing) — but cfg.filter = {} would be
+    -- mapped back to show-all by normalizeFilters, the exact fail-open the row parks
+    -- against (see BuildDirectDebuffFilters' header). Collapse to nil here so the sync
+    -- loop simply never marks the group live and the sweep parks its container.
+    if records and #records == 0 then records = nil end
     local structSig = records and DF.DebuffFilterRecordsStructSig and DF:DebuffFilterRecordsStructSig(records) or ""
     local tuningSig = records and DF.DebuffFilterRecordsTuningSig and DF:DebuffFilterRecordsTuningSig(records) or ""
-    dgroupResCache[group] = { version = ver, records = records, structSig = structSig, tuningSig = tuningSig }
+    dgroupResCache[group] = { version = ver, ctx = ctx, records = records, structSig = structSig, tuningSig = tuningSig }
     return records, structSig, tuningSig
 end
 
@@ -4993,6 +5109,7 @@ local function syncBorderEntry(bd, frame, key, cfg, map, mine)
     -- The pandemic ring's PRESENCE joins the struct sig: its holder is created in the
     -- secure init, so enabling it must hand over a fresh button.
     local structSig = "da=" .. tostring(drawAbove) .. (pdSpec and "|pd" or "")
+        .. "|an=" .. borderAnimStructToken(spec)
     local tuningSig = placedTuningSig(map, filt)
     local coSig = borderSpecSig(spec) .. (pdSpec and ("|pd=" .. colSig(cfg.pandemicColor)) or "")
 
@@ -5806,7 +5923,8 @@ function Factory:SyncFrame(frame)
             -- relative to `frame` (the flat path's parent) at any chain length.
             local pdChain = pandemicBorderSpec(bestSpec, bestCfg)
             return syncConditionChain(bd, bestName, frame, frame.unit, chainLinks, filt,
-                "da=" .. tostring(drawAboveBD) .. (pdChain and "|pd" or ""),
+                "da=" .. tostring(drawAboveBD) .. (pdChain and "|pd" or "")
+                    .. "|an=" .. borderAnimStructToken(bestSpec),
                 borderSpecSig(bestSpec) .. (pdChain and ("|pd=" .. colSig(bestCfg.pandemicColor)) or ""),
                 function(map, f) return stampGate(buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD, pdChain), bestCfg) end,
                 function(h) h:ApplyStyle({ border = { spec = bestSpec, pandemicSpec = pdChain } }) end,
@@ -6063,9 +6181,13 @@ function Factory:SyncFrame(frame)
     -- sort fields (Wave 2) -> in-place
     -- ApplyTuning with the config.filter pre-swap (Wave 1). The layout fields and
     -- cosmetic style fields hot-apply via ApplyStyle. Eye-hidden groups (`enabled == false`), empty selections
-    -- (no records) and deleted groups are not marked live -> the sweep destroys their
+    -- (no records), CLAIM-EMPTIED groups (cross-group dedup swallowed the whole
+    -- selection) and deleted groups are not marked live -> the sweep destroys their
     -- handle. adDB.debuffGroups is preset-level and spec-INDEPENDENT (mirror otherAuras),
     -- but rides the same spec gate as the rest of SyncFrame (no spec -> ClearFrame).
+    -- ☠ CONFIG ORDER IS PRIORITY: with Hide Duplicate Debuffs on, a debuff matching
+    -- several groups renders in the FIRST matching group in the list (see the claim
+    -- fold below) — reordering groups moves auras between them.
     do
         local dg = store.dgroups
         if not dg then dg = {}; store.dgroups = dg end
@@ -6073,11 +6195,45 @@ function Factory:SyncFrame(frame)
 
         local groups = adDB.debuffGroups
         if groups then
+            -- ★ CROSS-GROUP DEDUP (2026-08-29): groups resolve IN CONFIG ORDER, each
+            -- receiving the categories claimed by the enabled groups above it — the
+            -- row's own claim machinery, folded group-over-group. First group in the
+            -- list wins a contested category; a debuff matching several groups renders
+            -- once instead of once per group (field: "the same 1 debuff x 4/5",
+            -- Drasvin, 5.3.1). Two identical groups leave the second one empty — the
+            -- duplicated-config case heals the same way.
+            -- Gated on its OWN preset-level toggle (adDB.debuffGroupDedup, the Debuff
+            -- Groups tab), deliberately independent of the row's Hide Duplicate
+            -- Debuffs — Krathe's call 2026-08-29: "you might want to dedupe one and
+            -- not the other". Preset-level also means the fold is derived purely from
+            -- adDB, so it is deterministic within an auraLayoutVersion for every frame
+            -- and mode. The claim fold mirrors GetClaimedDebuffCategories' criterion
+            -- exactly (enabled + selection table, records not required).
+            local dedupOn = adDB.debuffGroupDedup ~= false
+            local claimedSoFar
             for _, group in ipairs(groups) do
                 if type(group) == "table" and group.enabled ~= false then
                     -- Version-cached: within one auraLayoutVersion this is a table
                     -- lookup; the resolve + record serialization run once per version.
-                    local records, recStructSig, recTuningSig = resolveDebuffGroup(group)
+                    local records, recStructSig, recTuningSig =
+                        resolveDebuffGroup(group, dedupOn and claimedSoFar or nil)
+                    -- Fold AFTER resolving: a group is never claimed against itself.
+                    if dedupOn and type(group.selection) == "table" then
+                        local sel = group.selection
+                        for ci = 1, #CLAIMABLE_CATEGORIES do
+                            local ck = CLAIMABLE_CATEGORIES[ci]
+                            if sel[ck] then
+                                claimedSoFar = claimedSoFar or {}
+                                claimedSoFar[ck] = true
+                            end
+                        end
+                        -- Mode travels with the claim here too — see the same fold in
+                        -- GetClaimedDebuffCategories for why the token must match.
+                        if sel.dispellable and (sel.dispellableMode == "ALL" or sel.dispellableMode == "ANY") then
+                            claimedSoFar = claimedSoFar or {}
+                            claimedSoFar.dispellableAll = true
+                        end
+                    end
                     if records then
                         local key = "dgroup:" .. tostring(group.id)
                         live[key] = true
@@ -6232,16 +6388,20 @@ function Factory:DebugDumpADGate()
                             local hGate, hShown, bShown, extra
                             local oShown = "-"
                             if isSlot then
-                                hGate = (h and h._deathLatched) and true or false
-                                -- "shown" for a slot = is a LIVE filter pushed (vs the park
-                                -- string). ⚠ Compare against SLOT_PARK_FILTER, not "" --
-                                -- the empty-string park is retired, and deriving from ""
-                                -- made every correctly-parked slot read shown=true and trip
-                                -- the suspect counter while owner=false proved it dark.
+                                hGate = (h and (h._deathLatched or h._visLatched)) and true or false
+                                -- ☠ "shown" NOW DERIVES FROM THE CF LOCK, NOT THE STRING.
+                                -- A dark slot keeps its own live filter since 2026-08-30
+                                -- (the contradiction string is proven to match auras and is
+                                -- no longer pushed), so reading the string would report
+                                -- every parked slot as shown=true — the same lie the
+                                -- retired empty-string comparison used to tell, one
+                                -- convention later. The CF park constant is now the only
+                                -- thing that darkens a slot, so it is the only honest
+                                -- source for this column.
                                 local pf = h and h._pushedFilter
-                                local park = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_FILTER
-                                hShown = (pf == nil) and "-"
-                                    or ((pf == "" or pf == park) and "false" or "true")
+                                local parkCF = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_CF
+                                local darkCF = parkCF ~= nil and h and h._cfPushed == parkCF
+                                hShown = (pf == nil) and "-" or (darkCF and "false" or "true")
                                 -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
                                 -- literally "has GetButton", so every slot can hand us the
                                 -- frame the player is looking at. An empty pushed filter

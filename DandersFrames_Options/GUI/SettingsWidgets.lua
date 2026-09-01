@@ -3050,8 +3050,14 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     -- Inset / Offset apply to every non-NONE effect EXCEPT DF_PULSATE (which
     -- modulates the border's own edges and has no separate animRect).
     local hasPositioning = { CORNERS_ONLY=1, DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
-    -- Scale slider = sparkle size (DF Chase).
-    local hasScale     = { DF_ORBIT=1 }
+    -- Scale slider = how big the effect draws. Sparkle size on DF Chase; on DF Proc and
+    -- DF Flash it multiplies how far the glow reaches past the border. That reach cannot
+    -- be a constant: both are a square glow texture stretched over the host, its bright
+    -- band is a soft gradient baked into the art (no line to pin), and frames come in
+    -- every shape — the value that hugs a 125x60 frame is wrong on a tall one. The
+    -- per-axis geometry puts the band's midline on the frame edge; Scale is the one knob
+    -- that moves the band in or out from there.
+    local hasScale     = { DF_ORBIT=1, DF_PROC=1, DF_FLASH=1 }
     -- Length slider = bar length (DF Pixel's chasing bars).
     local hasLength    = { DF_PIXEL=1 }
     local cornersOnly  = { CORNERS_ONLY=1 }
@@ -3164,6 +3170,11 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         0.5, 3, 0.05, dbTable, aKey("Scale"),
         fullUpdate, lightUpdate, true), 55)
     w.animationScale.hideOn = hideUnless(hasScale)
+    -- Effect names go in as ARGUMENTS, not baked into the sentence: they are the
+    -- dropdown's own labels (localised in their own right), so a translator gets a
+    -- reorderable sentence and the tooltip always names what the dropdown shows.
+    w.animationScale.tooltip = format(L["How large the effect draws. On %s, the size of each sparkle; on %s and %s, how far the glow reaches beyond the border."],
+        L["DF Chase"], L["DF Proc"], L["DF Flash"])
 
     w.animationInset = group:AddWidget(GUI:CreateSlider(parent, L["Animation Inset"],
         -50, 50, 1, dbTable, aKey("Inset"),
@@ -3182,10 +3193,36 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     w.animationOffsetY.hideOn = hideUnless(hasPositioning)
 
     -- DF Flash / DF Proc: skip the one-shot intro burst (glow-only).
+    -- ☠ introInert SHOWS THE FORCED VALUE, NOT THE STORED ONE. The runtime pins
+    -- procStart = true (intro suppressed) on every row-mode button, so binding the
+    -- box to the saved key would render it greyed-UNCHECKED on any profile that
+    -- never turned it on — a greyed "off" sitting directly above a tooltip saying
+    -- the intro can never play. customGet returns the forced state so the two agree.
+    -- The key stays wired (override indicators, export) and customSet is deliberately
+    -- absent: the box is disabled below, so there is no write to redirect.
+    local hideIntroGet = opts.introInert and function() return true end or nil
     w.animationHideIntro = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Intro Flash"],
-        dbTable, aKey("ProcStart"), fullUpdate), 30)
+        dbTable, aKey("ProcStart"), fullUpdate, hideIntroGet), 30)
     w.animationHideIntro.hideOn = hideUnless({ DF_FLASH = 1, DF_PROC = 1 })
     w.animationHideIntro.tooltip = L["These effects open with a one-off burst before settling into their loop. Turn this on to skip the burst and go straight to the loop."]
+    -- introInert (aura-button border cards): the intro cannot fire on a pooled
+    -- container button — animation timelines advance while the button is hidden
+    -- and no OnShow script runs in the restricted subtree, so a build-time
+    -- one-shot is spent before the first aura ever shows. The runtime forces the
+    -- intro off for row-mode buttons (AuraContainer's ANIMATION FILTER), so this
+    -- checkbox is permanently greyed there and the tooltip explains why instead
+    -- of describing a burst the user will never see.
+    -- ☠ GREY DIRECTLY at build, not only via disableOn: the AD cards never run
+    -- the RefreshChildStates pass that applies disableOn predicates (the group
+    -- card's refreshStates comment documents this on purpose), so a
+    -- predicate-only grey renders enabled there — field-caught on the AD icon
+    -- card, 2026-08-29. disableOn stays as well, so a context that DOES apply
+    -- predicates cannot re-enable it.
+    if opts.introInert then
+        w.animationHideIntro.disableOn = function() return true end
+        w.animationHideIntro:SetEnabled(false)
+        w.animationHideIntro.tooltip = L["Aura icons can't play the intro flash, so the effect always starts on its loop. Only the frame-level border can show the intro."]
+    end
 
     w.animationCornerLength = group:AddWidget(GUI:CreateSlider(parent, L["Corner Length"],
         2, 40, 1, dbTable, aKey("CornerLength"),
@@ -3523,6 +3560,9 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             -- site (e.g. the Aura Designer border restricts to overlay-recoverable
             -- animation types). nil for every other caller → full type list.
             excludeTypes = opts.animExcludeTypes,
+            -- Aura-button border cards grey the intro checkbox — see introInert
+            -- in CreateAnimationControls. nil everywhere else.
+            introInert   = opts.animIntroInert,
             hideExtra    = hideOff,
             onTypeChange = function()
                 if refreshStates then refreshStates() end

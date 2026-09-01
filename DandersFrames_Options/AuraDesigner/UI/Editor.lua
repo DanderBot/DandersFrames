@@ -1546,6 +1546,44 @@ S.BuildDebuffGroupsHeadArea = function(parent, yPos, opts)
         dedupHint:SetText(L["Categories shown here are hidden from the main debuff bar automatically."])
         dedupHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         yPos = yPos - 30
+
+        -- ── CROSS-GROUP DEDUP TOGGLE (2026-08-29) ──
+        -- Its OWN switch, deliberately independent of the row's Hide Duplicate
+        -- Debuffs (Krathe: "you might want to dedupe one and not the other").
+        -- Preset-level (adDB.debuffGroupDedup) because the groups it governs are;
+        -- default ON — nil must READ as checked, hence customGet/customSet rather
+        -- than a raw key bind (a raw bind renders an untouched profile unchecked
+        -- while the factory treats nil as on). The factory's dgroup sync consumes
+        -- it via `adDB.debuffGroupDedup ~= false`; a flip moves the claims fold,
+        -- so it takes the full structural chain — checkbox-safe (no slider
+        -- mid-interaction hazard, see LayoutDebuffGroupRefresh's note).
+        --
+        -- ☠ IT LIVES IN THE HEAD AREA, NOT IN BuildDebuffGroupsTab. The upstream
+        -- patch put it in the card layout's tab builder, which the popout layout
+        -- never calls (Rows.lua builds its own list and only borrows this head
+        -- area) — the toggle would have existed in one of the two layouts. This
+        -- function is the piece both hosts share, so one definition serves both,
+        -- which is the whole reason it was lifted out.
+        local adDBForDedup = GetAuraDesignerDB()
+        if adDBForDedup then
+            -- Same structural chain both layouts already spell for the eye and the
+            -- delete; defined here because neither host's copy is in scope.
+            local function StructuralDedupRefresh()
+                S.SwitchTab("layout")
+                RefreshPlacedIndicators()
+                DF:InvalidateAuraLayout()
+                DF:UpdateAllFrames()
+                local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+                if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+            end
+            local dgDedup = GUI:CreateCheckbox(parent, L["Hide Duplicates Between Groups"], nil, nil,
+                StructuralDedupRefresh,
+                function() return adDBForDedup.debuffGroupDedup ~= false end,
+                function(v) adDBForDedup.debuffGroupDedup = v and true or false end)
+            dgDedup.tooltip = L["A debuff matching several groups shows only in the first matching group in the list, so it never appears twice. Turn off to let every matching group show it."]
+            dgDedup:SetPoint("TOPLEFT", 8, yPos)
+            yPos = yPos - 28
+        end
     end
 
     return yPos

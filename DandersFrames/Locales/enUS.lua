@@ -1135,6 +1135,11 @@ L["The Aura Designer bar."] = true
 L["Hide Duplicate Buffs"] = true
 L["Hide Duplicate Debuffs"] = true
 L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."] = true
+-- The Debuff Groups tab's own dedup switch, beside its debuff-row twin above: that one
+-- keeps a group's debuffs off the main bar, this one keeps one debuff out of a second
+-- group. Separate settings on purpose, so they read together here.
+L["Hide Duplicates Between Groups"] = true
+L["A debuff matching several groups shows only in the first matching group in the list, so it never appears twice. Turn off to let every matching group show it."] = true
 L["Hide Duration on Permanent Auras"] = true
 L["Hide in Combat"] = true
 L["Hide Status Icons"] = true
@@ -2492,8 +2497,16 @@ L["How fast the effect runs. On DF Dash this is how quickly the dashes march aro
 L["How many separate lights travel around the border. More reads as busier and costs a little more to draw."] = true
 L["How long each moving segment is. Short values read as darting sparks, long ones as a sweeping tail."] = true
 L["How heavy the moving effect is. Separate from Border Thickness — the animation draws on its own layer, so it can be thicker or thinner than the border underneath."] = true
+-- %s three times over = the effect names, which are the dropdown's OWN labels
+-- (L["DF Chase"] / L["DF Proc"] / L["DF Flash"], defined above) rather than English
+-- baked into the sentence — so this reorders like any other sentence.
+L["How large the effect draws. On %s, the size of each sparkle; on %s and %s, how far the glow reaches beyond the border."] = true
 L["Moves the effect in or out from the edge, independently of the border. Push it outward to make a glow spill past the frame."] = true
 L["These effects open with a one-off burst before settling into their loop. Turn this on to skip the burst and go straight to the loop."] = true
+-- Replaces the line above on an aura-icon border card, where the intro can never
+-- play and the checkbox is permanently greyed. Sits beside its twin so a translator
+-- sees the pair.
+L["Aura icons can't play the intro flash, so the effect always starts on its loop. Only the frame-level border can show the intro."] = true
 L["How far the effect runs along each edge from the corner before stopping. Small values leave four short brackets instead of a full outline."] = true
 L["Where the border colour comes from. Static uses the colour below; Class and Role read it from the unit, so the border tells you who you are looking at without reading the name."] = true
 L["Pulls the border inward (positive) or pushes it outward (negative) from the edge. Thickness is how heavy the line is, Inset is how far in it sits, Offset slides the whole border sideways."] = true

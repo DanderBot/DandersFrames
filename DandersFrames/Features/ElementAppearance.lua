@@ -1431,8 +1431,24 @@ end
 -- regions hangs off — its own anchor frame for a container, dfLevelHost for a
 -- collapsed slot — so fading it fades the indicator whole. Nil only if host creation
 -- failed, hence the guard. See SlotHandle:GetAlphaHost.
+-- ☠☠ "fgroups"/"dgroups" WERE MISSING FROM THIS LIST, AND THAT WAS THE WHOLE
+-- "AD groups don't fade out of range" bug (element mode, 2026-08-26). The Factory's own
+-- retarget list names all eight stores; this one named six. Group containers therefore
+-- had NO alpha writer at all in element mode — the frame is pinned at base there, so the
+-- cascade that covers them in whole-frame mode never runs, and nothing else touches them.
+-- Placed indicators kept fading (slot-owner anchor), which made it look like the old
+-- anchor fix had regressed. It had not: groups are a different pathway that never had the
+-- fade wired.
+-- ⚠ Krathe's differential located it — "my AD single PI is working, it's a group that
+-- doesn't fade" — after four wrong theories from me about the anchor path.
+-- ★ Group handles are ROW handles: entry.handle.button is nil, so the walk's existing
+-- callback routes them onto the fade branch (base-only in whole-frame mode, where the
+-- cascade already fades them — no squared fade, see [ad_oor_fade_two_layers]).
+-- ☠ If the Factory ever grows a ninth store, IT GOES IN BOTH LISTS — this one and the
+-- retarget walk at Factory.lua ~5464 — or its containers will silently skip either fades
+-- or unit reassignment.
 local AD_STORE_KEYS = { "healthbar", "background", "border", "placed",
-                        "nametext", "healthtext" }
+                        "nametext", "healthtext", "fgroups", "dgroups" }
 
 -- ☠ THE WRITE IS PROTECTED, AND A DENIED HOST IS REMEMBERED.
 -- GetAlphaHost is supposed to answer with a DF-owned frame, so in principle a tainted
@@ -1652,6 +1668,241 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
             DF._adDeniedHostFrames[frame] = true
         end
     end
+end
+
+-- ============================================================
+-- AD ALPHA HOST PROBE  (/df debug adalpha [unit])
+-- ============================================================
+-- ☠ ANSWERS ONE QUESTION: has the aura button's access restriction started DESCENDING
+-- TO ITS CHILDREN?
+--
+-- The whole AD fade design rests on it not doing so. The note above
+-- ForEachAuraDesignerAlphaHost says it outright: the host is a CHILD of the aura button,
+-- the button carries DenyTaintedAccessWhenAurasAreSecret, and DF assumes restrictions do
+-- not descend — "a Blizzard-side implementation detail, not a contract". It even names
+-- the symptom to expect if that assumption breaks: *AD indicators that no longer fade out
+-- of range — not an error storm, and not a dead range pass.* Which is the field report
+-- this probe exists to settle (Krathe, 2026-08-26, with `AD alpha host refused a tainted
+-- write ... plainSetAlphaOK=false` in the log).
+--
+-- ☠☠ IT NEVER CALLS A METHOD ON A HOST TO IDENTIFY IT. The refused object rejects READS
+-- too — `readableName=false` in that log line is GetDebugName being refused — so probing
+-- it for identity is how you replace the fault with a fresh error and learn nothing (the
+-- exact mistake recorded at the warning site). Identity comes from `rawequal` against
+-- frames we already hold, which cannot dispatch into the object, and everything that does
+-- touch a host is pcall'd and writes only the base alpha the walk writes anyway.
+--
+-- Read the output as a PATTERN, not per row: a child refused while its DF-owned ancestor
+-- accepts is the descent, and the cure is to fade the ancestor and let it cascade — which
+-- is what the slot-owner block already does, and what EllesmereUI does throughout.
+function DF:DebugADAlphaHosts(unit)
+    unit = (unit and unit ~= "" and unit) or "player"
+    local o = DF:Out("AD Alpha Hosts", "unit " .. unit)
+
+    -- ⚠ DEFAULTING TO "player" IS A TRAP FOR THIS PARTICULAR PROBE. The player is almost
+    -- always in range, so an argument-less run reads a tidy 1.00 everywhere and looks like
+    -- a clean bill of health for a frame that was never the broken one. Field: exactly that
+    -- happened. `last` is the frame you most recently hovered — point at the unfaded
+    -- indicator, then type, the same as /dfauras. `target` and player names resolve too.
+    local frame
+    if unit == "last" then
+        frame = DF._lastHoverFrame
+        if not frame then
+            o:Line("No DF frame has been hovered yet — put the mouse over the frame whose "
+                .. "indicator is not fading, then run this again.", "WARN")
+            return
+        end
+        unit = frame.unit or "?"
+        o:Line("Using the last hovered frame — unit " .. tostring(unit), "NEUTRAL")
+    end
+    if not frame and DF.IterateAllFrames then
+        DF:IterateAllFrames(function(f) if not frame and f.unit == unit then frame = f end end)
+        if not frame then
+            DF:IterateAllFrames(function(f)
+                if not frame and f.unit then
+                    local ok, same = pcall(UnitIsUnit, f.unit, unit)
+                    if ok and same then frame = f end
+                end
+            end)
+        end
+    end
+    if not frame then
+        o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
+        o:Line("Try `last` (the frame you most recently hovered), a partyN/raidN token, "
+            .. "target, or a player name.", "NEUTRAL")
+        return
+    end
+    -- ☠ The header was stamped before the unit could be resolved, so restate it — a dump
+    -- titled "unit player" while reporting party2 is how a reading gets attributed to the
+    -- wrong frame.
+    o:Line("Reporting on unit: " .. tostring(unit), "NEUTRAL")
+
+    -- Baseline: frames we KNOW are ours. If either of these is refused the client has
+    -- moved the ground under the whole addon and nothing below means what it looks like.
+    local function probe(f)
+        if not f then return "absent" end
+        local okW = pcall(f.SetAlpha, f, f.dfProbeBase or 1.0)
+        local okR = pcall(f.GetDebugName, f)
+        return (okW and "write OK" or "WRITE REFUSED") .. " / " .. (okR and "name OK" or "name refused")
+    end
+
+    o:Section("Baseline (DF-owned)")
+    o:Field("unit frame", probe(frame), "NEUTRAL")
+    o:Field("contentOverlay", probe(frame.contentOverlay), "NEUTRAL")
+    local slotHost = DF.AuraContainer and DF.AuraContainer.GetSlotOwnerAlphaHost
+        and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
+    o:Field("slot-owner anchor", probe(slotHost), "NEUTRAL")
+
+    -- ★ WHAT THE ALPHAS ACTUALLY ARE, not merely whether a write is permitted — a fade can
+    -- be broken while every write probe answers "fine" (2026-08-26: the group containers
+    -- were missing from the walk entirely, so no write was ever attempted; writability
+    -- probes had nothing to refuse).
+    -- ☠ THE TWO OOR MODES TAKE DIFFERENT ROUTES, and a reading means nothing without
+    -- knowing which is active:
+    --   whole-frame (oorEnabled off) -- the FRAME is faded and alpha CASCADES down.
+    --     Nothing needs to write to an AD host at all.
+    --   element (oorEnabled on) -- the frame is PINNED at base so each element owns its own
+    --     look; slot-backed indicators fade via one write to the slot-owner anchor, group
+    --     containers via the walk writing their own wrapper.
+    local pdb = GetDB(frame)
+    o:Section("Alpha readings")
+    o:Line(string.format("mode: %s", (pdb and pdb.oorEnabled)
+        and "ELEMENT (per-element fades)" or "WHOLE-FRAME (cascade)"))
+    o:Line(string.format("configured AD out-of-range alpha: %s",
+        tostring((pdb and pdb.oorAuraDesignerAlpha) or 0.2)))
+    local function alphaOf(f, label)
+        if not f then o:Field(label, "absent", "NEUTRAL") return end
+        local okA, a = pcall(f.GetAlpha, f)
+        local okE, e = pcall(f.GetEffectiveAlpha, f)
+        o:Field(label, string.format("alpha=%s effective=%s",
+            okA and string.format("%.2f", a or 0) or "unreadable",
+            okE and string.format("%.2f", e or 0) or "n/a"), "NEUTRAL")
+    end
+    alphaOf(frame, "unit frame")
+    alphaOf(slotHost, "slot-owner anchor")
+    local astore = frame.dfADFactory
+    if astore then
+        for _, storeKey in ipairs(AD_STORE_KEYS) do
+            local t = astore[storeKey]
+            if t then
+                for entryKey, entry in pairs(t) do
+                    local h = entry and entry.handle
+                    local f = (h and h.GetAlphaHost) and h:GetAlphaHost() or nil
+                    if f then alphaOf(f, storeKey .. "/" .. tostring(entryKey)) end
+                end
+            end
+        end
+    end
+    o:Line("⚠ Compare the effective alphas against the configured value above. Anchor faded "
+        .. "but an indicator not = the cascade breaks between them. Anchor itself unfaded = "
+        .. "the one write that should have faded it never landed.", "NEUTRAL")
+
+    -- ★ AND WHY IT DID NOT LAND. Knowing the anchor is unfaded only halves the answer;
+    -- these four fields say which half. ☠ In ELEMENT mode the unit frame's own alpha is
+    -- PINNED at base by design, so it tells you nothing about range — read dfInRange, not
+    -- the frame, or you will conclude the unit is in range when it is not.
+    o:Section("Why")
+    local ir = frame.dfInRange
+    if issecretvalue and issecretvalue(ir) then
+        o:Field("frame.dfInRange", "SECRET — ApplyOORAlpha is forced onto "
+            .. "SetAlphaFromBoolean, the one setter these hosts refuse", "WARN")
+    else
+        o:Field("frame.dfInRange", tostring(ir),
+            (ir == false) and "GOOD" or "NEUTRAL")
+    end
+    -- Stamped by UpdateAuraDesignerAppearance itself. nil = that pass has NEVER run for
+    -- this frame, which makes it a trigger fault outright and nothing to do with alphas.
+    o:Field("AD pass has run?", frame._dfADLastInRange == nil and "NO — never"
+        or ("yes, last saw inRange=" .. tostring(frame._dfADLastInRange)),
+        frame._dfADLastInRange == nil and "BAD" or "NEUTRAL")
+    o:Field("frame queued for restriction-lift retry?",
+        (DF._adDeniedHostFrames and DF._adDeniedHostFrames[frame]) and "YES — a write was "
+            .. "refused and is waiting on combat end" or "no", "NEUTRAL")
+    o:Line("Read it as: pass never ran => trigger. Pass ran with inRange=true while the "
+        .. "unit is out of range => the range value is wrong, not the alpha. Pass ran with "
+        .. "inRange=false and the anchor still 1.00 => the write itself was rejected.",
+        "NEUTRAL")
+
+    -- ☠☠ THE DECIDING EXPERIMENT for a stuck slot-anchor fade: write it NOW and read the
+    -- result back, separating "the write never ran when it needed to" (anchor takes the
+    -- configured alpha here) from "the setter executes and does nothing" (stays 1.00 — the
+    -- engine-owns-the-alpha case met on the dispel overlay, needing a DF dim frame
+    -- instead). ⚠ Note this covers the slot-owner anchor ONLY — group containers fade via
+    -- the walk over their own wrappers, and a group that will not fade is diagnosed by the
+    -- per-store alpha readings above, not by this write.
+    -- ⚠ This WRITES. It is a diagnostic that changes state on purpose, and it will fix the
+    -- frame in front of you as a side effect — which is itself the answer.
+    if slotHost then
+        local oorAlpha = (pdb and pdb.oorAuraDesignerAlpha) or 0.2
+        local okForce = pcall(ApplyOORAlpha, slotHost, frame.dfInRange, 1.0, oorAlpha)
+        local okRead, after = pcall(slotHost.GetAlpha, slotHost)
+        o:Section("Forced write")
+        o:Line(string.format("wrote via ApplyOORAlpha: %s   anchor now: %s",
+            okForce and "accepted" or "REFUSED",
+            okRead and string.format("%.2f", after or 0) or "unreadable"),
+            (okForce and okRead and after and after < 0.99) and "GOOD" or "BAD")
+        o:Line("Faded now => timing, not writability: the write never ran on the range edge. "
+            .. "Still 1.00 => the setter executes and does nothing, and the fade needs a "
+            .. "DF-owned dim layer instead.", "NEUTRAL")
+    end
+
+    local store = frame.dfADFactory
+    if not store then
+        o:Line("This frame has no Aura Designer factory store — nothing to probe.", "WARN")
+        return
+    end
+
+    local ver = DF.auraLayoutVersion or 0
+    local total, refused, slotBacked = 0, 0, 0
+    for _, storeKey in ipairs(AD_STORE_KEYS) do
+        local t = store[storeKey]
+        if t then
+            local shown = false
+            for entryKey, entry in pairs(t) do
+                local h = entry and entry.handle
+                local f = (h and h.GetAlphaHost) and h:GetAlphaHost() or nil
+                if f then
+                    if not shown then o:Section(storeKey); shown = true end
+                    total = total + 1
+                    -- Slot-backed hosts sit UNDER a Blizzard aura button; standalone ones
+                    -- are DF frames of our own. That split is the whole diagnosis, and it
+                    -- is read off our handle, never off the host.
+                    local kind = h.button and "slot-backed (child of an aura button)"
+                                           or "standalone (DF-created)"
+                    if h.button then slotBacked = slotBacked + 1 end
+                    local okW = pcall(f.SetAlpha, f, h._dfADBaseAlpha or 1.0)
+                    if not okW then refused = refused + 1 end
+                    local okR = pcall(f.GetDebugName, f)
+                    local latched = (h._dfAlphaHostDeniedVer == ver) and " LATCHED-DENIED" or ""
+                    o:Line(string.format("%s: %s | write %s, name %s | isHandleFrame=%s%s",
+                        tostring(entryKey), kind,
+                        okW and "OK" or "REFUSED", okR and "OK" or "refused",
+                        tostring(rawequal(f, h.frame)), latched),
+                        okW and nil or "BAD")
+                end
+            end
+        end
+    end
+
+    o:Section("Verdict")
+    o:Line(string.format("%d host%s probed, %d slot-backed, %d refused",
+        total, total == 1 and "" or "s", slotBacked, refused))
+    if refused == 0 then
+        o:Line("Every host accepts a plain write — the restriction is NOT descending right "
+            .. "now. A fade stuck on screen is then a TRIGGER problem, not a writability "
+            .. "one: check the range edge, not this.", "GOOD")
+    elseif slotBacked > 0 and refused >= slotBacked then
+        o:Line("Slot-backed hosts are refusing while DF-owned frames above them accept. "
+            .. "That is the access restriction DESCENDING TO CHILDREN — the case the walk's "
+            .. "header warns about, and the fade has to move to the DF-owned ancestor.", "BAD")
+    else
+        o:Line("Mixed result: some hosts refuse and the split does not follow slot-backing. "
+            .. "Capture this alongside combat state — the restriction is aura-secrecy "
+            .. "scoped, so in and out of combat can differ.", "WARN")
+    end
+    o:Line("⚠ Run this BOTH in and out of combat on the same unit: the restriction is tied "
+        .. "to aura secrecy, so an out-of-combat run alone can read clean while the fade is "
+        .. "broken in a fight.", "NEUTRAL")
 end
 
 -- ============================================================

@@ -1373,7 +1373,7 @@ end
 --   "custom" = one slot per dispel type (includeDispelTypes); type known at declare
 --     time, so the FULL art styles statically from the DF pickers (borders, EDGE
 --     gradients, intensity, type icons). Rare dual-type overlap accepted.
--- Me/all: "HARMFUL|RAID_PLAYER_DISPELLABLE" vs "HARMFUL" + candidateFilters
+-- Me/all: "HARMFUL|RAID" (player-dispellable) vs "HARMFUL" + candidateFilters
 -- includeDispelTypes (the shared DF.DispelTypeMap). ☠ The old route here used a
 -- ProcessAura policy + processedAuraType=Dispel and was described as "the native
 -- all-dispellable classification" — it is NOT. That branch is gated on aura.isRaid
@@ -1455,7 +1455,34 @@ local function dispelSlotPlan(db, selfOnly)
 
     local baseFilter, baseCF
     if byMe then
-        baseFilter = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+        -- ☠☠ "RAID", NOT "RAID_PLAYER_DISPELLABLE" — the names point the WRONG way and
+        -- this mode shipped on the wrong one. Blizzard's own token table
+        -- (Blizzard_FrameXMLUtil/AuraUtil.lua) is explicit:
+        --   RAID                    = "harmful auras the player can dispel"
+        --   RAID_PLAYER_DISPELLABLE = "auras SOMEONE IN THE PLAYER'S RAID can dispel"
+        -- We adopted the raid-scoped token on the strength of "observed player-scoped in
+        -- practice" — an observation made solo and in tiny test groups, where the two
+        -- sets are IDENTICAL. In a real raid they diverge exactly per the docs.
+        -- Field-caught (Krathe, 2026-08-27): a priest with By Me on saw the POISON
+        -- overlay lit raid-wide — because the raid had poison-dispellers. Nothing to do
+        -- with race, range, or the shaman gap; DISPEL-channel log showed e=none (empty
+        -- exclude, correct for a priest) and racialSelf=false on every build.
+        -- ⚠ Test any future change to this line IN A MIXED RAID: solo, the wrong token
+        -- is indistinguishable from the right one.
+        baseFilter = "HARMFUL|RAID"
+        -- ☠ THE ENGINE'S FLAG OVER-REPORTS TALENT-GATED DISPELS, so subtract what this
+        -- character demonstrably cannot cleanse. Field-reported: "dispellable by me always
+        -- shows that a priest can remove disease despite it again being a talent choice".
+        -- ⚠ SUBTRACT, never replace — see DF:GetDispelTypesToExclude for why, and for the
+        -- precondition that makes a bad spell ID fail toward over-showing rather than
+        -- silently hiding a type the player CAN cure.
+        -- ✅ excludeDispelTypes is a candidate filter, so it sits OUTSIDE the identity gate
+        -- and is applied by the secure-environment matcher — it works in combat, which is
+        -- the only time this matters. (Same evidence chain as includeDispelTypes.)
+        local exclude = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+        if exclude then
+            baseCF = { excludeDispelTypes = exclude }
+        end
     elseif allToken then
         baseFilter = "HARMFUL|" .. allToken
     else
@@ -1507,7 +1534,7 @@ local function dispelSlotPlan(db, selfOnly)
     slots.mode = byMe and "byme" or "alltypes"
     slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF, roles = roles }
     -- ★ ENGINE-FLAG GAP REPAIR (Shaman poison via totem): a second slot for the
-    -- dispel types RAID_PLAYER_DISPELLABLE misses -- the whole story, the peer
+    -- dispel types the engine's player-dispel flag (RAID) misses -- the whole story, the peer
     -- survey and the honest secrecy limit live on DF:GetEngineDispelFlagGaps
     -- (Features/Auras.lua). The token is NEGATED here so this slot can only fill
     -- with an aura the main slot cannot, which keeps the two from double-lighting
@@ -1520,7 +1547,13 @@ local function dispelSlotPlan(db, selfOnly)
         -- class-wide Poison half applies on every frame, because a totem cleanses the group.
         local gap = DF:GetEngineDispelFlagGaps(selfOnly)
         if gap then
-            slots[#slots + 1] = { key = "gap", filter = "HARMFUL|!RAID_PLAYER_DISPELLABLE",
+            -- ☠ "!RAID" to match the main slot's token (see the comment there). The old
+            -- "!RAID_PLAYER_DISPELLABLE" negation had its own raid-scope hole: with any
+            -- raid-mate able to dispel a gap type (an Evoker covers bleeds), the aura
+            -- passed the raid-scoped token, failed the negation, and this slot went dark
+            -- — a dwarf would silently lose the self-bleed marker exactly when the raid
+            -- composition changed. The player-scoped complement cannot be stolen that way.
+            slots[#slots + 1] = { key = "gap", filter = "HARMFUL|!RAID",
                                   candidateFilters = { includeDispelTypes = gap }, roles = roles }
         end
     end
@@ -1569,6 +1602,45 @@ local function dispelFactoryPlanAndSig(db, selfOnly)
     for i = 1, #slots do
         st[#st + 1] = slots[i].key                             -- key set: structural
         tu[#tu + 1] = slots[i].key .. "=" .. slots[i].filter    -- string: tunable
+        -- ☠☠ THE DISPEL-TYPE MAP IS TUNABLE STATE AND IT WAS IN NEITHER SIGNATURE.
+        -- Field report (tRp, resto shaman DWARF, v5.3.1): "bleeds are now shown with dispel
+        -- overlay on other players (which are not dwarf) when being a dwarf".
+        -- Cause: for a dwarf shaman the gap slot exists in BOTH plans — own frame and
+        -- everyone else's — with the SAME key and the SAME filter string
+        -- ("HARMFUL|!RAID_PLAYER_DISPELLABLE"). Only includeDispelTypes differs:
+        -- {Poison,Bleed} on self, {Poison} elsewhere. With the map absent from both sigs
+        -- the struct sig matched (no rebuild) AND the tuning sig matched (no re-tune), so
+        -- the container silently kept whatever map it was first built with. A frame built
+        -- while driving the player then carried Bleed for the rest of the session — and
+        -- header children get reassigned to other units by roster churn, which is how a
+        -- self-only repair ended up lighting bleeds on the whole raid.
+        -- ⚠ The dfDispelSelf latch added with that repair was necessary but NOT sufficient:
+        -- it forces a re-PLAN on the self/non-self edge, and the re-plan then produced
+        -- identical signatures, so nothing was ever applied. Recomputing is not applying.
+        -- TUNING, not structural: SetAuraSlotCandidateFilters is a live mutator, so this
+        -- re-pushes in place with no teardown (and no stranded buttons — AddAuraSlot is
+        -- add-only).
+        -- ⚠ BOTH MAPS, not just the include. The exclude side carries the talent-aware
+        -- correction, and it moves for exactly the same reasons — a talent edit changes it
+        -- while the key set and the filter string stay put, which is the staleness this
+        -- serialisation exists to catch.
+        local scf = slots[i].candidateFilters
+        local edt = scf and scf.excludeDispelTypes
+        if edt then
+            local types = {}
+            for k in pairs(edt) do types[#types + 1] = tostring(k) end
+            table.sort(types)
+            tu[#tu + 1] = slots[i].key .. ":edt=" .. table.concat(types, ",")
+        end
+        local idt = scf and scf.includeDispelTypes
+        if idt then
+            -- Sorted, so the same set always serialises identically — an unordered pairs()
+            -- walk would move the signature at random and re-tune every drive.
+            local types = {}
+            for k in pairs(idt) do types[#types + 1] = tostring(k) end
+            table.sort(types)
+            tu[#tu + 1] = slots[i].key .. ":idt=" .. table.concat(types, ",")
+        end
         -- ROLES are structural: the carriers a slot builds are created + bound ONCE in
         -- the secure init, so toggling the ring / gradient / EDGE strips must rebuild.
         -- They used to be separate slot keys (and so rode the loop above); now that one
@@ -2659,6 +2731,11 @@ function DF:DriveDispelOverlayFactory(frame, db)
     -- (or stopped being) the player would keep the wrong slot set until some unrelated
     -- rebuild happened by. Costs nothing for anyone who is not a dwarf: RacialGapPossible
     -- short-circuits before the UnitIsUnit call, and this is the per-UNIT_AURA path.
+    -- ⚠ NOT "is this the player's frame". It is "does the RACIAL gap apply here" — that AND
+    -- being a dwarf — which is why it logs as racialSelf. The first cut printed it as
+    -- `self`, and a line reading `unit=player self=false` looks like the unit test is
+    -- broken rather than a non-dwarf short-circuiting before it ever runs (field log,
+    -- 2026-08-26 16:56). A diagnostic that reads as a fault is worse than no diagnostic.
     local isSelf = RacialGapPossible() and UnitIsUnit(frame.unit, "player") and true or false
     if h and frame.dfDispelFactoryVersion == ver and frame.dfDispelStyledGen == (h._gen or 0)
         and frame.dfDispelSelf == isSelf then
@@ -2679,10 +2756,28 @@ function DF:DriveDispelOverlayFactory(frame, db)
         -- one button each time (AddAuraSlot is add-only). ApplyTuning routes overlay mode
         -- through the live slot-side setters, carries its own combat deferral, and rebuilds
         -- itself under test mode. Records carry onInit — see dispelFilterRecords.
+        -- "I changed a setting and nothing happened" is always answered by WHICH SIG MOVED,
+        -- and this row had no such line at all. It is the proof for the dispel-type map fix:
+        -- on a frame whose self-ness flips (own frame <-> someone else's) the map differs
+        -- while key set and filter strings do not, so before that fix NEITHER sig moved and
+        -- this branch was never reached. Seeing a TUNE here on that transition IS the fix
+        -- working; seeing none means the plan and the signature have drifted apart again.
+        DF:Debug("DISPEL", "overlay: TUNE unit=%s racialSelf=%s  %s -> %s",
+            tostring(frame.unit), tostring(isSelf),
+            tostring(frame.dispelFactoryTuneSig), tostring(tuneSig))
         frame.dispelFactoryTuneSig = tuneSig
         h:ApplyTuning({ filter = dispelFilterRecords(slots, db, frame) })
         -- Fall through: the unit upkeep and style pass below still apply.
     elseif not h or frame.dispelFactorySig ~= sig then
+        -- ☠ THE OTHER HALF OF THE TUNE LINE ABOVE, AND THE ONE A TALENT CHANGE TAKES.
+        -- Adding or removing the poison gap slot changes the slot KEY SET, so it is
+        -- structural and lands here rather than in the tune branch — which is why the
+        -- first cut of this logging showed nothing at all while the totem was being
+        -- talented on and off. A dump that is silent on the transition you are testing is
+        -- worse than no dump: it reads as "nothing happened".
+        DF:Debug("DISPEL", "overlay: %s unit=%s racialSelf=%s  %s -> %s",
+            h and "REBUILD" or "BUILD", tostring(frame.unit), tostring(isSelf),
+            tostring(frame.dispelFactorySig), tostring(sig))
         if h then h:Destroy() end
         local filterRecords = dispelFilterRecords(slots, db, frame)
         h = DF.AuraContainer:Create(frame, {

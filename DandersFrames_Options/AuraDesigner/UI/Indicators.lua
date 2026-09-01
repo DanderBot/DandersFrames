@@ -695,12 +695,16 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Border (Stage 5.1c — unified controls via CreateBorderControls).
         -- Show / Thickness / Inset are the same widgets as before; the helper
         -- adds Style / Texture / Color / Gradient / Shadow / BlendMode /
-        -- Offset / Alpha on top.  Animation, classColor, roleColor, and the
-        -- colorByTime checkbox are deliberately omitted — animation isn't
-        -- wired through AD's expiring system yet, class/role don't fit aura
+        -- Offset / Alpha on top.  classColor, roleColor, and the colorByTime
+        -- checkbox are deliberately omitted — class/role don't fit aura
         -- indicators (the indicator's job is to show aura state, not unit
         -- identity), and AD's Expiring section already covers "colour by
         -- time remaining" implicitly through its own colour curve.
+        -- Animation RESTORED 2026-08-29 (button-mode reopening): the placed
+        -- indicator's container opts into the declarative DF border animations
+        -- (config.adBorderAnim + the AuraContainer ANIMATION FILTER), and an
+        -- animation-key edit rebuilds the container (rawBorderAnimStructTok —
+        -- the effect is creation-frozen on a restricted button).
         -- Text-only mode hides the icon texture, so the whole Border group is
         -- hidden (the runtime force-disables the border there too).
         -- ⚠ COLLECT MODE KEEPS IT AND HIDES THE ROW INSTEAD -- see AddGroup's own
@@ -714,7 +718,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
+                    animate = true,
                 },
+                animIntroInert = true,   -- pooled buttons never see the intro burst
                 -- IMPORTANT: AD's per-aura proxy only triggers
                 -- RefreshLiveFramesThrottled + S.RefreshPreviewLightweight
                 -- on direct key assignment (proxy.X = v) via __newindex.
@@ -871,7 +877,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Border (Stage 5.2 — unified controls via CreateBorderControls).
         -- Same full toolkit as the icon's base border: Style / Texture / Colour
-        -- / Gradient / Shadow / Blend / Offset / Alpha + Animation.  The
+        -- / Gradient / Shadow / Blend / Offset / Alpha + Animation (restored
+        -- 2026-08-29 with the button-mode reopening — see the icon card).  The
         -- square's expiring system tints the FILL (not the border), so the
         -- icon's expiring-border overrides are intentionally NOT added here.
         AddGroup(L["Border"], function(g)
@@ -880,7 +887,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
+                    animate = true,
                 },
+                animIntroInert = true,   -- pooled buttons never see the intro burst
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
@@ -1038,17 +1047,20 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
         -- Full toolkit (Style / Texture / Colour / Gradient / Shadow / Blend /
-        -- Inset / Alpha + Animation).  No offset (the bar has its own X/Y) and
-        -- no class/role (it's an aura bar, not unit identity).  The bar's
-        -- expiring tints the FILL via its colour curve, so the icon/square
-        -- expiring-border overrides are intentionally not added here.
+        -- Inset / Alpha + Animation, restored 2026-08-29 — see the icon card).
+        -- No offset (the bar has its own X/Y) and no class/role (it's an aura
+        -- bar, not unit identity).  The bar's expiring tints the FILL via its
+        -- colour curve, so the icon/square expiring-border overrides are
+        -- intentionally not added here.
         AddGroup(L["Border"], function(g)
             GUI:CreateBorderControls(g, proxy, "", {
                 parent  = parent,
                 include = {
                     inset = true, blendMode = true, gradient = true,
                     shadow = true, alpha = true,
+                    animate = true,
                 },
+                animIntroInert = true,   -- pooled buttons never see the intro burst
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,
@@ -1178,7 +1190,26 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 include = {
                     inset = true, offset = true, blendMode = true,
                     gradient = true, shadow = true, alpha = true,
+                    -- RESTORED 2026-08-27 (removed in the 12.1 retirement, 961d1e13).
+                    -- This border is the whole-frame presence ring, drawn on an
+                    -- OVERLAY-mode container — the one surface the AuraContainer
+                    -- ANIMATION FILTER reopens, because it is a single ring per frame.
+                    -- ⚠ The legacy style migration DEPENDS on this control existing:
+                    -- the old Dashed/Animated styles map onto Thickness 0 + DF Dash, and
+                    -- Corners onto Thickness 0 + Corners Only (see the note above) — with
+                    -- animation gone those profiles resolved to a border that drew nothing.
+                    animate = true,
                 },
+                -- ★ NO animExcludeTypes, AND THAT IS THE WHOLE SET ON PURPOSE. Every type
+                -- the dropdown offers now has a declarative twin and is in
+                -- SAFE_OVERLAY_ANIM, so nothing is left to exclude — see "DECLARATIVE
+                -- EFFECTS" in Frames/Border.lua. The filter that stood here while only DF
+                -- Chase was ported is GONE rather than emptied, because an empty exclude
+                -- set reads as "someone meant to restrict this and forgot".
+                -- ⚠ If a NEW effect type is ever added, give it a declarative twin and a
+                -- SAFE_OVERLAY_ANIM entry, or put the filter back for it — on this surface
+                -- an OnUpdate-only effect looks correct at a target dummy and freezes on
+                -- the pull.
                 fullUpdate    = RPL,
                 lightUpdate   = RPL,
                 lightColors   = RPL,

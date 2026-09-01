@@ -54,12 +54,21 @@ local addonName, DF = ...
 --      forwards the curve without the required `property`, and DurationTextBinding is private).
 --      Colour-by-time = discrete BUCKETS via the duration formatter (|c escapes) — P2.
 --      Stacks formatters are FORBIDDEN outright (secret trap — see bindNative).
---   6. Animation drivers do NOT run inside the button subtree: onUpdateMode=disabled
---      propagates, so an OnUpdate/AnimationGroup on a descendant is installed but never
---      ticks (verified in-game — SetScript/Play merely don't error). Host the driver
---      OUTSIDE the subtree (e.g. UIParent) and drive our own textures by reference — see
---      DF.Border ensureDriver (secretRect -> UIParent). Expiry-TRIGGERED anim is separately
---      dead (needs the sealed timer).
+--   6. ☠ CORRECTED 2026-08-27 — this said "an OnUpdate/AnimationGroup on a descendant is
+--      installed but never ticks", and the AnimationGroup half is FALSE. It is what kept
+--      animation retired here for six weeks, so read the split carefully:
+--        * SCRIPTS do not run in the button subtree. onUpdateMode=disabled, and
+--          ForbiddenAspect.UntrustedScriptExecution is documented as propagating to
+--          children. So host an OnUpdate driver OUTSIDE the subtree (e.g. UIParent) and
+--          drive our own textures by reference — DF.Border ensureDriver (secretRect).
+--        * A DECLARATIVE AnimationGroup is not a script and DOES run. Built and :Play()ed
+--          inside initializeFrame and never touched again, it animates C-side with zero Lua
+--          per frame — our own pandemic FLASH does exactly this, on a slot child.
+--      What the OUTSIDE-hosted driver still cannot do is WRITE into the subtree while auras
+--      are secret; that is the real constraint, and it is now guarded rather than assumed
+--      (Border.lua's driver drops a border whose tick is refused).
+--      Expiry-TRIGGERED anim remains separately dead (needs the sealed timer) — though an
+--      always-playing effect revealed by the duration-band formatter is not the same thing.
 --   7. Cannot read IsShown / spellId / expirationTime / dispelName / presence — all secret.
 --      Never branch on them. Filtering is Blizzard-side (filterString + candidateFilters).
 --   8. Group topology is add-only: no RemoveAuraGroup/Slot; a filterString change = recreate
@@ -121,12 +130,12 @@ local warnedFilterString = false
 -- other two for the session. Same split, same reasoning, as the dispel pair above.
 local warnedPandemicBorder, warnedPandemicRegion, warnedPandemicCover = false, false, false
 
--- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
--- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
--- own dash / sparkle / flipbook / overlay textures on our own frames), so they
--- never re-parent anything onto a Blizzard AuraButton and never taint.
--- Any type NOT in this set (a future/unknown type) is stripped. ROW mode always
--- strips (see below).
+-- Animations SAFE to run on a container border (Aura Designer) — overlay-mode
+-- frame borders AND row-mode aura buttons (the latter reopened 2026-08-29). These
+-- render entirely on DF-owned child regions of the border (edge alpha ticks +
+-- DF_DASH's own dash / sparkle / flipbook / overlay textures on our own frames),
+-- so they never re-parent anything onto a Blizzard AuraButton and never taint.
+-- Any type NOT in this set (a future/unknown type) is stripped.
 local SAFE_OVERLAY_ANIM = {
     DF_PULSATE     = true,
     DF_DASH        = true,
@@ -310,17 +319,35 @@ local function setContainerProviderDeaf(c, deaf)
     -- c.RegisterEvent`: that idiom falls through to RegisterEvent when
     -- UnregisterEvent is nil, i.e. it would REGISTER the event while reporting
     -- that it had deafened the container. Exactly backwards.
+    -- ☠☠ LOG LEVELS ARE LOAD-BEARING HERE. This probe has exactly one EXPECTED outcome on
+    -- every current build — a hard refusal — and it used to shout it at WARN once per UI
+    -- load. A warning that fires in every single session is not a signal, it is a tax on
+    -- every future log read: it cost a real investigation on 2026-08-30 when it was the
+    -- only WARN in a clean log and read as a new fault, and it is exactly the noise that
+    -- teaches people to skim past the lines that matter.
+    -- So the levels now follow what a reader should DO about each outcome:
+    --   expected refusal  -> INFO. Documented, the rebirth fallback covers it, act on nothing.
+    --   SILENT refusal    -> WARN. We believe we are deaf and we are NOT. Dangerous.
+    --   it actually WORKED -> WARN. The engine's rule changed under us; the Edit Mode
+    --                         fallback and a pile of comments are now describing a build
+    --                         that no longer exists, and someone must re-check them.
     local why
     if not c.UnregisterEvent then
         AuraContainer._providerDeafOK, AuraContainer._providerDeafWhy =
             false, "UnregisterEvent missing on the container"
+        DF:Debug(DBG, "provider deafening: UnregisterEvent missing (expected on this build)")
         return
     end
     local ok, err = pcall(c.UnregisterEvent, c, PROVIDER_EVENT)
     if not ok then
         AuraContainer._providerDeafOK = false
         AuraContainer._providerDeafWhy = "UnregisterEvent errored: " .. tostring(err)
-        DF:DebugWarn(DBG, "provider deafening refused: %s", tostring(err))
+        -- EXPECTED since 68914: the container carries ForbiddenAspect.EventRegistrations
+        -- from birth (Blizzard's own OnLoad_Intrinsic registers the event), so there is no
+        -- window in which this can succeed. INFO, not WARN — the rebirth fallback is the
+        -- real mechanism and nothing here needs acting on.
+        DF:Debug(DBG, "provider deafening refused (EXPECTED, rebirth fallback owns"
+            .. " Edit Mode): %s", tostring(err))
         return
     end
 
@@ -335,7 +362,17 @@ local function setContainerProviderDeaf(c, deaf)
         AuraContainer._providerDeafOK, why = true, "confirmed deaf"
     end
     AuraContainer._providerDeafWhy = why
-    DF:Debug(DBG, "provider deafening: %s", why)
+    -- Both surviving outcomes are worth a WARN, for opposite reasons: a silent refusal
+    -- means we believe we are deaf and are not, and a SUCCESS means the engine stopped
+    -- refusing — which invalidates the 68914 finding this whole section is built on.
+    if AuraContainer._providerDeafOK then
+        DF:DebugWarn(DBG, "provider deafening SUCCEEDED (%s) — the 68914 refusal no longer"
+            .. " holds on this build. Re-check the Edit Mode rebirth fallback and the"
+            .. " forbidden-aspect notes above; they describe a build that has changed.", why)
+    else
+        DF:DebugWarn(DBG, "provider deafening %s — containers are NOT deaf while we believe"
+            .. " they are; Edit Mode may render live auras.", why)
+    end
 end
 
 -- ============================================================
@@ -527,7 +564,7 @@ end
 --     generation token also lets that newer kick supersede a stale pending one).
 local KICK_CHUNK = 10   -- containers bounced per frame
 
-function AuraContainer._kickLiveParse()
+function AuraContainer._kickLiveParse(reason)
     -- Snapshot the work list synchronously — the registries can churn while the
     -- chunks run, and pairs() over a mutating table is undefined.
     local handles, containers = {}, {}
@@ -576,8 +613,9 @@ function AuraContainer._kickLiveParse()
         if i < nh + ns then
             C_Timer.After(0, step)
         else
-            DF:Debug(DBG, "test exit: re-parsed %d live handles, %d slot owners over %d frames", nh, ns, frames)
-            if t0 then DF:Debug("PERF", "_kickLiveParse done %.1fms after exit (%d handles, %d slot owners, %d frames)", debugprofilestop() - t0, nh, ns, frames) end
+            DF:Debug(DBG, "%s: re-parsed %d live handles, %d slot owners over %d frames",
+                reason or "test exit", nh, ns, frames)
+            if t0 then DF:Debug("PERF", "_kickLiveParse done %.1fms (%s: %d handles, %d slot owners, %d frames)", debugprofilestop() - t0, reason or "test exit", nh, ns, frames) end
         end
     end
     -- First chunk on the NEXT frame, not this one: the exit frame already carries the
@@ -585,6 +623,492 @@ function AuraContainer._kickLiveParse()
     -- rebuild) — adding parse bounces to it is exactly the hitch this exists to fix.
     C_Timer.After(0, step)
 end
+
+-- ============================================================
+-- STALE-PARSE SAFETY NET (field: stuck AD icon on raid15, 2026-08-27)
+-- ============================================================
+-- A container can stop re-parsing while staying correctly bound: the field case showed
+-- a group indicator frozen with a stale aura and a frozen ENGINE-written count, clean
+-- bindings (adgate), no gate involvement, no Lua error. Presence is SECRET, so no code
+-- of ours can DETECT "this slot is stale" — the honest move is to make the state
+-- self-heal instead, the same doctrine as the shipped hide-conditions recheck.
+--
+-- The cure is the bounce, not the mark: UpdateAllAuras sets dirty flags that wait for
+-- the next UNIT_AURA on that unit — a DEAF container (dropped event registrations, the
+-- prime suspect for the field case) never hears one, so mark-only heals nothing there.
+-- The Hide/Show bounce crosses the partition, re-registers events AND re-arms a real
+-- parse — and it is OOC-only, which is why the schedule is:
+--   * a full kick shortly after EVERY combat end (the first legal moment a container
+--     that stuck mid-fight can actually be cured — this replaces "reload after the
+--     boss"), delayed a beat so the regen-flush machinery and event burst go first;
+--   * a slow out-of-combat sweep as the background net for stuck-while-idle cases;
+--   * nothing in combat: mark-only there mostly re-marks containers the dense combat
+--     traffic is already driving, and the deaf case it cannot reach anyway.
+-- Cost: one test-exit-sized chunked kick per combat drop / per interval — the
+-- mover-hitch fix already proved that invisible.
+local SWEEP_INTERVAL = 30
+
+-- UNIT_AURA FLOW LOG (channel-gated): the question this incident could not answer was
+-- "did aura traffic exist for raid15 while its container sat frozen?" — OUR hearing the
+-- event proves the traffic; the container staying stale then proves deafness. Counts
+-- per unit, flushed as ONE compact line per sweep interval, and registered only while
+-- the AURACONTAINER debug channel is on so normal users pay nothing.
+local flowCounts, flowTotal = {}, 0
+local flowFrame = CreateFrame("Frame")
+flowFrame:SetScript("OnEvent", function(_, _, unit)
+    if unit then
+        flowTotal = flowTotal + 1
+        flowCounts[unit] = (flowCounts[unit] or 0) + 1
+    end
+end)
+local flowArmed = false
+local function syncFlowWatch()
+    local want = (DF.DebugActive and DF:DebugActive(DBG)) and true or false
+    if want == flowArmed then return end
+    flowArmed = want
+    if want then flowFrame:RegisterEvent("UNIT_AURA")
+    else flowFrame:UnregisterEvent("UNIT_AURA") end
+end
+local function flushFlowLog()
+    if not flowArmed then return end
+    -- Group units with ZERO events this window: legitimate for out-of-range members,
+    -- but the post-mortem correlation is exactly what was missing this incident.
+    local zeroed, n = {}, GetNumGroupMembers()
+    if n and n > 0 then
+        local prefix = IsInRaid() and "raid" or "party"
+        for i = 1, n do
+            local u = prefix .. i
+            if not flowCounts[u] and #zeroed < 10 then zeroed[#zeroed + 1] = u end
+        end
+    end
+    DF:Debug(DBG, "auraflow %ds: events=%d units=%d zeroflow=%s",
+        SWEEP_INTERVAL, flowTotal,
+        (function() local c = 0; for _ in pairs(flowCounts) do c = c + 1 end; return c end)(),
+        (#zeroed > 0) and table.concat(zeroed, ",") or "-")
+    wipe(flowCounts); flowTotal = 0
+end
+
+local function anyLiveContainers()
+    if next(AuraContainer._handles or {}) then return true end
+    return next(AuraContainer._slotHandles or {}) ~= nil
+end
+
+-- POOL-GROWTH DETECTOR. Presence is secret, so staleness cannot be READ — and the one
+-- number the engine leaves plain, `GetAuraGroupFrameCount`, is plain precisely because
+-- it leaks nothing: it returns the group's OWNED pool size, not its visible count
+-- (Blizzard_AuraContainerFrameProviders: GetOwnedFrameCount -> #ownedFrames). The pool
+-- is batch-allocated at 10 per group inside AddAuraGroup and NEVER shrinks — released
+-- buttons go back to `availableFrames` but stay owned. So for any group whose
+-- maxFrameCount is ≤ 10, this number is a CONSTANT 10 for the whole session, and
+-- "frozen" is the healthy state. (The first cut of this watch had that exactly
+-- backwards — it warned "POSSIBLY STALE" on frozen counts, which would have tripped on
+-- every healthy handle a few minutes into any raid. Genuine staleness has NO read-side
+-- signature; the wedge class is detectable only by its cure — a rebuild.)
+--
+-- What the number CAN say, and says with a latch: the pool only grows (in steps of 10,
+-- AuraContainerCustomFrameProviderMixin:AcquireFrame -> CreateFrameBatch when dry) if
+-- MORE frames than it owns were simultaneously assigned in that ONE group. A gated
+-- group (HELPFUL + spell-ID pool, a handful of IDs) can never legitimately need >10 at
+-- once — growth there means the engine skipped the include map: the identity-gate
+-- fail-open flood. And because the pool never shrinks, the evidence SURVIVES the heal:
+-- a kick can empty the flood minutes before the log is read and this line still shows
+-- it happened. Runs only while the AURACONTAINER channel is on (DebugActive), same
+-- contract as the flow watch. Groups only: the dispel overlay and placed indicators
+-- declare SLOTS, which have no count API.
+local poolWatch = setmetatable({}, { __mode = "k" })
+local function samplePoolGrowth()
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    for h in pairs(AuraContainer._handles or {}) do
+        local keys = not h._destroyed and not h._testFrame
+            and h.backend and h.backend.groupKeys
+        local c = keys and #keys > 0 and h.backend.container
+        if c and c.GetAuraGroupFrameCount then
+            local w = poolWatch[h]
+            if not w then w = { base = {} }; poolWatch[h] = w end
+            for i = 1, #keys do
+                local key = keys[i]
+                local ok, n = pcall(c.GetAuraGroupFrameCount, c, key)
+                n = (ok and type(n) == "number") and n or 0
+                local base = w.base[key]
+                if base == nil then
+                    -- First sight is the batch allocation (10 per group); baseline
+                    -- silently. A flood that lands before the first sample baselines
+                    -- in — accepted; the canary probe covers arm-time state.
+                    w.base[key] = n
+                elseif n > base then
+                    w.base[key] = n
+                    local unit = h.config and h.config.unit
+                    local gated = h.backend.gatedGroupKeys and h.backend.gatedGroupKeys[key]
+                    DF:DebugWarn(DBG,
+                        "POOL GREW unit=%s group=%s %d -> %d: more than %d auras were assigned to"
+                        .. " this one group at once%s. Latched for the session — this line is proof"
+                        .. " the overflow happened even if a kick has already healed the display.",
+                        tostring(unit), tostring(key), base, n, base,
+                        gated and " — and this is a GATED group (HELPFUL + spell-ID pool), so that"
+                            .. " is the identity-gate fail-open flood" or "")
+                end
+            end
+        end
+    end
+end
+
+-- ☠ PARK-STRING SENTINEL. The slot park string rests on engine-INVISIBLE C parser
+-- semantics, and TWO conventions have now failed open in the field — "" (caught
+-- 2026-08-18) and "HELPFUL|!HELPFUL" (caught 2026-08-29: parked slots rendered live
+-- DEBUFFS, the parser reading the contradiction as harmful). The CF second lock
+-- (SLOT_PARK_CF) holds the slots dark either way, but the NEXT parser drift should
+-- announce itself instead of waiting for a field report: ask the engine directly what
+-- the park string matches on the player. Any non-zero answer = the string is open
+-- again. Runs on the 30s sweep (one C call), WARNs once per session, secrecy-guarded
+-- (a sealed read skips silently and tries next sweep). Detection needs the player to
+-- be carrying SOME aura the failed reading matches — buffs cover a helpful-drift
+-- instantly, a harmful-drift catches on the first rez sickness / dungeon debuff.
+-- ★ GENERALIZED 2026-08-29 (Krathe: "catch this situation or something in a similar
+-- shape"): the park string is one instance of a CLASS — filter-string semantics we
+-- depend on but cannot read, which the C parser can change per build. The probe now
+-- checks every convention the codebase leans on, each with its own once-per-session
+-- latch so one drift cannot mask another:
+--   * both polarity contradictions must match NOTHING (the park string is the helpful
+--     one; the harmful twin is the same drift seen from the other side);
+--   * the PLAYER-token partition must be exact: every helpful aura is cast by the
+--     player or it is not, so |HELPFUL| = |HELPFUL,PLAYER| + |HELPFUL,!PLAYER|. This
+--     one identity guards the '!' negation machinery every dedup lattice rides — the
+--     debuff row's neg() chain, the dgroup claims, othersOnly, the dispel gap slot.
+--     All three counts are taken in one uninterrupted Lua tick, so aura churn cannot
+--     fake a violation.
+local sentinelWarned = {}
+local function auraCountOn(unit, filterStr)
+    local ok, ids = pcall(C_UnitAuras.GetUnitAuraInstanceIDs, unit, filterStr)
+    if not ok or type(ids) ~= "table" then return nil end
+    local okN, n = pcall(function() return #ids end)
+    if not okN or (issecretvalue and issecretvalue(n)) or type(n) ~= "number" then return nil end
+    return n
+end
+-- (Removed) `auraCount(filterStr)` — the player-only wrapper. Every check takes a unit
+-- now, and leaving a convenience that silently means "player" is how this probe came to
+-- ask the one unit least able to expose a context-dependent parse in the first place.
+-- ☠ THE ANSWER MAY DEPEND ON THE UNIT, NOT THE CLOCK (Krathe, 2026-08-30: "it might be
+-- that it changes again when you can't assist"). The first version of this probe asked
+-- only "player" — a unit that is always assistable, always visible, always in your
+-- instance, i.e. the single unit least likely to expose a context-dependent parse. It
+-- reported the park string matching while an experiment on a party frame minutes later
+-- rendered nothing, and that conflict is still open precisely because the probe could
+-- not say what was different about the unit.
+-- So: every finding now carries the unit's CONTEXT, and the sweep walks the group.
+--
+-- ⚠ ROUND-ROBIN, ONE GROUP UNIT PER SWEEP. Probing every unit each sweep would be five
+-- C calls x 40 in a raid, every 30s, forever — the exact "cost everyone pays for nobody"
+-- the OOR watch is channel-gated to avoid. One rotating unit keeps this ALWAYS-ON at
+-- constant cost and still covers a full raid inside ~20 minutes, which is far faster than
+-- a field report.
+local sentinelCursor = 0
+local function nextGroupUnit()
+    local n = (GetNumGroupMembers and GetNumGroupMembers()) or 0
+    if n <= 1 then return nil end
+    local raid = IsInRaid and IsInRaid()
+    local count = raid and n or (n - 1)   -- party tokens exclude you; raid tokens include you
+    if count < 1 then return nil end
+    sentinelCursor = (sentinelCursor % count) + 1
+    return (raid and "raid" or "party") .. sentinelCursor
+end
+
+-- The context that plausibly changes a C-side parse. Recorded on EVERY finding so the
+-- log can be read as a correlation rather than a mystery — "assist=0" appearing on every
+-- drift line would name the trigger outright.
+-- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix at :844).
+local function sentinelCtx(unit)
+    local parts = { "exists=" .. (UnitExists(unit) and 1 or 0) }
+    local oka, a = pcall(UnitCanAssist, "player", unit)
+    local aSecret = issecretvalue and issecretvalue(a) or false
+    parts[#parts + 1] = "assist=" .. ((oka and not aSecret) and (a and 1 or 0) or "?")
+    local okv, v = pcall(UnitIsVisible, unit)
+    local vSecret = issecretvalue and issecretvalue(v) or false
+    parts[#parts + 1] = "vis=" .. ((okv and not vSecret) and (v and 1 or 0) or "?")
+    return table.concat(parts, " ")
+end
+
+-- One polarity's self-contradiction, with the DISCRIMINATOR the first version lacked.
+-- ★ Comparing the contradiction's count against the PLAIN polarity's separates two
+-- different faults that look identical in a bare count:
+--   equal   -> the "!" component was DROPPED ("HARMFUL|!HARMFUL" degraded to "HARMFUL")
+--   unequal -> the contradiction resolved to something else entirely
+-- The old line asserted the second without ever measuring the first, and 12 matches on a
+-- unit carrying 12 debuffs is exactly what a dropped negation looks like.
+local function checkContradiction(unit, polarity)
+    local str = polarity .. "|!" .. polarity
+    local contra = auraCountOn(unit, str)
+    if not contra or contra == 0 then return end
+    local plain = auraCountOn(unit, polarity)
+    local ctx = sentinelCtx(unit)
+    -- Latched per polarity PER CONTEXT, not once per session: a drift that only appears
+    -- when you cannot assist must still be reported the first time that context occurs,
+    -- and a global latch would have swallowed exactly the case we are hunting.
+    local latch = "contra:" .. polarity .. "|" .. ctx
+    if sentinelWarned[latch] then return end
+    sentinelWarned[latch] = true
+    DF:DebugWarn(DBG,
+        "PARK/POLARITY DRIFT on %s: %q matched %d (plain %s=%s) — %s [%s]. The CF lock"
+        .. " (maxDuration = 0) is what keeps parked slots dark; the string is a canary only.",
+        tostring(unit), str, contra, polarity, tostring(plain),
+        (plain and contra == plain) and "NEGATION IGNORED (equals plain)"
+            or "contradiction resolved to something else",
+        ctx)
+end
+
+local function checkPartition(unit)
+    local all    = auraCountOn(unit, "HELPFUL")
+    local mine   = auraCountOn(unit, "HELPFUL|PLAYER")
+    local others = auraCountOn(unit, "HELPFUL|!PLAYER")
+    if not (all and mine and others) or (mine + others == all) then return end
+    local ctx = sentinelCtx(unit)
+    local latch = "partition|" .. ctx
+    if sentinelWarned[latch] then return end
+    sentinelWarned[latch] = true
+    DF:DebugWarn(DBG,
+        "PLAYER-token partition broken on %s: HELPFUL=%d but PLAYER=%d + !PLAYER=%d [%s] —"
+        .. " the '!' negation machinery has drifted; every negation-token dedup lattice"
+        .. " (debuff row, debuff groups, othersOnly, dispel gap) is suspect.",
+        tostring(unit), all, mine, others, ctx)
+end
+
+local function checkParkSentinel()
+    if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    -- The player every sweep (cheap, and the baseline every other reading is compared
+    -- against), plus one rotating group member.
+    local units = { "player" }
+    local g = nextGroupUnit()
+    if g and UnitExists(g) then units[#units + 1] = g end
+    for i = 1, #units do
+        local u = units[i]
+        checkContradiction(u, "HELPFUL")
+        checkContradiction(u, "HARMFUL")
+        checkPartition(u)
+    end
+end
+
+-- ★ OUT-OF-RANGE CASTER ATTRIBUTION WATCH (field prompt 2026-08-29: a Paladin's buff
+-- bar on "Only Mine" showed an aura on an OUT-OF-RANGE ally that vanished the moment
+-- they came back into range — "it looked like the only mine part had stopped").
+-- Two readings, and they need separating: a frozen stale snapshot (the server stops
+-- sending aura changes for distant units — game behaviour, no bug), or the PLAYER token
+-- FAILING OPEN because the client cannot resolve the caster at distance.
+--
+-- ☠ THE PARTITION IDENTITY ABOVE CANNOT SEE THIS, which is why it is a separate check.
+-- If PLAYER fails open it returns everything and !PLAYER returns nothing, so
+-- |PLAYER| + |!PLAYER| still equals |HELPFUL| and the identity HOLDS. The observable is
+-- the RATIO |HELPFUL,PLAYER| / |HELPFUL| — and a ratio alone means nothing (a healer
+-- legitimately owns most buffs on an ally), so it needs a CONTROL.
+--
+-- ★ THE CONTROL IS THE IN-RANGE HALF OF THE SAME GROUP, SAMPLED IN THE SAME TICK. Same
+-- client, same filter strings, same moment — the only variable is distance. If the
+-- out-of-range units sit at ~1.0 while the in-range units sit clearly below, the token
+-- is admitting auras at distance that it rejects up close. If BOTH halves are high the
+-- player is simply the one buffing everybody, and nothing is wrong — which is exactly
+-- the false positive a control exists to kill. (Methodology lesson from the profiling
+-- work: never compare a number against intuition when an untouched control is available.)
+-- Needs both halves populated before it can conclude anything, so it stays silent solo,
+-- in a fully stacked group, and in a fully spread one.
+local OOR_MIN_UNITS  = 2      -- per half, before the comparison means anything
+local OOR_MIN_AURAS  = 3      -- per half; tiny samples swing the ratio wildly
+local function checkOutOfRangeAttribution()
+    if sentinelWarned.oorAttribution then return end
+    -- ⚠ CHANNEL-GATED, unlike the park sentinel above. That one is five C calls; this
+    -- walks the whole group at two calls a unit — 80 in a full raid, every sweep, for a
+    -- verdict only a log reader will ever see. Same contract as the flow watch and the
+    -- pool-growth sampler: investigation tools cost nothing while nobody is investigating.
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    if not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    if not IsInGroup() then return end
+    local prefix, count = "party", 4
+    if IsInRaid() then prefix, count = "raid", math.min(MAX_RAID_MEMBERS or 40, 40) end
+    local inN, inAll, inMine = 0, 0, 0
+    local outN, outAll, outMine = 0, 0, 0
+    for i = 1, count do
+        local unit = prefix .. i
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
+            -- ⚠ Range from UnitInRange's SECOND return (checkedRange): a false with
+            -- checked=false means "could not test", not "out of range", and counting
+            -- those as distant would poison the out-of-range half with units that are
+            -- simply untestable.
+            -- ☠☠ TEST SECRECY BEFORE TRUTHINESS, NOT IN THE SAME EXPRESSION. UnitInRange
+            -- is documented SecretReturns, and this shipped as
+            -- `okR and checked and not issecretvalue(...)` — where `and checked` performs
+            -- a BOOLEAN TEST on a secret the guard had not reached yet, which throws
+            -- ("attempt to perform boolean test on local 'checked'", 6x in the field
+            -- minutes after shipping). `and`/`or` evaluate truthiness left to right, so a
+            -- secrecy guard placed after the value in one expression is already too late.
+            -- Call issecretvalue FIRST (a call, not a truth test), bail, and only then
+            -- read the booleans.
+            local okR, inRange, checked = pcall(UnitInRange, unit)
+            local secret = issecretvalue
+                and (issecretvalue(inRange) or issecretvalue(checked)) or false
+            if okR and not secret and checked then
+                local all  = auraCountOn(unit, "HELPFUL")
+                local mine = auraCountOn(unit, "HELPFUL|PLAYER")
+                if all and mine and all > 0 then
+                    if inRange then
+                        inN, inAll, inMine = inN + 1, inAll + all, inMine + mine
+                    else
+                        outN, outAll, outMine = outN + 1, outAll + all, outMine + mine
+                    end
+                end
+            end
+        end
+    end
+    if inN < OOR_MIN_UNITS or outN < OOR_MIN_UNITS then return end
+    if inAll < OOR_MIN_AURAS or outAll < OOR_MIN_AURAS then return end
+    local inRatio, outRatio = inMine / inAll, outMine / outAll
+    -- Out-of-range claims (near) everything while in-range does not: that gap is the
+    -- signature. Deliberately wide thresholds — this fires once per session and is a
+    -- prompt to investigate, not a verdict.
+    if outRatio >= 0.95 and inRatio <= 0.60 then
+        sentinelWarned.oorAttribution = true
+        DF:DebugWarn(DBG,
+            "PLAYER token looks OPEN AT DISTANCE: out-of-range units report %d/%d helpful"
+            .. " auras as yours (%.2f) while in-range units report %d/%d (%.2f) in the same"
+            .. " tick. Same filter strings, same moment — distance is the only variable, so"
+            .. " \"Only Mine\" is likely admitting other casters' auras on far units."
+            .. " (If both halves were high this would be silent: that is the control.)",
+            outMine, outAll, outRatio, inMine, inAll, inRatio)
+    end
+end
+
+-- ★ RANGE-TRANSITION AURA SNAPSHOT — the direct evidence capture for the same report,
+-- and the reason it is an EVENT rather than a command: the moment worth measuring is a
+-- unit crossing the range edge mid-pull, which is precisely when nobody can type
+-- (Krathe, twice: "very hard to do commands mid raid", "hard to type commands mid
+-- pull/m+ key"). Range.lua calls this from its transition branch (the cache-MISS half,
+-- so it fires once per real crossing, not per check).
+--
+-- Reading the log: the OUT line is the baseline the frozen snapshot was showing; the IN
+-- line is the truth that replaced it. A stale snapshot shows both counts DROPPING on
+-- return (the auras had expired unseen — game behaviour, no bug). The PLAYER token
+-- failing open shows `mine` collapsing while `all` holds roughly steady — the same auras
+-- are still there, they simply stop being credited to you once the caster resolves.
+-- ⚠ Channel-gated: costs two C calls per crossing while AURACONTAINER is on, nothing
+-- otherwise. Distinguishing those two shapes is the whole question, and neither is
+-- observable after the fact.
+function AuraContainer.NoteRangeTransition(unit, inRange)
+    if not (DF.DebugActive and DF:DebugActive(DBG)) then return end
+    if type(unit) ~= "string" or not (C_UnitAuras and C_UnitAuras.GetUnitAuraInstanceIDs) then return end
+    if issecretvalue and issecretvalue(inRange) then return end
+    local all  = auraCountOn(unit, "HELPFUL")
+    local mine = auraCountOn(unit, "HELPFUL|PLAYER")
+    if not (all and mine) then return end
+    DF:Debug(DBG, "range %s unit=%s helpful=%d ofWhichMine=%d%s",
+        inRange and "IN " or "OUT", tostring(unit), all, mine,
+        (all > 0 and mine == all) and "  <-- claims ALL of them" or "")
+end
+
+-- ★ SLOT-ACCUMULATION TRIPWIRE. Add-only topology: every structural variant a slot
+-- consumer ever declares is a permanent button (AcquireSlot's park-table warning — the
+-- Frame Level and animation sliders are the known minters). Harmless in normal play and
+-- wiped by /reload, but growth should be VISIBLE in a field log, not deduced. WARNs
+-- once per owner per session when its slot count first crosses the threshold — a busy
+-- config legitimately runs ~18, so 24 means minting happened.
+local SLOT_ACCUM_WARN = 24
+local accumWarned = setmetatable({}, { __mode = "k" })
+local function checkSlotAccumulation()
+    local byOwner
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        local ow = h.owner
+        if ow and not accumWarned[ow] then
+            byOwner = byOwner or {}
+            byOwner[ow] = (byOwner[ow] or 0) + 1
+        end
+    end
+    if not byOwner then return end
+    for ow, n in pairs(byOwner) do
+        if n >= SLOT_ACCUM_WARN then
+            accumWarned[ow] = true
+            DF:DebugWarn(DBG,
+                "slot accumulation: owner %s holds %d slots — structural-edit minting"
+                .. " (one permanent button per Frame Level / animation slider value)."
+                .. " Harmless, permanent until /reload; the /df debug idgate slot audit"
+                .. " has the breakdown.", tostring(ow.unit), n)
+        end
+    end
+end
+
+-- ★★ THE DARK MISMATCH — the precondition of the debuff-bleed bug, moved onto the sweep.
+-- A slot that BELIEVES it is dark (parked / death-latched / vis-latched) but has not got
+-- the CF park lock recorded against it is a slot the engine may still be filling. That is
+-- exactly the state Drasvin's report and Krathe's repro were in, and until now it could
+-- only be seen by running the idgate dump AT THE MOMENT it was happening — which nobody
+-- does, because the symptom is noticed later.
+-- ☠ The CF lock is the ONLY test now: since the park string stopped being pushed, a dark
+-- slot's filter string is indistinguishable from a live one (see _pushFilter).
+-- ⚠ Latched per SLOT KEY, not once per session: several slots failing is a different and
+-- worse story than one, and collapsing them would hide it. _pushOK == false is called out
+-- separately because a REFUSED push with a replay queued is expected in combat and is not
+-- the same fault as a push that was never made.
+local darkWarned = {}
+local function checkDarkMismatch()
+    local parkCF = AuraContainer.SLOT_PARK_CF
+    if not parkCF then return end
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        local dark = h.parked or h._deathLatched or h._visLatched
+        if dark and h._cfPushed ~= parkCF and not darkWarned[h.key] then
+            darkWarned[h.key] = true
+            DF:DebugWarn(DBG,
+                "SLOT BELIEVED DARK BUT NOT LOCKED: slot %s on %s — parked=%s death=%s vis=%s,"
+                .. " CF lock NOT recorded (pushOK=%s%s). This is the precondition of auras"
+                .. " rendering at a retired indicator's position.",
+                tostring(h.key), tostring(h.owner and h.owner.unit),
+                tostring(h.parked and true or false),
+                tostring(h._deathLatched and true or false),
+                tostring(h._visLatched and true or false),
+                tostring(h._pushOK),
+                h._pendingTuning and ", replay queued" or "")
+        end
+    end
+end
+
+C_Timer.NewTicker(SWEEP_INTERVAL, function()
+    syncFlowWatch()
+    samplePoolGrowth()
+    flushFlowLog()
+    if AuraContainer._testMode then return end
+    if InCombatLockdown() then return end   -- regen kick below owns the combat-end heal
+    checkParkSentinel()
+    checkOutOfRangeAttribution()
+    checkSlotAccumulation()
+    checkDarkMismatch()
+    if not anyLiveContainers() then return end
+    AuraContainer._kickLiveParse("safety sweep")
+end)
+
+local regenFrame = CreateFrame("Frame")
+regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- ☠ ZONE-IN KICK, added after the 2026-08-28 field report (identical stacked icon in
+-- every container, M+, live 5.3.1). The engine's identity gate is evaluated PER PARSE,
+-- and delta parses never re-run old auras — so an aura applied during the zone-in
+-- window (a key's start aura lands exactly then) that gets a wrong gate verdict keeps
+-- it for as long as it lives. The gate's group-member exemption is documented as
+-- token-shaped, but that is a DOC-STRING claim never verified live; if the C side has
+-- any state-dependent window during loading/roster sync, zone-in is where it is. One
+-- full re-parse after the world settles re-runs the gate against settled state and
+-- unlatches any aura parsed during the window. Cheap either way: one test-exit-sized
+-- kick per loading screen.
+regenFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+regenFrame:SetScript("OnEvent", function(_, event)
+    local delay = (event == "PLAYER_ENTERING_WORLD") and 8 or 2
+    -- 2s after regen: after the regen flush (deferred rebuilds/tunings) and the
+    -- combat-end event burst, so the kick re-parses settled state rather than racing
+    -- it. 8s after zone-in: past the loading hitch, roster sync and the initial aura
+    -- storm, but well before the first pull needs correct frames.
+    C_Timer.After(delay, function()
+        if InCombatLockdown() or AuraContainer._testMode then return end
+        -- ★ RECONCILE BEFORE THE KICK, and NOT gated on anyLiveContainers: a stale latch
+        -- is exactly the state where containers are dark, so gating the reconcile on
+        -- live containers would skip the case it exists for.
+        AuraContainer.ReconcileLatches(event == "PLAYER_ENTERING_WORLD"
+            and "zone-in" or "post-combat")
+        if not anyLiveContainers() then return end
+        AuraContainer._kickLiveParse(event == "PLAYER_ENTERING_WORLD"
+            and "zone-in heal" or "post-combat heal")
+    end)
+end)
 
 -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
 -- rebuild makes a fresh slot host and re-fires onHost, which recreates everything below
@@ -917,17 +1441,175 @@ function AuraContainer.IsHelperRoleExcluded(unit) return helperRoleExcluded(unit
 
 -- A record's candidateFilters REPLACES the config-wide set for that group/slot
 -- (the dispel overlay's per-type slots) — see normalizeFilters.
+-- ☠☠ THE PLAYER TOKEN FAILS OPEN — SECOND LOCK, APPLIED HERE FOR EVERY CONSUMER.
+-- Field-proven 2026-08-29 (Krathe, Paladin, buff bar on "Only My Buffs", an ally in
+-- ANOTHER INSTANCE): a shaman's Earth Shield / Skyfury / Lightning Shield rendered on
+-- that ally's row and corrected only on walking back into range. The API named the fault
+-- outright — `GetUnitAuraInstanceIDs(unit, "HELPFUL|PLAYER")` returned four auras and
+-- every one of them reported `isFromPlayerOrPlayerPet = false`. The token and the aura
+-- data flatly disagree, so "only mine" rested entirely on a token the game evaluates in C
+-- where we cannot read it. Third invisible-C-token failure this month (SLOT_PARK_FILTER
+-- accounts for the other two), and the same cure: move the load-bearing claim onto
+-- something evaluated in READABLE Blizzard Lua.
+--
+-- ☠☠ WHAT THIS LOCK IS AND IS NOT — READ BEFORE TRUSTING IT.
+-- `isFromPlayerOrPlayerPet` does NOT mean "cast by you". It means "cast by SOME player or
+-- player pet". It is therefore NOT interchangeable with the PLAYER token, and this lock
+-- does not re-implement "only mine".
+--
+-- ⚠ THE EVIDENCE BASE, IN FULL, because it is thinner than it looks and the field is
+-- worth re-testing rather than re-arguing (audited 2026-08-30 against the live 12.1
+-- client dump). The field is UNDOCUMENTED — zero entries across every
+-- Blizzard_APIDocumentationGenerated aura file — and has exactly ONE semantic consumer
+-- in the whole client: TargetFrameAuraContainer.lua:406. Everything else merely carries
+-- it (AuraUtil packs it, CustomAuraContainer lists it as a boolean candidate field,
+-- AuraContainerUtil:95 compares it, EditModeAuraDataProvider stubs it true).
+--   1. THE STRONGEST ARGUMENT IS OUR OWN SHIPPED FEATURE, not Blizzard's code. The
+--      "Non-Player Debuffs" category is nothing but isFromPlayerOrPlayerPet = false, and
+--      what it promises users is dropping OTHER PLAYERS' Sated and Forbearance. It
+--      shipped in 5.2.0 and no report has ever said those still show. Under a "cast by
+--      you" reading that option could not work at all.
+--   2. The one consumer is coherent only under this reading. Line 406 hides player-
+--      sourced auras on a hostile NPC target — the long-standing "don't show every
+--      raider's DoTs on the boss" rule. Under a "you" reading it would instead HIDE YOUR
+--      OWN aura, contradicting line 396 three lines above it, which exists precisely to
+--      show yours.
+--   3. PEER FIELD TEST, and the one piece of hard measurement anyone has: EllesmereUI
+--      8.7.4's raid-frame aura module states that the boolean "matches auras cast by ANY
+--      player (field-verified: same-spec allies' buffs passed it), so own-cast filtering
+--      rides the PLAYER filter token instead." Someone else ran the experiment and got
+--      the same answer.
+--   ☠ 4. BLIZZARD ONCE NAMED IT OUTRIGHT, AND THAT CITATION HAS ROTTED. The old
+--      TargetFrameMixin:ShouldShowDebuffs took this very field as a parameter named
+--      `casterIsAPlayer`. That was the decisive proof and it is GONE: 12.1 refactored the
+--      whole path into TargetFrameAuraContainerPrivateMixin:ShouldShowAuraAsDebuff, and
+--      neither `casterIsAPlayer` nor `ShouldShowDebuffs` appears anywhere in the retail
+--      OR ptr dump any more (checked 2026-08-30). Do not go looking for it. It also kills
+--      the only counter-argument worth raising — that the FIELD name mirrors
+--      AuraUtil.AuraFilters.Player word for word — because Blizzard's own parameter name
+--      for it said "a player", not "the player".
+--   ⚠ An earlier version of this note claimed line 406 would be DEAD CODE under the "you"
+--      reading. That is not airtight and should not be repeated: 406 is still reachable
+--      when sourceUnit is nil, so the branch would be reachable either way. The
+--      self-contradiction in (2), not deadness, is what does the work.
+-- ✅✅ SETTLED IN GAME, 2026-08-30 (Krathe, /df debug auraexp caster, 5-man party).
+--      A shaman's Earth Shield, on the shaman AND on the mage, rendered in the
+--      isFromPlayerOrPlayerPet = true row while the HELPFUL|PLAYER row showed only the
+--      viewer's own Fortitude. A buff nobody in the viewer's control cast passed the
+--      flag ⇒ **ANY player**, confirmed by measurement rather than by argument.
+--      ⚠ Sanity check, stated at the strength it actually has: on the two units whose
+--      strips could be counted off the screenshot, the true and false rows summed to
+--      the unfiltered row — consistent with the two being exact complements. That is a
+--      spot check on two units, NOT a verified invariant across the party.
+--      Stop re-deriving the semantics; the Earth Shield observation alone is decisive.
+--
+-- ★★ AND THE SAME RUN EXPLAINS THE LOCK. In that healthy state Earth Shield read
+--      TRUE. In the stale out-of-range/cross-instance state that started this, the
+--      SAME aura from the SAME caster read FALSE (Krathe's per-aura probe: "Earth
+--      Shield false / Virulent Mucus false / Skyfury false / Lightning Shield false").
+--      Same aura, same caster, opposite value. So the field is part of what goes
+--      UNATTRIBUTED when a unit's aura data goes stale — which is exactly why a lock
+--      built on it catches the failure while the PLAYER token, evaluated in the C
+--      matcher, fails open through it. That contrast is the rationale; it is measured
+--      at both ends now, not inferred from one.
+--
+-- ★ SO WHY DOES IT FIX THE BUG? Because of WHERE the token fails. In the field case every
+-- one of those four auras was player-cast (a shaman's), yet the field still read FALSE —
+-- which under the correct reading can only mean the caster was not resolvable at all in
+-- that state. The lock catches the failure by failing CLOSED on unresolved caster data,
+-- not by identifying auras as yours. It is checked in DoesAuraPassCandidateFilters
+-- (Blizzard_AuraContainerUtil.lua:95), OUTSIDE the identity-gate block (which closes ~45
+-- lines earlier, so no gate state can skip it), as a strict equality — nil or false
+-- REJECTS.
+--
+-- ✅✅ THE WHOLE CHAIN IS NOW MEASURED, cross-instance, 2026-08-30 (Krathe,
+-- /df debug auraexp caster, standing outside an instance from a party member):
+--   row 2  "HELPFUL|PLAYER"                    -> SHOWED the shaman's Earth Shield
+--   row 3  isFromPlayerOrPlayerPet = true      -> did NOT show it
+--   row 4  isFromPlayerOrPlayerPet = false     -> showed it
+-- ⇒ the PLAYER **token** fails OPEN across an instance boundary (it renders a buff the
+-- viewer never cast), and on the very same aura the **candidate boolean** reads FALSE.
+-- Opposite directions on one piece of missing data — caster attribution — which is
+-- exactly what the lock is built to exploit. The same aura reads TRUE in the healthy
+-- in-range case, so this is attribution loss, not a per-aura quirk.
+-- ⚠ Out-of-range and cross-instance behave the SAME here (both -> false). They had been
+-- treated as possibly-different failure modes; they are not, on this field.
+--
+-- ⚠ THE RESIDUAL GAP, kept but downgraded: a failure where the token fails open while
+-- the caster IS resolved to another player would leave the field TRUE and this lock
+-- would not catch it. Nothing rules it out, but both measured fail-open cases share ONE
+-- cause — lost attribution — and that same loss is what drives the field false. So the
+-- gap requires a fail-open with attribution intact, for which there is still no
+-- evidence. What the lock cannot do is hide something wrongly: a buff of yours in range
+-- has a resolved, player caster, so it passes.
+--
+-- ★ WHY HERE AND NOT AT THE CONSUMERS. This resolver is the ONE place every record's
+-- filter string and candidate filters meet, on BOTH the build path and the live-tuning
+-- path — so the lock cannot drift from the token, and a future consumer that emits
+-- "|PLAYER" gets it for free instead of re-learning this the hard way. The buff row had
+-- its own copy of this for one commit; a second mechanism doing the same job is exactly
+-- the drift hazard this file keeps warning about, so it was removed in favour of this.
+--
+-- ☠ EXACT COMPONENT MATCH, never a substring: "HELPFUL|!PLAYER" (othersOnly) CONTAINS
+-- "PLAYER" and means the precise opposite. Filter strings are "|"-separated, so the test
+-- is per component.
+-- ⚠ The Aura Designer's SELF_ONLY pool is untouched either way: it deliberately drops to
+-- a bare "HELPFUL" with no PLAYER token (a few buffs sit on the caster but are credited
+-- to the linked ally — Symbiotic Relationship), so this never fires for it. Keying off
+-- the TOKEN rather than off a "is this a mine pool" flag is what keeps that automatic:
+-- the pool already says what it means in its filter string, so there is no second place
+-- to remember. (Its aura is player-cast, so the lock would probably have passed it
+-- anyway — but "probably" is not a thing to build on.)
+local function filterHasPlayerToken(f)
+    if type(f) ~= "string" then return false end
+    for component in f:gmatch("[^|]+") do
+        if component == "PLAYER" then return true end
+    end
+    return false
+end
+
+-- The lock itself, taking a filter STRING and its candidate filters. Split out from
+-- recordCandidateFilters 2026-08-30 because the audit found the claim above ("the ONE
+-- place every record's filter string and candidate filters meet") was TRUE ONLY OF THE
+-- GROUP PATH. The SLOT path — SlotOwner's AddAuraSlot and SlotHandle:ApplyTuning — hands
+-- its candidateFilters straight to the engine and never passes through here, so every
+-- Aura Designer PLACED My Buffs indicator was emitting HELPFUL|PLAYER with no lock at
+-- all. The commit that introduced the chokepoint claimed it covered "every AD pool"; it
+-- covered AD containers (filter/debuff groups) and missed AD slots.
+-- ⚠ ONE IMPLEMENTATION, THREE CALLERS, on purpose — the whole argument for a chokepoint
+-- was that per-site locking gives every site a chance to be missed, and per-site locking
+-- is exactly what missed the slots.
+local function applyCasterLock(filterString, cf)
+    if not filterHasPlayerToken(filterString) then return cf end
+    -- ☠ NEVER OVERRIDE AN EXPLICIT VALUE. The debuff row's "nonplayer" record sets
+    -- isFromPlayerOrPlayerPet = FALSE on purpose (it is the only way to say "debuffs
+    -- somebody else applied"), and silently flipping that to true would invert its
+    -- meaning. Its filter carries no bare PLAYER token today so it never reaches here —
+    -- but a record that sets the field explicitly has already answered this question,
+    -- and the day one gains a PLAYER token this guard is what stops a silent inversion.
+    if cf and cf.isFromPlayerOrPlayerPet ~= nil then return cf end
+    -- ☠ COPY, NEVER MUTATE. The table reached here can be shared: config-level
+    -- candidateFilters serve every record on the row, and the debuff GROUP records are
+    -- cached and shared across frames within an auraLayoutVersion ("immutable" by
+    -- contract). Stamping the flag in place would leak it onto pools that never asked
+    -- for it and would outlive this build.
+    local out = {}
+    if cf then for k, v in pairs(cf) do out[k] = v end end
+    out.isFromPlayerOrPlayerPet = true
+    return out
+end
+
+-- GROUP-path caller: one record, falling back to the config-level candidate filters.
 local function recordCandidateFilters(rec, config)
-    local cf = rec.candidateFilters or config.candidateFilters
     -- Two independent reasons to go dark: the cooldown switch (everyone at once) and this
     -- unit's role (this frame only). Both resolve to the same dead map.
-    -- Ownership is read off the CONFIG, never off the map -- see `config.dfGate` above. That is
-    -- why a record carrying its own candidateFilters is still gated correctly: the mark and the
-    -- content are separate things now.
+    -- Ownership is read off the CONFIG, never off the map -- see `config.dfGate` above.
+    -- ORDER: helper gate FIRST, caster lock second. A gated-dark map is the dead map and
+    -- needs no lock; everything live gets the PLAYER-token caster lock (see applyCasterLock).
     if config.dfGate and (helperGateDark or helperRoleExcluded(config.unit)) then
         return HELPER_GATE_DEAD_CF
     end
-    return cf
+    return applyCasterLock(rec.f, rec.candidateFilters or config.candidateFilters)
 end
 
 -- IDENTITY-GATE EXPOSURE (12.1, live-confirmed 2026-07-17, widened 2026-07-18).
@@ -1570,19 +2252,62 @@ local function styleButton_regions(slot, config)
                     if spec then spec.knownWidth, spec.knownHeight = sx, sy end
                 end
                 -- ANIMATION FILTER (single chokepoint for every container border).
-                -- 12.1 PTR-5 made AuraButtons blanket-forbidden while auras are secret
-                -- (combat / M+ / encounters / PvP): once forbidden, ANY API call on the
-                -- button OR its children errors from our tainted code — including the
-                -- render setters our OnUpdate border driver uses (SetVertexColor / Hide /
-                -- SetPoint). Every animated border here lives on a container-button child,
-                -- so any animation spams a per-frame forbidden error in exactly the content
-                -- these indicators are for. Animation is therefore stripped on ALL
-                -- container borders unconditionally (the recovery that once let AD placed /
-                -- overlay borders animate via config.adBorderAnim is gone). DF-owned frames
-                -- OFF the container — unit-frame border, missing-buff badge, targeted-spell
-                -- highlight — are not forbidden and keep animating through their own paths.
+                -- 12.1 PTR-5 made AuraButtons forbidden to tainted code while auras are
+                -- secret (combat / M+ / encounters / PvP), descendants included since
+                -- 12.1.0.69382 — and our border animations are an OnUpdate driver writing
+                -- SetVertexColor / Hide / SetPoint into those descendants every frame. That
+                -- is what made animation unsafe here, and it was stripped unconditionally.
+                --
+                -- ★ NARROWED 2026-08-27, and it is the DRIVER that was the problem, not
+                -- animation as such: a declarative AnimationGroup on a button child runs
+                -- fine (our own pandemic flash does, and two peer addons animate borders and
+                -- glows on container buttons the same way). The OnUpdate driver now DROPS a
+                -- border whose tick is refused instead of erroring every frame
+                -- (Border.lua's sharedAnimDriver), so the failure mode is a stopped effect,
+                -- not a log flood — which is what makes this safe to reopen at all.
+                --
+                -- Reopened wherever the container opted in (config.adBorderAnim):
+                --   * overlay = the whole-frame presence box (the AD frame-level border) —
+                --     the first surface reopened (2026-08-27), proven in combat.
+                --   * ROW-mode buttons too (2026-08-29, Krathe's call — "make it work for
+                --     the actual aura buttons"). The old objection was that every group
+                --     pre-allocates its 10-button batch, so a looping effect runs on
+                --     buttons no aura is using. Under the DECLARATIVE regime that is the
+                --     FEATURE, not the cost: the anims are C-side AnimationGroups built
+                --     once in the secure init, they tick invisibly on hidden buttons for
+                --     pennies, and when the engine Shows a button its effect is already
+                --     running — presence-driven animation with zero addon reads. Intro
+                --     one-shots (DF Proc's burst) play at BUILD, not at aura-appear
+                --     (presence is secret; no OnShow script runs in the subtree), so
+                --     buttons show the steady loop only.
+                --   * ☠ Animation keys are STRUCTURAL for every opted-in consumer: the
+                --     groups are creation-frozen on a restricted button, so each factory
+                --     sig folds rawBorderAnimStructTok / borderAnimStructToken and a key
+                --     change hands over fresh buttons via Rebuild. A restyle with an
+                --     UNCHANGED spec is a no-op (Border.lua's dedupe counts _declAnims).
+                -- SAFE_OVERLAY_ANIM still filters the TYPE, so a stale profile naming an
+                -- effect we no longer own renders static rather than erroring.
+                -- DF-owned frames OFF the container — unit-frame border, missing-buff badge,
+                -- targeted-spell highlight — were never affected and keep animating.
                 if spec then
-                    spec.animation = nil
+                    local animType = spec.animation and spec.animation.type
+                    if not config.adBorderAnim
+                        or not (animType and SAFE_OVERLAY_ANIM[animType]) then
+                        spec.animation = nil
+                    end
+                    -- ☠ NO INTRO ON BUTTONS — forced, not user-configurable. The DF Proc /
+                    -- DF Flash intro one-shot plays at BUILD: timelines advance while a
+                    -- button is hidden and no OnShow script runs in the subtree, so on a
+                    -- pooled button it can only ever fire as a burst on every container
+                    -- rebuild that happens while an aura is up — config-edit noise on a
+                    -- whole row of icons, never an "aura appeared" cue. Buttons go
+                    -- straight to the settled loop (and skip building the intro objects).
+                    -- The GUI greys the Hide Intro Flash checkbox on button cards
+                    -- (introInert). The overlay frame border KEEPS its intro: one ring,
+                    -- and its rebuild-time burst is user-triggered edit feedback.
+                    if spec.animation and isRow then
+                        spec.animation.procStart = true
+                    end
                     -- pp: the border renders inside the container's SetScale(scale)
                     -- subtree — Apply must snap thickness in that space, not
                     -- UIParent's (spec.renderScale, Border:SnapThickness). Factory
@@ -3687,6 +4412,14 @@ function NativeBackend:build()
         and not (handle.config and handle.config.parentDrivenVisibility) then
         pcall(function() handle:_setDeathLatch(true) end)
     end
+    -- ☠ SEED THE VISIBILITY LATCH TOO, for the identical reason: it is edge-driven, and
+    -- a container built while the unit is already in another instance would otherwise
+    -- come up open and stay open — reload beside a cross-instance member and every row
+    -- came back, which is the exact 5.0.0 shape this latch was written for.
+    if dlu and AuraContainer._invisibleUnits[dlu]
+        and not (handle.config and handle.config.parentDrivenVisibility) then
+        pcall(function() handle:_setVisLatch(true) end)
+    end
 end
 
 function NativeBackend:setUnit(unit)
@@ -5481,6 +6214,7 @@ function Handle:_applyVisibility()
     -- gate's hide and the cinematic latch used to sit here — see the demolition note
     -- above SetUnitDeathLatched.)
     local want = (self._intendedShown ~= false) and not self._deathLatched
+        and not self._visLatched
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
     -- ping-pong against the park's own deferred hide.
@@ -5534,6 +6268,20 @@ function Handle:_setDeathLatch(on)
         -- back to a mark-dirty that the next aura event flushes).
         self:Refresh()
     end
+end
+
+-- ★★ VISIBILITY LATCH, handle half — RESTORED 2026-08-30. Deliberately a SEPARATE
+-- flag from the death latch rather than a second writer of it: a unit can be dead,
+-- invisible, both or neither, and clearing one condition must never clear the other.
+-- Same actuation, same re-parse on clear (a unit that was outside your world produced
+-- no aura events while it was away, so the standing parse is stale by definition).
+-- See AuraContainer.SetUnitVisibilityLatched for what drives it and why it exists.
+function Handle:_setVisLatch(on)
+    on = on or nil
+    if self._visLatched == on then return end
+    self._visLatched = on
+    self:_applyVisibility()
+    if not on then self:Refresh() end
 end
 
 -- ============================================================
@@ -5595,6 +6343,9 @@ function Handle:SetUnit(unit)
     -- an already-dead unit never comes, so a clear-only retarget onto a ghost rendered
     -- the corpse's auras until an unrelated edge swept (2026-08-18 audit).
     self:_setDeathLatch(AuraContainer._deathLatchedUnits[unit] or nil)
+    -- Same re-seed for visibility: the new unit may already be outside your world, and
+    -- that edge will not fire again just because a handle changed hands.
+    self:_setVisLatch(AuraContainer._invisibleUnits[unit] or nil)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
     if InCombatLockdown() then self:_queueOp("retarget"); return end
@@ -6914,6 +7665,25 @@ local function ensureOwner(frame, unit)
     owner = { frame = frame, anchor = anchor, container = c, unit = unit, slots = {}, seq = 0 }
     frame.dfSlotOwner = owner
     AuraContainer.stats.slotOwners = (AuraContainer.stats.slotOwners or 0) + 1
+
+    -- ★ SEED THE APPEARANCE AT BIRTH — defensive, not a diagnosis.
+    -- In element-fade mode this anchor is the only thing that fades slot-backed Aura
+    -- Designer indicators, the pass that writes it runs on a range EDGE, and the owner is
+    -- stood up LAZILY on first slot acquisition. An anchor born while its unit is already
+    -- out of range would therefore start at full alpha with no further edge to correct it;
+    -- this call closes that ordering hole. Idempotent (the pass recomputes from db + the
+    -- frame's own range state) and effectively a no-op in whole-frame mode, where the
+    -- unit-frame cascade covers the anchor anyway.
+    --
+    -- ⚠ HONEST STATUS: this shipped mid-hunt as THE fix for "AD indicators don't fade out
+    -- of range" (2026-08-26) and it was NOT that bug — the field fault was group
+    -- containers being absent from ElementAppearance's AD_STORE_KEYS walk entirely, fixed
+    -- separately. The birth-order hole above is real but was never proven to be biting.
+    -- Kept because it is one cheap call at a rare event; if it is ever suspected of
+    -- misbehaving, deleting it outright is safe.
+    if DF.UpdateAuraDesignerAppearance then
+        pcall(DF.UpdateAuraDesignerAppearance, DF, frame)
+    end
     return owner
 end
 
@@ -7020,10 +7790,14 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
 
     -- Stashed BEFORE the declare so the declare can read through _cf(): a helper-owned
     -- slot born while the gate is dark must be born gated, not corrected one push later.
-    handle._lastCandidateFilters = spec.candidateFilters
+    -- The stash holds the CASTER-LOCKED map (lock-at-WRITE, here and in ApplyTuning --
+    -- the only two stash writers): _cf() then returns a stable table, which is what
+    -- _pushFilter's value-tracked push compares against.
+    handle._lastCandidateFilters = applyCasterLock(filter, spec.candidateFilters)
+    local declaredCF = handle._cf and handle:_cf() or spec.candidateFilters
 
     local okS, btn = pcall(owner.container.AddAuraSlot, owner.container, slotKey, filter, {
-        candidateFilters = handle:_cf(),
+        candidateFilters = declaredCF,
         sortMethod       = spec.sortMethod,
         sortDirection    = spec.sortDirection,
         initializeFrame  = function(b)
@@ -7103,6 +7877,11 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     handle._idGateVulnerable    = filterVulnerableToIdentityGate(filter, spec.candidateFilters)
     handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
     -- (_lastCandidateFilters is stashed ABOVE, before the declare, so _cf() could read it.)
+    -- CF-lock seed: AddAuraSlot just declared these candidates engine-side, so the
+    -- value-tracked push in _pushFilter must not redundantly re-push (and reparse)
+    -- them on the first live pass. Seeded with the DECLARED value (through _cf()), so a
+    -- slot born helper-gated tracks the dead map it actually declared. See SLOT_PARK_CF.
+    handle._cfPushed = declaredCF
     -- ☠ SEED THE DEATH LATCH — it is edge-driven, and a slot born AFTER the edge hears
     -- nothing. SetUnitDeathLatched loops the registries at the transition; a slot
     -- created later (indicator re-enabled beside a ghost) starts unlatched and renders
@@ -7111,6 +7890,9 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     -- whole time, so the edges reached them.
     if AuraContainer._deathLatchedUnits[spec.unit] then
         pcall(function() handle:_setDeathLatch(true) end)
+    end
+    if AuraContainer._invisibleUnits[spec.unit] then
+        pcall(function() handle:_setVisLatch(true) end)
     end
 
     -- Enabled defaults true on the template, but assert it once the container actually
@@ -7217,12 +7999,56 @@ end
 -- ⚠ Deliberately not HARMFUL-flavoured for harmful slots. The contradiction is what parks
 -- it, not the polarity, so one constant serves every slot and there is no branch to get
 -- wrong.
+-- ☠☠ "CANNOT MATCH" ABOVE WAS FALSIFIED IN THE FIELD, 2026-08-29 (Drasvin, live 5.3.1,
+-- then reproduced on Krathe's own frames after a profile swap left imported slots
+-- parked): parked slots rendered the unit's TOP DEBUFF live at their anchors — the
+-- engine's C-side parser evidently resolves the contradiction with the negation winning
+-- the polarity axis, reading the park as ~HARMFUL. Same failure class as the retired
+-- empty string: ANY filter-string park rests on invisible C semantics that a build can
+-- change silently. Hence the SECOND LOCK below.
 local SLOT_PARK_FILTER = "HELPFUL|!HELPFUL"
 -- ⚠ Also on the module table: NativeBackend:ApplyTuning pushes the park string for
 -- slot-backed rows and sits EARLIER in this file, where the local is not yet in scope. The
 -- field resolves at call time, so both writers park with the identical string -- which they
 -- must, or whichever runs last decides and one of them is the retired convention.
 AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
+-- ★ THE SECOND LOCK — candidate-filter park, and the one that is PROVABLE. maxDuration
+-- excludes every aura unconditionally at 0: a timed aura fails `duration > 0`, a
+-- permanent one fails `duration == 0` (Blizzard_AuraContainerUtil.lua,
+-- DoesAuraPassCandidateFilters — readable LUA in the secure env, not invisible C, and
+-- evaluated OUTSIDE CanApplyIdentityCandidateFilters, so no identity-gate state can skip
+-- it). The CF lock's semantics can be re-verified against dumped source on every build.
+-- One shared constant — the inbound securecopies it, so no aliasing.
+--
+-- ✅✅ VERIFIED IN GAME 2026-08-30 (Krathe, /df debug auraexp park). Against a unit
+-- carrying EIGHT live buffs — timed and permanent — the maxDuration = 0 row rendered
+-- NOTHING while the unfiltered row rendered all eight. Source and field agree, and this
+-- lock is now the sole thing parking a slot (the string is no longer pushed), so it
+-- needed to be measured rather than reasoned about.
+--
+-- ✅✅ SOLVED 2026-08-30 — THE NEGATION WINS THE POLARITY AXIS. A self-contradicting
+-- polarity string returns THE OPPOSITE POLARITY'S AURAS. Measured, with the plain-polarity
+-- control taken in the same tick, on two units independently:
+--   party3 21:44:33  "HARMFUL|!HARMFUL" = 6   plain HARMFUL = 0   plain HELPFUL = 6
+--   party4 22:29:01  "HARMFUL|!HARMFUL" = 5   plain HARMFUL = 0   plain HELPFUL = 5
+-- The contradiction's count equals the OPPOSITE polarity's count exactly, while its own
+-- polarity is empty. So "HARMFUL|!HARMFUL" resolves to ~HARMFUL, and by the same rule the
+-- park string "HELPFUL|!HELPFUL" resolves to ~HELPFUL — it returns the unit's DEBUFFS.
+-- ☠ THAT IS THE ENTIRE BLEED BUG, mechanism confirmed: a parked BUFF slot was being handed
+-- a filter that means "show this unit's debuffs". Drasvin's report and Krathe's repro were
+-- the engine doing exactly what the string asked.
+--
+-- ★ AND IT DISSOLVES THE "INTERMITTENT" READING, which was wrong. The auraexp park row
+-- rendered nothing because that unit had NO DEBUFFS at the time — an empty result from a
+-- correctly-resolved ~HELPFUL query, not a working park. Nothing was varying with time.
+-- ⚠ Also kills "the negation was IGNORED": a dropped "!" would have given the contradiction
+-- its own polarity's count, and that count is zero in both samples. The discriminator is
+-- the only reason this is decidable at all — a bare non-zero count cannot tell the two
+-- apart, and the first version of this probe reported exactly that bare count.
+-- ⚠ Independent of the field repro, which stands on its own: parked slots rendering live
+-- debuffs (Drasvin, then Krathe's own frames after a profile swap).
+local SLOT_PARK_CF = { maxDuration = 0 }
+AuraContainer.SLOT_PARK_CF = SLOT_PARK_CF
 
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
@@ -7236,17 +8062,55 @@ function SlotHandle:_pushFilter()
     -- (The identity-gate terms that used to sit here — _gateHidden, _cineLatched,
     -- _pendingGateReparse — died with the gate; see the demolition note above
     -- SetUnitDeathLatched.)
-    local unitHidden = self._deathLatched and true or false
+    local unitHidden = (self._deathLatched or self._visLatched) and true or false
     local anchor = self.owner.anchor
     if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
-    local want = (self.parked or unitHidden)
-        and SLOT_PARK_FILTER or self.liveFilter
+    local dark = (self.parked or unitHidden) and true or false
+    -- ☠☠ THE PARK STRING IS NO LONGER PUSHED (2026-08-30). A dark slot keeps its OWN
+    -- live filter and is held dark by the CF lock below, alone.
+    --
+    -- WHY: the contradiction is PROVEN to match auras on this build. The parser probe
+    -- fired in the field on both polarities in one session —
+    --   "PARK STRING FAILED OPEN: \"HELPFUL|!HELPFUL\" matched 1 aura(s)"
+    --   "HARMFUL-side contradiction matched 12 aura(s)"
+    -- — so pushing it was not neutral, it was actively handing the slot a filter whose
+    -- meaning the engine's parser decides for us. That is how debuffs came to render in
+    -- buff-indicator positions: the string a parked BUFF slot carried matched HARMFUL
+    -- auras. Keeping the slot's real filter makes the same CF-lock failure show that
+    -- slot's OWN intended auras — wrong, but sane, and never the reported bug.
+    -- ★ THE PRINCIPLE: when a lock and a fallback disagree, the fallback should fail
+    -- toward the slot's intent, never toward an arbitrary parse.
+    -- ⚠ The constant and the probe both STAY. The probe is a canary on parser drift and
+    -- is worth keeping precisely because it is no longer load-bearing. Everything that
+    -- USED to read the pushed string to decide "is this slot dark" now reads the CF lock
+    -- instead — the slot audit below, and the Factory's AD dump — because a dark slot's
+    -- pushed string is now indistinguishable from a live one.
+    local want = self.liveFilter
     local ok = pcall(c.SetAuraSlotFilterString, c, self.key, want)
     -- ☠ RECORD WHAT WAS ACTUALLY PUSHED, AND WHETHER IT TOOK. liveFilter is the STORED
     -- filter and never changes when a park or latch darkens a slot; diagnosing an
     -- indicator that renders while believed dark needs the pushed value.
     self._pushedFilter = want
     self._pushOK = ok and true or false
+    -- ★ THE SECOND LOCK (see SLOT_PARK_CF). Dark pushes the CF park; live restores the
+    -- stored live candidates (nil clears — a slot with no live CFs must not keep the
+    -- park). Value-tracked because SetAuraSlotCandidateFilters has NO engine-side
+    -- equality guard — every call clears the slot's candidates and reparses — so this
+    -- pushes only on a real transition. _cfPushed is recorded only out of lockdown: a
+    -- secure setter can refuse QUIETLY in combat, and the regen replay (which clears
+    -- _cfPushed) must re-push then. The dark->live push doubles as the unlatch BOUNCE
+    -- the death-latch clear wants (the standing parse predates the death): dark always
+    -- records the non-nil park constant, so the transition can never compare equal and
+    -- skip.
+    -- Through _cf(), never the raw stash: the wake push after a park/latch clears must
+    -- not un-gate a helper-owned slot whose Power Infusion gate is still dark. _cf()
+    -- returns the stash (already caster-locked at write) or the helper dead map.
+    local cfWant = dark and SLOT_PARK_CF or self:_cf()
+    if self._cfPushed ~= cfWant then
+        local okCF = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfWant)
+        if okCF and not InCombatLockdown() then self._cfPushed = cfWant end
+        ok = ok and okCF
+    end
     return ok
 end
 
@@ -7294,12 +8158,12 @@ function SlotHandle:Restore()
 end
 
 -- DEATH LATCH, slot half (#1043) — see Handle:_setDeathLatch for the mechanism
--- and the tradeoff. Actuates through _pushFilter (owner anchor + park string);
--- the CLEAR also re-pushes candidates (the standard replay covers it in
--- lockdown), because the death window produced no aura events and the standing
--- parse predates the death. SetAuraSlotCandidateFilters has NO engine-side
--- equality check — every call clears the slot's candidates and reparses — which
--- is precisely the bounce wanted here.
+-- and the tradeoff. Actuates through _pushFilter (owner anchor + park string +
+-- the CF park lock). The CLEAR's candidate re-push — the bounce the death window
+-- needs, because it produced no aura events and the standing parse predates the
+-- death — now lives INSIDE _pushFilter's dark->live transition (which always
+-- fires: dark records the non-nil park constant), so the explicit re-push that
+-- used to sit here is gone rather than doubled.
 function SlotHandle:_setDeathLatch(on)
     on = on or nil
     if self._deathLatched == on then return end
@@ -7308,11 +8172,21 @@ function SlotHandle:_setDeathLatch(on)
     if not ok or InCombatLockdown() then
         self._pendingTuning = true
         registerSlotRegen(self)
-        return
     end
-    if not on and self._lastCandidateFilters ~= nil then
-        local c = self.owner and self.owner.container
-        if c then pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf()) end
+end
+
+-- VISIBILITY LATCH, slot half — the twin of Handle:_setVisLatch, actuating the same
+-- way the death latch does (owner anchor + park string + the CF park lock, all through
+-- _pushFilter, whose dark->live transition carries the re-parse on clear).
+-- ⚠ A separate flag, NOT a second writer of _deathLatched — see the handle half.
+function SlotHandle:_setVisLatch(on)
+    on = on or nil
+    if self._visLatched == on then return end
+    self._visLatched = on
+    local ok = self:_pushFilter()
+    if not ok or InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
     end
 end
 
@@ -7336,6 +8210,12 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     end
     local candidatesChanged = candidateFilters ~= nil
     if candidatesChanged then
+        -- ★ SLOT-PATH CASTER LOCK, applied BEFORE the store so the replay path
+        -- (_pushFilter's dark->live transition, and the regen replay) pushes the locked
+        -- table too — locking only at the push site would leave every deferred
+        -- in-combat edit unlocked. Keyed off self.liveFilter, which the block above has
+        -- already updated for this call.
+        candidateFilters = applyCasterLock(self.liveFilter, candidateFilters)
         self._lastCandidateFilters = candidateFilters
     end
     -- Kept for the replay: sort is not otherwise stored on the handle (AddAuraSlot took
@@ -7359,18 +8239,27 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
         registerSlotRegen(self)
         return false
     end
-    if candidatesChanged then
-        -- Through _cf(): the argument is the LIVE map by definition, and a tuning pass on a
-        -- gated-dark slot must not un-gate it -- the same clobber the container lane's
-        -- chokepoint design exists to prevent.
-        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
+    -- ☠ DARK-AWARE: a parked/latched slot stores the new candidates (above) but must
+    -- NOT push them — that would overwrite the CF park lock with live filters while the
+    -- slot is meant to be dark. _pushFilter's dark->live transition pushes the stored
+    -- value on wake. Live pushes record _cfPushed (out of lockdown) so _pushFilter's
+    -- value-tracked lock doesn't immediately re-push the same table.
+    -- ☠ _visLatched BELONGS IN THIS TEST TOO — a vis-latched slot would push its live
+    -- candidates straight over the CF park lock. Any new latch must be added here AND to
+    -- _pushFilter's dark test.
+    -- Through _cf(), never the raw value: _cf() carries BOTH the helper gate (a tuning
+    -- pass on a gated-dark slot must not un-gate it) and the caster lock.
+    if candidatesChanged and not (self.parked or self._deathLatched or self._visLatched) then
+        local cfOut = self:_cf()
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfOut)
+        if not InCombatLockdown() then self._cfPushed = cfOut end
     end
     -- ☠ UNCONDITIONAL. What must reach the engine is the park/latch state, and a pass
     -- where neither the filter nor the candidates moved would otherwise push nothing --
     -- while SetAuraSlotCandidateFilters immediately above has no equality guard and
     -- reparses the slot on every call, clearing engine-side state the push re-asserts.
     -- Free to do every pass: SetAuraSlotFilterString carries its own equality guard
-    -- engine-side.
+    -- engine-side (and the CF half of _pushFilter is value-tracked).
     self:_pushFilter()
     if sortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
@@ -7388,12 +8277,14 @@ end
 function SlotHandle:_replayTuning()
     local c = self.owner and self.owner.container
     if not c then return end
-    if self._lastCandidateFilters ~= nil then
-        -- Through _cf(), not the raw stash: this replay is the combat-exit drain for every
-        -- deferred push, including the helper gate's own -- raw here meant a gated slot
-        -- came out of combat un-gated.
-        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
-    end
+    -- ☠ CANDIDATES GO THROUGH _pushFilter, NOT A DIRECT PUSH. The old direct
+    -- re-push of _lastCandidateFilters was dark-blind: on a slot parked or
+    -- death-latched at drain time it overwrote the CF park lock with live
+    -- filters — exactly the leak class this lock exists to stop. Clearing
+    -- _cfPushed makes _pushFilter's value-tracked CF half push FRESH, choosing
+    -- park or live from the state at drain time (the same collapse-to-one-push
+    -- rule the filter string already follows).
+    self._cfPushed = nil
     self:_pushFilter()
     if self._lastSortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, self._lastSortMethod,
@@ -7620,8 +8511,10 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     -- will never fire again. _setDeathLatch is transition-gated and its push decides
     -- the owner ANCHOR, so this also un-hides an anchor left dark by the OLD unit.
     local latched = AuraContainer._deathLatchedUnits[unit] or nil
+    local invis = AuraContainer._invisibleUnits[unit] or nil
     for _, h in pairs(owner.slots) do
         pcall(function() h:_setDeathLatch(latched) end)
+        pcall(function() h:_setVisLatch(invis) end)
     end
     -- ☠ SetUnit ALONE DOES NOT RENDER THE RETARGET — it writes the token and marks
     -- FullAuraRebuild, but it cannot ARM the private-side dirty processor, so the
@@ -7844,6 +8737,131 @@ function AuraContainer.SetUnitDeathLatched(unit, on)
     end
 end
 
+-- ============================================================
+-- ★★ VISIBILITY LATCH — RESTORED 2026-08-30
+-- ============================================================
+-- ☠ THIS IS NOT THE IDENTITY GATE, and it must never grow back into one. It is ONE
+-- probe with ONE actuation, restored on its own merits after the demolition took it
+-- out as collateral.
+--
+-- WHAT IT IS FOR. `UnitIsVisible` is INSTANCE-scoped, not range-scoped: TRUE for a
+-- same-instance member far outside 40yd, FALSE only across instances and phases
+-- (field-verified 3-case probe, 2026-07-23). A unit reading false is not in your world
+-- at all, so the engine cannot attribute casters for it — and the PLAYER filter token
+-- then FAILS OPEN, rendering every caster's aura through an "only mine" pool.
+--
+-- ✅ THAT FAIL-OPEN IS MEASURED ON THE CURRENT CLIENT, not inherited belief: with the
+-- viewer outside an instance from a party member, "HELPFUL|PLAYER" rendered a shaman's
+-- Earth Shield the viewer never cast (/df debug auraexp caster, Krathe, 2026-08-30).
+--
+-- ☠☠ WHY IT CAME BACK. This is a 5.0.0 fix (07088555, hardened by e03405cf) that the
+-- identity-gate demolition deleted along with the gate (f5073f42, 13 UnitIsVisible
+-- lines) on the premise that build 69465 made secondary protection unnecessary. That
+-- premise was TRUE for the identity gate — which governs includeSpellIDs/excludeSpellIDs
+-- and nothing else — and FALSE here: the PLAYER token is a filter STRING, evaluated in
+-- C through IsAuraFilteredOutByInstanceID, in a code path 69465 never touched. One
+-- commit removed two guards on one justification. The 5.0.0 bug came straight back.
+--
+-- ⚠ NOT A COMPLETE CATCH-ALL, and the old code said so in a note worth keeping: a unit
+-- in another PHASE, layer or Chromie time can read UnitIsVisible TRUE and still be
+-- unattributable, so the token fails open with this probe perfectly happy.
+-- UnitPhaseReason covers that but is only reliable within ~250yd. VuhDo pairs the two
+-- (VuhDoToolbox.lua:656) which is the known technique if we ever need the phase half —
+-- it was never implemented here, and pretending otherwise is how this became a gate
+-- last time. This latch closes the instance boundary. That is all it claims.
+--
+-- ⚠ WHY A LATCH AND NOT A FILTER FIX: nothing in readable Lua can express "cast by me"
+-- — DoesAuraPassCandidateFilters has 13 fields and not one tests caster identity. When
+-- a unit is out of your world EVERY pool it renders is stale, not just source-relative
+-- ones; restricting the response to "mine" filters once left a cross-instance unit
+-- showing a full debuff row and dispel overlay while its buff bar was correctly blanked
+-- (Krathe, 2026-08-18). So the actuation is per UNIT, like the death latch.
+AuraContainer._invisibleUnits = AuraContainer._invisibleUnits or {}
+
+function AuraContainer.SetUnitVisibilityLatched(unit, on)
+    if type(unit) ~= "string" then return end
+    -- Test mode fabricates units that are not really in your world; latching them would
+    -- blank every preview row. Same exemption the death latch takes, same reason.
+    if AuraContainer._testMode then return end
+    AuraContainer._invisibleUnits[unit] = on and true or nil
+    -- Edge-driven from Frames/Update.lua, so this is one line per instance crossing.
+    GateLog("visibility latch %s unit=%s", on and "ON" or "OFF", unit)
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and h.config and h.config.unit == unit
+            and not h.config.parentDrivenVisibility then
+            pcall(function() h:_setVisLatch(on) end)
+        end
+    end
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        if s.owner and s.owner.unit == unit then
+            pcall(function() s:_setVisLatch(on) end)
+        end
+    end
+end
+
+-- ============================================================
+-- ★★ LATCH RECONCILER — "stuck parked" becomes self-healing
+-- ============================================================
+-- ☠ CORRECT EDGES ARE NOT A GUARANTEE. Both latches shipped with the edge keyed on a
+-- FRAME flag while the registry is keyed by UNIT, and frames are pooled and retargeted —
+-- so a unit could end up latched with nothing left to clear it and its icons parked
+-- until a /reload (party3, field, 2026-08-30). The edges are fixed, but an edge is a
+-- transition and transitions can always be missed; the only structural answer is to
+-- periodically re-ask the question and drop any latch that no longer earns its place.
+--
+-- ⚠ THIS ONLY EVER CLEARS, never latches. Setting is the edge's job and needs the frame
+-- context; a reconciler that also latched would be a second writer racing the first.
+-- Clearing is safe from anywhere: the worst case is one extra re-parse.
+--
+-- ⚠ FAIL-SAFE, matching each latch's own rule. Death clears on a definite "not dead".
+-- Visibility clears on a definite, non-secret "visible". A unit that no longer EXISTS
+-- clears both — nothing can render it, and leaving the entry would re-latch its
+-- containers at build if the token were ever reused.
+-- ⚠ issecretvalue FIRST, as its own statement (see the UnitInRange fix at :844).
+-- ⚠ Both loops CLEAR the table they are traversing. That is legal Lua: setting an
+-- EXISTING key to nil during a pairs() traversal is explicitly permitted (adding a new
+-- key is not, and neither loop does). Both setters only ever nil an existing key here.
+function AuraContainer.ReconcileLatches(reason)
+    if AuraContainer._testMode then return end
+    local cleared = 0
+
+    for unit in pairs(AuraContainer._deathLatchedUnits) do
+        local gone = not UnitExists(unit)
+        local alive = false
+        if not gone then
+            local okd, dead = pcall(UnitIsDeadOrGhost, unit)
+            local secret = issecretvalue and issecretvalue(dead) or false
+            if okd and not secret and not dead then alive = true end
+        end
+        if gone or alive then
+            AuraContainer.SetUnitDeathLatched(unit, nil)
+            cleared = cleared + 1
+        end
+    end
+
+    for unit in pairs(AuraContainer._invisibleUnits) do
+        local gone = not UnitExists(unit)
+        local visible = false
+        if not gone then
+            local okv, vis = pcall(UnitIsVisible, unit)
+            local secret = issecretvalue and issecretvalue(vis) or false
+            if okv and not secret and vis then visible = true end
+        end
+        if gone or visible then
+            AuraContainer.SetUnitVisibilityLatched(unit, nil)
+            cleared = cleared + 1
+        end
+    end
+
+    -- Silent when there was nothing to do: this runs on every zone-in and every combat
+    -- drop, and a line per run would drown the trail it shares with the latch
+    -- transitions. A line here means a latch had genuinely gone stale — which is a bug
+    -- worth seeing, not routine bookkeeping.
+    if cleared > 0 then
+        GateLog("reconcile (%s): cleared %d stale latch(es)", reason or "sweep", cleared)
+    end
+end
+
 -- /df debug idgate — identity-gate ground truth: EVERY handle (not just the
 -- vulnerable ones — an under-flagged handle is exactly the failure this dump
 -- must expose), with its unit, vulnerability flag, the LIVE UnitCanAssist
@@ -7993,6 +9011,60 @@ function AuraContainer.DebugDumpIdentityGate()
     -- the probe block below; resolved at call time, so declaration order is fine.
     if AuraContainer.DebugGateProbeStatus then
         AuraContainer.DebugGateProbeStatus(o)
+    end
+    -- ★ SLOT AUDIT — the parked-slot leak class (2026-08-29), made visible. Presence is
+    -- secret, so "is this dark slot RENDERING" cannot be read — but every input on OUR
+    -- side of the divergence can: what we believe (parked/latched), what we last pushed
+    -- (_pushedFilter/_cfPushed), and whether the push took (_pushOK). A slot whose
+    -- believed state and pushed state disagree is the leak's precondition, findable in a
+    -- dump BEFORE a user sees debuffs in buff positions. Also counts accumulation per
+    -- owner (add-only topology: every structural variant ever seen is a permanent
+    -- button — see AcquireSlot's park-table warning; /reload clears it).
+    do
+        local total, live, parked, latched, flagged = 0, 0, 0, 0, 0
+        local byOwner = {}
+        for h in pairs(AuraContainer._slotHandles or {}) do
+            total = total + 1
+            local dark = h.parked or h._deathLatched or h._visLatched
+            if h.parked then parked = parked + 1 end
+            if h._deathLatched or h._visLatched then latched = latched + 1 end
+            if not dark then live = live + 1 end
+            local ow = h.owner
+            if ow then byOwner[ow] = (byOwner[ow] or 0) + 1 end
+            local why
+            -- ☠ THE FILTER-STRING TEST IS GONE, and must not come back. A dark slot now
+            -- KEEPS its live filter on purpose (see _pushFilter) — the contradiction
+            -- string is proven to match auras and is no longer pushed — so comparing the
+            -- pushed string against the park constant would flag every correctly-dark
+            -- slot as suspect. The CF lock is the only thing darkening a slot, so it is
+            -- the only sound test for "believed dark but not actually dark".
+            if dark and h._cfPushed ~= SLOT_PARK_CF then
+                why = "believed dark, CF lock not recorded"
+            elseif h._pushOK == false then
+                why = "last filter push REFUSED and not yet replayed"
+            end
+            if why then
+                flagged = flagged + 1
+                o:Line(("slot %s [%s]: %s%s"):format(tostring(h.key),
+                    tostring(ow and ow.unit), why,
+                    h._pendingTuning and " (replay queued)" or ""), "BAD")
+            end
+        end
+        local worst, worstN = nil, 0
+        local owners = 0
+        for ow, n in pairs(byOwner) do
+            owners = owners + 1
+            if n > worstN then worst, worstN = ow, n end
+        end
+        o:Section(("Slot audit — %d slots on %d owners: %d live, %d parked, %d death-latched, %d flagged")
+            :format(total, owners, live, parked, latched, flagged))
+        if worst and worstN >= 24 then
+            o:Line(("owner %s holds %d slots — structural-edit minting (Frame Level / animation"
+                .. " sliders); permanent until /reload"):format(tostring(worst.unit), worstN), "WARN")
+        end
+        if flagged == 0 and total > 0 then
+            o:Line("every dark slot has both locks pushed and recorded", "GOOD")
+        end
     end
     -- ★ The gate trail's tail — the dump above is NOW, the tail is WHAT LED HERE.
     -- ALWAYS captured (session ring, see GateLog): no category to enable first.

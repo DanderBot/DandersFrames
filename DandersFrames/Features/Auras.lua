@@ -126,8 +126,9 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- map the engine flag misses for the current character, or nil when there is
 -- no gap -- consumed by the overlay's by-me slot plan (Features/Dispel.lua)
 -- and the debuff row's by-me records (below), each of which pairs it with a
--- "|!RAID_PLAYER_DISPELLABLE" negation so the repair never double-renders
--- what the flag already catches.
+-- "|!RAID" negation (the player-dispellable token — see the dispelToken note
+-- below for why it is RAID and not the raid-scoped RAID_PLAYER_DISPELLABLE)
+-- so the repair never double-renders what the flag already catches.
 --
 -- ★ THIS WORKS IN COMBAT, and the reason is worth stating because I twice
 -- claimed the opposite. ADDON Lua genuinely cannot read aura data in combat
@@ -171,10 +172,18 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- the local dump -- so their repair silently no-ops for anyone with that CVar
 -- off. That is the exact trap the note below records us falling into first.
 --
--- ⚠ Re-checked on every call, never cached: the totem is a TALENT, and talent
--- swaps re-drive the factories through the coalesced PLAYER_TALENT_UPDATE ->
--- UpdateAllFrames path, which rebuilds the plans that call this. A cached
--- answer would survive exactly the event that changes it.
+-- ⚠ Re-checked on every call, never cached: the totem is a TALENT, so a cached answer
+-- would survive exactly the event that changes it.
+--
+-- ☠ THE RE-DRIVE ROUTE IS NOT WHAT THIS COMMENT USED TO SAY. It claimed talent swaps
+-- reach the plans "through the coalesced PLAYER_TALENT_UPDATE -> UpdateAllFrames path".
+-- UpdateAllFrames does NOT bump auraLayoutVersion, and the drives are version-gated, so
+-- that route on its own leaves the overlay on its fast path and never re-plans. What
+-- actually carried it was the AD engine: the same handler calls
+-- Engine:ForceRefreshAllFrames, which ends in DF:InvalidateAuraLayout. A dispel feature
+-- depending on the Aura Designer's refresh to notice a talent is the kind of link nobody
+-- would look for when it breaks, so the talent handler now bumps the version itself
+-- (Core.lua) and this no longer rides a sibling feature.
 --
 -- ☠☠ NOT IsPlayerSpell. The first cut used it, and on a 12.1 client that
 -- function EXISTS ONLY IF A CVAR IS ON: it lives in Blizzard_DeprecatedSpellBook
@@ -190,6 +199,345 @@ DF.DispelTypeMap = DISPEL_TYPES
 -- ★ THREE OUTCOMES, NOT TWO. nil means "cannot tell" and is logged once --
 -- distinct from a confident false. A capability probe that cannot run must say
 -- so rather than quietly answering "no".
+-- ============================================================
+-- PLAYER DISPEL CAPABILITY (talent-aware)
+-- ============================================================
+-- ☠ THE ENGINE'S FLAG IS CLASS/SPEC SHAPED AND TALENTS ARE NOT PART OF IT — in BOTH
+-- directions. It misses capability a talent GRANTS (a shaman's Poison Cleansing Totem) and
+-- asserts capability a talent GATES (a priest's disease cure, which needs Improved Purify).
+-- Field-reported both ways.
+--
+-- ★ THIS IS A SPELLBOOK QUESTION, NOT AN AURA QUESTION, which is why it is answerable at
+-- all under the 12.1 lockdown. Aura DATA is sealed; the player's own spellbook never was. I
+-- told Krathe more than once that talent-aware dispels were impossible, and that was the
+-- two conflated — worth remembering before repeating it.
+--
+-- ⚠ EVERY ID IN THIS TABLE NEEDS FIELD VALIDATION, class by class. A wrong ID silently
+-- mis-renders dispels for a whole class, and offline there is no way to confirm one. That
+-- is what `/df debug dispelcap` is for: it prints what we concluded and the spell that
+-- concluded it, so a bad entry shows up as a disagreement with the character in front of
+-- you rather than as a quietly wrong overlay. Entries marked UNVERIFIED have not been
+-- checked on a live character yet.
+--
+-- ⚠ NOT COPIED. Peer libraries solve the same problem (ElvUI's LibDispel, VuhDo's
+-- VUHDO_PLAYER_DISPEL_ABILITIES) and the METHOD is theirs — probe the spellbook per class,
+-- treat talent entries separately. The table below is ours, retail-only, and deliberately
+-- omits the classic/vanilla branches those libraries carry.
+--
+-- ☠ `talent = true` selects the probe. C_SpellBook.IsSpellKnown answers "does the player
+-- KNOW this", which is the only correct question for a talent; IsSpellInSpellBook answers
+-- "should this appear in the spellbook" and returns TRUE FOR UNKNOWN TALENT ENTRIES by
+-- Blizzard's own documentation. We shipped the wrong one once already. ⚠ ElvUI's LibDispel
+-- makes exactly this split — IsSpellKnown for Improved Purify, the spellbook probe for the
+-- shaman totem — which is why their shaman case has the bug we just fixed and their priest
+-- case does not.
+--
+-- ★ THE IDS AND THE GATING ARE CROSS-CHECKED AGAINST THE ADDONS THAT ALREADY DO THIS ON
+-- RETAIL — ElvUI's LibDispel and VuhDo — rather than authored from memory. That check found
+-- four errors in my first pass: Monk had the talent's types backwards, Mage and Paladin were
+-- each missing a spell, and HUNTER was absent altogether. Spell IDs are game data, not
+-- authored code; reading a peer to confirm one is research, and it is the difference between
+-- a table that is right and one that merely looks right.
+-- ⚠ Retail only. The peers carry classic/TBC branches (Abolish Poison, Devour Magic ranks,
+-- Disease Cleansing Totem) that have no place here.
+local DISPEL_SPELLS = {
+    DRUID = {
+        { id = 88423,  types = { Magic = true, Poison = true, Curse = true } },  -- Nature's Cure (Resto)
+        { id = 2782,   types = { Poison = true, Curse = true } },                -- Remove Corruption
+    },
+    EVOKER = {
+        { id = 360823, types = { Magic = true, Poison = true } },                -- Naturalize (Preservation)
+        { id = 365585, types = { Poison = true } },                              -- Expunge (Devastation)
+        { id = 374251, types = { Poison = true, Disease = true, Curse = true, Bleed = true } }, -- Cauterizing Flame
+        { id = 378438, types = { Magic = true } },                               -- Scouring Flame (PvP talent)
+    },
+    HUNTER = {
+        -- ☠ NEARLY MISSED ENTIRELY. Hunters dispel on retail through a talent-granted
+        -- salve, which is why a from-memory table left the class out and would have treated
+        -- every hunter as dispelling nothing.
+        { id = 459517, types = { Poison = true, Disease = true }, talent = true },
+    },
+    MAGE = {
+        -- ✅ 2026-08-26: verified BOTH ways on one character — unspecced it reads unknown,
+        -- with default talents it reads known. ★ So a talent-gated spell does NOT always
+        -- need `talent = true`: that flag exists only for grants the spellbook probe
+        -- OVER-reports, which is the override-linked kind (Poison Cleansing Totem). An
+        -- ordinary talent that simply is or is not in the book tracks correctly as a base
+        -- entry. Do not flag every talent-gated spell on principle — flag the ones that
+        -- lie.
+        { id = 475,    types = { Curse = true } },                               -- Remove Curse
+        -- ⚠ Grants Magic AS WELL as Curse — the half a from-memory entry drops.
+        -- ☠ 412113 WAS HERE AND DOES NOT RESOLVE ON RETAIL — "(name unavailable)" in the
+        -- first mage dump, the same failure as the paladin's 1152. Taken from LibDispel,
+        -- where it is probed with no era guard and would have contributed a Magic claim
+        -- mages do not have. Second import from the same source to fail the name check,
+        -- which is the argument for the name column existing at all.
+    },
+    MONK = {
+        { id = 115450, types = { Magic = true, Poison = true, Disease = true } },-- Detox (Mistweaver)
+        -- ✅ 2026-08-26, confirmed from the talent tooltip itself: SpellID 218164,
+        -- "Removes all Poison and Disease effects", Rank 0/1 — a talent NOT in the default
+        -- loadout. So a monk who has not taken it genuinely cannot dispel, and reading
+        -- unknown here is the right answer rather than a missing capability.
+        -- ★ Another non-override talent that tracks correctly as a BASE entry, like the
+        -- mage's Remove Curse — the spellbook probe returned false untalented. See the note
+        -- on the talent flag above.
+        { id = 218164, types = { Poison = true, Disease = true } },              -- Detox (Brewmaster/Windwalker)
+        -- ⚠ Poison/Disease, NOT Magic. My first pass had this one exactly backwards.
+        { id = 388874, types = { Poison = true, Disease = true }, talent = true },-- Improved Detox
+    },
+    PALADIN = {
+        { id = 4987,   types = { Magic = true, Poison = true, Disease = true } },-- Cleanse (Holy)
+        -- ☠ 1152 "Purify" WAS HERE AND IS NOT A RETAIL SPELL. LibDispel probes it without a
+        -- retail guard, so it came across when I said the classic branches were dropped —
+        -- they were, except the ones the peer does not label. It showed as
+        -- "(name unavailable)" in the very first paladin dump, which is precisely the check
+        -- the name column exists for. ⚠ Cross-checking a peer is not the same as inheriting
+        -- its era assumptions: verify each ID RESOLVES, not just that someone else uses it.
+        { id = 213644, types = { Poison = true, Disease = true } },              -- Cleanse Toxins
+    },
+    PRIEST = {
+        { id = 527,    types = { Magic = true } },                               -- Purify (Disc/Holy)
+        { id = 32375,  types = { Magic = true } },                               -- Mass Dispel
+        { id = 213634, types = { Disease = true } },                             -- Purify Disease (Shadow)
+        -- ★ THE REPORTED CASE. ✅ Confirmed both directions in game, 2026-08-26.
+        { id = 390632, types = { Disease = true }, talent = true },              -- Improved Purify
+    },
+    SHAMAN = {
+        { id = 77130,  types = { Magic = true, Curse = true } },                 -- Purify Spirit (Resto)
+        { id = 51886,  types = { Curse = true } },                               -- Cleanse Spirit
+        -- ✅ Confirmed both directions in game, 2026-08-26 (Krathe).
+        { id = 383013, types = { Poison = true }, talent = true },                -- Poison Cleansing Totem
+    },
+    WARLOCK = {
+        -- ☠ A PET SPELL, and the only one here that is. Singe Magic belongs to the Imp, so
+        -- the probe must ask the PET spellbook rather than the player's. Both peers also
+        -- re-check it on UNIT_PET, which is why that event joins the capability watcher.
+        -- ✅ 2026-08-26, verified BOTH ways: unknown with no Imp out, known with one
+        -- summoned. That is the only live proof the PET bank resolves at all — nothing else
+        -- in this table takes that branch, so a broken Enum.SpellBookSpellBank.Pet would
+        -- have shown up as "?" here and nowhere else.
+        { id = 89808,  types = { Magic = true }, pet = true },                   -- Singe Magic (Imp)
+    },
+}
+
+-- Races whose racial clears a type no class spell covers. ✅ Dwarf/Bleed verified in game.
+-- ☠ SELF ONLY — a racial cleanses its own caster. See GetEngineDispelFlagGaps.
+local RACIAL_DISPEL = {
+    Dwarf = { Bleed = true },   -- Stoneform
+}
+
+-- ⚠ Same three-outcome contract as the totem probe: nil means "could not tell", which is
+-- NOT the same as false. A capability probe that cannot run must say so.
+-- ☠☠ TWO PROBES, AND WHICH ONE IS RIGHT DEPENDS ON THE ENTRY.
+--   talent entries -> IsSpellKnown. IsSpellInSpellBook returns TRUE FOR UNKNOWN TALENTS by
+--     Blizzard's own doc, which is the over-report that showed poison for every shaman.
+--   base entries   -> IsSpellInSpellBook with includeOverrides. A base spell replaced by an
+--     upgraded version is still usable, and only the spellbook probe follows that chain;
+--     IsSpellKnown on the superseded ID can answer false and lose the capability.
+-- ⚠ Using one call for both is wrong in one direction or the other, which is why the peers
+-- split it exactly here too. I had it as IsSpellKnown for everything and would have started
+-- losing overridden base spells.
+local function PlayerKnowsSpell(id, isTalent, isPet)
+    local sb, en = C_SpellBook, Enum and Enum.SpellBookSpellBank
+    if not (sb and en) then return nil end
+    local bank = isPet and en.Pet or en.Player
+    if not bank then return nil end
+    if isTalent then
+        if sb.IsSpellKnown then return sb.IsSpellKnown(id, bank) and true or false end
+        -- No safe fallback for a talent: the spellbook probe would answer yes for one the
+        -- player does not have, recreating the exact bug this exists to remove. Say
+        -- "cannot tell" rather than guess.
+        return nil
+    end
+    if sb.IsSpellInSpellBook then
+        return sb.IsSpellInSpellBook(id, bank, true) and true or false
+    end
+    if sb.IsSpellKnown then return sb.IsSpellKnown(id, bank) and true or false end
+    return nil
+end
+
+-- What can this player actually dispel, right now? Returns a type map plus a per-type note
+-- of which spell granted it, for the debug dump. Never cached — a talent edit changes the
+-- answer and a cached one would survive exactly that.
+function DF:GetPlayerDispelCapability()
+    local _, class = UnitClass("player")
+    local types, via = {}, {}
+    for _, entry in ipairs(DISPEL_SPELLS[class] or {}) do
+        if PlayerKnowsSpell(entry.id, entry.talent, entry.pet) == true then
+            for t in pairs(entry.types) do
+                if not types[t] then
+                    types[t] = true
+                    via[t] = entry.id
+                end
+            end
+        end
+    end
+    local _, race = UnitRace("player")
+    local racial = race and RACIAL_DISPEL[race]
+    return types, via, racial
+end
+
+-- Types this character demonstrably CANNOT cleanse, for subtracting from the engine's
+-- answer. Returns nil when we should not act at all.
+--
+-- ★ CORRECT THE ENGINE, DO NOT REPLACE IT — Krathe's call, and the failure modes are the
+-- argument. Driving the overlay purely from our own table would fail CLOSED: one wrong
+-- spell ID, or a class nobody has curated, and that type silently stops showing at all.
+-- Subtracting from the engine's answer fails OPEN — the worst a mistake does is show a
+-- type you cannot actually cleanse, which is exactly what the overlay does today and is
+-- plainly better than a healer not seeing a debuff they CAN cure.
+--
+-- ☠☠ THE FAIL-OPEN IS NOT AUTOMATIC, IT IS THIS PRECONDITION. If NOTHING in the class list
+-- probed true, the table is not working for this character — bad IDs, an uncurated class,
+-- a spellbook that has not populated yet — and its negatives are worth nothing, so we
+-- subtract nothing and leave the engine's answer alone. Only once at least one spell has
+-- proven the list functional HERE do we trust it to say what is missing.
+-- ⚠ Types the class list does not cover at all are never excluded either: silence is not
+-- evidence. A priest list carrying no Curse entry says nothing about curses.
+--
+-- ☠ THE PRECONDITION HAS A BLIND SPOT, AND THREE CLASSES LIVE ENTIRELY INSIDE IT.
+-- HUNTER, WARLOCK and MAGE each have exactly one usable entry, and none of it is a
+-- baseline always-known spell (talent salve / Imp pet spell / spec-tracked Remove
+-- Curse). For them "the list proved functional" and "the capability is missing" can
+-- NEVER separate: an untalented hunter probes empty, which reads identical to "the
+-- table is broken here", so the bail above kept the engine's over-report forever for
+-- exactly the players the subtraction exists for. For those classes an empty probe is
+-- allowed to act, but only once it is shown to be a real answer and not an API failure:
+--   (a) at least one probe answered a definitive false — PlayerKnowsSpell ran and said
+--       no, rather than nil ("could not tell"); and
+--   (b) at least one spell ID in the table is known to the game (C_Spell.GetSpellName
+--       resolves) — the bad-ID failure mode the name column exists to catch.
+-- Classes with a baseline dispel keep the strict bail: their empty probe still means
+-- "spellbook not populated / table broken", never "genuinely dispels nothing".
+local NO_BASELINE_DISPEL_CLASS = { HUNTER = true, WARLOCK = true, MAGE = true }
+
+function DF:GetDispelTypesToExclude()
+    local _, class = UnitClass("player")
+    local entries = DISPEL_SPELLS[class]
+    if not entries then return nil end          -- uncurated class: not our place to say
+
+    local types = DF:GetPlayerDispelCapability()
+    if next(types) == nil then
+        -- the list proved nothing here; for a class with a baseline spell, do not act
+        if not NO_BASELINE_DISPEL_CLASS[class] then return nil end
+        -- Gated-only class: separate "the player genuinely lacks every capability
+        -- spell" from "the probe could not run" — see the header note.
+        local probeRan, idResolves = false, false
+        for _, e in ipairs(entries) do
+            if PlayerKnowsSpell(e.id, e.talent, e.pet) == false then probeRan = true end
+            if C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id) then idResolves = true end
+        end
+        if not (probeRan and idResolves) then return nil end
+        -- Fall through: types is empty, so every covered type below is excluded —
+        -- the genuine "this character dispels nothing" answer.
+    end
+
+    -- Every type this class can cleanse in principle, per the table above. Covered-but-not-
+    -- known is what gets SUBTRACTED, so this set is the whole claim the correction rests on
+    -- -- which is why the table is cross-checked against the peers rather than remembered.
+    local covered = {}
+    for _, e in ipairs(entries) do
+        for t in pairs(e.types) do covered[t] = true end
+    end
+
+    local exclude
+    for t in pairs(covered) do
+        if not types[t] then
+            exclude = exclude or {}
+            exclude[t] = true
+        end
+    end
+    return exclude
+end
+
+-- ☠ THE VALIDATION TOOL FOR THE TABLE ABOVE, and the reason it is safe to ship a table of
+-- unverified spell IDs at all. Every ID is a claim about a class the author may not have
+-- played; this prints the claim and the evidence side by side so a wrong one is visible on
+-- the character that disproves it, rather than silently mis-rendering that class's overlay.
+-- ⚠ Read the PROBE column: "known" means C_SpellBook.IsSpellKnown said yes, "unknown" means
+-- it said no, and "?" means it could not answer — which for a talent entry is deliberate
+-- (the spellbook fallback over-reports talents, so it is refused rather than guessed).
+-- ☠ DECLARED HERE, BELOW ITS DATA, NOT BESIDE THE OTHER DEBUG DUMPS. The first cut sat
+-- above DISPEL_SPELLS and PlayerKnowsSpell, so both compiled as nil GLOBALS — legal Lua
+-- that parses clean and dies at the call. The `_ENV` globals diff is what caught it; it is
+-- the second time this file has done it to me in one session.
+function DF:DebugDispelCapability()
+    local _, class = UnitClass("player")
+    local _, race = UnitRace("player")
+    local o = DF:Out("Dispel Capability", (class or "?") .. " / " .. (race or "?"))
+
+    local entries = DISPEL_SPELLS[class]
+    o:Section("Spells probed")
+    if not entries then
+        o:Line("No dispel spells are curated for this class — it is treated as dispelling "
+            .. "nothing. If that is wrong, the class is missing from DISPEL_SPELLS.", "WARN")
+    else
+        for _, e in ipairs(entries) do
+            local known = PlayerKnowsSpell(e.id, e.talent, e.pet)
+            local list = {}
+            for t in pairs(e.types) do list[#list + 1] = t end
+            table.sort(list)
+            local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(e.id)
+            o:Line(string.format("%-7d %-24s %-8s %-22s%s%s",
+                e.id, tostring(name or "(name unavailable)"),
+                known == true and "known" or (known == false and "unknown" or "?"),
+                table.concat(list, "/"),
+                e.talent and " [talent]" or "",
+                e.pet and " [pet]" or ""),
+                known == true and "GOOD" or nil)
+        end
+    end
+
+    local types, via, racial = DF:GetPlayerDispelCapability()
+    o:Section("Conclusion — what DF thinks you can cleanse")
+    local any = false
+    for _, t in ipairs({ "Magic", "Curse", "Disease", "Poison", "Bleed" }) do
+        local from = via[t]
+        local racialFrom = racial and racial[t]
+        if types[t] or racialFrom then
+            any = true
+            o:Line(string.format("%-8s yes   %s", t,
+                from and ("via spell " .. from) or (racialFrom and ("via the " .. tostring(race)
+                    .. " racial — SELF ONLY") or "")), "GOOD")
+        else
+            o:Line(string.format("%-8s no", t))
+        end
+    end
+    if not any then
+        o:Line("Nothing — 'Only Dispellable by You' should show an empty overlay.", "WARN")
+    end
+
+    -- ★ THE CONSEQUENCE, not just the conclusion. Capability alone does not tell you what
+    -- the overlay will DO — only the subtraction does, and the subtraction is the half that
+    -- can regress someone. Printing it is what makes this dump a safety check rather than
+    -- a curiosity.
+    o:Section("Effect on 'Only Dispellable by You'")
+    local exclude = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+    if not exclude then
+        o:Line("Nothing subtracted — the engine's answer stands unchanged.")
+        o:Line("Either this class is not in the table, nothing it can cleanse in principle "
+            .. "is missing, or no spell probed known at all — that last one leaves the "
+            .. "engine alone on purpose.", "NEUTRAL")
+    else
+        local list = {}
+        for t in pairs(exclude) do list[#list + 1] = t end
+        table.sort(list)
+        o:Line("Subtracting: " .. table.concat(list, ", "), "GOOD")
+        o:Line("These are types this class CAN cleanse in principle, that you cannot right "
+            .. "now. If any of them is wrong, a dispel you have is being hidden — that is "
+            .. "the one failure worth reporting immediately.", "WARN")
+    end
+
+    o:Section("Cross-check")
+    o:Line("Compare the yes/no column against the character in front of you. A row that "
+        .. "disagrees means that entry's spell ID or its talent gating is wrong, not that "
+        .. "the feature is broken.", "NEUTRAL")
+    o:Line("⚠ The check that matters is the NAME column: if a row resolves to a spell that "
+        .. "is not the one the comment claims, that ID is wrong and its types are being "
+        .. "attributed to the wrong ability.", "NEUTRAL")
+end
+
 local ENGINE_GAP_POISON = { Poison = true }
 -- ★ THE RACIAL GAP. RAID_PLAYER_DISPELLABLE knows class and spec dispels, and NOTHING a
 -- class learns removes a Bleed -- only the Dwarf racial, Stoneform. So without this, "Only
@@ -208,6 +556,25 @@ local function KnowsPoisonCleansingTotem()
     local sb = C_SpellBook
     local bank = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
     if sb and bank then
+        -- ☠☠ IsSpellKnown, NOT IsSpellInSpellBook. THE TWO ANSWER DIFFERENT QUESTIONS and
+        -- we shipped the wrong one — Blizzard's own documentation says so outright:
+        --   IsSpellInSpellBook — "Returns true if a spell should be found in the spellbook.
+        --     This function CAN ALSO RETURN TRUE FOR SPELLS THAT AREN'T KNOWN, such as
+        --     override spells granted by an aura linked to CLASS TALENTS."
+        --   IsSpellKnown      — "Returns true if a player KNOWS a spell."
+        -- Poison Cleansing Totem is precisely a talent-linked entry, so the spellbook probe
+        -- answered true for every shaman alive and the poison gap slot was added whether or
+        -- not the totem was talented. Field-reported: "it's still showing when they don't
+        -- have the totem talent. It's a half fix." (Krathe, 2026-08-26.)
+        -- ⚠ A capability probe must ask about the CAPABILITY. "Would this appear in the
+        -- spellbook UI" is a rendering question and was never the right one.
+        if sb.IsSpellKnown then
+            return sb.IsSpellKnown(POISON_CLEANSING_TOTEM, bank) and true or false
+        end
+        -- ⚠ LAST RESORT, AND IT OVER-REPORTS — see above. Kept only so a build without
+        -- IsSpellKnown still repairs the gap for the shamans who DO have the totem, at the
+        -- cost of also repairing it for those who do not. Better than the feature being
+        -- silently dead, worse than being right.
         if sb.IsSpellInSpellBook then
             return sb.IsSpellInSpellBook(POISON_CLEANSING_TOTEM, bank, true) and true or false
         end
@@ -245,6 +612,70 @@ function DF:GetEngineDispelFlagGaps(selfOnly)
     if poison then return ENGINE_GAP_POISON end
     if bleed then return ENGINE_GAP_BLEED end
     return nil
+end
+
+-- ☠☠ A TALENT EDIT DOES NOT FIRE A SPEC EVENT, AND THE SPELLBOOK GRANT LANDS LATE.
+-- PLAYER_TALENT_UPDATE is not the signal: talent edits do not necessarily raise it, and
+-- even when something does fire, the spell is not KNOWN yet when we probe — the grant
+-- arrives with SPELLS_CHANGED afterwards. Net effect, field-reported: untalenting the
+-- totem removed the poison gap (the spell goes away promptly) while re-talenting it never
+-- brought it back, because the only re-plan happened before the spellbook caught up and
+-- nothing re-asked afterwards. One-way, which is the same shape as every other missing
+-- trigger this week: the state has an edge, and only one side of it had a listener.
+--
+-- ⚠ Both events, for the two different lags — the trait config landing, and the spellbook
+-- grant that follows it. EllesmereUI reached the same pair from the same bug and says so
+-- in its own note; the reasoning is theirs and it holds here.
+--
+-- ★ FLIP-GATED. SPELLS_CHANGED fires constantly (every login, every book open, every
+-- temporary grant), so the version is bumped only when the CAPABILITY actually changes.
+-- The cache here exists solely to detect that flip — the probe itself stays uncached, so
+-- every real read is still live. Shamans only: nobody else can hold this talent, so no
+-- other class pays an event registration for it.
+-- ⚠ ANY DISPEL-CAPABLE CLASS, not just shamans. The first cut watched SHAMAN alone because
+-- the totem was the only known case; a priest's disease cure is talent-gated the same way
+-- and would have sat stale until a reload. The predicate is "does this class have a
+-- curated dispel list", which is the same set the capability table can answer for.
+do
+    local _, playerClass = UnitClass("player")
+    if DISPEL_SPELLS[playerClass] then
+        -- ☠ COMPARE THE RESULT, NOT THE INPUT. The first cut serialised the raw
+        -- capability set and invalidated on any flip — but the layout consumes
+        -- GetDispelTypesToExclude, not the capability itself, and the two do not move
+        -- together: a warlock's sig flips on every Imp death/sacrifice/swap mid-combat,
+        -- and for most of those flips the derived exclusion is identical before and
+        -- after. Re-planning every row for a no-op answer is pure cost, so the watcher
+        -- hashes what the layout actually reads and fires only when THAT moves.
+        local function exclusionSig()
+            local ex = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+            if not ex then return "-" end
+            local list = {}
+            for t in pairs(ex) do list[#list + 1] = t end
+            table.sort(list)
+            return table.concat(list, ",")
+        end
+        -- Seeded at creation, not nil (the poolBaseline pattern): the first
+        -- SPELLS_CHANGED after login always fires, and comparing it against a nil seed
+        -- forced a full invalidate on every fresh session for a state that had not
+        -- changed at all.
+        local lastKnown = exclusionSig()
+        local capWatcher = CreateFrame("Frame")
+        capWatcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+        capWatcher:RegisterEvent("SPELLS_CHANGED")
+        -- ⚠ Warlock's only dispel is the Imp's, so summoning or swapping a pet changes what
+        -- the player can cleanse without any talent or spellbook event firing. Both peers
+        -- re-check on this event for the same reason.
+        capWatcher:RegisterUnitEvent("UNIT_PET", "player")
+        capWatcher:SetScript("OnEvent", function()
+            local now = exclusionSig()
+            if now == lastKnown then return end
+            local before = lastKnown
+            lastKnown = now
+            DF:Debug("DISPEL", "dispel exclusion changed: [%s] -> [%s] (re-planning)",
+                tostring(before), now)
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        end)
+    end
 end
 
 -- Build the debuff filter records (native 12.1 category filters).
@@ -350,8 +781,21 @@ local function BuildDirectDebuffFilters(db, claimed)
             if claimed.dispellable then
                 -- Mirrors the category-mode split: the token when the build has
                 -- it, else the dispel-type map (same semantics, no token).
-                if AuraFilters.Dispellable then
-                    filterStr = filterStr .. "|!" .. AuraFilters.Dispellable
+                --
+                -- ☠ MODE-MATCHED TOKEN (2026-08-30). This used to negate
+                -- DISPELLABLE unconditionally, which is only correct when the
+                -- claiming group actually shows the whole superset. A PLAYER-mode
+                -- group ("only dispellable by you") shows a strict SUBSET of it, so
+                -- negating the superset deleted every dispellable-by-SOMEONE-ELSE
+                -- debuff from the row while no group displayed it — the aura showed
+                -- NOWHERE. Show All is the default mode, so that hole was open on
+                -- ordinary setups. claimed.dispellableAll is set only when a
+                -- claiming group runs ALL/ANY; otherwise subtract the by-me token,
+                -- which is exactly the set the group renders.
+                local claimTok = claimed.dispellableAll and AuraFilters.Dispellable
+                    or (AuraFilters.Raid or "RAID")
+                if claimTok then
+                    filterStr = filterStr .. "|!" .. claimTok
                 else
                     need().excludeDispelTypes = DISPEL_TYPES
                 end
@@ -446,7 +890,19 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- CC needs its Blizzard token; skip the group entirely if unavailable
     local ccToken = db.debuffFilterCrowdControl and AuraFilters.CrowdControl or nil
     local raidOn = db.debuffFilterRaid
-    local dispelToken = AuraFilters.RaidPlayerDispellable or "RAID_PLAYER_DISPELLABLE"
+    -- ☠ By-me rides "RAID" — "harmful auras the player can dispel" per Blizzard's own
+    -- token table. It shipped on RaidPlayerDispellable, which despite our "observed
+    -- player-scoped" note is documented AND field-confirmed raid-scoped: a priest in a
+    -- raid with poison-dispellers had poison lit as dispellable-by-me (2026-08-27, the
+    -- overlay's twin of this record — see Features/Dispel.lua for the full account).
+    -- The solo observations that justified the old token are the one setting where the
+    -- two tokens are indistinguishable.
+    -- ⚠ This makes the by-me dispel record and the "raid" category record (both
+    -- HARMFUL|RAID) the SAME SET by construction. That is not new overlap: player-
+    -- dispellable was already a subset of raid-dispellable, so the raid record was
+    -- already emptied by its dispel negation whenever both were on. neg() below just
+    -- avoids emitting the now-identical component twice.
+    local dispelToken = AuraFilters.Raid or "RAID"
     local maxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0 and (db.debuffMaxDurationMinutes or 0) * 60 or nil
     local keepImportant = db.debuffMaxDurationKeepImportant
 
@@ -463,8 +919,14 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- here is the dedup working, not a leak.
     local function neg(excludeDispel, excludeCC, excludeRaid)
         local s = ""
+        -- Tracks whether the dispel negation already emitted "!RAID" — since by-me's
+        -- token IS "RAID" now, emitting it again for excludeRaid would duplicate the
+        -- component in the filter string.
+        local negatedRaid = false
         if excludeDispel then
-            if playerMode then s = s .. "|!" .. dispelToken
+            if playerMode then
+                s = s .. "|!" .. dispelToken
+                negatedRaid = (dispelToken == "RAID")
             elseif dispelTypeToken then s = s .. "|!" .. dispelTypeToken end
         end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
@@ -484,7 +946,7 @@ local function BuildDirectDebuffFilters(db, claimed)
         -- direction without a capture: /dfauras now prints the per-group counts
         -- (raid=N nonplayer=N) beside the player's dead state, and running it once alive
         -- and once dead on the same unit distinguishes the two outright.
-        if excludeRaid and raidOn then s = s .. "|!RAID" end
+        if excludeRaid and raidOn and not negatedRaid then s = s .. "|!RAID" end
         return s
     end
     -- candidateFilters for one record. Hands each record its OWN table (extra
@@ -498,6 +960,98 @@ local function BuildDirectDebuffFilters(db, claimed)
         if maxDur and not (important and keepImportant) then cf.maxDuration = maxDur end
         if next(cf) == nil then return nil end
         return cf
+    end
+
+    -- ★★ CLAIM SUBTRACTION — the OTHER half of the row/Aura-Designer dedup, and the
+    -- half that was missing (2026-08-30).
+    --
+    -- Dropping a claimed category's RECORD is only half the job. The row's SURVIVING
+    -- records still match auras the AD group displays whenever the ROW does not
+    -- itself enable that category, because every exclusion neg() emits is keyed on
+    -- the row's OWN flag (dispelOn / ccToken / raidOn) — a category the row never
+    -- ticked contributes no negation at all, so there is nothing to "keep".
+    -- ☠ Field shape: row = boss + role + raid, group = dispels + CC + priority, with
+    -- Hide Duplicate Debuffs ON. A boss debuff that is also dispellable rendered in
+    -- the row's bossrole record AND in the group's dispel record; a raid-flagged CC
+    -- rendered in the row's raid record AND the group's cc record (Jânine, live
+    -- 5.3.1). Nothing about the toggle was broken — it only ever covered the case
+    -- where BOTH sides ticked the same category.
+    -- ⚠ ALL mode has always done this (its claim block builds these very
+    -- subtractions into the blanket cf); category mode is being brought into line,
+    -- so the two modes finally dedup the same way.
+    -- ⚠ ACCEPTED, unchanged from the record-drop that shipped before it: a claiming
+    -- group with Hide Long Debuffs on displays only the SHORT half of its category,
+    -- but claims all of it — so a long one is now subtracted from the row too. The
+    -- record-drop already had this hole; widening the subtraction widens the hole
+    -- rather than opening a new one. Fix it at the CLAIM if it bites.
+    local claimNegStr, claimNegCF
+    if claimed then
+        local s = ""
+        local function needCF() claimNegCF = claimNegCF or {}; return claimNegCF end
+        if claimed.dispellable then
+            -- Mode-matched, exactly as the ALL-mode block above: negate the by-me
+            -- token unless a claiming group runs ALL/ANY and therefore renders the
+            -- whole DISPELLABLE superset.
+            local t = claimed.dispellableAll and AuraFilters.Dispellable or dispelToken
+            if t then s = s .. "|!" .. t end
+        end
+        if claimed.crowdControl and AuraFilters.CrowdControl then
+            s = s .. "|!" .. AuraFilters.CrowdControl
+        end
+        if claimed.raid then s = s .. "|!RAID" end
+        -- Boolean categories invert through candidateFilters (the group ANDs them).
+        -- Boss/role narrowing on the row's OWN important record is already handled by
+        -- effBoss/effRole below; these cover every OTHER record, where a claimed
+        -- boss/role/priority aura would otherwise ride in on a token record.
+        if claimed.boss and claimed.role then needCF().isBossOrRoleAura = false
+        elseif claimed.boss then needCF().isBossAura = false
+        elseif claimed.role then needCF().isRoleAura = false end
+        if claimed.priority then needCF().isPriorityAura = false end
+        if s ~= "" then claimNegStr = s end
+    end
+
+    local function filterHasComponent(filter, component)
+        for own in filter:gmatch("[^|]+") do
+            if own == component then return true end
+        end
+        return false
+    end
+
+    -- Apply the claim subtraction to ONE record, skipping any token the record
+    -- already asserts POSITIVELY.
+    -- ☠☠ THE SKIP IS NOT AN OPTIMISATION — it is the whole safety of this pass.
+    -- By-me dispel rides the "RAID" token (see the dispelToken note above), so the
+    -- dispel record's own string is "HARMFUL|RAID". A raid claim would append
+    -- "|!RAID" to it and the record would then match NOTHING — the row would lose
+    -- every dispellable debuff rather than one duplicate.
+    -- ⚠ RESIDUAL, deliberately left: that same token identity means a PLAYER-mode
+    -- dispel claim cannot be subtracted from the row's own raid record either (it
+    -- includes RAID positively), so a by-me-dispellable raid debuff still renders
+    -- twice in that one pairing. Emptying the record is strictly worse than the
+    -- duplicate, and there is no third token that separates them.
+    local function applyClaimSubtraction(rec)
+        if claimNegStr then
+            local add = ""
+            for component in claimNegStr:gmatch("[^|]+") do
+                -- Two skips, not one: the positive form (appending "!RAID" to a record
+                -- that asserts RAID would empty it — the safety note above), AND the
+                -- negated form itself — a record whose own neg() already emitted "!RAID"
+                -- must not collect a second copy of the same component.
+                if not filterHasComponent(rec.filter, component:sub(2))
+                    and not filterHasComponent(rec.filter, component) then
+                    add = add .. "|" .. component
+                end
+            end
+            if add ~= "" then rec.filter = rec.filter .. add end
+        end
+        if claimNegCF then
+            local cf = rec.candidateFilters
+            if not cf then cf = {}; rec.candidateFilters = cf end
+            -- Never overwrite a positive assertion the record made about itself.
+            for k, v in pairs(claimNegCF) do
+                if cf[k] == nil then cf[k] = v end
+            end
+        end
     end
 
     -- CATEGORY mode: the boss/role and priority records below already exist and are
@@ -554,13 +1108,84 @@ local function BuildDirectDebuffFilters(db, claimed)
                                   key = "cc", candidateFilters = cfFor(false, notImportant()) }
     end
     if raidOn and not (claimed and claimed.raid) then
-        filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true),
-                                  key = "raid", candidateFilters = cfFor(false, notImportant()) }
-    end
-    if dispelOn and not (claimed and claimed.dispellable) then
+        -- ☠ NO SELF-CONTRADICTING STRING, EVER. This record's base is the positive RAID
+        -- token, and in playerMode the dispel negation neg() emits is "|!RAID" — the SAME
+        -- token — so neg(true, ...) here would build "HARMFUL|RAID|!RAID", a record that
+        -- matches nothing. That is not dedup, it is deletion: with the by-me dispel record
+        -- excluding the types the player cannot actually cleanse (excludeDispelTypes),
+        -- the engine-flagged-but-uncleansable raid debuffs would render NOWHERE in the row.
+        -- In playerMode the by-me dispel record and this record share the identical base
+        -- set (both HARMFUL|RAID), so exclusivity has to run through candidateFilters, not
+        -- the token string:
+        --   * dispel record = HARMFUL|RAID minus cantCleanse types (its own exclude);
+        --   * this record   = HARMFUL|RAID restricted TO cantCleanse types — the exact
+        --     complement, so together they tile the set with no double-render.
+        --   * no cantCleanse exclusions -> the dispel record already IS this whole set, so
+        --     the record is skipped outright (every raid-flagged debuff still renders,
+        --     just via the dispel record).
+        --   * dispel absent from the ROW (off, or covered by an AD claim) -> nothing to
+        --     dedup against here: keep the plain record. For the claim case this is a
+        --     documented, accepted double-render — same residual as the one recorded at
+        --     applyClaimSubtraction, and for the same reason: emptying the record is
+        --     strictly worse than the duplicate, and no third token separates the sets.
         if playerMode then
+            local rowHasDispelRecord = not (claimed and claimed.dispellable
+                and (playerMode or claimed.dispellableAll))
+            if rowHasDispelRecord then
+                local cantCleanse = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+                if cantCleanse then
+                    filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(false, true),
+                                              key = "raid",
+                                              candidateFilters = cfFor(false, notImportant({ includeDispelTypes = cantCleanse })) }
+                end
+            else
+                filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(false, true),
+                                          key = "raid", candidateFilters = cfFor(false, notImportant()) }
+            end
+        else
+            filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true),
+                                      key = "raid", candidateFilters = cfFor(false, notImportant()) }
+        end
+    end
+    -- ★★ DROP ONLY WHEN THE CLAIM COVERS THE ROW (2026-08-30). A dispellable claim
+    -- used to drop this record whatever mode either side ran — the "simplest rule"
+    -- the claim builder still documents. It is wrong in exactly one direction:
+    --   row ALL + group PLAYER -> the group renders only what YOU can dispel, so
+    --   dropping the row's record deleted every dispellable-by-someone-ELSE debuff
+    --   from the display entirely. Not a duplicate — a disappearance.
+    -- Blizzard's own token table is the authority here (Blizzard_FrameXMLUtil/
+    -- AuraUtil.lua, AuraUtil.AuraFilters):
+    --   RAID        = "harmful auras the player can dispel"          <- by-me, a SUBSET
+    --   DISPELLABLE = "dispellable, REGARDLESS of whether the        <- the superset
+    --                  player's raid can dispel them"
+    -- so RAID ⊂ DISPELLABLE and the two are not interchangeable.
+    -- ⚠ NARROWING IS NOT DONE HERE. Keeping the record is the whole edit: the claim
+    -- subtraction pass at the end of this function appends the by-me negation to it
+    -- (claimNegStr is "|!RAID" for a PLAYER-mode claim, and this record's own string
+    -- is "HARMFUL|DISPELLABLE", so the self-collision skip lets it through). The
+    -- result is "dispellable, but not by me" — the exact complement of the group.
+    -- Every other pairing still drops, because the group's set then covers the row's:
+    --   row ALL + group ALL -> same set; row PLAYER + group either -> group ⊇ row.
+    local dispelClaimed = claimed and claimed.dispellable
+    local dispelCovered = dispelClaimed and (playerMode or claimed.dispellableAll)
+    if dispelOn and not dispelCovered then
+        if playerMode then
+            -- ☠ SAME TALENT OVER-REPORT AS THE OVERLAY, SAME SUBTRACTION. This record and
+            -- the overlay's main slot ride the identical engine flag, so a priest without
+            -- Improved Purify saw disease here too. Fixing only the overlay would have been
+            -- worse than fixing neither: the two displays would disagree about the same
+            -- debuff on the same frame, which reads as a rendering fault rather than a
+            -- capability one.
+            -- ⚠ ALL mode is deliberately untouched — it rides DISPELLABLE, which is
+            -- capability-independent by Blizzard's own definition and correctly shows
+            -- everything dispellable by anyone.
+            -- ✅ The row's tuning signature already serialises excludeDispelTypes (cfSig,
+            -- per record via filterTuningSig), so this moves the sig and re-tunes in place.
+            local dispelCF = notImportant()
+            local cantCleanse = DF.GetDispelTypesToExclude and DF:GetDispelTypesToExclude()
+            if cantCleanse then dispelCF.excludeDispelTypes = cantCleanse end
             filters[#filters + 1] = { filter = "HARMFUL|" .. dispelToken,
-                                      key = "dispel", candidateFilters = cfFor(false, notImportant()) }
+                                      key = "dispel", candidateFilters = cfFor(false, dispelCF) }
             -- ★ ENGINE-FLAG GAP REPAIR (Shaman poison via totem -- see
             -- DF:GetEngineDispelFlagGaps above for the whole story). A sibling
             -- record for the types the flag misses: negates the flag token so it
@@ -570,7 +1195,10 @@ local function BuildDirectDebuffFilters(db, claimed)
             -- excludes these types while a gap is active), so the include here
             -- and the exclude there are exact complements.
             if dispelGap then
-                filters[#filters + 1] = { filter = "HARMFUL|!" .. dispelToken .. neg(false, true, true),
+                -- excludeRaid dropped from the neg() call: the record's own base already
+                -- negates the token, and the token IS "RAID" now — the raid-precedence
+                -- exclusion the old excludeRaid=true bought is the base negation itself.
+                filters[#filters + 1] = { filter = "HARMFUL|!" .. dispelToken .. neg(false, true, false),
                                           key = "dispelgap",
                                           candidateFilters = cfFor(false, notImportant({ includeDispelTypes = dispelGap })) }
             end
@@ -627,6 +1255,14 @@ local function BuildDirectDebuffFilters(db, claimed)
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "nonplayer",
                                   candidateFilters = cfFor(false, npCf) }
     end
+    -- Subtract everything the Aura Designer groups claim from every record that
+    -- survived the drop above. Runs LAST so each record's own tokens are already in
+    -- place for the self-collision skip, and before the empty-list check so a record
+    -- is never both dropped and subtracted.
+    if claimNegStr or claimNegCF then
+        for i = 1, #filters do applyClaimSubtraction(filters[i]) end
+    end
+
     if #filters == 0 then
         -- Claims emptied a NON-empty selection: EMPTY array = render nothing
         -- (DriveDebuffFactory intercepts — see the header comment).
@@ -643,10 +1279,18 @@ end
 -- category groups (C1). The AD factory builds a facade db table from a group's
 -- selection (directDebuffShowAll=false + the flat debuffFilter*/debuffMaxDuration*
 -- keys) and calls this — the records come out byte-identical to a row configured
--- the same way. The AD path must NEVER pass `claimed` (claims derive FROM the AD
--- groups; feeding them back would be circular — row → claims → AD groups → this
--- facade, claim-free, is the whole chain). `claimed` exists for the ROW call
--- sites in DriveDebuffFactory only.
+-- the same way.
+-- `claimed` serves TWO callers now (2026-08-29): the ROW call sites in
+-- DriveDebuffFactory (the full union from GetClaimedDebuffCategories, as always),
+-- and the AD dgroup sync's ORDERED fold — each group receives the categories of
+-- the enabled groups ABOVE it, so overlapping groups no longer repeat a debuff
+-- once per group. The old "the AD path must NEVER pass claimed" rule was about
+-- feeding the row's own derived set back in (circular); the ordered fold is not
+-- circular and reuses these exact drop-record/keep-negation semantics.
+-- ⚠ The facade db carries no debuffDeduplicateDesigner key, so the toggle guard
+-- at the top of BuildDirectDebuffFilters cannot fire for AD calls — the dgroup
+-- sync gates on its OWN preset-level toggle (adDB.debuffGroupDedup) before
+-- passing claimed; the two dedup paths are deliberately independent switches.
 function DF:BuildDebuffFilterRecords(dbLike, claimed)
     return BuildDirectDebuffFilters(dbLike, claimed)
 end
@@ -2028,6 +2672,12 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- friendly frames (the assist/attack gate).
     local candidateFilters
     if prefix == "buff" then
+        -- ("Only My Buffs" needs no candidate filter here. The PLAYER token it rides was
+        -- caught failing open on 2026-08-29, and the second lock that fixes it —
+        -- isFromPlayerOrPlayerPet — is applied for EVERY consumer at the one place a
+        -- record's filter string and candidate filters meet: recordCandidateFilters in
+        -- Frames/AuraContainer.lua, which carries the whole account. This row had its own
+        -- copy for one commit; two mechanisms doing one job is how they drift apart.)
         -- Native max-TOTAL-duration filter (candidateFilters.maxDuration, seconds).
         -- Blizzard-side semantics: auras with duration > max OR duration == 0 are
         -- filtered — i.e. permanent auras are IMPLICITLY always hidden while this
@@ -2463,6 +3113,39 @@ local function rowTuningSig(cfg)
     }, "|")
 end
 
+-- ☠ CONFIRM THE RETARGET ACTUALLY RE-PARSED, AND SAY SO WHEN IT DID NOT.
+-- NativeBackend:setUnit already does a partition bounce out of combat, which is SUPPOSED to
+-- make the container drop the previous occupant's parse. Field evidence says it does not
+-- always land: a shaman's own Earth Shield stayed on a frame after "party3 -> party2", out
+-- of combat, with the log showing the three retargets and then nothing at all
+-- (2026-08-26 22:14). A buff nobody re-casts generates no UNIT_AURA on the new unit, so a
+-- missed re-parse has nothing to correct it and the icon sits there until a reload.
+--
+-- Handle:Refresh is the addon-callable re-parse and it RETURNS whether a genuine one
+-- happened, so this is a fix and an instrument at once: it forces the parse, and a "did NOT
+-- happen" line is the bounce having failed rather than an unexplained icon.
+-- ✅ Source-confirmed combat-safe (see the note on Handle:Refresh). No combat gate needed
+-- anyway — in combat the retarget itself defers to regen, so this cannot be reached there.
+-- ⚠ Cheap: the drives call this only on an ACTUAL unit change, never per pass.
+-- ⚠ Handle:Refresh never throws (it pcalls internally) and answers false BOTH for a
+-- failed bounce and for a backend that simply has not attached yet — a deferred
+-- backend has nothing to re-parse and will parse fresh when it attaches, so warning
+-- there was a false alarm. The warn is gated on the backend being present: only then
+-- is "false" a re-parse that should have happened and did not.
+local function confirmRetarget(h, label, unit)
+    if not (h and h.Refresh) then return end
+    local reparsed = h:Refresh()
+    if reparsed then
+        DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))
+    elseif h.backend then
+        DF:DebugWarn("AURAROW", "%s: retarget re-parse did NOT happen on %s - the row may "
+            .. "still be showing the previous occupant", label, tostring(unit))
+    else
+        DF:Debug("AURAROW", "%s: retarget re-parse deferred on %s (backend not attached yet)",
+            label, tostring(unit))
+    end
+end
+
 -- Drive the factory buff row for one frame. Creates the container lazily, hides the legacy
 -- icons (no double row), keeps it on the frame's unit, and applies setting changes. The
 -- container self-updates from UNIT_AURA, so there is no per-tick render here.
@@ -2507,6 +3190,7 @@ function DF:DriveBuffFactory(frame, db)
             InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfBuffFactoryHidden = InCombatLockdown() or nil
+        if not InCombatLockdown() then confirmRetarget(h, "buff", frame.unit) end
     elseif frame.dfBuffFactoryHidden and not InCombatLockdown() then
         DF:Debug("AURAROW", "buff: regen, unhiding row after deferred retarget")
         frame.dfBuffFactoryHidden = nil
@@ -2709,6 +3393,7 @@ function DF:DriveDebuffFactory(frame, db)
             InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfDebuffFactoryHidden = InCombatLockdown() or nil
+        if not InCombatLockdown() then confirmRetarget(h, "debuff", frame.unit) end
     elseif frame.dfDebuffFactoryHidden and not InCombatLockdown() then
         DF:Debug("AURAROW", "debuff: regen, unhiding row after deferred retarget")
         frame.dfDebuffFactoryHidden = nil
@@ -2779,13 +3464,11 @@ end
 -- UnitIsDeadOrGhost read at the point of use, which would be right only on whichever pass
 -- happened to follow the transition.
 --
--- ⚠ NOTHING ACTS ON THIS TODAY, ON PURPOSE, and that is not an oversight to tidy away.
--- The filter change that did act on it rested on an unverified reading of Blizzard's RAID
--- token and was reverted before it shipped — see neg() in BuildDirectDebuffFilters for
--- what is and is not known. The state stays because /dfauras prints it: a field report of
--- a debuff row misbehaving *only while the reporter is dead* needs the death edge stamped
--- on the dump, or every capture has to be taken twice to mean anything.
--- Give it a consumer again only once a log says which way the token actually moves.
+-- ⚠ NOTHING ACTS ON THIS TODAY, ON PURPOSE. The filter change that did (c46e4771) rested
+-- on an unverified reading of the RAID token and was reverted — see neg() in
+-- BuildDirectDebuffFilters. The state stays because the AURAROW overflow watch stamps it
+-- on every line, and "did this row break on the death edge" is the question a capture has
+-- to answer. Give it a consumer again only once a log says which way the token moves.
 function DF:SetPlayerDeadState(dead)
     dead = dead and true or false
     if DF.playerIsDead == dead then return end
@@ -3038,6 +3721,7 @@ function DF:DriveDefensiveFactory(frame, db)
             InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfDefFactoryHidden = InCombatLockdown() or nil
+        if not InCombatLockdown() then confirmRetarget(h, "defensive", frame.unit) end
     elseif frame.dfDefFactoryHidden and not InCombatLockdown() then
         DF:Debug("AURAROW", "defensive: regen, unhiding row after deferred retarget")
         frame.dfDefFactoryHidden = nil
@@ -4325,10 +5009,15 @@ end
 -- Render one container handle's live config. `h.config.filter` is the same
 -- value normalizeFilters() consumes, so this prints the groups Blizzard is
 -- actually being asked to build.
--- How many frames a group is CURRENTLY using, straight from the engine
--- (CustomAuraContainerSharedMixin:GetAuraGroupFrameCount -> the group's frame provider).
--- ★ This is the number the eye sees, and it is the one thing no amount of reading the
--- config can tell you: config.max is what each group is ALLOWED, this is what it TOOK.
+-- ☠ THE GROUP'S OWNED POOL SIZE, NOT ITS VISIBLE COUNT. GetAuraGroupFrameCount
+-- returns the frame provider's #ownedFrames (Blizzard_AuraContainerFrameProviders):
+-- batch-allocated at 10 per group inside AddAuraGroup, grown in steps of 10 when the
+-- pool runs dry, and NEVER shrunk — released buttons stay owned. It is plain-readable
+-- precisely because it leaks no presence. So a registered group reads 10 regardless of
+-- what is showing; the visible count is not observable from outside. What the number
+-- DOES carry is a session-latched high-water mark: pool > 10 proves that more than 10
+-- auras were simultaneously assigned to that ONE group at some point — for a gated
+-- (HELPFUL + spell-ID) group, the identity-gate fail-open flood.
 -- Blizzard models a non-existent group as an empty one, so an unknown key answers 0
 -- rather than throwing — safe to ask for every record including slot-mode ones.
 -- ⚠ pcall'd and secrecy-checked anyway: a count derived from a secret aura set could
@@ -4371,9 +5060,9 @@ local function dumpRow(o, label, h)
         tostring(sort and sort.direction or "Normal")))
     -- ☠ max IS PER GROUP, NOT PER ROW. Blizzard caps at AddAuraGroup/
     -- SetAuraGroupMaxFrameCount, so a row built from N filter records can render up to
-    -- N x max. The per-group counts below plus the TOTAL are the only way to see that
-    -- happening — and the only way to tell "one group overfilled" apart from "the same
-    -- aura landed in two groups", which look identical on screen.
+    -- N x max. The pool sizes below cannot count what is VISIBLE (see groupFrameCount's
+    -- header), but a pool above 10 names WHICH group once overflowed — that is the
+    -- per-group attribution the screen cannot give.
     -- The player's own dead state rides along because it changes what the ENGINE
     -- matches: "RAID" means "harmful auras the player can dispel", and the identity gate
     -- flips which candidate filters are applicable on harmful auras
@@ -4385,27 +5074,32 @@ local function dumpRow(o, label, h)
     local filter = cfg.filter
     if type(filter) == "string" then
         local n = groupFrameCount(h, "df1")
-        pr(o, "group 1: %s   showing=%s", filter, tostring(n))
+        pr(o, "group 1: %s   pool=%s", filter, tostring(n))
+        if type(n) == "number" and n > 10 then
+            o:Line(format("    pool %d > 10: this group once held more than 10 auras at"
+                .. " once (session high-water mark — survives any heal)", n), "BAD")
+        end
         return
     elseif type(filter) ~= "table" then
         pr(o, "filter: %s (unexpected type)", tostring(filter))
         return
     end
 
-    local total, counted = 0, true
+    local flooded = 0
     for i, f in ipairs(filter) do
         local str, key, cf
         if type(f) == "string" then str = f
         elseif type(f) == "table" then str, key, cf = f.filter, f.key, f.candidateFilters end
         -- Mirror the build's own key derivation (`rec.key or "df"..i`), or the count
         -- would be asked for a key the container never registered and answer 0.
-        -- `shown`, not `n`: the candidateFilters block below declares its own `n` for map
+        -- `pool`, not `n`: the candidateFilters block below declares its own `n` for map
         -- sizes, and two counts one nested inside the other is exactly how a dump starts
         -- reporting the wrong number.
-        local shown = groupFrameCount(h, key or ("df" .. i))
-        if type(shown) == "number" then total = total + shown else counted = false end
-        pr(o, "group %d%s: %s   showing=%s", i, key and (" [" .. tostring(key) .. "]") or "",
-            tostring(str), tostring(shown))
+        local pool = groupFrameCount(h, key or ("df" .. i))
+        local over = type(pool) == "number" and pool > 10
+        if over then flooded = flooded + 1 end
+        pr(o, "group %d%s: %s   pool=%s%s", i, key and (" [" .. tostring(key) .. "]") or "",
+            tostring(str), tostring(pool), over and "  << GREW PAST THE BATCH" or "")
         if cf then
             for _, ck in ipairs({ "isBossAura", "isRoleAura", "isBossOrRoleAura", "isPriorityAura",
                                   "isStealable", "canApplyAura", "isFromPlayerOrPlayerPet", "maxDuration" }) do
@@ -4422,22 +5116,131 @@ local function dumpRow(o, label, h)
         end
     end
 
-    -- THE LINE THIS WHOLE DUMP EXISTS FOR: what the row is allowed vs what it drew.
-    -- Flagged BAD when the total exceeds the setting, because that is the user-visible
-    -- claim ("Max Debuffs 3") being false — not a curiosity.
-    if counted then
-        local cap = tonumber(cfg.max)
-        local overCap = cap and total > cap
-        o:Line(format("TOTAL showing=%d across %d group%s (max=%s per GROUP%s)",
-            total, #filter, #filter == 1 and "" or "s", tostring(cfg.max),
-            cap and format(", so up to %d for this row", cap * #filter) or ""),
-            overCap and "BAD" or nil)
+    -- THE LINE THIS WHOLE DUMP EXISTS FOR: pools are session high-water marks, so a
+    -- flooded group testifies AFTER the fact — flagged BAD because for a gated group
+    -- >10 simultaneous auras means the engine skipped its spell-ID map (fail-open).
+    if flooded > 0 then
+        o:Line(format("%d group%s grew past the 10-frame batch: more than 10 auras sat in"
+            .. " one group at once at some point this session (latched even if since healed)",
+            flooded, flooded == 1 and "" or "s"), "BAD")
     else
-        o:Line("TOTAL showing: unavailable (a group count could not be read)", "WARN")
+        o:Line(format("pools at batch size across %d group%s — no group has ever exceeded"
+            .. " 10 simultaneous auras this session (visible counts are not readable;"
+            .. " pool growth is the only engine-side overflow signal)",
+            #filter, #filter == 1 and "" or "s"))
     end
 end
 
 DF:RegisterDebugSlash("DFAURAS", "Aura pipeline dump — filters, groups, dedup (add a unit token)", false, "/dfauras")
+-- ============================================================
+-- AURA ROW OVERFLOW WATCH (debug console, AURAROW category)
+-- ============================================================
+-- ☠ `max` IS PER GROUP, NOT PER ROW — Blizzard caps at AddAuraGroup /
+-- SetAuraGroupMaxFrameCount — so a row built from N filter records can draw up to N x max
+-- and nothing on screen tells you which number you are looking at.
+--
+-- ★ WHY A WATCH AND NOT A COMMAND. /dfauras answers for ONE unit, and the failure shows up
+-- mid-pull on a raider you cannot identify in advance — by the time you have picked a unit
+-- and typed the token, the moment is gone. Krathe's point exactly. So the console watches
+-- every frame and records the anomaly when it happens; the log is read afterwards.
+--
+-- Costs nothing unless the AURAROW category is on. DF:DebugActive is the documented
+-- predicate for this shape: DF:Debug short-circuits, but its ARGUMENTS are evaluated by
+-- the caller first, so an unguarded table walk is paid whether logging is on or off.
+local WATCH_INTERVAL = 1
+local WATCH_ROWS = {
+    { "debuff",    "debuffFactory"    },
+    { "buff",      "buffFactory"      },
+    { "defensive", "defensiveFactory" },
+}
+-- ☠ WHAT THIS WATCH CAN AND CANNOT SEE. groupFrameCount is the group's OWNED pool
+-- size (see its header), NOT the visible count — the first cut compared summed pools
+-- against cfg.max and would have cried OVERFLOW on every healthy row (a 6-record row
+-- reads 60 forever: six 10-frame batches; the 2026-08-26 field log's "60 against a max
+-- of 3" was exactly that arithmetic). Visible counts are not readable from outside.
+-- The one true engine-side signal is pool GROWTH: a pool only steps past its first-seen
+-- size when MORE auras than it owned were simultaneously assigned in that ONE group,
+-- so any growth is the overflow event, latched for the handle's lifetime. Baselines are
+-- keyed per HANDLE (weak) so a rebuilt row baselines its fresh container's batch
+-- instead of inheriting the old high-water mark and going blind.
+local poolBaseline = setmetatable({}, { __mode = "k" })
+
+-- File-local, not a closure built per tick: this runs once per frame per row per second
+-- while the category is on, and a fresh closure each pass is garbage for nothing.
+local function checkFrameOverflow(frame)
+    if not frame or not frame.unit then return end
+    for i = 1, #WATCH_ROWS do
+        local label, field = WATCH_ROWS[i][1], WATCH_ROWS[i][2]
+        local h = frame[field]
+        if type(h) == "table" and type(h.GetUnit) == "function" and h.config then
+            local filter = h.config.filter
+            if type(filter) == "table" then
+                local base = poolBaseline[h]
+                if not base then base = {}; poolBaseline[h] = base end
+                for gi, f in ipairs(filter) do
+                    local key = (type(f) == "table" and f.key) or ("df" .. gi)
+                    local n = groupFrameCount(h, key)
+                    if type(n) == "number" and n > 0 then
+                        if base[key] == nil then
+                            -- First sight is the batch allocation; baseline silently.
+                            base[key] = n
+                        elseif n > base[key] then
+                            local prev = base[key]
+                            base[key] = n
+                            -- The group KEY is the whole diagnosis: it names which record's
+                            -- pool blew past its batch, which the screen cannot attribute.
+                            -- ★ THE PER-UNIT TERMS, because the report is "only SOME people".
+                            -- Whatever is different about the affected raiders has to be a
+                            -- per-unit value, and these are the ones the aura path actually
+                            -- reads. canAssist above all: it is the sole input to Blizzard's
+                            -- identity gate (isHarmful and UnitCanAssist -> spell-ID candidate
+                            -- filters are NOT applied), it is evaluated PER TARGET, and DF has
+                            -- already field-confirmed it goes false for everyone while you are
+                            -- a ghost (Update.lua's note on the observer-side case).
+                            -- pcall'd and secrecy-checked: dfInRange can hold a secret boolean
+                            -- from the UnitInRange fallback, and tostring on a secret makes the
+                            -- whole line vanish rather than erroring.
+                            local okA, canAssist = pcall(UnitCanAssist, "player", frame.unit)
+                            if not okA or (issecretvalue and issecretvalue(canAssist)) then canAssist = "?" end
+                            local inRange = frame.dfInRange
+                            if issecretvalue and issecretvalue(inRange) then inRange = "secret" end
+                            DF:DebugWarn("AURAROW",
+                                "POOL GREW %s %s row group %s: %d -> %d — more than %d auras sat in"
+                                .. " this one group at once (latched even if since healed)"
+                                .. " | playerDead=%s combat=%s | unitDead=%s canAssist=%s inRange=%s",
+                                tostring(frame.unit), label, tostring(key), prev, n, prev,
+                                tostring(DF.playerIsDead), tostring(DF.playerInCombat),
+                                tostring(UnitIsDeadOrGhost(frame.unit)), tostring(canAssist),
+                                tostring(inRange))
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ☠ IterateAllFrames has NO pinned arm — a pinned frame has rows like any other.
+function DF:ScanAuraRowOverflow()
+    if DF.IterateAllFrames then DF:IterateAllFrames(checkFrameOverflow) end
+    if DF.IteratePinnedFrames then DF.IteratePinnedFrames(checkFrameOverflow) end
+end
+
+-- One ticker for the life of the session. The body is a single boolean test until the
+-- category is switched on, which is cheaper than arming and disarming it from every event
+-- that could change the answer (and cannot go stale the way that would).
+C_Timer.NewTicker(WATCH_INTERVAL, function()
+    if not DF.DebugActive or not DF:DebugActive("AURAROW") then return end
+    -- ☠ NOT IN TEST MODE. The preview deliberately fills every group from the curated
+    -- sample pool — Handle:_slotCount returns testSlotCount there, NOT config.max — so a
+    -- six-record debuff row reports 60 against a max of 3 and every frame in the raid
+    -- fires at once. That is the preview working, not a fault, and one toggle buried the
+    -- real findings under 50 false lines (field log, 2026-08-26 11:49:35).
+    if DF.AuraContainer and DF.AuraContainer._testMode then return end
+    if DF.testMode or DF.raidTestMode then return end
+    DF:ScanAuraRowOverflow()
+end)
+
 SlashCmdList["DFAURAS"] = function(msg)
     local unit = (msg or ""):lower():trim()
     if unit == "" then unit = "player" end
@@ -4458,18 +5261,47 @@ SlashCmdList["DFAURAS"] = function(msg)
         tostring(select(4, GetBuildInfo()))))
 
     -- Find the frame driving this unit.
+    -- ★ THREE WAYS IN, AND `last` IS THE ONE THAT ACTUALLY WORKS MID-RAID.
+    -- ☠ `mouseover` CANNOT be used from a slash command: moving the cursor to the chat box
+    -- to type IS the mouse leaving the frame, so the token is empty by the time you press
+    -- enter. I suggested it before realising that. `last` is the sticky record of the
+    -- previous DF frame hovered (ClickCasting/Frames.lua) — point at the broken frame, then
+    -- type. `target` works too, at the cost of changing your target.
+    -- The UnitIsUnit pass below then resolves `target`, a player NAME, or any token that
+    -- aliases a frame's unit, so you never need the raid index of a frame you are looking at.
+    -- ⚠ pcall'd: UnitIsUnit throws on a token for a unit that does not exist, and a dump
+    -- that errors while you are chasing something transient is worse than useless.
     local target
-    if DF.IterateAllFrames then
+    if unit == "last" then
+        target = DF._lastHoverFrame
+        if not target then
+            o:Line("No DF frame has been hovered yet — put the mouse over the frame you "
+                .. "want, then run this again.", "WARN")
+            o:Siblings("auras")
+            return
+        end
+        unit = target.unit or "?"
+        o:Line("Using the last hovered frame — unit " .. tostring(unit), "NEUTRAL")
+    end
+    if not target and DF.IterateAllFrames then
         DF:IterateAllFrames(function(f)
             if not target and f.unit == unit then target = f end
         end)
+        if not target then
+            DF:IterateAllFrames(function(f)
+                if not target and f.unit then
+                    local ok, same = pcall(UnitIsUnit, f.unit, unit)
+                    if ok and same then target = f end
+                end
+            end)
+        end
     end
     if not target then
         -- Reuse the writer opened above; a second DF:Out here printed the
         -- separator rule and the title twice on the not-found path.
         -- IterateAllFrames covers party/raid/arena, not pets or pinned sets.
         o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
-        o:Line("Try player, party1..4 or raid1..40, and make sure the frames are shown.", "NEUTRAL")
+        o:Line("Try `last` (the frame you most recently hovered), target, player, a raid1..40 token, or a player name.", "NEUTRAL")
         o:Siblings("auras")
         return
     end

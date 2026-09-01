@@ -12,9 +12,16 @@
 - (DandersMover) Anchor things to individual party or raid frames and to raid groups, choose what to anchor to from a searchable list instead of dragging, set a backup anchor that takes over whenever the main one is hidden, and drag the link handle onto another element to tie the two together without moving anything.
 - (DandersMover) The element panel now reads as part of the mover it is editing — matching outlines on both and a short glowing line joining them — and slides across when you pick a different mover. Pin it and it detaches: it stops following your selection and carries on editing its own mover, which wears a marker so you can see which one the panel belongs to. Editing in a panel pins it automatically (there is a toggle for that under the mover's Editor settings), and its cross closes it. Clicking empty space no longer deselects, so the camera and the rest of your UI stay usable while movers are unlocked; Esc backs out a step at a time.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
+- (Aura Designer) Border animations are back on aura icons. Placed icons and squares, aura bars, and filter, debuff and layout group icons can all animate their borders again, in combat included. Each one is set from its own Border section in the Aura Designer, alongside the colour and thickness. Aura icons always start on the effect's settled loop — only the frame border still plays the opening flash. (by Krathe)
 
 ### Bug Fixes
 
+- (Aura Designer) Fix debuffs appearing in the place of buff indicators, most visibly after swapping to a spec with no Aura Designer setup, until a reload. (by Krathe)
+- (Aura Designer) Fix filter, debuff and layout group icons staying at full brightness on out-of-range players while the indicators next to them faded. (by Krathe)
+- (Dispel) "Only Dispellable by You" now updates immediately when you change talents, instead of waiting for a reload — a Shaman's poison dispel follows Poison Cleansing Totem as you swap it in and out. (by Krathe)
+- (Dispel) Fix bleeds showing as dispellable on other players' frames for a Dwarf after group changes — Stoneform only cleanses yourself, so they now mark your own frame only. (by Krathe)
+- (Auras) Fix "Only My Buffs" showing other players' buffs on a group member who is in a different instance to you. Those buffs now hide until they are back with you. Group members merely far out of range are unaffected. (by Krathe)
+- (Auras) Fix one player's buffs, debuffs and Aura Designer icons all staying blank until a reload, most often after they died and were resurrected. (by Krathe)
 - (Aura Designer) Fix the Add Indicator panel opening empty.
 - (Aura Designer) Fix an open panel's highlight staying on the page behind the spell picker, so it looked like two random spells in the list were selected. It now outlines the spell list while the picker is up.
 - (Aura Designer) Fix indicators showing another player's auras after the group changed — someone leaving, a sort, or entering an arena. Long-lasting buffs could stay stuck on the wrong frame until a reload.

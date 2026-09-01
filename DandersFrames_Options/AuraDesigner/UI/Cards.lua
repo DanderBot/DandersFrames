@@ -6873,15 +6873,21 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, co
     end)
 
     -- ── BORDER ── (the placed icon's control set; gradient degrades to solid on
-    -- container slots — same known casualty as placed indicators; LCG glow types
-    -- are excluded from the animation dropdown, mirror the placed border)
+    -- container slots — same known casualty as placed indicators. Animation
+    -- restored 2026-08-29 with the button-mode reopening: the group's style
+    -- table carries the BorderAnimation* keys, buildGroupBorderSpec feeds them
+    -- through the same builder as the placed indicators, and a key edit
+    -- rebuilds the group container — groupStyleStructSig folds
+    -- rawBorderAnimStructTok.)
     AddSection(L["Border"], "border", function(g)
         GUI:CreateBorderControls(g, proxy, "", {
             parent  = body,
             include = {
                 inset = true, offset = true, blendMode = true,
                 gradient = true, shadow = true, alpha = true,
+                animate = true,
             },
+            animIntroInert = true,   -- pooled buttons never see the intro burst
             fullUpdate    = refresh,
             lightUpdate   = refresh,
             lightColors   = refresh,

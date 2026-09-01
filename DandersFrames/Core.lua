@@ -7435,6 +7435,21 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 elseif DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then
                     DF.AuraContainer.DebugDumpIdentityGate()
                 end
+            elseif msg == "dispelcap" then
+                -- What can this character ACTUALLY cleanse, talents included, and which
+                -- spell said so. The engine's flag is class/spec shaped and wrong in both
+                -- directions on talent-gated dispels; this is the table that is meant to
+                -- replace it, printed for validation before anything is wired to it.
+                if DF.DebugDispelCapability then DF:DebugDispelCapability() end
+            elseif msg == "adalpha" or msg:match("^adalpha%s") then
+                -- ☠ WRITABILITY, not visibility — the question adgate cannot answer.
+                -- An AD indicator that will not fade out of range is usually not a
+                -- gate or a trigger problem: it is the aura button's access
+                -- restriction reaching its CHILDREN, where our alpha hosts live.
+                -- See DF:DebugADAlphaHosts for why it identifies hosts by rawequal
+                -- rather than by asking them anything.
+                local unit = msg:match("^adalpha%s+(%S+)$")
+                if DF.DebugADAlphaHosts then DF:DebugADAlphaHosts(unit) end
             elseif msg == "adgate" then
                 -- The AD half of the same question: idgate sees a placement's handle but
                 -- not its chain, its parent-driven links or its badge — so an indicator
@@ -8248,6 +8263,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
                 if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
                     DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                end
+                -- ☠ A TALENT CHANGE IS AN AURA-LAYOUT CHANGE, and nothing here said so.
+                -- The dispel overlay's plan asks whether the player has Poison Cleansing
+                -- Totem — a TALENT — and the drives are version-gated, so without a bump
+                -- the overlay stays on its fast path and keeps the old plan until some
+                -- unrelated setting happens to move the version.
+                -- ⚠ It appeared to work only because ForceRefreshAllFrames above ends in
+                -- InvalidateAuraLayout: a dispel feature silently depending on the Aura
+                -- Designer's refresh to notice a talent, which is the kind of link nobody
+                -- would look for when it breaks -- and it breaks the moment that call is
+                -- guarded on AD being enabled. State it here instead of inheriting it.
+                -- Cheap: the drives are sig-gated, so an unchanged plan costs a compare.
+                if DF.InvalidateAuraLayout then
+                    DF:InvalidateAuraLayout()
                 end
             end)
         end
