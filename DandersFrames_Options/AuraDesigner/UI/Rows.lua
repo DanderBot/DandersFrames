@@ -736,6 +736,51 @@ local function BuildEffectsTabRows(ctx, shell)
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
 
+    -- ── POWER INFUSION HELPER (priest only, Any Buff pool only) ──
+    -- The classic layout draws this block inline in its Effects head area; here
+    -- it is one popout row mounting the SAME shared builder
+    -- (Cards.lua's S.BuildPIHelperPane). The pool gate is the classic one's:
+    -- the helper watches OTHER people's cooldowns, so Any Buff is the only pool
+    -- where its records can match anything (the head area's gate comment says
+    -- why at length). The pane holds whole-feature verbs and per-signal state
+    -- the builder redraws itself, so like the add rows it takes neither a
+    -- modified tick nor a footer.
+    if select(2, UnitClass("player")) == "PRIEST" and IsOtherTab() then
+        local pihBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(),
+                                                { chromeless = true })
+        local pihMount = tools.PopoutContent(function(g, holder)
+            local pane = CreateFrame("Frame", nil, holder)
+            pane:SetWidth(PopoutWidth())
+            -- ⚠ NO ready/wantH DANCE, unlike the add panes above: the shared
+            -- builder is synchronous and RETURNS its y cursor rather than
+            -- reporting through a SetHeight callback, so the height exists
+            -- before AddWidget needs it.
+            local yEnd = S.BuildPIHelperPane(pane, {
+                startY  = -4,
+                -- The row page's redraw verb: the same full rebuild
+                -- S.SwitchTab("effects") routes to in rows mode, without the
+                -- shared builder naming a tab panel it does not have. The open
+                -- panel goes with it, which is honest -- ticking a signal
+                -- changes which effect rows the list below shows.
+                Refresh = function()
+                    if page.Refresh then page:Refresh() end
+                end,
+            })
+            local h = max(-(yEnd or 0) + 4, 1)
+            pane:SetHeight(h)
+            g:AddWidget(pane, h)
+        end)
+        local pihRow = pihBand:AddWidget(GUI:CreatePopoutRow(page.child, {
+            label  = L["POWER INFUSION HELPER"],
+            title  = L["POWER INFUSION HELPER"],
+            window = DF.GUIFrame,
+            clipTo = page,
+            build  = pihMount,
+        }))
+        if not ctx.adEnabled then pihRow.disableOn = function() return true end end
+        Add(pihBand, nil, "both")
+    end
+
     -- ── THE ACTIVE INDICATORS HEADING, AND THE FILTER ON IT ──
     -- The same furniture the card layout puts above its list, mounted as one
     -- full-width object. The add BLOCK is skipped -- this layout has a row for it
