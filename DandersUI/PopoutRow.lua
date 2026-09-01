@@ -780,7 +780,7 @@ local function closeLoosePanels(row, reason)
     end
 end
 
-local function forgetInstance(host, po)
+local function forgetInstance(host, po, reason)
     local s = storeFor(host)
     if s.shared[po.key] == po then s.shared[po.key] = nil end
     for i = #s.pinned, 1, -1 do
@@ -795,6 +795,13 @@ local function forgetInstance(host, po)
     -- After the unbind, not before: _SyncActive answers by walking row._bound,
     -- and a row still holding a closed instance would paint itself active.
     if row then safeCall(row._SyncActive) end
+    -- The ROW's own close hook (opts.onClose), last of all, so it observes the
+    -- world with the unbind already done -- a consumer that reacts by rebuilding
+    -- its page must not find the row still claiming the panel. Fired for the row
+    -- the panel was ABOUT when it closed (one panel serves many rows), with the
+    -- shell's close reason ("cross"|"family"|"source"|"api", plus whatever a
+    -- CloseAllPopoutRows caller passed through).
+    if row and row._onClose then safeCall(row._onClose, row, reason) end
 end
 
 -- ============================================================
@@ -848,6 +855,14 @@ end
 --              mechanism from the toggle's gate: a dependent-grey row whose own
 --              toggle is ON keeps its popout contents live
 --   onToggle   fn(newValue) after a toggle write from either place
+--   onClose    fn(row, reason) after a panel that was ABOUT this row closes
+--              (any close: the cross, the family sweep, a source death, an api
+--              call -- `reason` is the shell's close reason). Fired after the
+--              unbind, so the row no longer claims the panel when it runs. NOT
+--              fired when the shared panel is merely retargeted to another row
+--              -- the panel is still up, just about something else. For a
+--              consumer whose pane edits data some other surface displays: the
+--              close is "done editing", so this is where that surface refreshes
 --   window     REQUIRED for opening: the window frame the popout docks outside
 --   clipTo     the region that actually CLIPS this row -- the scroll frame the
 --              list lives in. The popout's connected chrome hides while the row
@@ -907,6 +922,7 @@ function UI:CreatePopoutRow(parent, opts)
     row._clipTo  = opts.clipTo
     row._key     = opts.popoutKey or DEFAULT_KEY
     row._accent  = normColor(opts.accent)
+    row._onClose = (type(opts.onClose) == "function") and opts.onClose or nil
     row._hasToggle = opts.toggle ~= nil
     row._bound   = {}
     local offText = opts.offText or (L and L["Off"]) or "Off"
@@ -1379,7 +1395,7 @@ function UI:CreatePopoutRow(parent, opts)
             tetherSource = row,
             build   = mountBare,
             headerControls = function(p, bar) return buildHeaderControls(host, p, bar) end,
-            onClose = function(p) forgetInstance(host, p) end,
+            onClose = function(p, reason) forgetInstance(host, p, reason) end,
             onPin   = function(p)
                 local s = storeFor(host)
                 if s.shared[p.key] == p then s.shared[p.key] = nil end

@@ -31,6 +31,35 @@ local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
 
 -- ============================================================
+-- THE LAYOUT FLIP -- ONE FUNCTION, TWO DOORS
+-- ------------------------------------------------------------
+-- The title-bar glyph and the Options page's classic checkbox both flip the
+-- same SV root field, and both must run the SAME sequence in the SAME order:
+-- the open panels first (they belong to the layout being left), then every
+-- page's build cache, then the page on screen, then the glyph's tint. The two
+-- sites each carried their own copy of that list, which is exactly how they
+-- would drift; this is the only copy now.
+--
+-- `value` omitted = toggle (the glyph). The checkbox passes the value its
+-- factory has already written -- SetClassicSettingsLayout is an idempotent
+-- field write, so restating it costs nothing and the one function serves both.
+--
+-- Safe from ANY page, the designer shells included: the rebuild goes through
+-- RefreshCurrentPage -> page:Refresh() -> the page's own builder, and each
+-- designer's build dispatcher owns the arm swap (DF.BuildAuraDesignerPage /
+-- DF.BuildTextDesignerPage restore the harness's RefreshStates their classic
+-- island replaced -- see those files).
+-- ============================================================
+function GUI:FlipSettingsLayout(value)
+    if value == nil then value = not DF:IsClassicSettingsLayout() end
+    DF:SetClassicSettingsLayout(value)
+    if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("layoutFlip") end
+    if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
+    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+    if GUI.PaintLayoutButton then GUI.PaintLayoutButton() end
+end
+
+-- ============================================================
 -- THE CONTENT CORRIDOR
 -- ------------------------------------------------------------
 -- Every number between the right edge of a widget on a page and the right edge
@@ -838,16 +867,9 @@ function DF:CreateGUI()
         width = 20, height = 20, iconSize = 15,
         color    = C_TEXT_DIM,
         tooltip  = layoutTooltip,
-        onClick  = function()
-            DF:SetClassicSettingsLayout(not DF:IsClassicSettingsLayout())
-            -- Same flip sequence as the Options-page checkbox, same order: the
-            -- open panels first (they belong to the layout being left), then
-            -- every page's build cache, then the page on screen.
-            if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("layoutFlip") end
-            if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
-            if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-            PaintLayoutButton()
-        end,
+        -- The one shared flip -- see GUI:FlipSettingsLayout above. It ends by
+        -- calling GUI.PaintLayoutButton, which is this button's own painter.
+        onClick  = function() GUI:FlipSettingsLayout() end,
     })
     layoutBtn:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -4, 0)
     layoutBtn:SetFrameStrata("FULLSCREEN_DIALOG")

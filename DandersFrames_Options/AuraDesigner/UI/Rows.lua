@@ -748,6 +748,14 @@ local function BuildEffectsTabRows(ctx, shell)
     if select(2, UnitClass("player")) == "PRIEST" and IsOtherTab() then
         local pihBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(),
                                                 { chromeless = true })
+        -- ☠ A TICK IN THE PANE MUST NOT REBUILD THE PAGE. The first cut routed
+        -- the builder's Refresh to page:Refresh(), and a page rebuild retires
+        -- the row the panel is docked to -- so every checkbox slammed the panel
+        -- shut ("it should stay until ur done editing"). The pane now redraws
+        -- ITSELF in place, and the page -- whose Active Indicators list the
+        -- helper's signals feed -- refreshes ONCE, from the row's onClose, and
+        -- only when something in here actually changed.
+        local pihDirty = false
         local pihMount = tools.PopoutContent(function(g, holder)
             local pane = CreateFrame("Frame", nil, holder)
             pane:SetWidth(PopoutWidth())
@@ -755,20 +763,40 @@ local function BuildEffectsTabRows(ctx, shell)
             -- builder is synchronous and RETURNS its y cursor rather than
             -- reporting through a SetHeight callback, so the height exists
             -- before AddWidget needs it.
-            local yEnd = S.BuildPIHelperPane(pane, {
-                startY  = -4,
-                -- The row page's redraw verb: the same full rebuild
-                -- S.SwitchTab("effects") routes to in rows mode, without the
-                -- shared builder naming a tab panel it does not have. The open
-                -- panel goes with it, which is honest -- ticking a signal
-                -- changes which effect rows the list below shows.
-                Refresh = function()
-                    if page.Refresh then page:Refresh() end
-                end,
-            })
-            local h = max(-(yEnd or 0) + 4, 1)
-            pane:SetHeight(h)
-            g:AddWidget(pane, h)
+            local BuildContent
+            local function RebuildPane()
+                -- Retire the previous build the way the classic arm's
+                -- ClearTabContent does: hide and unanchor. The retired frames
+                -- stay PARKED on the pane -- WoW never releases frames -- which
+                -- is the same cost profile as the classic arm's SwitchTab
+                -- rebuild (that arm re-runs this same builder on every tick).
+                for _, child in ipairs({ pane:GetChildren() }) do
+                    child:Hide()
+                    child:ClearAllPoints()
+                end
+                for _, region in ipairs({ pane:GetRegions() }) do
+                    region:Hide()
+                end
+                local h = BuildContent()
+                -- The panel re-measures the pane's slot -- the same verb the
+                -- Add Indicator pane's SetHeight reports through above.
+                GUI:RelayoutHost(pane, h)
+            end
+            BuildContent = function()
+                local yEnd = S.BuildPIHelperPane(pane, {
+                    startY  = -4,
+                    -- The pane's redraw verb: itself, in place -- see the note
+                    -- on the band above for why this is not page:Refresh().
+                    Refresh = function()
+                        pihDirty = true
+                        RebuildPane()
+                    end,
+                })
+                local h = max(-(yEnd or 0) + 4, 1)
+                pane:SetHeight(h)
+                return h
+            end
+            g:AddWidget(pane, BuildContent())
         end)
         local pihRow = pihBand:AddWidget(GUI:CreatePopoutRow(page.child, {
             label  = L["POWER INFUSION HELPER"],
@@ -776,6 +804,22 @@ local function BuildEffectsTabRows(ctx, shell)
             window = DF.GUIFrame,
             clipTo = page,
             build  = pihMount,
+            -- "Done editing" is the panel closing, and that is when the page
+            -- catches up on what the pane changed. Deferred a frame: this fires
+            -- inside the popout's own close path (a teardown's
+            -- CloseAllPopoutRows included), and a synchronous rebuild would
+            -- retire frames mid-close. Skipped when nothing changed, and when
+            -- the page has left the screen (a window close or layout flip runs
+            -- its own rebuild).
+            onClose = function()
+                if not pihDirty then return end
+                pihDirty = false
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, function()
+                        if page:IsShown() and page.Refresh then page:Refresh() end
+                    end)
+                end
+            end,
         }))
         if not ctx.adEnabled then pihRow.disableOn = function() return true end end
         Add(pihBand, nil, "both")

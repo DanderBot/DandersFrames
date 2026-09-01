@@ -3865,16 +3865,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 parent, L["Use classic settings layout"],
                 nil, nil,
                 function()
-                    -- The panels first: see the note above for why the rebuild
-                    -- cannot do this half itself.
-                    if GUI.CloseAllPopoutRows then GUI:CloseAllPopoutRows("layoutFlip") end
-                    -- Every page picks its container at BUILD time, so a page already
-                    -- built in the other mode would re-show with stale layout. Drop every
-                    -- page's build cache, then rebuild the one on screen right now.
-                    if GUI.InvalidateAllPages then GUI:InvalidateAllPages() end
-                    if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
-                    -- The title-bar toggle shows the same state; keep its tint honest.
-                    if GUI.PaintLayoutButton then GUI.PaintLayoutButton() end
+                    -- The one shared flip -- GUI:FlipSettingsLayout (GUI/Panel.lua)
+                    -- runs the whole sequence the notes above describe, in the
+                    -- order they demand (panels first, then every page's build
+                    -- cache, then the page on screen, then the title-bar glyph's
+                    -- tint). The factory's set has already written the field, so
+                    -- the value passed here is a restated no-op write and the
+                    -- sequence is the whole point.
+                    GUI:FlipSettingsLayout(DF:IsClassicSettingsLayout())
                 end,
                 function() return DF:IsClassicSettingsLayout() end,
                 function(val) DF:SetClassicSettingsLayout(val) end

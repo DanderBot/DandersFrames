@@ -2205,6 +2205,18 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             S.mainFrame:SetParent(nil)
             S.mainFrame = nil
         end
+        -- ⚠ AND THE ISLAND'S OWN RefreshStates GOES WITH IT. BuildAuraDesignerIsland
+        -- REPLACES the harness's RefreshStates on the page object, permanently --
+        -- its version sizes page.child to the viewport and routes redraws to
+        -- AuraDesigner_RefreshPage -- so a layout flip landing here would leave
+        -- the band column with no layout pass at all: nothing ever positions the
+        -- bands and the page draws broken. Same restore the Text Designer's
+        -- dispatcher makes (TextDesigner/UI/Options.lua), same dispatch-by-name
+        -- shape Panel.lua's BuildPage installs (the profiler swaps the target).
+        pageRef.RefreshStates = function(self) return GUI.PageRefreshStates(self) end
+        -- ...and the island's size cache goes too, so a flip BACK to classic
+        -- re-fires its first RefreshStates instead of early-outing on stale numbers.
+        pageRef._lastRefreshStatesH, pageRef._lastRefreshStatesW = nil, nil
         return P.BuildAuraDesignerRowsPage(pageRef, dbRef, Add, AddSpace)
     end
     S.rowsMode = false

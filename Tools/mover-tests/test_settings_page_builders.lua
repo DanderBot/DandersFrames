@@ -527,16 +527,26 @@ print("-- Settings page: the classic-layout escape hatch")
 do
     local body = builderBody("BuildPanelAppearanceGroup")
 
-    local closeAt  = body:find('GUI:CloseAllPopoutRows("layoutFlip")', 1, true)
-    local invalAt  = body:find("GUI:InvalidateAllPages()", 1, true)
-    local rebuildAt = body:find("GUI:RefreshCurrentPage()", 1, true)
-    check(closeAt ~= nil, "escape hatch: the flip closes the open panels itself")
+    -- ⚠ THE SEQUENCE MOVED. The checkbox and the title-bar glyph each carried a
+    -- copy of the flip list and the copies could drift; both now route through
+    -- the ONE shared function, GUI:FlipSettingsLayout (GUI/Panel.lua). The
+    -- body's half of the contract is the routing; the function's half is the
+    -- old sequence, in the old order, with the old guard.
+    check(body:find("GUI:FlipSettingsLayout(", 1, true) ~= nil,
+          "escape hatch: the flip routes through the one shared function")
+
+    local panelSrc = options_file_source("GUI/Panel.lua")
+    local fa = panelSrc:find("function GUI:FlipSettingsLayout", 1, true)
+    local flipBody = fa and panelSrc:sub(fa, panelSrc:find("\nend\n", fa, true) or #panelSrc) or ""
+    local closeAt  = flipBody:find('GUI:CloseAllPopoutRows("layoutFlip")', 1, true)
+    local invalAt  = flipBody:find("GUI:InvalidateAllPages()", 1, true)
+    local rebuildAt = flipBody:find("GUI:RefreshCurrentPage()", 1, true)
+    check(closeAt ~= nil, "escape hatch: ...which closes the open panels itself")
     check(invalAt ~= nil, "escape hatch: ...drops every page's build cache")
     check(rebuildAt ~= nil, "escape hatch: ...and rebuilds the one on screen")
-    check(closeAt and invalAt and rebuildAt and closeAt < invalAt and invalAt < rebuildAt,
-          "escape hatch: ...in that order -- the panels come down before the rebuild")
-    check(body:find("if GUI.CloseAllPopoutRows then", 1, true) ~= nil,
-          "escape hatch: the close is guarded on the verb, so classic is a plain no-op")
+    check(closeAt and invalAt and rebuildAt and closeAt < invalAt and invalAt < rebuildAt
+          and flipBody:find("if GUI.CloseAllPopoutRows then", 1, true) ~= nil,
+          "escape hatch: ...in that order, panels first, and guarded on the verb so classic is a plain no-op")
 
     -- ☠ NOT DEFERRED. A C_Timer.After here would be cargo-cult: see the section
     -- header for why the Raid Layout Mode precedent does not transfer.

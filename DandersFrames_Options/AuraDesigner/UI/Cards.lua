@@ -5775,6 +5775,14 @@ S.BuildPIHelperPane = function(parent, opts)
     local pihBlock = GUI:CreateChoiceCardGroup(parent, {
         title    = L["POWER INFUSION HELPER"],
         accent   = tc,
+        -- ⚠ WIDTH PASSED, NOT LEFT TO THE ANCHORS. Without it the card keeps its
+        -- fixed CHOICE_CARD_H and cannot measure its wrapped description -- fine
+        -- at the classic tab's width, where the sentence fits the floor, but in
+        -- the 260px popout pane the same sentence wraps past the card's bottom
+        -- edge. The parent is sized before this builder runs in both arms (the
+        -- pane by its mount, the classic host by its caller), and the 16 is the
+        -- block's two 8px insets below.
+        width    = (parent:GetWidth() or 320) - 16,
         onToggle = function() Refresh() end,
         cards = {
             {
@@ -5881,14 +5889,19 @@ S.BuildPIHelperPane = function(parent, opts)
         -- measured height reported 30 for all of them whatever the text, because a pinned
         -- label's frame never grows -- the FontString simply draws past it. The slot IS the
         -- layout here; the frame height is not evidence of anything.
-        local function pihLines(text)
-            local cpl = math.max(20, math.floor(PIH_NOTE_W / 6))
+        -- Parameterised on the wrap width, because the checkbox helper below
+        -- estimates against a NARROWER column than the notes (its text starts
+        -- past the box). pihLines keeps its name and its one argument -- the
+        -- note call sites are many and their width is one number.
+        local function pihLinesAt(text, w)
+            local cpl = math.max(20, math.floor(w / 6))
             -- ⚠ Colour escapes are not characters anyone can see. Counting them would add
             -- twelve bytes per highlighted word and inflate the box by a line or two of pure
             -- whitespace, which is the fault this estimator exists to avoid.
             local plain = tostring(text):gsub("||r", "")
             return math.max(1, math.ceil(#plain / cpl))
         end
+        local function pihLines(text) return pihLinesAt(text, PIH_NOTE_W) end
         -- ⭐ GUI:CreateNote, not a hand-coloured CreateLabel. It IS the toned-note widget --
         -- a label with the tone's own accent baked in through ToneHex, so a caution note here
         -- is the same yellow as every caution note in the addon rather than three numbers
@@ -5900,6 +5913,35 @@ S.BuildPIHelperPane = function(parent, opts)
             local w = tone and GUI:CreateNote(parent, text, { tone = tone })
                 or GUI:CreateLabel(parent, text)
             g:AddWidget(w, pihLines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
+        end
+
+        -- ☠ CHECKBOX LABELS ARE SINGLE-LINE AND UNBOUNDED. CreateCheckbox
+        -- anchors its label LEFT-only off the box, so a long label simply runs
+        -- right at its natural width -- invisible in the classic tab's column,
+        -- where the longest fits, and straight off the edge of the 260px popout
+        -- pane ("text runs off the edge"). So every tick in this column goes
+        -- through here: the label gets a right edge on its own row, wraps, and
+        -- the SLOT grows by the same estimator the notes use (measuring is not
+        -- available at build time -- see the note above). At the classic width
+        -- every label estimates one line and nothing moves.
+        -- ⚠ Checkboxes are fixedRowHeight widgets: ResolveRowHeight ignores a
+        -- call-site number for them, so the taller slot goes through
+        -- preferredHeight instead. The container grows by the same lines so the
+        -- box and the centred label keep tracking each other.
+        local PIH_CB_TEXT = 24   -- the 16px box plus the 8px label gap
+        local function pihCheck(g, label, get, set)
+            local w = GUI:CreateCheckbox(parent, label, nil, nil, nil, get, set)
+            w.label:SetPoint("RIGHT", w, "RIGHT", 0, 0)
+            w.label:SetJustifyH("LEFT")
+            w.label:SetWordWrap(true)
+            local lines = pihLinesAt(label, PIH_NOTE_W - PIH_CB_TEXT)
+            if lines > 1 then
+                w:SetHeight(24 + (lines - 1) * PIH_NOTE_LINE)
+                w.preferredHeight = (GUI.RowHeight.checkbox or 35)
+                    + (lines - 1) * PIH_NOTE_LINE
+            end
+            g:AddWidget(w)
+            return w
         end
 
         -- ☠☠ NOT A BANNER, AND THE REASON IS A RACE RATHER THAN A SIZE.
@@ -5927,12 +5969,12 @@ S.BuildPIHelperPane = function(parent, opts)
         -- also appear in Active Indicators: they ARE indicators, and hiding them there
         -- would mean a row you can see the colour of but cannot find.
         local function signalRow(g, key, label)
-            g:AddWidget(GUI:CreateCheckbox(parent, label, nil, nil, nil,
+            pihCheck(g, label,
                 function() return P.PIH_SignalOn(key) end,
                 function(v)
                     P.PIH_SetSignal(key, v)
                     Refresh()   -- the dependent groups appear and vanish with it
-                end))
+                end)
 
             -- ⚠ GREYED, NOT HIDDEN. The signal tick is a FEATURE TOGGLE, and the
             -- house rule is grey-in-place for those; hiding is for mode choices, where a
@@ -6021,12 +6063,12 @@ S.BuildPIHelperPane = function(parent, opts)
             local which = PIH_ICON_OF[key]
             local iconLabel = (key == "strong")
                 and L["Their trinkets and potions as icons"] or L["As icons"]
-            g:AddWidget(GUI:CreateCheckbox(parent, iconLabel, nil, nil, nil,
+            pihCheck(g, iconLabel,
                 function() return P.PIH_IconsShow(which) end,
                 function(v)
                     P.PIH_SetIconsShow(which, v)
                     Refresh()
-                end))
+                end)
         end
 
         pihGroup(L["What to Show"], function(g)
@@ -6080,10 +6122,9 @@ S.BuildPIHelperPane = function(parent, opts)
             -- single checkbox is more chrome than the setting is worth, and this label says
             -- what it does without a header to lean on -- which is the test for whether a
             -- control can live under a heading that does not quite describe it.
-            g:AddWidget(GUI:CreateCheckbox(parent,
-                L["Hide the helper while Power Infusion is on cooldown"], nil, nil, nil,
+            pihCheck(g, L["Hide the helper while Power Infusion is on cooldown"],
                 function() return P.PIH_Settings().gateEnabled ~= false end,
-                function(v) P.PIH_SetGateEnabled(v) end))
+                function(v) P.PIH_SetGateEnabled(v) end)
 
 
             -- ☠☠ TWO ONE-LINE NOTES, AND THE LENGTH IS THE WHOLE POINT.
@@ -6122,12 +6163,12 @@ S.BuildPIHelperPane = function(parent, opts)
                 -- empty, resolveConditions skips it, bails on fewer than two groups, and the
                 -- effect silently degrades into a duplicate of the burst signal. So the
                 -- recipe deletes it instead, and ticking one back brings it into existence.
-                g:AddWidget(GUI:CreateCheckbox(parent, L["Combat potions"], nil, nil, nil,
+                pihCheck(g, L["Combat potions"],
                     function() return P.PIH_Settings().potions == true end,
-                    function(v) P.PIH_SetAmplifier("potions", v); Refresh() end))
-                g:AddWidget(GUI:CreateCheckbox(parent, L["On-use trinkets"], nil, nil, nil,
+                    function(v) P.PIH_SetAmplifier("potions", v); Refresh() end)
+                pihCheck(g, L["On-use trinkets"],
                     function() return P.PIH_Settings().trinkets == true end,
-                    function(v) P.PIH_SetAmplifier("trinkets", v); Refresh() end))
+                    function(v) P.PIH_SetAmplifier("trinkets", v); Refresh() end)
             end)
         end
 
@@ -6135,12 +6176,12 @@ S.BuildPIHelperPane = function(parent, opts)
             -- ⚠ FAILS OPEN. A group with no assigned roles reads as "no role" for everyone
             -- and nothing is excluded. Marking a tank you did not want is a smaller failure
             -- than silently hiding the signal on the damage dealers you did.
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Tanks"], nil, nil, nil,
+            pihCheck(g, L["Tanks"],
                 function() return (P.PIH_Settings().roles or {}).TANK == true end,
-                function(v) P.PIH_SetRole("TANK", v) end))
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Healers"], nil, nil, nil,
+                function(v) P.PIH_SetRole("TANK", v) end)
+            pihCheck(g, L["Healers"],
                 function() return (P.PIH_Settings().roles or {}).HEALER == true end,
-                function(v) P.PIH_SetRole("HEALER", v) end))
+                function(v) P.PIH_SetRole("HEALER", v) end)
             pihNote(g,
                 L["Only applies when the group has roles."])
         end)
@@ -6199,9 +6240,9 @@ S.BuildPIHelperPane = function(parent, opts)
                 local name = (classFile == "@racials") and L["Racials"]
                     or ((DF.FilterRegistry and DF.FilterRegistry.ClassDisplayName
                         and DF.FilterRegistry.ClassDisplayName(classFile)) or classFile)
-                g:AddWidget(GUI:CreateCheckbox(parent, name, nil, nil, nil,
+                pihCheck(g, name,
                     function() return P.PIH_ClassOn(classFile) end,
-                    function(v) P.PIH_SetClassOn(classFile, v) end))
+                    function(v) P.PIH_SetClassOn(classFile, v) end)
             end
         -- ⚠ NO showSummary. The collapsed summary concatenates every child label, which for
         -- thirteen classes and a two-line note is a wall of text rather than a summary. The
@@ -6213,10 +6254,9 @@ S.BuildPIHelperPane = function(parent, opts)
             -- WHETHER -- so turning it off and back on does not make anyone hunt for their
             -- sound a second time. Silent until chosen, either way: a cue nobody asked for
             -- is the fastest route to the whole feature being switched off.
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Play a sound when someone becomes worth infusing"],
-                nil, nil, nil,
+            pihCheck(g, L["Play a sound when someone becomes worth infusing"],
                 function() return P.PIH_Settings().soundOn == true end,
-                function(v) P.PIH_SetSoundOn(v); Refresh() end))
+                function(v) P.PIH_SetSoundOn(v); Refresh() end)
             if P.PIH_Settings().soundOn then
                 g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"],
                     P.PIH_Settings(), "soundLSMKey",

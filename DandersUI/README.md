@@ -359,6 +359,12 @@ panels coexist. The popout's content width is `UI.PopoutContentWidth` (260 — t
 settings-group inner width every factory is already built for, so widgets mount
 unchanged).
 
+`opts.onClose(row, reason)` fires after a panel that was ABOUT this row closes —
+any close, with the shell's close reason — and after the unbind, so the row no
+longer claims the panel when it runs. It does NOT fire on a retarget to another
+row (the panel is still up). It is the "done editing" hook for a pane whose
+edits some other surface displays.
+
 **The row is a plate, and it says which one is open.** Every metric it draws with
 lives in `UI.PopoutRow` (Theme.lua) — a 44px plate in a 50px slot, the inner
 padding, the column gaps, the glyph sizes, the two type sizes and the state
