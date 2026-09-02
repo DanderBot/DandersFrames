@@ -740,8 +740,41 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- debuff hides/shows immediately instead of waiting for the next aura event.
             DF:RefreshAllVisibleFrames()
         end), 30)
-        local debuffMax = visibilityGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        local debuffMax = visibilityGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function()
+            DF:RefreshAllVisibleFrames()
+            -- The note below re-reads the number, so it must re-run when it moves.
+            self:RefreshStates()
+        end, true), 55)
         debuffMax.disableOn = function(d) return not d.showDebuffs end
+
+        -- ☠ THE CAP IS PER CATEGORY GROUP, NOT PER ROW, and that is an engine limit
+        -- we cannot close: Blizzard caps at maxFrameCount per aura group with no
+        -- container-level total, and the groups the row splits into cannot share a
+        -- budget (see DF:GetDebuffRowGroupCount for why counting them is impossible).
+        -- So the note states the REAL ceiling rather than the addon quietly
+        -- under-showing or dropping the highlight to make the number true. It stays
+        -- silent at one group, where the number means exactly what it says.
+        -- ⚠ hideOn for VISIBILITY, refreshContent for TEXT: RefreshChildStates only
+        -- calls refreshContent on a widget that IS SHOWN, so hiding from inside it
+        -- would freeze it hidden. No slot height on purpose: the sentence wraps to
+        -- three lines at this width, and a call-site number would suppress the
+        -- label's own height converge and draw over the control beneath.
+        local function debuffGroupCount(d)
+            return (DF.GetDebuffRowGroupCount and DF:GetDebuffRowGroupCount(d)) or 1
+        end
+        local maxNote = visibilityGroup:AddWidget(GUI:CreateNote(self.child, "",
+            { tone = "caution", prefix = "Note", width = GUI:GroupInnerWidth(visibilityGroup) }))
+        maxNote.hideOn = function(d)
+            return not d.showDebuffs or (tonumber(d.debuffMax) or 0) <= 0
+                or debuffGroupCount(d) <= 1
+        end
+        maxNote.refreshContent = function(w, d)
+            local n = debuffGroupCount(d)
+            local per = tonumber(d.debuffMax) or 0
+            w:SetText(("|c%s%s:|r "):format(GUI:ToneHex("caution"), (L and L["Note"]) or "Note")
+                .. L["The game applies this limit to each category separately. Your filters use %d categories, so up to %d debuffs can show at once."]:format(n, n * per))
+        end
+        maxNote:refreshContent(db)
         Add(visibilityGroup, nil, 1)
 
         -- Shared by both groups below: rebuild the native filter strings and re-drive
