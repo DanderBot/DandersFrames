@@ -2807,7 +2807,17 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- while the colorblindMode CVar is on (test mode previews it regardless).
     local dispel
     if prefix == "debuff" then
-        local colorByType = db.debuffBorderColorByType
+        -- ☠ THE COLOUR RING IS A BORDER, SO IT OBEYS THE BORDER TOGGLE. This read the
+        -- by-type flag on its own, so a user with Show Border OFF still got a coloured
+        -- ring on every dispellable debuff — green on poison, brown on bleed — with no
+        -- visible setting to turn it off, because the by-type checkbox lives INSIDE the
+        -- Border section and is out of reach while that section is off. The only escape
+        -- was to re-enable the border, untick by-type, and disable the border again
+        -- (undëe, live 5.3.1).
+        -- ⚠ THE SYMBOL IS DELIBERATELY NOT GATED. The colourblind dispel letter is text,
+        -- not border art, and shipped decoupled on purpose — someone running without
+        -- borders should still get it. Only the RING answers to debuffShowBorder.
+        local colorByType = db.debuffBorderColorByType and db.debuffShowBorder ~= false
         local showSymbol = db.debuffDispelSymbolEnabled == true
         if colorByType or showSymbol then
             dispel = { showWhenHarmful = true }
