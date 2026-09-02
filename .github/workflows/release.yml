@@ -97,7 +97,10 @@ jobs:
         if: steps.guard.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/')
         uses: BigWigsMods/packager@v2
         with:
-          args: -m .pkgmeta-mover -r .release-mover
+          # ./ prefix is load-bearing: the packager validates the release dir as
+          # "absolute or inside .", and a bare .release-mover fails that check
+          # (v5.4.0-alpha.1's mover upload died on exactly this).
+          args: -m .pkgmeta-mover -r ./.release-mover
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
