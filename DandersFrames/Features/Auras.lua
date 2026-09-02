@@ -1295,6 +1295,34 @@ function DF:BuildDebuffFilterRecords(dbLike, claimed)
     return BuildDirectDebuffFilters(dbLike, claimed)
 end
 
+-- ☠ HOW MANY GROUPS THE DEBUFF ROW WILL BUILD — i.e. what "Max Debuffs" actually
+-- multiplies by. Blizzard caps at maxFrameCount PER AURA GROUP and the engine has NO
+-- container-level cap (checked against Blizzard_AuraContainerGroups: maxFrameCount is
+-- group state, nothing sums across groups), so a row built from N records can render up
+-- to N x max. The row is split whenever the config needs per-group STYLING or mutually
+-- exclusive category records — Show All with the Important Debuffs highlight on is THREE
+-- groups, and that highlight is ON BY DEFAULT, so the stock configuration already has a
+-- ceiling of 3x. Category mode reaches five or six.
+--
+-- ⚠ THIS CANNOT BE FIXED BY BUDGETING THE GROUPS. Sharing one budget would need to know
+-- how many auras each group will actually match, and the ALL-mode records are separated
+-- only by candidate BOOLEANS (isBossOrRoleAura / isPriorityAura) which
+-- C_UnitAuras.GetUnitAuraInstanceIDs cannot evaluate — all three carry the same filter
+-- string, so a count would be identical for each. Dividing blindly under-shows the
+-- common case (a unit with only ordinary debuffs would get max/3), and collapsing the
+-- split to honour the cap silently deletes the highlight. Krathe's call, 2026-09-02:
+-- never lose debuffs or functionality — SAY SO INSTEAD.
+--
+-- Claims are deliberately NOT passed: an Aura Designer claim only ever REMOVES records,
+-- so ignoring them yields the worst case, which is what a ceiling should report. Nil
+-- records mean the show-all fallback, which is a single group.
+function DF:GetDebuffRowGroupCount(dbLike)
+    if not dbLike then return 1 end
+    local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, nil)
+    if not ok or type(recs) ~= "table" then return 1 end
+    return math.max(1, #recs)
+end
+
 -- Build defensive filter table (BIG_DEFENSIVE + EXTERNAL_DEFENSIVE, nil if unavailable)
 -- Assigned to the forward-declared local at the top of the file so it is
 -- visible to code defined above this point.

@@ -1280,6 +1280,9 @@ L["Matched (not applied)"] = true
 L["Max Bars"] = true
 L["Max Buffs"] = true
 L["Max Debuffs"] = true
+-- ⚠ TWO FORMAT PLACEHOLDERS, IN ORDER: the number of category groups, then the resulting
+-- ceiling (groups x the slider). A translation must keep both %d and their order.
+L["The game applies this limit to each category separately. Your filters use %d categories, so up to %d debuffs can show at once."] = true
 L["Max Health"] = true
 L["Max HP"] = true
 L["Max HP Reduction %"] = true
