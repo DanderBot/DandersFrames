@@ -84,7 +84,15 @@ jobs:
       # git-ignored (junctions locally), so CI has to materialise them before packaging.
       - name: Sync embedded libs
         if: steps.guard.outputs.skip != 'true'
-        run: bash Tools/sync-libs.sh
+        # ☠ THE git add -f IS WHAT SHIPS THE LIBRARY. The packager excludes every
+        # UNTRACKED path (release.sh:1133, git ls-files --others) -- .pkgmeta and
+        # .gitignore are irrelevant to that check -- so the synced copies must be
+        # STAGED or the zips ship without DandersUI and every host addon dies at
+        # its LibStub lookup on load (v5.4.0-alpha.2, field-reported). CI-only:
+        # locally these paths are junctions and must never be staged.
+        run: |
+          bash Tools/sync-libs.sh
+          git add -f DandersFrames/Libs/DandersUI DandersFrames_Options/Libs/DandersUI DandersMover/Libs/DandersUI
 
       - name: Package and Release
         if: steps.guard.outputs.skip != 'true'
