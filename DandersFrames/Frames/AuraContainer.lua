@@ -8469,6 +8469,13 @@ local function registerOwnerRegen(owner)
         AuraContainer._ownerRegen._owners = setmetatable({}, { __mode = "k" })
         AuraContainer._ownerRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
         AuraContainer._ownerRegen:SetScript("OnEvent", function(self)
+            -- ☠ Same commit-only-on-success rule as SetSlotOwnerUnit — read its note for
+            -- why an optimistic o.unit write is permanent. It is WORSE here: this drain
+            -- clears pendingUnit and drops the owner from the registry up front, so a
+            -- refusal used to lose the retarget outright with nothing left to retry it.
+            -- ⚠ Failures are re-queued AFTER the loop, never inside it: setting an
+            -- existing key to nil during a pairs() traversal is legal, ADDING one is not.
+            local requeue
             for o in pairs(self._owners) do
                 self._owners[o] = nil
                 local u = o.pendingUnit
@@ -8476,13 +8483,25 @@ local function registerOwnerRegen(owner)
                 -- Re-check: the owner may have been retargeted again, or torn down,
                 -- between the defer and now.
                 if u and o.container and o.unit ~= u then
-                    o.unit = u
-                    pcall(o.container.SetUnit, o.container, u)
-                    -- The deferred retarget needs the same partition kick the immediate one
-                    -- does, for the same reason. We are here on PLAYER_REGEN_ENABLED, so
-                    -- reparseContainer takes its OOC branch and the bounce is real.
-                    if not AuraContainer._testMode then reparseContainer(o.container) end
+                    if pcall(o.container.SetUnit, o.container, u) then
+                        o.unit = u
+                        -- The deferred retarget needs the same partition kick the immediate one
+                        -- does, for the same reason. We are here on PLAYER_REGEN_ENABLED, so
+                        -- reparseContainer takes its OOC branch and the bounce is real.
+                        if not AuraContainer._testMode then reparseContainer(o.container) end
+                    else
+                        -- o.unit stays on the OLD token, so the Factory's own per-pass
+                        -- retarget walk will retry on its next sync — that is the fast
+                        -- path back. This re-queue is the backstop for a frame the walk
+                        -- does not reach.
+                        requeue = requeue or {}
+                        requeue[#requeue + 1] = o
+                        o.pendingUnit = u
+                    end
                 end
+            end
+            if requeue then
+                for i = 1, #requeue do self._owners[requeue[i]] = true end
             end
         end)
     end
@@ -8504,8 +8523,48 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
         registerOwnerRegen(owner)
         return false
     end
-    owner.unit = unit
+    -- ☠☠ COMMIT owner.unit ONLY IF THE ENGINE TOOK THE RETARGET. This used to write it
+    -- BEFORE the call and ignore the result, which turns any transient SetUnit failure
+    -- into a PERMANENT desync — and the equality guard at the top of this function is
+    -- what makes it permanent. owner.unit already reads as the new token, so every later
+    -- call returns true without ever retrying, while the container is still bound to the
+    -- PREVIOUS occupant. It then renders that player's auras on this frame forever, and
+    -- misses this player's own, until a /reload.
+    -- ☠ Field shape, and it survived the 5.4.0 alpha: "happens every time I join raid,
+    -- to fix have to reload after everyone has joined" — Earth Shield drawn on a third
+    -- player who never had it, and a Riptide indicator not lighting for the player who
+    -- did (Beans, v5.4.0-alpha.3). Raid formation is a burst of retargets, so it only
+    -- takes one refusal to strand a frame, and out of combat a long-lived buff nobody
+    -- re-casts fires no UNIT_AURA to correct it.
+    -- ★ THE COMBAT BRANCH ABOVE ALREADY STATES THE RULE — "owner.unit is left on the OLD
+    -- token deliberately, so GetUnit stays truthful about what is on screen and a repeat
+    -- call simply re-queues rather than reporting a retarget that has not happened." That
+    -- is exactly right, and this path was the one place that did not honour it.
+    -- ⚠ Everything below is deliberately skipped on failure: the latch re-seed and the
+    -- reparse are both FOR THE NEW UNIT, and running them against a container still bound
+    -- to the old one would re-parse the wrong player and stamp the wrong latch state.
     local ok = pcall(owner.container.SetUnit, owner.container, unit)
+    if not ok then
+        DF:DebugWarn(DBG, "slot owner retarget REFUSED: %s -> %s (owner left on the old"
+            .. " token so a repeat call retries; the container is still bound to it)",
+            tostring(owner.unit), tostring(unit))
+        return false
+    end
+    owner.unit = unit
+    -- ★★ READ THE ENGINE BACK. AuraContainerSharedMixin:GetUnit returns self.unitToken —
+    -- a PLAIN STRING, not a secret — so "did the retarget actually land" is one of the
+    -- few things about a container we can ask directly. Believing a write we never
+    -- checked is what let this class hide: the symptom (one player's auras drawn on
+    -- another's frame) looks like a filter fault and is nothing of the kind.
+    -- ⚠ A mismatch here is NOT recoverable by retrying — owner.unit is already committed
+    -- above and Blizzard's SetUnit no-ops when its own token already matches — so this
+    -- reports rather than repairs. If it ever fires, the repair is a container rebuild.
+    local okU, bound = pcall(owner.container.GetUnit, owner.container)
+    if okU and type(bound) == "string" and bound ~= unit then
+        DF:DebugWarn(DBG, "slot owner retarget MISMATCH: asked for %s, container is bound"
+            .. " to %s — this frame will render %s's auras until it is rebuilt.",
+            tostring(unit), tostring(bound), tostring(bound))
+    end
     -- ⚠ The death latch is UNIT state, so a retarget re-seeds it from the registry the
     -- same way Handle:SetUnit does: the new unit may already be dead, and that edge
     -- will never fire again. _setDeathLatch is transition-gated and its push decides
