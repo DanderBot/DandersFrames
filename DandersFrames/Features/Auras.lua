@@ -3172,6 +3172,23 @@ end
 -- is "false" a re-parse that should have happened and did not.
 local function confirmRetarget(h, label, unit)
     if not (h and h.Refresh) then return end
+    -- ★ CONFIRM THE BINDING, NOT JUST THE PARSE. This only ever checked whether a
+    -- re-parse ran, which says nothing about WHICH UNIT it parsed. The container's
+    -- GetUnit returns a plain readable string (AuraContainerSharedMixin.unitToken), so
+    -- the one question that matters — is this row actually pointed at the player whose
+    -- frame it sits on — is answerable, and was simply never asked.
+    -- ⚠ Reported shape: a row or indicator showing a THIRD player's aura after roster
+    -- churn, healed only by /reload. A mismatch here names it outright instead of
+    -- leaving it to look like a filter fault.
+    local c = h.backend and h.backend.container
+    if c and c.GetUnit then
+        local okU, bound = pcall(c.GetUnit, c)
+        if okU and type(bound) == "string" and unit and bound ~= unit then
+            DF:DebugWarn("AURAROW", "%s: retarget MISMATCH - asked for %s, container is"
+                .. " bound to %s; this row is showing %s's auras",
+                label, tostring(unit), tostring(bound), tostring(bound))
+        end
+    end
     local reparsed = h:Refresh()
     if reparsed then
         DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))
