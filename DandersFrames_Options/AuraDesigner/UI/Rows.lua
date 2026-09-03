@@ -770,15 +770,15 @@ local function BuildEffectsTabRows(ctx, shell)
         -- dirty flag), and the LAST close is the one that pays it.
         local pihOpenPanes = 0
         -- ☠ ...EXCEPT A CHANGE THAT DECIDES WHICH ROWS EXIST. Adding or
-        -- removing the helper gates every section row; the strong signal gates
-        -- the Trinkets and Potions row (through any door -- its tick, its
-        -- surface dropdown's None, the last amplifier untick, the icons tick
-        -- that keeps an otherwise-empty helper alive). An in-place rebuild
-        -- cannot add or retire a ROW, so those go straight to the deferred
+        -- removing the helper gates every section row. An in-place rebuild
+        -- cannot add or retire a ROW, so that goes straight to the deferred
         -- page:Refresh -- the panel closing at that moment is correct: the
         -- surface being edited is being restructured.
+        -- ⚠ The amplifier ticks used to belong here too, when they gated a
+        -- Trinkets and Potions row of their own. They are nested inside the
+        -- cooldown row now and add no row, so they rebuild the pane in place.
         -- ⚠ THE FAMILY FOLDS, AND THE FOLD IS ACCOUNT STATE UNDER A LITERAL KEY.
-        -- Eight section rows under one card is a lot of column; the card row is
+        -- Four section rows under one card is still a lot of column; the card row is
         -- the family's header and carries an expander, and the section rows are
         -- only BUILT while it is open -- the same "a collapsed thing builds no
         -- rows" rule the effect sections above follow. The store is the shared
@@ -791,8 +791,7 @@ local function BuildEffectsTabRows(ctx, shell)
         local PIH_FOLD_KEY = "ad_pihelper"
         local function PIHCollapsed() return pihSaved[PIH_FOLD_KEY] and true or false end
         local function PIHRowSet()
-            return tostring(P.PIH_Exists()) .. "|" .. tostring(P.PIH_SignalOn("strong"))
-                .. "|" .. tostring(PIHCollapsed())
+            return tostring(P.PIH_Exists()) .. "|" .. tostring(PIHCollapsed())
         end
         local function PIHDeferredPageRefresh()
             -- The page rebuild is the catch-up, so the close that follows it
