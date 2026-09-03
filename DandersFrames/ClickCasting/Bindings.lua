@@ -2080,7 +2080,7 @@ function CC:GetSlotItemInfo(slotId)
     local itemId = GetInventoryItemID("player", slotId)
     if itemId then
         local itemName, _, _, _, _, _, _, _, _, itemIcon = C_Item.GetItemInfo(itemId)
-        local spellName = GetItemSpell(itemId)
+        local spellName = C_Item.GetItemSpell(itemId)
         return {
             itemId = itemId,
             name = itemName,
@@ -2097,7 +2097,7 @@ function CC:GetItemInfoById(itemId)
     if not itemId then return nil end
     local itemName, _, _, _, _, _, _, _, _, itemIcon = C_Item.GetItemInfo(itemId)
     if itemName then
-        local spellName = GetItemSpell(itemId)
+        local spellName = C_Item.GetItemSpell(itemId)
         return {
             itemId = itemId,
             name = itemName,
@@ -2112,7 +2112,7 @@ end
 -- Get item count in bags
 function CC:GetItemCount(itemId)
     if not itemId then return 0 end
-    return C_Item.GetItemCount(itemId) or GetItemCount(itemId) or 0
+    return C_Item.GetItemCount(itemId) or 0
 end
 
 -- Build macro text for a single binding
