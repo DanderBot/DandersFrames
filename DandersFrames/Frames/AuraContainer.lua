@@ -295,6 +295,37 @@ local PROVIDER_EVENT = "AURA_DATA_PROVIDER_SWITCH"
 local function setContainerProviderDeaf(c, deaf)
     if not c then return end
 
+    -- ★★ 12.1.5 GIVES US THE LEVER THIS FUNCTION WAS WRITTEN WANTING.
+    -- ManagedAuraContainerSharedMixin:SetEditModePreviewEnabled is on the shared (so
+    -- inbound) mixin, and ShouldUseEditModeSource became
+    --     self.editModePreviewEnabled and self.useEditModeSource
+    -- — an AND gate over the flag the switch event writes. Blizzard_CustomAuraContainer.xml
+    -- seeds editModePreviewEnabled = true as a KeyValue, so a container behaves exactly as
+    -- it does today unless we opt out.
+    --
+    -- ⚠ THIS IS NOT DEAFENING, AND THE NAME OVERSELLS IT. The container still hears
+    -- AURA_DATA_PROVIDER_SWITCH and still sets useEditModeSource; what changes is that
+    -- the fake source becomes unreachable for THIS container. Same outcome for us, by a
+    -- route that never touches event registration — which is why it succeeds where the
+    -- UnregisterEvent lever below is refused by design.
+    --
+    -- ☠ PER CONTAINER, so this sits ABOVE the one-shot probe guard: every container needs
+    -- its own answer, unlike the capability question below which is asked once per session.
+    -- `deaf` is `not _testMode` at all three call sites, so preview stays ENABLED in test
+    -- mode — the permissive direction, i.e. identical to current behaviour — even though
+    -- _ownTestPreview means we paint our own frames and would not miss it.
+    --
+    -- ⚠ THE GLOBAL ResetAuraDataProvider COUNTER-PUNCH IS DELIBERATELY LEFT IN PLACE.
+    -- Once this is confirmed in game, our containers no longer take the fake source at
+    -- all, so the park-and-reset on a foreign switch becomes unnecessary and Blizzard's
+    -- own Edit Mode preview could keep its sample auras — that trade is recorded as
+    -- accepted a few hundred lines below and would finally be payable. But it is a
+    -- behavioural change to an in-game-verified path, and changing two coupled things at
+    -- once leaves neither testable. Follow-up, not now.
+    if c.SetEditModePreviewEnabled then
+        pcall(c.SetEditModePreviewEnabled, c, not deaf)
+    end
+
     -- ☠ ANSWERED IN GAME (68914): this is refused, and it is refused BY DESIGN.
     --   Frame:UnregisterEvent(): Function call not permitted on forbidden aspect
     --   'EventRegistrations' (execution tainted by 'DandersFrames')
