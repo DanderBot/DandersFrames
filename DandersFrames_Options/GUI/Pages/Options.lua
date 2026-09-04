@@ -4401,12 +4401,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- out L["Alpha"] instead of using the Greek letter. The Permanent
             -- Mover summary already prints its handle size this way, so this is
             -- the page's existing spelling rather than a new one.
-            local function FrameSizeSummary(d)
+            -- ☠ `shown` IS WHAT THE ROW'S OWN PLATE IS ALREADY SHOWING -- the set
+            -- of hoisted keys currently drawn, or nil when there are none. The
+            -- first try printed "125x64 · Spacing 2" on the title line while 125
+            -- and 64 sat in the two sliders directly beneath it: the row saying
+            -- the same thing twice and spending its one line of detail on the
+            -- half the user could already read. So the size drops out exactly
+            -- when it is on the plate, which leaves the summary saying what is
+            -- still behind the click. A folded, split-away or gated row is not
+            -- showing them, and gets them back on its own.
+            local function FrameSizeSummary(d, shown)
                 if not d then return "" end
                 local D = DF.Defaults
                 local parts = {}
                 local w, h = tonumber(d.frameWidth), tonumber(d.frameHeight)
-                if w and h then parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h)) end
+                if w and h and not (shown and shown.frameWidth and shown.frameHeight) then
+                    parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h))
+                end
                 -- "Not the shipped default" via the same engine the row's amber
                 -- tick asks, rather than a literal per key: the defaults live in
                 -- Config.lua and a number copied here would be a second copy of
@@ -4573,15 +4584,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- only where a bare number would be ambiguous, WORDS localised and
             -- numbers raw. Every read is guarded -- a profile mid-migration may
             -- be missing any of these keys, and a summary is not worth an error.
-            local function BorderSummary(d)
+            -- `shown` is what the plate is already showing -- see the long note
+            -- on FrameSizeSummary. This row hoists thickness and style, so both
+            -- drop out while they are on the plate and the summary is left
+            -- saying the colour source and the alpha, which are not.
+            local function BorderSummary(d, shown)
                 if not d then return "" end
                 local parts = {}
                 local size = tonumber(d.frameBorderSize)
-                if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
-                local style = d.frameBorderStyle
-                parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
-                                 or (style == "TEXTURE" and L["Texture"])
-                                 or L["Solid"]
+                if size and not (shown and shown.frameBorderSize) then
+                    parts[#parts + 1] = format("%dpx", math.floor(size))
+                end
+                if not (shown and shown.frameBorderStyle) then
+                    local style = d.frameBorderStyle
+                    parts[#parts + 1] = (style == "GRADIENT" and L["Gradient"])
+                                     or (style == "TEXTURE" and L["Texture"])
+                                     or L["Solid"]
+                end
                 -- STATIC is the default and says nothing; the other two are the
                 -- whole reason a border may not be the colour beneath it.
                 local src = d.frameBorderColorSource
@@ -5033,7 +5052,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- would leave the row naming the previous orientation's edge for as
             -- long as it took the page to rebuild. Same rule as every other
             -- summary here: read the table you were handed.
-            local function LayoutDirectionSummary(d)
+            --
+            -- `shown` is what the plate is already showing -- see the long note
+            -- on FrameSizeSummary. The first item IS growDirection said in
+            -- words, and growDirection is this row's one hoisted control, so it
+            -- drops out while the dropdown is on the plate. The anchor half is
+            -- not hoisted and stays; in raid, where the anchor is not shown
+            -- either, the row is left with no summary at all and the strip's
+            -- count carries it, which is the honest answer rather than a word
+            -- repeating the dropdown two pixels below it.
+            local function LayoutDirectionSummary(d, shown)
                 if not d then return "" end
                 local parts = {}
                 local vert    = d.growDirection == "VERTICAL"
@@ -5041,10 +5069,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- Grouped raid inverts the pair -- the repeating unit is a GROUP
                 -- there, see the ☠☠ note above the dropdowns. One place decides
                 -- it for the dropdown and this one has to agree with it.
-                if grouped then
-                    parts[#parts + 1] = vert and L["Rows"] or L["Columns"]
-                else
-                    parts[#parts + 1] = vert and L["Columns"] or L["Rows"]
+                if not (shown and shown.growDirection) then
+                    if grouped then
+                        parts[#parts + 1] = vert and L["Rows"] or L["Columns"]
+                    else
+                        parts[#parts + 1] = vert and L["Columns"] or L["Rows"]
+                    end
                 end
                 if GUI.SelectedMode ~= "raid" then
                     local a = d.growthAnchor or "START"
@@ -6036,13 +6066,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- words localised and numbers raw -- and the attach word only when it
             -- is doing something, because "Container" on every default profile is
             -- noise the row cannot afford.
-            local function PermMoverSummary(d)
+            --
+            -- `shown` is what the plate is already showing -- see the long note
+            -- on FrameSizeSummary. The handle size is this row's hoisted pair, so
+            -- it drops out while the mover is ON and the two sliders are drawn,
+            -- and comes straight back the moment the mover is switched off and
+            -- they are gated away.
+            local function PermMoverSummary(d, shown)
                 if not d then return "" end
                 local parts = {}
                 local pos = d.permanentMoverAnchor and moverAnchorValues[d.permanentMoverAnchor]
                 if pos then parts[#parts + 1] = pos end
                 local w, h = tonumber(d.permanentMoverWidth), tonumber(d.permanentMoverHeight)
-                if w and h then parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h)) end
+                if w and h
+                   and not (shown and shown.permanentMoverWidth and shown.permanentMoverHeight) then
+                    parts[#parts + 1] = format("%dx%d", math.floor(w), math.floor(h))
+                end
                 local attach = d.permanentMoverAttachTo
                 if attach == "FIRST" then parts[#parts + 1] = L["First Unit"]
                 elseif attach == "LAST" then parts[#parts + 1] = L["Last Unit"] end

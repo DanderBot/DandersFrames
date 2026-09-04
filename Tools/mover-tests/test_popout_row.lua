@@ -125,9 +125,10 @@ UI.PopoutRow = UI.PopoutRow or {
     -- The hoisted-controls half of the token table (Theme.lua). Mirrored whole
     -- for the reason the rest of it is: PopoutRow.lua reads these at FILE SCOPE,
     -- so a missing one is a nil in an arithmetic expression at load.
-    lineH = 28, nameLane = 62, laneGap = 6, cellGap = 10, nameSize = 9,
-    minControl = 98, minCell = 166,
+    lineH = 36, nameH = 12, controlH = 24, linePad = 4,
+    cellGap = 10, nameSize = 9, minControl = 98, splitCell = 166,
     footer = 18, footerFill = 0.5, footerBorder = 0.6, footerOn = 0.22,
+    plateStrip = 30, stripArc = 8, modTickGap = 2,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
@@ -174,6 +175,12 @@ end
 function UI:CreateLabelNative(parent, opts)
     local fs = FakeUIFrame()
     fs._labelOpts = opts
+    -- ☠ THE PARENT IS RECORDED. A FontString is a REGION, and a region created on
+    -- the wrong parent is simply never drawn -- the hidden-holder trap this
+    -- rework has already been bitten by, and the reason a hoisted control's name
+    -- lives in a frame of its own rather than on the plate. A stub that dropped
+    -- the parent could not tell the two apart.
+    fs:SetFakeParent(parent)
     fs.SetTextColor = function(self, r, g, b, a) self._textColor = { r = r, g = g, b = b, a = a } end
     if opts and opts.color then fs:SetTextColor(opts.color.r, opts.color.g, opts.color.b) end
     if opts and opts.text then fs:SetText(opts.text) end
@@ -2329,9 +2336,21 @@ if not UI.CreateSliderNative then
     end
 end
 
-local LINE_H, LANE, LANE_GAP = M.lineH, M.nameLane, M.laneGap
-local CELL_GAP, FOOTER_H, MIN_CELL = M.cellGap, M.footer, M.minCell
+local LINE_H, NAME_H, CONTROL_H = M.lineH, M.nameH, M.controlH
+local LINE_PAD, CELL_GAP, FOOTER_H = M.linePad, M.cellGap, M.footer
+local MIN_CONTROL, SPLIT_CELL = M.minControl, M.splitCell
 local LABEL_X = M.padX + M.check + M.labelGap
+-- ☠ A STRIP ROW'S TITLE LINE IS **NOT** `plate`. A plain row's plate is the
+-- whole row and is the 44 every other page's census pins; a strip row's plate is
+-- a title line, some control lines and a strip, and the title line alone is
+-- M.plateStrip. Section 24.1 pins that the plain row did not move.
+local HEAD_H = M.plateStrip
+-- The kit slider's own two numbers, from DandersUI/Widgets.lua's CreateSlider:
+-- the value box is SetSize(50, 20) pinned to the container's right edge, and the
+-- track and the bar both stop 8 short of it. Restated here because they are
+-- file-locals over there and the WHOLE POINT of putting the name above the
+-- control is what these two leave of a cell -- see 24.4's track arithmetic.
+local SLIDER_BOX, SLIDER_BOX_GAP = 50, 8
 
 -- A row at a stated WIDTH, laid out. `place` pins 260 on every row, which is one
 -- of the three width regimes this suite needs, so the width is set after it and
@@ -2410,12 +2429,23 @@ do
     local strip = row.footerStrip
     check(strip ~= nil, "strip: declaring it builds it")
     eq(strip:GetHeight(), FOOTER_H, "strip: at the theme's own height")
-    eq(row.plate:GetHeight(), PLATE_H + FOOTER_H,
-        "strip: the plate grows by exactly the strip -- the title line is unchanged")
-    eq(row:GetHeight(), PLATE_H + FOOTER_H + M.gap, "strip: and the slot follows the plate")
-    eq(row.preferredHeight, PLATE_H + FOOTER_H + M.gap,
+    -- ☠ THE TITLE LINE IS TIGHTER ON A STRIP ROW, and that is the whole of the
+    -- "chonky" half of the in-game verdict. 44 was a row; here it is the top
+    -- third of one, and 44 + 36 + 4 + 18 is a plate a third of which is air.
+    eq(row.plate:GetHeight(), HEAD_H + FOOTER_H,
+        "strip: the plate is the title line and the strip, and nothing between them")
+    eq(row:GetHeight(), HEAD_H + FOOTER_H + M.gap, "strip: and the slot follows the plate")
+    eq(row.preferredHeight, HEAD_H + FOOTER_H + M.gap,
         "strip: ...re-reported, because the row was added to its band before this")
     eq(row.layoutHeight, row.preferredHeight, "strip: under the name the layout pass reads")
+    -- The number that matters, stated as the comparison rather than as a
+    -- constant: a row with nothing hoisted has to be VISIBLY shorter than the
+    -- 62px plate the first try shipped, or the strip is pure cost on the ten
+    -- rows that hoist nothing.
+    check(row.plate:GetHeight() < PLATE_H + FOOTER_H,
+        "strip: a bare strip row is shorter than it was when the title line was a whole plate")
+    check(HEAD_H >= M.check + 12,
+        "strip: ...but still holds the 16px tick with air either side")
 
     -- The cluster MOVED. Same two textures, re-anchored -- not a second pair.
     eq(rightEdgeFrom(row.chevron, strip), -M.padX, "strip: the chevron is a pad in from the strip's right")
@@ -2425,9 +2455,21 @@ do
         -(M.padX + M.chevron + M.colGap + (row.stripCount:GetWidth() or 0) + M.colGap),
         "strip: and the cog a gap inboard of the phrase")
     check(not row.badgePill:IsShown(), "strip: the count PILL is gone -- the words replace it")
-    eq(row.modifiedTick._points[1][2], row.gear,
-        "strip: so the modified tick moves onto the cog, which is what says how much is inside now")
-    eq(row.modifiedTick._points[1][3], "TOPRIGHT", "strip: ...its top-right one")
+    -- ☠ AND THE MODIFIED TICK IS NOT ON THE COG. It was notched on the cog's
+    -- top-right corner and in game the 5px dot landed ON the 14px glyph -- a
+    -- notch needs something bigger than itself to be notched on. It goes after
+    -- the CHEVRON instead: the end of the way-in cluster, touching none of it.
+    eq(row.modifiedTick._points[1][2], row.chevron,
+        "strip: the modified tick sits after the chevron, at the strip's far right")
+    eq(row.modifiedTick._points[1][1], "LEFT", "strip: ...anchored by its own left edge")
+    eq(row.modifiedTick._points[1][3], "RIGHT", "strip: ...to the chevron's right")
+    eq(row.modifiedTick._points[1][4], M.modTickGap, "strip: a hair clear of it")
+    check(row.modifiedTick._points[1][2] ~= row.gear,
+        "strip: and NOT on the cog, which is the same size class as the dot")
+    -- ...and it still fits inside the plate's own padding: the chevron ends a
+    -- padX in, and the dot plus its gap have to come out of that.
+    check(M.modTickGap + M.modTick < M.padX,
+        "strip: the dot and its gap fit inside the plate's right-hand padding")
 
     -- Nothing on the strip takes the mouse: a frame drawn over a control eats
     -- that control's clicks, and the WHOLE ROW is already the click target. A
@@ -2479,44 +2521,78 @@ do
     check(h1:IsShown() and h2:IsShown(), "cells: ...and both are drawn")
     eq(h1:GetWidth(), cellW, "cells: two equal cells share the line")
     eq(h2:GetWidth(), cellW, "cells: ...exactly equal")
+    eq(cellW, 172, "cells: ...172 each at the shipped default window")
     eq(h1:GetHeight(), LINE_H, "cells: at the theme's line height")
+    eq(LINE_H, NAME_H + CONTROL_H, "cells: which is the name tier plus the control tier")
     -- Same line, second column.
     eq(h1._points[1][4], LABEL_X, "cells: the first cell starts at the NAME's x, not the tick's")
     eq(h2._points[1][4], LABEL_X + cellW + CELL_GAP, "cells: the second a cell-gap along")
-    eq(h1._points[1][5], -PLATE_H, "cells: line one sits directly under the title line")
-    eq(h2._points[1][5], -PLATE_H, "cells: ...and both cells are on it")
-    eq(row.plate:GetHeight(), PLATE_H + LINE_H + FOOTER_H,
-        "cells: one line of controls, so the plate grows by one")
+    eq(h1._points[1][5], -HEAD_H, "cells: line one sits directly under the title line")
+    eq(h2._points[1][5], -HEAD_H, "cells: ...and both cells are on it")
+    eq(row.plate:GetHeight(), HEAD_H + LINE_H + LINE_PAD + FOOTER_H,
+        "cells: one line of controls, so the plate grows by one -- and by the air under it")
 
-    -- THE LANE. Fixed, right-aligned and in caps, so the tracks start at the
-    -- same x in every cell of every row -- which is the whole argument.
-    local nm = row._hoists[1].nameText
-    eq(nm:GetText(), "FRAME WIDTH", "lane: the name is the panel's own string, in caps")
-    eq(nm._points[2][4], LANE, "lane: the lane is a fixed width")
-    eq(nm._points[1][4], 0, "lane: ...flush with the cell's left edge")
-    -- ...and the control gets what the lane leaves, at the cell's own width.
-    eq(row._hoists[1].control:GetWidth(), cellW - LANE - LANE_GAP,
-        "lane: the control fills what the lane leaves")
+    -- ☠ THE NAME IS ABOVE THE CONTROL, NOT BESIDE IT. The lane version gave the
+    -- name a fixed 62px and the panel's own labels did not fit: "FRAME WI...",
+    -- "GROWTH DI...". Two tiers, and each gets the cell's whole width.
+    local h = row._hoists[1]
+    local nm, box = h.nameText, h.nameBox
+    eq(nm:GetText(), "FRAME WIDTH", "name: the name is the panel's own string, in caps")
+    check(box ~= nil, "name: the name tier is a FRAME of its own")
+    eq(box:GetParent(), h1, "name: ...inside the cell")
+    eq(box:GetHeight(), NAME_H, "name: with a height, so what sits under it is anchored to something")
+    eq(box._points[1][5], 0, "name: flush with the cell's top -- it is the upper tier")
+    eq(box._points[1][4], 0, "name: ...and its full width, left edge")
+    eq(box._points[2][4], 0, "name: ...to right edge")
+    eq(nm:GetParent(), box, "name: the string lives in that frame, not on the plate")
+    -- ⚠ AND IT TAKES NO MOUSE. It lies directly over a control on a plate that is
+    -- itself the click target: the one frame in this cell that would eat a drag.
+    eq(rawget(box, "_flags").mouse, false, "name: and the tier takes no mouse")
+    -- The control's own tier is the rest of the cell, and it starts under the name.
+    local c1 = h.control
+    eq(c1._points[1][1], "TOPRIGHT", "name: the control hangs from the cell's top-right")
+    eq(c1._points[1][5], -(NAME_H + CONTROL_H / 2) + M.sliderBarMid,
+        "name: ...centred by its BAR on the control tier, not on the whole cell")
+
+    -- ☠ THE POINT OF THE WHOLE CHANGE: THE TRACK. The control gets the cell's
+    -- full width now, and the kit slider spends 50 of it on its value box and 8
+    -- keeping clear of it. Beside a 62px lane that left 46px of live track on a
+    -- 60-300 range -- about five units per pixel.
+    eq(c1:GetWidth(), cellW, "track: the control fills the whole cell, lane and all")
+    eq(cellW - SLIDER_BOX - SLIDER_BOX_GAP, 114,
+        "track: so a control in a PAIR gets 114px of live track, not 46")
+    check(cellW - SLIDER_BOX - SLIDER_BOX_GAP >= 112,
+        "track: ...at least the 112 ControlRow.lua sized its own slider for")
 
     -- THE SPLIT. Narrow the plate until two cells no longer fit and the pair
     -- becomes two ONE-cell lines -- the tracks get longer, not shorter.
     widen(row, 260)
     eq(row._hoistCells[1]:GetWidth(), 260 - LABEL_X - M.padX,
         "split: at 260 a cell takes the whole line")
-    eq(row._hoistCells[1]._points[1][5], -PLATE_H, "split: the first is on line one")
-    eq(row._hoistCells[2]._points[1][5], -(PLATE_H + LINE_H), "split: the second on line two")
-    eq(row.plate:GetHeight(), PLATE_H + 2 * LINE_H + FOOTER_H,
+    eq(row._hoistCells[1]._points[1][5], -HEAD_H, "split: the first is on line one")
+    eq(row._hoistCells[2]._points[1][5], -(HEAD_H + LINE_H), "split: the second on line two")
+    eq(row.plate:GetHeight(), HEAD_H + 2 * LINE_H + LINE_PAD + FOOTER_H,
         "split: so the plate is two lines tall")
-    eq(row:GetHeight(), PLATE_H + 2 * LINE_H + FOOTER_H + M.gap, "split: and the slot with it")
+    eq(row:GetHeight(), HEAD_H + 2 * LINE_H + LINE_PAD + FOOTER_H + M.gap,
+        "split: and the slot with it")
     eq(row.stripCount:GetText(), "3 more settings",
         "split: a split shows the same two, so the count does not move")
+    -- ☠ AND THE SPLIT STILL HAPPENS AT 260, which is the reason splitCell is a
+    -- token of its own rather than minControl. With the name above, a cell IS
+    -- its control's width -- so a rule that split only at minControl would put
+    -- two 98px cells on this plate and hand the NARROW window 40px of track,
+    -- the exact cramp the tiers were built to fix, arriving at the other end.
+    check(SPLIT_CELL > MIN_CONTROL,
+        "split: the split threshold is generous and the fold floor is hard -- two numbers")
+    eq(row._hoistCells[1]:GetWidth() - SLIDER_BOX - SLIDER_BOX_GAP, 156,
+        "split: so a split line's track is LONGER than a pair's, not shorter")
 
     -- NEVER THREE. Three lanes plus three minimum tracks do not fit any plate
     -- the shell allows, so a very wide row still splits its pair across two
     -- columns and no more.
     widen(row, 1200)
-    eq(row._hoistCells[2]._points[1][5], -PLATE_H, "cells: a wide plate puts both back on one line")
-    eq(row.plate:GetHeight(), PLATE_H + LINE_H + FOOTER_H, "cells: ...one line tall")
+    eq(row._hoistCells[2]._points[1][5], -HEAD_H, "cells: a wide plate puts both back on one line")
+    eq(row.plate:GetHeight(), HEAD_H + LINE_H + LINE_PAD + FOOTER_H, "cells: ...one line tall")
     -- ...in TWO cells, not three. The line is wide enough for three lanes and
     -- three tracks here, so a rule that allowed them would show up as a narrower
     -- cell -- which is what this measures, rather than counting a third control
@@ -2533,15 +2609,15 @@ do
     local row = stripRow({ label = "Folding", db = db, count = 5,
                            window = win, footerStrip = true })
     row:SetHoistedControls(twoSliders(db, seen))
-    -- The floor: below the width where a line cannot hold ONE named control.
-    local floorW = LABEL_X + M.padX + MIN_CELL
+    -- The floor: below the width where a line cannot hold ONE drawable control.
+    local floorW = LABEL_X + M.padX + MIN_CONTROL
     widen(row, floorW)
     eq(row:GetShownHoistCount(), 2, "fold: at the floor exactly one cell still fits")
     widen(row, floorW - 1)
     eq(row:GetShownHoistCount(), 0, "fold: one pixel under it the row folds")
     check(not row._hoistCells[1]:IsShown(), "fold: ...and draws no cell at all")
-    eq(row.plate:GetHeight(), PLATE_H + FOOTER_H,
-        "fold: back to the title line and the strip -- today's row")
+    eq(row.plate:GetHeight(), HEAD_H + FOOTER_H,
+        "fold: back to the title line and the strip -- and the air under the lines goes too")
     eq(row.stripCount:GetText(), "5 more settings",
         "fold: and the count goes back up by what it was showing")
     -- ...and back again, because a fold is a state and not a demolition.
@@ -2565,7 +2641,7 @@ do
     })
     widen(row, 401)
     eq(row:GetShownHoistCount(), 0, "gate: a control for a feature that is OFF is not hoisted")
-    eq(row.plate:GetHeight(), PLATE_H + FOOTER_H, "gate: ...so the row is title line and strip")
+    eq(row.plate:GetHeight(), HEAD_H + FOOTER_H, "gate: ...so the row is title line and strip")
     eq(row.stripCount:GetText(), "15 more settings", "gate: and the whole group is behind the click")
 
     -- Switch it on THROUGH THE ROW'S OWN WRITE PATH, which is the way a user
@@ -2573,7 +2649,8 @@ do
     -- than answered once at build.
     row._Write(true)
     eq(row:GetShownHoistCount(), 2, "gate: switching the feature on brings its controls out")
-    eq(row.plate:GetHeight(), PLATE_H + LINE_H + FOOTER_H, "gate: ...and the row grows for them")
+    eq(row.plate:GetHeight(), HEAD_H + LINE_H + LINE_PAD + FOOTER_H,
+        "gate: ...and the row grows for them")
     eq(row.stripCount:GetText(), "13 more settings", "gate: with the count down by the two on show")
 end
 
@@ -2662,6 +2739,144 @@ do
     eq(fill._fill.a, M.footerOn, "paint: ...at the open alpha, brighter than the plate's wash")
     eq(line._fill.r, acc.r, "paint: and the hairline goes with it")
     row:ClosePopout()
+end
+
+-- ---- 24.10 the strip's SHAPE: square top, round bottom ---------------
+-- ☠ THE SHAPE Round.lua DOES NOT BAKE, MADE FROM THE ONE IT DOES. The strip runs
+-- to the plate's bottom edge, so on a rounded plate its wash has to be square
+-- where it meets the plate's interior and curved where it IS the plate's edge.
+-- The generator bakes all-four and top-two only; the first try dodged it by
+-- insetting the wash 4px off the arc, and in game that read as a floating bar
+-- sitting inside the plate rather than as the plate's own foot.
+--
+-- So: a CLIP frame the strip's height, holding an all-four-corners surface that
+-- is taller than the clip and anchored to its BOTTOM. The clip eats the overhang
+-- and the top curve with it.
+do
+    local win = window()
+
+    -- The SQUARE arm first -- the row every section above builds. One flat quad,
+    -- flush, no clip involved at all.
+    local sq = stripRow({ label = "Square", count = 3, window = win, footerStrip = true })
+    check(sq._stripFill:IsShown(), "shape: a square plate paints the strip as one flat quad")
+    check(not sq._stripClip:IsShown(), "shape: ...and does not use the clip")
+    eq(sq._stripFill._points[1][4], 0, "shape: flush with the strip's left edge")
+    eq(sq._stripFill._points[2][4], 0, "shape: ...and with its right")
+
+    -- ...and the ROUNDED arm.
+    local rd = stripRow({ label = "Round", count = 3, window = win, footerStrip = true,
+                          surface = UI.SurfaceStyle })
+    local clip, shape = rd._stripClip, rd._stripShape
+    check(rd._surface ~= nil, "shape: the row took the rounded style it was handed")
+    check(not rd._stripFill:IsShown(), "shape: the flat quad steps aside")
+    check(clip:IsShown(), "shape: ...and the clip takes over")
+    check(clip:DoesClipChildren(), "shape: the clip actually clips")
+    -- ☠ SIZED BEFORE THE SHAPE WENT IN IT. SetClipsChildren clips at the frame's
+    -- own RECT, and a holder anchored inside a clip with no resolved height is
+    -- measured against nothing -- the surface would be stretched over a zero rect
+    -- and never appear.
+    eq(clip:GetHeight(), FOOTER_H - 1, "shape: the clip is the strip's own height, resolved")
+    check(clip:GetHeight() > 0, "shape: ...and NOT zero, which is what a clip must never be")
+
+    eq(shape:GetParent(), clip, "shape: the rounded surface's holder is INSIDE the clip")
+    check(shape:GetHeight() > clip:GetHeight(),
+        "shape: and it is taller than the clip -- the overhang is what removes the top corners")
+    check(M.stripArc >= 8,
+        "shape: the overhang is at least the largest radius Round.lua bakes, or a nick of arc survives")
+    eq(shape._points[1][1], "BOTTOMLEFT", "shape: anchored by its BOTTOM, so the bottom curve is the one kept")
+    eq(shape._points[2][1], "BOTTOMRIGHT", "shape: ...both corners of it")
+
+    -- FULL WIDTH, less the plate's own border weight and nothing more. The 4px
+    -- clearance is what made the first try read as a bar floating in the plate.
+    local bw = UI.SurfaceStyle.rowBorderWidth
+    eq(shape._points[1][4], bw, "shape: inset by the plate's border weight, so the ring survives")
+    eq(shape._points[2][4], -bw, "shape: ...symmetrically")
+    check(bw < UI.SurfaceEdgeInset(UI.SurfaceStyle.radius),
+        "shape: which is far less than the arc clearance the inset version used")
+
+    -- ⚠ NEITHER FRAME TAKES THE MOUSE. Both lie over the strip, the strip lies
+    -- over the plate, and the whole row is the click target.
+    eq(rawget(clip, "_flags").mouse, false, "shape: the clip takes no mouse")
+    eq(rawget(shape, "_flags").mouse, false, "shape: ...nor its holder")
+
+    local surf = UI:GetRoundedSurface(shape)
+    check(surf ~= nil, "shape: a rounded surface was actually issued on the holder")
+    eq(surf:GetShape(), "all", "shape: as the ALL-FOUR art -- the clip makes the other two square")
+    eq(surf:GetRadius(), UI.SurfaceStyle.radius, "shape: on the plate's own curve")
+    check(not surf.hasBorder, "shape: with no ring -- the plate already draws one round the row")
+    local sr, _, _, sa = surf:GetFillColor()
+    eq(sr, UI.Colors.background.r, "shape: at rest the wash is a hole in the plate")
+    eq(sa, M.footerFill, "shape: ...at the theme's own alpha")
+
+    -- ...and the one paint path reaches BOTH shapes: open the panel and the
+    -- rounded wash lights exactly as the flat one does.
+    rd:OpenPopout()
+    local ar, _, _, aa = surf:GetFillColor()
+    eq(ar, (rd._accent or host:GetAccent()).r, "shape: an open row lights the rounded wash too")
+    eq(aa, M.footerOn, "shape: ...at the open alpha")
+    rd:ClosePopout()
+end
+
+-- ---- 24.11 the summary says only what the plate does NOT --------------
+-- ☠ THE ROW WAS SAYING IT TWICE. "125x64 · Spacing 2" sat on the title line
+-- while 125 and 64 sat in the controls directly beneath it -- the row spending
+-- its one line of detail on the half the user could already read. So a
+-- consumer's summary is handed the set of keys currently ON THE PLATE, and a
+-- consumer that can rebuild itself without them does.
+--
+-- ⚠ SHOWN, NOT DECLARED. A folded, split-away or gated-off control is not on the
+-- plate, and the summary has to name it again the moment it goes.
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50, spacing = 2 }
+    local seen, sets = {}, {}
+    local function summary(d, shown)
+        sets[#sets + 1] = shown or false
+        local parts = {}
+        if not (shown and shown.frameWidth and shown.frameHeight) then
+            parts[#parts + 1] = string.format("%dx%d", d.frameWidth, d.frameHeight)
+        end
+        parts[#parts + 1] = "Spacing " .. tostring(d.spacing)
+        return table.concat(parts, " ")
+    end
+    local row = stripRow({ label = "Summing", db = db, count = 5, window = win,
+                           footerStrip = true, summary = summary, toggle = { key = "on" } })
+    eq(row.summary:GetText(), "100x50 Spacing 2",
+        "summary: with nothing hoisted the row reports the lot")
+    eq(sets[1], false, "summary: ...and is handed no set at all, not an empty one")
+
+    row:SetHoistedControls(twoSliders(db, seen))
+    widen(row, 401)
+    eq(row.summary:GetText(), "Spacing 2",
+        "summary: once the plate shows width and height, the summary drops them")
+    -- ⚠ TYPE-CHECKED BEFORE IT IS INDEXED. A summary handed `false` (or nothing)
+    -- must fail these as assertions rather than error out of the suite -- a
+    -- crashing test takes everything after it down with it.
+    local set = sets[#sets]
+    check(type(set) == "table", "summary: the set arrives once there is something on the plate")
+    eq(type(set) == "table" and set.frameWidth or nil, true,
+        "summary: naming the keys the plate is showing")
+    eq(type(set) == "table" and set.frameHeight or nil, true, "summary: ...both of them")
+    eq(type(set) == "table" and set.spacing or nil, nil,
+        "summary: and nothing that is still behind the click")
+
+    -- THE FOLD gives them back. Nothing refreshed -- only the width moved -- so
+    -- this also pins that the summary is repainted from the LAYOUT.
+    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    eq(row:GetShownHoistCount(), 0, "summary: the row folded")
+    eq(row.summary:GetText(), "100x50 Spacing 2",
+        "summary: ...so it reports the lot again, without anything having refreshed")
+    -- ☠ AND THE SET IS **nil** AGAIN, not an emptied table. "Nothing is on the
+    -- plate" and "these keys are on the plate" are different answers, and a
+    -- consumer testing `if shown then` -- the obvious way to write it -- would
+    -- read a wiped-but-truthy table as the second one for ever.
+    eq(sets[#sets], false, "summary: a row showing nothing hands over no set at all")
+    widen(row, 401)
+    eq(row.summary:GetText(), "Spacing 2", "summary: and widening takes them back off it")
+
+    -- OFF still replaces the whole summary, hoists or no hoists.
+    row._Write(false)
+    eq(row.summary:GetText(), "Off", "summary: a row that is switched off says so instead")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

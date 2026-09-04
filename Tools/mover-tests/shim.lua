@@ -251,6 +251,13 @@ function FakeUIFrame(w, h, cx, cy)
     function f:StartMoving() self._flags.moving = true end
     function f:StopMovingOrSizing() self._flags.moving = false end
     function f:SetClampedToScreen(v) self._flags.clamped = v and true or false end
+    -- ☠ RECORDED, not swallowed by the __index no-op. Clipping is how the kit
+    -- gets a shape its art does not bake -- PopoutRow's footer strip is an
+    -- all-four-corners surface hanging out of the top of a clip frame, so its top
+    -- curve is cut off and the bottom two survive. "Does this frame clip" is the
+    -- whole of that trick and there is nothing else headless that can see it.
+    function f:SetClipsChildren(v) self._flags.clips = v and true or false end
+    function f:DoesClipChildren() return self._flags.clips == true end
     function f:SetFrameStrata(v) self._flags.strata = v end
     -- ⚠ A REAL getter, not the __index no-op. The popout's connected chrome takes
     -- the strata of the window it docks outside of (Popout.lua's _SyncWindowLevel)

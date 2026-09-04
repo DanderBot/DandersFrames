@@ -481,7 +481,7 @@ do
     -- The summary prints the size with an ASCII x, for the reason the border
     -- summary spells out L["Alpha"]: the settings font has no multiplication
     -- sign, and the Permanent Mover row already prints its handle size this way.
-    local sum = SRC:match("local function FrameSizeSummary%(d%)(.-)local FRAME_SIZE_COUNT")
+    local sum = SRC:match("local function FrameSizeSummary%(d, shown%)(.-)local FRAME_SIZE_COUNT")
     check(sum ~= nil, "frame size: the summary is a named function on the page")
     if sum then
         check(sum:find('"%%dx%%d"') ~= nil, "frame size: ...printing WxH in ASCII")
@@ -563,7 +563,7 @@ do
           "layout direction: ...and the declared count, not a literal")
 
     -- The summary reads the table it is handed, not the build-time edge words.
-    local sum = SRC:match("local function LayoutDirectionSummary%(d%)(.-)\n            end")
+    local sum = SRC:match("local function LayoutDirectionSummary%(d, shown%)(.-)\n            end")
     check(sum ~= nil, "layout direction: the summary is a named function on the page")
     if sum then
         check(sum:find("MAIN_START", 1, true) == nil and sum:find("CROSS_START", 1, true) == nil,
@@ -1102,6 +1102,42 @@ do
     end
     check(SRC:find("local BORDER_COUNT, SHADOW_COUNT = 13, 4", 1, true) ~= nil,
           "hoist: ...and the border row still claims all thirteen behind it")
+
+    -- ---- the summary says only what the plate does NOT ---------------
+    -- ☠ THE ROW WAS SAYING IT TWICE. In game the Frame Size row printed
+    -- "125x64 · Spacing 2" on its title line while 125 and 64 sat in the two
+    -- sliders directly beneath it -- the row spending its one line of detail on
+    -- the half the user could already read. DandersUI/PopoutRow.lua hands a
+    -- summary a SECOND argument, the set of hoisted keys currently on the plate,
+    -- and every row on this page that hoists has to use it. A row that took the
+    -- argument and ignored it would be the defect, unchanged.
+    --
+    -- ⚠ ALL FOUR ARE DERIVABLE, so none of them hides its summary: each one's
+    -- remaining items are built from keys that are still behind the click
+    -- (spacing, the colour source, the growth anchor, the handle's position).
+    -- The one that can come out EMPTY is Layout Direction in raid, where the
+    -- anchor dropdown is not shown either -- and an empty summary there is the
+    -- honest answer, with the strip's count carrying the fact.
+    local SUMMARY_HOISTS = {
+        { fn = "FrameSizeSummary",       gate = "shown.frameWidth and shown.frameHeight" },
+        { fn = "BorderSummary",          gate = "shown.frameBorderSize" },
+        { fn = "BorderSummary",          gate = "shown.frameBorderStyle" },
+        { fn = "LayoutDirectionSummary", gate = "shown.growDirection" },
+        { fn = "PermMoverSummary",
+          gate = "shown.permanentMoverWidth and shown.permanentMoverHeight" },
+    }
+    for _, e in ipairs(SUMMARY_HOISTS) do
+        check(SRC:find("local function " .. e.fn .. "(d, shown)", 1, true) ~= nil,
+              "summary: " .. e.fn .. " takes what the plate is already showing")
+        check(SRC:find("not (shown and " .. e.gate .. ")", 1, true) ~= nil,
+              "summary: ...and leaves out " .. e.gate .. " while it is on the plate")
+    end
+    -- ...and the rows that hoist NOTHING are untouched: a second argument they
+    -- never receive must not have grown a branch in them.
+    for _, fn in ipairs({ "ShadowSummary", "FrameFadeSummary" }) do
+        check(SRC:find("local function " .. fn .. "(d)", 1, true) ~= nil,
+              "summary: " .. fn .. " hoists nothing, so it still takes only the table")
+    end
 
     -- ---- the general verb, not a sibling ----------------------------
     -- One door for both kinds of hoist. A second exported name would be a second

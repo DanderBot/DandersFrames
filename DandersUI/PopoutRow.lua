@@ -96,9 +96,14 @@ local PLATE_H = M.plate
 local LABEL_X = M.padX + M.check + M.labelGap
 
 -- The hoist half's metrics, all from the same table for the reason above it.
-local LINE_H, NAME_LANE   = M.lineH, M.nameLane
-local LANE_GAP, CELL_GAP  = M.laneGap, M.cellGap
-local FOOTER_H, MIN_CELL  = M.footer, M.minCell
+-- LINE_H is the whole CELL and the two tiers inside it are NAME_H above
+-- CONTROL_H -- the name is over the control, not beside it, so a cell's control
+-- is the cell's full width.
+local LINE_H, NAME_H      = M.lineH, M.nameH
+local CONTROL_H, LINE_PAD = M.controlH, M.linePad
+local CELL_GAP            = M.cellGap
+local FOOTER_H            = M.footer
+local MIN_CONTROL, SPLIT_CELL = M.minControl, M.splitCell
 
 -- ⚠ NO rowKind. rowKind drives UI.RowCompact's run-tightening, and a value that
 -- is not IN RowCompact silently BREAKS a run of checkboxes it sits between --
@@ -940,6 +945,16 @@ function UI:CreatePopoutRow(parent, opts)
     row._bound   = {}
     local offText = opts.offText or (L and L["Off"]) or "Off"
 
+    -- ☠ ASKED BEFORE ANYTHING IS DRAWN, because the TITLE LINE'S OWN HEIGHT
+    -- depends on it. A plain row's plate IS its title line and is the 44 every
+    -- other page's census pins; a strip row's plate is a title line, some control
+    -- lines and a strip, and 44 for the top third of that is what read in game as
+    -- "very chonky". So a strip row's title line is M.plateStrip and a plain
+    -- row's is M.plate -- one number each, resolved once here, and nothing on an
+    -- unconverted page moves by a pixel.
+    row._strip = opts.footerStrip and true or false
+    local HEAD_H = row._strip and M.plateStrip or PLATE_H
+
     -- ---- chrome ---------------------------------------------------
     -- A FRAME, not the texture this used to be, and everything the row draws is
     -- parented to IT rather than to the row. Two reasons, and the second is the
@@ -957,7 +972,7 @@ function UI:CreatePopoutRow(parent, opts)
     local plate = CreateFrame("Frame", nil, row, "BackdropTemplate")
     plate:SetPoint("TOPLEFT", 0, 0)
     plate:SetPoint("TOPRIGHT", 0, 0)
-    plate:SetHeight(PLATE_H)
+    plate:SetHeight(HEAD_H)
     row.plate = plate
 
     -- ---- the plate's SHAPE, and the one paint path both shapes share ----
@@ -1159,9 +1174,10 @@ function UI:CreatePopoutRow(parent, opts)
     -- OnEnter/OnLeave the moment the cursor crossed onto it, dropping the hover
     -- paint while the user is over the thing they are about to click.
     local strip                    -- the footer strip's frame, nil unless asked for
-    local stripFill, stripLine     -- its wash and the hairline above it
+    local stripFill, stripLine     -- its square wash and the hairline above it
+    local stripClip, stripShape    -- ...and the ROUNDED wash's clip and its holder
+    local stripSurface             -- the rounded handle, nil while the plate is square
     local stripCount               -- "N more settings"
-    row._strip = opts.footerStrip and true or false
 
     if row._strip then
         strip = CreateFrame("Frame", nil, plate)
@@ -1170,20 +1186,81 @@ function UI:CreatePopoutRow(parent, opts)
         strip:SetHeight(FOOTER_H)
         row.footerStrip = strip
 
-        -- ⚠ THE WASH IS INSET ON A ROUNDED PLATE, AND FLUSH ON A SQUARE ONE.
-        -- Round.lua bakes exactly two corner shapes -- all four, and top-two --
-        -- so there is no bottom-corners-only surface to draw this with, and a
-        -- flush rectangle would paint two square nubs where the plate's own arc
-        -- has already gone transparent. UI.SurfaceEdgeInset is the kit's own
-        -- published clearance for exactly this ("the last few units of the band
-        -- belong to the curve"), so the wash stops short of the arc instead.
+        -- ☠ A BOTTOM-CORNERS-ONLY WASH, BUILT FROM THE TWO SHAPES Round.lua
+        -- BAKES. The strip runs to the plate's bottom edge, so on a rounded plate
+        -- its wash has to be square at the top (it meets the plate's interior)
+        -- and curved at the bottom (it IS the plate's bottom edge). The generator
+        -- bakes all-four and top-two only, and the first attempt at this dodged
+        -- the problem by insetting the wash 4px off the arc -- which read in game
+        -- as a floating bar sitting inside the plate rather than as the plate's
+        -- own foot.
+        --
+        -- So the missing shape is made from the ones that exist: a CLIP frame the
+        -- strip's own height holding an ALL-FOUR-corners surface that is
+        -- M.stripArc taller and anchored to the clip's BOTTOM. The clip cuts the
+        -- overhang off, and the top curve goes with it. Square top, round bottom,
+        -- flush, full width.
+        --
+        -- ☠ THE CLIP IS SIZED BEFORE THE SHAPE GOES IN IT. SetClipsChildren
+        -- clips at the frame's own RECT, and a holder anchored inside a clip with
+        -- no resolved height is measured against nothing -- the surface would be
+        -- stretched over a zero rect and never appear.
+        --
+        -- ⚠ AND NEITHER FRAME TAKES THE MOUSE, said out loud rather than left to
+        -- the default. Both lie over the strip, the strip lies over the plate,
+        -- and the whole row is the click target -- a mouse-enabled frame anywhere
+        -- in that stack is the "anything drawn over a control eats its clicks"
+        -- bug this rework has shipped twice.
         stripFill = strip:CreateTexture(nil, "BACKGROUND")
+        stripFill:SetPoint("TOPLEFT", strip, "TOPLEFT", 0, -1)
+        stripFill:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", 0, 0)
+
+        stripClip = CreateFrame("Frame", nil, strip)
+        stripClip:SetPoint("TOPLEFT", strip, "TOPLEFT", 0, -1)
+        stripClip:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", 0, 0)
+        stripClip:SetHeight(FOOTER_H - 1)
+        stripClip:EnableMouse(false)
+        if stripClip.SetClipsChildren then stripClip:SetClipsChildren(true) end
+        row._stripClip = stripClip
+
+        stripShape = CreateFrame("Frame", nil, stripClip)
+        stripShape:SetHeight(FOOTER_H - 1 + M.stripArc)
+        stripShape:EnableMouse(false)
+        row._stripShape = stripShape
+
         row._ApplyStripShape = function()
             local s = row._surface
-            local inset = (s and UI.SurfaceEdgeInset) and UI.SurfaceEdgeInset(s.radius) or 0
-            stripFill:ClearAllPoints()
-            stripFill:SetPoint("TOPLEFT", strip, "TOPLEFT", inset, -1)
-            stripFill:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", -inset, inset)
+            -- ☠ BOTH ARMS ARE SWITCHED BY ONE PAIR OF CALLS, not by each arm
+            -- hiding the other's. A shape change runs this again, and "hide the
+            -- one I am not" leaves whichever was never shown in the first place
+            -- looking correct while the toggle that would have moved it does
+            -- nothing -- exactly the kind of state a Hide/Show pair per branch
+            -- grows. One condition, both frames, every time.
+            stripFill:SetShown(s == nil)
+            stripClip:SetShown(s ~= nil)
+            if not s then
+                -- Square plate, square strip: one flat quad, flush, full width.
+                if stripSurface then stripSurface:Hide() end
+                return
+            end
+            -- ⚠ INSET BY THE PLATE'S OWN BORDER WEIGHT, and by nothing else. The
+            -- plate's ring is a texture on the PLATE and the strip is a child
+            -- frame over it, so a wash run right to the edge would paint out the
+            -- plate's bottom border. One border width back is the border itself,
+            -- not the 4px clearance that made this read as a floating bar.
+            local bw = s.rowBorderWidth or s.borderWidth or 0
+            stripShape:ClearAllPoints()
+            stripShape:SetPoint("BOTTOMLEFT", stripClip, "BOTTOMLEFT", bw, bw)
+            stripShape:SetPoint("BOTTOMRIGHT", stripClip, "BOTTOMRIGHT", -bw, bw)
+            stripShape:SetHeight(FOOTER_H - 1 + M.stripArc - bw)
+            stripSurface = UI:CreateRoundedSurface(stripShape, {
+                radius = s.radius,
+                -- NO RING. The plate already draws one round the whole row and a
+                -- second traced up the strip's own sides would double it.
+                border = false,
+                fill   = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, M.footerFill },
+            })
+            stripSurface:Show()
         end
         row._ApplyStripShape()
         -- The hairline that parts the strip from the plate. Full width in both
@@ -1196,6 +1273,14 @@ function UI:CreatePopoutRow(parent, opts)
         -- Published for the reason the cells are: the strip's look is only
         -- observable as the colours these two were handed.
         row._stripFill, row._stripLine = stripFill, stripLine
+
+        -- ONE PAINT PATH FOR TWO SHAPES, exactly as paintPlate is for the plate:
+        -- the state paint computes four numbers and must not know whether it is
+        -- tinting a quad or a nine-sliced surface.
+        row._PaintStrip = function(r, g, b, a)
+            if row._surface and stripSurface then stripSurface:SetFillColor(r, g, b, a)
+            else stripFill:SetColorTexture(r, g, b, a) end
+        end
 
         -- The words. "N MORE settings" is the honest count once some of the
         -- group is on the plate: opts.count is what the PANE holds, and every
@@ -1220,20 +1305,28 @@ function UI:CreatePopoutRow(parent, opts)
 
         -- ...and the count PILL goes, because the words replace it. Which
         -- rehouses the modified tick, whose whole argument was "a mark on the
-        -- chip that says how much is in here". The cog is what says that now, so
-        -- the notch moves onto its corner and keeps meaning the same thing.
+        -- chip that says how much is in here".
+        --
+        -- ☠ NOT ON THE COG. The first try notched it on the cog's top-right
+        -- corner, on the reading that the cog is what says "how much is in here"
+        -- now -- and in game the 5px dot landed ON the 14px glyph and read as a
+        -- smudge on it. The two are the same size class; a NOTCH needs something
+        -- bigger than itself to be notched on, which the pill was and the cog is
+        -- not. So it goes after the CHEVRON at the strip's far right: the end of
+        -- the way-in cluster, touching none of it, and still unambiguously about
+        -- the group's contents rather than about the row's name or its value.
         badgePill:Hide()
         modTick:SetParent(strip)
         modTick:ClearAllPoints()
-        modTick:SetPoint("CENTER", gear, "TOPRIGHT", 0, 0)
+        modTick:SetPoint("LEFT", chevron, "RIGHT", M.modTickGap, 0)
     end
 
     -- ---- the control lines ----------------------------------------
-    -- One CELL per hoisted control: a fixed name lane at its head and the
-    -- control filling what is left. The lane is the same width in every cell of
-    -- every row, which is the whole of "the tracks start and end at the same x
-    -- down the page" -- the argument the four right-hand columns above are fixed
-    -- for, one axis over.
+    -- One CELL per hoisted control, in two tiers: the name across the cell's
+    -- full width, the control across the cell's full width beneath it. Cells on
+    -- a line are equal and every row indents to the same LABEL_X, which is the
+    -- whole of "the tracks start and end at the same x down the page" -- the
+    -- argument the four right-hand columns above are fixed for, one axis over.
     local hoists = nil             -- the declarations, in the order they were given
     local hoistCells = nil         -- the cell frames, one per declaration
     local shownHoists = 0          -- how many are drawn RIGHT NOW (the gate, the fold)
@@ -1249,6 +1342,34 @@ function UI:CreatePopoutRow(parent, opts)
         local left = max(row._count - shownHoists, 0)
         local fmt = L and L["%d more settings"]
         stripCount:SetText(format(fmt or "%d", left))
+    end
+
+    -- ---- the summary ------------------------------------------------
+    -- ☠ THE SUMMARY IS TOLD WHAT THE PLATE IS ALREADY SHOWING. A Frame Size row
+    -- that hoists width and height was still printing "125x64 · Spacing 2" on
+    -- the title line while 125 and 64 sat in the controls directly beneath it --
+    -- the row saying the same thing twice and spending its one line of detail on
+    -- the half the user can already read. So the consumer's summary function
+    -- takes a SECOND argument: the set of keys currently on the plate, or nil
+    -- when there are none. A consumer that ignores it gets exactly what it got
+    -- before, which is what every unconverted page does.
+    --
+    -- ⚠ RE-PAINTED FROM THE LAYOUT, not only from the refresh. The set moves
+    -- when a line folds, splits or gates -- a window drag runs the layout alone,
+    -- and a summary that only followed a refresh would go on hiding a number
+    -- that had just left the plate. Guarded on the toggle having been read at
+    -- least once: construction lays out before its first Refresh, and `on` is
+    -- what decides between the summary and the off text.
+    local function paintSummary()
+        if row._toggledOn == nil then return end
+        local text
+        if row._toggledOn then
+            local shown = (shownHoists > 0) and row._shownKeys or nil
+            text = opts.summary and opts.summary(resolveDB(opts.db), shown) or ""
+        else
+            text = offText
+        end
+        summary:SetText(text or "")
     end
 
     -- Is this control's feature switched on? A control for a feature that is OFF
@@ -1282,11 +1403,18 @@ function UI:CreatePopoutRow(parent, opts)
         if not plateW or plateW <= 0 then plateW = UI.PopoutContentWidth or 260 end
         local lineW = plateW - LABEL_X - M.padX
 
-        -- Two cells, one, or none. NEVER three: three lanes plus three minimum
-        -- tracks does not fit the plate at any window size the shell allows.
+        -- Two cells, one, or none. NEVER three: three minimum controls and two
+        -- gaps do not fit the plate at any window size the shell allows.
+        --
+        -- ☠ TWO DIFFERENT THRESHOLDS, and they are not interchangeable. SPLIT is
+        -- generous (a pair is only worth having while each half is still a
+        -- draggable control), FOLD is the hard floor (below it there is no
+        -- control left to draw at all). One number doing both would either split
+        -- rows that had plenty of room or leave 40px stubs on a narrow window --
+        -- see Theme.lua's splitCell.
         local perLine = 0
-        if lineW >= 2 * MIN_CELL + CELL_GAP then perLine = 2
-        elseif lineW >= MIN_CELL then perLine = 1 end
+        if lineW >= 2 * SPLIT_CELL + CELL_GAP then perLine = 2
+        elseif lineW >= MIN_CONTROL then perLine = 1 end
 
         -- Which declarations are drawable at all, in declaration order.
         local live = {}
@@ -1299,6 +1427,18 @@ function UI:CreatePopoutRow(parent, opts)
         if perLine == 0 then live = {} end
 
         shownHoists = #live
+        -- WHICH KEYS ARE ON THE PLATE, as a set the consumer's summary reads so
+        -- it can leave out what the user can already see. Rebuilt here rather
+        -- than derived at paint time because the fold, the split and the gate all
+        -- move it, and re-used rather than re-allocated -- this runs on every
+        -- refresh and on every window drag.
+        local keys = row._shownKeys
+        if not keys then keys = {}; row._shownKeys = keys end
+        for k in pairs(keys) do keys[k] = nil end
+        for _, idx in ipairs(live) do
+            local key = hoists[idx] and hoists[idx].key
+            if type(key) == "string" then keys[key] = true end
+        end
         local lines = (perLine > 0) and ceil(shownHoists / perLine) or 0
         local cellW = (perLine == 2) and floor((lineW - CELL_GAP) / 2) or lineW
 
@@ -1323,21 +1463,28 @@ function UI:CreatePopoutRow(parent, opts)
                 cell:ClearAllPoints()
                 cell:SetPoint("TOPLEFT", plate, "TOPLEFT",
                               LABEL_X + col * (cellW + CELL_GAP),
-                              -(PLATE_H + (lineN - 1) * LINE_H))
-                -- The control fills what the lane leaves, re-sized here because
-                -- the cell's width is the thing that just changed.
+                              -(HEAD_H + (lineN - 1) * LINE_H))
+                -- The control gets the WHOLE cell, because the name is above it
+                -- rather than beside it. Re-sized here because the cell's width
+                -- is the thing that just changed.
                 local h = hoists[idx]
                 if h.control then
-                    local w = max(cellW - NAME_LANE - LANE_GAP, 1)
-                    h.control:SetSize(w, (h.kind == "slider") and M.sliderH or M.dropdownH)
+                    h.control:SetSize(max(cellW, 1),
+                                      (h.kind == "slider") and M.sliderH or M.dropdownH)
                 end
                 cell:Show()
             end
         end
 
         -- ---- the plate, and the row's slot ---------------------------
-        local plateH = PLATE_H + lines * LINE_H + (strip and FOOTER_H or 0)
-        local headDY = (plateH - PLATE_H) / 2
+        -- LINE_PAD is air under the LAST control line only -- a row showing none
+        -- is its title line and its strip and nothing between them, which is what
+        -- makes a bare strip row visibly shorter than a hoisted one rather than
+        -- carrying a hoisted row's slack for nothing.
+        local plateH = HEAD_H + lines * LINE_H
+                     + ((lines > 0) and LINE_PAD or 0)
+                     + (strip and FOOTER_H or 0)
+        local headDY = (plateH - HEAD_H) / 2
         if plate:GetHeight() ~= plateH then plate:SetHeight(plateH) end
 
         -- ☠ EVERY REGION ON THE TITLE LINE TAKES THE SAME y, or two of them
@@ -1388,6 +1535,8 @@ function UI:CreatePopoutRow(parent, opts)
         end
 
         paintStripCount()
+        -- ...and the summary, because what is on the plate is what it leaves out.
+        paintSummary()
     end
     row._LayoutPlate = plateLayout
 
@@ -1432,10 +1581,10 @@ function UI:CreatePopoutRow(parent, opts)
         -- leaves its right end because the strip is the panel's tether.
         if stripFill then
             if active then
-                stripFill:SetColorTexture(accent.r, accent.g, accent.b, M.footerOn)
+                row._PaintStrip(accent.r, accent.g, accent.b, M.footerOn)
                 stripLine:SetColorTexture(accent.r, accent.g, accent.b, M.activeBorder)
             else
-                stripFill:SetColorTexture(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, M.footerFill)
+                row._PaintStrip(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, M.footerFill)
                 stripLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, M.footerBorder)
             end
             stripCount:SetTextColor(accent.r, accent.g, accent.b, on and 1 or OFF_ALPHA)
@@ -1549,9 +1698,10 @@ function UI:CreatePopoutRow(parent, opts)
         end
         -- OFF replaces the summary outright. A row that is switched off has no
         -- settings worth reporting, and printing them anyway reads as though it
-        -- were still doing them.
-        local text = on and (opts.summary and opts.summary(db) or "") or offText
-        summary:SetText(text or "")
+        -- were still doing them. (The body is shared with the layout pass -- see
+        -- paintSummary: a fold or a gate changes what the summary may leave out
+        -- without anything having refreshed.)
+        paintSummary()
 
         -- The modified tick rides the SUMMARY's cadence, which is the point: a
         -- write inside the popout already repaints the row's summary, so the
@@ -1669,7 +1819,7 @@ function UI:CreatePopoutRow(parent, opts)
     --
     --   name      REQUIRED. The setting's own display name -- the SAME string
     --             the panel labels it with, already localised. Drawn in the
-    --             cell's fixed lane, and handed to the embedded factory as its
+    --             cell's name tier, and handed to the embedded factory as its
     --             label so the tooltip, the override markers and the search
     --             index all name one thing
     --   kind      "slider" | "dropdown"
@@ -1709,14 +1859,38 @@ function UI:CreatePopoutRow(parent, opts)
                 -- by). The cell is a frame; the name goes in it, and the two
                 -- move together for ever after.
                 local cell = CreateFrame("Frame", nil, plate)
-                cell:SetSize(NAME_LANE + LANE_GAP + M.minControl, LINE_H)
+                cell:SetSize(SPLIT_CELL, LINE_H)
                 hoistCells[n] = cell
 
-                local nameFS = host:CreateLabelNative(cell, { size = M.nameSize, color = C_TEXT_DIM })
+                -- ☠ TWO TIERS: THE NAME ABOVE, THE CONTROL BENEATH. Beside the
+                -- control the name had a fixed 62px lane and the panel's own
+                -- labels did not fit it -- "FRAME WI...", "GROWTH DI..." -- while
+                -- the control it stole the width from was left with 46px of live
+                -- track. Above, the name has the cell's whole width and so does
+                -- the control: the two things the row is for both get 172px
+                -- instead of both getting neither.
+                --
+                -- Its OWN FRAME, with its OWN height, for the reason the cell is
+                -- one: a bare FontString anchored inside a rect has no height of
+                -- its own, and everything under it would be anchored to nothing.
+                --
+                -- ⚠ AND IT TAKES NO MOUSE. It lies directly above a control on a
+                -- plate that is itself a click target -- the one place in this
+                -- cell where an enabled frame would eat a drag.
+                local nameBox = CreateFrame("Frame", nil, cell)
+                nameBox:SetPoint("TOPLEFT", cell, "TOPLEFT", 0, 0)
+                nameBox:SetPoint("TOPRIGHT", cell, "TOPRIGHT", 0, 0)
+                nameBox:SetHeight(NAME_H)
+                nameBox:EnableMouse(false)
+                h.nameBox = nameBox
+
+                local nameFS = host:CreateLabelNative(nameBox, { size = M.nameSize, color = C_TEXT_DIM })
                 nameFS:SetText((h.name:upper()))
-                nameFS:SetPoint("LEFT", cell, "LEFT", 0, 0)
-                nameFS:SetPoint("RIGHT", cell, "LEFT", NAME_LANE, 0)
-                if nameFS.SetJustifyH then nameFS:SetJustifyH("RIGHT") end
+                nameFS:SetPoint("LEFT", nameBox, "LEFT", 0, 0)
+                nameFS:SetPoint("RIGHT", nameBox, "RIGHT", 0, 0)
+                -- LEFT, not the lane's RIGHT: a name over its control reads from
+                -- the same edge the track starts at.
+                if nameFS.SetJustifyH then nameFS:SetJustifyH("LEFT") end
                 if nameFS.SetWordWrap then nameFS:SetWordWrap(false) end
                 h.nameText = nameFS
 
@@ -1745,8 +1919,10 @@ function UI:CreatePopoutRow(parent, opts)
                         accent      = row._accent,
                         tooltip     = h.tooltip,
                     })
+                    -- Centred in the CONTROL TIER, which starts under the name.
                     c:ClearAllPoints()
-                    c:SetPoint("TOPRIGHT", cell, "TOPRIGHT", 0, -(LINE_H - M.dropdownH) / 2)
+                    c:SetPoint("TOPRIGHT", cell, "TOPRIGHT", 0,
+                               -(NAME_H + (CONTROL_H - M.dropdownH) / 2))
                 elseif h.kind == "slider" then
                     c = host:CreateSliderNative(cell, {
                         label       = h.name,
@@ -1762,12 +1938,17 @@ function UI:CreatePopoutRow(parent, opts)
                     -- The factory has no `inline`, so its caption is hidden
                     -- after the fact -- ControlRow's move, for its reason.
                     if c.label then c.label:Hide() end
-                    -- ☠ CENTRED BY THE BAR, NOT BY THE CONTAINER. See
+                    -- ☠ CENTRED BY THE BAR, NOT BY THE CONTAINER, and centred on
+                    -- the CONTROL TIER rather than on the cell. See
                     -- M.sliderBarMid: the container's top 18px hold the caption
                     -- just hidden, so centring the container would park the
-                    -- track low and leave dead space doing the balancing.
+                    -- track low and leave dead space doing the balancing. The
+                    -- tier's middle is NAME_H + CONTROL_H/2 below the cell's top,
+                    -- which puts the 20px value box 2px clear of the name above
+                    -- it and 2px clear of the cell's foot.
                     c:ClearAllPoints()
-                    c:SetPoint("TOPRIGHT", cell, "TOPRIGHT", 0, -(LINE_H / 2) + M.sliderBarMid)
+                    c:SetPoint("TOPRIGHT", cell, "TOPRIGHT", 0,
+                               -(NAME_H + CONTROL_H / 2) + M.sliderBarMid)
                 else
                     local dbg = host:Call("debug", "popoutrow")
                     if dbg then
@@ -1780,18 +1961,20 @@ function UI:CreatePopoutRow(parent, opts)
                 -- caption's rect at the widget's level + 5, unconditionally and
                 -- whether or not there is a tooltip to show -- so a hidden
                 -- caption leaves an invisible click-eater floating over the
-                -- plate. On a slider that lands in the TITLE LINE (the container
-                -- hangs 8px above its cell so the bar centres); on an inline
-                -- dropdown it lands on the opener itself. Either way it is the
-                -- "anything drawn over a control eats its clicks" class that has
-                -- shipped twice in this rework.
+                -- plate. On a slider that rect is the container's top 18px,
+                -- which under the two-tier cell covers the name AND the top of
+                -- the track and value box below it; on an inline dropdown it
+                -- lands on the opener itself. Either way it is the "anything
+                -- drawn over a control eats its clicks" class that has shipped
+                -- twice in this rework.
                 --
                 -- ⚠ THE COST IS THE TOOLTIP: a hoisted control has none. The
-                -- alternative -- re-anchoring the hit onto the cell's name lane
-                -- -- trades it for a 62px hole in the row's own click target,
-                -- and the row being clickable everywhere is what the whole
-                -- shape leans on. Taken deliberately; the panel's twin still
-                -- carries the tooltip.
+                -- alternative -- re-anchoring the hit onto the cell's NAME TIER
+                -- -- trades it for a full-cell-width hole in the row's own click
+                -- target, which is worse under the two tiers than it was under
+                -- the lane, and the row being clickable everywhere is what the
+                -- whole shape leans on. Taken deliberately; the panel's twin
+                -- still carries the tooltip.
                 if c and c.dfTooltipHit then c.dfTooltipHit:Hide() end
                 h.control = c
             end
