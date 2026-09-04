@@ -95,20 +95,55 @@ end
 --   widget       the frame the caller holds and sets .tooltip on (the container)
 --   label        the default title
 --   labelRegion  the label FontString — the hit frame is built over ITS rect
-function UI:AttachTooltip(widget, label, labelRegion)
+--   opts         optional:
+--                  hit    a FRAME to build the hit over INSTEAD of labelRegion,
+--                         for a consumer that hides the caption and draws the
+--                         name somewhere else (see below)
+--                  noHit  build nothing at all — the consumer owns the hover
+--
+-- ☠ THE HIT TAKES MOTION, NEVER CLICKS. `EnableMouse(true)` takes both, and a
+-- frame that takes clicks sitting over a control eats them -- which is what this
+-- helper did for every widget it ever attached to. It went unnoticed while the
+-- rect was a VISIBLE caption with nothing behind it, and bit the moment a
+-- consumer hid its caption and the rect landed on the control instead. A tooltip
+-- needs OnEnter/OnLeave and nothing else, so it asks for motion only and the
+-- click falls through to whatever is underneath. That is the fix at the source:
+-- it holds whether or not the caller ever sets a tooltip, and whether or not the
+-- rect is where the caller thinks it is.
+--
+-- ⚠ THE HIT IS STILL A HOLE IN A PARENT'S HOVER. Motion is what OnEnter is made
+-- of, so a hit frame inside a plate that paints on hover still takes the hover
+-- off that plate for as long as the cursor is over it. A consumer whose row
+-- owns the hover passes `noHit` and shows the tooltip itself; a consumer that
+-- wants one passes `hit` and picks a region where the hole costs least.
+function UI:AttachTooltip(widget, label, labelRegion, opts)
     local host = self
-    if not labelRegion then return end
+    opts = opts or {}
+    if opts.noHit then return nil end
+    -- The stand-in region is a FRAME, not a FontString: the hit is PARENTED to it
+    -- so its level is relative to the thing it covers rather than to a widget
+    -- that may sit somewhere else entirely.
+    local region = opts.hit or labelRegion
+    if not region then return nil end
 
-    local hit = CreateFrame("Frame", nil, widget)
-    -- Two-corner anchored to the FontString, so it tracks the text if the label
-    -- is ever re-set or re-fonted. The 2px vertical bleed makes a single line of
-    -- small text comfortable to hit without reaching the control below it.
-    hit:SetPoint("TOPLEFT", labelRegion, "TOPLEFT", 0, 2)
-    hit:SetPoint("BOTTOMRIGHT", labelRegion, "BOTTOMRIGHT", 0, -2)
-    hit:EnableMouse(true)
-    -- Above the widget's own children so the label area wins the mouse, but it
-    -- only ever covers the TEXT, so nothing clickable is behind it.
-    hit:SetFrameLevel((widget:GetFrameLevel() or 0) + 5)
+    local anchorTo = opts.hit or widget
+    local hit = CreateFrame("Frame", nil, anchorTo)
+    if opts.hit then
+        -- The whole named region, and the caller may narrow it afterwards
+        -- through .dfTooltipHit -- it knows how wide its own words are.
+        hit:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 0)
+        hit:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
+    else
+        -- Two-corner anchored to the FontString, so it tracks the text if the label
+        -- is ever re-set or re-fonted. The 2px vertical bleed makes a single line of
+        -- small text comfortable to hit without reaching the control below it.
+        hit:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 2)
+        hit:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, -2)
+    end
+    hit:SetMouseMotionEnabled(true)
+    hit:SetMouseClickEnabled(false)
+    -- Above the children of whatever it was built on, so the words win the hover.
+    hit:SetFrameLevel((anchorTo:GetFrameLevel() or 0) + (opts.hit and 1 or 5))
 
     hit:SetScript("OnEnter", function()
         -- ★ GAME-DATA TOOLTIPS ride the same hit frame: a widget stamped with
@@ -2030,7 +2065,11 @@ end
 --                               compatibility; deleted next minor. Do not add
 --                               new call sites.
 --   accent {r,g,b}              pinned accent instead of the host one
---   tooltip                     as before, read at hover time off the container
+--   tooltip                     stamped onto the container and read at hover time
+--   tooltipHit  <frame>         build the hover hit over THIS frame instead of
+--                               over the caption -- for a caller that hides the
+--                               caption and draws the name itself
+--   noTooltipHit                build no hover hit at all; the caller owns it
 --   dbRef = { db, key }         optional settings metadata. A slider WITHOUT it
 --                               never calls getOverrideState / interceptWrite /
 --                               onSettingWritten / registerSearch, so a consumer
@@ -2840,7 +2879,16 @@ function UI:CreateSlider(parent, opts)
     -- off the bar matters most here — a tooltip over a slider you are dragging is
     -- the worst case of the problem. Both .tooltip (title from the label) and the
     -- legacy .tooltipText/.tooltipSubText pair are honoured.
-    host:AttachTooltip(container, label, lbl)
+    --
+    -- ⚠ opts.tooltip IS STORED, not dropped. It was documented in the opts block
+    -- above and read by nothing, so every consumer that passed one got silence.
+    -- The container is where AttachTooltip reads it from at hover time, so this
+    -- is the one line that makes the documented opt true.
+    if opts.tooltip ~= nil then container.tooltip = opts.tooltip end
+    -- A consumer that HIDES this caption says where the hit belongs instead --
+    -- over the name it drew itself -- or that it owns the hover and wants none.
+    host:AttachTooltip(container, label, lbl,
+        { hit = opts.tooltipHit, noHit = opts.noTooltipHit })
 
     return container
 end
@@ -3177,6 +3225,8 @@ end
 UI.CreateAnchorGridNative = UI.CreateAnchorGrid
 
 -- opts: label, options, get, set, onChanged, tooltip, dbRef = { db, key },
+--       tooltipHit / noTooltipHit (see CreateSlider's opts block -- an inline
+--       dropdown needs one or the other),
 --       plus the display flags carried through unchanged: accent, inline,
 --       optionsFunc, searchable, menuAlign, onRuntimeWrite.
 function UI:CreateDropdown(parent, opts)
@@ -3703,7 +3753,14 @@ function UI:CreateDropdown(parent, opts)
     -- Tooltip: shared attach on the LABEL only (see UI:AttachTooltip). The label
     -- sits at the container's TOPLEFT, above the opener, so it is well clear of
     -- the menu you are about to click.
-    host:AttachTooltip(container, label, lbl)
+    --
+    -- ☠ EXCEPT ON AN INLINE ONE, where the caption is hidden and its rect is
+    -- therefore the container's own top left -- which the opener FILLS. That is
+    -- how a hit frame ended up over the button it was meant to explain. Inline
+    -- callers pass `tooltipHit` (the name they drew themselves) or `noTooltipHit`.
+    if opts.tooltip ~= nil then container.tooltip = opts.tooltip end
+    host:AttachTooltip(container, label, lbl,
+        { hit = opts.tooltipHit, noHit = opts.noTooltipHit })
 
     -- SEARCH: Register this setting
     if dbKey and type(dbKey) == "string" then

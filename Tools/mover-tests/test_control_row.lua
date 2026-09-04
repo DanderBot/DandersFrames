@@ -177,6 +177,28 @@ local function boundValue(opts)
     return nil
 end
 
+-- ☠ THE TOOLTIP HOVER RECT, MODELLED. UI:AttachTooltip lays one over the caption
+-- for every labelled widget it builds -- and this row hides the caption of both
+-- of the kinds below, so the rect landed on the plate (slider) or on the OPENER
+-- (inline dropdown), which is a dead patch over the button that opens the menu.
+-- The row now says `noTooltipHit` at both call sites; a stub that ignored the opt
+-- and always built one would let that claim pass without the row doing anything,
+-- so this honours it exactly as the real factory does. Its own end of the
+-- contract is driven against the real Widgets.lua in test_widgets_slider.lua.
+--
+-- ⚠ PARENTED THE WAY THE REAL HELPER PARENTS IT: to the frame the caller NAMED,
+-- or to the container itself when it named none. That is what puts it inside the
+-- plate's subtree, and the plate's subtree is what the mouse sweep below walks --
+-- a stub that hung it off the caption FontString instead would leave that sweep
+-- looking at nothing and passing for free.
+local function attachStubHit(c, opts)
+    if opts.noTooltipHit then return end
+    local hit = CreateFrame("Frame", nil, opts.tooltipHit or c)
+    hit:SetMouseMotionEnabled(true)
+    hit:SetMouseClickEnabled(false)
+    c.dfTooltipHit = hit
+end
+
 function UI:CreateSliderNative(parent, opts)
     local c = CreateFrame("Frame", nil, parent)
     c._sliderOpts = opts
@@ -185,6 +207,7 @@ function UI:CreateSliderNative(parent, opts)
     -- "the caption is hidden" pass without the row doing anything.
     c.label = FakeUIFrame()
     c.label:Show()
+    attachStubHit(c, opts)
     c.refreshValue = function(self) self._value = boundValue(opts) end
     c.SetEnabled = function(self, e) self._enabled = e and true or false end
     c:refreshValue()
@@ -194,6 +217,8 @@ end
 function UI:CreateDropdownNative(parent, opts)
     local c = CreateFrame("Frame", nil, parent)
     c._dropdownOpts = opts
+    c.label = FakeUIFrame()
+    attachStubHit(c, opts)
     c.refreshValue = function(self) self._value = boundValue(opts) end
     c.SetEnabled = function(self, e) self._enabled = e and true or false end
     c:refreshValue()
@@ -703,6 +728,37 @@ do
     -- markers and the result card look for it.
     eq(dd.control._dropdownOpts.tooltip, spec, "tooltip: ...and the factory is still handed it too")
     dd:GetScript("OnLeave")()
+
+    -- ☠ AND THE FACTORY BUILDS NO HOVER RECT OF ITS OWN, on either kind whose
+    -- caption this row hides. It used to build one over that hidden caption --
+    -- which on a slider row is the plate, and on an inline dropdown row is the
+    -- OPENER, a dead patch over the button that opens the menu. The row says so
+    -- at the call site now rather than assuming it in a comment.
+    eq(dd.control._dropdownOpts.noTooltipHit, true,
+       "tooltip: an inline dropdown row tells the factory to build no hover rect")
+    eq(rawget(dd.control, "dfTooltipHit"), nil, "tooltip: ...so there is none over its opener")
+
+    local sl = host:CreateControlRow(FakeUIFrame(), {
+        label = "Width", kind = "slider", min = 0, max = 10, step = 1, tooltip = "w",
+    })
+    eq(sl.control._sliderOpts.noTooltipHit, true,
+       "tooltip: and a slider row says the same, for its hidden caption over the plate")
+    eq(rawget(sl.control, "dfTooltipHit"), nil, "tooltip: ...so there is none over its track")
+
+    -- The negative, driven: NOTHING inside either plate takes the mouse except
+    -- the row itself. A rect over a control eats its clicks, and the whole point
+    -- of the two flags above is that no such rect is built.
+    local function mouseTakersIn(frame, out)
+        out = out or {}
+        for _, kid in ipairs(rawget(frame, "_children") or {}) do
+            local f = rawget(kid, "_flags") or {}
+            if f.mouse or f.mouseMotion or f.mouseClick then out[#out + 1] = kid end
+            mouseTakersIn(kid, out)
+        end
+        return out
+    end
+    eq(#mouseTakersIn(dd.plate), 0, "tooltip: nothing inside a dropdown row's plate takes the mouse")
+    eq(#mouseTakersIn(sl.plate), 0, "tooltip: nor inside a slider row's")
 end
 
 -- ============================================================

@@ -4969,6 +4969,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             return { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
         end
+        -- ...and its explanation, lifted for the SAME reason and to the same
+        -- scope. The row hoists this dropdown onto its plate, and §3 of the
+        -- rework says a hoisted control and its panel twin are ONE setting -- so
+        -- they say one thing about themselves, from one place, in whichever
+        -- dialect the build is speaking.
+        local function GrowDirectionTooltip(grouped)
+            if grouped then
+                return L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
+            end
+            return L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
+        end
         -- Which dialect this build is speaking. The two dropdowns below decide it
         -- with hideOn (both are mounted, one is shown); the hoisted twin is ONE
         -- control on a fixed line, so it asks here instead -- and the page is
@@ -4986,13 +4997,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local growOptions = GrowDirectionOptions(false)
             local growDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
             growDrop.hideOn = function() return GUI.SelectedMode == "raid" and db.raidUseGroups end
-            growDrop.tooltip = L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
+            growDrop.tooltip = GrowDirectionTooltip(false)
 
             -- Grouped raid: same key, inverted labels, because the repeating unit is a group.
             local groupGrowOptions = GrowDirectionOptions(true)
             local groupGrowDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], groupGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
             groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
-            groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
+            groupGrowDrop.tooltip = GrowDirectionTooltip(true)
 
             -- ☠ THE OVERRIDE READOUT MUST SPEAK THE GLOBAL'S DIALECT. These two dropdowns
             -- share ONE key with OPPOSITE label maps, so the word for a given stored value
@@ -5140,6 +5151,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.RegisterHoistedToggle(dirRow, {
                 { name = L["Growth Direction"], kind = "dropdown", key = "growDirection",
                   options = GrowDirectionOptions(GrowDirectionGrouped()),
+                  -- The panel twin's own words, in the same dialect as the
+                  -- options map above it -- one setting, one explanation. Its
+                  -- hover rides the cell's NAME, never the opener.
+                  tooltip = GrowDirectionTooltip(GrowDirectionGrouped()),
                   onChanged = OnGrowthDirectionChanged },
             })
         end

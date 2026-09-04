@@ -43,7 +43,7 @@ local rawget, rawset, type, pairs, ipairs = rawget, rawset, type, pairs, ipairs
 local xpcall, geterrorhandler, tostring = xpcall, geterrorhandler, tostring
 local format = string.format
 local tremove = table.remove
-local max, ceil, floor = math.max, math.ceil, math.floor
+local max, min, ceil, floor = math.max, math.min, math.ceil, math.floor
 
 -- Perf marks, the same pair Popout.lua declares and for the same reason -- see
 -- its PERF MARKS block. Written into `host.perf`, printed by UI:PerfReport, and
@@ -1510,6 +1510,29 @@ function UI:CreatePopoutRow(parent, opts)
                     h.control:SetSize(max(cellW, 1),
                                       (h.kind == "slider") and M.sliderH or M.dropdownH)
                 end
+                -- ☠ THE HOVER HIT IS RE-SEATED WITH THE CELL, for the two reasons
+                -- anything built once has to be. Its WIDTH is the words, not the
+                -- lane: the name FontString is stretched across the whole cell so
+                -- it truncates, so its rect is no guide to how much of the row's
+                -- click target a hole would cost -- the string's own width is, and
+                -- the cell width just moved. Its LEVEL is relative to the name
+                -- tier it now hangs off rather than to the control it came from,
+                -- and is re-stated here because this is the pass that re-places
+                -- every cell.
+                --
+                -- ⚠ rawget, the convention this file already uses for a private
+                -- field that may be absent: a headless frame answers an unset key
+                -- with a no-op FUNCTION, so a plain read is truthy on every cell
+                -- that was built without a hit and the block below would index it.
+                local hit = h.control and rawget(h.control, "dfTooltipHit")
+                if hit and h.nameBox and h.nameText then
+                    local w = h.nameText.GetStringWidth and h.nameText:GetStringWidth() or 0
+                    hit:ClearAllPoints()
+                    hit:SetPoint("TOPLEFT", h.nameBox, "TOPLEFT", 0, 0)
+                    hit:SetPoint("BOTTOMLEFT", h.nameBox, "BOTTOMLEFT", 0, 0)
+                    hit:SetWidth(max(min(w, cellW), 1))
+                    hit:SetFrameLevel((h.nameBox:GetFrameLevel() or 0) + 1)
+                end
                 cell:Show()
             end
         end
@@ -1870,6 +1893,11 @@ function UI:CreatePopoutRow(parent, opts)
     --   min/max/step/lightweight     forwarded to the slider
     --   options/optionsFunc          forwarded to the dropdown
     --   onChanged                    the panel's own apply for this key
+    --   tooltip   the SAME spec the panel's own control carries -- one setting,
+    --             one explanation. Its hover rides the cell's NAME, never the
+    --             control; omit it and the cell builds no hover rect at all,
+    --             which is the right answer for a setting the panel does not
+    --             explain either
     --
     -- ☠ DECLARED AFTER THE ROW IS IN ITS BAND, which is why the layout below
     -- re-reports the height rather than assuming the slot it was given is still
@@ -1939,6 +1967,32 @@ function UI:CreatePopoutRow(parent, opts)
                 -- same rule at its own binding.
                 local dbRef = (type(h.db) == "table" and type(h.key) == "string")
                               and { db = h.db, key = h.key } or nil
+
+                -- ☠ WHERE THE TOOLTIP'S HOVER RECT GOES, decided HERE and passed
+                -- INTO the factory rather than fixed up afterwards. The factory
+                -- builds it over the caption, and this cell hides the caption --
+                -- on a slider that rect is the container's top 18px, which under
+                -- the two tiers covers the name AND the top of the track; on an
+                -- inline dropdown it is the opener itself. The name tier is the
+                -- region that stands in for the caption here, so that is what the
+                -- hover rides, and it is the ONE part of the cell with no control
+                -- under it.
+                --
+                -- ⚠ THE PRICE IS A HOLE IN THE ROW'S OWN CLICK TARGET. The plate
+                -- is a Button and a motion-taking child drops its hover paint for
+                -- as long as the cursor is inside -- so the hit is narrowed to the
+                -- WORDS in plateLayout (the lane is the whole cell width because
+                -- the FontString is stretched across it to truncate), and it is
+                -- only built for a declaration that actually carries a tooltip.
+                -- No tooltip, no frame, no hole.
+                --
+                -- ☠ AND THE TIER MUST HAVE A RESOLVED HEIGHT before anything is
+                -- anchored to both its corners; a zero-height frame silently puts
+                -- the child somewhere else. nameBox is given NAME_H above, and
+                -- this refuses rather than trusts.
+                local nameH = nameBox:GetHeight() or 0
+                local hitBox = (h.tooltip ~= nil and nameH > 0) and nameBox or nil
+
                 local c
                 if h.kind == "dropdown" then
                     -- `inline` hides the caption and lets the opener fill the
@@ -1956,6 +2010,8 @@ function UI:CreatePopoutRow(parent, opts)
                         onChanged   = h.onChanged,
                         accent      = row._accent,
                         tooltip     = h.tooltip,
+                        tooltipHit   = hitBox,
+                        noTooltipHit = (hitBox == nil),
                     })
                     -- Centred in the CONTROL TIER, which starts under the name.
                     c:ClearAllPoints()
@@ -1972,6 +2028,8 @@ function UI:CreatePopoutRow(parent, opts)
                         lightweight = h.lightweight,
                         accent      = row._accent,
                         tooltip     = h.tooltip,
+                        tooltipHit   = hitBox,
+                        noTooltipHit = (hitBox == nil),
                     })
                     -- The factory has no `inline`, so its caption is hidden
                     -- after the fact -- ControlRow's move, for its reason.
@@ -1994,26 +2052,6 @@ function UI:CreatePopoutRow(parent, opts)
                                    tostring(h.name), tostring(h.kind)))
                     end
                 end
-                -- ☠ AND THE TOOLTIP HIT FRAME COMES DOWN WITH THE CAPTION.
-                -- UI:AttachTooltip builds a MOUSE-ENABLED frame over the
-                -- caption's rect at the widget's level + 5, unconditionally and
-                -- whether or not there is a tooltip to show -- so a hidden
-                -- caption leaves an invisible click-eater floating over the
-                -- plate. On a slider that rect is the container's top 18px,
-                -- which under the two-tier cell covers the name AND the top of
-                -- the track and value box below it; on an inline dropdown it
-                -- lands on the opener itself. Either way it is the "anything
-                -- drawn over a control eats its clicks" class that has shipped
-                -- twice in this rework.
-                --
-                -- ⚠ THE COST IS THE TOOLTIP: a hoisted control has none. The
-                -- alternative -- re-anchoring the hit onto the cell's NAME TIER
-                -- -- trades it for a full-cell-width hole in the row's own click
-                -- target, which is worse under the two tiers than it was under
-                -- the lane, and the row being clickable everywhere is what the
-                -- whole shape leans on. Taken deliberately; the panel's twin
-                -- still carries the tooltip.
-                if c and c.dfTooltipHit then c.dfTooltipHit:Hide() end
                 h.control = c
             end
         end

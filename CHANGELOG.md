@@ -33,6 +33,8 @@
 - (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
 - (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
 - (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.
+- (Settings) Fix an invisible patch swallowing clicks on some settings rows, so a dropdown would not open or a slider would not take a drag on the first try.
+- (Frame) Hover a setting's name on the page and its explanation shows, the same one the panel behind the row gives.
 
 ### Changes
 
