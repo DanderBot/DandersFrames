@@ -545,10 +545,73 @@ UI.PopoutRow = {
     activeBorder = 1,
     badgeFill    = 0.55,   -- of C_BACKGROUND: the pill reads as a hole in the plate
     badgeBorder  = 0.45,   -- of C_BORDER
+
+    -- ---- HOISTED CONTROLS, AND THE FOOTER STRIP ----------------------
+    -- An opted-in row draws up to two CONTROL LINES under its title line and a
+    -- FOOTER STRIP along the bottom of the plate. Both are additive: a row that
+    -- declares neither is the 44px plate above and nothing below it.
+    --
+    -- ☠ THESE ARE SCALARS, NOT A NESTED TABLE, and that is a test contract
+    -- rather than a style. test_control_row.lua compares this whole table
+    -- key-for-key against its own mirror with `eq`, and two equal tables are not
+    -- equal values -- a nested one would fail the mirror by identity for ever.
+    --
+    -- lineH  28, and it is the SLIDER that sets it: the embedded slider is
+    --        centred by its BAR (sliderBarMid below), which puts its 20px value
+    --        box 4px below the line's top and 4 above its bottom at 28. At 26 the
+    --        box overhangs into the line above -- two mouse-enabled edit boxes
+    --        overlapping, which is the "anything drawn over a control eats its
+    --        clicks" class. The dropdown's 24 fits either way.
+    -- nameLane  the CAPS name at the head of every cell, right-aligned. Fixed, so
+    --        the tracks start at the same x on every line of every row -- the
+    --        argument the right-hand columns above are fixed for, one axis over.
+    -- minControl  the narrowest a control may be DRAWN before its cell stops
+    --        being worth having: the slider's own 50px value box, the 8px it
+    --        keeps clear of the track, and 40 of live track. Below this a line
+    --        splits (two cells become two lines) and, at the floor, the row folds.
+    lineH        = 28,
+    nameLane     = 62,
+    laneGap      = 6,      -- name lane -> control
+    cellGap      = 10,     -- between the two cells on a line
+    nameSize     = 9,
+    minControl   = 98,
+
+    -- The strip. 18 = the 14px cog plus 2 above and below; the count text is a
+    -- 10pt face, which is shorter than the cog.
+    --
+    -- ⚠ NOT the popout title bar's 28, which the design asked for. A row that
+    -- carries a 28px strip on a 44px plate costs 72px before a single control
+    -- line, and the Frame page's six visible rows would go from 300 to 552 with
+    -- nothing hoisted at all. 18 is the smallest strip that holds the cog with
+    -- air around it.
+    footer       = 18,
+    footerFill   = 0.5,    -- of C_BACKGROUND: the strip reads as a hole in the plate
+    footerBorder = 0.6,    -- of C_BORDER -- the hairline above it
+    footerOn     = 0.22,   -- of the accent, when this row's panel is open
+
+    -- ---- the embedded control's own metrics --------------------------
+    -- Shared with ControlRow.lua, which embeds the same two factories into the
+    -- same plate and had these as file-locals. One home, because a retune of the
+    -- slider's internals has to move both shapes or the two visibly disagree.
+    --
+    -- ☠ sliderBarMid IS COUPLED TO TWO NUMBERS THAT ARE FILE-LOCALS IN
+    -- Widgets.lua. CreateSlider lays its track at y = -18 with a height of 8
+    -- (centre -22) and its value box at y = -12 with a height of 20 (centre -22)
+    -- inside a 50-tall container whose top 18px hold a label both embedders hide.
+    -- Centring the CONTAINER would park the bar 3px low. If those offsets are
+    -- ever retuned this has to follow; the suites pin the resulting anchor, so
+    -- the drift is a red suite rather than a crooked row.
+    dropdownH    = 24,     -- the standalone opener's own height
+    sliderH      = 50,     -- the slider factory's own container height
+    sliderBarMid = 22,
 }
 -- The layout SLOT: the plate plus the gap to the next row. Derived rather than
 -- declared, so the two can never be set to numbers that disagree.
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
+-- ...and the narrowest a CELL may be: the name lane, its gap, and the narrowest
+-- control worth drawing. Derived for the slot's reason -- the fold threshold and
+-- the pieces it is made of cannot be set to numbers that disagree.
+UI.PopoutRow.minCell = UI.PopoutRow.nameLane + UI.PopoutRow.laneGap + UI.PopoutRow.minControl
 
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
 -- own their height (drift-proof); everything else uses the height it was handed, then the widget's

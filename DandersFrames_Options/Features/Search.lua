@@ -200,7 +200,23 @@ function Search:Register(entry)
     if self.RegistryBuilt then
         return entry
     end
-    
+
+    -- ☠ A HOISTED CONTROL IS THE PANEL'S OWN SETTING SHOWN TWICE, AND SEARCH
+    -- MUST NOT SHOW IT TWICE. A popout row may draw a second widget bound to the
+    -- SAME table and key as one of the controls in its pane (GUI/Controls.lua's
+    -- RegisterHoistedToggle, table form) so the commonly-changed settings are
+    -- back on the plate. Every db-bound factory registers whatever it is handed,
+    -- so without this the registry would carry two entries with one label, one
+    -- key and one section -- two identical result cards for one setting.
+    --
+    -- Set and cleared by the caller AROUND the build, rather than a per-widget
+    -- opt-out, because the widget being suppressed is built by the KIT, which
+    -- has no search of its own to be told about.
+    if self.SuppressRegistration then
+        return entry
+    end
+
+
     -- Allow registration if we have either a string dbKey OR a searchKey for custom widgets
     local hasValidKey = (entry.dbKey and type(entry.dbKey) == "string") or 
                         (entry.searchKey and type(entry.searchKey) == "string")

@@ -137,8 +137,11 @@ local CONTROL_W = {
 }
 local CONTROL_H = {
     checkbox = 0,
-    dropdown = 24,     -- the standalone opener's own height
-    slider   = 50,     -- the slider factory's own container height (see below)
+    -- ⚠ READ FROM THE THEME, NOT RESTATED. A popout row's hoisted control lines
+    -- embed the same two factories into the same plate, so these two numbers now
+    -- have two readers and exactly one home (Theme.lua's UI.PopoutRow).
+    dropdown = M.dropdownH,   -- the standalone opener's own height
+    slider   = M.sliderH,     -- the slider factory's own container height (see below)
     editbox  = 20,
     color    = 18,
     button   = 22,
@@ -155,7 +158,11 @@ local CONTROL_H = {
 -- slider's internal offsets are ever retuned this has to follow; the test suite
 -- pins the resulting anchor so the drift is a red suite rather than a crooked
 -- row.
-local SLIDER_BAR_MID = 22
+--
+-- ⚠ AND IT LIVES IN THE THEME NOW, for the reason the two heights above do: a
+-- popout row's hoisted control lines centre the same embedded slider the same
+-- way, so the number has two readers and one home.
+local SLIDER_BAR_MID = M.sliderBarMid
 
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then return end

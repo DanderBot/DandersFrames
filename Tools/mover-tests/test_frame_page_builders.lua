@@ -520,10 +520,25 @@ do
     -- ☠ THE TWO INVERTED LABEL MAPS SURVIVED THE MOVE. This is the regression the
     -- ☠☠ note above the dropdowns exists to prevent, and moving them into a
     -- builder is exactly the kind of edit that would quietly unify them.
-    check(body:find('HORIZONTAL = L["Rows"], VERTICAL = L["Columns"]', 1, true) ~= nil,
-          "layout direction: the flat/party map is unchanged")
-    check(body:find('HORIZONTAL = L["Columns"], VERTICAL = L["Rows"]', 1, true) ~= nil,
-          "layout direction: ...and the grouped-raid map is still its inverse")
+    --
+    -- ⚠ THEY LIVE AT PAGE SCOPE NOW, IN ONE FUNCTION, because the row HOISTS this
+    -- dropdown onto its own plate and a third copy of a map whose whole hazard is
+    -- that it has an inverse would be the same bug one edit away. So the claim is
+    -- read where the maps are, and the builder is checked for having no copy of
+    -- its own -- which is strictly more than the old body search said.
+    local maps = SRC:match("local function GrowDirectionOptions%(grouped%)(.-)\n        end")
+    check(maps ~= nil, "layout direction: the two dialects are one page-scope function")
+    if maps then
+        check(maps:find('HORIZONTAL = L["Columns"], VERTICAL = L["Rows"]', 1, true) ~= nil,
+              "layout direction: the grouped-raid map is unchanged")
+        check(maps:find('HORIZONTAL = L["Rows"], VERTICAL = L["Columns"]', 1, true) ~= nil,
+              "layout direction: ...and the flat/party map is still its inverse")
+    end
+    check(body:find('HORIZONTAL = L["', 1, true) == nil,
+          "layout direction: ...with no copy of either left in the builder")
+    check(body:find("GrowDirectionOptions(false)", 1, true) ~= nil
+      and body:find("GrowDirectionOptions(true)", 1, true) ~= nil,
+          "layout direction: the builder asks for both dialects by name")
 
     -- ☠ THE FOOTER MUST NOT REBUILD THE PAGE. OnGrowthDirectionChanged defers a
     -- GUI:RefreshCurrentPage, and Hold: Defaults releases on the footer button's
@@ -865,4 +880,238 @@ do
     local marks = 0
     for _ in page:gmatch("%.fullRow%s*=%s*true") do marks = marks + 1 end
     eq(marks, 1, "grid: exactly one blurb opts out of a track, in the one two-track pane")
+end
+
+-- ============================================================
+-- 6. THE FOOTER STRIP, AND WHAT THIS PAGE HOISTS
+--
+-- The popout sweep put every setting behind a click and the feedback was "less
+-- overwhelming but much harder to find what ur looking for". So this page --
+-- and, for now, only this page -- puts its commonly-changed controls back ON the
+-- plate, named, and moves the way in to a footer strip so that a row WITH
+-- hoisted controls and a row without still open the same way, from the same
+-- place.
+--
+-- ☠ A HOISTED CONTROL IS THE PANEL'S OWN SETTING SHOWN TWICE, NEVER A COPY OF
+-- DATA. Which makes this section's real job arithmetic rather than inventory:
+-- every hoisted key must be one the row's OWN builder still mounts, and every
+-- hoisted name must be the string that builder labels it with. If either drifts,
+-- the plate is showing a second setting that merely looks like the first.
+--
+-- What this can and cannot see: source only, like the rest of this file. That
+-- the two widgets end up bound to one table is driven in
+-- test_popout_page_tools.lua; that the plate lays them out is driven in
+-- test_popout_row.lua.
+-- ============================================================
+
+-- Every popout row this page declares, by the variable it is assigned to. Read
+-- out of the source rather than listed, so a row added without a strip fails
+-- here rather than shipping as the one row on the page with its cog somewhere
+-- else.
+local function pageRows()
+    local out = {}
+    for var in framePage():gmatch("local ([%w_]+) = %w+:AddWidget%(GUI:CreatePopoutRow%(") do
+        out[#out + 1] = var
+    end
+    return out
+end
+
+-- One row's `tools.RegisterHoistedToggle(<row>, { ... })` block, or nil.
+local function hoistBlock(rowVar)
+    local page = framePage()
+    local a = page:find("tools.RegisterHoistedToggle(" .. rowVar .. ", {", 1, true)
+    if not a then return nil end
+    local b = page:find("\n            })", a, true)
+    return page:sub(a, (b or a) + 16)
+end
+
+-- The declarations inside one, as { name, kind, key, gated }. Newlines are
+-- collapsed first so a declaration split over three lines reads as one, and each
+-- chunk runs to the START OF THE NEXT -- the same reader shape the widget census
+-- at the top of this file uses, and for the same reason: a nested brace would
+-- defeat a balanced match.
+local function hoistEntries(block)
+    local out = {}
+    if not block then return out end
+    local flat = block:gsub("%s+", " ")
+    local starts, i = {}, 1
+    while true do
+        local s = flat:find("{ name = ", i, true)
+        if not s then break end
+        starts[#starts + 1] = s
+        i = s + 1
+    end
+    for n, s in ipairs(starts) do
+        local chunk = flat:sub(s, (starts[n + 1] and starts[n + 1] - 1) or #flat)
+        out[#out + 1] = {
+            name  = chunk:match('name = L%["([^"]+)"%]'),
+            kind  = chunk:match('kind = "(%a+)"'),
+            key   = chunk:match('key = "([%w_]+)"'),
+            gated = chunk:find("visible =", 1, true) ~= nil,
+        }
+    end
+    return out
+end
+
+do
+    local page = framePage()
+    local rows = pageRows()
+    check(#rows == 11, "strip: the page declares its eleven rows (" .. #rows .. ")")
+
+    -- ---- every row gets the strip -----------------------------------
+    -- The whole of "the way in is in the same place on every row". A row that
+    -- hoists nothing gets it too, with its cog and its count moved onto it.
+    for _, var in ipairs(rows) do
+        local a = page:find("local " .. var .. " = ", 1, true)
+        local b = page:find("}))", a or 1, true)
+        local opts = (a and b) and page:sub(a, b + 2) or ""
+        check(opts:find("footerStrip = true", 1, true) ~= nil,
+              "strip: " .. var .. " declares the footer strip")
+    end
+
+    -- ---- and NOTHING ELSE ON ANY OTHER PAGE DOES --------------------
+    -- Stated here rather than in the all-rows rule because it is this page's
+    -- claim: the sweep reaches the others once this one has been seen in game.
+    local TOC = options_file_source("DandersFrames_Options.toc")
+    local elsewhere = {}
+    for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
+        local path = "GUI/" .. name:gsub("\\", "/")
+        local src = options_file_source(path)
+        local n = 0
+        for _ in src:gmatch("footerStrip = true") do n = n + 1 end
+        if path ~= "GUI/Pages/Options.lua" and n > 0 then
+            elsewhere[#elsewhere + 1] = path .. " (" .. n .. ")"
+        end
+    end
+    eq(#elsewhere, 0,
+       "strip: no other page has moved yet -- " .. table.concat(elsewhere, ", "))
+    -- ...and inside THIS file, only the Frame page: Options.lua carries a dozen
+    -- other pages, and eleven is exactly the roster above.
+    local total = 0
+    for _ in SRC:gmatch("footerStrip = true") do total = total + 1 end
+    eq(total, #rows, "strip: ...and only the Frame page's rows inside this file")
+
+    -- ---- which rows hoist, and what --------------------------------
+    -- ☠ EVERY NAME IS THE PANEL'S OWN L KEY AND EVERY KEY IS ONE THE PANE STILL
+    -- MOUNTS, checked against the census tables at the top of this file rather
+    -- than against a second list -- so a hoist that drifted from the control it
+    -- is meant to be a second view of fails here.
+    local HOISTS = {
+        { row = "sizeRow", census = FRAME_SIZE, want = {
+            { "Frame Width",  "slider",   "frameWidth",          false },
+            { "Frame Height", "slider",   "frameHeight",         false },
+        } },
+        { row = "dirRow", census = LAYOUT_DIR, want = {
+            { "Growth Direction", "dropdown", "growDirection",   false },
+        } },
+        { row = "moverRow", census = PERM_MOVER, want = {
+            { "Handle Width",  "slider", "permanentMoverWidth",  true },
+            { "Handle Height", "slider", "permanentMoverHeight", true },
+        } },
+    }
+
+    local hoistedRows = 0
+    for _, var in ipairs(rows) do
+        if hoistBlock(var) then hoistedRows = hoistedRows + 1 end
+    end
+    -- Three from the table above plus the Border row, whose two controls come
+    -- from the shared border helper rather than from a builder census here.
+    eq(hoistedRows, 4, "hoist: four of the eleven rows hoist anything at all")
+
+    for _, spec in ipairs(HOISTS) do
+        local got = hoistEntries(hoistBlock(spec.row))
+        eq(#got, #spec.want, "hoist: " .. spec.row .. " hoists the declared number")
+        local seen = {}
+        for i, w in ipairs(spec.want) do
+            local g = got[i]
+            if not g then
+                check(false, "hoist: " .. spec.row .. " is missing " .. w[1])
+            else
+                eq(g.name, w[1], "hoist: " .. spec.row .. " control " .. i .. " is named")
+                eq(g.kind, w[2], "hoist: ..." .. w[1] .. " is the kind the panel draws")
+                eq(g.key,  w[3], "hoist: ..." .. w[1] .. " is bound to the panel's key")
+                eq(g.gated, w[4], "hoist: ..." .. w[1] .. "'s gate is as declared")
+
+                -- ONE WIDGET PER KEY ON THE PLATE. A key declared twice would be
+                -- two tracks writing the same setting, which is not "shown twice"
+                -- -- it is two of the same thing on one row.
+                check(not seen[g.key], "hoist: " .. spec.row .. " binds " .. tostring(g.key) .. " once")
+                seen[g.key] = true
+
+                -- ...and the KEY and the NAME both come from the row's own pane.
+                local found
+                for _, c in ipairs(spec.census) do
+                    if c[3] == w[3] then found = c end
+                end
+                check(found ~= nil,
+                      "hoist: " .. w[1] .. " is a control the pane still mounts")
+                if found then
+                    eq(w[1], found[2],
+                       "hoist: ...under the very L key the pane labels it with")
+                    eq(w[2], found[1], "hoist: ...and the same kind of control")
+                end
+            end
+        end
+    end
+
+    -- ---- the BORDER row, whose controls come from the shared helper --
+    -- Its pane is built by GUI:CreateBorderControls, so there is no census table
+    -- here to check against; the claim is made against the HELPER's own source
+    -- instead, which is the same claim one file along.
+    local bgot = hoistEntries(hoistBlock("borderRow"))
+    eq(#bgot, 2, "border: the row hoists two controls")
+    eq(bgot[1].name, "Border Thickness", "border: the thickness slider")
+    eq(bgot[1].key,  "frameBorderSize",  "border: ...on the prefixed size key")
+    eq(bgot[2].name, "Border Style",     "border: and the style dropdown")
+    eq(bgot[2].key,  "frameBorderStyle", "border: ...on the prefixed style key")
+    check(bgot[1].gated and bgot[2].gated,
+          "border: both gated -- a control for a border that is OFF is never hoisted")
+    local widgets = options_file_source("GUI/SettingsWidgets.lua")
+    check(widgets:find('L["Border Thickness"], sizeMin, sizeMax, sizeStep', 1, true) ~= nil,
+          "border: ...and the helper labels its own slider with that same key")
+    check(widgets:find('GUI:CreateDropdown(parent, L["Border Style"],', 1, true) ~= nil,
+          "border: ...and its dropdown with the other")
+
+    -- ☠ ONE OPTION MAP, ASKED FOR RATHER THAN RETYPED. The hoisted dropdown and
+    -- the pane's own dropdown read the SAME helper, so a fourth border style
+    -- appears in both or in neither -- the drift the two growth-direction maps
+    -- carry a ☠☠ about, one control along.
+    check(widgets:find("function GUI:BorderStyleOptions(includeGradient)", 1, true) ~= nil,
+          "border: the style map is a named helper")
+    check(widgets:find("local styleOptions = GUI:BorderStyleOptions(include.gradient)", 1, true) ~= nil,
+          "border: ...which the pane's own dropdown reads")
+    check(page:find("options = GUI:BorderStyleOptions(true)", 1, true) ~= nil,
+          "border: ...and so does the hoisted one, rather than a copy of it")
+    -- The same rule for the write: switching to Texture with no texture picked
+    -- seeds one, and it has to happen whichever of the two widgets was dragged.
+    check(widgets:find("function GUI:SeedBorderTexture(dbTable, prefix)", 1, true) ~= nil,
+          "border: the Texture seeding is a named helper too")
+    check(widgets:find("GUI:SeedBorderTexture(dbTable, prefix)", 1, true) ~= nil,
+          "border: ...run by the pane's own dropdown")
+    check(page:find('GUI:SeedBorderTexture(db, "frame")', 1, true) ~= nil,
+          "border: ...and by the hoisted one, so the two agree what Texture means")
+
+    -- ---- the counts did NOT move ------------------------------------
+    -- The strongest single statement of "shown twice, not moved": every declared
+    -- count is what the pane mounts, hoisting or no hoisting. Section 4 already
+    -- pins each number against its builder; this says the four hoisting rows are
+    -- among them rather than exceptions to them.
+    for _, name in ipairs({ "FRAME_SIZE_COUNT", "LAYOUT_DIR_COUNT", "PERM_MOVER_COUNT" }) do
+        check(SRC:match("local " .. name .. "%s*=%s*%d+") ~= nil,
+              "hoist: " .. name .. " is still declared in one place")
+    end
+    check(SRC:find("local BORDER_COUNT, SHADOW_COUNT = 13, 4", 1, true) ~= nil,
+          "hoist: ...and the border row still claims all thirteen behind it")
+
+    -- ---- the general verb, not a sibling ----------------------------
+    -- One door for both kinds of hoist. A second exported name would be a second
+    -- place that has to remember the row's name, the section stamp and the
+    -- search rules -- and they are the same rules read from either end.
+    local controls = options_file_source("GUI/Controls.lua")
+    check(controls:find("local function RegisterHoistedControls(row, list, dbFn)", 1, true) ~= nil,
+          "verb: the controls form is declared")
+    check(controls:find("if type(label) == \"table\" then", 1, true) ~= nil,
+          "verb: ...and reached by overloading RegisterHoistedToggle's second argument")
+    check(controls:find("RegisterHoistedControls = ", 1, true) == nil,
+          "verb: ...with no second name exported beside it")
 end

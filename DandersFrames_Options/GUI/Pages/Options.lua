@@ -4442,10 +4442,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = sizeMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(sizeRow, sizeContent)
             tools.WireModifiedTick(sizeRow)
             tools.WireFooter(sizeRow, ApplyFrameSize)
+            -- ☠ THE SAME TWO SLIDERS THE PANE MOUNTS, SHOWN A SECOND TIME. Not a
+            -- copy of the values: the same db table, the same keys, the same
+            -- apply -- so the pane's twin, the row's amber tick, Reset Group,
+            -- Hold: Defaults and the undo stack all move them, and ClaimKeys
+            -- counts each key once because it walks the PANE and these are not
+            -- in it. Width and height are what a Frame Size row is opened for;
+            -- scale, padding and spacing stay behind the click.
+            tools.RegisterHoistedToggle(sizeRow, {
+                { name = L["Frame Width"],  kind = "slider", key = "frameWidth",
+                  min = 60, max = 300, step = 1, onChanged = UpdateFrames,
+                  lightweight = function() DF:LightweightUpdateFrameSize() end },
+                { name = L["Frame Height"], kind = "slider", key = "frameHeight",
+                  min = 20, max = 300, step = 1, onChanged = UpdateFrames,
+                  lightweight = function() DF:LightweightUpdateFrameSize() end },
+            })
         end
 
         -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
@@ -4639,11 +4655,41 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
             tools.WireFooter(borderRow, ApplyBorder)
             tools.RegisterHoistedToggle(borderRow, L["Show Border"], "frameShowBorder", OnBorderToggle)
+            -- ☠ GATED ON THE FEATURE, which on this row is the row's own tick. A
+            -- control for a border that is switched OFF is a track that changes
+            -- nothing, and putting one on the plate says the feature is there to
+            -- tune when it is not doing anything at all. Switch Show Border back
+            -- on and the two lines come back with it -- the row re-lays itself
+            -- out on every refresh, and the strip's count follows.
+            local function BorderHoistOn(d) return (d or db).frameShowBorder ~= false end
+            -- The Style dropdown writes through the SAME seeding the pane's own
+            -- does (GUI:SeedBorderTexture) and re-states the same three things
+            -- OnBorderToggle does, because Style governs which of the pane's
+            -- controls are shown at all.
+            local function OnBorderStyleHoisted()
+                GUI:SeedBorderTexture(db, "frame")
+                self:RefreshStates()
+                tools.ReflowMounted()
+                ApplyBorder()
+            end
+            tools.RegisterHoistedToggle(borderRow, {
+                { name = L["Border Thickness"], kind = "slider", key = "frameBorderSize",
+                  min = 1, max = 16, step = 1, visible = BorderHoistOn,
+                  onChanged = ApplyBorder,
+                  lightweight = function() DF:LightweightUpdateBorder() end },
+                { name = L["Border Style"], kind = "dropdown", key = "frameBorderStyle",
+                  -- ONE option map, asked for rather than retyped: the pane's own
+                  -- dropdown reads the same helper, so a fourth style appears in
+                  -- both or in neither.
+                  options = GUI:BorderStyleOptions(true),
+                  visible = BorderHoistOn, onChanged = OnBorderStyleHoisted },
+            })
 
             local shadowMount, shadowContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBorderShadowGroup({
@@ -4667,6 +4713,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = shadowMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(shadowRow, shadowContent)
             tools.WireModifiedTick(shadowRow)
@@ -4806,6 +4853,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = fadeMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(fadeRow, fadeContent)
             tools.WireModifiedTick(fadeRow)
@@ -4882,18 +4930,47 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local CROSS_START = isVert and L["Left"] or L["Top"]
         local CROSS_END   = isVert and L["Right"] or L["Bottom"]
 
+        -- ☠☠ THE TWO DIALECTS OF ONE KEY, AND THE ONLY PLACE THEY ARE SPELLED.
+        -- growDirection means the same stored value in both modes and the WORD
+        -- for it inverts: on party (and flat raid) the repeating unit is a line
+        -- of frames, so HORIZONTAL reads "Rows"; on grouped raid the repeating
+        -- unit is a GROUP, so the same value reads "Columns". Two maps, one key,
+        -- deliberately -- see the ☠☠ block below the dropdowns for what has
+        -- already been broken by trying to unify them.
+        --
+        -- ⚠ LIFTED TO PAGE SCOPE SO THERE ARE STILL ONLY TWO. The Layout
+        -- Direction row HOISTS this dropdown onto its plate -- a second widget on
+        -- the same table and key -- and a third copy of a map whose whole hazard
+        -- is that it has an inverse would be the same bug waiting one edit away.
+        -- ⚠ Built on CALL, never at file scope: a table baked from L at load
+        -- freezes on enUS and never follows a language override.
+        local function GrowDirectionOptions(grouped)
+            if grouped then
+                return { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Columns"], VERTICAL = L["Rows"] }
+            end
+            return { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
+        end
+        -- Which dialect this build is speaking. The two dropdowns below decide it
+        -- with hideOn (both are mounted, one is shown); the hoisted twin is ONE
+        -- control on a fixed line, so it asks here instead -- and the page is
+        -- rebuilt on both of the things this reads (a mode switch, and the Raid
+        -- Layout Mode row's own deferred rebuild).
+        local function GrowDirectionGrouped()
+            return GUI.SelectedMode == "raid" and db.raidUseGroups and true or false
+        end
+
         -- The three dropdowns, verbatim, taking the group and parent they
         -- should build into. Guarded by test_frame_page_builders.lua against
         -- the inventory they had inline.
         local function BuildLayoutDirectionGroup(tools2)
             local group, parent = tools2.group, tools2.parent
-            local growOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
+            local growOptions = GrowDirectionOptions(false)
             local growDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
             growDrop.hideOn = function() return GUI.SelectedMode == "raid" and db.raidUseGroups end
             growDrop.tooltip = L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
 
             -- Grouped raid: same key, inverted labels, because the repeating unit is a group.
-            local groupGrowOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Columns"], VERTICAL = L["Rows"] }
+            local groupGrowOptions = GrowDirectionOptions(true)
             local groupGrowDrop = group:AddWidget(GUI:CreateDropdown(parent, L["Growth Direction"], groupGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
             groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
             groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
@@ -5012,10 +5089,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = dirMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(dirRow, dirContent)
             tools.WireModifiedTick(dirRow)
             tools.WireFooter(dirRow, ApplyLayoutDirection)
+            -- ONE hoisted control, not two, and the second is a refusal rather
+            -- than an omission. "Frames Grow From" is labelled from MAIN_START /
+            -- MAIN_END, which are BAKED from db.growDirection at page build --
+            -- the exact staleness this row's summary carries a ☠ about -- so a
+            -- hoisted twin of it would name the previous orientation's edge until
+            -- the next rebuild. Growth Direction is the control the row is opened
+            -- for anyway.
+            --
+            -- ⚠ ITS OWN CALLBACK, NOT ApplyLayoutDirection. The pane's dropdowns
+            -- run OnGrowthDirectionChanged, which defers a page rebuild because
+            -- the direction decides the WORDS the anchor dropdown offers; the
+            -- hoisted twin has to do the same or those words go stale from the
+            -- plate but not from the panel.
+            tools.RegisterHoistedToggle(dirRow, {
+                { name = L["Growth Direction"], kind = "dropdown", key = "growDirection",
+                  options = GrowDirectionOptions(GrowDirectionGrouped()),
+                  onChanged = OnGrowthDirectionChanged },
+            })
         end
 
         -- ===== RAID LAYOUT MODE (a 280 box in classic, a row in the band) ==
@@ -5156,6 +5252,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = raidModeMount,
+                footerStrip = true,
             }))
             tools.RegisterHoistedToggle(raidModeRow, L["Use Group-Based Layout"], "raidUseGroups", OnRaidModeToggle)
             -- RAID ONLY, exactly as the box was. A row carries hideOn the same way
@@ -5444,6 +5541,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = groupLayoutMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(groupLayoutRow, groupLayoutContent)
             tools.WireModifiedTick(groupLayoutRow)
@@ -5548,6 +5646,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = groupVisMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(groupVisRow, groupVisContent, { "raidGroupVisible" })
             tools.WireModifiedTick(groupVisRow)
@@ -5664,6 +5763,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = groupOrderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(groupOrderRow, groupOrderContent)
             tools.WireModifiedTick(groupOrderRow)
@@ -5768,6 +5868,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = flatGridMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(flatGridRow, flatGridContent)
             tools.WireModifiedTick(flatGridRow)
@@ -5977,11 +6078,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = moverMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(moverRow, moverContent)
             tools.WireModifiedTick(moverRow)
             tools.WireFooter(moverRow, ApplyPermMover)
             tools.RegisterHoistedToggle(moverRow, L["Enable Permanent Mover"], "permanentMover", OnPermMoverToggle)
+            -- THE GATED CASE, and the page's clearest one: the mover ships OFF,
+            -- so on a default profile this row draws NO control line at all and
+            -- its strip reads the full fifteen. Switch it on and the handle's
+            -- size appears on the plate -- which is what someone reaches for
+            -- first once there is a handle to see.
+            --
+            -- ⚠ ApplyPermMover, not the pane slider's own one-line size update.
+            -- That update is a local inside the builder and cannot be reached
+            -- from here; the group's apply is a superset of it (it re-runs the
+            -- visibility, anchor and colour passes as well), which is the same
+            -- trade WireFooter already makes for Reset Group on this row.
+            local function MoverHoistOn(d) return (d or db).permanentMover and true or false end
+            tools.RegisterHoistedToggle(moverRow, {
+                { name = L["Handle Width"],  kind = "slider", key = "permanentMoverWidth",
+                  min = 5, max = 500, step = 1, visible = MoverHoistOn,
+                  onChanged = ApplyPermMover, lightweight = ApplyPermMover },
+                { name = L["Handle Height"], kind = "slider", key = "permanentMoverHeight",
+                  min = 5, max = 500, step = 1, visible = MoverHoistOn,
+                  onChanged = ApplyPermMover, lightweight = ApplyPermMover },
+            })
         end
 
         -- ===== THE BANDS, AND THE ORDER THEY ARE ADDED IN ====================

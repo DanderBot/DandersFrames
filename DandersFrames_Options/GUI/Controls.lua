@@ -3877,7 +3877,9 @@ end
 --   ClaimKeys(row, group, extra)
 --   WireModifiedTick(row)
 --   WireFooter(row, apply)
---   RegisterHoistedToggle(row, label, key, onToggle)
+--   RegisterHoistedToggle(row, label, key, onToggle)   -- the hoisted TICK
+--   RegisterHoistedToggle(row, { <control declaration>, ... })  -- ...and the
+--                                                       hoisted CONTROLS
 --   RegisterControlRow(row, kind, key, custom, callback)
 --   ReflowMounted(values)
 --   RowDB()
@@ -4350,7 +4352,67 @@ function GUI:CreatePopoutPageTools(page)
     -- it. Stamped here rather than left to ClaimKeys because this entry is on the
     -- ROW, not in the group ClaimKeys walks, and a row may hoist a toggle whether
     -- or not it claims anything.
+    -- ============================================================
+    -- ...AND THE SAME VERB FOR A HOISTED *CONTROL*
+    -- ------------------------------------------------------------
+    -- The toggle was the first thing a row hoisted: the tick is ON the plate
+    -- while the settings it governs live in the panel. A row may now hoist its
+    -- commonly-changed CONTROLS the same way -- named, on a line under the title
+    -- -- because the popout sweep put every setting behind a click and the
+    -- feedback was "less overwhelming but much harder to find what ur looking
+    -- for".
+    --
+    -- ☠ ONE VERB, NOT A SIBLING. A sibling would be a second place that has to
+    -- remember the row's name, the section stamp and the search rules -- and the
+    -- rules are the SAME rules, read from the other end. So this is the toggle
+    -- verb with a second calling form, and the toggle form is untouched:
+    --
+    --   RegisterHoistedToggle(row, label, key, onToggle)   -- the tick, as before
+    --   RegisterHoistedToggle(row, { <declaration>, ... })  -- the controls
+    --
+    -- A declaration is `{ name = L["..."], kind = "slider"|"dropdown",
+    -- key = "...", ... }` -- see DandersUI/PopoutRow.lua's SetHoistedControls for
+    -- the full shape. `db` defaults to the page's own table, which is what makes
+    -- "the SAME table and key the panel's control is bound to" the default
+    -- rather than something every call site has to remember.
+    --
+    -- ☠ THE HOISTED CONTROL REGISTERS NOTHING WITH SEARCH, and that is the
+    -- opposite of what the toggle form does -- for the opposite reason. A hoisted
+    -- toggle is a control that was SUPPRESSED in the pane, so without a
+    -- re-registration the setting would be unfindable. A hoisted control is a
+    -- control that is still in the pane and already in the registry, so a second
+    -- registration would put one setting in the index twice under one label, one
+    -- key and one section -- two identical result cards. Suppressed AROUND the
+    -- build rather than per widget, because the widget is built by the KIT and
+    -- has no way to be told.
+    local function RegisterHoistedControls(row, list, dbFn)
+        if not (row and row.SetHoistedControls and type(list) == "table") then return end
+        local resolved = {}
+        for _, h in ipairs(list) do
+            if type(h) == "table" then
+                local e = {}
+                for k, v in pairs(h) do e[k] = v end
+                if e.db == nil then e.db = (dbFn or RowDB)() end
+                resolved[#resolved + 1] = e
+            end
+        end
+        local Search = DF.Search
+        local held = Search and Search.SuppressRegistration
+        if Search then Search.SuppressRegistration = true end
+        row:SetHoistedControls(resolved)
+        if Search then Search.SuppressRegistration = held end
+        -- The row's own name, for the reason the toggle form calls it: a row is
+        -- worth naming even where search never loaded, because the cross-links
+        -- that jump to a row by name do not care whether it is in the registry.
+        AnchorRow(row)
+    end
+
     local function RegisterHoistedToggle(row, label, key, onToggle)
+        -- The CONTROLS form. Overloaded on the second argument's type rather
+        -- than split into two exported names -- see the essay above.
+        if type(label) == "table" then
+            return RegisterHoistedControls(row, label, key)
+        end
         local Search = DF.Search
         if not (Search and Search.RegisterCheckbox) then return end
         row.searchEntry = Search:RegisterCheckbox(label, key, nil, false, onToggle)

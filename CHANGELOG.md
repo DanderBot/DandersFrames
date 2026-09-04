@@ -36,6 +36,7 @@
 
 ### Changes
 
+- (Frame) The most-changed settings are back on the page. Frame Size shows Width and Height, Layout Direction shows the growth direction, Border shows its thickness and style, and the Permanent Mover shows its handle size once it is switched on. Every row now opens from a strip along its bottom edge, so the way in is in the same place whether or not a row shows anything.
 - (Aura Designer) Redesigned. The preview, the settings and the indicator list are now one column that fits the normal settings window instead of forcing it wider, and each effect's settings open in their own panel rather than filling the page.
 - (Aura Designer) Adding an indicator is now one panel showing the whole job at once: pick the aura, pick how it should look, pick where it goes. Every look is drawn as a small picture of your own frame with that effect on it, and anything the aura already has is greyed out so you cannot add it twice. Starting from a filter is offered as an equal choice beside the spell search.
 - (Aura Designer) Choosing a filter for a new indicator now opens the full filter list, the same way the spell search does. Open any filter in that list to scroll through the spells inside it — the switched-off ones included — before you pick it.

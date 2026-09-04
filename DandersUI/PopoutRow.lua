@@ -43,7 +43,7 @@ local rawget, rawset, type, pairs, ipairs = rawget, rawset, type, pairs, ipairs
 local xpcall, geterrorhandler, tostring = xpcall, geterrorhandler, tostring
 local format = string.format
 local tremove = table.remove
-local max = math.max
+local max, ceil, floor = math.max, math.ceil, math.floor
 
 -- Perf marks, the same pair Popout.lua declares and for the same reason -- see
 -- its PERF MARKS block. Written into `host.perf`, printed by UI:PerfReport, and
@@ -86,6 +86,19 @@ local M = UI.PopoutRow
 -- inside the plate.
 local ROW_H   = M.slot
 local PLATE_H = M.plate
+
+-- ☠ THE LABEL'S x, AND THE CONTROL LINES' LEFT EDGE, ARE ONE CONSTANT. The tick's
+-- column is reserved whether or not a tick is drawn (see the label's anchor
+-- below), and a control line is indented to the NAME -- so a row's second line
+-- starts under the first line's first letter rather than under its tick. Named
+-- once here because three things now read it; ControlRow.lua computes the same
+-- expression for the same reason and says so at its own LABEL_X.
+local LABEL_X = M.padX + M.check + M.labelGap
+
+-- The hoist half's metrics, all from the same table for the reason above it.
+local LINE_H, NAME_LANE   = M.lineH, M.nameLane
+local LANE_GAP, CELL_GAP  = M.laneGap, M.cellGap
+local FOOTER_H, MIN_CELL  = M.footer, M.minCell
 
 -- ⚠ NO rowKind. rowKind drives UI.RowCompact's run-tightening, and a value that
 -- is not IN RowCompact silently BREAKS a run of checkboxes it sits between --
@@ -1121,6 +1134,263 @@ function UI:CreatePopoutRow(parent, opts)
     if summary.SetWordWrap then summary:SetWordWrap(false) end
     row.summary = summary
 
+    -- ============================================================
+    -- THE FOOTER STRIP, AND THE CONTROL LINES
+    -- ------------------------------------------------------------
+    -- ☠ OPT-IN, ROW BY ROW, AND EVERY LINE BELOW IS DEAD ON A ROW THAT DID NOT
+    -- ASK. `opts.footerStrip` is what a page passes; a row without it never
+    -- builds a strip, never re-anchors one of the six title-line regions above,
+    -- and draws exactly what it drew before this block existed. That is not
+    -- politeness -- a dozen pages' census suites pin those rows' anatomy, and the
+    -- Frame page is the only one converted in this pass.
+    --
+    -- WHAT THE STRIP IS FOR. Every setting went behind a row in the popout sweep,
+    -- so every setting is invisible until a panel opens; the answer is to put a
+    -- feature's most-reached-for controls back ON the plate, named, and move the
+    -- way IN to a strip along the bottom so it is in the same place on every row
+    -- whether or not anything was hoisted. The cog, the count and the chevron all
+    -- move down onto it; the title line keeps its tick, its name and its summary
+    -- and is otherwise untouched.
+    --
+    -- ☠ THE STRIP TAKES NO MOUSE. Two reasons and either is sufficient: a frame
+    -- drawn over a control eats that control's clicks (it has shipped twice in
+    -- this rework), and the WHOLE ROW is already the click target -- so a
+    -- mouse-enabled strip would buy nothing and would steal the row's own
+    -- OnEnter/OnLeave the moment the cursor crossed onto it, dropping the hover
+    -- paint while the user is over the thing they are about to click.
+    local strip                    -- the footer strip's frame, nil unless asked for
+    local stripFill, stripLine     -- its wash and the hairline above it
+    local stripCount               -- "N more settings"
+    row._strip = opts.footerStrip and true or false
+
+    if row._strip then
+        strip = CreateFrame("Frame", nil, plate)
+        strip:SetPoint("BOTTOMLEFT", plate, "BOTTOMLEFT", 0, 0)
+        strip:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", 0, 0)
+        strip:SetHeight(FOOTER_H)
+        row.footerStrip = strip
+
+        -- ⚠ THE WASH IS INSET ON A ROUNDED PLATE, AND FLUSH ON A SQUARE ONE.
+        -- Round.lua bakes exactly two corner shapes -- all four, and top-two --
+        -- so there is no bottom-corners-only surface to draw this with, and a
+        -- flush rectangle would paint two square nubs where the plate's own arc
+        -- has already gone transparent. UI.SurfaceEdgeInset is the kit's own
+        -- published clearance for exactly this ("the last few units of the band
+        -- belong to the curve"), so the wash stops short of the arc instead.
+        stripFill = strip:CreateTexture(nil, "BACKGROUND")
+        row._ApplyStripShape = function()
+            local s = row._surface
+            local inset = (s and UI.SurfaceEdgeInset) and UI.SurfaceEdgeInset(s.radius) or 0
+            stripFill:ClearAllPoints()
+            stripFill:SetPoint("TOPLEFT", strip, "TOPLEFT", inset, -1)
+            stripFill:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", -inset, inset)
+        end
+        row._ApplyStripShape()
+        -- The hairline that parts the strip from the plate. Full width in both
+        -- shapes: it sits FOOTER_H up from the plate's bottom, which is clear of
+        -- any radius the kit bakes.
+        stripLine = strip:CreateTexture(nil, "BORDER")
+        stripLine:SetPoint("TOPLEFT", strip, "TOPLEFT", 0, 0)
+        stripLine:SetPoint("TOPRIGHT", strip, "TOPRIGHT", 0, 0)
+        stripLine:SetHeight(1)
+        -- Published for the reason the cells are: the strip's look is only
+        -- observable as the colours these two were handed.
+        row._stripFill, row._stripLine = stripFill, stripLine
+
+        -- The words. "N MORE settings" is the honest count once some of the
+        -- group is on the plate: opts.count is what the PANE holds, and every
+        -- hoisted control is one of those shown a second time here -- so what is
+        -- left behind the click is the count less whatever this row is currently
+        -- showing. Fold the lines away and the number goes back up on its own.
+        stripCount = host:CreateLabelNative(strip, { size = M.badgeSize, color = C_TEXT_DIM })
+        if stripCount.SetJustifyH then stripCount:SetJustifyH("RIGHT") end
+        if stripCount.SetWordWrap then stripCount:SetWordWrap(false) end
+        row.stripCount = stripCount
+
+        -- ☠ THE CLUSTER MOVES; IT IS NOT REBUILT. The gear and the chevron are
+        -- the same two textures the title line carried, re-anchored onto the
+        -- strip -- so the row's own Refresh goes on fading them with the toggle
+        -- and there is no second pair to keep in step. Right-aligned in the same
+        -- order and at the same gaps they had up there: cog, count, chevron.
+        chevron:ClearAllPoints()
+        chevron:SetPoint("RIGHT", strip, "RIGHT", -M.padX, 0)
+        stripCount:SetPoint("RIGHT", chevron, "LEFT", -M.colGap, 0)
+        gear:ClearAllPoints()
+        gear:SetPoint("RIGHT", stripCount, "LEFT", -M.colGap, 0)
+
+        -- ...and the count PILL goes, because the words replace it. Which
+        -- rehouses the modified tick, whose whole argument was "a mark on the
+        -- chip that says how much is in here". The cog is what says that now, so
+        -- the notch moves onto its corner and keeps meaning the same thing.
+        badgePill:Hide()
+        modTick:SetParent(strip)
+        modTick:ClearAllPoints()
+        modTick:SetPoint("CENTER", gear, "TOPRIGHT", 0, 0)
+    end
+
+    -- ---- the control lines ----------------------------------------
+    -- One CELL per hoisted control: a fixed name lane at its head and the
+    -- control filling what is left. The lane is the same width in every cell of
+    -- every row, which is the whole of "the tracks start and end at the same x
+    -- down the page" -- the argument the four right-hand columns above are fixed
+    -- for, one axis over.
+    local hoists = nil             -- the declarations, in the order they were given
+    local hoistCells = nil         -- the cell frames, one per declaration
+    local shownHoists = 0          -- how many are drawn RIGHT NOW (the gate, the fold)
+
+    -- What is left BEHIND the click: the pane's count, less whatever this row is
+    -- currently showing on its own plate. Written from the LAYOUT rather than
+    -- only from the refresh, because the fold and the split move it and a window
+    -- drag runs the layout alone -- a count that only followed a refresh would
+    -- go on claiming three while five sit behind the click.
+    local function paintStripCount()
+        if not stripCount then return end
+        if not row._count then stripCount:SetText("") return end
+        local left = max(row._count - shownHoists, 0)
+        local fmt = L and L["%d more settings"]
+        stripCount:SetText(format(fmt or "%d", left))
+    end
+
+    -- Is this control's feature switched on? A control for a feature that is OFF
+    -- is never hoisted -- an inert track on the plate says the feature is there
+    -- to tune when it is not doing anything at all.
+    local function hoistVisible(h, db)
+        if type(h.visible) ~= "function" then return true end
+        local ok = h.visible(db)
+        return ok and true or false
+    end
+
+    -- ---- the plate's own size, and everything anchored inside it ----
+    --
+    -- ☠ ONE FUNCTION, RE-RUN, RATHER THAN ARITHMETIC DONE ONCE AT BUILD. Three
+    -- things move it: the row's WIDTH (a narrow window splits a two-cell line
+    -- into two one-cell lines and, at the floor, folds them away entirely), the
+    -- GATE on any hoisted control, and the declaration itself, which arrives
+    -- after the row has already been added to its band. Each of those has to
+    -- re-report the row's height to the layout that is holding a slot for it.
+    local function plateLayout()
+        if not (strip or hoists) then return end
+
+        local db = resolveDB(opts.db)
+
+        -- The width available to a control line: the plate, less the name
+        -- indent on the left and the plate's own padding on the right. DERIVED
+        -- FROM THE PLATE rather than read off a cell -- at build the cells have
+        -- no resolved width and would answer 0.
+        local plateW = plate:GetWidth() or 0
+        if not plateW or plateW <= 0 then plateW = row:GetWidth() or 0 end
+        if not plateW or plateW <= 0 then plateW = UI.PopoutContentWidth or 260 end
+        local lineW = plateW - LABEL_X - M.padX
+
+        -- Two cells, one, or none. NEVER three: three lanes plus three minimum
+        -- tracks does not fit the plate at any window size the shell allows.
+        local perLine = 0
+        if lineW >= 2 * MIN_CELL + CELL_GAP then perLine = 2
+        elseif lineW >= MIN_CELL then perLine = 1 end
+
+        -- Which declarations are drawable at all, in declaration order.
+        local live = {}
+        for i, h in ipairs(hoists or {}) do
+            if hoistCells[i] and hoistVisible(h, db) then live[#live + 1] = i end
+        end
+        -- THE FOLD. Below the width where a line cannot hold one named control,
+        -- the row goes back to its title line and its summary -- today's row --
+        -- and the strip's count goes back up by what it was showing.
+        if perLine == 0 then live = {} end
+
+        shownHoists = #live
+        local lines = (perLine > 0) and ceil(shownHoists / perLine) or 0
+        local cellW = (perLine == 2) and floor((lineW - CELL_GAP) / 2) or lineW
+
+        -- ⚠ THE CELLS ARE ONLY RE-PLACED WHEN THEIR PLACEMENT CHANGED. This runs
+        -- on every refresh -- and a refresh is cheap only if it does nothing when
+        -- nothing moved. The signature is exactly what the placement below is a
+        -- function of: which declarations are live, in what order, at what cell
+        -- width. The plate's own height still falls through, because the gate may
+        -- have moved it without moving a cell.
+        local sig = cellW .. "|" .. perLine .. "|" .. table.concat(live, ",")
+        if sig ~= row._hoistSig then
+            row._hoistSig = sig
+            for i = 1, #(hoists or {}) do
+                local cell = hoistCells[i]
+                if cell then cell:Hide() end
+            end
+            for n, idx in ipairs(live) do
+                local cell = hoistCells[idx]
+                local lineN = ceil(n / perLine)
+                local col   = (n - 1) % perLine
+                cell:SetSize(cellW, LINE_H)
+                cell:ClearAllPoints()
+                cell:SetPoint("TOPLEFT", plate, "TOPLEFT",
+                              LABEL_X + col * (cellW + CELL_GAP),
+                              -(PLATE_H + (lineN - 1) * LINE_H))
+                -- The control fills what the lane leaves, re-sized here because
+                -- the cell's width is the thing that just changed.
+                local h = hoists[idx]
+                if h.control then
+                    local w = max(cellW - NAME_LANE - LANE_GAP, 1)
+                    h.control:SetSize(w, (h.kind == "slider") and M.sliderH or M.dropdownH)
+                end
+                cell:Show()
+            end
+        end
+
+        -- ---- the plate, and the row's slot ---------------------------
+        local plateH = PLATE_H + lines * LINE_H + (strip and FOOTER_H or 0)
+        local headDY = (plateH - PLATE_H) / 2
+        if plate:GetHeight() ~= plateH then plate:SetHeight(plateH) end
+
+        -- ☠ EVERY REGION ON THE TITLE LINE TAKES THE SAME y, or two of them
+        -- disagree about where the middle is. They are anchored LEFT/RIGHT --
+        -- i.e. by their VERTICAL MIDDLE -- to the plate, and the plate's middle
+        -- is no longer the title line's once anything is drawn under it. One
+        -- offset, applied to all of them, keeps the constraints consistent by
+        -- construction (see section 24 of the rework log for what two vertical
+        -- constraints that disagree actually do to a frame).
+        if headDY ~= (row._headDY or 0) then
+            row._headDY = headDY
+            if cb then
+                cb:ClearAllPoints()
+                cb:SetPoint("LEFT", plate, "LEFT", M.padX, headDY)
+            end
+            label:ClearAllPoints()
+            label:SetPoint("LEFT", plate, "LEFT", LABEL_X, headDY)
+            summary:ClearAllPoints()
+            summary:SetPoint("LEFT", label, "RIGHT", M.colGap, 0)
+            if strip then
+                -- The cluster is on the strip, so the summary runs to the
+                -- plate's own padding instead of stopping at the gear.
+                summary:SetPoint("RIGHT", plate, "RIGHT", -M.padX, headDY)
+            else
+                summary:SetPoint("RIGHT", gear, "LEFT", -M.colGap, 0)
+                chevron:ClearAllPoints()
+                chevron:SetPoint("RIGHT", plate, "RIGHT", -M.padX, headDY)
+            end
+        end
+
+        local slotH = plateH + M.gap
+        -- ☠ THE FRAME'S HEIGHT IS RE-ASSERTED WHENEVER IT DISAGREES, and that is
+        -- NOT the same test as the one below it. A layout pass may have set the
+        -- row to whatever slot it was holding at the time; the row is the
+        -- authority on how tall it is, so it says so again. Guarding both halves
+        -- on `preferredHeight` alone let a stale frame height survive every later
+        -- layout, because the number it is compared against was already right.
+        if row:GetHeight() ~= slotH then row:SetHeight(slotH) end
+        if row.preferredHeight ~= slotH then
+            row.preferredHeight = slotH
+            -- The layout pass reads `layoutHeight` off the widget; the group's
+            -- own stored slot is corrected by RelayoutHost below. Both, because
+            -- a row whose height changes AFTER it was added has to tell the
+            -- thing already holding a slot for it -- the idiom the info banner
+            -- and the designer canvas already use.
+            row.layoutHeight = slotH
+            if host.RelayoutHost then host:RelayoutHost(row, slotH) end
+        end
+
+        paintStripCount()
+    end
+    row._LayoutPlate = plateLayout
+
     -- ---- the plate's paint ----------------------------------------
     -- Everything whose colour depends on the row's STATE rather than on its
     -- values: the plate, and the label that names it.
@@ -1154,6 +1424,22 @@ function UI:CreatePopoutRow(parent, opts)
         -- label over a dimmed summary would read as the opposite.
         local c = (not on) and C_TEXT_DIM or (active and accent or C_TEXT)
         label:SetTextColor(c.r, c.g, c.b, 1)
+
+        -- THE STRIP IS THE WAY IN, SO IT SAYS SO IN THE ACCENT. At rest it is a
+        -- hole in the plate (the count pill's own idiom, spread along the bottom
+        -- edge) with the cluster in the accent; when this row's panel is open it
+        -- LIGHTS -- an accent wash, brighter than the plate's, and the beam
+        -- leaves its right end because the strip is the panel's tether.
+        if stripFill then
+            if active then
+                stripFill:SetColorTexture(accent.r, accent.g, accent.b, M.footerOn)
+                stripLine:SetColorTexture(accent.r, accent.g, accent.b, M.activeBorder)
+            else
+                stripFill:SetColorTexture(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, M.footerFill)
+                stripLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, M.footerBorder)
+            end
+            stripCount:SetTextColor(accent.r, accent.g, accent.b, on and 1 or OFF_ALPHA)
+        end
     end
 
     -- ACTIVE is "the panel that is open is about ME", and it is ANSWERED by
@@ -1278,6 +1564,31 @@ function UI:CreatePopoutRow(parent, opts)
         -- been reset. The row's own dim carries "not currently doing anything".
         if row._modified then modTick:SetShown(row._modified(db) and true or false) end
 
+        -- ---- the hoisted controls ------------------------------------
+        -- ☠ THE VALUES COME FROM HERE, NOT FROM CONSTRUCTION. A hoisted control
+        -- is the panel's own setting shown a SECOND time -- same table, same key
+        -- -- so the pane's twin, a group Reset, a hold and an undo all move it
+        -- without this widget doing anything. re-reading on the row's own
+        -- cadence is what makes "drag either and the other follows" true.
+        --
+        -- ⚠ THE SELF GOES IN. The kit's own factories alias their private
+        -- repaints onto `refreshValue` and at least one of them USES its self
+        -- (the checkbox's is `function(self) self:Refresh() end`), so a bare
+        -- call would error on the day this row hoists one -- the same fallback
+        -- chain ControlRow.lua spells out at its own RefreshValue.
+        for _, h in ipairs(hoists or {}) do
+            local w = h.control
+            if w then
+                if type(w.refreshValue) == "function" then safeCall(w.refreshValue, w)
+                elseif type(w.RefreshValue) == "function" then safeCall(w.RefreshValue, w)
+                elseif type(w.Refresh) == "function" then safeCall(w.Refresh, w) end
+            end
+        end
+        -- ...and the GATE, which may have moved with the toggle that was just
+        -- written: a control for a feature that is off is not drawn at all, and
+        -- the row is that much shorter. Re-runs the fold and the split with it.
+        plateLayout()
+
         -- Dependent-grey dims the WHOLE row, toggle included. Toggled-off dims
         -- only what the toggle governs -- so the tick you need to click to turn
         -- it back on never fades with everything it controls.
@@ -1285,8 +1596,20 @@ function UI:CreatePopoutRow(parent, opts)
         -- The plate and the label, in one place shared with the active repaint.
         paintState()
         summary:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, on and 1 or 0.7)
-        gear:SetVertexColor(1, 1, 1, on and 0.6 or OFF_ALPHA * 0.6)
-        chevron:SetVertexColor(1, 1, 1, on and 0.5 or OFF_ALPHA * 0.5)
+        if strip then
+            -- ON THE STRIP THE CLUSTER IS THE WAY IN, and the way in is drawn in
+            -- the accent -- cog, count and chevron together, so the strip reads
+            -- as one object rather than as two grey glyphs either side of a
+            -- coloured phrase. On the title line they stay the neutral glyphs
+            -- they have always been.
+            local acc = row._accent or host:GetAccent()
+            gear:SetVertexColor(acc.r, acc.g, acc.b, on and 1 or OFF_ALPHA)
+            chevron:SetVertexColor(acc.r, acc.g, acc.b, on and 1 or OFF_ALPHA)
+            paintStripCount()
+        else
+            gear:SetVertexColor(1, 1, 1, on and 0.6 or OFF_ALPHA * 0.6)
+            chevron:SetVertexColor(1, 1, 1, on and 0.5 or OFF_ALPHA * 0.5)
+        end
 
         for po in pairs(row._bound) do
             if po and not po.closed and po._boundRow == row then
@@ -1338,6 +1661,152 @@ function UI:CreatePopoutRow(parent, opts)
         end
         return row
     end
+
+    -- ---- the hoisted controls -------------------------------------
+    --
+    -- Declare the controls this row shows a SECOND time on its own plate. Each
+    -- entry:
+    --
+    --   name      REQUIRED. The setting's own display name -- the SAME string
+    --             the panel labels it with, already localised. Drawn in the
+    --             cell's fixed lane, and handed to the embedded factory as its
+    --             label so the tooltip, the override markers and the search
+    --             index all name one thing
+    --   kind      "slider" | "dropdown"
+    --   db, key   the settings TABLE and the key inside it. The same pair the
+    --             panel's own control is bound to -- that is what makes this a
+    --             second WIDGET rather than a second copy of the value
+    --   visible   fn(db) -> bool. False and the control is not drawn at all: a
+    --             track for a feature that is switched off invites a tune that
+    --             does nothing
+    --   min/max/step/lightweight     forwarded to the slider
+    --   options/optionsFunc          forwarded to the dropdown
+    --   onChanged                    the panel's own apply for this key
+    --
+    -- ☠ DECLARED AFTER THE ROW IS IN ITS BAND, which is why the layout below
+    -- re-reports the height rather than assuming the slot it was given is still
+    -- right. Same shape as SetModifiedCheck and SetActions and for the same
+    -- reason: what a page can hand CreatePopoutRow at the moment it calls it is
+    -- not everything the row ends up owning.
+    function row:SetHoistedControls(list)
+        if type(list) ~= "table" then return row end
+        hoists, hoistCells = {}, {}
+        -- ...and the layout's memo of what it last placed, or a second
+        -- declaration with the same shape would keep the first one's cells.
+        row._hoistSig = nil
+        -- Published under the underscore convention -- private fields a consumer
+        -- may READ (a driven test asks the plate what it laid out) and must not
+        -- write. Same shape as row._bound and row._claimedKeys.
+        row._hoists, row._hoistCells = hoists, hoistCells
+        for _, h in ipairs(list) do
+            if type(h) == "table" and type(h.name) == "string" then
+                local n = #hoists + 1
+                hoists[n] = h
+                -- ☠ THE NAME LIVES IN A FRAME, NOT ON THE PLATE. A FontString is
+                -- a region, not a frame -- so one created on a parent that a
+                -- later pass moves frames out of is left behind and never drawn
+                -- (the hidden-holder trap this rework has already been bitten
+                -- by). The cell is a frame; the name goes in it, and the two
+                -- move together for ever after.
+                local cell = CreateFrame("Frame", nil, plate)
+                cell:SetSize(NAME_LANE + LANE_GAP + M.minControl, LINE_H)
+                hoistCells[n] = cell
+
+                local nameFS = host:CreateLabelNative(cell, { size = M.nameSize, color = C_TEXT_DIM })
+                nameFS:SetText((h.name:upper()))
+                nameFS:SetPoint("LEFT", cell, "LEFT", 0, 0)
+                nameFS:SetPoint("RIGHT", cell, "LEFT", NAME_LANE, 0)
+                if nameFS.SetJustifyH then nameFS:SetJustifyH("RIGHT") end
+                if nameFS.SetWordWrap then nameFS:SetWordWrap(false) end
+                h.nameText = nameFS
+
+                -- ⚠ dbRef OR get/set, NEVER BOTH -- Widgets.lua's slider and
+                -- dropdown fire interceptWrite / onSettingWritten themselves
+                -- whenever a dbKey is present, so passing both runs the host's
+                -- setting hooks twice for one edit. ControlRow.lua states the
+                -- same rule at its own binding.
+                local dbRef = (type(h.db) == "table" and type(h.key) == "string")
+                              and { db = h.db, key = h.key } or nil
+                local c
+                if h.kind == "dropdown" then
+                    -- `inline` hides the caption and lets the opener fill the
+                    -- container, so the cell's own SetSize decides its size. The
+                    -- label is PASSED and hidden rather than omitted: an empty
+                    -- one registers the setting under no name at all.
+                    c = host:CreateDropdownNative(cell, {
+                        label       = h.name,
+                        inline      = true,
+                        options     = h.options,
+                        optionsFunc = h.optionsFunc,
+                        get         = (not dbRef) and h.get or nil,
+                        set         = (not dbRef) and h.set or nil,
+                        dbRef       = dbRef,
+                        onChanged   = h.onChanged,
+                        accent      = row._accent,
+                        tooltip     = h.tooltip,
+                    })
+                    c:ClearAllPoints()
+                    c:SetPoint("TOPRIGHT", cell, "TOPRIGHT", 0, -(LINE_H - M.dropdownH) / 2)
+                elseif h.kind == "slider" then
+                    c = host:CreateSliderNative(cell, {
+                        label       = h.name,
+                        min         = h.min, max = h.max, step = h.step,
+                        get         = (not dbRef) and h.get or nil,
+                        set         = (not dbRef) and h.set or nil,
+                        dbRef       = dbRef,
+                        onChanged   = h.onChanged,
+                        lightweight = h.lightweight,
+                        accent      = row._accent,
+                        tooltip     = h.tooltip,
+                    })
+                    -- The factory has no `inline`, so its caption is hidden
+                    -- after the fact -- ControlRow's move, for its reason.
+                    if c.label then c.label:Hide() end
+                    -- ☠ CENTRED BY THE BAR, NOT BY THE CONTAINER. See
+                    -- M.sliderBarMid: the container's top 18px hold the caption
+                    -- just hidden, so centring the container would park the
+                    -- track low and leave dead space doing the balancing.
+                    c:ClearAllPoints()
+                    c:SetPoint("TOPRIGHT", cell, "TOPRIGHT", 0, -(LINE_H / 2) + M.sliderBarMid)
+                else
+                    local dbg = host:Call("debug", "popoutrow")
+                    if dbg then
+                        dbg(format("%s: unknown hoisted control kind %s",
+                                   tostring(h.name), tostring(h.kind)))
+                    end
+                end
+                -- ☠ AND THE TOOLTIP HIT FRAME COMES DOWN WITH THE CAPTION.
+                -- UI:AttachTooltip builds a MOUSE-ENABLED frame over the
+                -- caption's rect at the widget's level + 5, unconditionally and
+                -- whether or not there is a tooltip to show -- so a hidden
+                -- caption leaves an invisible click-eater floating over the
+                -- plate. On a slider that lands in the TITLE LINE (the container
+                -- hangs 8px above its cell so the bar centres); on an inline
+                -- dropdown it lands on the opener itself. Either way it is the
+                -- "anything drawn over a control eats its clicks" class that has
+                -- shipped twice in this rework.
+                --
+                -- ⚠ THE COST IS THE TOOLTIP: a hoisted control has none. The
+                -- alternative -- re-anchoring the hit onto the cell's name lane
+                -- -- trades it for a 62px hole in the row's own click target,
+                -- and the row being clickable everywhere is what the whole
+                -- shape leans on. Taken deliberately; the panel's twin still
+                -- carries the tooltip.
+                if c and c.dfTooltipHit then c.dfTooltipHit:Hide() end
+                h.control = c
+            end
+        end
+        -- The declaration is what changed the row's height, so the layout runs
+        -- here rather than waiting for the next refresh.
+        plateLayout()
+        row.Refresh()
+        return row
+    end
+
+    -- What the row is CURRENTLY showing on its plate. The strip's count is the
+    -- pane's total less this, so a consumer's own tests can ask the row rather
+    -- than re-deriving the fold.
+    function row:GetShownHoistCount() return shownHoists end
 
     -- ---- the popout -----------------------------------------------
 
@@ -1392,7 +1861,16 @@ function UI:CreatePopoutRow(parent, opts)
             -- every adopt, so the shared instance shows whichever row's actions
             -- last asked for it rather than the first row's forever.
             actions = row._actions,
-            tetherSource = row,
+            -- ☠ THE STRIP IS THE TETHER WHEN THERE IS ONE, AND THE ROW WHEN
+            -- THERE IS NOT. The strip is the way in -- the cog, the count and a
+            -- chevron pointing RIGHT at where the panel appears -- so the beam
+            -- has to leave IT rather than the middle of a plate that may now be
+            -- three lines tall. Reusing tetherSource rather than inventing a
+            -- second anchor keeps the shell's three readers (the source outline,
+            -- the beam and the clip gate) describing ONE rect, which is the
+            -- contract _TetherRegion exists to hold. A strip declares no
+            -- popoutInset, so its whole rect is ink -- which it is.
+            tetherSource = strip or row,
             build   = mountBare,
             headerControls = function(p, bar) return buildHeaderControls(host, p, bar) end,
             onClose = function(p, reason) forgetInstance(host, p, reason) end,
@@ -1489,6 +1967,9 @@ function UI:CreatePopoutRow(parent, opts)
     function row:SetSurface(style)
         row._surface = UI.ResolveSurfaceStyle(host, style)
         applyPlateShape()
+        -- The strip's wash clears the plate's arc by a margin taken FROM the
+        -- radius, so a shape change moves it too.
+        if row._ApplyStripShape then row._ApplyStripShape() end
         row.Refresh()
         for po in pairs(row._bound) do
             if po and not po.closed and po.SetSurface then
@@ -1503,6 +1984,24 @@ function UI:CreatePopoutRow(parent, opts)
     function row:GetSurface() return row._surface end
 
     -- ---- interaction ----------------------------------------------
+    -- ☠ THE SPLIT AND THE FOLD ARE FUNCTIONS OF THE ROW'S WIDTH, so the row has
+    -- to be told when that changes. Installed ONLY on a row that draws something
+    -- under its title line -- a plain row's geometry does not depend on its
+    -- width, and an OnSizeChanged it never had is a script every other page's
+    -- rows would start running for nothing.
+    --
+    -- ⚠ RE-ENTRANT BY CONSTRUCTION: plateLayout sets the row's HEIGHT, which
+    -- fires this again. Guarded on the width actually having moved, which the
+    -- height change cannot do.
+    if opts.footerStrip then
+        row:SetScript("OnSizeChanged", function(self, w)
+            w = w or self:GetWidth()
+            if w == row._laidOutAt then return end
+            row._laidOutAt = w
+            plateLayout()
+        end)
+    end
+
     row:SetScript("OnEnter", function() row._hovered = true;  paintState() end)
     row:SetScript("OnLeave", function() row._hovered = false; paintState() end)
     -- NOT gated on `enabled`. A greyed row is one whose settings do nothing YET;
