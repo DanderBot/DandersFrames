@@ -456,6 +456,9 @@ L["USE"] = true
 -- End ClickCasting UI strings
 L["    Show ZZZ Icon"] = true
 L["%d - %d players"] = true
+-- The way IN, on a settings row's footer strip: what is left behind the click
+-- once the row's commonly-changed controls are drawn on the plate itself.
+L["%d more settings"] = true
 L["%d of %d IDs"] = true
 L["%d of %d tracked"] = true
 L["%d override"] = true

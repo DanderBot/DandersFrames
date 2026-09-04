@@ -59,6 +59,15 @@ local UI = {
         restFill = 0.55, hoverFill = 0.75, restBorder = 0.5,
         activeFill = 0.14, activeHover = 0.20, activeBorder = 1,
         badgeFill = 0.55, badgeBorder = 0.45,
+        -- The hoisted-controls half. This file only reads three of them
+        -- (dropdownH / sliderH / sliderBarMid, which ControlRow.lua now takes
+        -- from the theme rather than restating), but section 2 below compares
+        -- the mirror to Theme.lua KEY FOR KEY -- so every token the real table
+        -- carries has to be here or the mirror is the thing that has drifted.
+        lineH = 28, nameLane = 62, laneGap = 6, cellGap = 10, nameSize = 9,
+        minControl = 98, minCell = 166,
+        footer = 18, footerFill = 0.5, footerBorder = 0.6, footerOn = 0.22,
+        dropdownH = 24, sliderH = 50, sliderBarMid = 22,
     },
     _state = {},
     _priv = {

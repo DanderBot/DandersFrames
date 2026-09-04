@@ -392,6 +392,10 @@ do
                          tooltipResurrectionEnabled = true }
     DF.RaidDefaults  = { tooltipFrameX = 0, tooltipFrameEnabled = true,
                          tooltipResurrectionEnabled = true }
+    -- The live settings tables RowDB answers with. A hoisted control is bound to
+    -- the very table the panel's own control writes, so the verb has to have one
+    -- to resolve.
+    DF.db = { party = { tooltipFrameX = 0 }, raid = { tooltipFrameX = 0 } }
     function DF:DebugWarn() end
     -- SettingsBox only has to EXIST for Search.lua's file scope to load; the real
     -- table is driven against Search.lua in test_page_parking.
@@ -534,6 +538,83 @@ do
         check(not ddWords["auras"], "live: ...dropping the old section's words with it")
         eq(ctrlDrop.row.GetText and ctrlDrop.row:GetText(), "Addon Language",
            "live: ...and that row is anchored too")
+    end
+
+    -- ---- the hoisted CONTROLS, the same verb's other form ------------
+    -- A hoisted CONTROL is the panel's own setting shown twice: a second widget
+    -- on the SAME table and key. Two things have to be true of that and neither
+    -- is observable in source.
+    --
+    --   * SEARCH MUST NOT SEE IT TWICE. The pane's own control is already in the
+    --     registry under that label, key and section; a second registration is
+    --     two identical result cards for one setting.
+    --   * THE KEY IS CLAIMED ONCE. ClaimKeys walks the PANE, and a hoisted
+    --     control is not in it -- so the row's claimed set (its amber tick, its
+    --     Reset Group, its Hold) counts the key exactly once however many widgets
+    --     are bound to it.
+    do
+        Search.Registry = {}
+        Search.RegistryBuilt = false
+        Search:SetCurrentTab("frame", "Frame")
+        local hpage = {}
+        local htools = DF.GUI:CreatePopoutPageTools(hpage)
+        check(htools ~= nil, "hoist: the tools are up")
+
+        -- The pane's own control, registered the way a page's builder registers
+        -- it -- under whichever band header was built last.
+        Search:SetCurrentSection("Auras")
+        local paneEntry = Search:RegisterCheckbox("Frame Width", "tooltipFrameX")
+        local hrow = { _label = "Frame Size" }
+        htools.ClaimKeys(hrow, { groupChildren = { { widget = { searchEntry = paneEntry } } } })
+        eq(#hrow._claimedKeys, 1, "hoist: the pane's control claimed its key once")
+
+        -- ...and now the row hoists it. The row stands in for a real PopoutRow:
+        -- what the verb is being asked for is the LIST it hands over.
+        -- ☠ THE STUB REGISTERS, BECAUSE THE REAL ONE DOES. SetHoistedControls
+        -- builds the control with the KIT's own factory, and every db-bound kit
+        -- factory fires the `registerSearch` host hook -- which is the whole
+        -- reason the verb has to suppress anything. A stub that quietly built
+        -- nothing would let the suppression assertion below pass against a verb
+        -- that had never suppressed a thing.
+        local handed
+        hrow.SetHoistedControls = function(self, list)
+            handed = list
+            for _, h in ipairs(list) do
+                Search:RegisterSlider(h.name, h.key, h.min, h.max, h.step)
+            end
+            return self
+        end
+        local before = #Search.Registry
+        htools.RegisterHoistedToggle(hrow, {
+            { name = "Frame Width", kind = "slider", key = "tooltipFrameX",
+              min = 60, max = 300, step = 1 },
+        })
+        check(handed ~= nil, "hoist: the table form reaches the row's own declaration door")
+        eq(#handed, 1, "hoist: ...with the one control it was given")
+        eq(handed[1].name, "Frame Width",
+           "hoist: named with the panel's own string, so the two are provably one setting")
+        eq(handed[1].key, "tooltipFrameX", "hoist: ...on the panel's own key")
+        check(handed[1].db ~= nil, "hoist: ...and bound to a real TABLE, not left to a getter")
+
+        -- The two claims this block exists for.
+        eq(#Search.Registry - before, 0,
+           "hoist: a hoisted control registers NOTHING -- the pane's twin is already indexed")
+        eq(#hrow._claimedKeys, 1,
+           "hoist: ...and the key is still claimed once, not twice")
+
+        -- The suppression is a bracket, not a switch someone has to remember to
+        -- turn off: an ordinary registration straight afterwards still lands.
+        local after = #Search.Registry
+        Search:RegisterCheckbox("Frame Height", "tooltipFrameEnabled")
+        eq(#Search.Registry - after, 1, "hoist: and search is live again the moment it returns")
+
+        -- The TOGGLE form is untouched by the overload -- second argument a
+        -- string, and it registers exactly as it always did.
+        local togBefore = #Search.Registry
+        local trow = { _label = "Border" }
+        htools.RegisterHoistedToggle(trow, "Show Border", "tooltipResurrectionEnabled", function() end)
+        eq(#Search.Registry - togBefore, 1,
+           "hoist: the toggle form still registers its own entry, which nothing else would")
     end
 
     -- ---- and CLASSIC is untouched, by construction -------------------

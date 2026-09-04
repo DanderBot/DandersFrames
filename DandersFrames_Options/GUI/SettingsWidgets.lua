@@ -3298,6 +3298,43 @@ local function BuildBorderShadowWidgets(group, dbTable, prefix, opts, hideOff)
     return w
 end
 
+-- The Border Style dropdown's option map, and its order.
+--
+-- Gradient is a STYLE, not a separate toggle. When the consumer opts into
+-- gradient we expose GRADIENT as a third option, between SOLID and TEXTURE so
+-- the order reads "simple colour -> two colours -> custom texture"; otherwise the
+-- dropdown is the original SOLID / TEXTURE pair.
+--
+-- ☠ LIFTED OUT OF CreateBorderControls SO IT HAS ONE HOME. A popout row may
+-- HOIST this dropdown onto its own plate -- a second widget on the same table
+-- and key -- and that widget needs the same map. Two copies of an option map is
+-- exactly the drift the Frame page's own ☠☠ note about the two growth-direction
+-- maps is written against: the second copy is right on the day it is typed and
+-- silently wrong the day the first one gains an option.
+function GUI:BorderStyleOptions(includeGradient)
+    local L = DF.L
+    if includeGradient then
+        return { SOLID = L["Solid"], GRADIENT = L["Gradient"], TEXTURE = L["Texture"],
+                 _order = { "SOLID", "GRADIENT", "TEXTURE" } }
+    end
+    return { SOLID = L["Solid"], TEXTURE = L["Texture"], _order = { "SOLID", "TEXTURE" } }
+end
+
+-- Picking Texture without a texture configured leaves the border drawing
+-- nothing, so switching TO that style seeds the first LSM border. Lifted out of
+-- the Style dropdown's own callback for the reason the option map above was: a
+-- popout row may hoist that dropdown, and the hoisted twin has to do the SAME
+-- work on the same write or the two disagree about what "Texture" means.
+function GUI:SeedBorderTexture(dbTable, prefix)
+    if type(dbTable) ~= "table" or type(prefix) ~= "string" then return end
+    if dbTable[prefix .. "BorderStyle"] ~= "TEXTURE" then return end
+    local list = DF.GetBorderList and DF:GetBorderList() or nil
+    local t = dbTable[prefix .. "BorderTexture"]
+    if list and (not t or t == "" or t == "SOLID") then
+        dbTable[prefix .. "BorderTexture"] = next(list)
+    end
+end
+
 function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     opts = opts or {}
     local parent       = opts.parent
@@ -3356,28 +3393,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         dbTable, key("BorderSize"), fullUpdate, lightUpdate, true), 55)
     w.size.hideOn = hideOff
 
-    -- Gradient is a STYLE, not a separate toggle. When the consumer opts into
-    -- gradient via include.gradient, we expose GRADIENT as a third dropdown
-    -- option. Otherwise the dropdown is the original SOLID / TEXTURE pair.
-    local styleOptions = { SOLID = L["Solid"], TEXTURE = L["Texture"],
-        _order = { "SOLID", "TEXTURE" } }
-    if include.gradient then
-        styleOptions.GRADIENT = L["Gradient"]
-        -- Insert GRADIENT between SOLID and TEXTURE so the order reads
-        -- "simple colour → two colours → custom texture" in the dropdown.
-        styleOptions._order = { "SOLID", "GRADIENT", "TEXTURE" }
-    end
+    local styleOptions = GUI:BorderStyleOptions(include.gradient)
     w.style = group:AddWidget(GUI:CreateDropdown(parent, L["Border Style"],
         styleOptions, dbTable, key("BorderStyle"), function()
-            -- Match the frame border: pick the first LSM border when switching
-            -- to Texture without one configured.
-            if dbTable[key("BorderStyle")] == "TEXTURE" then
-                local list = DF.GetBorderList and DF:GetBorderList() or nil
-                local t = dbTable[key("BorderTexture")]
-                if list and (not t or t == "" or t == "SOLID") then
-                    dbTable[key("BorderTexture")] = next(list)
-                end
-            end
+            GUI:SeedBorderTexture(dbTable, prefix)
             if refreshStates then refreshStates() end
             fullUpdate()
         end), 55)
