@@ -116,9 +116,10 @@ UI.PopoutRow = UI.PopoutRow or {
     -- The hoisted-controls half of the token table (Theme.lua). Mirrored whole
     -- for the reason the rest of it is: PopoutRow.lua reads these at FILE SCOPE,
     -- so a missing one is a nil in an arithmetic expression at load.
-    lineH = 28, nameLane = 62, laneGap = 6, cellGap = 10, nameSize = 9,
-    minControl = 98, minCell = 166,
+    lineH = 36, nameH = 12, controlH = 24, linePad = 4,
+    cellGap = 10, nameSize = 9, minControl = 98, splitCell = 166,
     footer = 18, footerFill = 0.5, footerBorder = 0.6, footerOn = 0.22,
+    plateStrip = 30, stripArc = 8, modTickGap = 2,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap

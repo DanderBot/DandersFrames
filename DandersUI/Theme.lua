@@ -556,25 +556,47 @@ UI.PopoutRow = {
     -- key-for-key against its own mirror with `eq`, and two equal tables are not
     -- equal values -- a nested one would fail the mirror by identity for ever.
     --
-    -- lineH  28, and it is the SLIDER that sets it: the embedded slider is
-    --        centred by its BAR (sliderBarMid below), which puts its 20px value
-    --        box 4px below the line's top and 4 above its bottom at 28. At 26 the
-    --        box overhangs into the line above -- two mouse-enabled edit boxes
-    --        overlapping, which is the "anything drawn over a control eats its
-    --        clicks" class. The dropdown's 24 fits either way.
-    -- nameLane  the CAPS name at the head of every cell, right-aligned. Fixed, so
-    --        the tracks start at the same x on every line of every row -- the
-    --        argument the right-hand columns above are fixed for, one axis over.
-    -- minControl  the narrowest a control may be DRAWN before its cell stops
-    --        being worth having: the slider's own 50px value box, the 8px it
-    --        keeps clear of the track, and 40 of live track. Below this a line
-    --        splits (two cells become two lines) and, at the floor, the row folds.
-    lineH        = 28,
-    nameLane     = 62,
-    laneGap      = 6,      -- name lane -> control
+    -- ☠ THE NAME GOES ABOVE THE CONTROL, NOT BESIDE IT, and the whole of the
+    -- cell's box model follows from that. The lane version put a fixed 62px
+    -- right-aligned name at the head of the cell, which truncated the panel's
+    -- own labels ("FRAME WI...", "GROWTH DI...") and left the control 104 of the
+    -- 172px cell -- 46px of live track once the slider's value box and its
+    -- clearance came off. Two tiers give the name the cell's FULL width and the
+    -- control the full width under it: 172 - 50 - 8 = 114 of track, which is the
+    -- 112 ControlRow.lua settled on as "roughly a pixel per step".
+    --
+    -- nameH    the name tier. A 9pt caps line, left-aligned, across the cell.
+    -- controlH the control tier. 24 is the dropdown opener's own height, and it
+    --          is also the least the SLIDER can have: the slider is centred by
+    --          its BAR (sliderBarMid below), which hangs its 20px value box in
+    --          the tier's middle with 2 above and 2 below at 24. Any less and the
+    --          box overhangs into the name above it -- an edit box under a
+    --          FontString, the "anything drawn over a control eats its clicks"
+    --          class one tier up.
+    -- lineH    the whole cell, DERIVED from the two below the table so a retune
+    --          of either cannot leave a cell that does not hold what is in it.
+    -- linePad  air under the LAST control line, before the strip. Without it the
+    --          bottom cell's control butts straight onto the hairline.
+    -- minControl  the narrowest a control may be DRAWN at all: the slider's own
+    --          50px value box, the 8px it keeps clear of the track, and 40 of
+    --          live track. Below this the row FOLDS -- there is no cell left
+    --          worth drawing.
+    -- splitCell  and the narrowest a cell may be before a line SPLITS its pair
+    --          into two one-cell lines. NOT the same threshold as minControl, and
+    --          deliberately not equal to it: with the name above, a cell IS its
+    --          control's width, so splitting only at minControl would put two
+    --          98px cells on the 260px plate and hand the narrow window 40px of
+    --          track -- the exact cramp the tiers were built to fix, arriving at
+    --          the other end. 166 leaves 108 of track in a pair, and it is the
+    --          number the lane layout already split at (62 + 6 + 98), so no row
+    --          changes the width at which it splits.
+    nameH        = 12,
+    controlH     = 24,
+    linePad      = 4,
     cellGap      = 10,     -- between the two cells on a line
     nameSize     = 9,
     minControl   = 98,
+    splitCell    = 166,
 
     -- The strip. 18 = the 14px cog plus 2 above and below; the count text is a
     -- 10pt face, which is shorter than the cog.
@@ -588,6 +610,26 @@ UI.PopoutRow = {
     footerFill   = 0.5,    -- of C_BACKGROUND: the strip reads as a hole in the plate
     footerBorder = 0.6,    -- of C_BORDER -- the hairline above it
     footerOn     = 0.22,   -- of the accent, when this row's panel is open
+
+    -- plateStrip  the TITLE LINE's height on a row that carries a strip, and the
+    --          one number in this table that is deliberately not `plate`. 44 was
+    --          the whole row; on a strip row it is only the top third of it, and
+    --          44 + 36 + 4 + 18 read in game as "very chonky and cramped". 30
+    --          holds the 16px tick with 7 either side, which is what the title
+    --          line actually contains. `plate` itself is untouched, because every
+    --          row on every unconverted page is still exactly 44 + 6.
+    -- stripArc  how much taller than its clip the strip's rounded shape is drawn.
+    --          Round.lua bakes all-four-corners and top-two only -- there is no
+    --          bottom-corners-only art -- so the shape is an all-four surface
+    --          anchored to the BOTTOM of a clipping frame and overhanging the top
+    --          by this much, which cuts its top curve off. Must be >= the largest
+    --          radius the generator bakes (8), or a nick of the top arc survives.
+    -- modTickGap  the gap from the chevron to the modified tick, which now sits
+    --          after it at the strip's far right. Small on purpose: the tick's
+    --          5px and this 2 have to come out of the plate's own 10px padding.
+    plateStrip   = 30,
+    stripArc     = 8,
+    modTickGap   = 2,
 
     -- ---- the embedded control's own metrics --------------------------
     -- Shared with ControlRow.lua, which embeds the same two factories into the
@@ -608,10 +650,10 @@ UI.PopoutRow = {
 -- The layout SLOT: the plate plus the gap to the next row. Derived rather than
 -- declared, so the two can never be set to numbers that disagree.
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
--- ...and the narrowest a CELL may be: the name lane, its gap, and the narrowest
--- control worth drawing. Derived for the slot's reason -- the fold threshold and
--- the pieces it is made of cannot be set to numbers that disagree.
-UI.PopoutRow.minCell = UI.PopoutRow.nameLane + UI.PopoutRow.laneGap + UI.PopoutRow.minControl
+-- ...and the CELL: the name tier and the control tier under it. Derived for the
+-- slot's reason -- a cell and the two tiers inside it cannot be set to numbers
+-- that disagree.
+UI.PopoutRow.lineH = UI.PopoutRow.nameH + UI.PopoutRow.controlH
 
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
 -- own their height (drift-proof); everything else uses the height it was handed, then the widget's
