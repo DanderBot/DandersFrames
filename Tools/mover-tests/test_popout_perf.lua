@@ -106,11 +106,11 @@ UI.PopoutPad = UI.PopoutPad or 10
 UI.PopoutFooter = UI.PopoutFooter or { height = 26, btnHeight = 18, gap = 6, sepAlpha = 0.8 }
 UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true end
 UI.PopoutRow = UI.PopoutRow or {
-    plate = 44, gap = 8, padX = 10, labelGap = 10, colGap = 6,
+    plate = 44, gap = 10, padX = 10, labelGap = 10, colGap = 6,
     check = 16, checkTick = 9, gear = 14, chevron = 10,
     badgeW = 22, badgeH = 16, modTick = 5,
     labelSize = 12, summarySize = 11, badgeSize = 10,
-    restFill = 0.55, hoverFill = 0.75, restBorder = 0.5,
+    restFill = 0.55, hoverFill = 0.75, restBorder = 0.8,
     activeFill = 0.14, activeHover = 0.20, activeBorder = 1,
     badgeFill = 0.55, badgeBorder = 0.45,
     -- The hoisted-controls half of the token table (Theme.lua). Mirrored whole

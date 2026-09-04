@@ -502,7 +502,9 @@ UI.PopoutPad = 10
 --   colGap     between every column on the right-hand side.
 UI.PopoutRow = {
     plate     = 44,
-    gap       = 8,    -- was 6; "a tiny bit more spacing between the rows" (2026-09-04)
+    gap       = 10,   -- was 6, then 8; the strip needs the rows further apart than
+                      -- plain plates did, or its lighter band groups with the row
+                      -- below (2026-09-04, twice)
     padX      = 10,
     labelGap  = 10,
     colGap    = 6,
@@ -539,7 +541,12 @@ UI.PopoutRow = {
     -- three states together.
     restFill     = 0.55,   -- of C_ELEMENT
     hoverFill    = 0.75,   -- of C_HOVER
-    restBorder   = 0.5,    -- of C_BORDER -- the element default
+    restBorder   = 0.8,    -- of C_BORDER. Was 0.5, the element default -- too faint
+                           -- once the strip put a lighter band along every plate's
+                           -- foot: the band, a faint ring and a dark gap read as the
+                           -- NEXT row's header, and rows looked like they overlapped
+                           -- ("like an illusion"). A visible edge is what says where
+                           -- one plate stops. Shared with ControlRow on purpose.
     activeFill   = 0.14,   -- of the accent: a WASH, not a fill
     activeHover  = 0.20,
     activeBorder = 1,

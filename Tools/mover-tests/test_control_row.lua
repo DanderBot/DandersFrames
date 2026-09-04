@@ -52,11 +52,11 @@ local UI = {
     -- retune over there is a red suite here rather than a test quietly agreeing
     -- with its own stale copy.
     PopoutRow = {
-        plate = 44, gap = 8, padX = 10, labelGap = 10, colGap = 6,
+        plate = 44, gap = 10, padX = 10, labelGap = 10, colGap = 6,
         check = 16, checkTick = 9, gear = 14, chevron = 10,
         badgeW = 22, badgeH = 16, modTick = 5,
         labelSize = 12, summarySize = 11, badgeSize = 10,
-        restFill = 0.55, hoverFill = 0.75, restBorder = 0.5,
+        restFill = 0.55, hoverFill = 0.75, restBorder = 0.8,
         activeFill = 0.14, activeHover = 0.20, activeBorder = 1,
         badgeFill = 0.55, badgeBorder = 0.45,
         -- The hoisted-controls half. This file only reads three of them
@@ -496,9 +496,9 @@ do
         -- gap went 6 -> 8 on 2026-09-04 ("a tiny bit more spacing between the
         -- rows", from the Frame page's first hoisted look). Every converted page
         -- moves 2px per row with it -- one rhythm, not a strip-row exception.
-        eq(real.slot, 52, "theme: the slot is 52")
+        eq(real.slot, 54, "theme: the slot is 54")
         eq(real.plate, 44, "theme: 44 of that is ink")
-        eq(real.gap, 8, "theme: and 8 is the gap below it")
+        eq(real.gap, 10, "theme: and 10 is the gap below it")
         eq(real.padX, 10, "theme: the plate's inner padding is 10")
         eq(real.check, 16, "theme: the tick box is 16")
         eq(real.checkTick, 9, "theme: with a 9px tick in it")
@@ -506,7 +506,7 @@ do
         eq(real.colGap, 6, "theme: and the column gap is 6")
         eq(real.restFill, 0.55, "theme: the plate rests at 0.55 of the element fill")
         eq(real.hoverFill, 0.75, "theme: and lifts to 0.75 of the hover colour")
-        eq(real.restBorder, 0.5, "theme: inside the border at half strength")
+        eq(real.restBorder, 0.8, "theme: inside the border at a visible strength, so the strip's band does not group with the row below")
     end
 end
 
