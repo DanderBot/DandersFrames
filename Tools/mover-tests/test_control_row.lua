@@ -52,7 +52,7 @@ local UI = {
     -- retune over there is a red suite here rather than a test quietly agreeing
     -- with its own stale copy.
     PopoutRow = {
-        plate = 44, gap = 6, padX = 10, labelGap = 10, colGap = 6,
+        plate = 44, gap = 8, padX = 10, labelGap = 10, colGap = 6,
         check = 16, checkTick = 9, gear = 14, chevron = 10,
         badgeW = 22, badgeH = 16, modTick = 5,
         labelSize = 12, summarySize = 11, badgeSize = 10,
@@ -66,7 +66,7 @@ local UI = {
         -- carries has to be here or the mirror is the thing that has drifted.
         lineH = 36, nameH = 12, controlH = 24, linePad = 4,
         cellGap = 10, nameSize = 9, minControl = 98, splitCell = 166,
-        footer = 18, footerFill = 0.5, footerBorder = 0.6, footerOn = 0.22,
+        footer = 18, footerFill = 0.85, footerBorder = 0.6, footerOn = 0.22,
         plateStrip = 30, stripArc = 8, modTickGap = 2,
         dropdownH = 24, sliderH = 50, sliderBarMid = 22,
     },
@@ -493,9 +493,12 @@ do
         eq(real.slot, real.plate + real.gap, "theme: the slot is derived from the plate and the gap")
         -- The numbers the shape was designed against, pinned so a retune is a
         -- deliberate act with a red suite in front of it.
-        eq(real.slot, 50, "theme: the slot is 50")
+        -- gap went 6 -> 8 on 2026-09-04 ("a tiny bit more spacing between the
+        -- rows", from the Frame page's first hoisted look). Every converted page
+        -- moves 2px per row with it -- one rhythm, not a strip-row exception.
+        eq(real.slot, 52, "theme: the slot is 52")
         eq(real.plate, 44, "theme: 44 of that is ink")
-        eq(real.gap, 6, "theme: and 6 is the gap below it")
+        eq(real.gap, 8, "theme: and 8 is the gap below it")
         eq(real.padX, 10, "theme: the plate's inner padding is 10")
         eq(real.check, 16, "theme: the tick box is 16")
         eq(real.checkTick, 9, "theme: with a 9px tick in it")

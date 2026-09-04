@@ -1221,6 +1221,26 @@ function UI:CreatePopoutRow(parent, opts)
         stripClip:SetHeight(FOOTER_H - 1)
         stripClip:EnableMouse(false)
         if stripClip.SetClipsChildren then stripClip:SetClipsChildren(true) end
+        -- ☠ THE WASH DRAWS UNDER THE STRIP'S OWN REGIONS, AND THAT NEEDS SAYING WITH A
+        -- LEVEL. The count, the cog and the chevron are regions ON `strip`; this clip
+        -- and the rounded shape inside it are child FRAMES of `strip`, and a child
+        -- frame's textures draw above every region of its parent whatever layer the
+        -- region asked for. Left at its default (strip + 1) the wash painted straight
+        -- over "3 more settings" -- in game the text read as nearly black, and it
+        -- looked like a colour problem when it was an order problem. At the PLATE's
+        -- level the clip still draws above the plate's fill (same level, created
+        -- later) and now below the strip's regions (strip is plate + 1).
+        --
+        -- ⚠ RE-ASSERTED in _ApplyStripShape, not set once: anything that re-levels
+        -- the plate later would otherwise leave the clip stranded underneath it --
+        -- the standing lesson of section 15 of the designer rework.
+        -- The strip's own level is STATED, not inherited: the client would give a
+        -- child plate + 1 by default, but a relationship the whole fix depends on
+        -- should be in the code, not in a default -- and the headless shim does
+        -- not model the default at all, so without this line the test that pins
+        -- "clip below strip" could not be written.
+        strip:SetFrameLevel(plate:GetFrameLevel() + 1)
+        stripClip:SetFrameLevel(plate:GetFrameLevel())
         row._stripClip = stripClip
 
         stripShape = CreateFrame("Frame", nil, stripClip)
@@ -1238,6 +1258,8 @@ function UI:CreatePopoutRow(parent, opts)
             -- grows. One condition, both frames, every time.
             stripFill:SetShown(s == nil)
             stripClip:SetShown(s ~= nil)
+            strip:SetFrameLevel(plate:GetFrameLevel() + 1)
+            stripClip:SetFrameLevel(plate:GetFrameLevel())
             if not s then
                 -- Square plate, square strip: one flat quad, flush, full width.
                 if stripSurface then stripSurface:Hide() end
@@ -1258,7 +1280,7 @@ function UI:CreatePopoutRow(parent, opts)
                 -- NO RING. The plate already draws one round the whole row and a
                 -- second traced up the strip's own sides would double it.
                 border = false,
-                fill   = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, M.footerFill },
+                fill   = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, M.footerFill },
             })
             stripSurface:Show()
         end
@@ -1584,7 +1606,7 @@ function UI:CreatePopoutRow(parent, opts)
                 row._PaintStrip(accent.r, accent.g, accent.b, M.footerOn)
                 stripLine:SetColorTexture(accent.r, accent.g, accent.b, M.activeBorder)
             else
-                row._PaintStrip(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, M.footerFill)
+                row._PaintStrip(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, M.footerFill)
                 stripLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, M.footerBorder)
             end
             stripCount:SetTextColor(accent.r, accent.g, accent.b, on and 1 or OFF_ALPHA)

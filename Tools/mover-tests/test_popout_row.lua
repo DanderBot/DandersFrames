@@ -115,7 +115,7 @@ UI.StyleScrollBar = UI.StyleScrollBar or function(sf) sf._styledScrollBar = true
 -- slot derived the same way the real one is, so the two cannot drift into
 -- numbers that disagree.
 UI.PopoutRow = UI.PopoutRow or {
-    plate = 44, gap = 6, padX = 10, labelGap = 10, colGap = 6,
+    plate = 44, gap = 8, padX = 10, labelGap = 10, colGap = 6,
     check = 16, checkTick = 9, gear = 14, chevron = 10,
     badgeW = 22, badgeH = 16, modTick = 5,
     labelSize = 12, summarySize = 11, badgeSize = 10,
@@ -127,7 +127,7 @@ UI.PopoutRow = UI.PopoutRow or {
     -- so a missing one is a nil in an arithmetic expression at load.
     lineH = 36, nameH = 12, controlH = 24, linePad = 4,
     cellGap = 10, nameSize = 9, minControl = 98, splitCell = 166,
-    footer = 18, footerFill = 0.5, footerBorder = 0.6, footerOn = 0.22,
+    footer = 18, footerFill = 0.85, footerBorder = 0.6, footerOn = 0.22,
     plateStrip = 30, stripArc = 8, modTickGap = 2,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
@@ -2727,7 +2727,10 @@ do
     local row = stripRow({ label = "Painted", count = 3, window = win, footerStrip = true })
     local fill, line = row._stripFill, row._stripLine
     check(fill ~= nil and line ~= nil, "paint: the strip has a wash and a hairline above it")
-    eq(fill._fill.r, UI.Colors.background.r, "paint: at rest the wash is a hole in the plate")
+    -- A RAISED band, not a hole: C_ELEMENT (0.18) over a 0.12 plate. The hole --
+    -- C_BACKGROUND at half alpha -- was more black on black in game and the strip
+    -- vanished into the window ("blends into the black background too much").
+    eq(fill._fill.r, UI.Colors.element.r, "paint: at rest the wash is a raised band, lighter than the plate")
     eq(fill._fill.a, M.footerFill, "paint: ...at the theme's own alpha")
     eq(line._fill.r, UI.Colors.border.r, "paint: and the hairline is the border token")
     local acc = host:GetAccent()
@@ -2794,6 +2797,32 @@ do
     check(bw < UI.SurfaceEdgeInset(UI.SurfaceStyle.radius),
         "shape: which is far less than the arc clearance the inset version used")
 
+    -- ☠ THE WASH DRAWS UNDER THE STRIP'S OWN REGIONS. The count, the cog and the
+    -- chevron are regions on `strip`; the clip and the shape are child FRAMES of
+    -- it, and a child frame's textures draw above every region of its parent
+    -- whatever layer the region asked for. Left at its default level the wash
+    -- painted straight over "3 more settings" -- in game the text read as nearly
+    -- black and it looked like a colour problem. It was an order problem. The clip
+    -- sits at the PLATE's level: above the plate's fill (same level, created
+    -- later), below the strip (plate + 1) and everything drawn on it.
+    do
+        local lwin = window()
+        local row  = stripRow({ label = "Levelled", count = 3, window = lwin, footerStrip = true })
+        local clip = row._stripClip
+        check(clip ~= nil, "level: the strip has its clip")
+        eq(clip:GetFrameLevel(), row.plate:GetFrameLevel(),
+           "level: the clip sits at the plate's level, under the strip's regions")
+        check(clip:GetFrameLevel() < row.footerStrip:GetFrameLevel(),
+           "level: ...and strictly below the strip, so the count text is drawn over the wash")
+        -- ⚠ AND IT IS RE-ASSERTED, not set once. Re-level the plate the way a later
+        -- pass might, re-apply the shape, and the clip must follow -- otherwise it is
+        -- stranded under the plate's fill and the strip goes plain grey.
+        row.plate:SetFrameLevel(row.plate:GetFrameLevel() + 5)
+        row._ApplyStripShape()
+        eq(clip:GetFrameLevel(), row.plate:GetFrameLevel(),
+           "level: ...and follows the plate when the shape is re-applied")
+    end
+
     -- ⚠ NEITHER FRAME TAKES THE MOUSE. Both lie over the strip, the strip lies
     -- over the plate, and the whole row is the click target.
     eq(rawget(clip, "_flags").mouse, false, "shape: the clip takes no mouse")
@@ -2805,7 +2834,7 @@ do
     eq(surf:GetRadius(), UI.SurfaceStyle.radius, "shape: on the plate's own curve")
     check(not surf.hasBorder, "shape: with no ring -- the plate already draws one round the row")
     local sr, _, _, sa = surf:GetFillColor()
-    eq(sr, UI.Colors.background.r, "shape: at rest the wash is a hole in the plate")
+    eq(sr, UI.Colors.element.r, "shape: at rest the wash is a raised band, lighter than the plate")
     eq(sa, M.footerFill, "shape: ...at the theme's own alpha")
 
     -- ...and the one paint path reaches BOTH shapes: open the panel and the

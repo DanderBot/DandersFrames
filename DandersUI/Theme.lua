@@ -502,7 +502,7 @@ UI.PopoutPad = 10
 --   colGap     between every column on the right-hand side.
 UI.PopoutRow = {
     plate     = 44,
-    gap       = 6,
+    gap       = 8,    -- was 6; "a tiny bit more spacing between the rows" (2026-09-04)
     padX      = 10,
     labelGap  = 10,
     colGap    = 6,
@@ -607,7 +607,11 @@ UI.PopoutRow = {
     -- nothing hoisted at all. 18 is the smallest strip that holds the cog with
     -- air around it.
     footer       = 18,
-    footerFill   = 0.5,    -- of C_BACKGROUND: the strip reads as a hole in the plate
+    footerFill   = 0.85,   -- of C_ELEMENT: a RAISED band, lighter than the plate.
+                           -- It was 0.5 of C_BACKGROUND -- "a hole in the plate" --
+                           -- and in game a hole in a 0.12 plate over a 0.08 window
+                           -- is just more black; the strip vanished into the ground
+                           -- ("blends into the black background too much").
     footerBorder = 0.6,    -- of C_BORDER -- the hairline above it
     footerOn     = 0.22,   -- of the accent, when this row's panel is open
 
