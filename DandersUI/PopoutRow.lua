@@ -1386,8 +1386,24 @@ function UI:CreatePopoutRow(parent, opts)
         if row._toggledOn == nil then return end
         local text
         if row._toggledOn then
-            local shown = (shownHoists > 0) and row._shownKeys or nil
-            text = opts.summary and opts.summary(resolveDB(opts.db), shown) or ""
+            -- ☠ A STRIP ROW PAINTS NO SUMMARY WHEN IT IS ON. On the title line, a
+            -- fragment like "Spacing 2" or "Alpha 0.30 · Combat 1.00" stands alone
+            -- in the corner with nothing to explain it, and in game it read as
+            -- out of place ("makes no sense on its own"). The controls beneath say
+            -- what the row is, and the strip says there is more. The one word
+            -- that DOES earn the corner is "Off" -- the else arm below -- because
+            -- a switched-off row has nothing beneath it to say so.
+            --
+            -- ⚠ Keyed on the STRIP, not on the hoists: a strip row with nothing
+            -- hoisted (Frame Fade) was showing "Alpha 0.30 · Combat 1.00" and is
+            -- the row the feedback named. Rows without a strip -- every other page
+            -- -- keep their summary, byte for byte.
+            if strip then
+                text = ""
+            else
+                local shown = (shownHoists > 0) and row._shownKeys or nil
+                text = opts.summary and opts.summary(resolveDB(opts.db), shown) or ""
+            end
         else
             text = offText
         end

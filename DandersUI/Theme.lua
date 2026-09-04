@@ -599,7 +599,8 @@ UI.PopoutRow = {
     --          changes the width at which it splits.
     nameH        = 12,
     controlH     = 24,
-    linePad      = 4,
+    linePad      = 10,   -- was 4; the controls sat hard on the strip ("maybe the
+                         -- controls are too close to the bottom bar", 2026-09-04)
     cellGap      = 10,     -- between the two cells on a line
     nameSize     = 9,
     minControl   = 98,

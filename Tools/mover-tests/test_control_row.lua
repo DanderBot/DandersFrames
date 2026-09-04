@@ -64,7 +64,7 @@ local UI = {
         -- from the theme rather than restating), but section 2 below compares
         -- the mirror to Theme.lua KEY FOR KEY -- so every token the real table
         -- carries has to be here or the mirror is the thing that has drifted.
-        lineH = 36, nameH = 12, controlH = 24, linePad = 4,
+        lineH = 36, nameH = 12, controlH = 24, linePad = 10,
         cellGap = 10, nameSize = 9, minControl = 98, splitCell = 166,
         footer = 18, footerFill = 0.85, footerBorder = 0.6, footerOn = 0.22,
         plateStrip = 30, stripArc = 8, modTickGap = 2,

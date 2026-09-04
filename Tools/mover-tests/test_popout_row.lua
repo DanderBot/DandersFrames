@@ -125,7 +125,7 @@ UI.PopoutRow = UI.PopoutRow or {
     -- The hoisted-controls half of the token table (Theme.lua). Mirrored whole
     -- for the reason the rest of it is: PopoutRow.lua reads these at FILE SCOPE,
     -- so a missing one is a nil in an arithmetic expression at load.
-    lineH = 36, nameH = 12, controlH = 24, linePad = 4,
+    lineH = 36, nameH = 12, controlH = 24, linePad = 10,
     cellGap = 10, nameSize = 9, minControl = 98, splitCell = 166,
     footer = 18, footerFill = 0.85, footerBorder = 0.6, footerOn = 0.22,
     plateStrip = 30, stripArc = 8, modTickGap = 2,
@@ -2846,66 +2846,65 @@ do
     rd:ClosePopout()
 end
 
--- ---- 24.11 the summary says only what the plate does NOT --------------
--- ☠ THE ROW WAS SAYING IT TWICE. "125x64 · Spacing 2" sat on the title line
--- while 125 and 64 sat in the controls directly beneath it -- the row spending
--- its one line of detail on the half the user could already read. So a
--- consumer's summary is handed the set of keys currently ON THE PLATE, and a
--- consumer that can rebuild itself without them does.
+-- ---- 24.11 a strip row's title line says nothing but "Off" ----------
+-- ☠ THE CORNER TEXT MADE NO SENSE ON ITS OWN. For one pass the summary was
+-- DERIVED -- it named only what the plate did not show ("Spacing 2") -- and in
+-- game that fragment sat in the top-right corner with nothing to explain it:
+-- "makes no sense on its own and feels out of place". A strip row that is ON
+-- now paints NO summary at all: the controls beneath say what the row is, the
+-- strip says there is more. The one word that earns the corner is "Off".
 --
--- ⚠ SHOWN, NOT DECLARED. A folded, split-away or gated-off control is not on the
--- plate, and the summary has to name it again the moment it goes.
+-- ⚠ KEYED ON THE STRIP, NOT THE HOISTS. Frame Fade has a strip and nothing
+-- hoisted, and it was showing "Alpha 0.30 · Combat 1.00" -- the row the
+-- feedback named. And a row WITHOUT a strip -- every other page -- keeps its
+-- summary byte for byte, which the last block below pins.
 do
     local win = window()
     local db = { on = true, frameWidth = 100, frameHeight = 50, spacing = 2 }
-    local seen, sets = {}, {}
+    local called = 0
     local function summary(d, shown)
-        sets[#sets + 1] = shown or false
-        local parts = {}
-        if not (shown and shown.frameWidth and shown.frameHeight) then
-            parts[#parts + 1] = string.format("%dx%d", d.frameWidth, d.frameHeight)
-        end
-        parts[#parts + 1] = "Spacing " .. tostring(d.spacing)
-        return table.concat(parts, " ")
+        called = called + 1
+        return "100x50 Spacing 2"          -- a consumer that STILL returns text
     end
-    local row = stripRow({ label = "Summing", db = db, count = 5, window = win,
+
+    -- A strip row with nothing hoisted: on -> nothing, even though the consumer
+    -- handed back a string.
+    local row = stripRow({ label = "Quiet", db = db, count = 5, window = win,
                            footerStrip = true, summary = summary, toggle = { key = "on" } })
-    eq(row.summary:GetText(), "100x50 Spacing 2",
-        "summary: with nothing hoisted the row reports the lot")
-    eq(sets[1], false, "summary: ...and is handed no set at all, not an empty one")
+    eq(row.summary:GetText(), "",
+        "summary: a strip row that is on paints nothing on its title line")
 
-    row:SetHoistedControls(twoSliders(db, seen))
+    -- ...and hoisting changes nothing about that: still nothing, at any width.
+    row:SetHoistedControls(twoSliders(db, {}))
     widen(row, 401)
-    eq(row.summary:GetText(), "Spacing 2",
-        "summary: once the plate shows width and height, the summary drops them")
-    -- ⚠ TYPE-CHECKED BEFORE IT IS INDEXED. A summary handed `false` (or nothing)
-    -- must fail these as assertions rather than error out of the suite -- a
-    -- crashing test takes everything after it down with it.
-    local set = sets[#sets]
-    check(type(set) == "table", "summary: the set arrives once there is something on the plate")
-    eq(type(set) == "table" and set.frameWidth or nil, true,
-        "summary: naming the keys the plate is showing")
-    eq(type(set) == "table" and set.frameHeight or nil, true, "summary: ...both of them")
-    eq(type(set) == "table" and set.spacing or nil, nil,
-        "summary: and nothing that is still behind the click")
-
-    -- THE FOLD gives them back. Nothing refreshed -- only the width moved -- so
-    -- this also pins that the summary is repainted from the LAYOUT.
+    eq(row.summary:GetText(), "", "summary: ...hoisted or not")
     widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
     eq(row:GetShownHoistCount(), 0, "summary: the row folded")
-    eq(row.summary:GetText(), "100x50 Spacing 2",
-        "summary: ...so it reports the lot again, without anything having refreshed")
-    -- ☠ AND THE SET IS **nil** AGAIN, not an emptied table. "Nothing is on the
-    -- plate" and "these keys are on the plate" are different answers, and a
-    -- consumer testing `if shown then` -- the obvious way to write it -- would
-    -- read a wiped-but-truthy table as the second one for ever.
-    eq(sets[#sets], false, "summary: a row showing nothing hands over no set at all")
-    widen(row, 401)
-    eq(row.summary:GetText(), "Spacing 2", "summary: and widening takes them back off it")
+    eq(row.summary:GetText(), "",
+        "summary: ...and folding does not bring the fragment back")
 
-    -- OFF still replaces the whole summary, hoists or no hoists.
+    -- OFF is the one word that earns the corner.
     row._Write(false)
-    eq(row.summary:GetText(), "Off", "summary: a row that is switched off says so instead")
+    eq(row.summary:GetText(), "Off", "summary: a strip row that is switched off still says so")
+    row._Write(true)
+    eq(row.summary:GetText(), "", "summary: ...and goes quiet again when switched back on")
+
+    -- ☠ A ROW WITHOUT A STRIP KEEPS ITS SUMMARY. This is every other page, and
+    -- it must not have moved. Asserted on the strip's absence FIRST, so that if
+    -- the helper ever grows a strip by default this fails on the premise rather
+    -- than passing on a row that quietly had one.
+    -- Built DIRECTLY, not through stripRow(): that helper assumes a strip frame
+    -- exists to size, and on a strip-less row the field resolves to a function.
+    local plain = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Loud", db = db, count = 5, window = win,
+        build = counting("hoistLoud", 50), summary = summary, toggle = { key = "on" } })
+    plain:SetWidth(260); plain:SetFakeCenter(CX - 100, CY); plain:Show()
+    check(not (type(plain.footerStrip) == "table" and plain.footerStrip.SetSize),
+        "summary: the comparison row has no strip frame")
+    eq(plain.summary:GetText(), "100x50 Spacing 2",
+        "summary: a row without a strip still paints its summary, byte for byte")
+    plain._Write(false)
+    eq(plain.summary:GetText(), "Off", "summary: ...and its off word, as it always did")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
