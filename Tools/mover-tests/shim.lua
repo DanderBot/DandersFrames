@@ -246,7 +246,19 @@ function FakeUIFrame(w, h, cx, cy)
     -- title bar only became draggable once the popout was pinned.
     function f:SetMovable(v) self._flags.movable = v and true or false end
     function f:IsMovable() return self._flags.movable == true end
-    function f:EnableMouse(v) self._flags.mouse = v and true or false end
+    -- ☠ THE THREE ARE ONE STATE, and the split half is the whole point. EnableMouse
+    -- takes BOTH motion and clicks -- which is how a tooltip's hover rect ended up
+    -- eating the clicks of the control it was laid over -- so a stub that recorded
+    -- only `mouse` could not tell "hovers" from "eats clicks", and the __index
+    -- fallback would answer the two split setters with a truthy no-op and let the
+    -- fix pass without being made.
+    function f:EnableMouse(v)
+        local on = v and true or false
+        self._flags.mouse = on
+        self._flags.mouseMotion, self._flags.mouseClick = on, on
+    end
+    function f:SetMouseMotionEnabled(v) self._flags.mouseMotion = v and true or false end
+    function f:SetMouseClickEnabled(v) self._flags.mouseClick = v and true or false end
     function f:RegisterForDrag(...) self._flags.drag = { ... } end
     function f:StartMoving() self._flags.moving = true end
     function f:StopMovingOrSizing() self._flags.moving = false end

@@ -1446,6 +1446,111 @@ end
 -- addon, which does not load headlessly at all. Both aliases are pinned as
 -- source in test_group_actions.lua instead.
 
+-- ============================================================
+-- THE TOOLTIP HOVER RECT -- UI:AttachTooltip, through the two factories that
+-- build one.
+--
+-- ☠ THE BUG THIS PINS. The helper laid a frame over the caption's rect with
+-- EnableMouse(true), which takes motion AND clicks. Over a visible caption with
+-- nothing behind it that was harmless; the moment a consumer HID its caption the
+-- rect landed on the control instead and ate its clicks -- in the popout row's
+-- title line, and on an inline dropdown's own opener, which is a shipped dead
+-- patch over the button that opens the menu.
+--
+-- The fix is at the source and holds whether or not anyone ever sets a tooltip:
+-- the rect asks for MOTION and refuses CLICKS. What a consumer chooses is only
+-- WHERE it goes, or whether it is built at all.
+-- ============================================================
+print("-- Widgets: the tooltip hover rect takes motion, never clicks")
+
+-- The hit is not a named child; it is found by the two flags that make it one.
+local function hitOf(container)
+    return rawget(container, "dfTooltipHit")
+end
+
+do
+    local host = newHost(false)
+    local s = host:CreateSlider(pane(), { label = "Width", min = 0, max = 100, step = 1 })
+    local hit = hitOf(s)
+    check(hit ~= nil, "hit: a labelled slider still gets its hover rect")
+    eq(hit._flags.mouseMotion, true, "hit: which hovers")
+    -- ☠ THE WHOLE FIX, IN ONE FLAG. Everything else in this section is about
+    -- where the rect goes; this is why its being in the wrong place can no longer
+    -- cost the user a click.
+    eq(hit._flags.mouseClick, false, "hit: and can never eat a click, wherever it lands")
+    eq(hit:GetParent(), s, "hit: built on the container, over the caption")
+    eq(hit._points[1][2], s.label, "hit: anchored to the caption's own rect, top...")
+    eq(hit._points[2][2], s.label, "hit: ...and bottom, so it tracks the text")
+    eq(hit:GetFrameLevel(), s:GetFrameLevel() + 5, "hit: above the container's own children")
+
+    -- opts.tooltip WAS DOCUMENTED AND DROPPED. Every consumer that passed one got
+    -- silence, because nothing ever put it on the container the helper reads.
+    local t = host:CreateSlider(pane(), { label = "Width", min = 0, max = 1, step = 1,
+                                          tooltip = "what it does" })
+    eq(t.tooltip, "what it does", "hit: opts.tooltip reaches the container the helper reads at hover time")
+end
+
+do
+    -- A consumer that hides its caption and draws the name itself SAYS where the
+    -- rect belongs. The frame it names is what the rect is built ON, so the level
+    -- is relative to the thing it covers rather than to a container that may sit
+    -- somewhere else entirely.
+    local host = newHost(false)
+    local p = pane()
+    local nameBox = CreateFrame("Frame", nil, p)
+    nameBox:SetHeight(12)
+    nameBox:SetFrameLevel(7)
+    local s = host:CreateSlider(p, { label = "Width", min = 0, max = 1, step = 1,
+                                     tooltip = "words", tooltipHit = nameBox })
+    local hit = hitOf(s)
+    check(hit ~= nil, "hit: the named region gets the rect")
+    eq(hit:GetParent(), nameBox, "hit: built ON it, not on the widget")
+    eq(hit._points[1][2], nameBox, "hit: anchored to it, top left...")
+    eq(hit._points[2][2], nameBox, "hit: ...and bottom right")
+    eq(hit:GetFrameLevel(), 8, "hit: one level above the region it covers")
+    eq(hit._flags.mouseClick, false, "hit: still refuses clicks")
+
+    -- ...and the caption it would otherwise have covered is untouched.
+    check(hit._points[1][2] ~= s.label, "hit: and nowhere near the hidden caption")
+end
+
+do
+    -- The other answer: a consumer whose ROW owns the hover wants no rect at all,
+    -- because a motion-taking child inside a plate takes the hover off the plate.
+    local host = newHost(false)
+    local s = host:CreateSlider(pane(), { label = "Width", min = 0, max = 1, step = 1,
+                                          noTooltipHit = true })
+    eq(hitOf(s), nil, "hit: noTooltipHit builds nothing")
+
+    local d = host:CreateDropdown(pane(), {
+        label = "Style", inline = true,
+        options = { SOLID = "Solid" },
+        get = function() return "SOLID" end,
+        noTooltipHit = true,
+    })
+    eq(hitOf(d), nil, "hit: on an inline dropdown too -- the kind whose opener it used to cover")
+    -- ☠ AND THE OPENER IS THE THING THAT WAS BEING COVERED. Stated so that a
+    -- future `inline` that stops filling the container fails here rather than
+    -- quietly making this section about nothing.
+    eq(d.opener._allPoints, d, "hit: an inline dropdown's opener fills the container it hid the caption in")
+end
+
+do
+    -- A standalone dropdown is unchanged: its caption is VISIBLE, above the
+    -- opener, and that is where its rect goes.
+    local host = newHost(false)
+    local d = host:CreateDropdown(pane(), {
+        label = "Style", options = { SOLID = "Solid" },
+        get = function() return "SOLID" end,
+        tooltip = "pick one",
+    })
+    local hit = hitOf(d)
+    check(hit ~= nil, "hit: a standalone dropdown keeps its rect")
+    eq(hit._points[1][2], d.label, "hit: over its visible caption")
+    eq(hit._flags.mouseClick, false, "hit: and it cannot eat the opener's click either")
+    eq(d.tooltip, "pick one", "hit: opts.tooltip reaches the dropdown's container too")
+end
+
 -- ---- restore the globals -------------------------------------------
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 CreateColor, GetCursorPosition = prevCreateColor, prevCursor

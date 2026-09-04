@@ -2310,6 +2310,28 @@ if not UI.CreateSliderNative then
         if opts.dbRef and opts.dbRef.db then return opts.dbRef.db[opts.dbRef.key] end
         return nil
     end
+    -- ☠ THE HOVER HIT, BUILT THE WAY UI:AttachTooltip BUILDS IT under the two
+    -- opts a caption-hiding caller passes. The real helper's own end of the
+    -- contract -- motion but never clicks, parented to and levelled off the frame
+    -- it was pointed at, and nothing at all under `noTooltipHit` -- is driven
+    -- against the real Widgets.lua in test_widgets_slider.lua. What THIS stub
+    -- exists to let the row's own claims fail is (a) that the row points it at
+    -- the NAME TIER rather than leaving it on the hidden caption, (b) that a
+    -- declaration carrying no tooltip gets no frame at all, and (c) that the
+    -- layout narrows it to the words and re-levels it.
+    local function attachStubHit(c, opts)
+        if opts.noTooltipHit then return end
+        local box = opts.tooltipHit
+        if not box then return end
+        local hit = CreateFrame("Frame", nil, box)
+        hit:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+        hit:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 0)
+        hit:SetMouseMotionEnabled(true)
+        hit:SetMouseClickEnabled(false)
+        hit:SetFrameLevel((box:GetFrameLevel() or 0) + 1)
+        hit:Show()
+        c.dfTooltipHit = hit
+    end
     function UI:CreateSliderNative(parent, opts)
         local c = CreateFrame("Frame", nil, parent)
         c._sliderOpts = opts
@@ -2318,11 +2340,8 @@ if not UI.CreateSliderNative then
         -- caption is hidden" pass without the row doing anything.
         c.label = FakeUIFrame()
         c.label:Show()
-        -- The tooltip hit frame the REAL factory builds over the caption,
-        -- mouse-enabled and unconditional. Shown to begin with, so "the row
-        -- takes it down" is a claim that can fail.
-        c.dfTooltipHit = FakeUIFrame()
-        c.dfTooltipHit:Show()
+        if opts.tooltip ~= nil then c.tooltip = opts.tooltip end
+        attachStubHit(c, opts)
         c.refreshValue = function(self) self._value = boundValue(opts) end
         c:refreshValue()
         return c
@@ -2330,6 +2349,8 @@ if not UI.CreateSliderNative then
     function UI:CreateDropdownNative(parent, opts)
         local c = CreateFrame("Frame", nil, parent)
         c._dropdownOpts = opts
+        if opts.tooltip ~= nil then c.tooltip = opts.tooltip end
+        attachStubHit(c, opts)
         c.refreshValue = function(self) self._value = boundValue(opts) end
         c:refreshValue()
         return c
@@ -2678,12 +2699,14 @@ do
     eq(o.max, 300, "bound: ...both ends")
     check(w.label ~= nil and not w.label:IsShown(),
         "bound: the factory's own caption is hidden -- the cell's lane names it")
-    -- ☠ AND SO IS THE HIT FRAME THE FACTORY HUNG OVER IT. It is mouse-enabled
-    -- and built whether or not there is a tooltip, so left up it is an invisible
-    -- click-eater sitting on the plate -- on a slider, in the title line, where
-    -- the row's own name and summary are.
-    check(w.dfTooltipHit ~= nil and not w.dfTooltipHit:IsShown(),
-        "bound: ...and so is the tooltip hit frame it hung over that caption")
+    -- ☠ AND THE FACTORY BUILT NO HOVER RECT OVER THAT HIDDEN CAPTION. These two
+    -- declarations carry no tooltip, so there is nothing to show and therefore
+    -- nothing laid over the plate to show it -- see section 24.12 for the
+    -- declaration that DOES carry one and where its rect goes.
+    eq(rawget(w, "dfTooltipHit"), nil,
+        "bound: and no hover rect over that hidden caption, because there is nothing to say")
+    check(w._sliderOpts.noTooltipHit == true,
+        "bound: ...and the row SAID so to the factory rather than fixing it up afterwards")
 
     -- A write nobody on this plate made -- the pane's twin, a Reset Group, an
     -- undo -- reaches the hoisted control on the row's own refresh.
@@ -2905,6 +2928,126 @@ do
         "summary: a row without a strip still paints its summary, byte for byte")
     plain._Write(false)
     eq(plain.summary:GetText(), "Off", "summary: ...and its off word, as it always did")
+end
+
+-- ---- 24.12 the hoisted control's tooltip, and where its rect lands ----
+-- The first try shipped these with NO tooltip: the factory lays its hover rect
+-- over the CAPTION, this cell hides the caption, and the rect therefore landed
+-- in the title line (slider) or on the opener (inline dropdown). Taking it down
+-- fixed the click and lost the explanation.
+--
+-- What is pinned here is the replacement: the rect rides the cell's NAME TIER,
+-- it is as wide as the WORDS rather than as wide as the lane, it never reaches
+-- the tier the control is in, and it exists at all only for a declaration that
+-- has something to say.
+--
+-- ⚠ WHAT THIS CAN SEE. Fake frames record anchors instead of resolving them, so
+-- the non-overlap below is arithmetic on the recorded offsets, in cell-local
+-- coordinates measured DOWN from the cell's top -- the same way 24.4 reasons
+-- about the track. The tier heights are the theme's own.
+do
+    local win = window()
+    local db = { on = true, growDirection = "HORIZONTAL", frameWidth = 100 }
+    local TIP = "The shape each line of frames takes."
+    local row = stripRow({ label = "Explained", db = db, count = 4,
+                           window = win, footerStrip = true })
+    row:SetHoistedControls({
+        { name = "Growth Direction", kind = "dropdown", key = "growDirection", db = db,
+          options = { _order = { "HORIZONTAL" }, HORIZONTAL = "Rows" }, tooltip = TIP },
+        { name = "Frame Width", kind = "slider", key = "frameWidth", db = db,
+          min = 60, max = 300, step = 1 },
+    })
+    widen(row, 401)
+    eq(row:GetShownHoistCount(), 2, "tip: both declarations are on the plate")
+
+    local dd, sl = row._hoists[1], row._hoists[2]
+
+    -- ☠ THE PREMISE, ASSERTED BEFORE ANYTHING IS ANCHORED TO IT. A frame with no
+    -- resolved height silently misplaces a child anchored to both its corners, so
+    -- "the name tier has a height" is the thing the rest of this section stands
+    -- on rather than something it assumes.
+    eq(dd.nameBox:GetHeight(), NAME_H, "tip: the name tier has a resolved height to anchor into")
+
+    -- ---- the declaration that says something --------------------------
+    eq(dd.control.tooltip, TIP, "tip: the declaration's words reach the widget that shows them")
+    local hit = rawget(dd.control, "dfTooltipHit")
+    check(hit ~= nil, "tip: ...and it has a rect to show them from")
+    eq(hit:GetParent(), dd.nameBox,
+        "tip: built ON the name tier, so its level is relative to the thing it covers")
+    eq(hit:GetFrameLevel(), dd.nameBox:GetFrameLevel() + 1, "tip: ...one above it")
+    -- ☠ MOTION, NEVER CLICKS -- the whole of the bug this replaced. A rect that
+    -- takes clicks over a control eats them, and this class has shipped three
+    -- times in this codebase.
+    eq(hit._flags.mouseMotion, true, "tip: it hovers")
+    eq(hit._flags.mouseClick, false, "tip: ...and it can never eat a click")
+
+    -- ---- where it lands, in cell-local units --------------------------
+    -- The layout re-points it to the tier's left edge and gives it the WORDS'
+    -- width, so the hole in the row's own click target is the name and not the
+    -- lane. The lane is the whole cell because the FontString is stretched
+    -- across it to truncate.
+    eq(hit._points[1][1], "TOPLEFT", "tip: re-pointed to the tier's top left")
+    eq(hit._points[1][2], dd.nameBox, "tip: ...on the tier")
+    eq(hit._points[2][1], "BOTTOMLEFT", "tip: and its bottom left")
+    eq(hit._points[2][2], dd.nameBox, "tip: ...on the tier again, so its WIDTH is its own")
+    local cellW = dd.control:GetWidth()
+    check(hit:GetWidth() <= cellW,
+        "tip: the rect is never wider than the cell it is in")
+    eq(hit:GetWidth(), dd.nameText:GetStringWidth(),
+        "tip: it is as wide as the WORDS, which is the whole size of the hole")
+    check(hit:GetWidth() < cellW,
+        "tip: ...and that is strictly less than the lane, which is the point of measuring it")
+
+    -- ---- and it never reaches the control -----------------------------
+    -- Both tiers, in cell-local coordinates measured DOWN from the cell's top.
+    -- ⚠ THE RECT'S OWN EXTENT IS DERIVED FROM WHAT THE LAYOUT ANCHORED IT TO, not
+    -- assumed to be the name tier -- otherwise every line below would still pass
+    -- with the rect laid over the whole cell.
+    local hitBox = hit._points[1][2]
+    local hitBottom = hitBox:GetHeight()
+    eq(hitBottom, NAME_H, "tip: the rect is exactly the name tier deep, and no deeper")
+    -- The dropdown's opener is anchored TOPRIGHT into the control tier.
+    local ddTop = -(dd.control._points[1][5])
+    check(ddTop >= hitBottom,
+        "tip: the opener starts at or below the tier the rect is in -- no overlap")
+    eq(ddTop, NAME_H + (CONTROL_H - M.dropdownH) / 2, "tip: ...centred in the control tier")
+    -- ☠ THE SLIDER'S CONTAINER *DOES* CROSS THE TIER, and that is not the same
+    -- question. Its top 18px are the caption this cell hides -- dead space, which
+    -- is exactly why the container is centred by its BAR. What must not be
+    -- reached is the LIVE part: the bar and the 20px value box, whose middle is
+    -- sliderBarMid below the container's top.
+    local slTop = -(sl.control._points[1][5])
+    local barMid = slTop + M.sliderBarMid
+    local liveTop = barMid - 10          -- half the 20px value box
+    check(liveTop >= hitBottom,
+        "tip: and a slider's live rect starts below the name tier too")
+    check(slTop < hitBottom,
+        "tip: ...even though its CONTAINER crosses the tier, which is why the bar is what is measured")
+
+    -- ---- the declaration that says nothing ----------------------------
+    eq(rawget(sl.control, "dfTooltipHit"), nil,
+        "tip: a declaration with no tooltip builds no rect, so it costs the row nothing")
+    check(sl.control._sliderOpts.noTooltipHit == true,
+        "tip: ...said to the factory, not undone afterwards")
+    eq(sl.control._sliderOpts.tooltipHit, nil, "tip: ...and pointed at nothing")
+
+    -- ---- and the layout re-seats it ------------------------------------
+    -- The cell width is what decides both the clamp and the placement, so the
+    -- re-seat has to run again when the row narrows to one cell per line.
+    --
+    -- ☠ AND THE LEVEL IS RE-STATED, NOT SET ONCE. A rect built at "one above the
+    -- tier" is only above the tier until something re-levels the plate -- which
+    -- this row does whenever its shape changes (_ApplyStripShape re-levels the
+    -- strip off the plate on every surface change). Driven by moving the tier
+    -- underneath it and re-placing: a rect that kept its build-time number would
+    -- be BELOW the name it is meant to sit over.
+    dd.nameBox:SetFrameLevel(50)
+    widen(row, 260)
+    eq(row:GetShownHoistCount(), 2, "tip: narrowed to one cell a line, both are still drawn")
+    eq(hit:GetFrameLevel(), 51, "tip: the rect is re-levelled off the tier after the re-place")
+    check(hit:GetWidth() <= dd.control:GetWidth(),
+        "tip: ...and still no wider than the cell it now sits in")
+    check(hit:GetWidth() > 0, "tip: ...and it did not lose its width to the re-place")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

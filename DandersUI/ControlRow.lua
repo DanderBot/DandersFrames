@@ -496,6 +496,14 @@ function UI:CreateControlRow(parent, opts)
             onChanged   = opts.onChanged,
             accent      = row._accent,
             tooltip     = opts.tooltip,
+            -- ☠ AND NO HOVER HIT, because this row's caption is hidden and an
+            -- inline dropdown's hidden caption sits at the container's TOPLEFT --
+            -- which the OPENER FILLS. The factory's hit landed square on the
+            -- button, and every one of these rows shipped with a dead patch over
+            -- the menu it opens. The row's own OnEnter carries the tooltip (see
+            -- the essay at `row.tooltip`), so there is nothing to move -- only
+            -- something to stop building.
+            noTooltipHit = true,
         })
         placeControl(control)
 
@@ -510,6 +518,10 @@ function UI:CreateControlRow(parent, opts)
             lightweight = opts.lightweight,
             accent      = row._accent,
             tooltip     = opts.tooltip,
+            -- The dropdown's reason, one tier down: a slider's caption is the
+            -- container's top 18px, which on this plate is the row's own name and
+            -- the top of the track. Same suppression, same owner of the hover.
+            noTooltipHit = true,
         })
         -- The factory has no `inline`, so its caption is hidden after the fact.
         -- Passed and then hidden for the dropdown's reason: the search index and
@@ -720,12 +732,18 @@ function UI:CreateControlRow(parent, opts)
     -- and never sees the option at all. The plate is the one thing every kind has,
     -- and it already owns the hover.
     --
-    -- ⚠ NO HIT FRAME, which is the one place this departs from AttachTooltip. That
-    -- helper lays a MOUSE-ENABLED frame over the label region, and a mouse-enabled
-    -- child inside the plate takes the hover away from the row -- so the plate
-    -- would drop back to rest across the whole width of its own label, which on a
-    -- checkbox row is most of it. The row's own OnEnter is already here; it costs
-    -- nothing and it cannot fight the paint.
+    -- ⚠ NO HIT FRAME, and that is now SAID rather than assumed: both factory-built
+    -- kinds pass `noTooltipHit` at their branch above. The helper lays a
+    -- motion-taking frame over the label region, and a motion-taking child inside
+    -- the plate takes the hover away from the row -- so the plate would drop back
+    -- to rest across the whole width of its own label, which on a checkbox row is
+    -- most of it. The row's own OnEnter is already here; it costs nothing and it
+    -- cannot fight the paint.
+    --
+    -- ☠ IT USED TO BE ASSUMED, AND THE ASSUMPTION WAS FALSE. The slider and the
+    -- dropdown are built by the KIT, which attached its own hit whatever this file
+    -- believed -- over the plate on a slider row, over the OPENER on an inline
+    -- dropdown one. Saying it at the call site is what makes the comment true.
     --
     -- A bare string is wrapped into a spec titled with the row's name -- the same
     -- normalisation the kit's own opener tooltip does, so a consumer may pass
