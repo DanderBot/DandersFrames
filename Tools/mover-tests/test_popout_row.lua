@@ -127,7 +127,8 @@ UI.PopoutRow = UI.PopoutRow or {
     -- so a missing one is a nil in an arithmetic expression at load.
     lineH = 36, nameH = 12, controlH = 24, linePad = 10,
     cellGap = 10, nameSize = 9, minControl = 98, splitCell = 166,
-    footer = 18, footerFill = 0.85, footerBorder = 0.6, footerOn = 0.22,
+    footer = 18, footerFill = 0.85, footerHover = 1.0,
+    footerBorder = 0.6, footerOn = 0.22, footerOnHover = 0.30,
     plateStrip = 30, stripArc = 8, modTickGap = 2,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
@@ -2548,11 +2549,16 @@ do
     check(M.modTickGap + M.modTick < M.padX,
         "strip: the dot and its gap fit inside the plate's right-hand padding")
 
-    -- Nothing on the strip takes the mouse: a frame drawn over a control eats
-    -- that control's clicks, and the WHOLE ROW is already the click target. A
-    -- strip that installed handlers of its own would be the first half of that.
-    eq(strip:GetScript("OnEnter"), nil, "strip: the strip installs no hover of its own")
-    eq(strip:GetScript("OnMouseDown"), nil, "strip: ...and no click, so it cannot eat one")
+    -- ☠ THE STRIP TAKES THE MOUSE, and 24.19 drives what it does with it.
+    -- Stated here as anatomy because the first try asserted the OPPOSITE ("the
+    -- strip installs no hover of its own", "the whole row is already the click
+    -- target"), and the reversal is the whole of section 21: the band along the
+    -- bottom is the only way in and the only thing that lights.
+    eq(strip._kind, "Button", "strip: the strip is a Button, because it answers a click")
+    check(strip._flags.mouseClick, "strip: ...with the mouse actually on it")
+    check(strip:GetScript("OnClick") ~= nil, "strip: it carries the click")
+    check(strip:GetScript("OnEnter") ~= nil, "strip: ...a hover of its own")
+    check(strip:GetScript("OnLeave") ~= nil, "strip: ...and the leave that ends it")
 
     -- The title line made room for it, and every region on it moved by the SAME
     -- amount -- two that disagreed would be two vertical constraints fighting.
@@ -3502,8 +3508,12 @@ do
                                footerStrip = true, toggle = { key = "on" } })
     clicked:SetCountProvider(function() return 0 end)
     clicked:SetHoistedControls(twoSliders(db, {}))
-    clicked:GetScript("OnClick")(clicked)
-    check(clicked.popout ~= nil, "empty open: the row's own click opens a panel")
+    -- ⚠ THE STRIP'S CLICK, not the row's. Section 21 moved the way in onto the
+    -- band along the bottom and the row's own OnClick returns early there -- but
+    -- both ends of that split still run row:OpenPopout(), which is the point of
+    -- doing it that way and is what this line is really about.
+    clicked.footerStrip:GetScript("OnClick")(clicked.footerStrip)
+    check(clicked.popout ~= nil, "empty open: the strip's click opens a panel")
     eq(clicked.popout.pinned, true, "empty open: ...and pins it, like the verb does")
 
 
@@ -3699,6 +3709,99 @@ do
     host.hooks.isModifiedDefault = nil
     host:CloseAllPopoutRows("test")
 end
+
+-- ---- 24.19 THE STRIP IS THE ONLY WAY IN -----------------------------
+-- ☠ THE REVERSAL, ASKED FOR AFTER LIVING WITH THE FIRST TRY: "the popout
+-- should only be triggered from the bottom bar, same with the on hover highlight
+-- instead of the whole row being clickable". A plate whose every square inch
+-- opens a panel is a plate the cursor cannot rest on, and a whole row lighting
+-- up wherever the cursor lands says nothing about where to press. So on a STRIP
+-- ROW -- and nowhere else -- the strip owns the click and the strip is the only
+-- thing that lights.
+--
+-- ⚠ ACTIVE IS UNTOUCHED. The accent plate wash, the accent hairline and the
+-- beam are what say "the open panel is about THIS row", and that claim is about
+-- the row, not about where the cursor happens to be.
+do
+    local win = window()
+    local db = { on = true }
+    local row = stripRow({ label = "Only the strip", db = db, count = 5, window = win,
+                           popoutKey = "striponly.row",
+                           footerStrip = true, toggle = { key = "on" } })
+    local strip = row.footerStrip
+    local fill  = row._stripFill
+
+    -- ---- hover: the row's script still runs, the plate still does not move ----
+    eq(row.plate._fill.r, UI.Colors.element.r, "only: the plate rests on the element fill")
+    eq(row.plate._fill.a, M.restFill, "only: ...at the rest alpha")
+    row:GetScript("OnEnter")()
+    check(row._hovered, "only: hovering the ROW still sets its flag -- the script was not removed")
+    eq(row.plate._fill.r, UI.Colors.element.r,
+        "only: ...and the plate stays on the element fill anyway")
+    eq(row.plate._fill.a, M.restFill, "only: at the REST alpha, not the hover one")
+    eq(fill._fill.a, M.footerFill, "only: and the strip has not lit -- the cursor is not on it")
+
+    -- ---- hover: the strip is what lights ------------------------------
+    strip:GetScript("OnEnter")(strip)
+    eq(fill._fill.r, UI.Colors.hover.r, "only: hovering the STRIP lifts it to the hover colour")
+    eq(fill._fill.a, M.footerHover, "only: ...at the strip's own hover alpha")
+    eq(row.plate._fill.a, M.restFill, "only: while the plate under it still has not moved")
+    strip:GetScript("OnLeave")(strip)
+    eq(fill._fill.r, UI.Colors.element.r, "only: leaving the strip puts the band back")
+    eq(fill._fill.a, M.footerFill, "only: ...to its rest alpha")
+    row:GetScript("OnLeave")()
+
+    -- ---- click: the plate is inert ------------------------------------
+    row:GetScript("OnClick")(row)
+    eq(row.popout, nil, "only: a click on the PLATE opens nothing")
+    eq(next(row._bound), nil, "only: ...and binds no panel to the row")
+
+    strip:GetScript("OnClick")(strip)
+    check(row.popout ~= nil, "only: the strip's click opens one")
+    eq(row.popout.tetherSource, strip, "only: tethered to the strip, exactly as before")
+
+    -- ---- active, and active + hover -----------------------------------
+    local acc = host:GetAccent()
+    eq(row.plate._fill.r, acc.r, "only: the open row's plate still takes the accent wash")
+    eq(row.plate._fill.a, M.activeFill, "only: ...at the wash alpha -- ACTIVE did not change")
+    eq(fill._fill.r, acc.r, "only: and the strip lights in the accent with it")
+    eq(fill._fill.a, M.footerOn, "only: at the open alpha")
+    -- ⚠ THE ROW'S OWN HOVER FLAG IS SET FOR THE NEXT LINE, which is what makes
+    -- it a claim rather than a coincidence: the suppression has to hold on an OPEN
+    -- row too, and paintState's active arm is a second place it could have been
+    -- left out.
+    row:GetScript("OnEnter")()
+    eq(row.plate._fill.a, M.activeFill,
+        "only: hovering an OPEN row's plate does not brighten the wash either")
+    strip:GetScript("OnEnter")(strip)
+    eq(fill._fill.r, acc.r, "only: hovering an OPEN strip keeps the accent")
+    eq(fill._fill.a, M.footerOnHover, "only: ...and brightens it")
+    check(M.footerOnHover > M.footerOn, "only: which is only feedback if the token is brighter")
+    eq(row.plate._fill.a, M.activeFill,
+        "only: and the plate under it still does not -- the row's hover lift is gone")
+    strip:GetScript("OnLeave")(strip)
+    eq(fill._fill.a, M.footerOn, "only: leaving settles the open strip back to the open alpha")
+    row:GetScript("OnLeave")()
+    row:ClosePopout()
+
+    -- ---- and every unconverted row is untouched -----------------------
+    -- ⚠ BUILT DIRECTLY, not through stripRow(): that helper hands the row a
+    -- rect for a strip frame, which this one does not have.
+    local plain = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Whole plate", db = { on = true }, count = 3,
+        build = counting("striponlyplain", 50), window = win,
+    }), 80)
+    eq(rawget(plain, "footerStrip"), nil, "only: a row that did not ask has no strip")
+    plain:GetScript("OnEnter")()
+    eq(plain.plate._fill.r, UI.Colors.hover.r, "only: so IT still lifts to the hover colour")
+    eq(plain.plate._fill.a, M.hoverFill, "only: ...and brightens")
+    plain:GetScript("OnLeave")()
+    eq(plain.plate._fill.a, M.restFill, "only: and settles back")
+    plain:GetScript("OnClick")(plain)
+    check(plain.popout ~= nil, "only: and its WHOLE PLATE still opens the panel")
+    host:CloseAllPopoutRows("test")
+end
+
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit

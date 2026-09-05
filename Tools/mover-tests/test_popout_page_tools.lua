@@ -859,6 +859,24 @@ do
     })
     row:SetWidth(401)
 
+    -- ☠ THE WAY IN, ON THE SHIPPED TOKENS. test_popout_row.lua's section 24
+    -- drives the strip's mouse against that file's MIRROR of UI.PopoutRow; this
+    -- kit reads the real Theme.lua, so this is the one place where the numbers the
+    -- user actually sees are the numbers under test. The strip is the only thing
+    -- that opens the panel and the only thing that lights.
+    do
+        local strip = row.footerStrip
+        eq(strip._kind, "Button", "way in: the strip is a Button, because it answers a click")
+        check(strip._flags.mouseClick, "way in: ...with the mouse actually on it")
+        check(strip:GetScript("OnClick") ~= nil, "way in: it carries the click")
+        eq(row._stripFill._color.a, M0.footerFill, "way in: and rests at the shipped fill alpha")
+        strip:GetScript("OnEnter")(strip)
+        eq(row._stripFill._color.a, M0.footerHover, "way in: hovering it lights the band")
+        eq(row._stripFill._color.r, T.Colors.hover.r, "way in: ...in the shipped hover colour")
+        strip:GetScript("OnLeave")(strip)
+        eq(row._stripFill._color.a, M0.footerFill, "way in: and leaving puts it back")
+    end
+
     -- ⚠ CLAIM FIRST, HOIST SECOND -- the order the Frame page uses (ClaimKeys,
     -- the tick, the footer, THEN RegisterHoistedToggle). The second order is
     -- driven at the foot of this block.
