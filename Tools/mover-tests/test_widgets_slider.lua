@@ -1274,6 +1274,70 @@ do
     check(gp[#gp][2] == s.label, "global text: and back to the label the moment the dot goes")
 end
 
+-- ...AND THE LABEL IT HANGS OFF IS OVERRIDABLE, via `container.modifiedDotLabel`.
+-- A consumer that HIDES the control's own caption and draws the setting's name
+-- itself -- the popout row's hoisted cell -- had the dot anchored to a rect
+-- nobody could see, and the dot came down on the words of whatever was drawn
+-- over that rect. Nothing about the placement changes but WHICH FontString it is
+-- measured from, which is the point: the mark still belongs to the name.
+do
+    local host = dotHost(function() return true end)
+    local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
+    local shown = FakeUIFrame()
+    shown:SetText("FRAME WIDTH")
+    s.modifiedDotLabel = shown
+    s:UpdateOverrideIndicators(3)
+    local p = s.modifiedDot._points[#s.modifiedDot._points]
+    check(p[2] == shown, "override label: the dot hangs off the label it was GIVEN...")
+    check(p[2] ~= s.label, "override label: ...and not off the control's own hidden one")
+    eq(p[1], "LEFT", "override label: still by its own LEFT edge")
+    eq(p[3], "LEFT", "override label: ...measured from the given label's left")
+    eq(p[4], shown:GetStringWidth() + 4,
+        "override label: at the END of ITS words, plus the same gap")
+    eq(p[5], 0, "override label: and on that label's own line")
+
+    -- And it is read on EVERY update, not captured once: the field is the
+    -- consumer's to set after the widget is built (the row hides the caption
+    -- after the factory has already drawn it).
+    s.modifiedDotLabel = nil
+    s:UpdateOverrideIndicators(3)
+    check(s.modifiedDot._points[#s.modifiedDot._points][2] == s.label,
+        "override label: cleared, and the dot is back on the control's own")
+end
+
+-- ...AND THE OFFSET MAY BE CAPPED, via `container.modifiedDotMaxX`. The offset is
+-- a STRING WIDTH and GetStringWidth measures the WHOLE string -- so a name
+-- stretched across a fixed cell truncates on screen while still measuring its
+-- untruncated self, and an uncapped dot walks out of the cell to the right. The
+-- number is the consumer's, because only the consumer knows the rect; the kit
+-- only knows to obey it.
+do
+    local host = dotHost(function() return true end)
+    local s = boundSlider(host, { frameBorderSize = 3 }, "frameBorderSize")
+    local shown = FakeUIFrame()
+    -- The stub's width is 7px a character, so the string IS the lever.
+    shown:SetText("PERMANENT MOVER HANDLE WIDTH")     -- 28 chars -> 196
+    s.modifiedDotLabel = shown
+    s.modifiedDotMaxX = 60
+    s:UpdateOverrideIndicators(3)
+    local p = s.modifiedDot._points[#s.modifiedDot._points]
+    eq(p[4], 64, "cap: a string wider than the cap is clamped TO it, plus the gap")
+
+    -- A CEILING, not a position: a string that already fits still ends where its
+    -- own words end.
+    shown:SetText("SIZE")                             -- 4 chars -> 28
+    s:UpdateOverrideIndicators(3)
+    p = s.modifiedDot._points[#s.modifiedDot._points]
+    eq(p[4], 32, "cap: ...and a shorter one is not stretched out to it")
+
+    -- Absent, it does nothing at all -- which is every other control in the kit.
+    s.modifiedDotMaxX = nil
+    shown:SetText("PERMANENT MOVER HANDLE WIDTH")
+    s:UpdateOverrideIndicators(3)
+    p = s.modifiedDot._points[#s.modifiedDot._points]
+    eq(p[4], shown:GetStringWidth() + 4, "cap: no cap, no clamp")
+end
+
 -- ============================================================
 -- 9. THE COMMIT CALLBACK RIDES THE WRITE ANNOUNCEMENT
 -- ------------------------------------------------------------

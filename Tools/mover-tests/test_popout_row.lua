@@ -2332,17 +2332,73 @@ if not UI.CreateSliderNative then
         hit:Show()
         c.dfTooltipHit = hit
     end
+    -- ☠ THE MODIFIED-DEFAULT DOT, MODELLED. Widgets.lua's AddModifiedDot hangs a
+    -- 6px amber texture at the end of the control's OWN caption's words -- and
+    -- this cell HIDES that caption, which is the whole of the defect: the dot was
+    -- placed off a rect nobody can see, which lies directly under the name tier,
+    -- and came down on the letters of the name.
+    --
+    -- What the stub honours is exactly the kit's two optional fields, read on
+    -- EVERY update: `modifiedDotLabel` (which FontString the offset is measured
+    -- from) and `modifiedDotMaxX` (a ceiling on that measurement). The kit's own
+    -- end of that contract -- that it reads both, obeys the cap as a CEILING and
+    -- not as a position, and falls back to the caption when neither is set -- is
+    -- driven against the real Widgets.lua in test_widgets_slider.lua. Same split
+    -- this file's tooltip-hit stub above is already written to.
+    --
+    -- ⚠ ON THE SLIDER ONLY, and that is enough: the row sets the two fields on
+    -- whatever the factory handed back, without asking what kind it is, so a pair
+    -- of sliders drives the whole of the row's surface. Both kinds reach
+    -- AddModifiedDot through the one AddOverrideIndicators door over there.
+    local function attachStubDot(host, c, opts)
+        local dot = c:CreateTexture(nil, "OVERLAY")
+        dot:SetSize(6, 6)
+        dot:Hide()
+        c.modifiedDot = dot
+        c.UpdateModifiedDot = function(self)
+            local ref = opts.dbRef
+            local on = host:Call("isModifiedDefault", ref and ref.db, ref and ref.key)
+                       and true or false
+            if on then
+                -- rawget for both, as the kit does: an unset key on these frames
+                -- answers a truthy no-op FUNCTION, and a plain read would anchor
+                -- the dot to it.
+                local anchor = rawget(self, "modifiedDotLabel") or self.label
+                local x = (anchor:GetStringWidth() or 0)
+                local maxX = rawget(self, "modifiedDotMaxX")
+                if type(maxX) == "number" and x > maxX then x = maxX end
+                dot:ClearAllPoints()
+                dot:SetPoint("LEFT", anchor, "LEFT", x + 4, 0)
+            end
+            dot:SetShown(on)
+            return on
+        end
+        c:UpdateModifiedDot()
+    end
     function UI:CreateSliderNative(parent, opts)
         local c = CreateFrame("Frame", nil, parent)
         c._sliderOpts = opts
         -- SHOWN to begin with: the real factory draws its caption and the row
         -- hides it afterwards, so a stub that started hidden would let "the
         -- caption is hidden" pass without the row doing anything.
+        --
+        -- ...and CARRYING ITS TEXT, as the real one does. The caption is what the
+        -- dot falls back to, so a blank one would let "the dot is off the name"
+        -- pass at an offset the hidden caption would have given anyway.
         c.label = FakeUIFrame()
+        c.label:SetText(opts.label or "")
         c.label:Show()
         if opts.tooltip ~= nil then c.tooltip = opts.tooltip end
         attachStubHit(c, opts)
-        c.refreshValue = function(self) self._value = boundValue(opts) end
+        attachStubDot(self, c, opts)
+        -- The kit's slider re-answers the dot from inside its own value repaint
+        -- (RefreshValue -> UpdateValue -> UpdateOverrideIndicators), which is what
+        -- makes the row's Refresh keep the mark live without the row knowing the
+        -- indicator exists.
+        c.refreshValue = function(self2)
+            self2._value = boundValue(opts)
+            self2:UpdateModifiedDot()
+        end
         c:refreshValue()
         return c
     end
@@ -3529,6 +3585,118 @@ do
     eq(offer.stripCount:GetText(), "Pin settings in popout",
        "pin words: ...with the corner still saying the one true thing about it")
 
+    host:CloseAllPopoutRows("test")
+end
+
+-- ---- 24.18 the modified dot rides the NAME, and stays in the cell ----
+-- ☠ THE DEFECT IT PINS. Widgets.lua anchors the amber modified-default dot at
+-- the END OF THE CONTROL'S OWN CAPTION, re-anchored on every update -- and this
+-- cell HIDES that caption and draws the setting's name in a tier of its own. So
+-- the dot was measured off a rect nobody can see, which lies directly under the
+-- name tier, and landed on the words: in game, on the T of "...EIGHT".
+--
+-- ⚠ AND THE CLAMP IS NOT OPTIONAL. GetStringWidth measures the WHOLE string, and
+-- the name FontString is stretched across the cell precisely so it truncates --
+-- so the untruncated width of a long name puts the dot outside the cell
+-- entirely, which is a worse bug than the one being fixed.
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+    local modified = {}
+    -- The consumer's engine, stubbed to a set of keys this test controls. A host
+    -- that never publishes the hook draws no dot at all, which is what every
+    -- other section in this file has been running against.
+    host.hooks.isModifiedDefault = function(_, key)
+        return key ~= nil and modified[key] == true
+    end
+
+    modified.frameWidth = true
+    local row = stripRow({ label = "Marked", db = db, count = 5,
+                           window = win, footerStrip = true })
+    row:SetHoistedControls(twoSliders(db, {}))
+    widen(row, 401)
+    local cellW = math.floor((401 - LABEL_X - M.padX - CELL_GAP) / 2)
+    eq(cellW, 172, "dot: the shipped default window's cell, as 24.4 measures it")
+
+    local h1, h2 = row._hoists[1], row._hoists[2]
+    local c1, nm1 = h1.control, h1.nameText
+    check(c1.modifiedDot:IsShown(), "dot: a hoisted control whose key is modified shows one")
+    local p = c1.modifiedDot._points[#c1.modifiedDot._points]
+    check(p[2] == nm1, "dot: hung off the NAME the cell draws...")
+    check(p[2] ~= c1.label, "dot: ...and NOT off the caption the cell hid")
+    eq(p[1], "LEFT", "dot: by its own left edge")
+    eq(p[3], "LEFT", "dot: measured from the name's own left")
+    eq(p[5], 0, "dot: and on the name's line, which is what makes it read as the name's")
+    local w1 = nm1:GetStringWidth()
+    check(w1 < cellW - 10, "dot: 'FRAME WIDTH' fits the cell with room to spare")
+    eq(p[4], w1 + 4, "dot: so it sits just past the end of the words, unclamped")
+    check(p[4] + 6 <= cellW, "dot: ...and its right edge is inside the cell")
+    -- The caption it is NOT on, stated as a rect: the hidden label carries the
+    -- same words, so a dot that fell back to it would sit at the same x on a
+    -- frame the user cannot see -- which is exactly how this shipped.
+    eq(c1.label:GetText(), h1.name, "dot: the hidden caption carries the same words")
+    check(not c1.label:IsShown(), "dot: ...and is hidden, which is why it cannot hold the mark")
+
+    -- A CONTROL AT ITS SHIPPED VALUE SHOWS NOTHING. Same row, same pass.
+    check(not h2.control.modifiedDot:IsShown(),
+        "dot: a control still at its default shows none")
+
+    -- ...and lights on the ROW'S OWN REFRESH when its key goes off default, with
+    -- nothing invalidated by hand: the kit's value repaint re-answers the hook.
+    modified.frameHeight = true
+    row.Refresh()
+    check(h2.control.modifiedDot:IsShown(), "dot: ...until its key moves, and then it lights")
+    local p2 = h2.control.modifiedDot._points[#h2.control.modifiedDot._points]
+    check(p2[2] == h2.nameText, "dot: on ITS OWN name, not the first cell's")
+
+    -- ---- a name WIDER than the cell -------------------------------
+    local wide = stripRow({ label = "Long name", db = db, count = 5,
+                            window = win, footerStrip = true })
+    wide:SetHoistedControls({
+        { name = "Permanent Mover Handle Width", kind = "slider",
+          key = "frameWidth", db = db, min = 60, max = 300, step = 1 },
+    })
+    widen(wide, 401)
+    local lh = wide._hoists[1]
+    local lc, lnm = lh.control, lh.nameText
+    check(lnm:GetStringWidth() > cellW,
+        "clamp: the name measures WIDER than the cell it is truncated into")
+    local lp = lc.modifiedDot._points[#lc.modifiedDot._points]
+    check(lp[2] == lnm, "clamp: still hung off the name")
+    check(lp[4] < lnm:GetStringWidth() + 4,
+        "clamp: ...but short of where the untruncated words would have put it")
+    eq(lp[4], cellW - 6 - 4 + 4, "clamp: capped at the cell less the dot and its gap")
+    eq(lp[4] + 6, cellW, "clamp: which lands the dot's RIGHT edge exactly on the cell's")
+
+    -- ---- and it moves when the cell moves --------------------------
+    -- A window drag changes the cell's width and writes NOTHING, so no value
+    -- repaint will ever re-ask: the layout has to. At 260 the pair splits to one
+    -- cell a line, the cell gets wider, and this name now fits inside the cap --
+    -- which is the other half of the claim, that the cap is a ceiling and not a
+    -- position.
+    local before = lp[4]
+    widen(wide, 260)
+    local wideCell = 260 - LABEL_X - M.padX
+    eq(wide._hoistCells[1]:GetWidth(), wideCell, "clamp: the split gave the cell the whole line")
+    local sp = lc.modifiedDot._points[#lc.modifiedDot._points]
+    check(sp[4] ~= before, "clamp: the dot moved with the cell, with nothing written")
+    check(lnm:GetStringWidth() <= wideCell - 10, "clamp: the name now fits the wider cell...")
+    eq(sp[4], lnm:GetStringWidth() + 4, "clamp: ...so the cap steps aside and the words decide")
+    check(sp[4] + 6 <= wideCell, "clamp: still inside the cell")
+
+    -- ...and back the other way, so the cap is not a one-way ratchet.
+    widen(wide, 401)
+    local bp = lc.modifiedDot._points[#lc.modifiedDot._points]
+    eq(bp[4], cellW - 6, "clamp: narrowed again, and the cap takes over again")
+
+    -- A repaint that is NOT a layout keeps the cap the layout left behind: the
+    -- number lives on the control, so every other path that redraws the dot -- a
+    -- drag, a reset, a profile switch -- gets it for free.
+    wide.Refresh()
+    local rp = lc.modifiedDot._points[#lc.modifiedDot._points]
+    eq(rp[4], cellW - 6, "clamp: and a plain refresh redraws it at the same cap")
+
+    host.hooks.isModifiedDefault = nil
     host:CloseAllPopoutRows("test")
 end
 
