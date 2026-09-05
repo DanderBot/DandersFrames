@@ -1008,6 +1008,7 @@ L["From Center"] = true
 L["Frame Alpha (Above Threshold)"] = true
 L["Frame Alpha (Out of Range)"] = true
 L["Frame Display"] = true
+L["Enable Frame Fade"] = true
 L["Frame Fade"] = true
 L["Frame Style"] = true
 L["Frame Height"] = true
