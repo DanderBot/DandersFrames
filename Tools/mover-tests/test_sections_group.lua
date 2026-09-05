@@ -1102,6 +1102,91 @@ do
 end
 
 -- ============================================================
+-- COUNTING SOMEONE ELSE'S MARKS -- group:CountVisibleChildren(opts)
+-- ------------------------------------------------------------
+-- ☠ THE MARKS ON A GROUP ARE NOT ALWAYS THE MARKS THE CALLER MEANS. A
+-- settings row's strip promises a number about the LOOSE panel behind it, and
+-- the only pane instance it can reach is the eagerly built one -- which the
+-- first click adopts and the user may then PIN, and a pinned panel un-hides
+-- every control it was holding back. Counted straight off the marks, the
+-- strip's number ROSE on the pin: the corner read "Pin settings in popout",
+-- the click pinned, and the corner then flipped to a count while a second
+-- click merely raised the panel that was already there.
+--
+-- So the caller says "count it as though nothing were marked"
+-- (`ignoreHostHidden`) and "and leave these out" (`skip`), and gets the loose
+-- answer whatever the instance in front of it is doing. `skip` is a PREDICATE
+-- rather than a list, because the kit does not know what a key is: the caller
+-- resolves its own and answers a yes/no about a widget this already had in hand.
+-- ============================================================
+print("-- Group: counting a group as the caller means it, not as it is marked")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g:SetWidth(280)
+    local a, b, c = control(30), control(30), control(30)
+    g:AddWidget(a, 30); g:AddWidget(b, 30); g:AddWidget(c, 30)
+
+    -- The host mark, and the flag that says to look past it.
+    g:SetChildHidden(b, true)
+    eq(g:CountVisibleChildren(), 2, "opts: the mark stands for a caller that passes nothing")
+    eq(g:CountVisibleChildren({}), 2, "opts: ...and for one that passes an empty table")
+    eq(g:CountVisibleChildren({ ignoreHostHidden = true }), 3,
+       "opts: ignoreHostHidden counts the host-hidden child back in")
+
+    -- ⚠ AND THE LAYOUT IS UNTOUCHED BY ANY OF IT. It asks the predicate with
+    -- no flag, so the mark still takes the widget off the screen -- driven from
+    -- SHOWN, so that "not shown" is the mark's doing and not this group simply
+    -- never having been laid out.
+    g:SetChildHidden(b, false)
+    g:LayoutChildren()
+    check(b:IsShown(), "opts: the child is on screen with no mark on it")
+    g:SetChildHidden(b, true)
+    g:LayoutChildren()
+    check(not b:IsShown(), "opts: ...and the layout leaves it out the moment there is one")
+
+    -- ⚠ THE OTHER TWO REASONS ARE NOT LIFTED. The flag is about the HOST's
+    -- mark alone: a gate that fired and a shut section are the group's own truth,
+    -- and a count that ignored those would be describing no layout at all.
+    c.hideOn = function(d) return d.optsTest == true end
+    settingsDB.optsTest = true
+    eq(g:CountVisibleChildren(), 1, "opts: a gated child is out for a caller with no flag")
+    eq(g:CountVisibleChildren({ ignoreHostHidden = true }), 2,
+       "opts: ...and STILL out for one with it -- hideOn is not the host's mark")
+    g.collapsed = true
+    eq(g:CountVisibleChildren({ ignoreHostHidden = true }), 1,
+       "opts: ...and a collapsed group counts its header either way")
+    g.collapsed = false
+    settingsDB.optsTest = nil
+
+    -- `skip`: the caller's own reason, asked per widget.
+    local asked = {}
+    eq(g:CountVisibleChildren({ skip = function(w)
+           asked[#asked + 1] = w
+           return w == a
+       end }), 1, "opts: skip takes the caller's own child out of the count")
+    eq(#asked, 2, "opts: ...and is asked only about the ones the predicate had kept")
+
+    -- ☠ THE TWO TOGETHER, which is the shape the consumer actually uses:
+    -- ignore what the group was marked with, then take out what the caller is
+    -- already drawing itself.
+    eq(g:CountVisibleChildren({ ignoreHostHidden = true,
+                                skip = function(w) return w == a end }), 2,
+       "opts: the flag puts the marked child back and skip takes a different one out")
+    eq(g:CountVisibleChildren({ ignoreHostHidden = true,
+                                skip = function(w) return w == b end }), 2,
+       "opts: ...and naming the marked child itself is one child out, not two")
+
+    -- ☠ ONE CHILD OUT, NEVER TWO. A gated child the caller ALSO names is a
+    -- single absence: skip is asked AFTER the predicate, so it can never subtract
+    -- something the predicate had already dropped.
+    settingsDB.optsTest = true
+    eq(g:CountVisibleChildren({ ignoreHostHidden = true,
+                                skip = function(w) return w == c end }), 2,
+       "opts: a gated child the caller names too is one child out of three")
+    settingsDB.optsTest = nil
+    c.hideOn = nil
+end
+-- ============================================================
 -- HOST-HIDDEN -- group:SetChildHidden(widget, hidden)
 -- ------------------------------------------------------------
 -- ☠ THE HOST'S OWN REASON TO LEAVE A CHILD OUT, beside the widget's. `hideOn` is

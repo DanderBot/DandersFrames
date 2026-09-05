@@ -1011,7 +1011,22 @@ do
     pinPanel(pinnedPo)
     eq(shownIn(pinBuilt[1]), 5, "pin: pinning it puts every setting back")
     eq(pinRow.stripCount:GetText(), "3 more settings",
-       "pin: the strip is the row's arithmetic about the LOOSE panel, so it does not move")
+       "pin: the strip is about the LOOSE panel, so it does not move")
+
+    -- ☠ ...AND IT DOES NOT MOVE WHEN SOMETHING REPAINTS IT EITHER, which is
+    -- the half the line above cannot see. The number is painted from the layout
+    -- and from the refresh, and the pin ran between two of them -- so a strip that
+    -- was merely STALE would read the same thing there and flip on the next pass.
+    -- It does not, because the provider counts the pane AS THE LOOSE PANEL WOULD
+    -- DRAW IT: the marks on the instance it can reach are not consulted at all.
+    -- Wired to the eager group, which is exactly the instance just pinned.
+    pinRow._LayoutPlate()
+    eq(pinRow.stripCount:GetText(), "3 more settings",
+       "pin: ...and a repaint after the pin says the same number")
+    pinRow.Refresh()
+    eq(pinRow.stripCount:GetText(), "3 more settings", "pin: ...as does a refresh")
+    eq(shownIn(pinBuilt[1]), 5,
+       "pin: ...while the pinned panel it is counting still draws every setting")
 
     -- The row's next click asks the factory for content again, because the pin
     -- promoted that instance out of the pool. That one is not pinned, so it hides
@@ -1030,10 +1045,14 @@ do
     pinRow._LayoutPlate()
     eq(shownIn(pinBuilt[2]), 5, "pin: the fold puts all five back in the loose panel")
     eq(shownIn(pinBuilt[1]), 5, "pin: ...and leaves the pinned one whole")
+    eq(pinRow.stripCount:GetText(), "5 more settings",
+       "pin: ...and the strip has its whole number back, pinned instance or not")
     pinRow:SetWidth(401)
     pinRow._LayoutPlate()
     eq(shownIn(pinBuilt[2]), 3, "pin: widening takes them out of the loose panel again")
     eq(shownIn(pinBuilt[1]), 5, "pin: ...and STILL leaves the pinned one whole")
+    eq(pinRow.stripCount:GetText(), "3 more settings",
+       "pin: ...and the strip is back to three, though the pinned panel keeps its five")
 
     -- ⚠ AND A PIN ANSWERS FOR THE INSTANCE IT NAMES, NOT FOR THE LIST. The
     -- hook is handed one panel; a loose one standing beside it has to go on
@@ -1046,6 +1065,72 @@ do
     pinPanel(thirdPo)
     eq(shownIn(pinBuilt[3]), 5, "pin: pinning it gives that one every setting")
     eq(shownIn(pinBuilt[2]), 3, "pin: ...and leaves the panel that is still loose hiding")
+
+    -- ---- AN EMPTY PANE, PINNED ----------------------------------------
+    -- ☠ THE ROW THE FOLLOW-UP WAS REPORTED ON. Every setting behind this row
+    -- is on its plate, so the pane draws nothing and the strip stops promising a
+    -- count and offers to pin instead -- and the click that reads those words
+    -- pins. A count read off the pinned instance's marks would then say "2 more
+    -- settings" over a panel that is already open, and the next click would only
+    -- raise it: wrong words for a right click. The words have to survive the very
+    -- gesture they asked for.
+    local emptyBuilt = {}
+    local emptyMount, emptyGroup = tools.PopoutContent(function(g)
+        local mine = {}
+        for _, key in ipairs({ "frameWidth", "frameHeight" }) do
+            local w = paneControl(key)
+            g:AddWidget(w, 30)
+            mine[#mine + 1] = w
+        end
+        emptyBuilt[#emptyBuilt + 1] = mine
+    end)
+    local emptyRow = kitHost:CreatePopoutRow(page.child, {
+        label = "All hoisted", db = tools.RowDB, count = 2,
+        footerStrip = true, build = function() end,
+    })
+    emptyRow:SetWidth(401)
+    local emptyHook
+    local realEmptyPin = emptyRow.SetOnPanelPinned
+    emptyRow.SetOnPanelPinned = function(self, fn)
+        emptyHook = fn
+        return realEmptyPin(self, fn)
+    end
+    tools.ClaimKeys(emptyRow, emptyGroup)
+    tools.RegisterHoistedToggle(emptyRow, {
+        { name = "Frame Width", kind = "slider", key = "frameWidth",
+          min = 60, max = 300, step = 1 },
+        { name = "Frame Height", kind = "slider", key = "frameHeight",
+          min = 20, max = 300, step = 1 },
+    })
+    eq(emptyRow:GetShownHoistCount(), 2, "empty: the plate is drawing both settings")
+    eq(visible(emptyGroup), 0, "empty: ...so the pane behind it draws none")
+    eq(emptyRow.stripCount:GetText(), "Pin settings in popout",
+       "empty: ...and the strip offers to pin instead of promising a count")
+
+    local emptyPo, emptyPane = fakePanel()
+    emptyMount(emptyPo, emptyPane)
+    emptyPo.pinned = true
+    emptyHook(emptyRow, emptyPo)
+    eq(shownIn(emptyBuilt[1]), 2, "empty: pinning it puts both settings into the panel")
+    emptyRow._LayoutPlate()
+    eq(emptyRow.stripCount:GetText(), "Pin settings in popout",
+       "empty: ...and the strip STILL offers, because the offer is about the loose panel")
+    emptyRow.Refresh()
+    eq(emptyRow.stripCount:GetText(), "Pin settings in popout",
+       "empty: ...and a refresh does not change its mind either")
+
+    -- ...and the fold is still the way back: with nothing on the plate the pane
+    -- has both settings to draw again, so the corner goes back to a count -- and
+    -- says two whether the instance it is counting is pinned or not.
+    emptyRow:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    emptyRow._LayoutPlate()
+    eq(emptyRow:GetShownHoistCount(), 0, "empty: under the floor the row folds")
+    eq(emptyRow.stripCount:GetText(), "2 more settings",
+       "empty: ...and the strip counts the two the pane would draw")
+    emptyRow:SetWidth(401)
+    emptyRow._LayoutPlate()
+    eq(emptyRow.stripCount:GetText(), "Pin settings in popout",
+       "empty: ...and widening puts the offer back")
 
     -- ---- and the OTHER order: hoists declared BEFORE the claim ---------
     -- A page is free to call RegisterHoistedToggle first. Then no later layout
