@@ -2970,8 +2970,8 @@ L["Hide the helper while your Power Infusion is on cooldown"] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
 -- finer; the pointer names the editor that does go spell by spell, so the limit is not a
 -- dead end.
-L["Classes to Watch"] = true
-L["Choose how the helper shows on your group frames."] = true
+L["Classes and Cooldowns"] = true
+L["Classes"] = true
 L["To add or remove single cooldowns, edit the list in the Filter Designer."] = true
 L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
@@ -2985,14 +2985,13 @@ L["Not available on a Power Infusion Helper signal."] = true
 -- Amplifiers are one category with three sources: what makes a burst BIGGER, as against the
 -- cooldown list, which says a burst is happening at all. They are icons only -- a border
 -- lighting for a trinket on its own would be noise.
-L["Show icons"] = true
+L["Cooldowns"] = true
+L["Trinkets"] = true
+L["Potions"] = true
 -- Shown under a signal that has no colour and no icons -- a state the panel can reach and
 -- could not previously explain. Names both remedies; the second form is for a signal with no
 -- icons row of its own, where the menu is the only door.
 L["Cooldowns are not showing. Add a display from the dropdown, or tick '%s'."] = true
-L["Include trinkets"] = true
-L["Include potions"] = true
-L["Include racials"] = true
 L["Move and size the icons under Layout Groups."] = true
 -- Row labels, so a signal names itself in the effects list rather than reading as its
 -- spell list. Resolved at render from the mark; never stored.
