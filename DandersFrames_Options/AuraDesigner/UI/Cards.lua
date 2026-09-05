@@ -1378,7 +1378,11 @@ function P.PIH_SetAmplifier(which, on)
     s[which] = on and true or false
     pihSyncAmplifierFilter(s)
     local any = (s.potions or s.trinkets or s.racials) and true or false
-    P.PIH_SetIconsShow("amplifiers", any and P.PIH_IconsShow("cooldowns"))
+    -- ⚠ NO LONGER SUBORDINATE TO THE COOLDOWN LIST. The amplifier ticks used to link
+    -- only while the cooldown icons were on, because they were an "include" under that tick.
+    -- Four equal ticks means any list can show on its own -- potions only is a legitimate
+    -- setup, and refusing it would make three of the four ticks lie about being equal.
+    P.PIH_SetIconsShow("amplifiers", any)
     pihRefresh()
 end
 
@@ -6076,8 +6080,11 @@ local function pihMakeTools(parent, opts)
     -- narrows one (a no-op everywhere else -- a one-track group is all full rows).
     function t.note(g, text, tone)
         if not text or text == "" then return end
-        local w = tone and GUI:CreateNote(parent, text, { tone = tone })
-            or GUI:CreateLabel(parent, text)
+        -- ⚠ ALWAYS THROUGH CreateNote, toned or not: it resolves an untoned note to
+        -- CreateLabel itself, so branching here made this a second opinion about what a note
+        -- is -- and the tone vocabulary (and any future note chrome) would reach only half
+        -- of ours.
+        local w = GUI:CreateNote(parent, text, { tone = tone })
         w.fullRow = true
         g:AddWidget(w, t.lines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
         return w
@@ -6116,6 +6123,25 @@ local function pihMakeTools(parent, opts)
     -- the column layout multiplies `widget.indent` by 20 when it places the row. The wrap
     -- width narrows to match, or a long label would measure its height against a width it
     -- does not get.
+    -- A sub-heading inside a group, through the shared header widget rather than a
+    -- dim label pretending to be one: the ticks under it are a set, and a set wants a
+    -- name with a heading's weight.
+    -- ☠ A SETTING LABEL, NOT A SECTION HEADER. This was CreateHeader, and it was the
+    -- only mid-box header in the addon: every other CreateHeader in either addon is the FIRST
+    -- widget in its group -- the box's own title -- and one call site says so outright ("a
+    -- header names the SECTION"). One accent heading floating between two plain setting labels
+    -- read as a different kind of thing, which it was.
+    -- ⚠ THE WEIGHT COMES FOR FREE. A dropdown draws its own label in DFFontHighlightSmall
+    -- at C_TEXT, and the shared label helper defaults to that same font -- overriding only the
+    -- colour to dim. Passing C_TEXT back gives an exact match with "Big cooldown" above it,
+    -- with no new widget and no fork of a helper.
+    function t.settingLabel(g, text)
+        local w = GUI:CreateLabel(parent, text, nil, C_TEXT)
+        w.fullRow = true
+        g:AddWidget(w, t.lines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
+        return w
+    end
+
     function t.subCheck(g, label, get, set)
         local w = t.check(g, label, get, set, (t.noteW or 0) - PIH_INDENT)
         w.indent = true
@@ -6236,37 +6262,47 @@ local function pihMakeTools(parent, opts)
         -- the dropdown above -- the same picture, chosen where every other surface is chosen,
         -- rather than through a second control that means the same thing.
         local which = PIH_ICON_OF[key]
-        local iconsOn = which and P.PIH_IconsShow(which) or false
+        local st = which and P.PIH_Settings() or nil
+        local anyIcons = which and (P.PIH_IconsShow(which) or st.trinkets == true
+            or st.potions == true or st.racials == true) or false
 
         if which then
-            -- ☠ "SHOW ICONS", NOT "ALSO SHOW ICONS". The word "also" made this read as a
-            -- supplement to the colour above it -- which contradicts the entry the menu opens
-            -- with: "None" exists precisely so icons can be the ONLY thing a signal draws.
-            -- A label that quietly rules out a supported setup is worse than a longer one.
-            t.check(g, L["Show icons"],
+            -- ☠ FOUR LISTS, FOUR TICKS, AND A HEADER RATHER THAN A MASTER. The icon row
+            -- draws from four spell lists, and only three of them used to have a tick --
+            -- cooldowns were implicit, because the control sat under the cooldown signal and
+            -- was assumed to mean it. That asymmetry is what made "include" the only word
+            -- available for the other three: they read as extras to something unnamed.
+            --
+            -- ⚠ NO MASTER TICK, DELIBERATELY, and it was drawn both ways before this one
+            -- was chosen. A master would be DERIVED -- on when any child is on -- which is the
+            -- pattern removed from the signal rows for summarising its neighbours rather than
+            -- deciding anything. It also deadlocks the obvious reading: grey the children while
+            -- the master is off and no child can be ticked, so the only route back turns on all
+            -- four. A header names the set and costs nothing.
+            t.settingLabel(g, L["Icons"])
+            t.subCheck(g, L["Cooldowns"],
                 function() return P.PIH_IconsShow(which) end,
-                function(v)
-                    P.PIH_SetIconsShow(which, v)
-                    -- ⚠ THE AMPLIFIERS GO WITH IT. They are a second list linked to the
-                    -- SAME group, so leaving them behind keeps the group alive showing trinkets
-                    -- and potions on their own -- extras with no burst to be an extra to.
-                    if not v then P.PIH_SetIconsShow("amplifiers", false) end
-                    Refresh()
-                end)
-
-            -- ⭐ THE AMPLIFIERS, NESTED UNDER THE ICONS THEY RIDE IN. One category, three
-            -- sources: the things that say how HARD a burst lands, as against the cooldown
-            -- list, which says one is happening at all. They change nothing but what appears
-            -- in the row above, so they live under it and grey out with it.
+                function(v) P.PIH_SetIconsShow(which, v); Refresh() end)
+            -- ⭐ THE AMPLIFIERS: what makes a burst BIGGER, as against the cooldown list, which
+            -- says one is happening at all. Equal ticks now, so any of them can show alone.
             local function amp(label, field)
-                local w = t.subCheck(g, label,
+                t.subCheck(g, label,
                     function() return P.PIH_Settings()[field] == true end,
                     function(v) P.PIH_SetAmplifier(field, v); Refresh() end)
-                if not iconsOn and w and w.SetEnabled then w:SetEnabled(false) end
             end
-            amp(L["Include trinkets"], "trinkets")
-            amp(L["Include potions"],  "potions")
-            amp(L["Include racials"],  "racials")
+            amp(L["Trinkets"], "trinkets")
+            amp(L["Potions"],  "potions")
+            amp(L["Racials"],  "racials")
+
+            -- ☠ UNDER THE TICKS IT IS ABOUT. This used to be the LAST line in the box,
+            -- below the gate switch -- three controls away from the icons it explains, which is
+            -- the addon's convention read backwards: every CreateNote call site in the settings
+            -- puts its prose directly under the control it belongs to, one of them saying so
+            -- outright ("in the place the missing control would have occupied").
+            -- Only while a group exists: with no icons there is nothing to move or size.
+            if pihAnyIconGroup() then
+                t.note(g, L["Move and size the icons under Layout Groups."])
+            end
         end
 
         -- ☠ THE NOTE EXISTS TO TEACH THE ICONS-ONLY SETUP, not to warn about "None".
@@ -6277,12 +6313,12 @@ local function pihMakeTools(parent, opts)
         -- just chose it.
         -- ⚠ Reachable only while ANOTHER signal is keeping the helper alive: on the last
         -- one, this same state retires the helper and the row goes with it. Watched.
-        if which and surface == "none" and not iconsOn then
+        if which and surface == "none" and not anyIcons then
             -- The tick's own label rides as the placeholder, the same way the border clash
             -- warning names its remedy: a translator renders those words ONCE, so the
             -- sentence and the control it points at cannot drift apart in any language.
             t.note(g, format(L["Cooldowns are not showing. Add a display from the dropdown, or tick '%s'."],
-                L["Show icons"]), "caution")
+                L["Cooldowns"]), "caution")
         end
     end
 
@@ -6294,20 +6330,10 @@ end
 -- composition's business -- classic folds several into one box, the row page gives
 -- each its own pane.
 
-local function pihAddIntro(g, t)
-    -- ☠ A LABEL IN THE FIRST BOX, NOT A FREE-FLOATING INFO BANNER. The banner was
-    -- built and removed the same day: it measures its own height a frame after it is
-    -- drawn, and this column stacks its children at fixed offsets with no reflow
-    -- seam -- so the banner grew from its 34px placeholder and landed on top of the
-    -- box below it. That failure is documented in GUI:RelayoutHost, which names the
-    -- same symptom on the indicator cards ("the Duration Bar header overlapping the
-    -- Pandemic section's collapse bar") and fixes it through `dfAD_ReflowWidgets`,
-    -- a seam the indicator cards publish and this column does not.
-    -- ⚠ Inside a group, a measured label re-flows its host and settles. Outside one
-    -- it has nothing to tell. Same converge, different owner.
-    t.note(g,
-        L["Choose how the helper shows on your group frames."])
-end
+-- ☠ (Removed) pihAddIntro. Its one sentence -- "choose how the helper shows on your
+-- group frames" -- described what two labelled dropdowns and a set of ticks underneath were
+-- already saying. The banner-versus-label lesson it carried is not lost: pihAddGateAndNotes
+-- below states it, and GUI:RelayoutHost documents the underlying reflow seam.
 
 local function pihAddGateAndNotes(g, t)
     -- ☠ A LABEL, NOT AN INFO BANNER, AND THIS IS THE SECOND TIME THE SAME TRAP HAS
@@ -6359,9 +6385,6 @@ local function pihAddGateAndNotes(g, t)
     -- added to this panel has to fit on one line.
     -- The one navigational fact text is genuinely needed for. Only while the
     -- icon group exists: position is not a question about icons that are not there.
-    if pihAnyIconGroup() then
-        t.note(g, L["Move and size the icons under Layout Groups."])
-    end
 end
 
 local function pihAddRoles(g, t)
@@ -6378,51 +6401,13 @@ local function pihAddRoles(g, t)
         L["Groups without assigned roles show everyone."])
 end
 
+-- ☠ TWO NAMED HALVES IN ONE BOX. The section used to be "Classes to Watch" with a
+-- button for single spells bolted on top, which is two different questions -- WHOSE cooldowns,
+-- and WHICH cooldowns -- under one name that only answered the first. Each half now carries a
+-- label at setting weight, and the box is named for both.
 local function pihAddClasses(g, t)
     local parent = t.parent
-    -- ☠ ABOVE THE TICKS, NOT BELOW THEM. Fourteen rows is far enough that a line
-    -- underneath is a line nobody reads -- it arrives after the reader has already
-    -- decided what the box does. The one sentence that explains the box goes where
-    -- the reader still needs it.
-    t.note(g, L["Untick a class to stop watching its cooldowns."])
-
-    -- ☠ ABOVE THE LIST, NOT UNDER IT. Fourteen ticks is far enough that a button at
-    -- the bottom is a button nobody scrolls to -- and this is the escape hatch for
-    -- the thing the list cannot do (single spells), so it has to be visible while
-    -- someone is still deciding the list is not enough.
-    --
-    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
-    -- scrolls to this filter, selects it and pulses it. Its own comment records why:
-    -- the hand-written version "landed you on the page with nothing indicated, which
-    -- is indistinguishable from a broken link" -- which is exactly what was here.
-    t.note(g,
-        L["To add or remove single cooldowns, edit the list in the Filter Designer."])
-    local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-    local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
-        GUI:OpenFilterInDesigner("custom", cfID)
-        -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
-        -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
-        -- that range is still 0 -- so the clamp pins the scroll at the top and the
-        -- row it selected and pulsed is somewhere below the fold. The second call
-        -- runs after layout, when the range is real. The proper fix is a deferred
-        -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
-        -- list for him rather than edited from here.
-        if C_Timer and C_Timer.After then
-            C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
-        end
-    end)
-    if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
-        -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
-        -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
-        -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
-        -- backdrop with grey text, visibly unlike every other disabled button in the
-        -- addon. Caught in Danders' PR review.
-        if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
-        else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
-    end
-    -- Prose-width like the notes: only the class TICKS flow the popout's two tracks.
-    fdBtn.fullRow = true
-    g:AddWidget(fdBtn, 28)
+    t.settingLabel(g, L["Classes"])
 
     -- ⚠ THE POPOUT PANE FLOWS THESE ACROSS TWO TRACKS (t.classColumns; the classes
     -- section's own build passes innerColumns = 2 to the group). Fourteen 35px rows
@@ -6459,6 +6444,54 @@ local function pihAddClasses(g, t)
             R2.ApplyClassNameColor(w.label, classFile)
         end
     end
+    t.note(g, L["Untick a class to stop watching its cooldowns."])
+
+    t.settingLabel(g, L["Cooldowns"])
+    -- ☠ THE ESCAPE HATCH FOR WHAT THE LIST CANNOT DO -- single spells rather than whole
+    -- classes -- so it sits under its own label at the end of the box rather than opening it.
+    -- It was above the ticks on the argument that a button below a long list goes unscrolled;
+    -- naming the half it belongs to ("Cooldowns", as against "Classes") does that job without
+    -- putting a button before the list it is an escape from.
+    --
+    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
+    -- scrolls to this filter, selects it and pulses it. Its own comment records why:
+    -- the hand-written version "landed you on the page with nothing indicated, which
+    -- is indistinguishable from a broken link" -- which is exactly what was here.
+    local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+    local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
+        GUI:OpenFilterInDesigner("custom", cfID)
+        -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
+        -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
+        -- that range is still 0 -- so the clamp pins the scroll at the top and the
+        -- row it selected and pulsed is somewhere below the fold. The second call
+        -- runs after layout, when the range is real. The proper fix is a deferred
+        -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
+        -- list for him rather than edited from here.
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
+        end
+    end)
+    if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
+        -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
+        -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
+        -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
+        -- backdrop with grey text, visibly unlike every other disabled button in the
+        -- addon. Caught in Danders' PR review.
+        if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
+        else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
+    end
+    -- Prose-width like the notes: only the class TICKS flow the popout's two tracks.
+    fdBtn.fullRow = true
+    g:AddWidget(fdBtn, 28)
+    -- ☠ UNDER THE CONTROL IT EXPLAINS. Every CreateNote in the settings sits below its
+    -- control -- one call site puts it "in the place the missing control would have occupied".
+    -- Both notes in this section used to open it instead, on the argument that a line under a
+    -- long list goes unread. That argument is about THIS list; the convention is about the
+    -- whole addon, and a panel a user can tell apart from every other page is the thing the
+    -- convention exists to prevent.
+    t.note(g,
+        L["To add or remove single cooldowns, edit the list in the Filter Designer."])
+
 end
 
 local function pihAddSound(g, t)
@@ -6518,14 +6551,13 @@ end
 S.PIHelperSections = {
     { key = "overview", title = "What to Show",
       build = pihSection(function(g, t)
-          pihAddIntro(g, t)
           t.signalRow(g, "burst", L["Big cooldown"])
           t.signalRow(g, "infused", L["Already has active Power Infusion"])
           pihAddGateAndNotes(g, t)
       end) },
     { key = "roles", title = "Never Show On",
       build = pihSection(pihAddRoles) },
-    { key = "classes", title = "Classes to Watch",
+    { key = "classes", title = "Classes and Cooldowns",
       build = function(parent, o)
           o = o or {}
           local t = pihMakeTools(parent, o)
@@ -6548,7 +6580,6 @@ S.BuildPIHelperPane = function(parent, opts)
     if open then
         local t = pihMakeTools(parent, opts)
         yPos = t.group(L["What to Show"], function(g)
-            pihAddIntro(g, t)
             t.signalRow(g, "burst", L["Big cooldown"])
             t.signalRow(g, "infused", L["Already has active Power Infusion"])
             pihAddGateAndNotes(g, t)
@@ -6563,7 +6594,7 @@ S.BuildPIHelperPane = function(parent, opts)
         -- which for thirteen classes and a two-line note is a wall of text rather
         -- than a summary. The header alone says what is folded away, which is what
         -- a summary was for.
-        yPos = t.group(L["Classes to Watch"], pihAddClasses, yPos,
+        yPos = t.group(L["Classes and Cooldowns"], pihAddClasses, yPos,
             { collapsible = true, collapseKey = "pihelper:onlywatch" })
 
         yPos = t.group(L["Sound Alert"], pihAddSound, yPos)
