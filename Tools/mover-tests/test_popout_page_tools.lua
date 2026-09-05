@@ -632,3 +632,356 @@ do
 
     DandersFrames = savedDF
 end
+
+-- ============================================================
+-- THE PANE LOSES ITS COPY OF A HOISTED CONTROL -- driven, end to end
+-- ------------------------------------------------------------
+-- ☠ THE COUNT AND THE PANEL HAVE TO AGREE. The strip promised "3 more settings"
+-- and the panel then opened with five, two of them the sliders the user had just
+-- looked at on the row's own plate. A key on the plate is HIDDEN in the pane --
+-- never removed, because the fold, the split and the gate all take a key back
+-- off the plate and the setting has to be reachable again the moment they do.
+--
+-- Three parts meet here and none of them knows the other two: the ROW knows
+-- which keys are on its plate (DandersUI/PopoutRow.lua), the GROUP knows how to
+-- leave a child out of a layout (DandersUI/Sections.lua's SetChildHidden), and
+-- ClaimKeys knows which widget carries which key. So this is the one place the
+-- claim can be made honestly, and it is DRIVEN rather than censused: real
+-- frames, the real kit, the real helper compiled out of Controls.lua.
+--
+-- ⚠ A PRIVATE KIT, for test_control_row.lua's reason -- this file runs BEFORE
+-- test_popout_row.lua and test_sections_group.lua alphabetically, and installing
+-- a stub onto the shared library table is a stub those suites would adopt. The
+-- token tables are the REAL Theme.lua's, loaded into a throwaway namespace, so
+-- the arithmetic below is the shipped rhythm rather than numbers invented here.
+-- ============================================================
+print("-- Popout page tools: a hoisted control leaves the pane behind the row")
+do
+    local savedDF, savedCreateFrame = DandersFrames, CreateFrame
+
+    -- ---- the private kit ---------------------------------------------
+    local themeNS = { __DandersUI = { _state = {}, _priv = {} } }
+    load_ui_file_into("Theme.lua", themeNS)
+    local T = themeNS.__DandersUI
+
+    local UI = {
+        MEDIA = "",
+        Colors = T.Colors,
+        RowGap = T.RowGap, RowGapTight = T.RowGapTight, RowCompact = {},
+        RowHeight = T.RowHeight,
+        SettingsBox = T.SettingsBox,
+        PopoutContentWidth = T.PopoutContentWidth,
+        PopoutPad = T.PopoutPad,
+        PopoutRow = T.PopoutRow,
+        _state = {},
+        _priv = {
+            INFO_BANNER_TONES = {},
+            AddTooltipLines = function() end,
+            CURSOR_LIFT_X = 0, CURSOR_LIFT_Y = 0,
+            -- Sections.lua takes this off _priv and calls it WITHOUT a self.
+            CreateElementBackdrop = function(frame, opts) frame._elementOpts = opts return frame end,
+        },
+    }
+    do
+        local SHARED = NS.__DandersUI
+        for _, name in ipairs({ "SurfaceStyle", "ResolveSurfaceStyle", "SetSurfaceStyle",
+                                "GetSurfaceStyle", "HidePixelBorder",
+                                "CreateRoundedSurface", "GetRoundedSurface",
+                                "ApplyRoundedChrome", "RemoveRoundedChrome" }) do
+            UI[name] = SHARED[name]
+        end
+    end
+    -- No snapping: every number below is the arithmetic the layout did, and a
+    -- rounding pass would make it about the device grid instead.
+    function UI.SnapLen(_, n) return n end
+    UI.ResolveRowHeight = T.ResolveRowHeight
+    local ACCENT = { r = 0.45, g = 0.45, b = 0.95, a = 1 }
+    function UI:GetAccent() return ACCENT end
+    function UI:Hook(name) local h = rawget(self, "hooks") return h and h[name] or nil end
+    function UI:Call(name, ...)
+        local fn = self:Hook(name)
+        if not fn then return nil end
+        return fn(...)
+    end
+    function UI:CreateElementBackdrop(frame, opts)
+        opts = opts or {}
+        frame._elementOpts = opts
+        frame.SetBackdropColor = function(self, r, g, b, a) self._fill = { r, g, b, a } end
+        frame.SetBackdropBorderColor = function(self, r, g, b, a) self._edge = { r, g, b, a } end
+        return frame
+    end
+    function UI:ApplyPixelBorder(frame, color, weight)
+        frame._pxColor, frame._pxWeight = color, weight
+        return frame
+    end
+    function UI:StyleCheckButton(cb, opts)
+        opts = opts or {}
+        cb:SetSize(opts.size or 18, opts.size or 18)
+        cb.Check = cb.Check or FakeUIFrame()
+        cb.ApplyThemeColor = function(c) cb._tint = c end
+        return cb.Check
+    end
+    function UI:CreateLabelNative(parent, opts)
+        local fs = FakeUIFrame()
+        fs.SetTextColor = function(self, r, g, b, a) self._textColor = { r, g, b, a } end
+        if opts and opts.text then fs:SetText(opts.text) end
+        return fs
+    end
+    function UI:ShowTooltip() end
+    function UI:HideTooltip() end
+    local function boundValue(opts)
+        if opts.get then return opts.get() end
+        if opts.dbRef and opts.dbRef.db then return opts.dbRef.db[opts.dbRef.key] end
+        return nil
+    end
+    function UI:CreateSliderNative(parent, opts)
+        local c = CreateFrame("Frame", nil, parent)
+        c._sliderOpts = opts
+        c.label = FakeUIFrame()
+        c.label:Show()
+        c.refreshValue = function(self) self._value = boundValue(opts) end
+        c:refreshValue()
+        return c
+    end
+    function UI:CreateDropdownNative(parent, opts)
+        local c = CreateFrame("Frame", nil, parent)
+        c._dropdownOpts = opts
+        c.label = FakeUIFrame()
+        c.refreshValue = function(self) self._value = boundValue(opts) end
+        c:refreshValue()
+        return c
+    end
+
+    -- ☠ A MISSING DATA FIELD MUST READ nil, NOT A FUNCTION. FakeUIFrame answers
+    -- every unknown key with a no-op function, which is right for METHODS and
+    -- wrong for STATE -- and this suite turns on two pieces of state read straight
+    -- off a widget: `hideOn` (Sections' entryVisible) and `searchEntry` /
+    -- `overrideDbKey` (ClaimKeys' KeyOf, which would then INDEX a function).
+    local DATA_KEYS = { hideOn = true, searchEntry = true, overrideDbKey = true,
+                        tooltip = true, control = true, dfDisabled = true }
+    CreateFrame = function(kind, _, parent)
+        local f = FakeUIFrame()
+        setmetatable(f, { __index = function(_, k)
+            if DATA_KEYS[k] then return nil end
+            if type(k) == "string" and k:byte(1) == 95 then return nil end   -- "_"
+            return function() end
+        end })
+        f._kind = kind
+        f._parent = parent
+        f.GetParent = function(self) return self._parent end
+        f.SetParent = function(self, p) self._parent = p end
+        if kind == "CheckButton" then
+            f.SetChecked = function(self, v) self._checked = v and true or false end
+            f.GetChecked = function(self) return self._checked end
+        end
+        return f
+    end
+
+    -- The row plate's box model, off the REAL Theme.lua: the fold width below is
+    -- the shipped floor rather than a number invented here.
+    local M0 = UI.PopoutRow
+    local kitL = setmetatable({}, { __index = function(_, k) return k end })
+    local kitHost = setmetatable({ hooks = { L = kitL } }, { __index = UI })
+    local PRIVATE_NS = { __DandersUI = UI }
+    load_ui_file_into("Sections.lua", PRIVATE_NS)
+    load_ui_file_into("PopoutRow.lua", PRIVATE_NS)
+
+    -- ---- the addon surface the helper compiles against ---------------
+    local paneDB = { frameWidth = 100, frameHeight = 50,
+                     frameScale = 1, framePadding = 0, frameSpacing = 0 }
+    local DF = {}
+    DF.L = kitL
+    DF.db = { party = paneDB, raid = paneDB }
+    function DF:DebugWarn() end
+    DF.IsClassicSettingsLayout = function() return false end
+    local GUIstub = {
+        SelectedMode = "party",
+        Pages = {},
+        SettingsBox = T.SettingsBox,
+        PopoutContentWidth = T.PopoutContentWidth,
+        _trashFrame = CreateFrame("Frame"),
+        CreateSettingsGroup = function(_, parent, width, opts)
+            return kitHost:CreateSettingsGroup(parent, width, opts)
+        end,
+    }
+    DF.GUI = GUIstub
+    DandersFrames = DF
+
+    local env = setmetatable({ GUI = GUIstub, DF = DF, L = kitL }, { __index = _G })
+    local fn = (loadstring or load)(CHUNK, "@CreatePopoutPageTools")
+    check(fn ~= nil, "pane: the helper's source compiles on its own")
+    if fn then setfenv(fn, env) fn() end
+
+    local page = { child = CreateFrame("Frame") }
+    function page:RefreshStates() end
+    local tools = GUIstub:CreatePopoutPageTools(page)
+    check(tools ~= nil, "pane: the tools are up")
+
+    -- ---- the fixture: five keyed controls behind one row -------------
+    -- Deliberately five PLAIN keyed widgets rather than real factories: what is
+    -- under test is which of them the layout places, and a widget whose whole
+    -- contract is "I am bound to this key" is the honest stand-in for that.
+    local KEYS = { "frameWidth", "frameHeight", "frameScale", "framePadding", "frameSpacing" }
+    local function paneControl(key)
+        local w = CreateFrame("Frame")
+        w.preferredHeight = 30
+        w.overrideDbKey = key
+        return w
+    end
+    local built = {}
+    local mount, group = tools.PopoutContent(function(g)
+        local mine = {}
+        for _, key in ipairs(KEYS) do
+            local w = paneControl(key)
+            g:AddWidget(w, 30)
+            mine[#mine + 1] = w
+        end
+        built[#built + 1] = mine
+    end)
+    check(group ~= nil and group.groupChildren ~= nil, "pane: the eager group came back")
+    eq(#group.groupChildren, 5, "pane: ...with all five of the row's controls in it")
+
+    -- How many of a group's children the LAYOUT actually placed. Read off the
+    -- widgets rather than off the marks, because the mark is the input and the
+    -- Show is what the user sees.
+    local function visible(g)
+        local n = 0
+        for _, e in ipairs(g.groupChildren) do
+            if e.widget and e.widget:IsShown() then n = n + 1 end
+        end
+        return n
+    end
+
+    -- ---- the row, at a width that draws both hoisted cells -----------
+    local row = kitHost:CreatePopoutRow(page.child, {
+        label = "Frame Size", db = tools.RowDB, count = #KEYS,
+        footerStrip = true, build = function() end,
+    })
+    row:SetWidth(401)
+
+    -- ⚠ CLAIM FIRST, HOIST SECOND -- the order the Frame page uses (ClaimKeys,
+    -- the tick, the footer, THEN RegisterHoistedToggle). The second order is
+    -- driven at the foot of this block.
+    tools.ClaimKeys(row, group)
+    eq(#row._claimedKeys, 5, "pane: the row claims every key behind it, hoisted or not")
+    -- ⚠ NOT LAID OUT YET, and that is the eager build being eager: the group is
+    -- parked in a hidden holder until a panel mounts it or something re-flows it.
+    -- The count on the strip is the row's own arithmetic and is already right.
+    eq(visible(group), 0, "pane: the eagerly built group has not been laid out yet")
+    eq(row.stripCount:GetText(), "5 more settings", "pane: ...which is what the strip says")
+
+    tools.RegisterHoistedToggle(row, {
+        { name = "Frame Width", kind = "slider", key = "frameWidth",
+          min = 60, max = 300, step = 1 },
+        { name = "Frame Height", kind = "slider", key = "frameHeight",
+          min = 20, max = 300, step = 1 },
+    })
+
+    -- ☠ THE ASSERTION THE WHOLE SECTION EXISTS FOR.
+    eq(row:GetShownHoistCount(), 2, "pane: the row draws its two hoisted controls")
+    eq(visible(group), 3, "pane: ...and the pane behind it draws exactly the other three")
+    eq(row.stripCount:GetText(), "3 more settings", "pane: ...which is the number the strip promises")
+    eq(#group.groupChildren, 5, "pane: HIDDEN, never removed -- all five entries are still there")
+    for _, e in ipairs(group.groupChildren) do
+        local k = e.widget.overrideDbKey
+        local onPlate = (k == "frameWidth" or k == "frameHeight")
+        local drawn = e.widget:IsShown() and true or false
+        eq(drawn, not onPlate, "pane: " .. k .. " is drawn in exactly one place")
+    end
+
+    -- ⚠ SEARCH IS UNTOUCHED. The jump opens the ROW (Search:OpenOwningPopoutRow
+    -- reads page._popoutRowForKey), never the pane child -- so a hidden copy is
+    -- never a jump target, and the map still names the row for a hoisted key.
+    eq(page._popoutRowForKey["frameWidth"], row,
+       "pane: a hoisted key still maps to the row the panel hangs off")
+    eq(page._popoutRowForKey["frameSpacing"], row,
+       "pane: ...and so does one that stayed behind the click")
+
+    -- ---- the way back: the fold ---------------------------------------
+    -- Below the width where a line cannot hold one named control the row folds,
+    -- and every setting has to be reachable again -- which is the whole of
+    -- "hidden, never removed".
+    row:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    row._LayoutPlate()
+    eq(row:GetShownHoistCount(), 0, "fold: under the floor the row draws no controls")
+    eq(visible(group), 5, "fold: ...and all five come back into the pane")
+    eq(row.stripCount:GetText(), "5 more settings", "fold: ...with the strip's count back up")
+
+    row:SetWidth(401)
+    row._LayoutPlate()
+    eq(row:GetShownHoistCount(), 2, "fold: widening puts them back on the plate")
+    eq(visible(group), 3, "fold: ...and takes them out of the pane again")
+
+    -- ---- the SECOND instance ------------------------------------------
+    -- Pin the panel open and click the row again and the shell asks the factory
+    -- for content a second time. That instance is built AFTER the row last
+    -- announced its set, so nothing would ever have told it -- the mount is what
+    -- does, and a panel that opened showing the duplicate is exactly the bug.
+    local function fakePanel()
+        local pane = CreateFrame("Frame")
+        local po = { closed = false, SyncRowPaneHeight = function() end }
+        return po, pane
+    end
+    local po1, pane1 = fakePanel()
+    mount(po1, pane1)
+    eq(#built, 1, "second: the FIRST mount adopts the eagerly built group")
+    eq(visible(group), 3, "second: ...which is still hiding the two on the plate")
+
+    local po2, pane2 = fakePanel()
+    mount(po2, pane2)
+    eq(#built, 2, "second: a second mount builds a fresh instance through the same builder")
+    -- The fresh group is the one the SECOND run of the builder filled, found
+    -- through the widgets it made rather than by reaching into the factory.
+    local second = built[2]
+    local function shownIn(list)
+        local n = 0
+        for _, w in ipairs(list) do if w:IsShown() then n = n + 1 end end
+        return n
+    end
+    eq(shownIn(second), 3, "second: ...and it opens with the same three, not with all five")
+
+    -- ...and it goes on tracking the row. A change after BOTH are open has to
+    -- reach both: a hide applied to the eager instance alone would leave the
+    -- pinned panel showing the duplicate the moment the row folded and came back.
+    row:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    row._LayoutPlate()
+    eq(shownIn(built[1]), 5, "second: the fold puts all five back in the first panel")
+    eq(shownIn(second), 5, "second: ...and in the second one too")
+    row:SetWidth(401)
+    row._LayoutPlate()
+    eq(shownIn(built[1]), 3, "second: widening takes the two out of the first panel again")
+    eq(shownIn(second), 3, "second: ...and out of the second, which is the whole point of the list")
+
+    -- ---- and the OTHER order: hoists declared BEFORE the claim ---------
+    -- A page is free to call RegisterHoistedToggle first. Then no later layout
+    -- would announce a set that is already on the plate, and the immediate call
+    -- inside SetOnShownKeysChanged is what closes the gap.
+    local lateBuilt = {}
+    local lateMount, lateGroup = tools.PopoutContent(function(g)
+        local mine = {}
+        for _, key in ipairs(KEYS) do
+            local w = paneControl(key)
+            g:AddWidget(w, 30)
+            mine[#mine + 1] = w
+        end
+        lateBuilt[#lateBuilt + 1] = mine
+    end)
+    local lateRow = kitHost:CreatePopoutRow(page.child, {
+        label = "Frame Size Late", db = tools.RowDB, count = #KEYS,
+        footerStrip = true, build = function() end,
+    })
+    lateRow:SetWidth(401)
+    tools.RegisterHoistedToggle(lateRow, {
+        { name = "Frame Width", kind = "slider", key = "frameWidth",
+          min = 60, max = 300, step = 1 },
+        { name = "Frame Height", kind = "slider", key = "frameHeight",
+          min = 20, max = 300, step = 1 },
+    })
+    eq(lateRow:GetShownHoistCount(), 2, "late: the row is already drawing two before any claim")
+    eq(visible(lateGroup), 0, "late: ...and its pane has not been laid out at all yet")
+    tools.ClaimKeys(lateRow, lateGroup)
+    eq(visible(lateGroup), 3, "late: the claim applies the set the row is already showing")
+    eq(lateRow.stripCount:GetText(), "3 more settings", "late: ...and the two agree about the count")
+
+    DandersFrames, CreateFrame = savedDF, savedCreateFrame
+end

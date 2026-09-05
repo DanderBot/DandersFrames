@@ -409,6 +409,36 @@ function UI:CreateSettingsGroup(parent, width, opts)
         end
     end
 
+    -- LEAVE ONE CHILD OUT OF THE LAYOUT, on the HOST's say-so rather than the
+    -- widget's own. `hideOn` is a rule the widget carries; this is a mark the
+    -- consumer sets and clears, and the two are deliberately separate reasons --
+    -- a control that is host-hidden today may be hideOn-hidden tomorrow, and
+    -- clearing one must not un-hide the other.
+    --
+    -- What it is FOR: a setting the consumer is already showing somewhere the
+    -- user can see (a control lifted onto the row's own plate) must not also
+    -- appear inside the panel behind that row -- the panel would open with two
+    -- widgets on one key and a count that named them twice.
+    --
+    -- HIDDEN, NEVER REMOVED. The entry keeps its slot in groupChildren, so
+    -- clearing the mark puts the child back exactly where it was: LayoutChildren
+    -- places it again and Show()s it on the next pass, which is what makes the
+    -- fold, the split and the gate reversible. Nothing here calls Hide itself --
+    -- pass 3 does, along with the layout-hidden announcement, because a mark set
+    -- outside a layout still has to wait for one.
+    group.SetChildHidden = function(self, widget, hidden)
+        if not widget then return self end
+        for _, entry in ipairs(self.groupChildren) do
+            if entry.widget == widget then
+                -- nil rather than false: every read of this is a truth test, and
+                -- an absent key is what the rest of this pack means by "no".
+                entry.hostHidden = hidden and true or nil
+                return self
+            end
+        end
+        return self
+    end
+
     -- Add a widget to this group
     group.AddWidget = function(self, widget, height)
         widget:SetParent(self)
@@ -567,6 +597,12 @@ function UI:CreateSettingsGroup(parent, width, opts)
             if self.collapsed and index > 1 then return false end
             local w = entry and entry.widget
             if not w then return false end
+            -- The HOST's own reason, beside the widget's. See SetChildHidden: a
+            -- consumer that is already drawing this setting somewhere else asks
+            -- for it to be left out of the layout, and a mark it set has to read
+            -- exactly like a hideOn that fired -- same fold, same Hide, same
+            -- announcement, same way back.
+            if entry.hostHidden then return false end
             if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
             return true
         end

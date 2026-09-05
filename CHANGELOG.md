@@ -35,6 +35,7 @@
 - (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.
 - (Settings) Fix an invisible patch swallowing clicks on some settings rows, so a dropdown would not open or a slider would not take a drag on the first try.
 - (Frame) Hover a setting's name on the page and its explanation shows, the same one the panel behind the row gives.
+- (Settings) A setting shown on a row is no longer repeated inside that row's settings panel.
 
 ### Changes
 
