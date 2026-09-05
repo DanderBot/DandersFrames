@@ -6134,14 +6134,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 })
             end)
 
-            -- ITS OWN BAND, AND WITH NO HEADER. The Appearance band above is
-            -- three rows under a word that names none of them; this is one row
-            -- whose own label already says "Permanent Mover", and a header
-            -- repeating that directly above it is the page saying it twice.
+            -- ITS OWN BAND, UNDER ITS OWN WORD. The row is not an appearance
+            -- setting, so it does not sit in the Appearance band -- but a band
+            -- with no header is 40px of bare air after the band above (the gap
+            -- under the last row, two chromeless insets and the band margin),
+            -- and in game the row read as floating alone ("is the massive gap
+            -- intentional?"). A header fills that air the way "Appearance" fills
+            -- the same air above it, and turns the break into a section.
+            --
+            -- ⚠ NOT "Permanent Mover". The row's own label says that, and a
+            -- header repeating it directly above is the page saying it twice --
+            -- the reason this band shipped headerless in the first place. The
+            -- header names what the section is ABOUT; the row names the feature.
             -- Built at the page's usable width for the same reason the Appearance
             -- band is -- see the long note there -- so the row's right edge lands
             -- on the corridor and its popout's beam is a short hop.
             permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Movement"]), 40)
             local moverRow = permMoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Permanent Mover"],
                 db       = tools.RowDB,

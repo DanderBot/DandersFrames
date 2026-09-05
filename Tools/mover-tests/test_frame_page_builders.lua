@@ -502,8 +502,16 @@ do
     check(SRC:find('Add(permMoverBand, nil, "both")', 1, true) ~= nil,
           "permanent mover: ...and spanning both columns")
     -- ...and NO header above it. The row's own label already says the words.
-    check(SRC:find('permMoverBand:AddWidget(GUI:CreateHeader', 1, true) == nil,
-          "permanent mover: the band carries no header -- the row's label is the name")
+    -- A HEADER, AND NOT THE ROW'S OWN NAME. The band shipped headerless (the
+    -- row already says "Permanent Mover") and in game the row read as floating
+    -- alone under 40px of bare air; the header fills that air the way
+    -- "Appearance" fills the same air above it. "Movement" names what the
+    -- section is about; a header repeating the row's label would be the page
+    -- saying it twice, which is the reason the band had no header before.
+    check(SRC:find('permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Movement"]), 40)', 1, true) ~= nil,
+          "permanent mover: the band carries a header, so the row does not float alone")
+    check(SRC:find('permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Permanent Mover"]', 1, true) == nil,
+          "permanent mover: ...and the header is not the row's own name said twice")
 end
 
 -- ============================================================
@@ -1100,13 +1108,14 @@ do
               "width: the " .. band .. " band is chromeless, at the shared width")
     end
 
-    -- The Layout band carries a HEADER and the mover band does not, and both are
-    -- the same rule: a header names a SECTION, and a band of one row whose label
-    -- already says the words does not need one said twice.
+    -- All three bands carry a HEADER, and one rule: a header names a SECTION.
+    -- The mover band shipped without one (its one row already says "Permanent
+    -- Mover") and in game the row read as floating alone under 40px of bare
+    -- air; it now names what the section is ABOUT, which is not the row's name.
     check(page:find('layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)', 1, true) ~= nil,
           "width: the Layout band names itself above its rows")
-    check(page:find("permMoverBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "width: ...and the one-row mover band still does not")
+    check(page:find('permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Movement"]), 40)', 1, true) ~= nil,
+          "width: ...and so does the one-row mover band, by what it is about")
 
     -- ---- the classic boxes, all ten of them -------------------------
     local bare = 0
