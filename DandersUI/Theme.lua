@@ -620,8 +620,28 @@ UI.PopoutRow = {
                            -- and in game a hole in a 0.12 plate over a 0.08 window
                            -- is just more black; the strip vanished into the ground
                            -- ("blends into the black background too much").
+    -- ☠ AND THE STRIP IS THE ONLY THING THAT LIGHTS ON A STRIP ROW. The plate
+    -- stopped lifting when the way in moved onto the band (the team asked for it:
+    -- "the popout should only be triggered from the bottom bar, same with the on
+    -- hover highlight"), so these two carry the whole of the row's hover feedback
+    -- and they have to be a step anybody can see.
+    --
+    -- footerHover  1.0 of C_HOVER -- the PLATE's own idiom, one shape over: the
+    --          plate rested on C_ELEMENT and hovered to C_HOVER (restFill 0.55 ->
+    --          hoverFill 0.75), and the strip inherits the pair now that it is the
+    --          thing being hovered. Alpha alone had nowhere to go: the rest fill is
+    --          already 0.85 of a 0.18 grey over a 0.12 plate, so every drop of
+    --          headroom to 1.0 moves the band from 0.171 to 0.18 and reads as
+    --          nothing. The hue swap takes it to 0.22, which is the size of step
+    --          the plate used to make.
+    -- footerOnHover  0.30 of the accent against footerOn's 0.22 -- the same ~1.4x
+    --          the plate's activeFill 0.14 -> activeHover 0.20 makes, and still a
+    --          WASH: an open row has to brighten under the cursor without the strip
+    --          turning into a solid accent bar with unreadable text on it.
+    footerHover  = 1.0,    -- of C_HOVER, under the cursor
     footerBorder = 0.6,    -- of C_BORDER -- the hairline above it
     footerOn     = 0.22,   -- of the accent, when this row's panel is open
+    footerOnHover = 0.30,  -- ...and brighter still under the cursor
 
     -- plateStrip  the TITLE LINE's height on a row that carries a strip, and the
     --          one number in this table that is deliberately not `plate`. 44 was

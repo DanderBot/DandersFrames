@@ -1176,12 +1176,30 @@ function UI:CreatePopoutRow(parent, opts)
     -- move down onto it; the title line keeps its tick, its name and its summary
     -- and is otherwise untouched.
     --
-    -- ☠ THE STRIP TAKES NO MOUSE. Two reasons and either is sufficient: a frame
+    -- ☠ THE STRIP IS THE ONLY WAY IN, AND IT TAKES THE MOUSE FOR IT. This is
+    -- the reverse of what the first try shipped ("the strip takes no mouse -- the
+    -- whole row is already the click target"), and the reversal was asked for
+    -- after living with it: "the popout should only be triggered from the bottom
+    -- bar, same with the on hover highlight instead of the whole row being
+    -- clickable". A plate whose every square inch opens a panel is a plate the
+    -- cursor cannot rest on, and a whole row lighting up wherever the cursor
+    -- lands says nothing about where to press.
+    --
+    -- So the strip is a BUTTON: the only part of the plate that opens the panel
+    -- and the only part that lights on hover. The row's own OnClick returns early
+    -- when this exists, and paintState stops consulting row._hovered for the
+    -- PLATE. The tick and the hoisted controls keep the mouse they always had --
+    -- they sit on the title line and the control lines, not on this band.
+    --
+    -- ⚠ THE OLD OBJECTION STILL STANDS FOR WHAT LIES OVER THE STRIP: a frame
     -- drawn over a control eats that control's clicks (it has shipped twice in
-    -- this rework), and the WHOLE ROW is already the click target -- so a
-    -- mouse-enabled strip would buy nothing and would steal the row's own
-    -- OnEnter/OnLeave the moment the cursor crossed onto it, dropping the hover
-    -- paint while the user is over the thing they are about to click.
+    -- this rework), so the clip and the rounded shape stacked on this band still
+    -- say EnableMouse(false) out loud -- and now they would be eating the one
+    -- click the row answers rather than a click the row could catch anyway.
+    --
+    -- ⚠ NO RegisterForClicks. A Button answers LeftButtonUp out of the box on
+    -- the client, which is what the ROW itself has always run on -- so stating it
+    -- on one of the two and not the other would be a place for them to disagree.
     local strip                    -- the footer strip's frame, nil unless asked for
     local stripFill, stripLine     -- its square wash and the hairline above it
     local stripClip, stripShape    -- ...and the ROUNDED wash's clip and its holder
@@ -1189,10 +1207,16 @@ function UI:CreatePopoutRow(parent, opts)
     local stripCount               -- "N more settings"
 
     if row._strip then
-        strip = CreateFrame("Frame", nil, plate)
+        strip = CreateFrame("Button", nil, plate)
         strip:SetPoint("BOTTOMLEFT", plate, "BOTTOMLEFT", 0, 0)
         strip:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", 0, 0)
         strip:SetHeight(FOOTER_H)
+        -- Said out loud rather than left to the Button default, for the reason
+        -- the strip's own frame level is: the relationship the whole of this
+        -- depends on belongs in the code, and the headless shim models no
+        -- defaults at all -- without this line "the strip takes clicks" is not a
+        -- claim a test could make.
+        strip:EnableMouse(true)
         row.footerStrip = strip
         -- ☠ AND IT DECLINES THE SHELL'S SOURCE OUTLINE (Popout's
         -- _OutlineDeclined). The strip is the panel's tether, and the outline
@@ -1230,10 +1254,10 @@ function UI:CreatePopoutRow(parent, opts)
         -- stretched over a zero rect and never appear.
         --
         -- ⚠ AND NEITHER FRAME TAKES THE MOUSE, said out loud rather than left to
-        -- the default. Both lie over the strip, the strip lies over the plate,
-        -- and the whole row is the click target -- a mouse-enabled frame anywhere
-        -- in that stack is the "anything drawn over a control eats its clicks"
-        -- bug this rework has shipped twice.
+        -- the default. Both lie over the strip, and the STRIP is the click target
+        -- now -- a mouse-enabled frame anywhere in that stack is the "anything
+        -- drawn over a control eats its clicks" bug this rework has shipped twice,
+        -- and here it would eat the only click the row still answers.
         stripFill = strip:CreateTexture(nil, "BACKGROUND")
         stripFill:SetPoint("TOPLEFT", strip, "TOPLEFT", 0, -1)
         stripFill:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", 0, 0)
@@ -1737,14 +1761,23 @@ function UI:CreatePopoutRow(parent, opts)
         local on = row._Read()
         local active = row._active
         local accent = row._accent or host:GetAccent()
+        -- ☠ THE PLATE DOES NOT LIFT ON A STRIP ROW, so row._hovered is not
+        -- consulted for it there. The row is still a Button and its OnEnter still
+        -- runs -- the flag, the tooltip hit and everything else that reads the
+        -- row's hover are untouched -- but the strip is the only way in now, so it
+        -- is the only thing that lights: a plate that brightened wherever the
+        -- cursor landed while one 18px band answered the click would be pointing
+        -- at the wrong part of itself. Every unconverted row still lifts, exactly
+        -- as it always did, which is the whole of "no other page moves".
+        local plateHover = row._hovered and not strip
         if active then
             paintPlate(accent.r, accent.g, accent.b,
-                       row._hovered and M.activeHover or M.activeFill,
+                       plateHover and M.activeHover or M.activeFill,
                        accent.r, accent.g, accent.b, M.activeBorder)
         else
-            local f = row._hovered and C_HOVER or C_ELEMENT
+            local f = plateHover and C_HOVER or C_ELEMENT
             paintPlate(f.r, f.g, f.b,
-                       row._hovered and M.hoverFill or M.restFill,
+                       plateHover and M.hoverFill or M.restFill,
                        C_BORDER.r, C_BORDER.g, C_BORDER.b, M.restBorder)
         end
         -- OFF outranks ACTIVE on the label. A row with its feature switched off
@@ -1759,11 +1792,25 @@ function UI:CreatePopoutRow(parent, opts)
         -- LIGHTS -- an accent wash, brighter than the plate's, and the beam
         -- leaves its right end because the strip is the panel's tether.
         if stripFill then
+            -- FOUR STATES, NOT TWO, because the band carries the row's whole hover
+            -- feedback now: rest, rest + cursor, open, open + cursor.
+            --
+            -- ⚠ THE HAIRLINE AND THE WORDS DO NOT MOVE WITH IT. An open row's
+            -- edge is the accent whether or not the cursor is on it, and an edge
+            -- that brightened too would read as the strip growing rather than as
+            -- the strip lighting.
+            local hovered = row._stripHovered
             if active then
-                row._PaintStrip(accent.r, accent.g, accent.b, M.footerOn)
+                row._PaintStrip(accent.r, accent.g, accent.b,
+                                hovered and M.footerOnHover or M.footerOn)
                 stripLine:SetColorTexture(accent.r, accent.g, accent.b, M.activeBorder)
             else
-                row._PaintStrip(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, M.footerFill)
+                -- The HUE swaps with the alpha, which is the plate's own idiom
+                -- from back when the plate was the thing that lit: C_ELEMENT at
+                -- rest, C_HOVER under the cursor. Alpha alone had nowhere to go --
+                -- the rest fill is already 0.85 of it (see Theme.lua).
+                local f = hovered and C_HOVER or C_ELEMENT
+                row._PaintStrip(f.r, f.g, f.b, hovered and M.footerHover or M.footerFill)
                 stripLine:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, M.footerBorder)
             end
             stripCount:SetTextColor(accent.r, accent.g, accent.b, on and 1 or OFF_ALPHA)
@@ -2476,7 +2523,28 @@ function UI:CreatePopoutRow(parent, opts)
     -- NOT gated on `enabled`. A greyed row is one whose settings do nothing YET;
     -- being able to look at them (and at the control inside that would turn the
     -- feature on) is exactly what a user in that state needs.
-    row:SetScript("OnClick", function() row:OpenPopout() end)
+    --
+    -- ☠ ...AND ON A STRIP ROW IT OPENS NOTHING. The strip owns the click; this
+    -- RETURNS EARLY rather than being left uninstalled, because the row is still a
+    -- Button carrying a hover, an OnSizeChanged and a tooltip -- and a script that
+    -- is simply absent is indistinguishable from one nobody remembered to write.
+    row:SetScript("OnClick", function()
+        if strip then return end
+        row:OpenPopout()
+    end)
+
+    -- THE STRIP'S OWN MOUSE, wired HERE rather than where the strip is built:
+    -- paintState is declared between the two, so a handler written up there would
+    -- reach for it as a GLOBAL and quietly do nothing.
+    --
+    -- Straight to row:OpenPopout(), which is the same verb the plain row's click
+    -- has always used -- so the pool, the tether, the beam and the pin-on-an-empty
+    -- pane are all reached by one path and cannot drift apart.
+    if strip then
+        strip:SetScript("OnClick", function() row:OpenPopout() end)
+        strip:SetScript("OnEnter", function() row._stripHovered = true;  paintState() end)
+        strip:SetScript("OnLeave", function() row._stripHovered = false; paintState() end)
+    end
 
     if cb then
         cb:SetScript("OnClick", function(self)
