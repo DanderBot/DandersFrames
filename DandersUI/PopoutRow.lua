@@ -2302,23 +2302,40 @@ function UI:CreatePopoutRow(parent, opts)
     -- 21), pressing it while its own panel is up used to RAISE that panel -- a
     -- click that visibly did nothing, because the panel was already in front. In
     -- game the ask was direct: "clicking the bottom bar of the row should close
-    -- the popout instead of just reopening it". So: a loose panel about this row
-    -- closes; anything else opens.
+    -- the popout instead of just reopening it". So: anything up about this row
+    -- goes down; nothing up, and it opens.
     --
-    -- ⚠ A PINNED PANEL IS NOT CLOSED FROM HERE. Pinning is the user's gesture
-    -- for "keep this one up whatever I do next", and livePanel prefers a pinned
-    -- panel precisely so a re-click brings it forward (section 17.3). A strip
-    -- that closed it would undo the pin with the very click that used to honour
-    -- it; the panel's own cross is the way to take a pinned one down. The
-    -- empty-pane path is the same case one step earlier: the first click pins,
-    -- and every click after that raises.
+    -- ⚠ PINNED PANELS GO DOWN TOO. The first cut spared them -- pinning read as
+    -- "keep this up whatever I do next", and the panel's cross was the way to
+    -- take one down -- and in game that was wrong the first time it was tried:
+    -- a "Pin settings in popout" row opens its panel PINNED (section 18.4), so
+    -- sparing pinned panels made that strip the one strip that could never
+    -- close what it opened ("it should close the pinned one if clicked again").
+    -- A click on the row's own strip is a deliberate act on THIS row, and the
+    -- pin was about surviving a page change, not about surviving that click.
+    --
+    -- EVERY panel about the row, not livePanel's favourite. The row's own verbs
+    -- never bind a pinned and a loose panel at once (a re-open RAISES the pinned
+    -- one, section 17.3), so today this loop finds one panel -- but a toggle that
+    -- closed only the preferred one would leave any other up with the strip
+    -- still lit, and stating "all of them" costs nothing. Collected before
+    -- anything is closed, for the reason closeLoosePanels gives: Close reaches
+    -- back into `_bound`, and mutating it mid-pairs is how one of two survives.
     --
     -- The ROW's own OpenPopout keeps raise semantics: every unconverted page's
     -- whole-plate click is unchanged, and a consumer verb that says "open" opens.
     function row:TogglePopout()
-        local up = livePanel(row)
-        if up and not up.pinned then
-            up:Close("toggle")
+        local up
+        for po in pairs(row._bound) do
+            if po and not po.closed and po._boundRow == row then
+                up = up or {}
+                up[#up + 1] = po
+            end
+        end
+        if up then
+            for _, po in ipairs(up) do
+                if not po.closed then po:Close("toggle") end
+            end
             return row
         end
         return row:OpenPopout()
@@ -2569,7 +2586,7 @@ function UI:CreatePopoutRow(parent, opts)
     if strip then
         -- TOGGLE, not open: the strip is the one control that says "this row's
         -- panel", so pressing it while that panel is up means "put it away" --
-        -- see row:TogglePopout for why a PINNED panel is the exception.
+        -- pinned or not; see row:TogglePopout.
         strip:SetScript("OnClick", function() row:TogglePopout() end)
         strip:SetScript("OnEnter", function() row._stripHovered = true;  paintState() end)
         strip:SetScript("OnLeave", function() row._stripHovered = false; paintState() end)

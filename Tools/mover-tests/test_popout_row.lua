@@ -3810,8 +3810,9 @@ PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit
 -- ☠ ASKED FOR THE MOMENT THE STRIP BECAME THE ONLY WAY IN: "clicking the
 -- bottom bar of the row should close the popout instead of just reopening it".
 -- A raise of a panel already in front is a click that does nothing visible.
--- ⚠ A PINNED panel is the exception -- pinning means "keep this up", and the
--- strip must not undo it; the panel's own cross does that.
+-- ⚠ PINNED PANELS GO DOWN TOO. The first cut spared them, and a "Pin settings
+-- in popout" row -- whose panel opens pinned -- then had the one strip that
+-- could never close what it opened. Tried in game, corrected the same hour.
 do
     local win = window()
     local db = { on = true }
@@ -3837,15 +3838,36 @@ do
     row:TogglePopout()
     check(row.popout ~= nil, "toggle: ...and opens when there is none")
 
-    -- ---- pinned: the strip raises, it does not close ----------------------
+    -- ---- pinned: the strip closes that too --------------------------------
     local pinned = row.popout
     pinned:Pin(true)
     eq(pinned.pinned, true, "toggle: (pinned by hand)")
     strip:GetScript("OnClick")(strip)
-    check(not pinned.closed, "toggle: a click on the strip does NOT close a pinned panel")
-    eq(row.popout, pinned, "toggle: ...it raises that same panel, as section 17.3 says")
-    row:ClosePopout()
-    pinned:Close("test")
+    check(pinned.closed, "toggle: a click on the strip closes a PINNED panel as well")
+    eq(row.popout, nil, "toggle: ...and the row names nothing")
+
+    -- ---- the empty pane, which opens pinned: the strip still toggles it ----
+    local empty = stripRow({ label = "Pin me", db = db, count = 5, window = win,
+                             popoutKey = "toggle.empty",
+                             footerStrip = true, toggle = { key = "on" } })
+    empty:SetCountProvider(function() return 0 end)
+    empty:SetHoistedControls(twoSliders(db, {}))
+    local es = empty.footerStrip
+    es:GetScript("OnClick")(es)
+    local ep = empty.popout
+    check(ep ~= nil and ep.pinned, "toggle: an empty pane's strip opens its panel pinned")
+    es:GetScript("OnClick")(es)
+    check(ep.closed, "toggle: ...and the SAME strip closes it again -- the case that failed in game")
+    es:GetScript("OnClick")(es)
+    check(empty.popout ~= nil and empty.popout.pinned and not empty.popout.closed,
+          "toggle: a third click pins a fresh one")
+    empty:TogglePopout()
+    eq(empty.popout, nil, "toggle: (and the verb takes it down)")
+    -- ⚠ NOT DRIVEN: a row bound to a pinned AND a loose panel at once. The
+    -- verb closes every panel about the row rather than livePanel's favourite,
+    -- but the row's own verbs cannot reach that state -- a re-open RAISES the
+    -- pinned one (section 17.3) rather than building a loose one beside it --
+    -- so the loop is defensive, and this file says so instead of faking it.
 
     -- ---- the ROW's own verb keeps raise semantics --------------------------
     local plain = place(host:CreatePopoutRow(FakeUIFrame(), {
