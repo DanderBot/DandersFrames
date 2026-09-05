@@ -3276,5 +3276,189 @@ do
     host:CloseAllPopoutRows("test")
 end
 
+-- ---- 24.15 THE STRIP'S NUMBER CAN COME FROM SOMEWHERE ELSE ---------
+-- ☠ A DECLARED COUNT CANNOT FOLLOW THE MODE. The Layout Direction pane
+-- mounts a Growth Direction dropdown per mode (one hideOn-gated away) plus a
+-- party-only anchor, so its declared 3 less one hoisted control promised "2
+-- more settings" over a pane holding exactly ONE control in party and none at
+-- all in raid. The row cannot see its own pane; the consumer that built it can,
+-- so it answers the number instead -- and the arithmetic is then not consulted.
+--
+-- ⚠ ROWS WITHOUT ONE ARE UNTOUCHED. Every other page keeps opts.count and
+-- the subtraction, which is what 24.2 through 24.7 above are all still saying.
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+    local row = stripRow({ label = "Derived", db = db, count = 5, window = win,
+                           footerStrip = true, toggle = { key = "on" } })
+    eq(row.stripCount:GetText(), "5 more settings",
+       "derived: the declared count, while nothing else answers for it")
+
+    local behind = 4
+    local ret = row:SetCountProvider(function() return behind end)
+    eq(ret, row, "derived: the setter is chainable, like every other one on this row")
+    eq(row.stripCount:GetText(), "4 more settings",
+       "derived: ...and a provider is painted the moment it is wired")
+
+    -- ☠ IT REPLACES THE ARITHMETIC, it is not another term in it. The
+    -- consumer already counts the pane with the hoisted controls hidden, so
+    -- subtracting them again here would take them off twice.
+    row:SetHoistedControls(twoSliders(db, {}))
+    eq(row:GetShownHoistCount(), 2, "derived: two controls on the plate")
+    eq(row.stripCount:GetText(), "4 more settings",
+       "derived: ...and the strip says what the provider says, not four less two")
+
+    -- REPAINTED FROM THE LAYOUT, which is the pass a fold and a gate both run.
+    behind = 3
+    row._LayoutPlate()
+    eq(row.stripCount:GetText(), "3 more settings", "derived: the layout re-asks")
+    -- ...and from the refresh, which is the pass a write runs.
+    behind = 1
+    row.Refresh()
+    eq(row.stripCount:GetText(), "1 more settings", "derived: ...and so does the refresh")
+
+    -- ZERO, WITH THE PLATE HOLDING SOMETHING. There is nothing left behind the
+    -- click, but the settings on the plate are still worth having beside another
+    -- page -- so the corner stops promising a count and offers the way to keep
+    -- them: a pinned panel. The words ARE the confirmation for the click.
+    behind = 0
+    row._LayoutPlate()
+    eq(row.stripCount:GetText(), "Pin settings in popout",
+       "derived: an empty pane offers to pin instead of promising nothing")
+
+    -- ...and the moment there is something behind the click again the phrase
+    -- comes back. A gate, a mode switch or a fold can all do it.
+    behind = 2
+    row.Refresh()
+    eq(row.stripCount:GetText(), "2 more settings",
+       "derived: ...and the count phrase returns when the pane fills again")
+
+    -- ☠ ZERO AND AN EMPTY PLATE IS NOT THE PIN CASE, and the honest words
+    -- there are the count. Pinning is an offer to keep the ROW'S OWN controls
+    -- open somewhere else; with the row folded there are none, so the panel it
+    -- pinned would be as empty as the one it refused to open. "0 more settings"
+    -- says the true thing: there is nothing behind this click.
+    behind = 0
+    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    eq(row:GetShownHoistCount(), 0, "derived: under the floor the row folds")
+    eq(row.stripCount:GetText(), "0 more settings",
+       "derived: ...and an empty pane behind an empty plate is not an offer to pin")
+
+    -- ...and a provider can be taken off again, which hands the row back to its
+    -- own arithmetic -- five declared, none on the plate.
+    row:SetCountProvider(nil)
+    eq(row.stripCount:GetText(), "5 more settings",
+       "derived: clearing the provider gives the declared count back")
+end
+
+-- ⚠ AND NOTHING ON THE TITLE LINE MOVES. The badge pill is opts.count and
+-- stays opts.count: a provider is about the STRIP's phrase, and a row without a
+-- strip has no phrase to paint. Built directly rather than through stripRow,
+-- which exists to give a row its strip.
+do
+    local win = window()
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Plain provider", db = { on = true }, toggle = { key = "on" },
+        count = 4, build = counting("plainprov", 50), window = win,
+    }))
+    row:SetCountProvider(function() return 0 end)
+    eq(rawget(row, "stripCount"), nil, "derived: a title-line row has no count phrase")
+    check(row.badgePill:IsShown(), "derived: ...its count is still a pill")
+    eq(row.badge:GetText(), "4", "derived: ...carrying the DECLARED number, provider or no provider")
+end
+
+-- ---- 24.16 AN EMPTY PANE PINS ITSELF OPEN --------------------------
+-- ☠ A LOOSE EMPTY PANEL IS NEVER OPENED. With every one of its settings on
+-- the plate the panel has nothing left to draw, and a blank box docked beside
+-- the row is not what the strip's words offered -- they offered to PIN them, so
+-- the click that read them does it in one move. Pin(true) is AutoPin's silent
+-- path: the confirm pop is feedback for a press on the pin button, and here the
+-- strip's own words are the confirmation.
+--
+-- Driven against a REAL Popout, which is why it lives in this file: the page
+-- half (Controls.lua wiring the provider to its pane group) is driven in
+-- test_popout_page_tools.lua, which has no shell to pin against.
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+
+    -- ⚠ EACH ROW ON ITS OWN POPOUT KEY. The shell pools by key, so three
+    -- rows sharing the default one would hand the same instance round between
+    -- them -- and what is under test here is what an OPEN makes, not what an
+    -- adopt reuses (24.14 owns that claim).
+    -- WITH SOMETHING BEHIND THE CLICK the panel opens docked, exactly as before.
+    local full = stripRow({ label = "Opens loose", db = db, count = 5, window = win,
+                            popoutKey = "emptyopen.full",
+                            footerStrip = true, toggle = { key = "on" } })
+    full:SetCountProvider(function() return 3 end)
+    full:SetHoistedControls(twoSliders(db, {}))
+    full:OpenPopout()
+    local loose = full.popout
+    check(loose ~= nil, "empty open: a row with settings behind it opens a panel")
+    check(not loose.pinned, "empty open: ...docked to the row, not pinned")
+    check(loose.following, "empty open: ...and still following it")
+
+    -- WITH NOTHING BEHIND IT the same click pins.
+    local bare = stripRow({ label = "Pins itself", db = db, count = 5, window = win,
+                            popoutKey = "emptyopen.bare",
+                            footerStrip = true, toggle = { key = "on" } })
+    bare:SetCountProvider(function() return 0 end)
+    bare:SetHoistedControls(twoSliders(db, {}))
+    eq(bare:GetShownHoistCount(), 2, "empty open: the plate is drawing both settings")
+    eq(bare.stripCount:GetText(), "Pin settings in popout", "empty open: ...so the strip is offering")
+
+    bare:OpenPopout()
+    local po = bare.popout
+    check(po ~= nil and po ~= loose, "empty open: the click brought up its own panel")
+    eq(po.pinned, true, "empty open: ...already pinned, so nothing empty is left docked")
+    check(not po.following, "empty open: ...detached from the row it came out of")
+    -- Pinned chrome, which is no chrome: the two things that describe a dock.
+    -- Guarded on existence, not just on Shown -- a strip declines the source
+    -- outline outright (section 17.1), so a panel that never had one is the
+    -- same answer as one that has put it away.
+    check(not (po.srcOutline and po.srcOutline:IsShown()),
+          "empty open: ...with no outline traced on the strip")
+    check(not (po.beam and po.beam:IsShown()), "empty open: ...and no beam")
+    -- ...and out of the pool, which is what Pin is for -- see 24.14.
+    local store = rawget(host, "_popoutRows")
+    check(store.shared[bare._key] ~= po, "empty open: ...and never listed as the shared instance")
+    eq(store.pinned[#store.pinned], po, "empty open: ...it is listed among the pinned")
+
+    -- ⚠ AND A SECOND CLICK RAISES THAT ONE. livePanel prefers a pinned panel,
+    -- so the row does not make a second empty box -- the fresh pooled instance
+    -- appears when the NEXT row asks for the key, not when this one is clicked
+    -- again.
+    bare:OpenPopout()
+    eq(bare.popout, po, "empty open: clicking again raises the panel it already pinned")
+
+    -- The row's own OnClick is the same path, which is what the user presses.
+    local clicked = stripRow({ label = "Clicked", db = db, count = 5, window = win,
+                               popoutKey = "emptyopen.clicked",
+                               footerStrip = true, toggle = { key = "on" } })
+    clicked:SetCountProvider(function() return 0 end)
+    clicked:SetHoistedControls(twoSliders(db, {}))
+    clicked:GetScript("OnClick")(clicked)
+    check(clicked.popout ~= nil, "empty open: the row's own click opens a panel")
+    eq(clicked.popout.pinned, true, "empty open: ...and pins it, like the verb does")
+
+
+    -- ☠ ZERO WITH AN EMPTY PLATE DOES NOT PIN EITHER, because the strip did
+    -- not offer to. The two are one decision asked in one place: the words say
+    -- what the click will do, and a click that pinned where the corner read "0
+    -- more settings" would be answering a question nobody asked. There is
+    -- nothing on the plate to keep open beside another page, which is the whole
+    -- reason to pin.
+    local nothing = stripRow({ label = "Nothing at all", db = db, count = 5, window = win,
+                               popoutKey = "emptyopen.nothing",
+                               footerStrip = true, toggle = { key = "on" } })
+    nothing:SetCountProvider(function() return 0 end)
+    eq(nothing:GetShownHoistCount(), 0, "empty open: nothing hoisted onto this plate")
+    eq(nothing.stripCount:GetText(), "0 more settings", "empty open: ...so the strip is not offering")
+    nothing:OpenPopout()
+    check(nothing.popout ~= nil, "empty open: the click still opens a panel")
+    check(not nothing.popout.pinned, "empty open: ...and leaves it docked, as the words said")
+    host:CloseAllPopoutRows("test")
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit

@@ -1078,5 +1078,93 @@ do
     eq(visible(lateGroup), 3, "late: the claim applies the set the row is already showing")
     eq(lateRow.stripCount:GetText(), "3 more settings", "late: ...and the two agree about the count")
 
+
+    -- ---- THE STRIP'S NUMBER IS THE PANE'S, NOT A DECLARED CONSTANT ----
+    -- ☠ A DECLARED COUNT CANNOT FOLLOW THE MODE. Layout Direction declares
+    -- three -- a Growth Direction dropdown per mode, one hideOn-gated away, plus
+    -- a party-only anchor -- because the badge is about what is BEHIND the row
+    -- rather than what today's mode is showing. Hoist one of them and the strip
+    -- painted three less one, promising "2 more settings" over a pane that draws
+    -- exactly ONE control in party and NONE in raid. So the row asks the group
+    -- how many children a layout would place, and says that instead.
+    --
+    -- ⚠ hideOn IS ONLY CONSULTED WITH A DB IN HAND (see Sections' predicate),
+    -- so the host answers `getSettingsDB` from here on. Wired at the foot of this
+    -- block, after everything above has had its say against the plain shape.
+    kitHost.hooks.getSettingsDB = function() return paneDB end
+
+    local DIR_OPTS = { _order = { "HORIZONTAL" }, HORIZONTAL = "Rows" }
+    local ANCHOR_OPTS = { _order = { "START" }, START = "Top" }
+    local dirBuilt = {}
+    local dirMount, dirGroup = tools.PopoutContent(function(g)
+        -- The row's real shape: ONE key on two widgets, each gated to a mode,
+        -- and a third control the raid mode does not use at all.
+        local flat = paneControl("growDirection")
+        flat.hideOn = function() return GUIstub.SelectedMode == "raid" end
+        g:AddWidget(flat, 30)
+        local grouped = paneControl("growDirection")
+        grouped.hideOn = function() return GUIstub.SelectedMode ~= "raid" end
+        g:AddWidget(grouped, 30)
+        local anchor = paneControl("growthAnchor")
+        anchor.hideOn = function() return GUIstub.SelectedMode == "raid" end
+        g:AddWidget(anchor, 30)
+        dirBuilt[#dirBuilt + 1] = { flat, grouped, anchor }
+    end)
+    local dirRow = kitHost:CreatePopoutRow(page.child, {
+        label = "Layout Direction", db = tools.RowDB, count = 3,
+        footerStrip = true, build = function() end,
+    })
+    dirRow:SetWidth(401)
+    tools.ClaimKeys(dirRow, dirGroup)
+    eq(#dirGroup.groupChildren, 3, "dir: three controls behind the row")
+    -- ☠ AND THE STRIP ALREADY DISAGREES WITH THE DECLARED THREE, before a
+    -- single control is hoisted: party never shows the grouped-raid dropdown.
+    eq(dirRow.stripCount:GetText(), "2 more settings",
+       "dir: the strip counts what the pane will draw, not what the page declared")
+
+    tools.RegisterHoistedToggle(dirRow, {
+        { name = "Growth Direction", kind = "dropdown", key = "growDirection",
+          options = DIR_OPTS },
+        { name = "Frames Grow From", kind = "dropdown", key = "growthAnchor",
+          options = ANCHOR_OPTS,
+          visible = function() return GUIstub.SelectedMode ~= "raid" end },
+    })
+
+    -- PARTY: both on the plate, nothing left behind the click.
+    eq(dirRow:GetShownHoistCount(), 2, "dir: party draws both settings on the plate")
+    eq(visible(dirGroup), 0, "dir: ...and the pane behind it has nothing left to draw")
+    eq(dirRow.stripCount:GetText(), "Pin settings in popout",
+       "dir: ...so the strip offers to pin rather than promising nothing")
+
+    -- RAID: the anchor leaves the plate with the mode, and the pane is empty
+    -- there too -- one dropdown gated away, the other one on the plate.
+    GUIstub.SelectedMode = "raid"
+    dirRow._LayoutPlate()
+    eq(dirRow:GetShownHoistCount(), 1, "dir: raid takes the party-only anchor off the plate")
+    eq(visible(dirGroup), 0, "dir: ...and raid's pane is empty as well")
+    eq(dirRow.stripCount:GetText(), "Pin settings in popout",
+       "dir: ...so raid offers to pin too")
+
+    GUIstub.SelectedMode = "party"
+    dirRow._LayoutPlate()
+    eq(dirRow.stripCount:GetText(), "Pin settings in popout",
+       "dir: back in party it is the same offer")
+
+    -- UN-HOIST ONE and the pane has something behind the click again, which is
+    -- the phrase coming back rather than a state the row cannot leave.
+    tools.RegisterHoistedToggle(dirRow, {
+        { name = "Growth Direction", kind = "dropdown", key = "growDirection",
+          options = DIR_OPTS },
+    })
+    eq(dirRow:GetShownHoistCount(), 1, "dir: one control on the plate")
+    eq(visible(dirGroup), 1, "dir: ...and the anchor is back in the pane")
+    eq(dirRow.stripCount:GetText(), "1 more settings",
+       "dir: ...which is exactly what the strip promises")
+
+    -- ...and the mount is told the same thing, so a panel opened now draws the
+    -- one control the strip just named.
+    local dirPo, dirPane = fakePanel()
+    dirMount(dirPo, dirPane)
+    eq(shownIn(dirBuilt[1]), 1, "dir: the panel opens with the one control behind the row")
     DandersFrames, CreateFrame = savedDF, savedCreateFrame
 end

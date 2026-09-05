@@ -134,6 +134,32 @@ local function notifyHidden(widget)
     UI.NotifyLayoutHidden(UI, widget)
 end
 
+-- WILL THIS ENTRY BE LAID OUT? THE ONE PREDICATE, and it is file-local rather
+-- than a closure inside LayoutChildren because there are now two readers of it:
+-- the layout, which PLACES what it answers true for, and CountVisibleChildren,
+-- which answers the same question without laying anything out. A copy in the
+-- second reader would be a count that drifts from the layout it is describing --
+-- which is the whole bug the count exists to fix.
+--
+-- Three reasons, in the order they are cheapest to ask: a COLLAPSED section
+-- shows nothing but its header, the HOST may have marked the child (see
+-- SetChildHidden), and the widget carries its own `hideOn`. `layoutDB` is
+-- resolved ONCE by the caller and handed in, because a layout asks this per
+-- child and the host call behind it is not free.
+local function EntryVisible(group, entry, index, layoutDB)
+    if group.collapsed and index > 1 then return false end
+    local w = entry and entry.widget
+    if not w then return false end
+    -- The HOST's own reason, beside the widget's. See SetChildHidden: a
+    -- consumer that is already drawing this setting somewhere else asks
+    -- for it to be left out of the layout, and a mark it set has to read
+    -- exactly like a hideOn that fired -- same fold, same Hide, same
+    -- announcement, same way back.
+    if entry.hostHidden then return false end
+    if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
+    return true
+end
+
 function UI:CreateSettingsGroup(parent, width, opts)
     -- opts can be a boolean (legacy: collapsible) or a table
     -- { collapsible, showSummary, collapseKey, chromeless, bandStyle, padding,
@@ -439,6 +465,25 @@ function UI:CreateSettingsGroup(parent, width, opts)
         return self
     end
 
+    -- HOW MANY CHILDREN A LAYOUT WOULD PLACE, WITHOUT RUNNING ONE. Same
+    -- predicate, same three reasons -- EntryVisible is the shared answer, so this
+    -- cannot drift from what LayoutChildren does with it.
+    --
+    -- ☠ IT DOES NOT LAY OUT, AND THAT IS THE POINT. The eagerly built pane group
+    -- sits in a hidden holder until a panel mounts it or something re-flows it,
+    -- so nothing in it is Shown yet -- counting the Shown ones would answer zero
+    -- for a pane holding five controls. The consumer asking is a settings row's
+    -- footer strip, which has to name that number before the panel behind it has
+    -- ever been opened.
+    group.CountVisibleChildren = function(self)
+        local layoutDB = host:Call("getSettingsDB")
+        local n = 0
+        for i, entry in ipairs(self.groupChildren) do
+            if EntryVisible(self, entry, i, layoutDB) then n = n + 1 end
+        end
+        return n
+    end
+
     -- Add a widget to this group
     group.AddWidget = function(self, widget, height)
         widget:SetParent(self)
@@ -594,17 +639,7 @@ function UI:CreateSettingsGroup(parent, width, opts)
         -- row's hideOn would silently change the spacing of the rows around it.
         local layoutDB = host:Call("getSettingsDB")
         local function entryVisible(entry, index)
-            if self.collapsed and index > 1 then return false end
-            local w = entry and entry.widget
-            if not w then return false end
-            -- The HOST's own reason, beside the widget's. See SetChildHidden: a
-            -- consumer that is already drawing this setting somewhere else asks
-            -- for it to be left out of the layout, and a mark it set has to read
-            -- exactly like a hideOn that fired -- same fold, same Hide, same
-            -- announcement, same way back.
-            if entry.hostHidden then return false end
-            if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
-            return true
+            return EntryVisible(self, entry, index, layoutDB)
         end
 
         -- ===== PASS 1 -- PLACE ==============================================

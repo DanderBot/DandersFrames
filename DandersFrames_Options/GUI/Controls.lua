@@ -4303,6 +4303,32 @@ function GUI:CreatePopoutPageTools(page)
                 end)
             end
         end
+
+        -- ☠ AND THE STRIP'S NUMBER IS THE PANE'S, NOT A DECLARED CONSTANT.
+        -- Layout Direction declares 3 -- Growth Direction twice, one dropdown per
+        -- mode, plus a party-only anchor -- because the badge is about what is
+        -- behind the row rather than about what today's mode is showing. With
+        -- Growth Direction hoisted the strip painted 3 - 1 = 2 over a pane that
+        -- draws exactly ONE control in party and none in raid. A constant cannot
+        -- follow the mode, so the row asks the group instead: how many children
+        -- would a layout place right now, gates and pane hide included.
+        --
+        -- ⚠ THE EAGER GROUP, which is the instance the first click adopts and
+        -- the one the pane hide above has already run on. Should THAT instance be
+        -- pinned it shows every control again (see the pin wiring above) and the
+        -- number follows it up -- which is honest rather than stale: livePanel
+        -- prefers a pinned panel, so the next click on this row raises that very
+        -- panel, and the count is a promise about what a click opens.
+        --
+        -- ⚠ AND IT IS WIRED LAST, after the hide is in place, because the setter
+        -- repaints the strip on the spot and a count taken before the marks were
+        -- applied would name the controls the plate is already drawing.
+        --
+        -- A mode switch rebuilds the page, so the provider is rebuilt with it and
+        -- there is nothing to invalidate.
+        if row.SetCountProvider and group.CountVisibleChildren then
+            row:SetCountProvider(function() return group:CountVisibleChildren() end)
+        end
     end
 
     -- The tick's answer, for a row that has just had its keys claimed. Re-read on

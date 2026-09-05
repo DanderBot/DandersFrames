@@ -4973,6 +4973,17 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local function GrowDirectionGrouped()
             return GUI.SelectedMode == "raid" and db.raidUseGroups and true or false
         end
+        -- Where the run of frames STARTS FROM, party only. Lifted to page scope
+        -- for the reason GrowDirectionOptions was: the row hoists this dropdown
+        -- onto its plate as well, and one map asked for twice cannot drift the
+        -- way two typed copies of it would.
+        -- ⚠ MAIN_START / MAIN_END are baked from db.growDirection at page build,
+        -- so both copies name the previous orientation's edge until the next
+        -- rebuild -- which the pane's own copy has always done. Sharing the map
+        -- does not make that worse, and any rebuild puts both right.
+        local function GrowthAnchorOptions()
+            return { _order = { "START", "CENTER", "END" }, START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
+        end
 
         -- The three dropdowns, verbatim, taking the group and parent they
         -- should build into. Guarded by test_frame_page_builders.lua against
@@ -5021,7 +5032,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- plumbing. Do not re-add a per-dropdown hook: it would translate twice.
 
             -- Growth anchor (party only)
-            local anchorOptions = { _order = { "START", "CENTER", "END" }, START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
+            local anchorOptions = GrowthAnchorOptions()
             local anchorDropdown = group:AddWidget(GUI:CreateDropdown(parent, L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames), 55)
             anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
         end
@@ -5109,19 +5120,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(dirRow, dirContent)
             tools.WireModifiedTick(dirRow)
             tools.WireFooter(dirRow, ApplyLayoutDirection)
-            -- ONE hoisted control, not two, and the second is a refusal rather
-            -- than an omission. "Frames Grow From" is labelled from MAIN_START /
-            -- MAIN_END, which are BAKED from db.growDirection at page build --
-            -- the exact staleness this row's summary carries a ☠ about -- so a
-            -- hoisted twin of it would name the previous orientation's edge until
-            -- the next rebuild. Growth Direction is the control the row is opened
-            -- for anyway.
+            -- BOTH of them, which is a reversal. This hoisted ONE control and
+            -- refused the anchor because its words (MAIN_START / MAIN_END) are
+            -- baked at page build and go stale after a direction change -- the
+            -- staleness this row's summary carries a ☠ about. But the pane's
+            -- OWN copy of that dropdown has always been baked from the same two
+            -- locals, so the refusal bought nothing and cost the row its second
+            -- setting: with one control hoisted the party pane held exactly one
+            -- dropdown and the raid pane none, and a strip cannot honestly
+            -- promise a click that opens an empty panel (Danders, 2026-09-05:
+            -- "for the sake of 1 setting we just hoist both settings").
+            --
+            -- ⚠ THE ANCHOR IS PARTY ONLY, like the pane control it doubles: a
+            -- raid row that drew a dropdown the mode does not use would be an
+            -- inert track for a setting that changes nothing.
             --
             -- ⚠ ITS OWN CALLBACK, NOT ApplyLayoutDirection. The pane's dropdowns
             -- run OnGrowthDirectionChanged, which defers a page rebuild because
             -- the direction decides the WORDS the anchor dropdown offers; the
             -- hoisted twin has to do the same or those words go stale from the
-            -- plate but not from the panel.
+            -- plate but not from the panel. The anchor's own twin runs
+            -- UpdateFrames, exactly as the pane's does.
             tools.RegisterHoistedToggle(dirRow, {
                 { name = L["Growth Direction"], kind = "dropdown", key = "growDirection",
                   options = GrowDirectionOptions(GrowDirectionGrouped()),
@@ -5130,6 +5149,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                   -- hover rides the cell's NAME, never the opener.
                   tooltip = GrowDirectionTooltip(GrowDirectionGrouped()),
                   onChanged = OnGrowthDirectionChanged },
+                { name = L["Frames Grow From"], kind = "dropdown", key = "growthAnchor",
+                  options = GrowthAnchorOptions(),
+                  visible = function() return GUI.SelectedMode ~= "raid" end,
+                  onChanged = UpdateFrames },
             })
         end
 

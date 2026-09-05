@@ -1011,6 +1011,96 @@ do
     check(true, "contract: nil, a non-table and a plain widget are all no-ops")
 end
 
+
+-- ============================================================
+-- COUNTING WITHOUT LAYING OUT -- group:CountVisibleChildren()
+-- ------------------------------------------------------------
+-- ☠ ONE PREDICATE, TWO READERS. The layout PLACES what it answers true
+-- for; this counts the same answers without moving anything. A consumer needs
+-- the number before the group has ever been laid out -- a settings row's
+-- footer strip promises "N more settings" over a pane that sits in a hidden
+-- holder until the panel behind the row is first opened -- and counting the
+-- SHOWN children there would answer zero for a pane holding five controls.
+--
+-- So the claim is not "it returns a number", it is that it returns THE SAME
+-- number the layout goes on to place, across every reason a child is left
+-- out: collapsed, hideOn, host-hidden, and any two of them at once.
+-- ============================================================
+print("-- Group: counting what a layout would place, without laying one out")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g:SetWidth(280)
+    local a, b, c = control(30), control(30), control(30)
+    g:AddWidget(a, 30); g:AddWidget(b, 30); g:AddWidget(c, 30)
+
+    -- How many the LAYOUT actually placed, read off the widgets. The count
+    -- under test is checked against this and never against a hand-written
+    -- number, which is what makes "they agree" the assertion.
+    local function placed()
+        g:LayoutChildren()
+        local n = 0
+        for _, e in ipairs(g.groupChildren) do
+            if e.widget and e.widget:IsShown() then n = n + 1 end
+        end
+        return n
+    end
+    -- Asked BEFORE the layout every time, because the whole point is that it
+    -- does not need one -- and a count taken after would be reading a state
+    -- the layout had just written.
+    local function agrees(tag)
+        local counted = g:CountVisibleChildren()
+        eq(counted, placed(), "count: " .. tag)
+    end
+
+    -- ☠ NOT LAID OUT YET. Nothing in this group has ever been Shown, so a
+    -- count that read IsShown would answer 0 here rather than 3.
+    eq(g:CountVisibleChildren(), 3, "count: three children, none of them laid out yet")
+    for _, e in ipairs(g.groupChildren) do
+        check(not e.widget:IsShown(), "count: ...and the group really has not been laid out")
+    end
+    agrees("...which is what the first layout goes on to place")
+
+    -- HOST-HIDDEN, the reason the consumer sets.
+    g:SetChildHidden(b, true)
+    eq(g:CountVisibleChildren(), 2, "count: a host-hidden child is not counted")
+    agrees("...and the layout leaves it out too")
+
+    -- hideOn, the reason the widget carries -- on a DIFFERENT child, so the
+    -- two reasons are counted together rather than one masking the other.
+    c.hideOn = function(d) return d.countTest == true end
+    settingsDB.countTest = true
+    eq(g:CountVisibleChildren(), 1, "count: a hideOn that fired is not counted either")
+    agrees("...and the layout places the one that is left")
+
+    -- Both reasons on ONE child, which must not count as two absences.
+    g:SetChildHidden(c, true)
+    eq(g:CountVisibleChildren(), 1, "count: two reasons on one child is still one child out")
+    agrees("...and the layout says the same")
+
+    -- ...and the way back, one reason at a time.
+    settingsDB.countTest = nil
+    eq(g:CountVisibleChildren(), 1, "count: clearing the hideOn leaves the host mark holding it")
+    agrees("...as the layout does")
+    g:SetChildHidden(c, false)
+    g:SetChildHidden(b, false)
+    eq(g:CountVisibleChildren(), 3, "count: with neither reason standing all three count again")
+    agrees("...and all three are placed")
+
+    -- COLLAPSED, which is the group's own reason: a shut section shows its
+    -- header and nothing else, and index 1 is the header.
+    g.collapsed = true
+    eq(g:CountVisibleChildren(), 1, "count: a collapsed group counts only its first child")
+    agrees("...which is the one the layout places")
+    g.collapsed = false
+    agrees("count: and re-opening it counts them all again")
+
+    -- An empty group is 0 rather than an error -- the shape a pane has before
+    -- its builder has run.
+    local empty = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    empty:SetWidth(280)
+    eq(empty:CountVisibleChildren(), 0, "count: a group with no children counts none")
+end
+
 -- ============================================================
 -- HOST-HIDDEN -- group:SetChildHidden(widget, hidden)
 -- ------------------------------------------------------------

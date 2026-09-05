@@ -459,6 +459,10 @@ L["%d - %d players"] = true
 -- The way IN, on a settings row's footer strip: what is left behind the click
 -- once the row's commonly-changed controls are drawn on the plate itself.
 L["%d more settings"] = true
+-- ...and what the same corner offers instead when there is nothing left
+-- behind the click: the settings are all on the row, so the way in becomes
+-- a way to keep them open beside another page.
+L["Pin settings in popout"] = true
 L["%d of %d IDs"] = true
 L["%d of %d tracked"] = true
 L["%d override"] = true
