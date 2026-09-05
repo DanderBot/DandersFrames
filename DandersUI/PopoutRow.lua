@@ -1367,21 +1367,22 @@ function UI:CreatePopoutRow(parent, opts)
     end
 
     -- ---- the summary ------------------------------------------------
-    -- ☠ THE SUMMARY IS TOLD WHAT THE PLATE IS ALREADY SHOWING. A Frame Size row
-    -- that hoists width and height was still printing "125x64 · Spacing 2" on
-    -- the title line while 125 and 64 sat in the controls directly beneath it --
-    -- the row saying the same thing twice and spending its one line of detail on
-    -- the half the user can already read. So the consumer's summary function
-    -- takes a SECOND argument: the set of keys currently on the plate, or nil
-    -- when there are none. A consumer that ignores it gets exactly what it got
-    -- before, which is what every unconverted page does.
+    -- ☠ THE SUMMARY IS NOT TOLD WHAT THE PLATE IS SHOWING, AND NO LONGER NEEDS
+    -- TO BE. It was, for one pass: a Frame Size row that hoists width and height
+    -- was printing "125x64 · Spacing 2" on the title line while 125 and 64 sat in
+    -- the controls directly beneath it, so the function took a second argument
+    -- naming the keys on the plate and left them out. Then a strip row stopped
+    -- painting a summary at all while it is ON (see below), which made every one
+    -- of those subtractions unreachable -- and the shown set found a better
+    -- consumer: it is what hides the PANE's copy of a control the plate is
+    -- already drawing (row:SetOnShownKeysChanged). One setting, one widget, one
+    -- count. The summary is back to its one argument, the db.
     --
-    -- ⚠ RE-PAINTED FROM THE LAYOUT, not only from the refresh. The set moves
-    -- when a line folds, splits or gates -- a window drag runs the layout alone,
-    -- and a summary that only followed a refresh would go on hiding a number
-    -- that had just left the plate. Guarded on the toggle having been read at
-    -- least once: construction lays out before its first Refresh, and `on` is
-    -- what decides between the summary and the off text.
+    -- ⚠ RE-PAINTED FROM THE LAYOUT, not only from the refresh, because the row's
+    -- off text and its summary swap on a state the layout can be the first to
+    -- see. Guarded on the toggle having been read at least once: construction
+    -- lays out before its first Refresh, and `on` is what decides between the
+    -- summary and the off text.
     local function paintSummary()
         if row._toggledOn == nil then return end
         local text
@@ -1401,8 +1402,7 @@ function UI:CreatePopoutRow(parent, opts)
             if strip then
                 text = ""
             else
-                local shown = (shownHoists > 0) and row._shownKeys or nil
-                text = opts.summary and opts.summary(resolveDB(opts.db), shown) or ""
+                text = opts.summary and opts.summary(resolveDB(opts.db)) or ""
             end
         else
             text = offText
@@ -1465,18 +1465,46 @@ function UI:CreatePopoutRow(parent, opts)
         if perLine == 0 then live = {} end
 
         shownHoists = #live
-        -- WHICH KEYS ARE ON THE PLATE, as a set the consumer's summary reads so
-        -- it can leave out what the user can already see. Rebuilt here rather
-        -- than derived at paint time because the fold, the split and the gate all
-        -- move it, and re-used rather than re-allocated -- this runs on every
-        -- refresh and on every window drag.
+        -- WHICH KEYS ARE ON THE PLATE, as a set the consumer reads so it can
+        -- leave out what the user can already see -- today that is the PANE,
+        -- which hides its own copy of every control the plate is drawing.
+        -- Rebuilt here rather than derived at paint time because the fold, the
+        -- split and the gate all move it, and re-used rather than re-allocated --
+        -- this runs on every refresh and on every window drag.
         local keys = row._shownKeys
         if not keys then keys = {}; row._shownKeys = keys end
         for k in pairs(keys) do keys[k] = nil end
+        -- ☠ A SIGNATURE OVER THE MEMBERSHIP, AND NOT row._hoistSig. The sig
+        -- below is what the PLACEMENT is a function of, so it carries the cell
+        -- WIDTH -- and a plain window drag moves the width on every frame while
+        -- the set of keys does not move at all. Announcing on that one would
+        -- re-flow the open panel throughout a drag. This string is the keys and
+        -- nothing else, in the order the declarations gave them, so it changes
+        -- exactly when a key joins or leaves.
+        local shownSig = ""
         for _, idx in ipairs(live) do
             local key = hoists[idx] and hoists[idx].key
-            if type(key) == "string" then keys[key] = true end
+            if type(key) == "string" then
+                keys[key] = true
+                shownSig = shownSig .. key .. ","
+            end
         end
+        -- ⚠ THE MEMO IS WRITTEN BEFORE THE CONSUMER IS CALLED, not after. The
+        -- hook re-flows a panel, a re-flow can re-report a height, and a height
+        -- can bring the layout back round to here -- so the second pass has to
+        -- find the set already accounted for or the two would call each other.
+        -- nil reads as "", so a row that never shows a key never announces one;
+        -- a set going from something back to EMPTY does announce, because that
+        -- is the fold, and the pane's copies have to come back.
+        if shownSig ~= (row._shownSig or "") then
+            row._shownSig = shownSig
+            -- rawget, the convention this file already uses for a private field
+            -- that may be absent: a headless frame answers an unset key with a
+            -- no-op FUNCTION, and a plain read would call it on every row.
+            local announce = rawget(row, "_onShownKeys")
+            if announce then announce(row, keys) end
+        end
+
         local lines = (perLine > 0) and ceil(shownHoists / perLine) or 0
         local cellW = (perLine == 2) and floor((lineW - CELL_GAP) / 2) or lineW
 
@@ -2066,6 +2094,27 @@ function UI:CreatePopoutRow(parent, opts)
     -- pane's total less this, so a consumer's own tests can ask the row rather
     -- than re-deriving the fold.
     function row:GetShownHoistCount() return shownHoists end
+
+    -- WHO WANTS TELLING WHEN THE PLATE'S SET OF KEYS MOVES. `fn(row, keysSet)`,
+    -- called from the layout -- not from the refresh -- because the fold, the
+    -- split and the gate are all width, and a window drag runs the layout alone.
+    -- The set handed over is the row's own live table: read it, never keep a
+    -- copy, because the next layout clears and refills the very same table.
+    --
+    -- The kit knows nothing about what the keys MEAN. Its consumer does: the
+    -- page's panel hides its own copy of any control the plate has taken over,
+    -- so the count on the strip and the controls behind it agree.
+    --
+    -- Called immediately if the plate is already showing something, because a
+    -- consumer wired after the declaration would otherwise wait for a width
+    -- change that may never come.
+    function row:SetOnShownKeysChanged(fn)
+        row._onShownKeys = (type(fn) == "function") and fn or nil
+        if row._onShownKeys and shownHoists > 0 and row._shownKeys then
+            row._onShownKeys(row, row._shownKeys)
+        end
+        return row
+    end
 
     -- ---- the popout -----------------------------------------------
 

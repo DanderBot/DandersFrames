@@ -1011,4 +1011,113 @@ do
     check(true, "contract: nil, a non-table and a plain widget are all no-ops")
 end
 
+-- ============================================================
+-- HOST-HIDDEN -- group:SetChildHidden(widget, hidden)
+-- ------------------------------------------------------------
+-- ☠ THE HOST'S OWN REASON TO LEAVE A CHILD OUT, beside the widget's. `hideOn` is
+-- a rule the WIDGET carries and the layout asks; this is a mark the CONSUMER sets
+-- and clears. What it is for: a setting the consumer is already drawing where
+-- the user can see it -- a control lifted onto a popout row's own plate -- must
+-- not also appear in the panel behind that row, or the panel opens with two
+-- widgets on one key and a count that named them twice.
+--
+-- HIDDEN, NEVER REMOVED. The entry keeps its slot, so clearing the mark puts the
+-- child back exactly where it was -- which is what makes the fold, the split and
+-- the gate reversible. The kit knows nothing about keys; the consumer that does
+-- is driven in test_popout_page_tools.lua.
+-- ============================================================
+print("-- Group: a host can leave one child out of the layout")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g:SetWidth(280)
+    local a, b, c = control(30), control(30), control(30)
+    g:AddWidget(a, 30); g:AddWidget(b, 30); g:AddWidget(c, 30)
+
+    g:LayoutChildren()
+    check(a:IsShown() and b:IsShown() and c:IsShown(), "hostHidden: all three start on the page")
+    eq(g:GetHeight(), 30 * 3 + 20, "hostHidden: ...and the group is three rows between two insets")
+
+    local ret = g:SetChildHidden(b, true)
+    eq(ret, g, "hostHidden: the setter is chainable")
+    -- ⚠ NOTHING HAPPENS UNTIL A LAYOUT. The mark is a mark; pass 3 is what Hides,
+    -- which is the same one place the fold and a hideOn arrive at.
+    check(b:IsShown(), "hostHidden: the mark alone does not take the child down")
+    g:LayoutChildren()
+    check(not b:IsShown(), "hostHidden: the next layout does")
+    check(a:IsShown() and c:IsShown(), "hostHidden: ...and leaves its neighbours alone")
+    eq(g:GetHeight(), 30 * 2 + 20, "hostHidden: the slot collapses rather than leaving a hole")
+    eq(offsetY(c), -(10 + 30), "hostHidden: ...so the child after it moves up into the slot")
+
+    -- THE WAY BACK, which is the whole of "hidden, never removed".
+    g:SetChildHidden(b, false)
+    g:LayoutChildren()
+    check(b:IsShown(), "hostHidden: clearing the mark puts the child back")
+    eq(g:GetHeight(), 30 * 3 + 20, "hostHidden: ...in the slot it always had")
+    eq(offsetY(b), -(10 + 30), "hostHidden: ...and in its original ORDER, not appended after c")
+    eq(offsetY(c), -(10 + 30 + 30), "hostHidden: ...which pushes c back down where it was")
+
+    -- The mark reads as a fold does, announcement and all -- one Hide, one
+    -- contract, so a consumer that owns a panel loses it exactly once.
+    local told = 0
+    b._OnLayoutHidden = function() told = told + 1 end
+    g:SetChildHidden(b, true)
+    g:LayoutChildren()
+    eq(told, 1, "hostHidden: the child is told it went off the page, like any other fold")
+    g:LayoutChildren()
+    eq(told, 1, "hostHidden: ...on the transition only")
+    g:SetChildHidden(b, false)
+end
+
+-- ...and it is a SEPARATE reason from the widget's own, in both directions: a
+-- control that is host-hidden today may be hideOn-hidden tomorrow, and clearing
+-- either one must not un-hide the other.
+print("-- Group: host-hidden and hideOn are two reasons, not one")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g:SetWidth(280)
+    local w = control(30)
+    w.hideOn = function(db) return db.bothTest == true end
+    g:AddWidget(w, 30)
+
+    settingsDB.bothTest = true
+    g:SetChildHidden(w, true)
+    g:LayoutChildren()
+    check(not w:IsShown(), "both: two reasons, one Hide")
+
+    -- Clear the HOST's and the widget's own still holds it down.
+    g:SetChildHidden(w, false)
+    g:LayoutChildren()
+    check(not w:IsShown(), "both: clearing the host's mark does not overrule a hideOn")
+
+    -- Clear the widget's and it comes back, because the host's is already gone.
+    settingsDB.bothTest = nil
+    g:LayoutChildren()
+    check(w:IsShown(), "both: with neither reason standing it is laid out again")
+
+    -- ...and the other way round: the host's mark alone hides a widget whose own
+    -- predicate says show it.
+    g:SetChildHidden(w, true)
+    g:LayoutChildren()
+    check(not w:IsShown(), "both: the host's mark alone is enough")
+    g:SetChildHidden(w, false)
+end
+
+-- The verb is total: an unknown widget, and nil, are no-ops rather than errors.
+print("-- Group: SetChildHidden on something the group does not own")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g:SetWidth(280)
+    local mine, theirs = control(30), control(30)
+    g:AddWidget(mine, 30)
+    g:SetChildHidden(theirs, true)
+    g:SetChildHidden(nil, true)
+    g:LayoutChildren()
+    check(mine:IsShown(), "hostHidden: a stranger's mark changes nothing here")
+    -- rawget: the entry list is what the mark lives on, and a widget the group
+    -- never adopted must not have acquired one.
+    for _, entry in ipairs(g.groupChildren) do
+        eq(rawget(entry, "hostHidden"), nil, "hostHidden: ...and marks nothing it does own")
+    end
+end
+
 CreateFrame = prevCreateFrame

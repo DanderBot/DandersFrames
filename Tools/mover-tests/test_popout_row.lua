@@ -2885,7 +2885,7 @@ do
     local win = window()
     local db = { on = true, frameWidth = 100, frameHeight = 50, spacing = 2 }
     local called = 0
-    local function summary(d, shown)
+    local function summary(d)
         called = called + 1
         return "100x50 Spacing 2"          -- a consumer that STILL returns text
     end
@@ -3048,6 +3048,123 @@ do
     check(hit:GetWidth() <= dd.control:GetWidth(),
         "tip: ...and still no wider than the cell it now sits in")
     check(hit:GetWidth() > 0, "tip: ...and it did not lose its width to the re-place")
+end
+
+-- ---- 24.13 who gets told when the plate's set of keys moves ---------
+-- ☠ THE PANE BEHIND THE ROW HAS TO LOSE ITS COPY of any control the plate has
+-- taken over: the strip promised "3 more settings" and the panel then opened
+-- with five, two of them the sliders the user had just looked at. The kit's half
+-- of that is this hook -- `row:SetOnShownKeysChanged(fn)`, fired from the LAYOUT
+-- rather than from the refresh, because the fold, the split and the gate are all
+-- WIDTH and a window drag runs the layout alone.
+--
+-- ⚠ ON MEMBERSHIP, NOT ON PLACEMENT. The row's other signature (row._hoistSig)
+-- carries the cell WIDTH, which moves on every frame of a window drag while the
+-- set of keys does not move at all -- announcing on that one would re-flow the
+-- open panel throughout the drag. So a width change that keeps the same keys has
+-- to announce NOTHING, which is the assertion this block exists for.
+--
+-- The kit knows nothing about what the keys MEAN; it hands over the set and the
+-- consumer decides. What the CONSUMER does with it -- the pane hide, the count
+-- that has to agree with it -- is driven in test_popout_page_tools.lua.
+local function keyList(keys)
+    local names = {}
+    for k in pairs(keys) do names[#names + 1] = k end
+    table.sort(names)
+    return table.concat(names, ",")
+end
+
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+    local row = stripRow({ label = "Told", db = db, count = 5, window = win,
+                           footerStrip = true, toggle = { key = "on" } })
+
+    -- Wired BEFORE anything is hoisted, which is the order the Frame page uses:
+    -- it claims its keys (and wires this) before it declares its hoists.
+    local seen = {}
+    local ret = row:SetOnShownKeysChanged(function(_, keys) seen[#seen + 1] = keyList(keys) end)
+    eq(ret, row, "told: the setter is chainable, like every other one on this row")
+    eq(#seen, 0, "told: a row with nothing hoisted announces nothing on the way in")
+
+    -- The declaration is the first thing that puts keys on the plate, and it
+    -- lays the row out itself rather than waiting for a width to move.
+    row:SetHoistedControls(twoSliders(db, {}))
+    eq(row:GetShownHoistCount(), 2, "told: both cells are drawn at the row's build width")
+    eq(#seen, 1, "told: ...and the consumer was told exactly once")
+    eq(seen[1], "frameHeight,frameWidth", "told: ...with both keys on the plate")
+
+    -- ☠ A WIDTH-ONLY DRAG SAYS NOTHING. 401 puts the pair on ONE line, 260 stacks
+    -- them on two -- a different placement, at a different cell width, of exactly
+    -- the same two keys.
+    widen(row, 401)
+    eq(row:GetShownHoistCount(), 2, "told: a generous width puts both on one line")
+    eq(#seen, 1, "told: ...and says nothing, because nothing joined or left")
+    widen(row, 260)
+    eq(row:GetShownHoistCount(), 2, "told: narrowing to one cell a line still draws both")
+    eq(#seen, 1, "told: ...and still says nothing")
+
+    -- THE FOLD, which is the something-to-EMPTY case: below the floor there is no
+    -- control left to draw, and the pane's copies have to come back.
+    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    eq(row:GetShownHoistCount(), 0, "told: under the floor the row folds")
+    eq(#seen, 2, "told: ...and folding to nothing IS an announcement")
+    eq(seen[2], "", "told: ...carrying an empty set")
+
+    -- ...and widening past the floor brings them back, once.
+    widen(row, 401)
+    eq(#seen, 3, "told: widening past the floor announces the keys again")
+    eq(seen[3], "frameHeight,frameWidth", "told: ...both of them")
+
+    -- The set handed over is the row's OWN live table, which is why the contract
+    -- says read it and never keep it: the next layout clears and refills it.
+    local held
+    row:SetOnShownKeysChanged(function(_, keys) held = keys end)
+    local first = held
+    check(first ~= nil, "told: a consumer wired late is handed the set at once")
+    widen(row, LABEL_X + M.padX + MIN_CONTROL - 1)
+    eq(held, first, "told: every announcement hands back the same table")
+    eq(next(held), nil, "told: ...which the fold has already emptied")
+
+    -- ...and a consumer can be taken off again.
+    row:SetOnShownKeysChanged(nil)
+    held = "untouched"
+    widen(row, 401)
+    eq(held, "untouched", "told: clearing the hook stops the announcements")
+end
+
+-- THE GATE is the other way a key leaves the plate with the width standing still
+-- -- and it is the path a USER takes, through the row's own write.
+do
+    local win = window()
+    local db = { on = false, moverW = 40, moverH = 20 }
+    local function gate(d) return (d or db).on and true or false end
+    local row = stripRow({ label = "Gated told", db = db, toggle = { key = "on" },
+                           count = 5, window = win, footerStrip = true })
+    row:SetHoistedControls({
+        { name = "Handle Width", kind = "slider", key = "moverW", db = db,
+          min = 5, max = 500, step = 1, visible = gate },
+        { name = "Handle Height", kind = "slider", key = "moverH", db = db,
+          min = 5, max = 500, step = 1, visible = gate },
+    })
+    widen(row, 401)
+    eq(row:GetShownHoistCount(), 0, "told: a gated-off feature draws nothing")
+
+    -- ⚠ WIRED WITH THE PLATE EMPTY, so there is nothing to say and nothing is
+    -- said -- the immediate call is for a consumer that arrived LATE to a plate
+    -- that already had keys on it, not a way of announcing an empty set twice.
+    local seen = {}
+    row:SetOnShownKeysChanged(function(_, keys) seen[#seen + 1] = keyList(keys) end)
+    eq(#seen, 0, "told: nothing on the plate, nothing announced")
+
+    row._Write(true)
+    eq(row:GetShownHoistCount(), 2, "told: switching the feature on brings its controls out")
+    eq(#seen, 1, "told: ...which the consumer is told about")
+    eq(seen[1], "moverH,moverW", "told: ...by name")
+    row._Write(false)
+    eq(row:GetShownHoistCount(), 0, "told: and switching it off takes them away again")
+    eq(#seen, 2, "told: ...which is an announcement of its own")
+    eq(seen[2], "", "told: ...with an empty set, so the pane's copies come back")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer

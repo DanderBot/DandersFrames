@@ -3999,6 +3999,16 @@ function GUI:CreatePopoutPageTools(page)
     -- one-word checkboxes is exactly the list the second track was written for.
     -- Omitted = absent = one track.
     local function PopoutContent(buildInto, innerColumns)
+        -- ☠ EVERY INSTANCE THIS FACTORY EVER BUILT, not only the eager one. A
+        -- hoisted control is the pane's own setting shown a second time on the
+        -- row's plate, and the pane's copy has to be HIDDEN while that is true --
+        -- one setting, one widget, one count. The pane the user is looking at may
+        -- be the SECOND instance (pin the panel, click the row again asks this
+        -- factory for content a second time), so a hide applied to the eager group
+        -- alone would leave that panel drawing the duplicate. The list is stamped
+        -- on every group built from it, which is how ClaimKeys -- handed exactly
+        -- one group -- reaches all of them.
+        local instances = {}
         local function fresh()
             local st = {}
             local holder = CreateFrame("Frame", nil, page.child)
@@ -4013,6 +4023,8 @@ function GUI:CreatePopoutPageTools(page)
                                                { chromeless = true, padding = 0,
                                                  innerColumns = innerColumns })
             st.group:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+            st.group.dfPaneInstances = instances
+            instances[#instances + 1] = st
             -- What a builder's own dropdowns and checkboxes call. Cheap, and
             -- deliberately NOT a page rebuild: a rebuild retires the row the user
             -- is clicking through.
@@ -4057,6 +4069,12 @@ function GUI:CreatePopoutPageTools(page)
             -- opt-out -- only opts.staticHeight silences it, and that would change
             -- what the classic page draws -- which is what made this necessary.
             pane.dfReflowPane = function() ReflowPane(st) end
+            -- ⚠ ...AND THE ROW'S SHOWN SET, for an instance built AFTER the row
+            -- last announced one. ClaimKeys applies a change to every instance that
+            -- existed at the time; this is the other half -- a `fresh()` built here
+            -- has never been told, and would open drawing the very control the
+            -- plate is already showing. The reflow below is the one it needs.
+            if instances.applyShown then instances.applyShown(st) end
             st.group:Show()
             ReflowPane(st)
         end, pending.group
@@ -4155,6 +4173,17 @@ function GUI:CreatePopoutPageTools(page)
     --
     -- ⚠ AND THE SAME WALK IS WHERE THE SEARCH BREADCRUMB IS PUT RIGHT -- see
     -- RowSection below, which is the third job this one pass does.
+    -- ...AND IT IS ANSWERED IN ONE PLACE, because there are now two callers. The
+    -- walk below resolves a widget's key in order to CLAIM it; the pane hide at
+    -- the foot of this function resolves the SAME widget's key to decide whether
+    -- the row is already drawing that setting. Two copies of the two-sources rule
+    -- above would be two chances for one of them to miss a colour picker.
+    local function KeyOf(w)
+        local se = w and w.searchEntry
+        local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
+        return (type(k) == "string") and k or nil
+    end
+
     local function ClaimKeys(row, group, extra)
         if not row then return end
         -- The row's own name, ABOVE the group guard: a row is worth naming even
@@ -4167,8 +4196,8 @@ function GUI:CreatePopoutPageTools(page)
         for _, e in ipairs(group.groupChildren) do
             local w  = e.widget
             local se = w and w.searchEntry
-            local k  = (se and (se.dbKey or se.searchKey)) or (w and w.overrideDbKey)
-            if type(k) == "string" then
+            local k  = KeyOf(w)
+            if k then
                 page._popoutRowForKey[k] = row
                 claimed[#claimed + 1] = k
             end
@@ -4192,6 +4221,58 @@ function GUI:CreatePopoutPageTools(page)
         for _, k in ipairs(extra or {}) do
             page._popoutRowForKey[k] = row
             claimed[#claimed + 1] = k
+        end
+
+        -- ☠ AND THE PANE LOSES ITS COPY OF WHATEVER THE ROW IS ALREADY DRAWING.
+        -- The strip promises "3 more settings" and the panel then opened with five,
+        -- two of them the sliders the user had just looked at on the plate. A key
+        -- on the plate is HIDDEN in the pane, never removed: the fold, the split
+        -- and the gate all take a key back off the plate, and the pane's copy has
+        -- to come straight back when they do -- a folded row must still leave the
+        -- setting reachable somewhere.
+        --
+        -- ⚠ THE KEYS ARE STILL CLAIMED, every one of them. Reset Group, Hold:
+        -- Defaults, the amber tick and the undo all read `claimed` above and none
+        -- of them cares which widget is on screen -- so the row's own control
+        -- visibly jumps on a reset, which is the right feedback.
+        --
+        -- ⚠ THIS IS WHERE THE ROW AND THE FACTORY MEET, and neither knows the
+        -- other. The row knows which KEYS are on its plate and nothing about
+        -- widgets; the factory knows which WIDGETS it built and nothing about the
+        -- row. The link is the list PopoutContent stamps on every group it builds,
+        -- so the one group handed to this verb names every instance of its own
+        -- factory -- the eager one the walk above just read, and any later
+        -- `fresh()` alike.
+        --
+        -- ⚠ AND IT HAS TO WORK IN EITHER ORDER. A page may claim its keys
+        -- BEFORE it declares its hoists (the Frame page does: ClaimKeys, the tick,
+        -- the footer, then RegisterHoistedToggle) or after. The announcement from
+        -- the row's own layout covers the first; the immediate call inside
+        -- SetOnShownKeysChanged covers the second.
+        local instances = group.dfPaneInstances
+        if instances and row.SetOnShownKeysChanged then
+            local function applyShown(st, shown)
+                local g = st.group
+                if not (g and g.SetChildHidden and g.groupChildren) then return end
+                for _, e in ipairs(g.groupChildren) do
+                    local k = KeyOf(e.widget)
+                    g:SetChildHidden(e.widget, (k and shown and shown[k]) or false)
+                end
+            end
+            -- What a pane mounted LATER asks for: the set as it stands right then,
+            -- because an instance built after the last announcement never heard it.
+            -- rawget, the convention every private-field read in this pack follows:
+            -- a row that has never shown a key simply has not got the field.
+            instances.applyShown = function(st) applyShown(st, rawget(row, "_shownKeys")) end
+            row:SetOnShownKeysChanged(function(_, shown)
+                for _, st in ipairs(instances) do
+                    applyShown(st, shown)
+                    -- The closed ones are skipped for the reason ReflowMounted
+                    -- skips them: a panel that is down has nothing to re-flow, and
+                    -- the marks above are already right for when it comes back up.
+                    if not (st.po and st.po.closed) then ReflowPane(st) end
+                end
+            end)
         end
     end
 
