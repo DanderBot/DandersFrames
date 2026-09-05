@@ -4740,16 +4740,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- split on -- an out-of-combat and an in-combat value, plus a hover option that
         -- shows the in-combat value while the mouse is on a frame out of combat.
         --
-        -- ☠ A ROW WITH NO TICK, and that is a judgement rather than an omission.
-        -- Every other converted group on this page has one boolean that means
-        -- "am I doing anything at all"; this one does not. frameFadeSplitCombat
-        -- looks like a candidate and is the wrong answer twice over: it is a MODE
-        -- rather than an enable (both states fade), and it HIDES the global
-        -- slider, so a row tick that switched it off would grey the one control
-        -- the group exists for. So the row is a way in and nothing else -- the
-        -- kit draws no tick, reserves its column so the row still lines up with
-        -- Border and Border Shadow above it, and the group reads as permanently
-        -- on, which it is.
+        -- ☠ THE TICK IS frameFadeEnabled, AND IT IS NOT frameFadeSplitCombat.
+        -- The row went a whole release without one because the group had no
+        -- boolean meaning "am I doing anything at all" -- and the candidate that
+        -- looked like one was wrong twice over: the split is a MODE rather than an
+        -- enable (both states fade), and it HIDES the global slider, so a row tick
+        -- that switched it off would grey the one control the group exists for.
+        -- So the missing boolean was ADDED (Config.lua, defaulting true) rather
+        -- than borrowed, and the engine reads it before anything else it fades on
+        -- (DF:GetFrameBaseAlpha). Off means alpha 1, not alpha 0.1.
         local function RefreshFrameFade()
             if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
             -- Pets re-apply their fade only on a range-cache miss; flush it so the
@@ -4767,6 +4766,19 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- out of the source and checks it against the inventory it had inline.
         local function BuildFrameFadeGroup(tools2)
             local group, parent = tools2.group, tools2.parent
+
+            -- Suppressed when the ROW carries this tick. Still built in classic,
+            -- where it is the group's only on/off control.
+            if not tools2.hoistToggle then
+                local ffEnable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable Frame Fade"], db, "frameFadeEnabled", RefreshFrameFade), 30)
+                ffEnable.keepEnabled = true
+            end
+            -- ⚠ THE GROUP GATE STAYS INSIDE THE BUILDER, as it does on every other
+            -- hoisted-tick group on this page: classic greys its own children off
+            -- this, the pane has to do the same, and one builder serving both is
+            -- what stops the two drifting.
+            group.disableChildrenOn = function(d) return not d.frameFadeEnabled end
+
             local ffGlobal = group:AddWidget(GUI:CreateSlider(parent, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
             ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
             ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
@@ -4828,14 +4840,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Seven, which is the whole group: nothing is hoisted onto the row,
-            -- because there is no tick to hoist. Checked against what the builder
-            -- mounts by test_frame_page_builders.lua.
+            -- Seven: the global slider, the split and its two values, the two
+            -- hover/instance options and the hover scope. The enable tick is
+            -- HOISTED onto the row, so it is not one of them -- the same
+            -- arithmetic every other hoisted-tick row on this page does. Checked
+            -- against what the builder mounts by test_frame_page_builders.lua.
             local FRAME_FADE_COUNT = 7
+
+            -- ☠ NOT RefreshFrameFade ON ITS OWN, and not GUI:RefreshCurrentPage
+            -- either. The engine half is RefreshFrameFade; the PANE half is the
+            -- reflow, which is what re-runs the group's disableChildrenOn and greys
+            -- the seven controls behind the row while the fade is off. A page
+            -- rebuild would do both and also retire the row being clicked, whose
+            -- write path calls row.Refresh() after this returns.
+            local function OnFrameFadeToggle()
+                RefreshFrameFade()
+                self:RefreshStates()
+                tools.ReflowMounted()
+            end
 
             local fadeMount, fadeContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFrameFadeGroup({
                     group = group, parent = holder,
+                    hoistToggle = true,
                     -- The pane's own reflow, NOT self:RefreshStates alone: the
                     -- split checkbox drives three hideOn predicates inside this
                     -- group, so the pane changes height when it is clicked and
@@ -4850,18 +4877,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- its own under a "Frame Fade" header sitting directly above a row
             -- labelled "Frame Fade", says the words twice for no gain.
             local fadeRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
-                label   = L["Frame Fade"],
-                db      = tools.RowDB,
-                summary = FrameFadeSummary,
-                count   = FRAME_FADE_COUNT,
-                window  = DF.GUIFrame,
-                clipTo  = self,
-                build   = fadeMount,
+                label    = L["Frame Fade"],
+                db       = tools.RowDB,
+                toggle   = { key = "frameFadeEnabled" },
+                summary  = FrameFadeSummary,
+                count    = FRAME_FADE_COUNT,
+                onToggle = OnFrameFadeToggle,
+                window   = DF.GUIFrame,
+                clipTo   = self,
+                build    = fadeMount,
                 footerStrip = true,
             }))
             tools.ClaimKeys(fadeRow, fadeContent)
             tools.WireModifiedTick(fadeRow)
             tools.WireFooter(fadeRow, RefreshFrameFade)
+            tools.RegisterHoistedToggle(fadeRow, L["Enable Frame Fade"], "frameFadeEnabled", OnFrameFadeToggle)
         end
 
 

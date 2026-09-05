@@ -14,6 +14,7 @@
 - (DandersMover) The element panel now reads as part of the mover it is editing — matching outlines on both and a short glowing line joining them — and slides across when you pick a different mover. Pin it and it detaches: it stops following your selection and carries on editing its own mover, which wears a marker so you can see which one the panel belongs to. Editing in a panel pins it automatically (there is a toggle for that under the mover's Editor settings), and its cross closes it. Clicking empty space no longer deselects, so the camera and the rest of your UI stay usable while movers are unlocked; Esc backs out a step at a time.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
 - (Aura Designer) Border animations are back on aura icons. Placed icons and squares, aura bars, and filter, debuff and layout group icons can all animate their borders again, in combat included. Each one is set from its own Border section in the Aura Designer, alongside the colour and thickness. Aura icons always start on the effect's settled loop — only the frame border still plays the opening flash. (by Krathe)
+- (Frames) Frame Fade now has an on/off switch on its row, so you can turn fading off without touching the alpha values.
 
 ### Bug Fixes
 

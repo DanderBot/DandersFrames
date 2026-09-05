@@ -2383,6 +2383,11 @@ DF.PartyDefaults = {
     -- with the range / health fades. Global by default; the split swaps in an
     -- out-of-combat and an in-combat value (hover can borrow the in-combat one so a
     -- receded frame is still readable while you interact with it).
+    -- ⚠ TRUE, so nobody's frames change on upgrade: the migration fills this in for
+    -- every existing profile, and a profile that had fade set up has to keep it.
+    -- The resolver reads it as `== false` for the same reason -- a table that has not
+    -- been migrated yet holds nil, and nil has to mean on (Features/ElementAppearance.lua).
+    frameFadeEnabled = true,
     frameFadeAlpha = 1,
     frameFadeSplitCombat = false,
     frameFadeAlphaOutOfCombat = 1,

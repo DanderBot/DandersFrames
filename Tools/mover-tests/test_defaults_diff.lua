@@ -128,6 +128,16 @@ do
         "inherited table values are deep-copied per mode")
     check(deepsame(DF.RaidDefaults.absorbBarColor, DF.PartyDefaults.absorbBarColor),
         "...with equal contents")
+
+    -- ☠ TRUE IN BOTH MODES, AND DECLARED IN ONE. Frame Fade's enable is the
+    -- newest scalar to go in party-side only and be inherited, and BOTH halves of
+    -- that matter enough to pin: the default is TRUE, so nobody's fade switches
+    -- itself off on the upgrade that adds the key; and raid gets it from the
+    -- generator rather than a second literal, which is the one thing a
+    -- hand-maintained raid table used to get wrong. A false here is a silent
+    -- change to every existing profile on its first login.
+    eq(DF.PartyDefaults.frameFadeEnabled, true, "frame fade ships enabled for party")
+    eq(DF.RaidDefaults.frameFadeEnabled, true, "...and the generated raid table inherits it")
 end
 
 -- ============================================================

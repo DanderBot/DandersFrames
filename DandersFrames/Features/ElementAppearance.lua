@@ -126,6 +126,13 @@ end
 
 function DF:GetFrameBaseAlpha(db, frame)
     if not db then return 1 end
+    -- ☠ THE ENABLE GATE IS FIRST, and it is `== false` rather than `not`. Frame Fade
+    -- switched off means full opacity whatever the sliders and the split say, so it
+    -- has to answer before any of the branches below reads one -- and a profile that
+    -- has not been migrated yet holds NIL here, which must behave exactly as the
+    -- shipped default (true) does. `not db.frameFadeEnabled` would fade nobody's
+    -- frames on the first login after an upgrade.
+    if db.frameFadeEnabled == false then return 1 end
     if db.frameFadeSplitCombat then
         -- "In Instances" holds the in-combat value for the whole dungeon / raid /
         -- arena / BG visit -- the M+ complaint: combat drops between every pack, so

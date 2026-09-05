@@ -124,13 +124,18 @@ local function rowOpts(labelKey)
 end
 
 -- ============================================================
--- 1. FRAME FADE -- the toggle-less row
--- Seven controls behind one row, and NO tick on it: the group has no boolean
--- meaning "am I doing anything". frameFadeSplitCombat is a MODE (both states
--- fade) and it HIDES the global slider, so hoisting it would have given the row
--- a tick that greys the one control the group exists for.
+-- 1. FRAME FADE -- the row that had no tick, and now has a hoisted one
+-- Seven controls behind one row and an eighth ON it. The group had no boolean
+-- meaning "am I doing anything" for a whole release, and the candidate that
+-- looked like one was wrong twice over: frameFadeSplitCombat is a MODE (both
+-- states fade) and it HIDES the global slider, so hoisting IT would have given
+-- the row a tick that greys the one control the group exists for. So the
+-- boolean was ADDED -- frameFadeEnabled, shipped true -- rather than borrowed,
+-- and the row hoists that. The census below therefore carries eight and the
+-- declared count is seven, which is the arithmetic every hoisted-tick row does.
 -- ============================================================
 local FRAME_FADE = {
+    { "checkbox", "Enable Frame Fade",                 "frameFadeEnabled",            30 },
     { "slider",   "Global Frame Fade",                 "frameFadeAlpha",              55 },
     { "checkbox", "Separate Combat Fade",              "frameFadeSplitCombat",        30 },
     { "slider",   "Out of Combat Frame Fade",          "frameFadeAlphaOutOfCombat",   55 },
@@ -144,24 +149,82 @@ do
     local body = builderBody("BuildFrameFadeGroup")
     checkCensus(census(body), FRAME_FADE, "frame fade")
 
+    -- The hoist, and the arithmetic it implies. The checkbox is still IN the
+    -- builder -- the classic box needs it -- behind the one flag the popout
+    -- passes, so the pane mounts one fewer than the census.
+    check(body:find("if not tools2.hoistToggle then", 1, true) ~= nil,
+          "frame fade: the enable checkbox is skipped when the row has hoisted it")
+    check(body:find(".keepEnabled = true", 1, true) ~= nil,
+          "frame fade: ...and in classic it stays live under the group's own grey")
+    -- ⚠ INSIDE THE FADE MOUNT, not anywhere on the page. Twelve mounts on this
+    -- page pass this flag, so a page-wide find is green even when THIS one has
+    -- stopped passing it -- which is the whole bug the flag exists to prevent
+    -- (the pane would draw a second copy of the tick that is on the row).
+    local fadeMount = SRC:match(
+        "local fadeMount, fadeContent = tools.PopoutContent%(function%(group, holder, reflow%)(.-)\n            end%)")
+    check(fadeMount ~= nil, "frame fade: the pane mount is where the row says it is")
+    check(fadeMount and fadeMount:find("hoistToggle = true", 1, true) ~= nil,
+          "frame fade: ...and it is what passes the hoist flag")
+
+    -- ☠ THE GROUP GATE IS INSIDE THE BUILDER. Left on the page-level box, the
+    -- pane would not grey while the fade is off and the two layouts would
+    -- disagree about a setting that is one table read from the engine.
+    check(body:find("group.disableChildrenOn = function(d) return not d.frameFadeEnabled end", 1, true) ~= nil,
+          "frame fade: the group's grey-while-off gate is inside the builder")
+
     -- The count badge is a CLAIM about how much is behind the row. Read out of
     -- the page rather than retyped, so the two cannot drift.
     local declared = tonumber(SRC:match("local FRAME_FADE_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "frame fade: the page declares the row's count in one place")
-    eq(declared, #FRAME_FADE, "frame fade: ...and it is what the builder mounts")
-
-    -- Nothing is hoisted, so nothing is suppressed: all seven controls are in
-    -- the pane, and all seven keep the search entries their factories give them.
-    check(body:find("noEnableToggle") == nil and body:find("noShowToggle") == nil,
-          "frame fade: no toggle is suppressed, because none is hoisted")
+    eq(declared, #FRAME_FADE - 1, "frame fade: ...the census less the hoisted tick")
 
     local opts = rowOpts("Frame Fade")
-    check(opts:find("toggle", 1, true) == nil,
-          "frame fade: the row declares no toggle -- it is a way in, not a switch")
+    check(opts:find('toggle%s*=%s*{%s*key%s*=%s*"frameFadeEnabled"%s*}') ~= nil,
+          "frame fade: the row's tick is the group's own enable key")
     check(opts:find("summary%s*=%s*FrameFadeSummary") ~= nil,
           "frame fade: ...it does declare a summary")
     check(opts:find("count%s*=%s*FRAME_FADE_COUNT") ~= nil,
           "frame fade: ...and the declared count, not a literal")
+    check(opts:find("onToggle%s*=%s*OnFrameFadeToggle") ~= nil,
+          "frame fade: ...and a commit that is not a page rebuild")
+
+    -- The hoisted toggle is re-registered with search under the SAME label and
+    -- key the suppressed checkbox carried, or the setting becomes unfindable in
+    -- the popout layout while staying findable in classic.
+    local hoistedLabel, hoistedKey =
+        SRC:match('RegisterHoistedToggle%(fadeRow,%s*L%["([^"]+)"%],%s*"([^"]+)"')
+    eq(hoistedLabel, FRAME_FADE[1][2], "frame fade: the hoisted toggle is re-registered under its own label")
+    eq(hoistedKey,   FRAME_FADE[1][3], "frame fade: ...and its own db key")
+
+    -- ...and the label is a phrase the addon actually ships. A missing key does
+    -- not error -- AceLocale hands back the key itself -- so the only thing that
+    -- goes wrong is that translators never see the string and every non-English
+    -- client reads the row's tick in English forever.
+    check(df_file_source("Locales/enUS.lua"):find('L["' .. FRAME_FADE[1][2] .. '"] = true', 1, true) ~= nil,
+          "frame fade: the hoisted toggle's label is a shipped enUS phrase")
+
+    -- ☠ AND THE KEY IS EXPORTED. A setting left out of the category lists is
+    -- silently dropped from every profile string anyone shares -- nothing errors,
+    -- the value simply is not in the export and comes back as the default on the
+    -- other side. Its six neighbours are already named there.
+    check(options_file_source("Core/ExportCategories.lua"):find('"' .. FRAME_FADE[1][3] .. '"', 1, true) ~= nil,
+          "frame fade: ...and the key travels in a profile export")
+
+    -- ☠ THE COMMIT IS NOT A PAGE REBUILD: a rebuild retires every widget on the
+    -- page including the row being clicked, and the row's write path calls
+    -- row.Refresh() after this returns -- on a dead frame. It has to run BOTH
+    -- halves: the engine re-applies the alpha, the reflow re-runs the group gate
+    -- above so the seven controls behind the row grey with it.
+    local commit = SRC:match("local function OnFrameFadeToggle%(%)(.-)\n            end")
+    check(commit ~= nil, "frame fade: the popout commit is a named function")
+    if commit then
+        check(commit:find("RefreshCurrentPage", 1, true) == nil,
+              "frame fade: ...and never rebuilds the page")
+        check(commit:find("RefreshFrameFade()", 1, true) ~= nil,
+              "frame fade: ...it runs the group's own apply")
+        check(commit:find("tools.ReflowMounted()", 1, true) ~= nil,
+              "frame fade: ...and re-flows the pane so the gate greys what is behind it")
+    end
 
     -- ONE builder, BOTH layouts. This is the whole of "classic is identical to
     -- main": the classic branch does not carry a copy of the widgets, it mounts
@@ -181,6 +244,140 @@ do
         check(sum:find('L%["Alpha"%]') ~= nil, "frame fade: ...labelling the opacity with an existing key")
         check(sum:find('L%["Combat"%]') ~= nil, "frame fade: ...and the in-combat one with another")
         check(sum:find("\\194\\183", 1, true) ~= nil, "frame fade: ...separated by the convention's dot")
+    end
+end
+
+-- ============================================================
+-- 1b. FRAME FADE -- WHAT THE TICK ACTUALLY DOES
+-- A row tick that only greys a panel is decoration. The setting is read in ONE
+-- place -- DF:GetFrameBaseAlpha (Features/ElementAppearance.lua), which every
+-- writer of a whole frame's alpha multiplies by -- so that resolver is what has
+-- to answer for it, and it is driven here rather than eyeballed.
+--
+-- ☠ THE FUNCTION IS LIFTED OUT OF THE SHIPPED SOURCE, not copied into this file.
+-- ElementAppearance.lua cannot be loaded headlessly (event frames, a hundred
+-- element writers), but the resolver is a pure read over one table plus three
+-- client calls, so it compiles standalone against stubs for those three. A copy
+-- would pass forever after the real one changed; this cannot.
+--
+-- Two rules, and the second is the one that ships wrong:
+--   * FALSE -> 1, whatever the sliders and the split say. Off means full
+--     opacity, never alpha 0.1.
+--   * NIL   -> exactly what the function did before the key existed. A profile
+--     is migrated on load, but a table read a moment earlier still holds nil,
+--     and `not db.frameFadeEnabled` would have stopped every fade in the addon
+--     for anyone whose profile had not been through the migration yet.
+-- ============================================================
+do
+    local ENGINE = df_file_source("Features/ElementAppearance.lua")
+
+    -- Anchored on the newline + `end` at COLUMN ZERO: every `end` inside the
+    -- function is indented, so this is the function's own close.
+    local fnBody = ENGINE:match("function DF:GetFrameBaseAlpha%(db, frame%)\n(.-)\nend\n")
+    check(fnBody ~= nil, "frame fade engine: the resolver is where the page says it is")
+
+    if fnBody then
+        -- ⚠ THE CODE, NOT THE COMMENTS. The resolver's own comment names the
+        -- wrong spelling in order to warn about it, so a claim read off the raw
+        -- body would find `not db.frameFadeEnabled` in the very note saying never
+        -- to write it.
+        local code = fnBody:gsub("%-%-[^\n]*", "")
+
+        -- ☠ FIRST, before the split branch reads a single slider. Pinned as an
+        -- ORDER claim and not just a presence one: put the gate after the split
+        -- and a switched-off fade still returns the in-combat value in combat.
+        local gateAt  = code:find("db.frameFadeEnabled == false", 1, true)
+        local splitAt = code:find("db.frameFadeSplitCombat", 1, true)
+        check(gateAt ~= nil, "frame fade engine: the enable is read in the resolver")
+        check(gateAt and splitAt and gateAt < splitAt,
+              "frame fade engine: ...before the split branch reads any slider")
+        -- `== false`, never `not`: nil is a table the migration has not reached
+        -- and has to behave as the shipped default does.
+        check(code:find("not db.frameFadeEnabled", 1, true) == nil,
+              "frame fade engine: ...and a nil is not read as off")
+
+        local chunk = table.concat({
+            "local S = ...",
+            "local function AnyFrameHovered() return S.hovered end",
+            "local function UnitAffectingCombat() return S.combat end",
+            "local function IsInInstance() return S.instance end",
+            "local DF = {}",
+            "function DF:GetFrameBaseAlpha(db, frame)",
+            fnBody,
+            "end",
+            "return DF",
+        }, "\n")
+        local S = { hovered = false, combat = false, instance = false }
+        local mk = (loadstring or load)(chunk, "@GetFrameBaseAlpha")
+        check(mk ~= nil, "frame fade engine: ...and it compiles on its own")
+        local DFE = mk and mk(S)
+        check(DFE ~= nil, "frame fade engine: ...and returns the resolver")
+
+        if DFE then
+            -- The shape a switched-off profile is in: every fade value the group
+            -- can hold set to something that is NOT 1, so a resolver that read a
+            -- slider instead of the gate returns that number and is caught.
+            local function fadeDB(extra)
+                local d = {
+                    frameFadeEnabled          = false,
+                    frameFadeAlpha            = 0.10,
+                    frameFadeAlphaOutOfCombat = 0.20,
+                    frameFadeAlphaInCombat    = 0.30,
+                    frameFadeHoverScope       = "ALL",
+                }
+                for k, v in pairs(extra or {}) do d[k] = v end
+                return d
+            end
+            -- ...and the same table with the key GONE. Not `{ frameFadeEnabled =
+            -- nil }` above: a nil in a table constructor writes nothing, so the
+            -- base's `false` would have survived and every un-migrated assertion
+            -- below would have been testing the off case a second time.
+            local function unmigrated(extra)
+                local d = fadeDB(extra)
+                d.frameFadeEnabled = nil
+                return d
+            end
+
+            eq(DFE:GetFrameBaseAlpha(fadeDB()), 1,
+               "frame fade engine: off with the split off resolves to 1, not the global slider")
+            eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true })), 1,
+               "frame fade engine: ...off with the split on too, not the out-of-combat value")
+
+            S.combat = true
+            eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true })), 1,
+               "frame fade engine: ...and in combat, not the in-combat value")
+            S.combat = false
+
+            S.instance = true
+            eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true,
+                                              frameFadeInstanceUsesCombat = true })), 1,
+               "frame fade engine: ...and inside an instance")
+            S.instance = false
+
+            S.hovered = true
+            eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeSplitCombat = true,
+                                              frameFadeHoverUsesCombat = true })), 1,
+               "frame fade engine: ...and under the mouse")
+            S.hovered = false
+
+            -- NIL -- the table the migration has not reached -- answers exactly
+            -- as it did before the key existed. Asserted against the VALUES, so a
+            -- gate written `not db.frameFadeEnabled` returns 1 here and fails all
+            -- three.
+            eq(DFE:GetFrameBaseAlpha(unmigrated()), 0.10,
+               "frame fade engine: a nil enable still fades -- the global slider")
+            eq(DFE:GetFrameBaseAlpha(unmigrated({ frameFadeSplitCombat = true })), 0.20,
+               "frame fade engine: ...and the out-of-combat value under the split")
+            S.combat = true
+            eq(DFE:GetFrameBaseAlpha(unmigrated({ frameFadeSplitCombat = true })), 0.30,
+               "frame fade engine: ...and the in-combat value in combat")
+            S.combat = false
+
+            -- ...and so does an explicit true, which is what a migrated profile
+            -- holds.
+            eq(DFE:GetFrameBaseAlpha(fadeDB({ frameFadeEnabled = true })), 0.10,
+               "frame fade engine: an enabled fade is untouched by the gate")
+        end
     end
 end
 
