@@ -9,7 +9,8 @@ DF.CHANGELOG_TEXT = [===[
 
 ### New Features
 
-- (Aura Designer) New **Power Infusion Helper** for priests, added from the Other Buffs tab. One click marks the group members worth infusing: tick "Big cooldown" for anyone who has used a major damage cooldown, "Big cooldown with a trinket or potion" for someone going all in, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Choose where each signal appears — border, health bar, background, text colour, an icon or a square — pick which classes count, and add a sound; tanks and healers are skipped unless you say otherwise. (by Maelareth)
+- (Aura Designer) New **Power Infusion Helper** for priests, added from the Other Buffs tab. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Choose where each signal appears — border, health bar, background, text colour, an icon or a square — turn on icons to see which cooldowns are running, and include their trinkets, potions and racials to see how hard the burst is landing. Pick which classes count and add a sound; tanks and healers are skipped unless you say otherwise. (by Maelareth)
+- (Aura Designer) If you used the Power Infusion Helper in an earlier 5.4.0 alpha: the "Big cooldown with a trinket or potion" signal has been retired, and trinkets, potions and racials are now shown as icons alongside the cooldowns instead. Your helper updates itself the next time you open its settings. (by Maelareth)
 - (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon. It is the foundation for a shared positioning system across Danders addons — frame-to-frame snapping, anchoring elements to each other, undo/redo and save/discard. This release only includes the addon and its demo (`/mover demo`); DandersFrames' own frames move over to it in a later update.
 - (Frames) Party and raid frames can now be moved with DandersMover, including snapping them to and anchoring them onto other addons' elements.
 - (Frames) Pinned sets, the personal targeted-spells block and the targeted list can now be moved with DandersMover too, including anchoring a pinned set to any other element. Unlocking party frames shows only party movers, unlocking raid frames only raid movers (other addons' movers can be shown from the legend or DandersMover's settings), and a pinned set you had anchored to the frames through the Anchor To dropdown stays anchored.
@@ -18,6 +19,7 @@ DF.CHANGELOG_TEXT = [===[
 - (DandersMover) The element panel now reads as part of the mover it is editing — matching outlines on both and a short glowing line joining them — and slides across when you pick a different mover. Pin it and it detaches: it stops following your selection and carries on editing its own mover, which wears a marker so you can see which one the panel belongs to. Editing in a panel pins it automatically (there is a toggle for that under the mover's Editor settings), and its cross closes it. Clicking empty space no longer deselects, so the camera and the rest of your UI stay usable while movers are unlocked; Esc backs out a step at a time.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
 - (Aura Designer) Border animations are back on aura icons. Placed icons and squares, aura bars, and filter, debuff and layout group icons can all animate their borders again, in combat included. Each one is set from its own Border section in the Aura Designer, alongside the colour and thickness. Aura icons always start on the effect's settled loop — only the frame border still plays the opening flash. (by Krathe)
+- (Frames) Frame Fade now has an on/off switch on its row, so you can turn fading off without touching the alpha values.
 
 ### Bug Fixes
 
@@ -38,9 +40,15 @@ DF.CHANGELOG_TEXT = [===[
 - (Frames) Fix right-clicking a raid member who is far away or in another zone showing a pet menu instead of the player menu.
 - (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
 - (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.
+- (Settings) Fix an invisible patch swallowing clicks on some settings rows, so a dropdown would not open or a slider would not take a drag on the first try.
+- (Settings) A setting shown on a row is no longer repeated inside that row's settings panel.
+- (Settings) The first setting inside a panel now greys out with the rest when the row's switch is off.
 
 ### Changes
 
+- (Frames) Hover a setting's name on the page and its explanation shows, the same one the panel behind the row gives.
+- (Frames) The most-changed settings are back on the page. Frame Size shows Width and Height, Layout Direction shows the growth direction and where frames grow from, Border shows its thickness and style, and the Permanent Mover shows its handle size once it is switched on. Every row now opens from a strip along its bottom edge, so the way in is in the same place whether or not a row shows anything.
+- (Settings) A row whose settings are all shown on the row itself now offers to pin them in a panel you can keep open beside any page, and the "more settings" count follows the mode you are editing.
 - (Aura Designer) Redesigned. The preview, the settings and the indicator list are now one column that fits the normal settings window instead of forcing it wider, and each effect's settings open in their own panel rather than filling the page.
 - (Aura Designer) Adding an indicator is now one panel showing the whole job at once: pick the aura, pick how it should look, pick where it goes. Every look is drawn as a small picture of your own frame with that effect on it, and anything the aura already has is greyed out so you cannot add it twice. Starting from a filter is offered as an equal choice beside the spell search.
 - (Aura Designer) Choosing a filter for a new indicator now opens the full filter list, the same way the spell search does. Open any filter in that list to scroll through the spells inside it — the switched-off ones included — before you pick it.
