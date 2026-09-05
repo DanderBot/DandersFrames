@@ -36,13 +36,13 @@
 - (Frames) Fix stuttering and freezing when players join or leave the group, and when joining a large raid.
 - (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.
 - (Settings) Fix an invisible patch swallowing clicks on some settings rows, so a dropdown would not open or a slider would not take a drag on the first try.
-- (Frame) Hover a setting's name on the page and its explanation shows, the same one the panel behind the row gives.
 - (Settings) A setting shown on a row is no longer repeated inside that row's settings panel.
 - (Settings) The first setting inside a panel now greys out with the rest when the row's switch is off.
 
 ### Changes
 
-- (Frame) The most-changed settings are back on the page. Frame Size shows Width and Height, Layout Direction shows the growth direction and where frames grow from, Border shows its thickness and style, and the Permanent Mover shows its handle size once it is switched on. Every row now opens from a strip along its bottom edge, so the way in is in the same place whether or not a row shows anything.
+- (Frames) Hover a setting's name on the page and its explanation shows, the same one the panel behind the row gives.
+- (Frames) The most-changed settings are back on the page. Frame Size shows Width and Height, Layout Direction shows the growth direction and where frames grow from, Border shows its thickness and style, and the Permanent Mover shows its handle size once it is switched on. Every row now opens from a strip along its bottom edge, so the way in is in the same place whether or not a row shows anything.
 - (Settings) A row whose settings are all shown on the row itself now offers to pin them in a panel you can keep open beside any page, and the "more settings" count follows the mode you are editing.
 - (Aura Designer) Redesigned. The preview, the settings and the indicator list are now one column that fits the normal settings window instead of forcing it wider, and each effect's settings open in their own panel rather than filling the page.
 - (Aura Designer) Adding an indicator is now one panel showing the whole job at once: pick the aura, pick how it should look, pick where it goes. Every look is drawn as a small picture of your own frame with that effect on it, and anything the aura already has is greyed out so you cannot add it twice. Starting from a filter is offered as an equal choice beside the spell search.
