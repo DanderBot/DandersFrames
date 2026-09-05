@@ -951,19 +951,45 @@ function UI:CreateSettingsGroup(parent, width, opts)
         if not db then return end
 
         -- Group-level grey-out: set self.disableChildrenOn = function(db) ... end to
-        -- grey EVERY child when it returns true, EXCEPT the header and any widget
-        -- flagged widget.keepEnabled (the feature's own Enable toggle). Saves putting a
-        -- disableOn on every control; composes with per-widget disableOn (a child is
-        -- disabled if either says so). The checkbox factory auto-calls RefreshStates on
-        -- toggle, so the grey state updates live.
+        -- grey EVERY child when it returns true, EXCEPT the section header and any
+        -- widget flagged widget.keepEnabled (the feature's own Enable toggle). Saves
+        -- putting a disableOn on every control; composes with per-widget disableOn (a
+        -- child is disabled if either says so). The checkbox factory auto-calls
+        -- RefreshStates on toggle, so the grey state updates live.
+        --
+        -- ☠ THE SKIPS ARE MARKS, NOT POSITIONS. This read `i > 1` -- "except the
+        -- header", spelled as "except the first child" because in a classic settings
+        -- column the header IS the first child. A POPOUT PANE has no header: its
+        -- group is chromeless and its first child is a real control, so with the
+        -- row's own tick off the very first setting behind it stayed live and
+        -- clickable. That shipped on every hoisted-tick row -- Frame Fade's Global
+        -- Frame Fade slider, and the first control of Frame Tooltips, Health Fade
+        -- and Permanent Mover.
+        --
+        -- `isSectionHeader` is the contract, and the HOST stamps it: the kit has no
+        -- header factory of its own, so the mark is what a host SAYS rather than
+        -- something the kit guesses from a widget's shape (GUI:CreateHeader sets
+        -- it). Anything handed here without it is a control and greys with the rest.
+        --
+        -- ⚠ Belt-and-braces TODAY: that factory's container is a plain
+        -- CreateFrame("Frame") and nothing puts a SetEnabled on it, so the guard
+        -- below already skips a header before either mark is read. The mark is what
+        -- keeps that true the day a header grows one -- a section swatch that greys
+        -- with its section, say.
+        --
+        -- rawget on both, for LayoutChildren's `fullRow` reason: an ABSENT key has
+        -- to read as absent, and headlessly it does not -- the test stub answers
+        -- every unset key with a truthy no-op function, which would spare every
+        -- child from the gate and pass this loop for the wrong reason.
         local hasGroupGate = self.disableChildrenOn ~= nil
         local groupOff = hasGroupGate and self.disableChildrenOn(db) or false
 
-        for i, entry in ipairs(self.groupChildren) do
+        for _, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
             if widget.SetEnabled and (widget.disableOn or hasGroupGate) then
                 local shouldDisable = (widget.disableOn and widget.disableOn(db)) or false
-                if groupOff and i > 1 and not widget.keepEnabled then
+                if groupOff and not rawget(widget, "isSectionHeader")
+                            and not rawget(widget, "keepEnabled") then
                     shouldDisable = true
                 end
                 widget:SetEnabled(not shouldDisable)

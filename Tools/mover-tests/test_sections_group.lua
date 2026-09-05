@@ -866,6 +866,127 @@ do
 end
 
 -- ============================================================
+-- THE GROUP GATE -- WHAT IT SPARES
+-- ------------------------------------------------------------
+-- disableChildrenOn greys a whole group at once, and it spares exactly two
+-- things: the section HEADER (a caption has nothing to grey, and on a
+-- collapsible group it is also the fold handle) and any widget marked
+-- keepEnabled -- the feature's own Enable toggle, which has to stay clickable
+-- or the group could never be turned back on.
+--
+-- ☠ IT USED TO SPARE "CHILD NUMBER ONE". That is the same rule only while a
+-- header IS the first child, which is every classic settings box and NO popout
+-- pane: a pane's group is chromeless and headerless, so its first child is a
+-- real control, and it never greyed. Every hoisted-tick row shipped with its
+-- first setting live behind an off switch -- Frame Fade's Global Frame Fade
+-- slider, and the first control of Frame Tooltips, Health Fade, Permanent Mover.
+--
+-- So every claim below puts the mark somewhere POSITION cannot explain.
+-- ============================================================
+print("-- Group: the gate spares the header, wherever the header sits")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g.disableChildrenOn = function(d) return d.gateTest end
+
+    local head, a, b = control(20), control(30), control(30)
+    head.isSectionHeader = true
+    g:AddWidget(head, 20); g:AddWidget(a, 30); g:AddWidget(b, 30)
+
+    settingsDB.gateTest = true
+    g:RefreshChildStates()
+    check(head:IsEnabled(), "gate: the header stays live")
+    check(not a:IsEnabled(), "gate: ...and the control behind it greys")
+    check(not b:IsEnabled(), "gate: ...to the last one")
+
+    -- ...and the SECOND group puts the header at slot two, under a control. By
+    -- position that spares the control and greys the header; by mark it does
+    -- exactly the opposite, which is the whole of the change.
+    local p = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    p.disableChildrenOn = function(d) return d.gateTest end
+    local lead, late = control(30), control(20)
+    late.isSectionHeader = true
+    p:AddWidget(lead, 30); p:AddWidget(late, 20)
+
+    p:RefreshChildStates()
+    check(not lead:IsEnabled(), "gate: a control at slot one greys like any other")
+    check(late:IsEnabled(), "gate: ...and a header below it is still spared")
+    settingsDB.gateTest = nil
+end
+
+-- ☠ THE DEFECT, on its own. A popout pane's group has no header at all, so
+-- the control at slot one is precisely the one the row's tick is meant to grey.
+print("-- Group: a headerless pane greys its first control")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 260,
+                                       { chromeless = true, padding = 0 })
+    g.disableChildrenOn = function(d) return d.gateTest end
+
+    local slider, tick, drop = control(55), control(30), control(55)
+    g:AddWidget(slider, 55); g:AddWidget(tick, 30); g:AddWidget(drop, 55)
+
+    settingsDB.gateTest = true
+    g:RefreshChildStates()
+    check(not slider:IsEnabled(), "gate: the pane's FIRST control greys with the rest")
+    check(not tick:IsEnabled(), "gate: ...as does the second")
+    check(not drop:IsEnabled(), "gate: ...and the third")
+    settingsDB.gateTest = nil
+end
+
+print("-- Group: keepEnabled is spared wherever it sits")
+do
+    -- The classic shape: header, the group's own Enable, then what it gates. The
+    -- Enable is child TWO, so only its own mark can be what spares it.
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 280)
+    g.disableChildrenOn = function(d) return d.gateTest end
+    local head, enable, a = control(20), control(30), control(30)
+    head.isSectionHeader = true
+    enable.keepEnabled = true
+    g:AddWidget(head, 20); g:AddWidget(enable, 30); g:AddWidget(a, 30)
+
+    settingsDB.gateTest = true
+    g:RefreshChildStates()
+    check(enable:IsEnabled(), "gate: the group's own Enable stays clickable")
+    check(not a:IsEnabled(), "gate: ...and everything it gates greys")
+
+    -- ...and at slot one, which is the pane's shape when the row did NOT hoist
+    -- the tick: no header, the Enable first.
+    local p = host:CreateSettingsGroup(FakeUIFrame(), 260,
+                                       { chromeless = true, padding = 0 })
+    p.disableChildrenOn = function(d) return d.gateTest end
+    local lead, b = control(30), control(30)
+    lead.keepEnabled = true
+    p:AddWidget(lead, 30); p:AddWidget(b, 30)
+
+    p:RefreshChildStates()
+    check(lead:IsEnabled(), "gate: ...at slot one too")
+    check(not b:IsEnabled(), "gate: ...where it is still the only thing spared")
+    settingsDB.gateTest = nil
+end
+
+print("-- Group: an open gate greys nothing")
+do
+    local g = host:CreateSettingsGroup(FakeUIFrame(), 260,
+                                       { chromeless = true, padding = 0 })
+    g.disableChildrenOn = function(d) return d.gateTest end
+    local a, b, c = control(55), control(30), control(30)
+    g:AddWidget(a, 55); g:AddWidget(b, 30); g:AddWidget(c, 30)
+
+    settingsDB.gateTest = false
+    g:RefreshChildStates()
+    check(a:IsEnabled() and b:IsEnabled() and c:IsEnabled(),
+          "gate: with the gate open every child is live")
+
+    -- ...and the sweep DID reach them: close the gate and the same three grey, so
+    -- the claim above is the gate answering false rather than the loop never
+    -- getting there.
+    settingsDB.gateTest = true
+    g:RefreshChildStates()
+    check(not a:IsEnabled() and not b:IsEnabled() and not c:IsEnabled(),
+          "gate: ...and closing it greys all three")
+    settingsDB.gateTest = nil
+end
+
+-- ============================================================
 -- THE LAYOUT-HIDDEN CONTRACT
 -- ------------------------------------------------------------
 -- A widget can be taken off the page without being destroyed, and nothing
