@@ -78,11 +78,13 @@ These appear as GUI control labels, column headers, or dropdown options:
 | `"Center"` | Anchor position | The middle point of a frame. |
 | `"Clamp"` | As in "Clamp to Screen" | Prevent the frame from being dragged off-screen. |
 | `"Class"` | As in WoW class | Warrior, Mage, Priest, etc. — not a school class. |
+| `"Classes"` | Label in the Power Infusion Helper | Names the half of that box holding one tick per WoW class. Plural of the above, not a school sense. |
 | `"Clear"` | Button label | Remove/delete all items from a list. |
 | `"Clip"` | As in "Clip Border" | Visually cut off/trim the border at the frame edge. |
 | `"Color"` | Label or button | Opens a color picker or refers to a color setting. |
 | `"Console"` | Debug Console | A text output panel for debugging — not a game console. |
 | `"Container"` | Frame container | The parent frame that holds party/raid unit frames. |
+| `"Cooldowns"` | Tick in the Power Infusion Helper | One of four spell lists that can show as icons — a player's major damage abilities. The ability itself, not the waiting period. Also a label naming the other half of that box. |
 | `"Copy"` | Button label | Duplicate settings from one mode to another. |
 | `"Current"` | As in "Current Health" | The present value, not an electrical current. |
 | `"Custom"` | Dropdown option | User-defined, as opposed to a preset/default. |
@@ -114,6 +116,7 @@ These appear as GUI control labels, column headers, or dropdown options:
 | `"Hook"` | Attachment method | How the pet frame connects to its owner frame. |
 | `"Horizontal"` | Direction | Left-to-right layout. |
 | `"Icon"` | Small image | A buff/debuff icon, role icon, or status icon. |
+| `"Icons"` | Label in the Power Infusion Helper | Names the group of ticks choosing which spell lists appear as icons on a frame. Plural of `"Icon"` above. |
 | `"Import"` | Button label | Load settings from a shared string. |
 | `"Indicators"` | Settings category | Visual indicators (highlights, icons, spell tracking). |
 | `"Inset"` | Border inset | How far the border is pushed inward from the edge. |
@@ -135,10 +138,12 @@ These appear as GUI control labels, column headers, or dropdown options:
 | `"Overlay"` | Visual layer | A texture/color drawn on top of the health bar. |
 | `"Pips"` | Class power dots | Small indicators for class resources (Holy Power, Chi, etc.). |
 | `"Position"` | Settings section | X/Y offset and anchor point settings. |
+| `"Potions"` | Tick in the Power Infusion Helper | Combat potions a player drinks to boost damage. One of four spell lists that can show as icons. |
 | `"Power"` | Resource bar | Mana, Energy, Rage, etc. |
 | `"Priority"` | Sort/display priority | Which items appear first. |
 | `"Profile"` | Settings profile | A saved set of addon settings. |
 | `"Pull Timer"` | Raid tool | A countdown before pulling a boss. |
+| `"Racials"` | Tick in the Power Infusion Helper | Abilities a character has from its race rather than its class. One of four spell lists that can show as icons. |
 | `"Range"` | Distance check | Whether a unit is in spell range. |
 | `"Reverse"` | Bar fill option | Fill the bar in the opposite direction. |
 | `"Right"` | Anchor position | Right side of a frame. |
@@ -165,6 +170,7 @@ These appear as GUI control labels, column headers, or dropdown options:
 | `"Threshold"` | A trigger value | The point at which an effect activates (e.g., health %). |
 | `"Tooltip"` | Hover popup | Information shown when hovering over a frame. |
 | `"Top"` | Anchor position | Top of a frame. |
+| `"Trinkets"` | Tick in the Power Infusion Helper | Equipped items with an activated effect that boosts damage. One of four spell lists that can show as icons. |
 | `"Truncate"` | Text shortening | Cut long text to fit available space. |
 | `"Unlock"` | Button label | Allow the frame to be moved/resized. |
 | `"Up"` | Growth direction | Frames grow upward. |
