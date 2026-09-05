@@ -2298,6 +2298,32 @@ function UI:CreatePopoutRow(parent, opts)
 
     -- ---- the popout -----------------------------------------------
 
+    -- ☠ THE STRIP'S CLICK IS A TOGGLE. With the strip the only way in (section
+    -- 21), pressing it while its own panel is up used to RAISE that panel -- a
+    -- click that visibly did nothing, because the panel was already in front. In
+    -- game the ask was direct: "clicking the bottom bar of the row should close
+    -- the popout instead of just reopening it". So: a loose panel about this row
+    -- closes; anything else opens.
+    --
+    -- ⚠ A PINNED PANEL IS NOT CLOSED FROM HERE. Pinning is the user's gesture
+    -- for "keep this one up whatever I do next", and livePanel prefers a pinned
+    -- panel precisely so a re-click brings it forward (section 17.3). A strip
+    -- that closed it would undo the pin with the very click that used to honour
+    -- it; the panel's own cross is the way to take a pinned one down. The
+    -- empty-pane path is the same case one step earlier: the first click pins,
+    -- and every click after that raises.
+    --
+    -- The ROW's own OpenPopout keeps raise semantics: every unconverted page's
+    -- whole-plate click is unchanged, and a consumer verb that says "open" opens.
+    function row:TogglePopout()
+        local up = livePanel(row)
+        if up and not up.pinned then
+            up:Close("toggle")
+            return row
+        end
+        return row:OpenPopout()
+    end
+
     function row:OpenPopout()
         -- Without a window there is nothing to dock OUTSIDE of, and docking
         -- beside the row would put the panel on top of the list it came from --
@@ -2541,7 +2567,10 @@ function UI:CreatePopoutRow(parent, opts)
     -- has always used -- so the pool, the tether, the beam and the pin-on-an-empty
     -- pane are all reached by one path and cannot drift apart.
     if strip then
-        strip:SetScript("OnClick", function() row:OpenPopout() end)
+        -- TOGGLE, not open: the strip is the one control that says "this row's
+        -- panel", so pressing it while that panel is up means "put it away" --
+        -- see row:TogglePopout for why a PINNED panel is the exception.
+        strip:SetScript("OnClick", function() row:TogglePopout() end)
         strip:SetScript("OnEnter", function() row._stripHovered = true;  paintState() end)
         strip:SetScript("OnLeave", function() row._stripHovered = false; paintState() end)
     end

@@ -3805,3 +3805,58 @@ end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit
+
+-- ---- 24.20 THE STRIP'S CLICK IS A TOGGLE -----------------------------
+-- ☠ ASKED FOR THE MOMENT THE STRIP BECAME THE ONLY WAY IN: "clicking the
+-- bottom bar of the row should close the popout instead of just reopening it".
+-- A raise of a panel already in front is a click that does nothing visible.
+-- ⚠ A PINNED panel is the exception -- pinning means "keep this up", and the
+-- strip must not undo it; the panel's own cross does that.
+do
+    local win = window()
+    local db = { on = true }
+    local row = stripRow({ label = "Toggle me", db = db, count = 5, window = win,
+                           popoutKey = "toggle.row",
+                           footerStrip = true, toggle = { key = "on" } })
+    local strip = row.footerStrip
+
+    strip:GetScript("OnClick")(strip)
+    local po = row.popout
+    check(po ~= nil and not po.closed, "toggle: the first click opens the panel")
+    strip:GetScript("OnClick")(strip)
+    check(po.closed, "toggle: the second click CLOSES that panel rather than raising it")
+    eq(row.popout, nil, "toggle: ...and the row no longer names it")
+    eq(next(row._bound), nil, "toggle: ...nor is it bound any more")
+    strip:GetScript("OnClick")(strip)
+    check(row.popout ~= nil and not row.popout.closed, "toggle: a third click opens again")
+    check(row._active, "toggle: ...and the row is active once more")
+
+    -- The verb itself, for a consumer that wants the same gesture elsewhere.
+    row:TogglePopout()
+    check(row.popout == nil, "toggle: the verb closes an open loose panel")
+    row:TogglePopout()
+    check(row.popout ~= nil, "toggle: ...and opens when there is none")
+
+    -- ---- pinned: the strip raises, it does not close ----------------------
+    local pinned = row.popout
+    pinned:Pin(true)
+    eq(pinned.pinned, true, "toggle: (pinned by hand)")
+    strip:GetScript("OnClick")(strip)
+    check(not pinned.closed, "toggle: a click on the strip does NOT close a pinned panel")
+    eq(row.popout, pinned, "toggle: ...it raises that same panel, as section 17.3 says")
+    row:ClosePopout()
+    pinned:Close("test")
+
+    -- ---- the ROW's own verb keeps raise semantics --------------------------
+    local plain = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Whole plate", db = { on = true }, count = 3,
+        build = counting("toggleplain", 50), window = win,
+    }), 80)
+    plain:GetScript("OnClick")(plain)
+    local first = plain.popout
+    check(first ~= nil, "toggle: a plain row's click opens")
+    plain:GetScript("OnClick")(plain)
+    eq(plain.popout, first, "toggle: ...and a second click on the PLATE raises, not closes")
+    check(not first.closed, "toggle: (it is still open)")
+    plain:ClosePopout()
+end
