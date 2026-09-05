@@ -1502,6 +1502,21 @@ end
 -- again whenever the settings font does; a build-time anchor would pin the dot
 -- to whatever the width happened to be on the frame the widget was created in.
 --
+-- ⚠ THE LABEL IT HANGS OFF IS OVERRIDABLE, and it has to be. A consumer that
+-- HIDES the control's own caption and draws the setting's name itself -- the
+-- popout row's hoisted cell -- left this anchored to a rect nobody can see, and
+-- the dot came down on the WORDS of whatever was drawn over that rect. Setting
+-- `container.modifiedDotLabel` re-points it at the FontString the user is
+-- actually reading. Absent on every other control, which is every other control
+-- unchanged.
+--
+-- ⚠ ...AND THE OFFSET MAY BE CAPPED, by `container.modifiedDotMaxX`. The offset
+-- is a STRING WIDTH, and GetStringWidth measures the WHOLE string -- so a name
+-- stretched across a fixed cell to truncate still measures its untruncated self
+-- and the dot walks out of the cell to the right. The cap is the consumer's
+-- number because only the consumer knows the rect the dot has to stay inside;
+-- the kit only knows to obey it.
+--
 -- ⚠ AND IT DISPLACES THE "(Global: x)" TEXT. That text anchors to the label's
 -- ANCHOR right edge. For a label pinned only on its left (a slider's, a
 -- dropdown's) that edge IS the end of the text -- exactly where the dot now
@@ -1527,8 +1542,16 @@ local function AddModifiedDot(host, container, lbl, dbTable, dbKey)
         -- that some (db, key) pairs are "not the shipped value".
         local on = host:Call("isModifiedDefault", dbTable, dbKey) and true or false
         if on then
+            -- rawget for both, the convention this file already uses for an
+            -- optional private field (see the _skipOverrideIndicators probe
+            -- below): a headless frame answers an unset key with a truthy no-op
+            -- FUNCTION, and a plain read would anchor the dot to that.
+            local anchor = rawget(container, "modifiedDotLabel") or lbl
+            local x = (anchor:GetStringWidth() or 0)
+            local maxX = rawget(container, "modifiedDotMaxX")
+            if type(maxX) == "number" and x > maxX then x = maxX end
             dot:ClearAllPoints()
-            dot:SetPoint("LEFT", lbl, "LEFT", (lbl:GetStringWidth() or 0) + 4, 0)
+            dot:SetPoint("LEFT", anchor, "LEFT", x + 4, 0)
         end
         dot:SetShown(on)
         return on

@@ -105,6 +105,15 @@ local CELL_GAP            = M.cellGap
 local FOOTER_H            = M.footer
 local MIN_CONTROL, SPLIT_CELL = M.minControl, M.splitCell
 
+-- ⚠ THE MODIFIED DOT'S OWN TWO NUMBERS, RESTATED FROM Widgets.lua RATHER THAN
+-- TOKENISED. Over there the dot is SetSize(6, 6) and sits 4px past the end of
+-- the words; both are file-locals of that file and neither is a Theme token,
+-- and UI.PopoutRow's table is mirrored key-for-key by four test files -- so a
+-- fifth entry there would be a row token describing another file's widget.
+-- Named here because the CAP this row hands the kit is arithmetic on them:
+-- cellW - DOT_W - DOT_GAP puts the dot's RIGHT edge exactly on the cell's.
+local DOT_W, DOT_GAP = 6, 4
+
 -- ⚠ NO rowKind. rowKind drives UI.RowCompact's run-tightening, and a value that
 -- is not IN RowCompact silently BREAKS a run of checkboxes it sits between --
 -- the same trap the removed `toggle` entry was. A row with no kind at all is
@@ -1619,6 +1628,29 @@ function UI:CreatePopoutRow(parent, opts)
                     hit:SetWidth(max(min(w, cellW), 1))
                     hit:SetFrameLevel((h.nameBox:GetFrameLevel() or 0) + 1)
                 end
+                -- ☠ AND THE MODIFIED DOT'S CAP IS RE-STATED WITH THE CELL, for
+                -- the same reason and in the same pass. The kit places the dot
+                -- at the name's FULL string width, and this name is stretched
+                -- across the cell so it truncates -- so an uncapped dot walks
+                -- out past the cell's right edge on every name longer than the
+                -- cell. The cap is the only thing that keeps it inside, and only
+                -- the layout knows the width to cap it at.
+                --
+                -- ⚠ RE-RUN HERE rather than left to the next value write. The
+                -- dot is repainted off the control's own write path (a drag, a
+                -- reset, a profile switch), and a plain window drag moves the
+                -- cell's width without writing anything at all -- so nothing
+                -- else would ever re-ask, and the dot would sit at the previous
+                -- width's offset for as long as the panel stayed open.
+                local ctrl = h.control
+                if ctrl then
+                    ctrl.modifiedDotMaxX = max(cellW - DOT_W - DOT_GAP, 0)
+                    -- rawget, the convention above: an unset key answers a
+                    -- truthy no-op FUNCTION on a headless frame, and a control
+                    -- built without indicators has no update to run.
+                    local dotUpdate = rawget(ctrl, "UpdateModifiedDot")
+                    if type(dotUpdate) == "function" then dotUpdate(ctrl) end
+                end
                 cell:Show()
             end
         end
@@ -2138,6 +2170,14 @@ function UI:CreatePopoutRow(parent, opts)
                                    tostring(h.name), tostring(h.kind)))
                     end
                 end
+                -- ☠ THE MODIFIED DOT HANGS OFF THE NAME TIER, NOT THE CAPTION.
+                -- The kit anchors it at the end of the control's OWN label, and
+                -- this cell hides that label -- so the dot was placed off a rect
+                -- nobody can see, which happens to lie right under the name
+                -- tier, and came down on the letters of the name. The tier's
+                -- FontString is the name the user is actually reading here, so
+                -- that is what a mark on the name belongs to.
+                if c then c.modifiedDotLabel = nameFS end
                 h.control = c
             end
         end
