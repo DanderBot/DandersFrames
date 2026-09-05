@@ -4313,21 +4313,41 @@ function GUI:CreatePopoutPageTools(page)
         -- follow the mode, so the row asks the group instead: how many children
         -- would a layout place right now, gates and pane hide included.
         --
-        -- ⚠ THE EAGER GROUP, which is the instance the first click adopts and
-        -- the one the pane hide above has already run on. Should THAT instance be
-        -- pinned it shows every control again (see the pin wiring above) and the
-        -- number follows it up -- which is honest rather than stale: livePanel
-        -- prefers a pinned panel, so the next click on this row raises that very
-        -- panel, and the count is a promise about what a click opens.
+        -- ☠ AND IT COUNTS THE PANE AS THE LOOSE PANEL WOULD DRAW IT, whatever
+        -- the instance in hand is doing. The group asked is the EAGER one, which
+        -- is also the instance the first click adopts -- so pinning it un-hides
+        -- every control (the pin wiring above) and a count read off its marks
+        -- ROSE on the pin: the strip read "Pin settings in popout", the click
+        -- pinned, and the strip then flipped to "2 more settings" while a second
+        -- click merely raised the panel that was already there. Wrong words for a
+        -- right click.
+        --
+        -- So the marks are not consulted at all. `ignoreHostHidden` counts the
+        -- pane as though nothing had been hidden, and `skip` takes out exactly
+        -- what the ROW is drawing at the moment of the ask -- the same set the
+        -- hide reads, from the same place, so the two cannot disagree. A child the
+        -- mode has gated away is already out by then and is never taken out twice.
+        -- rawget, the convention every private-field read in this pack follows: a
+        -- row that has never shown a key simply has not got the field.
         --
         -- ⚠ AND IT IS WIRED LAST, after the hide is in place, because the setter
-        -- repaints the strip on the spot and a count taken before the marks were
-        -- applied would name the controls the plate is already drawing.
+        -- repaints the strip on the spot -- and while the number no longer depends
+        -- on the marks, the row's own shown-hoist count does decide between the
+        -- two phrases.
         --
         -- A mode switch rebuilds the page, so the provider is rebuilt with it and
         -- there is nothing to invalidate.
         if row.SetCountProvider and group.CountVisibleChildren then
-            row:SetCountProvider(function() return group:CountVisibleChildren() end)
+            row:SetCountProvider(function()
+                local shown = rawget(row, "_shownKeys")
+                return group:CountVisibleChildren({
+                    ignoreHostHidden = true,
+                    skip = function(w)
+                        local k = KeyOf(w)
+                        return (k and shown and shown[k]) and true or false
+                    end,
+                })
+            end)
         end
     end
 

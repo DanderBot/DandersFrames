@@ -146,7 +146,14 @@ end
 -- SetChildHidden), and the widget carries its own `hideOn`. `layoutDB` is
 -- resolved ONCE by the caller and handed in, because a layout asks this per
 -- child and the host call behind it is not free.
-local function EntryVisible(group, entry, index, layoutDB)
+--
+-- `ignoreHostHidden` drops the MIDDLE reason, for a caller that means a group
+-- other than the one it is holding -- see CountVisibleChildren. Threaded
+-- through the shared predicate rather than forked beside it: a second copy of
+-- the collapse and the gate would be a count that drifts from the layout it is
+-- describing, which is the whole bug this predicate exists to stop. The layout
+-- passes nothing, so nothing about it moves.
+local function EntryVisible(group, entry, index, layoutDB, ignoreHostHidden)
     if group.collapsed and index > 1 then return false end
     local w = entry and entry.widget
     if not w then return false end
@@ -155,7 +162,7 @@ local function EntryVisible(group, entry, index, layoutDB)
     -- for it to be left out of the layout, and a mark it set has to read
     -- exactly like a hideOn that fired -- same fold, same Hide, same
     -- announcement, same way back.
-    if entry.hostHidden then return false end
+    if entry.hostHidden and not ignoreHostHidden then return false end
     if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
     return true
 end
@@ -475,11 +482,30 @@ function UI:CreateSettingsGroup(parent, width, opts)
     -- for a pane holding five controls. The consumer asking is a settings row's
     -- footer strip, which has to name that number before the panel behind it has
     -- ever been opened.
-    group.CountVisibleChildren = function(self)
+    --
+    -- ⚠ AND THE CALLER MAY MEAN A GROUP OTHER THAN THE ONE IT IS HOLDING.
+    -- `opts.ignoreHostHidden` counts the entries as though no host mark had been
+    -- set, and `opts.skip(widget)` leaves out the ones the caller answers true
+    -- for. Together they are "how many would a layout place if this group were
+    -- marked the way I mean" -- which is what a settings row's strip needs: its
+    -- number describes the LOOSE panel, while the instance the consumer can see
+    -- may have been pinned, and a pinned panel un-hides everything.
+    --
+    -- ☠ A PREDICATE, NOT A LIST OF KEYS. The kit has never known what a key
+    -- is and is not learning here: the caller resolves its own and answers a
+    -- yes/no about a widget this already had in hand. And it is asked ONLY of
+    -- entries that got past the predicate, so a child that is gated away AND
+    -- named by the caller is one child out of the count, never two.
+    group.CountVisibleChildren = function(self, opts)
         local layoutDB = host:Call("getSettingsDB")
+        local ignoreHost = opts and opts.ignoreHostHidden
+        local skip = opts and opts.skip
         local n = 0
         for i, entry in ipairs(self.groupChildren) do
-            if EntryVisible(self, entry, i, layoutDB) then n = n + 1 end
+            if EntryVisible(self, entry, i, layoutDB, ignoreHost)
+               and not (skip and skip(entry.widget)) then
+                n = n + 1
+            end
         end
         return n
     end

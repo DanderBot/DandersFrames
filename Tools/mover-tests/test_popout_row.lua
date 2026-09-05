@@ -3244,8 +3244,17 @@ do
     -- reacts by re-flowing this very panel, and everything it reads -- the pin
     -- flag, the row's own bookkeeping -- has to be finished first.
     eq(seen[1].detached, true, "pinned: ...by which time the panel already reports itself pinned")
-    check(not po.srcOutline:IsShown(), "pinned: ...and its outline is already down")
-    check(not po.beam:IsShown(), "pinned: ...and its beam with it")
+    -- ⚠ AND WHAT A STRIP SOURCE HAS IS NO OUTLINE AT ALL. This row tethers
+    -- to its footer strip, and a strip DECLINES the source outline outright
+    -- (section 17.1) -- so the popout never builds one, and `po.srcOutline` here
+    -- is whatever an earlier section left on the pooled instance. Reading it
+    -- straight passed by luck. The honest claim is the declaration plus the
+    -- absence: the source says no, and nothing is traced on it.
+    eq(rawget(row.footerStrip, "popoutOutline"), false,
+       "pinned: the strip this panel tethers to declines the outline")
+    check(not (po.srcOutline and po.srcOutline:IsShown()),
+          "pinned: ...so there is none traced on it, pinned or otherwise")
+    check(not po.beam:IsShown(), "pinned: ...and its beam is down too")
     -- ...AND THE ROW'S OWN BOOKKEEPING IS FINISHED TOO. The consumer re-flows
     -- this very panel, and a re-flow that ran while the store still listed it as
     -- the SHARED instance would be laying out the panel the next click adopts.
@@ -3457,6 +3466,69 @@ do
     nothing:OpenPopout()
     check(nothing.popout ~= nil, "empty open: the click still opens a panel")
     check(not nothing.popout.pinned, "empty open: ...and leaves it docked, as the words said")
+    host:CloseAllPopoutRows("test")
+end
+
+-- ---- 24.17 AND THE WORDS DO NOT MOVE WHEN THE PANEL IS PINNED ------
+-- ☠ THE STRIP IS A PROMISE ABOUT WHAT A CLICK DOES, and pinning is the
+-- thing the click DID. A corner that read "Pin settings in popout", was
+-- clicked, and then flipped to a count would be describing a second panel
+-- that is never coming: livePanel prefers a pinned one, so the next click
+-- raises the very panel that is already open. Wrong words for a right click.
+--
+-- ⚠ THE ROW'S HALF OF IT, which is that the row adds nothing of its own on a
+-- pin: it paints what the provider answers and does not fall back to its
+-- declared arithmetic. What the CONSUMER answers across a pin -- the pane
+-- counted as the loose panel would draw it, whatever the instance in hand is
+-- doing -- is driven in test_popout_page_tools.lua, which owns Controls.lua.
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+
+    -- Declared NINE against a provider that says three, so the two can never be
+    -- mistaken for one another: the arithmetic would be 9 - 2 = 7.
+    local kept = stripRow({ label = "Words hold", db = db, count = 9, window = win,
+                            popoutKey = "pinwords.kept",
+                            footerStrip = true, toggle = { key = "on" } })
+    kept:SetCountProvider(function() return 3 end)
+    kept:SetHoistedControls(twoSliders(db, {}))
+    eq(kept:GetShownHoistCount(), 2, "pin words: two controls on the plate")
+    eq(kept.stripCount:GetText(), "3 more settings",
+       "pin words: the provider's number, before any click")
+    kept:OpenPopout()
+    check(not kept.popout.pinned, "pin words: a pane with something in it opens docked")
+    kept.popout:Pin()
+    check(kept.popout.pinned, "pin words: ...and pins on the gesture")
+    kept._LayoutPlate()
+    eq(kept.stripCount:GetText(), "3 more settings",
+       "pin words: ...and the layout repaints the same number over a pinned panel")
+    kept.Refresh()
+    eq(kept.stripCount:GetText(), "3 more settings", "pin words: ...as does the refresh")
+
+    -- The OFFER, which is the phrase the click answered.
+    local offer = stripRow({ label = "Offer holds", db = db, count = 9, window = win,
+                             popoutKey = "pinwords.offer",
+                             footerStrip = true, toggle = { key = "on" } })
+    offer:SetCountProvider(function() return 0 end)
+    offer:SetHoistedControls(twoSliders(db, {}))
+    eq(offer.stripCount:GetText(), "Pin settings in popout",
+       "pin words: an empty pane offers to pin")
+    offer:OpenPopout()
+    local pinned = offer.popout
+    eq(pinned.pinned, true, "pin words: ...and the click that read it pins")
+    offer._LayoutPlate()
+    eq(offer.stripCount:GetText(), "Pin settings in popout",
+       "pin words: ...and the offer reads the same once something repaints it")
+    offer.Refresh()
+    eq(offer.stripCount:GetText(), "Pin settings in popout",
+       "pin words: ...and after a refresh")
+    -- ...which is exactly what the unchanged words promise: the second click
+    -- raises that panel rather than making a second empty one.
+    offer:OpenPopout()
+    eq(offer.popout, pinned, "pin words: the second click raises the panel it pinned")
+    eq(offer.stripCount:GetText(), "Pin settings in popout",
+       "pin words: ...with the corner still saying the one true thing about it")
+
     host:CloseAllPopoutRows("test")
 end
 
