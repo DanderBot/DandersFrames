@@ -1185,6 +1185,20 @@ function UI:CreatePopoutRow(parent, opts)
         strip:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", 0, 0)
         strip:SetHeight(FOOTER_H)
         row.footerStrip = strip
+        -- ☠ AND IT DECLINES THE SHELL'S SOURCE OUTLINE (Popout's
+        -- _OutlineDeclined). The strip is the panel's tether, and the outline
+        -- the shell lays over a tether is either a square pixel border or a
+        -- full ring -- and this band is square along the top, where it meets
+        -- the plate's interior, and round along the bottom, where it IS the
+        -- plate's bottom edge. The square one gave the in-game report ("hard
+        -- corners on the bottom, not curved"); the ring would round the two
+        -- corners that are supposed to be flat.
+        --
+        -- Nothing is lost by saying no: the shared edge is already drawn from
+        -- this side -- the accent wash below and the accent hairline above it,
+        -- inside a plate wearing the accent ring -- and the beam and the
+        -- connection point still leave the strip.
+        strip.popoutOutline = false
 
         -- ☠ A BOTTOM-CORNERS-ONLY WASH, BUILT FROM THE TWO SHAPES Round.lua
         -- BAKES. The strip runs to the plate's bottom edge, so on a rounded plate
@@ -2116,6 +2130,24 @@ function UI:CreatePopoutRow(parent, opts)
         return row
     end
 
+    -- WHO WANTS TELLING WHEN ONE OF THIS ROW'S PANELS IS PINNED.
+    -- `fn(row, po)`, called from the row's own onPin below.
+    --
+    -- ☠ A PINNED PANEL IS NOT ABOUT THIS ROW ANY MORE. Pinning is the
+    -- gesture that detaches a panel from the row it came out of, and the user
+    -- may then change page -- so the row, and whatever it is drawing on its own
+    -- plate, is not on screen at all. A consumer that leaves things out of the
+    -- panel BECAUSE the plate is showing them (see SetOnShownKeysChanged) has to
+    -- put them back for that instance, and this is the moment it learns.
+    --
+    -- No immediate call, unlike the shown-keys hook: there is nothing to catch
+    -- up on. A panel pinned before the consumer wired this had no consumer to
+    -- hide anything for it either.
+    function row:SetOnPanelPinned(fn)
+        row._onPanelPinned = (type(fn) == "function") and fn or nil
+        return row
+    end
+
     -- ---- the popout -----------------------------------------------
 
     function row:OpenPopout()
@@ -2186,6 +2218,16 @@ function UI:CreatePopoutRow(parent, opts)
                 local s = storeFor(host)
                 if s.shared[p.key] == p then s.shared[p.key] = nil end
                 s.pinned[#s.pinned + 1] = p
+                -- ⚠ AFTER THE BOOKKEEPING, not before it. The consumer
+                -- reacts by re-flowing this very panel, and a re-flow that ran
+                -- while the store still listed it as the SHARED one would be
+                -- laying out an instance the next row click is about to adopt.
+                --
+                -- rawget, the convention this file uses for a private field
+                -- that may be absent: a headless frame answers an unset key
+                -- with a no-op FUNCTION, and a plain read would call it.
+                local told = rawget(row, "_onPanelPinned")
+                if told then told(row, p) end
             end,
         })
         -- Content BEFORE placement: the dock and the glide are both computed

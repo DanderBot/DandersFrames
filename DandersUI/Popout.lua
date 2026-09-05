@@ -1895,6 +1895,35 @@ function Popout:_OutlineRadius(region)
     return (type(r) == "number") and r or nil
 end
 
+-- ...AND A SOURCE MAY DECLINE THE OUTLINE ALTOGETHER --
+-- `region.popoutOutline = false`, the third field on the tether contract
+-- beside popoutInset and popoutRadius.
+--
+-- The footer STRIP is why it exists. The strip became the tether so the beam
+-- would leave the way IN rather than the middle of a plate that may now be
+-- three lines tall -- and a strip is square along the top, where it meets the
+-- plate's interior, and round along the bottom, where it IS the plate's bottom
+-- edge. Neither paint above can draw that: the pixel border traced a hard
+-- rectangle round a curved foot, reported in game as "selected rows have hard
+-- corners on the bottom, not curved", and a full ring at the plate radius
+-- would have rounded the two corners that are supposed to be square.
+--
+-- ☠ THIS IS THE SOURCE DECLINING, NOT THE SHELL SUPPRESSING, and the
+-- difference is the whole of the essay above. The trial's answer -- no outline
+-- while the panel is rounded -- guessed on every source's behalf and was right
+-- only where the source happened to own an accent ring; it is still refused.
+-- Here the strip says so ITSELF, because the strip already draws the shell's
+-- half of the shared edge: an accent wash while the panel is open and an accent
+-- hairline above it, inside a plate wearing the accent ring. A source that
+-- declares nothing is untouched, and so are the beam and the connection point --
+-- they say where the panel came from, which is still true.
+--
+-- rawget, like the radius above: a headless frame answers an unset key with a
+-- no-op FUNCTION, and a plain `~= false` would then be true for every source.
+function Popout:_OutlineDeclined(region)
+    return type(region) == "table" and rawget(region, "popoutOutline") == false
+end
+
 -- Paint the outline in whichever of the two it is wearing, and take the other
 -- one down. Both halves matter: a style switch under an open panel walks from
 -- one to the other, and a frame left carrying both draws a square box and a
@@ -1934,6 +1963,10 @@ function Popout:_UpdateSourceOutline()
                  and self.frame:IsShown() and not self:_TetherClipped()
     local region = want and self:_TetherRegion() or nil
     if region and not rectOf(region) then region = nil end
+    -- A DECLINING SOURCE READS AS NO SOURCE AT ALL here -- and only here, so
+    -- the beam and the connection point, which read the same region through
+    -- their own calls, are unaffected. See _OutlineDeclined.
+    if region and self:_OutlineDeclined(region) then region = nil end
     if not region then
         self:_HideSourceOutline()
         return

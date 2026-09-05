@@ -4254,6 +4254,22 @@ function GUI:CreatePopoutPageTools(page)
             local function applyShown(st, shown)
                 local g = st.group
                 if not (g and g.SetChildHidden and g.groupChildren) then return end
+                -- ☠ A PINNED PANEL SHOWS EVERYTHING, whatever the row says.
+                -- Pinning detaches a panel from the row it came out of, and the
+                -- user pins one in order to leave the page -- at which point the
+                -- row holding the width and height sliders is not on screen at
+                -- all, and a panel that had left them out would be a panel with
+                -- no way to reach them.
+                --
+                -- ⚠ ONE RULE, BOTH CALLERS. The shown-keys hook and the mount
+                -- closure both arrive here, and a pinned instance has to answer
+                -- the same either way -- a panel pinned and then folded past
+                -- would otherwise be hidden again by the announcement.
+                --
+                -- PER INSTANCE, not per row: pinning promoted this one out of the
+                -- pool, so the shared panel the row opens next is a fresh `st`
+                -- with no pin on it and hides exactly as before.
+                if st.po and st.po.pinned then shown = nil end
                 for _, e in ipairs(g.groupChildren) do
                     local k = KeyOf(e.widget)
                     g:SetChildHidden(e.widget, (k and shown and shown[k]) or false)
@@ -4273,6 +4289,19 @@ function GUI:CreatePopoutPageTools(page)
                     if not (st.po and st.po.closed) then ReflowPane(st) end
                 end
             end)
+            -- ...and the moment one of them is PINNED, that instance gets its
+            -- hidden copies back. Only that one: the strip's count is the row's
+            -- own arithmetic about the LOOSE panel and does not move on a pin.
+            if row.SetOnPanelPinned then
+                row:SetOnPanelPinned(function(_, po)
+                    for _, st in ipairs(instances) do
+                        if st.po == po then
+                            applyShown(st, nil)
+                            if not po.closed then ReflowPane(st) end
+                        end
+                    end
+                end)
+            end
         end
     end
 

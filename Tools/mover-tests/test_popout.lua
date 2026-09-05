@@ -2849,6 +2849,75 @@ do
 end
 
 -- ============================================================
+-- ...AND A SOURCE MAY DECLINE THE OUTLINE ALTOGETHER
+--
+-- ☠ A THIRD ANSWER, because two were not enough. The pack's footer STRIP
+-- is the tether for the row it sits on, and it is square along the top -- where
+-- it meets the plate's interior -- and round along the bottom, where it IS the
+-- plate's bottom edge. The pixel border traced a hard rectangle round that
+-- curved foot ("selected rows have hard corners on the bottom, not curved") and
+-- a full ring would have rounded the two corners that must stay flat.
+--
+-- ⚠ AND IT IS THE SOURCE'S DECISION, NOT THE SHELL'S. The essay in
+-- Popout.lua refuses "no outline while the panel is rounded" -- a guess made on
+-- every source's behalf -- and it is still refused. `popoutOutline = false` is a
+-- source declaring that it draws the shared edge itself.
+-- ============================================================
+
+-- A source that declines, the way a popout row's footer strip does.
+local function shySource()
+    local s = source(80, 40)
+    s.popoutOutline = false
+    return s
+end
+
+print("-- Popout: a source may decline the outline, and only the outline")
+do
+    local p = popout({ key = "outdecline" })
+    p:Follow(shySource())
+    check(rawget(p, "srcOutline") == nil,
+        "decline: nothing is even built for a source that says no")
+    -- THE OTHER TWO ARE NOT PART OF THE BARGAIN. They say where the panel came
+    -- from, which a decline does not make untrue.
+    check(p.beam:IsShown(), "decline: the beam is up as usual")
+    check(p.notch:IsShown(), "decline: ...and so is the connection point")
+    p:Close()
+end
+
+print("-- Popout: the decline is re-read on every retarget")
+do
+    -- One pooled panel is walked down a whole column of sources, so this cannot
+    -- be decided once at open: a panel that arrived on a declining source and
+    -- moved to an ordinary one must get its outline back, and the other way
+    -- round it must lose it rather than leave an accent rectangle behind.
+    local shy, ordinary = shySource(), source(80, 40)
+    local p = popout({ key = "outdeclineswap" })
+    p:Follow(ordinary)
+    check(p.srcOutline:IsShown(), "decline: on an ordinary source, the outline is up")
+    p:Follow(shy)
+    check(not p.srcOutline:IsShown(), "decline: retargeted onto a declining one, it goes")
+    p:Follow(ordinary)
+    check(p.srcOutline:IsShown(), "decline: and comes back on the way home")
+    eq(p.srcOutline._points[1][2], ordinary, "decline: ...re-anchored on the source it returned to")
+    p:Close()
+end
+
+print("-- Popout: only an explicit false declines")
+do
+    -- ☠ rawget, and `== false`. A headless frame answers an unset key with a
+    -- no-op FUNCTION, so a truthiness test on `region.popoutOutline` would read
+    -- "declared" for every source alive -- and a plain `~= false` would then be
+    -- true for all of them, which is the same bug wearing the other sign.
+    local s = source(80, 40)
+    check(type(s.popoutOutline) == "function",
+        "decline: the shim answers the unset key with a function, as WoW's frames do not")
+    local p = popout({ key = "outdeclinenil" })
+    p:Follow(s)
+    check(p.srcOutline:IsShown(), "decline: a source that never declared one still gets it")
+    p:Close()
+end
+
+-- ============================================================
 -- 18. THE TETHER OVERRIDE -- when something COVERS the surface
 -- ------------------------------------------------------------
 -- ☠ REPORTED IN GAME. Opening the Aura Designer's spell picker draws an overlay

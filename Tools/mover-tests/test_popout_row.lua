@@ -2729,17 +2729,49 @@ do
     }), 60)
     plain:OpenPopout()
     eq(plain.popout.tetherSource, plain, "tether: a row without a strip tethers to the row")
+    -- ...and it wears the shell's outline, because it declares no objection to
+    -- one. Every source that says nothing is untouched by the decline below.
+    check(plain.popout.srcOutline:IsShown(), "tether: ...and the outline is traced on it")
+    check(plain.popout.srcOutline._pxColor ~= nil,
+        "tether: a square plate declares no curve, so it gets the pixel border")
     -- ...and it goes away before the next one opens: every row on a host shares
     -- ONE pooled panel, and a panel adopted from another row keeps the outline it
     -- was already anchored on.
     plain:ClosePopout()
 
+    -- The same row with a CURVE declared gets the RING, exactly as before. The
+    -- decline is a third answer to "what shape is this source", not a rename of
+    -- either of the two that already existed.
+    local round = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "NoStripRound", db = { on = true }, count = 2, surface = R8,
+        build = counting("tetherround", 50), window = win,
+    }), 20)
+    round:OpenPopout()
+    local ring = UI:GetRoundedSurface(round.popout.srcOutline)
+    check(ring ~= nil and ring:IsShown(),
+        "tether: a plate that declares a radius still gets a ring at it")
+    round:ClosePopout()
+
     local row = stripRow({ label = "Tethered", count = 2, window = win, footerStrip = true })
     row:OpenPopout()
-    eq(row.popout.tetherSource, row.footerStrip,
+    local po = row.popout
+    eq(po.tetherSource, row.footerStrip,
         "tether: a row WITH one tethers to the strip -- the way in, not the title")
-    eq(row.popout.srcOutline._points[1][2], row.footerStrip,
-        "tether: ...so the source outline is traced on the strip")
+    -- ☠ ...AND THE STRIP DECLINES THE OUTLINE. Reported in game as
+    -- "selected rows have hard corners on the bottom, not curved": the shell has
+    -- two paints for a source, a square pixel border and a full ring, and this
+    -- band is square where it meets the plate's interior and round where it IS
+    -- the plate's bottom edge. Neither one describes it, so the strip says so on
+    -- the tether contract and the shell draws nothing.
+    eq(rawget(row.footerStrip, "popoutOutline"), false,
+        "tether: the strip declines the outline on the tether contract")
+    check(not po.srcOutline:IsShown(),
+        "tether: ...so nothing is traced round the strip's curved foot")
+    -- ⚠ THE DECLINE IS THE OUTLINE'S ALONE. The beam and the connection
+    -- point say where the panel came from, which is still true -- and the strip
+    -- is still the one rect all three of the shell's readers describe.
+    check(po.beam:IsShown(), "tether: the beam still leaves the strip")
+    check(po.notch:IsShown(), "tether: ...and so does the connection point")
 
     row:ClosePopout()
 end
@@ -3165,6 +3197,83 @@ do
     eq(row:GetShownHoistCount(), 0, "told: and switching it off takes them away again")
     eq(#seen, 2, "told: ...which is an announcement of its own")
     eq(seen[2], "", "told: ...with an empty set, so the pane's copies come back")
+end
+
+-- ---- 24.14 THE ROW TELLS ITS CONSUMER WHEN A PANEL IS PINNED ---------
+-- ☠ A PINNED PANEL IS NOT ABOUT THIS ROW ANY MORE. Pinning is the gesture
+-- that detaches a panel from the row it came out of, and the user pins one in
+-- order to CHANGE PAGE -- at which point the row, and the width and height
+-- sliders on its plate, are not on screen at all. A consumer that leaves
+-- settings out of a panel because the plate is showing them (24.13, and the
+-- pane hide it drives in test_popout_page_tools.lua) has to put them back for
+-- that one instance, so the row says when.
+--
+-- The kit still knows nothing about what any of it MEANS: it names the row and
+-- the instance, and the consumer decides.
+do
+    local win = window()
+    local db = { on = true, frameWidth = 100, frameHeight = 50 }
+    local row = stripRow({ label = "Pinned told", db = db, count = 5, window = win,
+                           footerStrip = true, toggle = { key = "on" } })
+    row:SetHoistedControls(twoSliders(db, {}))
+
+    local seen = {}
+    local ret = row:SetOnPanelPinned(function(r, po)
+        -- The per-host store, read AT THE MOMENT OF THE CALL -- see below for
+        -- why the two flags matter more than the fact of the call.
+        local s = rawget(host, "_popoutRows")
+        seen[#seen + 1] = { row = r, po = po, detached = po:IsPinned(),
+                            unshared = (s.shared[po.key] ~= po),
+                            listed   = (s.pinned[#s.pinned] == po) }
+    end)
+    eq(ret, row, "pinned: the setter is chainable, like every other one on this row")
+    -- ⚠ NO IMMEDIATE CALL, unlike the shown-keys hook. There is nothing to
+    -- catch up on: a panel pinned before the consumer was wired had no consumer
+    -- to leave anything out for it either.
+    eq(#seen, 0, "pinned: wiring it announces nothing")
+
+    row:OpenPopout()
+    local po = row.popout
+    eq(#seen, 0, "pinned: ...and opening a panel is not pinning one")
+
+    po:Pin()
+    eq(#seen, 1, "pinned: pinning tells the consumer, once")
+    eq(seen[1].row, row, "pinned: ...naming the row")
+    eq(seen[1].po, po, "pinned: ...and the instance that was pinned, not just any of them")
+    -- ☠ AND IT ARRIVES AFTER THE DETACHMENT, not during it. The consumer
+    -- reacts by re-flowing this very panel, and everything it reads -- the pin
+    -- flag, the row's own bookkeeping -- has to be finished first.
+    eq(seen[1].detached, true, "pinned: ...by which time the panel already reports itself pinned")
+    check(not po.srcOutline:IsShown(), "pinned: ...and its outline is already down")
+    check(not po.beam:IsShown(), "pinned: ...and its beam with it")
+    -- ...AND THE ROW'S OWN BOOKKEEPING IS FINISHED TOO. The consumer re-flows
+    -- this very panel, and a re-flow that ran while the store still listed it as
+    -- the SHARED instance would be laying out the panel the next click adopts.
+    eq(seen[1].unshared, true, "pinned: ...and the store has already let go of it as the shared one")
+    eq(seen[1].listed, true, "pinned: ...and already lists it among the pinned")
+
+    -- ⚠ PER ROW, AND PER INSTANCE. Pinning promoted that panel out of the
+    -- pool, so the next row to click gets a fresh one -- and what happens to THAT
+    -- one is its own row's business. A consumer told about a panel it never had
+    -- would put settings back into a panel that is still hiding them correctly.
+    local other = stripRow({ label = "Pinned other", db = db, count = 5, window = win,
+                             footerStrip = true, toggle = { key = "on" } })
+    other:OpenPopout()
+    check(other.popout ~= po, "pinned: the next row to click gets a fresh instance")
+    other.popout:Pin()
+    eq(#seen, 1, "pinned: ...and pinning that one says nothing to this row's consumer")
+
+    -- ...and a consumer can be taken off again.
+    local quiet = stripRow({ label = "Pinned quiet", db = db, count = 5, window = win,
+                             footerStrip = true, toggle = { key = "on" } })
+    local told = 0
+    quiet:SetOnPanelPinned(function() told = told + 1 end)
+    quiet:SetOnPanelPinned(nil)
+    quiet:OpenPopout()
+    quiet.popout:Pin()
+    eq(told, 0, "pinned: clearing the hook stops the announcements")
+
+    host:CloseAllPopoutRows("test")
 end
 
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
