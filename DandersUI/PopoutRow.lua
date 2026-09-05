@@ -1372,12 +1372,56 @@ function UI:CreatePopoutRow(parent, opts)
     -- only from the refresh, because the fold and the split move it and a window
     -- drag runs the layout alone -- a count that only followed a refresh would
     -- go on claiming three while five sit behind the click.
+    --
+    -- ☠ ...UNLESS A PROVIDER ANSWERS IT, and then the arithmetic is not
+    -- consulted at all. A DECLARED count cannot follow the mode: the Layout
+    -- Direction pane mounts one Growth Direction dropdown per mode plus a
+    -- party-only anchor, so a declared 3 less one hoisted control promised "2
+    -- more settings" over a pane holding exactly ONE control in party and none
+    -- in raid. A consumer that can see the pane counts what the pane will
+    -- actually draw and says so here. Rows without a provider -- every other
+    -- page -- keep their declared number, byte for byte.
+    --
+    -- ...AND WHEN THAT NUMBER IS ZERO the strip stops promising and starts
+    -- offering. There is nothing left behind the click, but the settings the
+    -- plate is drawing are still worth having beside ANOTHER page -- so the
+    -- words become the way to pin them, and the click that follows does exactly
+    -- that. Gated on the plate actually showing something: a row whose pane is
+    -- empty and whose plate is empty too has nothing to pin, and the count
+    -- phrase is the honest thing to say about it.
     local function paintStripCount()
         if not stripCount then return end
+        -- rawget, the convention this file uses for a private field that may be
+        -- absent: a headless frame answers an unset key with a no-op FUNCTION,
+        -- and a plain read would call it on every row.
+        local provider = rawget(row, "_countProvider")
+        if provider then
+            local left = max(provider() or 0, 0)
+            if left == 0 and shownHoists > 0 then
+                stripCount:SetText((L and L["Pin settings in popout"])
+                                   or "Pin settings in popout")
+            else
+                stripCount:SetText(format((L and L["%d more settings"]) or "%d", left))
+            end
+            return
+        end
         if not row._count then stripCount:SetText("") return end
         local left = max(row._count - shownHoists, 0)
         local fmt = L and L["%d more settings"]
         stripCount:SetText(format(fmt or "%d", left))
+    end
+
+    -- IS THE PANE BEHIND THIS ROW EMPTY, with the plate holding what it would
+    -- otherwise have shown? Exactly the state the strip offers to pin, asked in
+    -- ONE place so the words on the strip and what the click does cannot
+    -- disagree. False for a row with no provider: without one the row cannot see
+    -- its own pane, and guessing from a declared constant is the very thing the
+    -- provider exists to stop.
+    local function paneIsEmpty()
+        local provider = rawget(row, "_countProvider")
+        if not provider then return false end
+        if shownHoists <= 0 then return false end
+        return (provider() or 0) <= 0
     end
 
     -- ---- the summary ------------------------------------------------
@@ -2109,6 +2153,23 @@ function UI:CreatePopoutRow(parent, opts)
     -- than re-deriving the fold.
     function row:GetShownHoistCount() return shownHoists end
 
+    -- WHO ANSWERS THE STRIP'S NUMBER, when the row's own arithmetic cannot.
+    -- `fn() -> number`: how many settings are behind the click RIGHT NOW. Asked
+    -- fresh on every paint rather than cached, because the mode, a gate and the
+    -- pane hide all move it and none of them passes through this row.
+    --
+    -- The kit knows nothing about what is in the pane. Its consumer does: the
+    -- page hands back the pane group's own count of what a layout would place,
+    -- so the strip promises the number the panel will actually open with.
+    --
+    -- Painted at once, because a consumer wires this AFTER the row is built and
+    -- laid out and the strip is already carrying the declared number.
+    function row:SetCountProvider(fn)
+        row._countProvider = (type(fn) == "function") and fn or nil
+        paintStripCount()
+        return row
+    end
+
     -- WHO WANTS TELLING WHEN THE PLATE'S SET OF KEYS MOVES. `fn(row, keysSet)`,
     -- called from the layout -- not from the refresh -- because the fold, the
     -- split and the gate are all width, and a window drag runs the layout alone.
@@ -2173,6 +2234,12 @@ function UI:CreatePopoutRow(parent, opts)
         local up = livePanel(row)
         if up then
             swapTo(up, row)
+            -- ☠ AND NEVER LEFT LOOSE AND EMPTY. See the create path below: the
+            -- pane can go empty AFTER a panel was opened over it (a gate, a
+            -- widen that puts the last control on the plate), and the strip is
+            -- offering to pin from that moment on. Idempotent on a panel that is
+            -- already pinned, which is what livePanel usually hands back here.
+            if paneIsEmpty() then up:Pin(true) end
             up:Raise(true)
             row.popout = up
             perfStop(host, "popoutrow:open", t0)
@@ -2235,6 +2302,18 @@ function UI:CreatePopoutRow(parent, opts)
         -- height would land in the wrong place and then jump.
         swapTo(po, row)
         po:Follow(row, { outsideOf = row._window, clipTo = row._clipTo })
+        -- ☠ AN EMPTY PANEL IS NEVER OPENED LOOSE. With every one of its settings
+        -- on the plate the panel has nothing to draw, and a blank docked box
+        -- beside the row is not what the strip's words offered -- they offered to
+        -- PIN them, so the click that read them does it in one move. `Pin(true)`
+        -- is AutoPin's silent path: the confirm pop is feedback for a press on
+        -- the pin button, and the strip's own words are the confirmation here.
+        --
+        -- AFTER Follow, because Pin re-anchors the frame to the screen at the
+        -- rect it currently occupies and a panel that had not been placed yet
+        -- would be pinned at the origin. BEFORE the shared-store line below,
+        -- which is what keeps a pinned instance out of the pool.
+        if paneIsEmpty() then po:Pin(true) end
         row.popout = po
         if not po.pinned then storeFor(host).shared[row._key] = po end
         perfStop(host, "popoutrow:open", t0)

@@ -540,6 +540,24 @@ do
       and body:find("GrowDirectionOptions(true)", 1, true) ~= nil,
           "layout direction: the builder asks for both dialects by name")
 
+    -- ☠ AND SO IS THE ANCHOR MAP, for the same reason one control along.
+    -- The row now hoists Frames Grow From as well, so its START/CENTER/END map
+    -- is read by TWO dropdowns -- and a second typed copy of it is exactly the
+    -- drift the two growth-direction dialects carry a ☠☠ about.
+    check(SRC:find("local function GrowthAnchorOptions()", 1, true) ~= nil,
+          "layout direction: the anchor map is a page-scope function")
+    check(body:find("local anchorOptions = GrowthAnchorOptions()", 1, true) ~= nil,
+          "layout direction: ...which the pane's own dropdown asks for")
+    check(SRC:find("options = GrowthAnchorOptions()", 1, true) ~= nil,
+          "layout direction: ...and so does the hoisted one, rather than a copy")
+    -- ...and the map itself lives in exactly one place. Two literals would be
+    -- two chances for a fourth option to reach only one of the dropdowns.
+    local anchorLiterals = 0
+    for _ in SRC:gmatch('_order = { "START", "CENTER", "END" }, START= MAIN_START') do
+        anchorLiterals = anchorLiterals + 1
+    end
+    eq(anchorLiterals, 1, "layout direction: ...written out once and once only")
+
     -- ☠ THE FOOTER MUST NOT REBUILD THE PAGE. OnGrowthDirectionChanged defers a
     -- GUI:RefreshCurrentPage, and Hold: Defaults releases on the footer button's
     -- own mouse-up -- a rebuild between the press and the release would retire
@@ -1001,8 +1019,13 @@ do
             { "Frame Width",  "slider",   "frameWidth",          false },
             { "Frame Height", "slider",   "frameHeight",         false },
         } },
+        -- BOTH of this row's settings, and the anchor gated to party. With
+        -- only one hoisted, the strip promised two more settings over a pane
+        -- holding ONE dropdown in party and none at all in raid -- which is
+        -- the empty panel that started section 18.
         { row = "dirRow", census = LAYOUT_DIR, want = {
             { "Growth Direction", "dropdown", "growDirection",   false },
+            { "Frames Grow From", "dropdown", "growthAnchor",    true  },
         } },
         { row = "moverRow", census = PERM_MOVER, want = {
             { "Handle Width",  "slider", "permanentMoverWidth",  true },
@@ -1102,6 +1125,26 @@ do
     end
     check(SRC:find("local BORDER_COUNT, SHADOW_COUNT = 13, 4", 1, true) ~= nil,
           "hoist: ...and the border row still claims all thirteen behind it")
+
+    -- ---- what the strip says when there is nothing left behind it ----
+    -- ☠ A ROW CAN HOIST ITS WHOLE PANE, and Layout Direction now does: in
+    -- raid the pane draws nothing at all, in party one dropdown that is also on
+    -- the plate. The strip stops promising a count it cannot honour and offers
+    -- to pin instead, which needs a second phrase -- and the kit reads it
+    -- through host.hooks.L, so it has to ship beside the count phrase.
+    local ENUS = df_file_source("Locales/enUS.lua")
+    local moreAt = ENUS:find('L["%d more settings"] = true', 1, true)
+    local pinAt  = ENUS:find('L["Pin settings in popout"] = true', 1, true)
+    check(moreAt ~= nil, "locale: enUS still ships the count phrase")
+    check(pinAt ~= nil, "locale: ...and the pin phrase the empty pane paints instead")
+    -- BESIDE it, not filed alphabetically somewhere else: that block is
+    -- section-organised, and the two phrases are one corner of one strip.
+    check(moreAt and pinAt and pinAt > moreAt and (pinAt - moreAt) < 400,
+          "locale: ...directly beside it, where the strip's own comment is")
+    -- The kit is what paints it, so the kit is what has to ask for it.
+    local kit = ui_file_source("PopoutRow.lua")
+    check(kit:find('L["Pin settings in popout"]', 1, true) ~= nil,
+          "locale: ...and PopoutRow asks for it through the host's own L")
 
     -- ---- every summary takes the db, and nothing else -----------------
     -- ☠ THE SUBTRACTION IS GONE, AND SO IS THE ARGUMENT IT NEEDED. For one pass
