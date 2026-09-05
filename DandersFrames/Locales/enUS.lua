@@ -2941,12 +2941,9 @@ L["What to Show"] = true
 L["Big cooldown"] = true
 -- How the surface pickers behave. What the controls cannot show on their own: which
 -- surfaces stack, and which pick one winner.
-L["Health Bar and Background can show several indicators at once."] = true
-L["Border and Text colours show only one at a time."] = true
 -- Surface picker. Every surface is listed; one already held by a signal on the same spell list
 -- says what picking it does, because the two trade places rather than one being refused.
 L["%s (swap with %s)"] = true
-L["Big cooldown with a trinket or potion"] = true
 L["Already has active Power Infusion"] = true
 -- Clash warnings. Shown only on the three surfaces that take a single winner, and each names
 -- the remedy that already exists rather than describing the problem.
@@ -2962,19 +2959,16 @@ L["%s and %d more"] = true
 L["Another effect"] = true
 -- Shared settings. These live on the helper, not on each effect: they are statements about
 -- who you would infuse, and there is only one answer per player.
-L["Combat potions"] = true
-L["On-use trinkets"] = true
-L["Trinkets and Potions"] = true
 L["Never Show On"] = true
-L["Only applies when the group has roles."] = true
-L["Hide the helper while Power Infusion is on cooldown"] = true
+L["Groups without assigned roles show everyone."] = true
+L["Hide the helper while your Power Infusion is on cooldown"] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
 -- finer; the pointer names the editor that does go spell by spell, so the limit is not a
 -- dead end.
 L["Classes to Watch"] = true
-L["Tick what makes someone worth infusing. It shows on your group frames."] = true
-L["To add or remove single spells, open the list itself."] = true
-L["Untick a class to ignore its cooldowns."] = true
+L["Choose how the helper shows on your group frames."] = true
+L["To add or remove single cooldowns, edit the list in the Filter Designer."] = true
+L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
 -- on a filter-owned record, so it offers no row and no delete button for it either.
 L["Play a sound when someone becomes worth infusing"] = true
@@ -2982,15 +2976,21 @@ L["Only plays while the helper is showing."] = true
 -- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
 -- missing-mode render path is the one place the helper's cooldown gate cannot reach.
 L["Not available on a Power Infusion Helper signal."] = true
--- The icons controls: an "As icons" tick beside the colour dropdown on the two signals that
--- can be a list ("No colour" in the menu is what makes icons-only reachable), plus the
--- amplifiers include nested under burst's tick.
-L["As icons"] = true
-L["Their trinkets and potions as icons"] = true
+-- The icons row on the cooldown signal, and the three amplifier ticks nested under it.
+-- Amplifiers are one category with three sources: what makes a burst BIGGER, as against the
+-- cooldown list, which says a burst is happening at all. They are icons only -- a border
+-- lighting for a trinket on its own would be noise.
+L["Show icons"] = true
+-- Shown under a signal that has no colour and no icons -- a state the panel can reach and
+-- could not previously explain. Names both remedies; the second form is for a signal with no
+-- icons row of its own, where the menu is the only door.
+L["Cooldowns are not showing. Add a display from the dropdown, or tick '%s'."] = true
+L["Include trinkets"] = true
+L["Include potions"] = true
+L["Include racials"] = true
 L["Move and size the icons under Layout Groups."] = true
--- Row labels. The first two share one spell list on purpose, so without these the
--- rows read identically -- distinguishable only by their type badge.
+-- Row labels, so a signal names itself in the effects list rather than reading as its
+-- spell list. Resolved at render from the mark; never stored.
 L["PI Helper — Big cooldown"] = true
-L["PI Helper — Big cooldown with a trinket or potion"] = true
 L["PI Helper — Already has active Power Infusion"] = true
 --@end-do-not-package@
