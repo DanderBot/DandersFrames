@@ -1334,8 +1334,25 @@ end
 -- need to handle clicks independently.
 function CC:PropagateMouseOnChildren(frame)
     if not frame or not frame.GetChildren then return end
-    
-    local children = {frame:GetChildren()}
+
+    -- ☠☠ GUARD THE FUNCTION YOU CALL. The line above tests that the METHOD EXISTS; it
+    -- says nothing about whether CALLING it is permitted, and this call is the one place
+    -- in this function that was not pcall'd — despite the comment below promising
+    -- "everything here is pcall'd". GetChildren REFUSES to hand forbidden children to
+    -- tainted code and throws doing it:
+    --   bad argument #1 to '?' (Attempt to access forbidden object from code tainted by
+    --   an AddOn - Usage: local (scriptObject)* = self:GetChildren())
+    -- ⚠ The IsForbidden check below cannot prevent this. A child can pass it and still
+    -- have forbidden children OF ITS OWN, so the throw happens one level down, on the
+    -- recursion at the end of the loop.
+    -- ☠ And per the note below, a throw here does not skip one child — it abandons the
+    -- whole PLAYER_ENTERING_WORLD settle callback, taking ApplyGlobalBindings,
+    -- RunBindingRepair("zone-in") and ResolveColdStartProfile with it. Reported 126x in
+    -- one session (mist, live 5.3.1), i.e. click-casting recovery failing on every
+    -- zone-in that frame set was touched.
+    local ok, children = pcall(function() return { frame:GetChildren() } end)
+    if not ok or type(children) ~= "table" then return end
+
     for _, child in ipairs(children) do
         -- Everything here is pcall'd, and anything unreadable counts as "leave it
         -- alone". This walk recurses over EVERY child of every Blizzard frame we
