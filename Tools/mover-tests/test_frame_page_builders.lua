@@ -156,6 +156,42 @@ do
           "frame fade: the enable checkbox is skipped when the row has hoisted it")
     check(body:find(".keepEnabled = true", 1, true) ~= nil,
           "frame fade: ...and in classic it stays live under the group's own grey")
+
+    -- ☠ ...AND THE PANE'S FIRST CONTROL IS EXPECTED TO GREY. With the row
+    -- carrying the tick the enable checkbox is never built, so the Global Frame
+    -- Fade slider is child ONE of a group that has no header -- and the only mark
+    -- that would spare it from the gate below is a keepEnabled it must not have.
+    -- The kit used to spare child one by POSITION, which is why this row shipped
+    -- with a live slider sitting under an off switch.
+    local hoisted = body:match("if not tools2%.hoistToggle then.-\n            end\n(.*)")
+    check(hoisted ~= nil, "frame fade: the builder's hoisting half reads on its own")
+    if hoisted then
+        local paneFirst = census(hoisted)[1]
+        check(paneFirst ~= nil, "frame fade: ...and it mounts controls of its own")
+        if paneFirst then
+            eq(paneFirst.label, FRAME_FADE[2][2], "frame fade: ...the slider first")
+            eq(paneFirst.key,   FRAME_FADE[2][3], "frame fade: ...on the global alpha key")
+        end
+        eq(select(2, hoisted:gsub("%.keepEnabled", "")), 0,
+           "frame fade: ...and nothing the pane mounts is spared from the gate")
+    end
+
+    -- ...which only greys because the kit skips by MARK. `i > 1` was "except the
+    -- header" written as "except the first child" -- true of a classic box, false
+    -- of every pane, and the exact reason the slider above stayed live.
+    local sections = ui_file_source("Sections.lua")
+    check(sections:find("groupOff and i > 1", 1, true) == nil,
+          "frame fade: the group gate no longer spares child one by position")
+    check(sections:find('rawget(widget, "isSectionHeader")', 1, true) ~= nil,
+          "frame fade: ...it spares the header by its mark")
+    check(sections:find('rawget(widget, "keepEnabled")', 1, true) ~= nil,
+          "frame fade: ...and the feature's own Enable by its own")
+    -- The mark is the HOST's to stamp: the kit has no header factory, so the one
+    -- factory that makes section headers has to carry it or the gate greys every
+    -- classic header in the addon the day a header grows a SetEnabled.
+    check(options_file_source("GUI/SettingsWidgets.lua")
+            :find("container.isSectionHeader = true", 1, true) ~= nil,
+          "frame fade: ...which GUI:CreateHeader is what stamps")
     -- ⚠ INSIDE THE FADE MOUNT, not anywhere on the page. Twelve mounts on this
     -- page pass this flag, so a page-wide find is green even when THIS one has
     -- stopped passing it -- which is the whole bug the flag exists to prevent

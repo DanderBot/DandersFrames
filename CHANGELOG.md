@@ -38,6 +38,7 @@
 - (Settings) Fix an invisible patch swallowing clicks on some settings rows, so a dropdown would not open or a slider would not take a drag on the first try.
 - (Frame) Hover a setting's name on the page and its explanation shows, the same one the panel behind the row gives.
 - (Settings) A setting shown on a row is no longer repeated inside that row's settings panel.
+- (Settings) The first setting inside a panel now greys out with the rest when the row's switch is off.
 
 ### Changes
 

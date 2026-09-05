@@ -189,6 +189,13 @@ function GUI:CreateHeader(parent, text)
     container:SetSize(200, 25)
     container:Show()
     container.rowKind = "header"
+    -- The kit's "this is a section header" contract (DandersUI/Sections.lua --
+    -- see the note on the group gate). rowKind already says header, but that is
+    -- a LAYOUT-RUN kind: the two row factories deliberately set no rowKind at
+    -- all so RowCompact's run-tightening cannot see them, so it is not a field a
+    -- non-row widget can borrow to mean "header". This one carries only the
+    -- meaning, and the kit reads nothing else about the host to grey a group.
+    container.isSectionHeader = true
     -- Factory-owned slot, and fixed so ResolveRowHeight ignores whatever the call
     -- site passes. Headers were handed 25 in collapsible groups and 40 in plain
     -- ones -- the same widget, two rhythms, across ~200 sites. Owning it here
