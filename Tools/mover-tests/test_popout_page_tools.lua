@@ -952,6 +952,101 @@ do
     eq(shownIn(built[1]), 3, "second: widening takes the two out of the first panel again")
     eq(shownIn(second), 3, "second: ...and out of the second, which is the whole point of the list")
 
+    -- ---- ...UNLESS THE PANEL IS PINNED ---------------------------------
+    -- ☠ A PINNED PANEL SHOWS EVERY SETTING. Pinning detaches a panel from
+    -- the row it came out of, and the user pins one in order to CHANGE PAGE --
+    -- at which point the row carrying the width and height sliders on its plate
+    -- is not on screen at all, and a panel that had left them out would be a
+    -- panel with no way to reach them. So the hide above is the LOOSE panel's
+    -- rule, and a pinned instance opts out of it whatever the row says.
+    --
+    -- ⚠ WHAT THIS DRIVES AND WHAT IT DOES NOT. The shell's half -- Popout:Pin
+    -- flipping the flag and calling the row's onPin, and the row announcing that
+    -- to whoever asked -- is driven against a REAL Popout in test_popout_row.lua
+    -- (24.14). There is no shell in this file's private kit, so `pinPanel` below
+    -- is that contract in miniature: set the flag, then tell the row's consumer.
+    -- What is under test up here is what CONTROLS.LUA does once it is told.
+    local pinRow = kitHost:CreatePopoutRow(page.child, {
+        label = "Pinnable", db = tools.RowDB, count = #KEYS,
+        footerStrip = true, build = function() end,
+    })
+    pinRow:SetWidth(401)
+    local pinBuilt = {}
+    local pinMount, pinGroup = tools.PopoutContent(function(g)
+        local mine = {}
+        for _, key in ipairs(KEYS) do
+            local w = paneControl(key)
+            g:AddWidget(w, 30)
+            mine[#mine + 1] = w
+        end
+        pinBuilt[#pinBuilt + 1] = mine
+    end)
+    -- The row's own verb, captured on the way past rather than reached for
+    -- afterwards: what ClaimKeys registered is exactly what the shell would
+    -- eventually call, so the test plays the shell and nothing else is faked.
+    local pinHook
+    local realSetPin = pinRow.SetOnPanelPinned
+    pinRow.SetOnPanelPinned = function(self, fn)
+        pinHook = fn
+        return realSetPin(self, fn)
+    end
+    tools.ClaimKeys(pinRow, pinGroup)
+    check(pinHook ~= nil, "pin: the claim asks the row to tell it when a panel is pinned")
+    tools.RegisterHoistedToggle(pinRow, {
+        { name = "Frame Width", kind = "slider", key = "frameWidth",
+          min = 60, max = 300, step = 1 },
+        { name = "Frame Height", kind = "slider", key = "frameHeight",
+          min = 20, max = 300, step = 1 },
+    })
+    eq(pinRow:GetShownHoistCount(), 2, "pin: the row draws its two hoisted controls")
+
+    local function pinPanel(po)
+        po.pinned = true
+        pinHook(pinRow, po)
+    end
+
+    local pinnedPo, pinnedPane = fakePanel()
+    pinMount(pinnedPo, pinnedPane)
+    eq(shownIn(pinBuilt[1]), 3, "pin: the panel opens with the other three, like any loose one")
+    pinPanel(pinnedPo)
+    eq(shownIn(pinBuilt[1]), 5, "pin: pinning it puts every setting back")
+    eq(pinRow.stripCount:GetText(), "3 more settings",
+       "pin: the strip is the row's arithmetic about the LOOSE panel, so it does not move")
+
+    -- The row's next click asks the factory for content again, because the pin
+    -- promoted that instance out of the pool. That one is not pinned, so it hides
+    -- exactly as before -- the rule is per INSTANCE, not per row.
+    local loosePo, loosePane = fakePanel()
+    pinMount(loosePo, loosePane)
+    eq(#pinBuilt, 2, "pin: the next panel is a fresh instance through the same builder")
+    eq(shownIn(pinBuilt[2]), 3, "pin: ...and it opens hiding the two on the plate")
+    eq(shownIn(pinBuilt[1]), 5, "pin: ...while the pinned one still shows all five")
+
+    -- ☠ AND THE ROW GOES ON MOVING UNDERNEATH BOTH OF THEM. The fold reaches
+    -- every instance, so the loose one gets its copies back -- and the widening
+    -- that follows must NOT take them off the pinned one again, which is the one
+    -- way a rule written in the announcement rather than in the apply would fail.
+    pinRow:SetWidth(M0.padX + M0.check + M0.labelGap + M0.padX + M0.minControl - 1)
+    pinRow._LayoutPlate()
+    eq(shownIn(pinBuilt[2]), 5, "pin: the fold puts all five back in the loose panel")
+    eq(shownIn(pinBuilt[1]), 5, "pin: ...and leaves the pinned one whole")
+    pinRow:SetWidth(401)
+    pinRow._LayoutPlate()
+    eq(shownIn(pinBuilt[2]), 3, "pin: widening takes them out of the loose panel again")
+    eq(shownIn(pinBuilt[1]), 5, "pin: ...and STILL leaves the pinned one whole")
+
+    -- ⚠ AND A PIN ANSWERS FOR THE INSTANCE IT NAMES, NOT FOR THE LIST. The
+    -- hook is handed one panel; a loose one standing beside it has to go on
+    -- hiding. Driven straight, because the shell hands a row ONE loose panel at a
+    -- time and would therefore never expose a mistake here until the day it did.
+    local thirdPo, thirdPane = fakePanel()
+    pinMount(thirdPo, thirdPane)
+    eq(#pinBuilt, 3, "pin: a third instance came through the same builder")
+    eq(shownIn(pinBuilt[3]), 3, "pin: ...hiding the two on the plate, like any loose panel")
+    pinPanel(thirdPo)
+    eq(shownIn(pinBuilt[3]), 5, "pin: pinning it gives that one every setting")
+    eq(shownIn(pinBuilt[2]), 3, "pin: ...and leaves the panel that is still loose hiding")
+
     -- ---- and the OTHER order: hoists declared BEFORE the claim ---------
     -- A page is free to call RegisterHoistedToggle first. Then no later layout
     -- would announce a set that is already on the plate, and the immediate call
