@@ -1487,7 +1487,13 @@ DF.PartyDefaults = {
     buffPandemicBorderOffsetY = 0,
     buffPandemicBorderColor = {r = 0.2, g = 1, b = 0.2, a = 1},
     buffPandemicBorderBlendMode = "BLEND",
-    buffPandemicBorderTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    -- ☠ "SOLID", like all eleven sibling <prefix>BorderTexture defaults, and NOT
+    -- a texture path. GetBorderList() is keyed by LibSharedMedia NAME, so a path
+    -- is not a key in it: the dropdown could not label it and fell back to
+    -- printing the raw path, and GetBorderTexturePath could not fetch it either,
+    -- so the border drew nothing. This one shipped a STATUSBAR path besides --
+    -- DF_Minimalist is registered as a bar texture, never as a border.
+    buffPandemicBorderTexture = "SOLID",
     buffPandemicBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
     buffPandemicBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
     buffPandemicBorderGradientDirection = "HORIZONTAL",

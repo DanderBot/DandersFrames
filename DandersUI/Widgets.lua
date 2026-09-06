@@ -24,6 +24,24 @@ local math, tinsert, tostring, tonumber = math, table.insert, tostring, tonumber
 local PlaySound, SOUNDKIT, InCombatLockdown, C_Timer = PlaySound, SOUNDKIT, InCombatLockdown, C_Timer
 local strtrim, _G = strtrim, _G
 
+-- ☠ THE SEAM A COMMITTED WRITE HAS TO POKE. A host stamps `RefreshStates` on
+-- whatever a control was parented to -- a settings page's scroll child, or the
+-- holder behind a popout pane -- and running it is what re-reads the page's
+-- grey-out predicates and any row summary drawing this setting. A factory that
+-- skips it leaves both stale until something unrelated refreshes.
+--
+-- ⚠ COMMIT ONLY, NEVER PREVIEW. The slider below writes once per STEP CROSSED
+-- while it is dragged and previews once per rendered frame; the whole drag
+-- split exists so neither does page-wide work, so this is called from the
+-- release, the typed entry and a programmatic set -- never from a drag tick.
+--
+-- rawget, not a plain read: a headless test frame answers any unset field with
+-- a truthy no-op function, so a plain `if parent.RefreshStates` passes for the
+-- wrong reason and a test could never see the seam go missing.
+local function RefreshOwnerStates(parent)
+    if parent and rawget(parent, "RefreshStates") then parent:RefreshStates() end
+end
+
 -- Counterpart to ShowTooltip: hide the shared GameTooltip. Wrapped so callers
 -- route through the toolkit instead of poking GameTooltip directly.
 function UI:HideTooltip()
@@ -2640,6 +2658,7 @@ function UI:CreateSlider(parent, opts)
         host:Call("onDragStop")
         if callback then callback() end
         host:Call("refreshNow")
+        RefreshOwnerStates(parent)
 
         -- Update override indicators after drag ends
         if container.UpdateOverrideIndicators then
@@ -2712,6 +2731,12 @@ function UI:CreateSlider(parent, opts)
             local settled = SettleThumb()
             HideBubble()
             host:Call("onDragStop")
+            -- ⚠ THE ONE THING THIS BRANCH DOES OWE. A legacy host committed every
+            -- step of the drag, but the page sweep was skipped on every one of
+            -- them (see the guard in OnValueChanged: a sweep per step is the storm
+            -- the split exists to avoid), so the release is the only place it can
+            -- happen. Once, here, matching ReleaseDrag above.
+            RefreshOwnerStates(parent)
             -- Update override indicators after drag ends
             if container.UpdateOverrideIndicators then
                 container:UpdateOverrideIndicators(settled)
@@ -2822,6 +2847,10 @@ function UI:CreateSlider(parent, opts)
         if callback and not host:Call("isDragging") then
             callback()
         end
+        -- ⚠ Guarded on the LEGACY drag: this branch is also where a host with
+        -- no drag hooks lands on every step of a real drag, and a page sweep
+        -- per step is the storm the split above exists to avoid.
+        if not isDragging then RefreshOwnerStates(parent) end
     end)
     
     input:SetScript("OnEnterPressed", function(self)
@@ -2874,6 +2903,7 @@ function UI:CreateSlider(parent, opts)
 
             -- Guaranteed full update (SetValue may not fire OnValueChanged if value didn't change)
             host:Call("refreshNow")
+            RefreshOwnerStates(parent)
         else
             local v = ReadValue(); if v ~= nil then UpdateValue(v) end
         end
@@ -3392,6 +3422,12 @@ function UI:CreateDropdown(parent, opts)
     else
         menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     end
+    -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+    -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+    -- to the cursor: clicks landing on its padding, its border inset or the empty
+    -- tail below the last item fall straight through and write whatever setting
+    -- happens to sit behind the menu.
+    menuFrame:EnableMouse(true)
     RaiseMenuOverOpener(menuFrame, btn)
     host:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
@@ -3603,7 +3639,7 @@ function UI:CreateDropdown(parent, opts)
                     menuFrame:Hide()
                     host:Call("refreshNow")
                     if callback then callback() end
-                    if parent.RefreshStates then parent:RefreshStates() end
+                    RefreshOwnerStates(parent)
                 end)
 
                 menuButtons[i] = menuBtn

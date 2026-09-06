@@ -132,10 +132,25 @@ do
     check(BODY:find("end, pending.group", 1, true) ~= nil,
           "semantics: the eager group comes back beside the mount, for the key walk")
     -- The buildInto contract's exact shape: reflow THIS pane, then the page.
-    check(BODY:find("buildInto(st.group, holder, function()", 1, true) ~= nil,
+    check(BODY:find("buildInto(st.group, holder, reflow)", 1, true) ~= nil,
           "semantics: buildInto is handed the group, the holder and a refresh")
     check(BODY:find("ReflowPane(st)\n                page:RefreshStates()", 1, true) ~= nil,
           "semantics: ...whose refresh reflows this instance and then the page")
+
+    -- ☠ AND THE HOLDER ANSWERS TO THE SAME CLOSURE. Every widget factory ends
+    -- a write with `if parent.RefreshStates then parent:RefreshStates() end`;
+    -- `parent` inside a pane IS this holder, and until it carried the field the
+    -- guard read nil and every one of those calls did nothing. Pinned as ONE
+    -- name rather than a second copy of the body: two closures would be two
+    -- chances for the pane's own refresh and the factories' to drift.
+    local reflowAt = BODY:find("local reflow = function()", 1, true)
+    local stampAt  = BODY:find("holder.RefreshStates = reflow", 1, true)
+    local buildAt  = BODY:find("buildInto(st.group, holder, reflow)", 1, true)
+    check(reflowAt ~= nil, "semantics: the pane refresh is named once")
+    check(stampAt ~= nil,
+          "semantics: ...and the holder carries it, so a factory's parent:RefreshStates() lands")
+    check(reflowAt and stampAt and buildAt and reflowAt < stampAt and stampAt < buildAt,
+          "semantics: ...declared, stamped, then handed to the builder")
 
     -- ---- the values opt-in ------------------------------------------
     check(BODY:find("if values and g.RefreshChildValues then g:RefreshChildValues() end", 1, true) ~= nil,
@@ -1269,5 +1284,40 @@ do
     local dirPo, dirPane = fakePanel()
     dirMount(dirPo, dirPane)
     eq(shownIn(dirBuilt[1]), 1, "dir: the panel opens with the one control behind the row")
+
+    -- ---- the seam every widget factory reaches for ------------------
+    -- ☠ DRIVEN, because the shim makes the source read misleadingly honest: a
+    -- FakeUIFrame answers ANY unset field with a truthy no-op function, so
+    -- `if holder.RefreshStates` passes on a holder that never got one. rawget is
+    -- the only read that can tell the stamp from the shim, and calling it and
+    -- counting the page sweep is the only proof it is the RIGHT closure.
+    --
+    -- ⚠ LAST IN THE SECTION, because running it LAYS THE PANE OUT -- which is
+    -- half its job and would quietly satisfy the "not laid out yet" assertions
+    -- above if it ran before them.
+    do
+        local holder = page._popoutHolders and page._popoutHolders[1]
+        check(holder ~= nil, "seam: the eager build parked its group in a holder")
+        check(holder and rawget(holder, "RefreshStates") ~= nil,
+              "seam: ...and the holder carries RefreshStates, the name the factories call")
+
+        local sweeps, values = 0, 0
+        local savedPageRS = page.RefreshStates
+        page.RefreshStates = function() sweeps = sweeps + 1 end
+        group.RefreshChildValues = function() values = values + 1 end
+
+        if holder and rawget(holder, "RefreshStates") then holder:RefreshStates() end
+        eq(sweeps, 1, "seam: running it sweeps the page's states -- which is what re-reads disableOn")
+
+        -- ⚠ AND NOT THE VALUES. A slider inside a pane writes once per step
+        -- crossed while it is dragged, so if this route repainted bound values
+        -- the thumb would snap from under the mouse back to the last step. The
+        -- value sweep stays opt-in, and this door never opts in.
+        eq(values, 0, "seam: ...and never repaints bound values, so a drag is not stomped")
+
+        page.RefreshStates = savedPageRS
+        group.RefreshChildValues = nil
+    end
+
     DandersFrames, CreateFrame = savedDF, savedCreateFrame
 end

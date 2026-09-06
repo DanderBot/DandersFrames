@@ -1615,6 +1615,145 @@ do
     eq(d.tooltip, "pick one", "hit: opts.tooltip reaches the dropdown's container too")
 end
 
+-- ============================================================
+-- THE COMMIT-SIDE STATE SEAM
+-- A settings host stamps `RefreshStates` on whatever a control was parented to
+-- -- a page's scroll child, or the holder behind a popout pane -- and running it
+-- is what re-reads the page's grey-out predicates and any row summary drawing
+-- this setting. The slider never poked it at all, which is one half of "these
+-- rows don't update until a tab change".
+--
+-- ☠ AND THE WHEN IS THE WHOLE POINT. The bar writes once per STEP CROSSED while
+-- it is dragged; a page-wide sweep on each of those is exactly the storm the
+-- preview/commit split above exists to prevent. So: the release, the typed
+-- entry and a programmatic set -- never a drag tick.
+-- ============================================================
+print("-- Widgets: the state seam is poked on a commit and never mid-drag")
+do
+    local host = newHost(true)
+    local value, states = 10, 0
+    local p = pane()
+    p.RefreshStates = function() states = states + 1 end
+    local s = host:CreateSlider(p, {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+        lightweight = function() end,
+        onChanged   = function() end,
+    })
+    local sl = s.slider
+    states = 0                     -- the build's own initial paint is not a commit
+
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(11); sl:SetValue(12); fire(sl, "OnUpdate"); sl:SetValue(13)
+    eq(states, 0, "seam: not one sweep across four ticks of a drag")
+
+    fire(sl, "OnMouseUp", "LeftButton")
+    eq(states, 1, "seam: the release sweeps it EXACTLY once")
+end
+
+do
+    -- A typed value is a commit, and the suppressed SetValue it makes on its way
+    -- through must not turn that into two.
+    local host = newHost(true)
+    local value, states = 10, 0
+    local p = pane()
+    p.RefreshStates = function() states = states + 1 end
+    local s = host:CreateSlider(p, {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+        onChanged = function() end,
+    })
+    states = 0
+    local input = inputOf(s)
+    check(input ~= nil, "seam: the slider has its numeric readout")
+    input:SetText("42")
+    fire(input, "OnEnterPressed")
+    eq(value, 42, "seam: the typed value landed")
+    eq(states, 1, "seam: ...and swept the page once, not once per internal SetValue")
+end
+
+do
+    -- ☠ A LEGACY HOST -- one that publishes no drag hooks -- commits on every
+    -- value change, and that is exactly where a page sweep per step would be a
+    -- storm. It is guarded out of the per-change branch, which leaves the
+    -- release as the only place the sweep can happen for this host.
+    local host = newHost(false)
+    local value, states = 10, 0
+    local p = pane()
+    p.RefreshStates = function() states = states + 1 end
+    local s = host:CreateSlider(p, {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+        onChanged = function() end,
+    })
+    local sl = s.slider
+    states = 0
+
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(11); sl:SetValue(12); sl:SetValue(13)
+    eq(states, 0, "seam: a legacy host's per-step commits do not sweep the page")
+
+    fire(sl, "OnMouseUp", "LeftButton")
+    eq(states, 1, "seam: ...its release does, once")
+end
+
+do
+    -- ☠ rawget, NOT `if parent.RefreshStates`. This suite's frame stub answers
+    -- every unset field with a truthy no-op FUNCTION, exactly as a real fake
+    -- frame does everywhere else -- so a plain truthiness test would "pass" on a
+    -- parent that never carried the stamp, and no test could ever see the seam
+    -- go missing. Counting the metatable lookups is what proves the read is raw:
+    -- rawget does not go through __index at all.
+    local reads = 0
+    local p = CreateFrame("Frame")
+    setmetatable(p, { __index = function(t, k)
+        if k == "RefreshStates" then reads = reads + 1 end
+        return dataAwareMeta(t, k)
+    end })
+    local host = newHost(true)
+    local value = 10
+    local s = host:CreateSlider(p, {
+        label = "Width", min = 0, max = 100, step = 1,
+        get = function() return value end,
+        set = function(v) value = v end,
+        onChanged = function() end,
+    })
+    local sl = s.slider
+    fire(sl, "OnMouseDown", "LeftButton")
+    sl:SetValue(11)
+    fire(sl, "OnMouseUp", "LeftButton")
+    eq(reads, 0, "seam: an unstamped parent is read with rawget, so absent reads as absent")
+end
+
+-- ============================================================
+-- A DROPDOWN MENU TAKES THE MOUSE
+-- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. The menu sets a high strata, but
+-- strata only ORDERS frames that take the mouse -- so a menu that takes none is
+-- opaque to the eye and invisible to the cursor, and a click landing on its
+-- padding or its empty tail goes straight through to whatever control is
+-- underneath and writes THAT setting.
+-- ============================================================
+print("-- Widgets: a dropdown menu swallows the clicks that land on it")
+do
+    local host = newHost(false)
+    local d = host:CreateDropdown(pane(), {
+        label = "Style",
+        options = { _order = { "SOLID", "TEXTURE" }, SOLID = "Solid", TEXTURE = "Texture" },
+        get = function() return "SOLID" end,
+    })
+    check(d.opener ~= nil, "menu: the dropdown publishes its opener")
+    local menu
+    for _, c in ipairs(d.opener._children or {}) do
+        if c._kind == "Frame" then menu = c break end
+    end
+    check(menu ~= nil, "menu: ...which the menu frame hangs off")
+    eq(menu and menu._flags.mouseClick, true,
+       "menu: and the menu TAKES the mouse, so a click on it cannot reach the page behind")
+end
+
 -- ---- restore the globals -------------------------------------------
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 CreateColor, GetCursorPosition = prevCreateColor, prevCursor

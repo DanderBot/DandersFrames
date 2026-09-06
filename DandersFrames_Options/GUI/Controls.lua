@@ -19,6 +19,10 @@ local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local AddOverrideIndicators = GUI._priv.AddOverrideIndicators
 local AddOrderListOverrideIndicators = GUI._priv.AddOrderListOverrideIndicators
+-- The one commit-side page/pane refresh seam, defined in SettingsWidgets.lua
+-- (which loads first). See its header for why it is rawget and why it is on
+-- the commit side of the preview/commit split.
+local RefreshOwnerStates = GUI._priv.RefreshOwnerStates
 -- ============================================================
 -- EXPIRATION CONTROLS (shared) — the 12.1-safe Expiration panel. Pairs with the
 -- DF.Expiration engine (Features/Expiration.lua): the engine turns the expiryAlert* keys
@@ -738,6 +742,12 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
         menuFrame:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -2)
         menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+        -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+        -- to the cursor: clicks landing on its padding, its border inset or the empty
+        -- tail below the last item fall straight through and write whatever setting
+        -- happens to sit behind the menu.
+        menuFrame:EnableMouse(true)
         GUI:RegisterMenu(menuFrame)
         menuFrame:SetClampedToScreen(true)
         CreateElementBackdrop(menuFrame)
@@ -1028,6 +1038,12 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+    -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+    -- to the cursor: clicks landing on its padding, its border inset or the empty
+    -- tail below the last item fall straight through and write whatever setting
+    -- happens to sit behind the menu.
+    menuFrame:EnableMouse(true)
     GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -1188,6 +1204,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 menuFrame:Hide()
                 DF:UpdateAll()
                 if callback then callback() end
+                RefreshOwnerStates(parent)
             end)
 
             table.insert(menuButtons, menuBtn)
@@ -1397,6 +1414,12 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+    -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+    -- to the cursor: clicks landing on its padding, its border inset or the empty
+    -- tail below the last item fall straight through and write whatever setting
+    -- happens to sit behind the menu.
+    menuFrame:EnableMouse(true)
     GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -1558,6 +1581,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
                 menuFrame:Hide()
                 DF:UpdateAll()
                 if callback then callback() end
+                RefreshOwnerStates(parent)
             end)
             
             table.insert(menuButtons, menuBtn)
@@ -1699,6 +1723,12 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     local menuFrame = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     menuFrame:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
     menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+    -- ☠ A DRAWN BACKDROP IS NOT A MOUSE REGION. Strata only ORDERS frames that
+    -- take the mouse, so a menu that takes none is opaque to the eye and invisible
+    -- to the cursor: clicks landing on its padding, its border inset or the empty
+    -- tail below the last item fall straight through and write whatever setting
+    -- happens to sit behind the menu.
+    menuFrame:EnableMouse(true)
     GUI:RegisterMenu(menuFrame)
     menuFrame:SetClampedToScreen(true)
     CreateElementBackdrop(menuFrame)
@@ -1821,6 +1851,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
                 menuFrame:Hide()
                 DF:UpdateAll()
                 if callback then callback() end
+                RefreshOwnerStates(parent)
             end)
 
             table.insert(menuButtons, menuBtn)
@@ -1962,6 +1993,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 container:UpdateOverrideIndicators(saveOrder)
             end
             if callback then callback() end
+            RefreshOwnerStates(parent)
         end
     end
     
@@ -2293,6 +2325,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 container:UpdateOverrideIndicators(newOrder)
             end
             if callback then callback() end
+            RefreshOwnerStates(parent)
         end
     end
     
@@ -2607,6 +2640,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 container:UpdateOverrideIndicators(newOrder)
             end
             if callback then callback() end
+            RefreshOwnerStates(parent)
         end
     end
     
@@ -4028,10 +4062,28 @@ function GUI:CreatePopoutPageTools(page)
             -- What a builder's own dropdowns and checkboxes call. Cheap, and
             -- deliberately NOT a page rebuild: a rebuild retires the row the user
             -- is clicking through.
-            buildInto(st.group, holder, function()
+            local reflow = function()
                 ReflowPane(st)
                 page:RefreshStates()
-            end)
+            end
+
+            -- ☠ AND THE HOLDER ANSWERS TO THE SAME CLOSURE, because the widget
+            -- factories reach for it by name. Every one of them ends a write with
+            -- `if parent.RefreshStates then parent:RefreshStates() end`; classic's
+            -- scroll child carries that forwarder (Panel.lua), this bare holder did
+            -- not, so the guard read nil and silently did NOTHING. Every `disableOn`
+            -- inside a pane was therefore stale until the panel was re-opened --
+            -- ticking Solo Mode's Rested Indicator left the two rows it gates greyed.
+            -- Builders that thread `reflow` into their own callbacks were immune;
+            -- most do not, and none should have to.
+            --
+            -- ⚠ STATE ONLY, never values: ReflowPane repaints bound values only when
+            -- asked (see its header), and this route never asks. A slider being
+            -- dragged inside the pane writes on every step, so a value repaint here
+            -- would snap the thumb back to the last committed step under the mouse.
+            holder.RefreshStates = reflow
+
+            buildInto(st.group, holder, reflow)
             return st
         end
 
