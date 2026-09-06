@@ -183,7 +183,7 @@ do
 
     local declared = tonumber(PAGE:match("local COLOR_PICKER_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "color picker: the page declares the row's count in one place")
-    eq(declared, #COLOR_PICKER, "color picker: ...the whole census, because nothing is hoisted")
+    eq(declared, settingsIn(COLOR_PICKER), "color picker: ...every setting in the census, because nothing is hoisted")
 
     -- ☠ THE ROW'S db IS THE GLOBAL TABLE, NOT tools.RowDB. Every other row on the
     -- sweep hands the kit the per-mode table because that is where its keys live;

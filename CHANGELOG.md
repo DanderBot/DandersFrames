@@ -52,6 +52,10 @@
 - (DandersMover) Unlocking now fades the movers, strip and panel in, matching the fade-out when you lock.
 - (DandersMover) Fix a mover dropped onto a snap zone whose frame vanished mid-drag still anchoring to it. The drop now lands where the preview showed.
 - (DandersMover) A mover anchored to a stale frame can no longer be placed entirely off the screen, its handle always stays reachable on screen, and `/mover reset all` (or `/mover reset <addon>`) puts positions back to their defaults from chat.
+- (Text Designer, Aura Designer) Switching a designer off now really does lock its settings, instead of only dimming them. You can still open a row and read what is in it, but nothing in there can be changed or added until you switch the designer back on.
+- (Frames) Changing Growth Direction no longer closes the settings panel you changed it in. If the panel was pinned it comes back pinned.
+- (Text Designer) The Texts and Text Groups tabs show how many elements they hold again.
+- (Settings) The number on a settings row now counts only the settings behind it. Descriptions, headings and notes were being counted too, so some rows promised more than they held.
 
 ### Changes
 

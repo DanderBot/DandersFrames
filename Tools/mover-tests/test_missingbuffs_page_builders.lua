@@ -465,10 +465,10 @@ print("-- Missing Buffs page: the declared counts")
 do
     local function declared(name) return tonumber(PAGE:match("local " .. name .. "%s*=%s*(%d+)")) end
 
-    eq(declared("MISSING_SETTINGS_COUNT"), #MISSING_SETTINGS - 1,
-       "counts: Settings is the census less the hoisted Enable tick")
-    eq(declared("MISSING_BUFFS_COUNT"), #MISSING_BUFFS,
-       "counts: Buffs to Check is the whole census, nothing hoisted out of it")
+    eq(declared("MISSING_SETTINGS_COUNT"), settingsIn(MISSING_SETTINGS) - 1,
+       "counts: Settings is the census's settings less the hoisted Enable tick")
+    eq(declared("MISSING_BUFFS_COUNT"), settingsIn(MISSING_BUFFS),
+       "counts: Buffs to Check is every setting in the census, nothing hoisted out of it")
     eq(declared("MISSING_APPEARANCE_COUNT"), #MISSING_APPEARANCE, "counts: Appearance")
     eq(declared("MISSING_POSITION_COUNT"), #MISSING_POSITION, "counts: Position")
 

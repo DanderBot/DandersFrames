@@ -178,6 +178,30 @@ DF.TextDesigner = DF.TextDesigner or {}
 -- ============================================================
 local P = {}
 DF.TextDesigner._priv = P
+
+-- ============================================================
+-- HOW MANY THINGS EACH TAB HOLDS
+-- ------------------------------------------------------------
+-- Enabled elements only, bucketed the way the two element tabs are: a group
+-- counts as a group, everything else as a text. Written once and read by BOTH
+-- layouts' tab strips -- the classic strip's UpdateTabCounts and the popout
+-- shell's `count` fields -- because two copies of this arithmetic is two tabs
+-- that can disagree about the same profile.
+-- ============================================================
+local function TabElementCounts(countDB)
+    local counts = { texts = 0, groups = 0 }
+    local elems = countDB and countDB.elements
+    if type(elems) == "table" then
+        for _, e in ipairs(elems) do
+            if type(e) == "table" and e.enabled ~= false then
+                local bucket = (e.contentType == "group") and "groups" or "texts"
+                counts[bucket] = counts[bucket] + 1
+            end
+        end
+    end
+    return counts
+end
+P.TabElementCounts = TabElementCounts
 function DF.TextDesigner.ElementDisplayName(elem)
     if type(elem) ~= "table" then return nil end
     if type(elem.label) == "string" and elem.label ~= "" then return elem.label end
@@ -2082,17 +2106,7 @@ local function BuildTabStrip(GUI, parent, state, tdDB, page)
     -- an optional db so FullRebuildCards can pass the current mode's table rather
     -- than rely on the one captured at build time.
     local function UpdateTabCounts(countDB)
-        countDB = countDB or tdDB
-        local counts = { texts = 0, groups = 0 }
-        local elems = countDB and countDB.elements
-        if type(elems) == "table" then
-            for _, e in ipairs(elems) do
-                if type(e) == "table" and e.enabled ~= false then
-                    local bucket = (e.contentType == "group") and "groups" or "texts"
-                    counts[bucket] = counts[bucket] + 1
-                end
-            end
-        end
+        local counts = TabElementCounts(countDB or tdDB)
         for _, def in ipairs(tabDefs) do
             local c = counts[def.id]
             local btn = strip[def.id]
@@ -2319,6 +2333,13 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, op
     local RIGHT_INSET = rightInset or 22
     local skipChips   = opts and opts.skipChips or false
     local filterGlyph = opts and opts.filterGlyph or false
+    -- ☠ THE ADD CTA IS PART OF "THE FEATURE IS OFF", NOT A SEPARATE QUESTION.
+    -- Classic covers this whole area with the disabled scrim, so the button is
+    -- unreachable there; the popout arm mounts the same head area bare and the
+    -- button stayed live, which is how a switched-off Text Designer could still
+    -- be given new elements. nil = absent = enabled, so classic passes nothing
+    -- and is byte-for-byte what it was.
+    local ctaEnabled  = not (opts and opts.enabled == false)
     -- ☠ THE COLUMN THIS AREA LAYS OUT AGAINST, DERIVED RATHER THAN MEASURED --
     -- see the Aura Designer's matching note in AuraDesigner/UI/Cards.lua. The
     -- host was given an explicit width by the caller a line before this ran; a
@@ -2338,6 +2359,7 @@ local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, op
     -- the scrollbar) so the button doesn't overhang the element rows below it.
     addBtn:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
     GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Text Element"], font = "DFFontHighlight" })
+    if not ctaEnabled and addBtn.SetDisabled then addBtn:SetDisabled(true) end
     state.addBtn = addBtn
 
     -- ── Section caption ──
@@ -2813,8 +2835,11 @@ DF.TextDesigner.RenderGroupCardList = RenderGroupCardList
 -- The "+ Add Group" CTA and the caption above the list. Same two hosts, and the
 -- same reason, as the Texts tab's head area above.
 -- ============================================================
-local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset)
+local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)
     local RIGHT_INSET = rightInset or 22
+    -- See BuildTextsHeadArea's note: a switched-off designer must not be able to
+    -- be given new groups. nil = absent = enabled, which is classic's call.
+    local ctaEnabled  = not (opts and opts.enabled == false)
     -- "+ Add Group" hero CTA — full-width. Shared primary CTA via the styler
     -- (accent fill + white label), matching BuildTextsTab's "+ Add Text Element".
     local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -2824,6 +2849,7 @@ local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset)
     -- scrollbar) so the button doesn't overhang the cards below — matches Texts.
     addBtn:SetPoint("RIGHT", parent, "RIGHT", -RIGHT_INSET, 0)
     GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Group"], font = "DFFontHighlight" })
+    if not ctaEnabled and addBtn.SetDisabled then addBtn:SetDisabled(true) end
 
     addBtn:SetScript("OnClick", function()
         -- Add a new group element directly (no picker — only one type)

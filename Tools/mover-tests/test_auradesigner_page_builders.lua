@@ -2581,3 +2581,27 @@ do
     check(PO:find("function UI:SetPopoutTetherOverride(region)", 1, true) ~= nil,
           "adpicker: ...and the host sweep is the same verb over the open set")
 end
+
+-- ============================================================
+-- A SWITCHED-OFF DESIGNER REFUSES INPUT, IT DOES NOT ONLY DIM
+-- ------------------------------------------------------------
+-- ☠ REPORTED AS "Same thing with Aura Designer, I can still modify everything".
+-- The rows carry `disableOn` and the kit's default for that is a DIM: a greyed
+-- row keeps its pane live, because the control that would satisfy the dependency
+-- is usually in it. Here it is not -- the Enable banner is a band of its own --
+-- so every row opts into the real gate, which is what the classic layout's
+-- full-cover scrim has always been.
+-- ============================================================
+print("-- Aura Designer: switched off means unwritable, not merely dim")
+do
+    local rows, gated = 0, 0
+    for _ in ROWS:gmatch("GUI:CreatePopoutRow%(") do rows = rows + 1 end
+    for _ in ROWS:gmatch("gateWhenDisabled = true") do gated = gated + 1 end
+    check(rows > 0, "scrim: the page mints popout rows")
+    eq(gated, rows, "scrim: ...and every one of them opts into the dependent gate")
+
+    -- The head area mounts no add CTA here -- this layout has a ROW for it, and
+    -- that row is gated like the rest -- so there is nothing else left live.
+    check(ROWS:find("skipAddBlock = true", 1, true) ~= nil,
+          "scrim: the head area's own add block is skipped, so there is no ungated CTA beside them")
+end

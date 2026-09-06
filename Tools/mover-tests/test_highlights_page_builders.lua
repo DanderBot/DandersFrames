@@ -390,7 +390,7 @@ for _, g in ipairs(ROWS) do
 
     local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
     check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-    eq(declared, #g.golden, g.label .. ": ...and it is the whole census, nothing hoisted out of it")
+    eq(declared, settingsIn(g.golden), g.label .. ": ...and it is every setting in the census, nothing hoisted out of it")
 
     local opts = rowOpts(g.label)
     check(opts:find("summary%s*=%s*" .. g.summary) ~= nil,

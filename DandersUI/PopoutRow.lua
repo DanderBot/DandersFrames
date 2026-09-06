@@ -503,6 +503,26 @@ local function syncGate(po, row, rec)
     rec = rec or (po._rowPanes and po._rowPanes[row])
     if not rec then return end
     local shut = not row._Read()
+    -- ☠ ...AND THE DEPENDENT GREY, BUT ONLY WHERE THE CONSUMER ASKED FOR IT.
+    -- The default is spelled out above armGate: a greyed row deliberately keeps
+    -- its pane live, because the control that would satisfy the dependency is
+    -- very often one of the controls in it, and a pane that gated itself on the
+    -- grey would be a pane nobody could switch back on.
+    --
+    -- That is not true of a WHOLE FEATURE's off switch. Where the thing that
+    -- would re-enable the row lives somewhere else entirely -- the two designers'
+    -- Enable banner, which is a band of its own -- the pane holds nothing but
+    -- settings that cannot do anything, and leaving them writable is what the
+    -- classic layout's full-cover scrim has always refused to do. Those
+    -- consumers opt in per row with `gateWhenDisabled`; nobody else's rows move.
+    --
+    -- rawget for both, the convention this file uses for a private field that may
+    -- be absent: a headless frame answers an unset key with a no-op FUNCTION, and
+    -- a plain read would make every row look opted in.
+    if not shut and rawget(row, "_gateWhenDisabled")
+                and rawget(row, "_enabled") == false then
+        shut = true
+    end
     gatePane(po, rec, shut)
     -- THE FOOTER GOES WITH THE PANE. The shell's action strip is body, not
     -- chrome (the header toggle, the pin and the cross stay live -- see THE OFF
@@ -564,7 +584,25 @@ local function paneFor(po, row)
     -- ⚠ rawget for both markers. A test double (and any frame whose metatable
     -- answers unknown keys) would report a truthy method for `isSettingsGroup`,
     -- and a plain read would then treat every ordinary child as a group.
+    --
+    -- ☠ AND THE SAME WALK SEPARATES THE CONTROLS FROM THE PROSE, because the
+    -- BADGE is a promise about settings and a pane's roster is not only settings.
+    -- A section header, a blurb, a caption, a banner, a separator: every one of
+    -- them is a plain frame a consumer mounted, and every one of them was
+    -- counted -- which is what put a 4 on a row holding three ticks and made the
+    -- number read as "options" to nobody who could reproduce it.
+    --
+    -- The test is armGate's own, and deliberately not a second one: a widget the
+    -- gate can arm is a widget with a SetEnabled, which is exactly what a control
+    -- has and what prose does not. One definition, so the pane the gate greys and
+    -- the number the badge promises can never describe different sets.
     local kids, groups = {}, {}
+    local controls = 0
+    local function take(w)
+        kids[#kids + 1] = w
+        armGate(w)
+        if w._dfGateApply then controls = controls + 1 end
+    end
     if type(pane.GetChildren) == "function" then
         for _, w in ipairs({ pane:GetChildren() }) do
             if type(w) == "table" then
@@ -573,14 +611,10 @@ local function paneFor(po, row)
                     groups[#groups + 1] = w
                     for _, entry in ipairs(entries) do
                         local cw = entry and entry.widget
-                        if type(cw) == "table" then
-                            kids[#kids + 1] = cw
-                            armGate(cw)
-                        end
+                        if type(cw) == "table" then take(cw) end
                     end
                 else
-                    kids[#kids + 1] = w
-                    armGate(w)
+                    take(w)
                 end
             end
         end
@@ -626,17 +660,16 @@ local function paneFor(po, row)
 
     -- THE COUNT CHECK, and it runs here or nowhere: this is the one moment the
     -- declared number and the mounted one can be compared without building the
-    -- pane a second time purely to count it. Frames only -- a label is a
-    -- FontString and was never a "control" -- so a row whose count includes its
-    -- headers will report a mismatch, which is the report doing its job.
+    -- pane a second time purely to count it. Measured against the CONTROLS on the
+    -- roster -- see the walk above -- so a row whose declared number includes its
+    -- header or its blurb reports a mismatch, which is the report doing its job.
     --
     -- Measured against the ROSTER rather than pane:GetNumChildren(), and the two
     -- only differ where the roster does: a pane of plain direct children collects
-    -- exactly those children, so the number is unchanged there. A pane holding a
-    -- settings group would have counted 1 -- the group -- and reported every
-    -- honest declaration as a mismatch.
+    -- exactly those children. A pane holding a settings group would have counted
+    -- 1 -- the group -- and reported every honest declaration as a mismatch.
     if row._count then
-        local n = #kids
+        local n = controls
         if n ~= row._count then
             local dbg = po.host:Call("debug", "popoutrow")
             if dbg then
@@ -857,7 +890,10 @@ end
 --   count      declared number of controls in the group (the badge, and the
 --              number the build-time count check is measured against). Counted
 --              off the gate's roster, so a pane whose content is a settings
---              group is measured by the CONTROLS in it, not by the one child
+--              group is measured by the CONTROLS in it, not by the one child --
+--              and CONTROLS means things with a SetEnabled: a header, a blurb, a
+--              caption or a separator is furniture the pane mounts, not a setting
+--              the badge is promising
 --   build      fn(popout, pane) -> mounts the group's widgets; ONCE per
 --              (instance, row), and it must size its pane. A pane that re-flows
 --              LATER (a hideOn inside it changed) tells the panel so with
@@ -881,6 +917,13 @@ end
 --              still opens -- the controls inside gate themselves. ⚠ A SEPARATE
 --              mechanism from the toggle's gate: a dependent-grey row whose own
 --              toggle is ON keeps its popout contents live
+--   gateWhenDisabled
+--              opt out of that last sentence. true = the dependent grey shuts
+--              the pane exactly as a toggled-off row's does: the controls go
+--              dead, the prose dims and the footer greys, while the row still
+--              OPENS so the settings can be read. For a row whose off switch
+--              lives somewhere else on the page entirely -- see syncGate for why
+--              this is opt-in rather than the default
 --   onToggle   fn(newValue) after a toggle write from either place
 --   onClose    fn(row, reason) after a panel that was ABOUT this row closes
 --              (any close: the cross, the family sweep, a source death, an api
@@ -942,6 +985,9 @@ function UI:CreatePopoutRow(parent, opts)
     row._label   = opts.label or ""
     row._title   = opts.title or row._label
     row._count   = opts.count
+    -- Opt-in: does the DEPENDENT GREY take the pane down with it? See syncGate.
+    -- nil rather than false so the rawget there reads a plain absence.
+    row._gateWhenDisabled = opts.gateWhenDisabled and true or nil
     row._modified = (type(opts.modified) == "function") and opts.modified or nil
     row._actions = (type(opts.actions) == "table") and opts.actions or nil
     row._build   = opts.build

@@ -284,8 +284,8 @@ do
     -- ---- the row ------------------------------------------------------
     local declared = tonumber(PAGE:match("local FONT_SELECTION_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "global font settings: the page declares the row's count in one place")
-    eq(declared, #FONT_SELECTION + 1,
-       "global font settings: ...the census plus the Apply button the census cannot see")
+    eq(declared, settingsIn(FONT_SELECTION) + 1,
+       "global font settings: ...the census's settings plus the Apply button the census cannot see")
 
     local opts = rowOpts("Global Font Settings")
     check(opts:find("toggle", 1, true) == nil,
@@ -324,8 +324,8 @@ do
 
     local declared = tonumber(PAGE:match("local SHADOW_SETTINGS_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "shadow settings: the page declares the row's count in one place")
-    eq(declared, #SHADOW_SETTINGS,
-       "shadow settings: ...the whole census, because nothing is hoisted")
+    eq(declared, settingsIn(SHADOW_SETTINGS),
+       "shadow settings: ...every setting in the census, because nothing is hoisted")
 
     local opts = rowOpts("Shadow Settings")
     check(opts:find("toggle", 1, true) == nil, "shadow settings: the row declares no toggle")

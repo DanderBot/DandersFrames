@@ -3803,6 +3803,175 @@ do
 end
 
 
+
+-- ---- 25. THE DEPENDENT GREY AS A REAL GATE, WHERE A ROW ASKS FOR IT ----
+-- ☠ REPORTED AS "Enable Text Designer ... only dims the settings: doesn't
+-- disable the settings, I can still modify everything". The default above
+-- (section 16's last block) is deliberate and stays: a dependent-greyed row
+-- keeps its pane live because the control that would satisfy the dependency is
+-- usually IN it. The two designers are the case where it is not -- their Enable
+-- banner is a band of its own -- so they opt in with `gateWhenDisabled`, and the
+-- classic layout's full-cover scrim is what the pane then behaves like.
+do
+    local win, bag = window(), {}
+    local db = { master = true, on = true }
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Scrimmed", db = db, toggle = { key = "on" },
+        enabled = function(d) return d.master end,
+        gateWhenDisabled = true,
+        summary = function() return "ready" end,
+        build = mounting(bag, 2), window = win,
+    }))
+    row:OpenPopout()
+    local po = row.popout
+    check(bag[1]:IsEnabled() and bag[2]:IsEnabled(), "scrim: an enabled row's pane is live")
+
+    db.master = false
+    row.Refresh()
+    eq(row:GetAlpha(), 0.4, "scrim: the row is dependent-greyed")
+    check(bag[1]:IsEnabled() == false and bag[2]:IsEnabled() == false,
+          "scrim: ...and THIS row's pane goes dead with it, because it asked to")
+    check(po._rowPanes[row].gateShut, "scrim: the record says the gate is shut")
+    check(row.popout ~= nil and not row.popout.closed,
+          "scrim: the panel is still OPEN -- a switched-off feature stays readable")
+
+    db.master = true
+    row.Refresh()
+    check(bag[1]:IsEnabled() and bag[2]:IsEnabled(), "scrim: un-greying hands the pane back")
+    check(po._rowPanes[row].gateShut == false, "scrim: ...and the record with it")
+
+    -- The two reasons compose: either one shuts the gate, and it takes BOTH
+    -- being satisfied to open it.
+    db.on = false
+    row.Refresh()
+    check(bag[1]:IsEnabled() == false, "scrim: the row's own toggle still shuts it")
+    db.master, db.on = false, true
+    row.Refresh()
+    check(bag[1]:IsEnabled() == false, "scrim: ...and so does the grey with the toggle on")
+    db.master = true
+    row.Refresh()
+    check(bag[1]:IsEnabled(), "scrim: both satisfied, and only then is it live")
+    row:ClosePopout()
+end
+
+-- A pane built while the row is ALREADY greyed comes up dead, which is the
+-- state the designers actually ship in: the page is rebuilt with the feature
+-- off, and the first click on a row opens a pane that has never been live.
+do
+    local win, bag = window(), {}
+    local db = { master = false, on = true }
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Born grey", db = db, toggle = { key = "on" },
+        enabled = function(d) return d.master end,
+        gateWhenDisabled = true,
+        build = mounting(bag, 2), window = win,
+    }))
+    row:OpenPopout()
+    check(bag[1]:IsEnabled() == false and bag[2]:IsEnabled() == false,
+          "scrim: a pane built for an already-greyed row comes up dead")
+    check(row.popout._hdrToggle:IsEnabled(), "scrim: the header tick is chrome and stays live")
+    check(row.popout.closeBtn:IsEnabled(), "scrim: the cross too")
+    row:ClosePopout()
+end
+
+-- ...and an explicit SetEnabled(false) -- which is how a settings page drives
+-- disableOn -- reaches the same gate as the predicate does.
+do
+    local win, bag = window(), {}
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Told so", db = { on = true }, toggle = { key = "on" },
+        gateWhenDisabled = true,
+        build = mounting(bag, 1), window = win,
+    }))
+    row:OpenPopout()
+    check(bag[1]:IsEnabled(), "scrim: live to start with")
+    row:SetEnabled(false)
+    check(bag[1]:IsEnabled() == false, "scrim: SetEnabled(false) shuts the pane, not only the alpha")
+    row:SetEnabled(true)
+    check(bag[1]:IsEnabled(), "scrim: and SetEnabled(true) opens it again")
+    row:ClosePopout()
+end
+
+-- ⚠ AND NOBODY ELSE MOVES. The opt is absent on every other consumer's rows, so
+-- the kit's documented default -- a greyed row's pane stays live -- is still
+-- what they get. Stated here beside the opt-in so the two cannot drift.
+do
+    local win, bag = window(), {}
+    local db = { master = false, on = true }
+    local row = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "No opt", db = db, toggle = { key = "on" },
+        enabled = function(d) return d.master end,
+        build = mounting(bag, 2), window = win,
+    }))
+    row:OpenPopout()
+    eq(row:GetAlpha(), 0.4, "scrim: (the row really is greyed)")
+    check(bag[1]:IsEnabled() and bag[2]:IsEnabled(),
+          "scrim: a row that did NOT ask keeps its pane live, exactly as before")
+    row:ClosePopout()
+end
+
+-- ---- 26. THE COUNT IS SETTINGS, NOT EVERYTHING THE PANE MOUNTS ----------
+-- ☠ REPORTED AS "some widgets count the text as an option". The badge is a
+-- promise about how many settings are behind the row, and the pane's roster
+-- holds prose too -- a header, a blurb, a caption, a separator. The build-time
+-- check is the one place the kit can say the declared number is wrong, so it has
+-- to draw the same line the badge does: a widget the gate can arm has a
+-- SetEnabled and is a control; anything else is furniture.
+local function decoration()
+    local d = { _alpha = 1 }
+    function d:SetAlpha(v) self._alpha = v end
+    function d:GetAlpha() return self._alpha end
+    return d
+end
+
+do
+    local win = window()
+    local function paneWith(controls, prose)
+        return function(_, pane)
+            for _ = 1, controls do CreateFrame("Frame", nil, pane) end
+            local kids = rawget(pane, "_children")
+            if not kids then kids = {}; pane._children = kids end
+            for _ = 1, prose do kids[#kids + 1] = decoration() end
+            pane:SetHeight(60)
+        end
+    end
+
+    -- ⚠ COUNTED BY WHAT THEY SAY, not by how many there are: a pane build also
+    -- books a perf line on this same channel, so a bare length would move for a
+    -- reason that has nothing to do with the count.
+    local function mismatches()
+        local n = 0
+        for _, e in ipairs(dbgLog) do
+            if e.cat == "popoutrow" and e.msg:find("declared", 1, true) then n = n + 1 end
+        end
+        return n
+    end
+    local before = mismatches()
+    local honest = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Honest", db = { on = true }, count = 2,
+        build = paneWith(2, 3), window = win,
+    }))
+    honest:OpenPopout()
+    eq(mismatches(), before, "count: two controls and three blurbs declared as 2 reports nothing")
+    honest:ClosePopout()
+
+    local inflated = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Inflated", db = { on = true }, count = 5,
+        build = paneWith(2, 3), window = win,
+    }), 80)
+    inflated:OpenPopout()
+    eq(mismatches(), before + 1, "count: declaring the blurbs too is reported")
+    local last
+    for _, e in ipairs(dbgLog) do
+        if e.cat == "popoutrow" and e.msg:find("declared", 1, true) then last = e end
+    end
+    check(last ~= nil, "count: ...on the row's own debug channel")
+    check(last and last.msg:find("mounted 2", 1, true) ~= nil,
+          "count: ...and the number it names is the CONTROLS, not the roster")
+    inflated:ClosePopout()
+    host:CloseAllPopoutRows("test")
+end
+
 CreateFrame, C_Timer = prevCreateFrame, prevTimer
 PlaySound, SOUNDKIT = prevPlaySound, prevSoundKit
 

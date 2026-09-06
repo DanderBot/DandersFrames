@@ -487,8 +487,8 @@ for _, g in ipairs(ROWS) do
     if g.golden ~= PT_BORDER and g.golden ~= PT_HIGHLIGHT then
         local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
         check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-        eq(declared, #g.golden - g.hoistedIn,
-           g.label .. ": ...and it is the census less whatever the row hoisted")
+        eq(declared, settingsIn(g.golden) - g.hoistedIn,
+           g.label .. ": ...and it is the census's settings less whatever the row hoisted")
     end
 end
 

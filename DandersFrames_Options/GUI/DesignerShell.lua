@@ -10,6 +10,8 @@ local DF = DandersFrames
 local GUI = DF.GUI
 
 local max, floor = math.max, math.floor
+local format = string.format
+local ipairs, type = ipairs, type
 
 -- ============================================================
 -- THE DESIGNER SHELL
@@ -100,7 +102,12 @@ GUI.DESIGNER_BAND_GAP = BAND_GAP
 --                under a header of its own. The key is the caller's, and it is
 --                REQUIRED: see the note on the band below
 --   strips       { { height = n, build = fn(host, shell) }, ... }
---   tabs         { { key=, label=, accent=, tooltip=, disabled=fn->bool }, ... }
+--   tabs         { { key=, label=, accent=, count=, tooltip=, disabled=fn->bool }, ... }
+--                `count` is how many things live behind that tab -- a number, or
+--                fn -> number|nil asked fresh each paint. Rendered as "Label (N)".
+--                nil = no number, which is what a tab holding no list says. Re-ask
+--                for them all with shell:RefreshTabCounts() after a change that
+--                adds or removes one, since the strip is built once per page
 --   activeTab    the key that is showing
 --   onTab        fn(key)  -- what a tab click does; normally page:Refresh()
 --   buildTab     fn(key, shell)  -- adds the active tab's own bands
@@ -289,6 +296,18 @@ function GUI:BuildDesignerShell(page, opts)
         local cb = GUI.Colors.border
         baseline:SetColorTexture(cb.r, cb.g, cb.b, 0.5)
 
+        -- ☠ THE COUNT RIDES ON THE LABEL, AND NOWHERE ELSE. StyleButton's
+        -- SetActive only recolours the text, so a number written into it survives
+        -- every tab switch -- which is exactly the bargain the classic strip took
+        -- (TextDesigner/UI/Options.lua's UpdateTabCounts) and the reason a tab can
+        -- say how much it holds without a second FontString to keep in step.
+        local function TabText(def)
+            local c = def.count
+            if type(c) == "function" then c = c() end
+            if type(c) ~= "number" then return def.label end
+            return format("%s (%d)", def.label, c)
+        end
+
         local n = #opts.tabs
         local prev
         for _, def in ipairs(opts.tabs) do
@@ -300,7 +319,7 @@ function GUI:BuildDesignerShell(page, opts)
                 btn:SetPoint("TOPLEFT", 0, 0)
             end
             btn:SetWidth(max(60, floor((bandW - (n - 1) * TAB_GAP) / n)))
-            GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent,
+            GUI:StyleButton(btn, { tab = true, text = TabText(def), accent = def.accent,
                                    font = "DFFontHighlight" })
             btn.label  = btn.Text
             btn.tabKey = def.key
@@ -326,6 +345,17 @@ function GUI:BuildDesignerShell(page, opts)
 
             shell.tabButtons[def.key] = btn
             prev = btn
+        end
+
+        -- Re-ask every tab for its number and repaint it. For a page that changes
+        -- what a tab holds WITHOUT rebuilding -- adding an element from a pane,
+        -- deleting one -- so the strip does not go one edit stale.
+        function shell:RefreshTabCounts()
+            for _, def in ipairs(opts.tabs) do
+                local b = self.tabButtons[def.key]
+                if b and b.Text then b.Text:SetText(TabText(def)) end
+            end
+            return self
         end
 
         -- Equal-width tabs on resize: the layout pass stretches the bar, and a

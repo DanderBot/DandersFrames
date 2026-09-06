@@ -381,10 +381,13 @@ for _, g in ipairs(ROWS) do
     check(opts:find("onToggle", 1, true) == nil,
           g.label .. ": ...and so no commit either")
 
-    -- ---- the count is the whole census ----------------------------------
+    -- ---- the count is the census's SETTINGS ------------------------------
+    -- settingsIn, not #: a census lists what the builder mounts and the badge is
+    -- a promise about settings, so the headers and blurbs come out first. See the
+    -- helper in shim.lua.
     local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
     check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-    eq(declared, #g.golden, g.label .. ": ...the whole census, nothing hoisted out of it")
+    eq(declared, settingsIn(g.golden), g.label .. ": ...every setting in the census, nothing hoisted out of it")
 end
 
 -- ============================================================

@@ -672,7 +672,7 @@ do
           "legacy: the row page uses it for the tab's head area")
     check(TD:find("local function BuildTextsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)", 1, true) ~= nil,
           "legacy: the Texts head area is declared once")
-    check(TD:find("local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset)", 1, true) ~= nil,
+    check(TD:find("local function BuildGroupsHeadArea(GUI, parent, state, tdDB, page, rightInset, opts)", 1, true) ~= nil,
           "legacy: ...and so is the Text Groups one")
     check(TD:find("BuildTextsHeadArea(GUI, parent, state, tdDB, page)\n", 1, true) ~= nil,
           "legacy: the split panel's Texts tab mounts it")
@@ -1055,4 +1055,87 @@ do
     -- gone from the head band the moment the filter became a glyph.
     check(head <= 70,
           "tdchrome: the head band is the CTA and the caption, with no chip row in it")
+end
+
+-- ============================================================
+-- THE TABS SAY HOW MUCH THEY HOLD, IN BOTH LAYOUTS
+-- ------------------------------------------------------------
+-- ☠ REPORTED AS "Tabs (Texts, Text Groups) don't show the numbers of existing
+-- elements, compared to the classic layout that do shows them". Which tab holds
+-- the default current/max health is not obvious from its name; the split panel
+-- answered that with a count on the tab and the row layout shipped without one,
+-- because the conversion nilled the verb that painted it.
+--
+-- ONE piece of arithmetic, read by both strips: two copies is two tabs that can
+-- disagree about the same profile.
+-- ============================================================
+print("-- Text Designer: the tabs say how much they hold")
+do
+    check(TD:find("local function TabElementCounts(countDB)", 1, true) ~= nil,
+          "tabcount: the bucketing is declared once")
+    check(TD:find("P.TabElementCounts = TabElementCounts", 1, true) ~= nil,
+          "tabcount: ...and published for the other layout")
+    check(TD:find("local counts = TabElementCounts(countDB or tdDB)", 1, true) ~= nil,
+          "tabcount: the classic strip reads that one copy rather than its own loop")
+    local _, n = TD:gsub("local counts = { texts = 0, groups = 0 }", "")
+    eq(n, 1, "tabcount: and the loop it used to inline is gone from the classic arm")
+
+    -- The shell's half of the contract.
+    check(SHELL:find("local function TabText(def)", 1, true) ~= nil,
+          "tabcount: the shell composes a tab's text in one place")
+    check(SHELL:find('return format("%s (%d)", def.label, c)', 1, true) ~= nil,
+          "tabcount: ...as 'Label (N)', which is what the split panel printed")
+    check(SHELL:find("text = TabText(def)", 1, true) ~= nil,
+          "tabcount: ...and the button is built from it")
+    check(SHELL:find("function shell:RefreshTabCounts()", 1, true) ~= nil,
+          "tabcount: the strip can be re-asked without a page rebuild")
+    check(SHELL:find("if type(c) ~= \"number\" then return def.label end", 1, true) ~= nil,
+          "tabcount: a tab with no count keeps its plain label")
+
+    -- The row page's tab table, and the verb the rest of the editor calls.
+    local tabs = ROWS:match("tabs = {(.-)\n        },")
+    check(tabs ~= nil, "tabcount: the row page's tab table is readable")
+    tabs = tabs or ""
+    check(tabs:find("count = function() return TabElementCounts(tdDB).texts end", 1, true) ~= nil,
+          "tabcount: Texts carries its count")
+    check(tabs:find("count = function() return TabElementCounts(tdDB).groups end", 1, true) ~= nil,
+          "tabcount: Text Groups carries its count")
+    local globalLine = tabs:match('{ key = "global"[^%c]*')
+    check(globalLine ~= nil, "tabcount: the Global tab's line is readable")
+    check(globalLine ~= nil and globalLine:find("count", 1, true) == nil,
+          "tabcount: Global has no element list, so it carries no number")
+
+    check(ROWS:find("state.UpdateTabCounts = function() shell:RefreshTabCounts() end", 1, true) ~= nil,
+          "tabcount: the verb the editor already calls is re-pointed at the shell")
+    check(ROWS:find("state.UpdateTabCounts, state.scaleSlider = nil, nil", 1, true) == nil,
+          "tabcount: ...instead of being blanked with the split panel's furniture")
+end
+
+-- ============================================================
+-- A SWITCHED-OFF DESIGNER REFUSES INPUT, IT DOES NOT ONLY DIM
+-- ------------------------------------------------------------
+-- ☠ REPORTED AS "'Enable Text Designer' hides/disables the text on live frames
+-- and only dimms the settings: doesn't disable the settings, I can still modify
+-- everything. Same thing with Aura Designer". Classic covers the whole page
+-- below the header with a scrim; the row layout only greyed the rows.
+-- ============================================================
+print("-- Text Designer: switched off means unwritable, not merely dim")
+do
+    -- Every popout row this page mints asks the kit for the real gate.
+    local rows, gated = 0, 0
+    for _ in ROWS:gmatch("GUI:CreatePopoutRow%(") do rows = rows + 1 end
+    for _ in ROWS:gmatch("gateWhenDisabled = true") do gated = gated + 1 end
+    check(rows > 0, "scrim: the page mints popout rows")
+    eq(gated, rows, "scrim: ...and every one of them opts into the dependent gate")
+
+    -- The head area's add CTA is part of "the feature is off" too: classic's
+    -- scrim covers it, and the row layout mounts the same head area bare.
+    check(TD:find("local ctaEnabled  = not (opts and opts.enabled == false)", 1, true) ~= nil,
+          "scrim: the head areas take an enabled flag")
+    local _, ctas = TD:gsub("if not ctaEnabled and addBtn%.SetDisabled then addBtn:SetDisabled%(true%) end", "")
+    eq(ctas, 2, "scrim: ...and both add CTAs honour it")
+    check(ROWS:find("{ enabled = ctx.tdEnabled }", 1, true) ~= nil,
+          "scrim: the Groups tab passes the designer's own state")
+    check(ROWS:find("enabled = ctx.tdEnabled,", 1, true) ~= nil,
+          "scrim: ...and so does the Texts tab")
 end

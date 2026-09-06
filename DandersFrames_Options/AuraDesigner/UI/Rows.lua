@@ -573,6 +573,12 @@ local function MountEffect(ctx, effect, shell)
             window  = DF.GUIFrame,
             clipTo  = page,
             build   = mount,
+            -- ☠ AND THE GREY IS A REAL GATE, not a dim. The designer's own Enable
+            -- banner is a band of its own, so nothing in this pane can switch the
+            -- feature back on -- which is the kit's whole reason for leaving a
+            -- greyed row's contents live. The classic layout draws a full-cover
+            -- scrim over the same settings; this is that, said to the kit.
+            gateWhenDisabled = true,
         }))
         if opts.hideOn then row.hideOn = opts.hideOn end
         if not ctx.adEnabled then row.disableOn = AlwaysOff end
@@ -722,6 +728,8 @@ local function BuildEffectsTabRows(ctx, shell)
         window = DF.GUIFrame,
         clipTo = page,
         build  = addMount,
+        -- See the effect rows' note: the dependent grey is a real gate here.
+        gateWhenDisabled = true,
     }))
     -- ...and where Sync is called FROM. The kit exposes no per-open hook, so the
     -- row's own OpenPopout is wrapped: it is the one door every open goes through,
@@ -860,6 +868,8 @@ local function BuildEffectsTabRows(ctx, shell)
                 window = DF.GUIFrame,
                 clipTo = page,
                 build  = mount,
+                -- See the effect rows' note: the dependent grey is a real gate.
+                gateWhenDisabled = true,
                 -- "Done editing" is the panel closing, and that is when the
                 -- page catches up on what the pane changed. Deferred a frame:
                 -- this fires inside the popout's own close path (a teardown's
@@ -1156,6 +1166,8 @@ local function MountGroup(ctx, group, spec)
             window  = DF.GUIFrame,
             clipTo  = page,
             build   = mount,
+            -- See the effect rows' note: the dependent grey is a real gate here.
+            gateWhenDisabled = true,
         }))
         if not ctx.adEnabled then row.disableOn = AlwaysOff end
         tools.ClaimKeys(row, content, extra)
@@ -1320,6 +1332,8 @@ local function BuildLayoutTabRows(ctx, shell)
         window = DF.GUIFrame,
         clipTo = page,
         build  = addMount,
+        -- See the effect rows' note: the dependent grey is a real gate here.
+        gateWhenDisabled = true,
     }))
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
@@ -1471,6 +1485,8 @@ local function BuildGlobalTabRows(ctx, shell)
             window  = DF.GUIFrame,
             clipTo  = page,
             build   = mount,
+            -- See the effect rows' note: the dependent grey is a real gate here.
+            gateWhenDisabled = true,
         }))
         if not ctx.adEnabled then row.disableOn = AlwaysOff end
         -- ⚠ `extra` IS NOT A CONVENIENCE HERE. The Sound Alerts pair is bound
