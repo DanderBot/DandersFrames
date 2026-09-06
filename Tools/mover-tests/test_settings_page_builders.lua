@@ -280,7 +280,7 @@ do
 
     local declared = tonumber(PAGE:match("local FRAME_MODES_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "frame modes: the page declares the row's count in one place")
-    eq(declared, #FRAME_MODES, "frame modes: ...the whole census, because nothing is hoisted")
+    eq(declared, settingsIn(FRAME_MODES), "frame modes: ...every setting in the census, because nothing is hoisted")
 
     local opts = rowOpts("Frame Modes")
     -- ⚠ NO TOGGLE, and there are two candidates. Neither tick means "am I doing
@@ -369,8 +369,8 @@ do
 
     local declared = tonumber(PAGE:match("local BLIZZARD_FRAMES_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "blizzard frames: the page declares the row's count in one place")
-    eq(declared, #BLIZZARD_FRAMES,
-       "blizzard frames: ...the whole census, separator included -- the kit counts what is MOUNTED")
+    eq(declared, settingsIn(BLIZZARD_FRAMES),
+       "blizzard frames: ...the four ticks, and NOT the separator between them -- the badge counts settings")
 
     local opts = rowOpts("Blizzard Frames")
     check(opts:find("toggle", 1, true) == nil,
@@ -436,7 +436,7 @@ do
 
     local declared = tonumber(PAGE:match("local RENDERING_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "rendering: the page declares the row's count in one place")
-    eq(declared, #RENDERING, "rendering: ...the whole census, because nothing is hoisted")
+    eq(declared, settingsIn(RENDERING), "rendering: ...every setting in the census, because nothing is hoisted")
 
     local opts = rowOpts("Rendering")
     check(opts:find("toggle", 1, true) == nil,
@@ -479,7 +479,7 @@ do
 
     local declared = tonumber(PAGE:match("local PANEL_APPEARANCE_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "panel appearance: the page declares the row's count in one place")
-    eq(declared, #PANEL_APPEARANCE, "panel appearance: ...the whole census, because nothing is hoisted")
+    eq(declared, settingsIn(PANEL_APPEARANCE), "panel appearance: ...every setting in the census, because nothing is hoisted")
 
     local opts = rowOpts("Settings Panel Appearance")
     check(opts:find("toggle", 1, true) == nil,
@@ -631,7 +631,7 @@ do
 
     local declared = tonumber(PAGE:match("local NOTIFICATIONS_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "notifications: the page declares the row's count in one place")
-    eq(declared, #NOTIFICATIONS, "notifications: ...the whole census, because nothing is hoisted")
+    eq(declared, settingsIn(NOTIFICATIONS), "notifications: ...every setting in the census, because nothing is hoisted")
 
     local opts = rowOpts("Notifications")
     check(opts:find("toggle", 1, true) == nil, "notifications: the row declares no toggle")

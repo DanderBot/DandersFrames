@@ -506,25 +506,25 @@ print("-- Defensive Icon page: the declared counts")
 do
     local function declared(name) return tonumber(PAGE:match("local " .. name .. "%s*=%s*(%d+)")) end
 
-    eq(declared("DEFENSIVE_SETTINGS_COUNT"), #DEFENSIVE_SETTINGS - 1,
-       "counts: Settings is the census less the hoisted Enable tick")
-    eq(declared("DEFENSIVE_LAYOUT_COUNT"), #DEFENSIVE_LAYOUT,
-       "counts: Layout is the whole census, the growth control counting as the one widget it is")
+    eq(declared("DEFENSIVE_SETTINGS_COUNT"), settingsIn(DEFENSIVE_SETTINGS) - 1,
+       "counts: Settings is the census's settings less the hoisted Enable tick")
+    eq(declared("DEFENSIVE_LAYOUT_COUNT"), settingsIn(DEFENSIVE_LAYOUT),
+       "counts: Layout is every setting in the census, the growth control counting as the one widget it is")
     eq(declared("DEFENSIVE_APPEARANCE_COUNT"), #DEFENSIVE_APPEARANCE, "counts: Appearance")
     eq(declared("DEFENSIVE_POSITION_COUNT"), #DEFENSIVE_POSITION, "counts: Position")
-    eq(declared("DEFENSIVE_DURBAR_COUNT"), #DEFENSIVE_DURBAR - 1,
-       "counts: Duration Bar is the census less the hoisted Enable tick")
+    eq(declared("DEFENSIVE_DURBAR_COUNT"), settingsIn(DEFENSIVE_DURBAR) - 1,
+       "counts: Duration Bar is the census's settings less the hoisted Enable tick")
 
     -- The two blocks the TextStyle helper expands: font, scale, outline, shadow,
     -- colour, anchor and two offsets.
     local TEXTSTYLE = 8
     eq(declared("DEFENSIVE_STACK_COUNT"), TEXTSTYLE,
        "counts: Stack Count is exactly the TextStyle block's eight")
-    -- Duration Text: the census less the hoisted tick and less the TextStyle
-    -- placeholder, plus that block's eight, plus the Colors cross-link -- which
-    -- is not a GUI:Create call, so the census cannot see it.
-    eq(declared("DEFENSIVE_DURATION_COUNT"), (#DEFENSIVE_DURATION - 1 - 1) + TEXTSTYLE + 1,
-       "counts: Duration Text -- the format control, the TextStyle block's eight, Color by Time, its cross-link and the permanent-aura tick")
+    -- Duration Text: the census's settings less the hoisted tick and less the
+    -- TextStyle placeholder, plus that block's eight. NOT the Colors cross-link:
+    -- it is prose pointing at another page, and the badge promises settings.
+    eq(declared("DEFENSIVE_DURATION_COUNT"), (settingsIn(DEFENSIVE_DURATION) - 1 - 1) + TEXTSTYLE,
+       "counts: Duration Text -- the format control, the TextStyle block's eight, Color by Time and the permanent-aura tick")
     check(builderBody("BuildDefensiveDurationGroup"):find("AddColorsPageLink(group, parent)", 1, true) ~= nil,
           "counts: ...and that cross-link really is mounted into the group")
 

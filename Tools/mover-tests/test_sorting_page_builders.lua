@@ -178,7 +178,7 @@ do
           "unit frame sorting: ...and in classic it stays live under the group's own grey")
     local declared = tonumber(SRC:match("local SORT_OPTIONS_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "unit frame sorting: the page declares the row's count in one place")
-    eq(declared, #SORT_OPTIONS - 1, "unit frame sorting: ...the census less the hoisted tick")
+    eq(declared, settingsIn(SORT_OPTIONS) - 1, "unit frame sorting: ...the census's settings less the hoisted tick")
 
     -- ☠ THE GROUP GATE MOVED INSIDE THE BUILDER. In classic it was a property of
     -- the page-level box; left there, the pane would not grey while custom
@@ -283,7 +283,7 @@ do
 
     local declared = tonumber(SRC:match("local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = (%d+)"))
     check(declared ~= nil, "role priority: the page declares the row's count in one place")
-    eq(declared, #ROLE_PRIORITY + 1, "role priority: ...the blurb plus the drag list")
+    eq(declared, settingsIn(ROLE_PRIORITY) + 1, "role priority: ...the drag list the census cannot see, and not the blurb")
 
     -- ☠ THE WIDGET REFERENCE IS REBOUND INSIDE THE BUILDER. The Separate Melee &
     -- Ranged callback repaints whichever list the user can see, and the popout
@@ -346,7 +346,7 @@ do
 
     local declared = tonumber(SRC:match("local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = %d+, (%d+)"))
     check(declared ~= nil, "class priority: the page declares the row's count in one place")
-    eq(declared, #CLASS_PRIORITY + 1, "class priority: ...the blurb plus the drag list")
+    eq(declared, settingsIn(CLASS_PRIORITY) + 1, "class priority: ...the drag list the census cannot see, and not the blurb")
 
     check(body:find("group.disableChildrenOn = DisableSortOptions", 1, true) ~= nil,
           "class priority: the pane greys while custom sorting is off, as the box did")

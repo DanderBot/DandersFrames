@@ -359,11 +359,12 @@ for _, p in ipairs(PALETTES) do
     check(body:find("disableChildrenOn", 1, true) == nil,
           p.label .. ": ...and no group gate either")
 
-    -- The count is the blurb, the reset button and the list -- which is what the
-    -- pane MOUNTS, and what the kit compares its declared number against.
+    -- The count is the reset button and the list. NOT the blurb above them: the
+    -- badge promises settings, and a line of prose is not one -- which is the
+    -- line the kit's own build-time check draws too.
     local declared = tonumber(PAGE:match("local " .. p.countVar .. "%s*=%s*(%d+)"))
     check(declared ~= nil, p.label .. ": the page declares the row's count in one place")
-    eq(declared, #p.list + 2, p.label .. ": ...the blurb, the reset button and every swatch")
+    eq(declared, #p.list + 1, p.label .. ": ...the reset button and every swatch, but not the blurb")
     local opts = rowOpts(p.label)
     check(opts:find("count%s*=%s*" .. p.countVar) ~= nil,
           p.label .. ": ...and the row is handed that name, not a literal")

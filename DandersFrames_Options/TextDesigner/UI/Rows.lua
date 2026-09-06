@@ -28,6 +28,7 @@ local BuildTextsHeadArea     = P.BuildTextsHeadArea
 local BuildGroupsHeadArea    = P.BuildGroupsHeadArea
 local CreateEnableBanner     = P.CreateEnableBanner
 local GetState               = P.GetState
+local TabElementCounts       = P.TabElementCounts
 
 -- ...and the ONE thing this page borrows from the other designer: its frame
 -- canvas. Decision 4 of the designer rework -- the Text Designer had its own,
@@ -296,6 +297,12 @@ local function MountElement(ctx, elem)
             window  = DF.GUIFrame,
             clipTo  = page,
             build   = mount,
+            -- ☠ AND THE GREY IS A REAL GATE, not a dim. The designer's own Enable
+            -- banner is a band of its own, so nothing in this pane can switch the
+            -- feature back on -- which is the kit's whole reason for leaving a
+            -- greyed row's contents live. The classic layout draws a full-cover
+            -- scrim over the same settings; this is that, said to the kit.
+            gateWhenDisabled = true,
         }))
         if not ctx.tdEnabled then row.disableOn = AlwaysOff end
         tools.ClaimKeys(row, content)
@@ -358,10 +365,12 @@ local function BuildElementListTab(ctx, shell, wantGroups)
         host:SetWidth(tools.BandWidth())
         local h
         if wantGroups then
-            h = BuildGroupsHeadArea(GUI, host, state, tdDB, page, 0)
+            h = BuildGroupsHeadArea(GUI, host, state, tdDB, page, 0,
+                                    { enabled = ctx.tdEnabled })
         else
             h = BuildTextsHeadArea(GUI, host, state, tdDB, page, 0,
                                    { skipChips = true, filterGlyph = true,
+                                     enabled = ctx.tdEnabled,
                                      filterGlyphEnabled = ctx.tdEnabled })
         end
         host:SetHeight(max(h or 1, 1))
@@ -430,6 +439,8 @@ local function BuildGlobalTabRows(ctx)
         window  = DF.GUIFrame,
         clipTo  = page,
         build   = mount,
+        -- See the element rows' note: the dependent grey is a real gate here.
+        gateWhenDisabled = true,
     }))
     if not ctx.tdEnabled then row.disableOn = function() return true end end
     tools.ClaimKeys(row, content)
@@ -460,7 +471,12 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
     state.groupListContainer, state.groupListChild, state.groupEmptyMsg = nil, nil, nil
     state.groupAddBtn, state.addBtn, state.chipRow = nil, nil, nil
     state.tabStrip, state.tabContents, state.SelectTab = nil, nil, nil
-    state.UpdateTabCounts, state.scaleSlider = nil, nil
+    state.scaleSlider = nil
+    -- ⚠ NOT NILLED ANY MORE. The split panel's strip is gone, but the count on a
+    -- tab is not split-panel furniture -- the shell draws one too -- and blanking
+    -- the verb here is what left the row layout's tabs unnumbered. Re-pointed at
+    -- the shell below, once it exists.
+    state.UpdateTabCounts = nil
     state.previewPanel, state.mockFrame = nil, nil
     state.activeTab = state.activeTab or "texts"
     state.activeFilter = state.activeFilter or "_all"
@@ -482,7 +498,7 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
         tdEnabled = tdDB.enabled and true or false,
     }
 
-    GUI:BuildDesignerShell(page, {
+    local shell = GUI:BuildDesignerShell(page, {
         tools    = tools,
         Add      = Add,
         AddSpace = AddSpace,
@@ -598,9 +614,17 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
         -- GUI:CreateCollapsibleSection for why the title is not the key.
         canvasFold = { title = L["FRAME PREVIEW"], collapseKey = "td_canvas" },
 
+        -- ☠ THE SAME NUMBERS THE CLASSIC STRIP HAS ALWAYS SHOWN. Which tab
+        -- holds the default current/max health is not obvious from its name, and
+        -- the split panel answered that with a count on the tab; the row layout
+        -- shipped without one. Asked as a FUNCTION, from the shared counter, so a
+        -- shell repaint re-reads the profile instead of freezing this build's
+        -- total. Global has no element list, so it keeps its plain label.
         tabs = {
-            { key = "texts",  label = L["Texts"],       accent = nil },
-            { key = "groups", label = L["Text Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 } },
+            { key = "texts",  label = L["Texts"],       accent = nil,
+              count = function() return TabElementCounts(tdDB).texts end },
+            { key = "groups", label = L["Text Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 },
+              count = function() return TabElementCounts(tdDB).groups end },
             { key = "global", label = L["Global"],      accent = { r = 0.51, g = 0.86, b = 0.51 } },
         },
         activeTab = state.activeTab,
@@ -619,6 +643,14 @@ P.BuildTextDesignerRowsPage = function(page, db, Add, AddSpace)
             end
         end,
     })
+
+    -- The verb the rest of the editor already calls when an element is added,
+    -- removed or toggled: pointed at the shell's strip so both layouts answer the
+    -- same name. Guarded -- a shell built without tabs has no strip to repaint.
+
+    if shell and shell.RefreshTabCounts then
+        state.UpdateTabCounts = function() shell:RefreshTabCounts() end
+    end
 
     -- The other half of the reopen contract at the top of this file: whichever
     -- panel was open when a structural change forced this rebuild comes back.

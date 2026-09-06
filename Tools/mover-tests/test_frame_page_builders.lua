@@ -997,7 +997,7 @@ do
 
     local declared = tonumber(SRC:match("local GROUP_ORDER_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "group order: the page declares the row's count in one place")
-    eq(declared, #GROUP_ORDER + 1, "group order: ...the census plus the drag list")
+    eq(declared, settingsIn(GROUP_ORDER) + 1, "group order: ...the census's settings plus the drag list")
 
     -- ☠ THE LIST HAS TO REPAINT AFTER A WRITE IT DID NOT MAKE. It is bound to a
     -- TABLE setting and the row wires Reset Group / Hold: Defaults, so without the
@@ -1436,4 +1436,61 @@ do
           "verb: ...and reached by overloading RegisterHoistedToggle's second argument")
     check(controls:find("RegisterHoistedControls = ", 1, true) == nil,
           "verb: ...with no second name exported beside it")
+end
+
+-- ============================================================
+-- THE LAYOUT DIRECTION PANEL SURVIVES ITS OWN REBUILD
+-- ------------------------------------------------------------
+-- ☠ REPORTED AS "Changing Growth Direction to either option will close it's
+-- settings option, but not with Frames Grow From (even if the widget is
+-- pinned)". Growth Direction is the one control on this page whose own write
+-- forces a page rebuild -- the seven downstream dropdowns bake their titles and
+-- their values from the orientation at build time -- and every route into a page
+-- builder closes every open row panel first, pinned ones included, because the
+-- rebuild retires the rows those panels are about.
+--
+-- A rebuild is not the user asking for the panel to go away, so the panel comes
+-- back on the other side of it. Remembered by the ROW rather than by a panel
+-- object, because the rebuild mints new rows.
+-- ============================================================
+print("-- Frame page: Growth Direction puts its own panel back")
+do
+    -- The handle lives at FILE scope, above SetupGUIPages: a page-scoped local
+    -- would still be the OLD build's row when the reopen runs.
+    local declAt = SRC:find("\nlocal layoutDirRow\n", 1, true)
+    local setupAt = SRC:find("function DF:SetupGUIPages", 1, true)
+    check(declAt ~= nil, "reopen: the row handle is declared")
+    check(declAt ~= nil and setupAt ~= nil and declAt < setupAt,
+          "reopen: ...at file scope, above the page builders")
+    check(SRC:find("            layoutDirRow = dirRow", 1, true) ~= nil,
+          "reopen: the popout arm takes the row it built")
+    check(SRC:find("        layoutDirRow = nil", 1, true) ~= nil,
+          "reopen: ...and every build drops the previous one first, classic included")
+
+    -- The body of the deferred rebuild: capture, rebuild, re-open, re-pin.
+    local body = SRC:match("local po      = layoutDirRow and layoutDirRow%.popout(.-)\n            end%)")
+    check(body ~= nil, "reopen: the deferred rebuild's body is readable")
+    body = body or ""
+    check(body:find("local wasOpen", 1, true) ~= nil,
+          "reopen: it asks whether a panel was up BEFORE the rebuild")
+    check(body:find("po.pinned", 1, true) ~= nil,
+          "reopen: ...and whether that panel was pinned")
+    local refreshAt = body:find("GUI:RefreshCurrentPage()", 1, true)
+    local openAt    = body:find("row:OpenPopout()", 1, true)
+    check(refreshAt ~= nil and openAt ~= nil and refreshAt < openAt,
+          "reopen: the re-open happens AFTER the rebuild, not before it")
+    check(body:find("up:Pin(true)", 1, true) ~= nil,
+          "reopen: ...and a panel that was pinned is pinned again, silently")
+    check(body:find("local row = layoutDirRow", 1, true) ~= nil,
+          "reopen: the row re-read is the NEW build's, not the captured one")
+
+    -- ⚠ AND THE PAGE STILL DOES NOT TOUCH THE SEARCH ROW MAP. The reopen could
+    -- have found the new row through page._popoutRowForKey; that map belongs to
+    -- the shared machinery and the page has never managed it.
+    check(SRC:find("_popoutRowForKey", 1, true) == nil,
+          "reopen: ...and it is found without reaching into the shared row map")
+
+    -- Frames Grow From is unchanged: no rebuild, so nothing to put back.
+    check(SRC:find('L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames', 1, true) ~= nil,
+          "reopen: Frames Grow From still needs no rebuild, and so keeps its panel by itself")
 end

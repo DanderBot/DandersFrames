@@ -238,9 +238,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Five: two blurbs and three controls. The enable tick is HOISTED
-            -- onto the row, so it is not one of them.
-            local SORT_OPTIONS_COUNT = 5
+            -- Three, and the two blurbs beside them are not among them: the badge
+            -- counts SETTINGS, not everything the pane mounts. The enable tick is
+            -- HOISTED onto the row, so it is not one of them either.
+            local SORT_OPTIONS_COUNT = 3
 
             -- The group's own apply, named once so the footer's Reset and Hold do
             -- exactly what the controls' own callbacks do.
@@ -523,8 +524,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 return (names and names[top]) or ""
             end
 
-            -- Two apiece: the blurb and the drag list.
-            local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = 2, 2
+            -- One apiece: the drag list. The blurb above it is prose, not a
+            -- setting, and the badge counts settings.
+            local ROLE_PRIORITY_COUNT, CLASS_PRIORITY_COUNT = 1, 1
 
             -- Both lists write one TABLE key, and both rows carry Reset Group and
             -- Hold: Defaults -- which is exactly the write the list itself did not
@@ -681,8 +683,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 return ""
             end
 
-            -- Four: two ticks and the blurb under each.
-            local COLOR_PICKER_COUNT = 4
+            -- Two: the two ticks. The blurb under each is prose, not a setting.
+            local COLOR_PICKER_COUNT = 2
 
             local pickerMount, pickerContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildColorPickerGroup({ group = group, parent = holder, refreshStates = reflow })
@@ -1000,12 +1002,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- shows the label and the count badge, which is what an empty summary
             -- is for -- the Global Font Settings row's precedent.
             --
-            -- Fifteen: the blurb, the reset button and the thirteen pickers. The
-            -- count is what the pane MOUNTS (the kit compares its declared number
-            -- against the pane's own roster), so a blurb and a button count --
-            -- exactly as that same Global Font Settings row's seven counts its
-            -- blurb and its Apply button.
-            local CLASS_COLORS_COUNT = 15
+            -- Fourteen: the reset button and the thirteen pickers. The count is
+            -- what the pane offers you to PRESS OR CHANGE, so the button counts
+            -- and the blurb above it does not -- exactly as that same Global Font
+            -- Settings row's five counts its Apply button and not its two blurbs.
+            local CLASS_COLORS_COUNT = 14
 
             local classMount, classContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildClassColorsGroup({
@@ -1083,9 +1084,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(col2, nil, 2)
         else
-            -- Five: the blurb, the reset button and the three pickers. No summary,
-            -- for the reason the row above has none.
-            local ROLE_COLORS_COUNT = 5
+            -- Four: the reset button and the three pickers -- the blurb is prose.
+            -- No summary, for the reason the row above has none.
+            local ROLE_COLORS_COUNT = 4
 
             local roleMount, roleContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildRoleColorsGroup({
@@ -1144,9 +1145,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(dispelCol, nil, 1)
         else
-            -- Seven: the blurb, the reset button and the five pickers. No summary,
-            -- for the reason the two rows above have none.
-            local DISPEL_COLORS_COUNT = 7
+            -- Six: the reset button and the five pickers -- the blurb is prose.
+            -- No summary, for the reason the two rows above have none.
+            local DISPEL_COLORS_COUNT = 6
 
             local dispelMount, dispelContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDispelColorsGroup({
@@ -3742,11 +3743,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(colorGroup, nil, 2)
         else
-            -- Fourteen: the blurb, the colour-mode pick, the custom swatch, the ten
-            -- power swatches and the reset button. A blurb and a button count,
-            -- because the count is what the pane MOUNTS (the Class Colors row's
-            -- fifteen counts its blurb and its button the same way).
-            local RESOURCE_COLORS_COUNT = 14
+            -- Thirteen: the colour-mode pick, the custom swatch, the ten power
+            -- swatches and the reset button. The button counts and the blurb does
+            -- not, because the count is what the pane offers you to PRESS OR
+            -- CHANGE (the Class Colors row's fourteen draws the same line).
+            local RESOURCE_COLORS_COUNT = 13
 
             local colorsMount, colorsContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildResourceColorsGroup({
@@ -4056,15 +4057,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 refreshStates = function() self:RefreshStates() end,
             })
         else
-            -- Twenty-one: the mode pick, the texture, the swatch, the blend pick,
-            -- the overlay reverse, the clamp pick, the overshield tick and its four
-            -- detail controls, the floating header and the nine floating controls
-            -- under it. Most of them are hidden for most modes -- the count is what
-            -- the pane HOLDS, not what happens to be on show (the Health Bar Color
-            -- row's rule), and the header counts because the count is what the pane
-            -- MOUNTS (the Resource Colors row's, which counts its blurb and its
-            -- button the same way).
-            local ABSORB_SHIELD_COUNT = 21
+            -- Twenty: the mode pick, the texture, the swatch, the blend pick, the
+            -- overlay reverse, the clamp pick, the overshield tick and its four
+            -- detail controls, and the nine floating controls. Most of them are
+            -- hidden for most modes -- the count is what the pane HOLDS, not what
+            -- happens to be on show (the Health Bar Color row's rule) -- and the
+            -- floating HEADER is not among them, because the badge counts settings
+            -- rather than everything mounted (the Resource Colors row's rule).
+            local ABSORB_SHIELD_COUNT = 20
 
             local absorbMount, absorbContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildAbsorbShieldGroup({
@@ -4201,10 +4201,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 refreshStates = function() self:RefreshStates() end,
             })
         else
-            -- Fifteen: the blurb, the mode pick, the texture, the swatch, the blend
-            -- pick, the overlay reverse, the floating header and the eight floating
-            -- controls under it.
-            local HEAL_ABSORB_COUNT = 15
+            -- Thirteen: the mode pick, the texture, the swatch, the blend pick, the
+            -- overlay reverse and the eight floating controls. The blurb and the
+            -- floating header are prose, and prose is not a setting.
+            local HEAL_ABSORB_COUNT = 13
 
             local healMount, healContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHealAbsorbGroup({

@@ -249,7 +249,7 @@ do
 
     local declared = tonumber(PAGE:match("local OUT_OF_RANGE_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "out of range: the page declares the row's count in one place")
-    eq(declared, #OUT_OF_RANGE, "out of range: ...the whole census, nothing hoisted out of it")
+    eq(declared, settingsIn(OUT_OF_RANGE), "out of range: ...every setting in the census, nothing hoisted out of it")
 
     local opts = rowOpts("Out of Range")
     check(opts:find("toggle", 1, true) == nil,

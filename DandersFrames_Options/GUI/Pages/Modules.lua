@@ -1440,8 +1440,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Seven: the mode, the two tanking questions, thickness, inset, frame
             -- level and alpha.
             local AGGRO_COUNT = 7
-            -- Five: the custom-colours tick, the three swatches and the legend.
-            local THREAT_COUNT = 5
+            -- Four: the custom-colours tick and the three swatches. The legend
+            -- under them is prose, not a setting.
+            local THREAT_COUNT = 4
 
             local aggroMount, aggroContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildAggroHighlightGroup({

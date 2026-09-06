@@ -462,7 +462,7 @@ for _, g in ipairs(PLAIN) do
 
     local declared = tonumber(PAGE:match("local " .. g.countVar .. "%s*=%s*(%d+)"))
     check(declared ~= nil, g.label .. ": the page declares the row's count in one place")
-    eq(declared, #g.golden, g.label .. ": ...the whole census, nothing hoisted out of it")
+    eq(declared, settingsIn(g.golden), g.label .. ": ...every setting in the census, nothing hoisted out of it")
 
     local opts = rowOpts(g.label)
     check(opts:find("toggle", 1, true) == nil,
@@ -505,7 +505,7 @@ do
     -- `isRaidMode and 6 or 5` because those builders skip a control outright.
     local declared = tonumber(PAGE:match("local RESOURCE_SETTINGS_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "settings: the page declares the row's count in one place")
-    eq(declared, #RESOURCE_SETTINGS - 1, "settings: ...the census less the hoisted tick")
+    eq(declared, settingsIn(RESOURCE_SETTINGS) - 1, "settings: ...the census's settings less the hoisted tick")
     check(PAGE:find("showInSolo.hideOn = function() return GUI.SelectedMode == \"raid\" end", 1, true) ~= nil,
           "settings: Show in Solo Mode is hidden in raid, not skipped -- which is why the count is not mode-dependent")
 
@@ -671,15 +671,16 @@ do
     checkCensus(census(body), RESOURCE_COLORS, "resource colors")
     checkShared(g)
 
-    -- Ten powers, and the count is blurb + mode + custom + ten + the reset button.
+    -- Ten powers, and the count is mode + custom + ten + the reset button. The
+    -- blurb above them is prose, and the badge promises settings.
     local list = PAGE:match("local POWER_LIST = {(.-)\n            }")
     check(list ~= nil, "resource colors: the power list is locatable")
     local tokens = 0
     for _ in (list or ""):gmatch("token = \"") do tokens = tokens + 1 end
     eq(tokens, 10, "resource colors: ten power types in the list")
     local declared = tonumber(PAGE:match("local RESOURCE_COLORS_COUNT%s*=%s*(%d+)"))
-    eq(declared, 3 + tokens + 1,
-       "resource colors: fourteen behind the row -- blurb, mode, custom swatch, ten powers, reset")
+    eq(declared, 2 + tokens + 1,
+       "resource colors: thirteen behind the row -- mode, custom swatch, ten powers, reset")
 
     -- The ten seeds stay in the builder, ahead of the picker that reads each one.
     check(body:find("if not powerColorsDB[token] then", 1, true) ~= nil,

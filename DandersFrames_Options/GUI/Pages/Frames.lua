@@ -325,9 +325,9 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(shadowGroup, nil, 1)
         else
             -- ---- the font selection row ----------------------------------
-            -- Seven: the blurb, the three selectors, the Apply button, and the
-            -- SDF tick with its own blurb.
-            local FONT_SELECTION_COUNT = 7
+            -- Five: the three selectors, the Apply button and the SDF tick. The
+            -- two blurbs are prose, and the badge counts settings.
+            local FONT_SELECTION_COUNT = 5
 
             local fontMount, fontContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFontSelectionGroup({ group = group, parent = holder, refreshStates = reflow })
@@ -404,11 +404,11 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Four, which is the whole group: the blurb, the two offsets and the
-            -- colour. Nothing is hoisted -- there is no boolean in here meaning
+            -- Three: the two offsets and the colour -- the blurb above them is
+            -- prose. Nothing is hoisted -- there is no boolean in here meaning
             -- "am I doing anything" (the shadow style is chosen by the outline
             -- dropdown in the row above, and on a dozen other pages besides).
-            local SHADOW_SETTINGS_COUNT = 4
+            local SHADOW_SETTINGS_COUNT = 3
 
             local shadowMount, shadowContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildShadowSettingsGroup({ group = group, parent = holder, refreshStates = reflow })

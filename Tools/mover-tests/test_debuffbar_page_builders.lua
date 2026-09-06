@@ -656,16 +656,19 @@ do
     eq(declared("DEBUFF_LAYOUT_COUNT"), #DEBUFF_LAYOUT, "counts: Layout")
     eq(declared("DEBUFF_POSITION_COUNT"), #DEBUFF_POSITION,
        "counts: Position, the growth control counting as the one widget it is")
-    eq(declared("DEBUFF_IMPORTANT_COUNT"), #DEBUFF_IMPORTANT - 1,
-       "counts: Important Debuffs is the census less the hoisted Highlight tick")
-    eq(declared("DEBUFF_DURATION_COUNT"), (#DEBUFF_DURATION - 1) + 1,
-       "counts: Duration Text is its fourteen remaining widgets plus the Colors-page cross-link the census cannot see")
+    eq(declared("DEBUFF_IMPORTANT_COUNT"), settingsIn(DEBUFF_IMPORTANT) - 1,
+       "counts: Important Debuffs is the census's settings less the hoisted Highlight tick")
+    -- ⚠ THE CROSS-LINK IS NOT IN THE NUMBER. It is a line of prose pointing at
+    -- another page, and the badge promises settings -- the same line the kit's own
+    -- build-time check draws, since a link frame carries no SetEnabled.
+    eq(declared("DEBUFF_DURATION_COUNT"), settingsIn(DEBUFF_DURATION) - 1,
+       "counts: Duration Text is its settings less the hoisted tick, the cross-link not among them")
     eq(declared("DEBUFF_STACK_COUNT"), #DEBUFF_STACK,
        "counts: Stack Count is its own eight, spelled out rather than helper-built")
     eq(declared("DEBUFF_DISPEL_COUNT"), 8,
        "counts: Dispel Text is exactly the TextStyle block's eight, the tick hoisted")
-    eq(declared("DEBUFF_DURBAR_COUNT"), #DEBUFF_DURBAR - 1,
-       "counts: Duration Bar is the census less the hoisted Enable tick")
+    eq(declared("DEBUFF_DURBAR_COUNT"), settingsIn(DEBUFF_DURBAR) - 1,
+       "counts: Duration Bar is the census's settings less the hoisted Enable tick")
 
     -- ☠ THE COMPOSITE COUNT, DERIVED FROM THE HELPER RATHER THAN ASSERTED AT IT.
     -- CreateBorderControls builds a fixed set plus one widget per include key, and

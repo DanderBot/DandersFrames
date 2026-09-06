@@ -585,12 +585,14 @@ do
     eq(declared("BUFF_LAYOUT_COUNT"), #BUFF_LAYOUT, "counts: Layout")
     eq(declared("BUFF_POSITION_COUNT"), #BUFF_POSITION,
        "counts: Position, the growth control counting as the one widget it is")
-    eq(declared("BUFF_DURATION_COUNT"), 15,
-       "counts: Duration Text -- the six page widgets it keeps, the format control, and the TextStyle block's eight, less the hoisted tick")
+    -- ⚠ THE CROSS-LINK IS NOT IN THE NUMBER: it is a line of prose pointing at
+    -- another page, and the badge promises settings.
+    eq(declared("BUFF_DURATION_COUNT"), 14,
+       "counts: Duration Text -- the five page settings it keeps, the format control, and the TextStyle block's eight, less the hoisted tick")
     eq(declared("BUFF_STACK_COUNT"), 8,
        "counts: Stack Count is exactly the TextStyle block's eight")
-    eq(declared("BUFF_DURBAR_COUNT"), #BUFF_DURBAR - 1,
-       "counts: Duration Bar is the census less the hoisted Enable tick")
+    eq(declared("BUFF_DURBAR_COUNT"), settingsIn(BUFF_DURBAR) - 1,
+       "counts: Duration Bar is the census's settings less the hoisted Enable tick")
 
     -- ☠ THE TWO COMPOSITE COUNTS, DERIVED FROM THE HELPER RATHER THAN ASSERTED
     -- AT IT. CreateBorderControls builds a fixed set plus one widget per include
@@ -611,11 +613,15 @@ do
        "counts: Border is those eighteen less the hoisted Show Border")
 
     -- Pandemic mounts the SAME toolkit for its BORDER mode, with noShowToggle
-    -- already set by the helper -- so seventeen -- plus its own eight (the nine
-    -- it builds less the tick this row now hoists) plus the page's own blurb.
+    -- already set by the helper -- so seventeen -- plus its own six.
+    --
+    -- ⚠ THE PROSE IS NOT IN EITHER NUMBER. The helper mounts two notes (the
+    -- explainer and the unsupported-client caution) and the page adds a blurb of
+    -- its own; none of the three is a setting, and the badge promises settings.
     local PANDEMIC_OWN = 9         -- enable, explain, unsupported note, type, flash, speed, tint colour/alpha/inset
-    eq(declared("BUFF_PANDEMIC_COUNT"), 1 + (PANDEMIC_OWN - 1) + (borderAll - 1),
-       "counts: Pandemic is the blurb, its own eight, and the border toolkit's seventeen")
+    local PANDEMIC_PROSE = 2       -- ...and two of those nine are notes
+    eq(declared("BUFF_PANDEMIC_COUNT"), (PANDEMIC_OWN - PANDEMIC_PROSE - 1) + (borderAll - 1),
+       "counts: Pandemic is its own six and the border toolkit's seventeen, prose in neither")
 
     -- The filter row's count is the one that is DATA rather than a constant.
     check(PAGE:find("local function BuffFilterCount()", 1, true) ~= nil,

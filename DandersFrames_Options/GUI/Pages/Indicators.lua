@@ -1241,10 +1241,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durationGroup, nil, 2)
         else
-            -- Fifteen: the swipe tick, the format pick, the eight TextStyle controls,
-            -- Color by Time and its cross-link, the Hide Above pair and the
-            -- permanent-aura tick. The Show Duration tick is HOISTED onto the row.
-            local BUFF_DURATION_COUNT = 15
+            -- Fourteen: the swipe tick, the format pick, the eight TextStyle controls,
+            -- Color by Time, the Hide Above pair and the permanent-aura tick. The
+            -- cross-link beside Color by Time is prose, not a setting, and the badge
+            -- promises settings. The Show Duration tick is HOISTED onto the row.
+            local BUFF_DURATION_COUNT = 14
 
             -- What the suppressed Show Duration checkbox ran, plus the repaint of every
             -- pane standing open.
@@ -1428,9 +1429,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durBarGroup, nil, 2)
         else
-            -- Nine: the blurb, the position pick, height, gap, the colour mode, the
-            -- texture and two colours, and Reverse Fill. The Enable tick is HOISTED.
-            local BUFF_DURBAR_COUNT = 9
+            -- Eight: the position pick, height, gap, the colour mode, the texture
+            -- and two colours, and Reverse Fill. The blurb is prose, not a
+            -- setting. The Enable tick is HOISTED.
+            local BUFF_DURBAR_COUNT = 8
 
             local function OnBuffDurationBarToggle()
                 self:RefreshStates()
@@ -1550,10 +1552,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- applies to the popout layout, which has no columns to balance.
             Add(pandemicGroup, nil, 2)
         else
-            -- Twenty-six: the blurb, the eight pandemic controls the helper builds
-            -- without its Enable tick, and the seventeen of the border toolkit it mounts
-            -- for BORDER mode.
-            local BUFF_PANDEMIC_COUNT = 26
+            -- Twenty-three: the six pandemic controls the helper builds without its
+            -- Enable tick, and the seventeen of the border toolkit it mounts for
+            -- BORDER mode. The page's blurb and the helper's two notes are prose,
+            -- and the badge promises settings.
+            local BUFF_PANDEMIC_COUNT = 23
 
             local function OnBuffPandemicToggle()
                 self:RefreshStates()
@@ -2954,9 +2957,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- needed to buy anything.
             Add(impGroup, nil, 2)
         else
-            -- Nine: the blurb, the size step, the marker tick, its size, corner, two
-            -- offsets and two colours. The Highlight tick is HOISTED onto the row.
-            local DEBUFF_IMPORTANT_COUNT = 9
+            -- Eight: the size step, the marker tick, its size, corner, two offsets
+            -- and two colours. The blurb is prose, not a setting. The Highlight
+            -- tick is HOISTED onto the row.
+            local DEBUFF_IMPORTANT_COUNT = 8
 
             -- What the suppressed Highlight checkbox ran, plus the two passes the row's
             -- tick owes the pane behind it. ⚠ THE STATE PASS IS NEW: ImportantChanged
@@ -3092,10 +3096,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durationGroup, nil, 2)
         else
-            -- Fifteen: the swipe tick, the format pick, the eight text-style controls,
-            -- Color by Time and its cross-link, the Hide Above pair and the
-            -- permanent-aura tick. The Show Duration tick is HOISTED onto the row.
-            local DEBUFF_DURATION_COUNT = 15
+            -- Fourteen: the swipe tick, the format pick, the eight text-style
+            -- controls, Color by Time, the Hide Above pair and the permanent-aura
+            -- tick. The cross-link beside Color by Time is prose, not a setting. The
+            -- Show Duration tick is HOISTED onto the row.
+            local DEBUFF_DURATION_COUNT = 14
 
             -- What the suppressed Show Duration checkbox ran, plus the repaint of every
             -- pane standing open.
@@ -3381,9 +3386,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durBarGroup, nil, 2)
         else
-            -- Nine: the blurb, the position pick, height, gap, the colour mode, the
-            -- texture and two colours, and Reverse Fill. The Enable tick is HOISTED.
-            local DEBUFF_DURBAR_COUNT = 9
+            -- Eight: the position pick, height, gap, the colour mode, the texture
+            -- and two colours, and Reverse Fill. The blurb is prose, not a
+            -- setting. The Enable tick is HOISTED.
+            local DEBUFF_DURBAR_COUNT = 8
 
             local function OnDebuffDurationBarToggle()
                 self:RefreshStates()
@@ -3630,9 +3636,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(settingsGroup, nil, 1)
         else
-            -- Four: the blurb, the client-capability banner, Auto-detect and Hide
-            -- Raid Buffs from Buff Bar. The Enable tick is HOISTED onto the row.
-            local MISSING_SETTINGS_COUNT = 4
+            -- Two: Auto-detect and Hide Raid Buffs from Buff Bar. The blurb and the
+            -- client-capability banner are prose, and the badge counts settings.
+            -- The Enable tick is HOISTED onto the row.
+            local MISSING_SETTINGS_COUNT = 2
 
             -- What the suppressed Enable checkbox ran, plus a repaint of every pane
             -- standing open -- four of which grey with it. Never a page rebuild:
@@ -3737,8 +3744,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             buffsGroup.hideOn = HideManualBuffVariant
             Add(buffsGroup, nil, 1)
         else
-            -- Seven: the caption and the six raid buffs.
-            local MISSING_BUFFS_COUNT = 7
+            -- Six: the six raid buffs. The caption above them is prose.
+            local MISSING_BUFFS_COUNT = 6
 
             local buffsMount, buffsContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildMissingBuffsToCheckGroup({
@@ -4234,9 +4241,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(settingsGroup, nil, 1)
         else
-            -- Two: the blurb and Hide Cooldown Swipe. The Enable tick is HOISTED
-            -- onto the row.
-            local DEFENSIVE_SETTINGS_COUNT = 2
+            -- One: Hide Cooldown Swipe. The blurb is prose, not a setting. The
+            -- Enable tick is HOISTED onto the row.
+            local DEFENSIVE_SETTINGS_COUNT = 1
 
             -- What the suppressed Enable checkbox ran, plus a repaint of every pane
             -- standing open -- eight of which grey with it. Never a page rebuild:
@@ -4757,10 +4764,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(layoutGroup, nil, 1)
         else
-            -- Six: the blurb, the growth control (one widget, three stacked mini
-            -- dropdowns inside it), Max Icons, the sort pick, Icons Per Row and the
-            -- spacing.
-            local DEFENSIVE_LAYOUT_COUNT = 6
+            -- Five: the growth control (one widget, three stacked mini dropdowns
+            -- inside it), Max Icons, the sort pick, Icons Per Row and the spacing.
+            -- The blurb is prose, not a setting.
+            local DEFENSIVE_LAYOUT_COUNT = 5
 
             local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDefensiveLayoutGroup({
@@ -4980,10 +4987,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durationGroup, nil, 1)
         else
-            -- Twelve: the format control, the TextStyle block's eight, Color by Time
-            -- and its cross-link, and the permanent-aura tick. The Show Duration tick
-            -- is HOISTED onto the row.
-            local DEFENSIVE_DURATION_COUNT = 12
+            -- Eleven: the format control, the TextStyle block's eight, Color by Time
+            -- and the permanent-aura tick. The cross-link beside Color by Time is
+            -- prose, not a setting. The Show Duration tick is HOISTED onto the row.
+            local DEFENSIVE_DURATION_COUNT = 11
 
             -- ☠ AND THE REFLOW IS NOT OPTIONAL ON THIS ONE. Every control behind
             -- this row carries hideOn rather than disableOn -- which is what classic
@@ -5075,9 +5082,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(durBarGroup, nil, 1)
         else
-            -- Nine: the blurb, the position pick, height, gap, the colour mode, the
-            -- texture and two colours, and Reverse Fill. The Enable tick is HOISTED.
-            local DEFENSIVE_DURBAR_COUNT = 9
+            -- Eight: the position pick, height, gap, the colour mode, the texture
+            -- and two colours, and Reverse Fill. The blurb is prose, not a
+            -- setting. The Enable tick is HOISTED.
+            local DEFENSIVE_DURBAR_COUNT = 8
 
             local function OnDefensiveDurationBarToggle()
                 self:RefreshStates()
@@ -5359,10 +5367,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 })
                 Add(settingsGroup, nil, 1)
             else
-                -- Eight: the two blurbs, the three filters, the untargeted tick, the
-                -- offscreen CVar tick and the bar cap. The Enable tick is HOISTED
-                -- onto the row.
-                local TL_SETTINGS_COUNT = 8
+                -- Six: the three filters, the untargeted tick, the offscreen CVar
+                -- tick and the bar cap. The two blurbs are prose, and the badge
+                -- counts settings. The Enable tick is HOISTED onto the row.
+                local TL_SETTINGS_COUNT = 6
 
                 -- What the suppressed Enable checkbox ran, plus a repaint of every
                 -- pane standing open -- twelve rows grey with it. Never a page
@@ -6463,9 +6471,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
             Add(settingsGroup, nil, 1)
         else
-            -- Four: the two blurbs, Important Spells Only and the offscreen CVar
-            -- tick. The Enable tick is HOISTED onto the row.
-            local PT_SETTINGS_COUNT = 4
+            -- Two: Important Spells Only and the offscreen CVar tick. The two
+            -- blurbs are prose, and the badge counts settings. The Enable tick is
+            -- HOISTED onto the row.
+            local PT_SETTINGS_COUNT = 2
 
             -- What the suppressed Enable checkbox ran, plus a repaint of every pane
             -- standing open -- seven rows and the control row grey with it. Never a
@@ -6561,8 +6570,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- stays — that one is about which mode you're in, not an off state.)
             Add(contentGroup, nil, 2)
         else
-            -- Seven: the caption, the five content ticks and the party-tab note.
-            local PT_CONTENT_COUNT = 7
+            -- Five: the five content ticks. The caption above them and the
+            -- party-tab note under them are prose, not settings.
+            local PT_CONTENT_COUNT = 5
 
             local contentMount, contentContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPersonalContentGroup({

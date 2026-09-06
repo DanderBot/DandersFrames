@@ -187,7 +187,7 @@ do
           "solo mode: the enable checkbox is skipped when the row has hoisted it")
     local declared = tonumber(PAGE:match("local SOLO_MODE_COUNT%s*=%s*(%d+)"))
     check(declared ~= nil, "solo mode: the page declares the row's count in one place")
-    eq(declared, #SOLO_MODE - 1, "solo mode: ...the census less the hoisted tick")
+    eq(declared, settingsIn(SOLO_MODE) - 1, "solo mode: ...the census's settings less the hoisted tick")
 
     -- ⚠ THE COMPOUND GREY PREDICATES SURVIVED THE MOVE VERBATIM, including the
     -- "not d.soloMode" half the row's own off-gate already covers. Classic has

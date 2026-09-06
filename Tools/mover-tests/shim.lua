@@ -283,6 +283,31 @@ function FakeUIFrame(w, h, cx, cy)
     return setmetatable(f, { __index = function() return function() end end })
 end
 
+-- ============================================================
+-- WHAT A COUNT BADGE PROMISES: SETTINGS, NOT EVERYTHING MOUNTED
+-- ------------------------------------------------------------
+-- A golden census lists what a builder MOUNTS, prose included -- a section
+-- header, a blurb, a caption, a separator. A popout row's declared count is a
+-- promise about SETTINGS: the kit's own build-time check draws exactly that line
+-- (DandersUI/PopoutRow.lua -- a widget the gate can arm has a SetEnabled and is a
+-- control; anything else is furniture), and the reporter who asked what the
+-- number meant had noticed the difference. So a test comparing a declared count
+-- against a census takes the furniture out of the census first.
+--
+-- ⚠ BY KIND, which is what a census records. `e.kind` is the reader's own field
+-- and `e[1]` the golden list's first column; both spellings appear.
+-- ============================================================
+local CENSUS_PROSE = { header = true, label = true, note = true, separator = true,
+                       banner = true, link = true }
+function settingsIn(list)
+    local n = 0
+    for _, e in ipairs(list or {}) do
+        local kind = (type(e) == "table") and (e.kind or e[1]) or nil
+        if not CENSUS_PROSE[kind] then n = n + 1 end
+    end
+    return n
+end
+
 -- Test harness
 T = { pass = 0, fail = 0 }
 function check(cond, msg)

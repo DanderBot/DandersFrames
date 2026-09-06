@@ -7,6 +7,16 @@
 local DF = DandersFrames
 local format = string.format
 
+-- ☠ FILE SCOPE, AND THAT IS THE POINT. The Layout Direction row is the one row
+-- whose own dropdown forces a page rebuild (see OnGrowthDirectionChanged), and
+-- the panel it was open in has to come back on the other side of that rebuild.
+-- A page-scoped local would be the OLD build's row by then; this one is
+-- re-assigned by the new build before anything reads it again. The Text
+-- Designer's rows page keeps its reopen registry at file scope for the same
+-- reason and says so at length. Only the popout arm ever assigns it; classic
+-- leaves it nil and every read is guarded.
+local layoutDirRow
+
 -- ============================================================
 -- GUI PAGE SETUP - Collapsible Category System
 -- ============================================================
@@ -531,9 +541,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Four: three ticks and the blurb. The Solo Mode tick is HOISTED onto
-            -- the row, so it is not one of them.
-            local SOLO_MODE_COUNT = 4
+            -- Three ticks. The blurb beside them is prose, not a setting, and the
+            -- badge counts settings. The Solo Mode tick is HOISTED onto the row,
+            -- so it is not one of them either.
+            local SOLO_MODE_COUNT = 3
 
             -- The group's own apply, named once so the footer's Reset Group and
             -- Hold: Defaults run exactly what the four controls' own callbacks do
@@ -1767,11 +1778,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Eighteen, which is the whole group -- the spell dropdown, the custom
-            -- spell box, the active-spell label, the interval, the frame alpha, the
-            -- element-specific tick and its twelve sliders. Nothing is hoisted onto
-            -- the row, because there is no tick to hoist.
-            local OUT_OF_RANGE_COUNT = 18
+            -- Seventeen -- the spell dropdown, the custom spell box, the interval,
+            -- the frame alpha, the element-specific tick and its twelve sliders.
+            -- The active-spell label is prose, not a setting. Nothing is hoisted
+            -- onto the row, because there is no tick to hoist.
+            local OUT_OF_RANGE_COUNT = 17
 
             -- The group's own apply, named once so the footer's Reset Group and
             -- Hold: Defaults run exactly what the group's controls run between
@@ -3427,9 +3438,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Three, which is the whole group: the two ticks and the explainer
-            -- under them. Nothing is hoisted, per the note above the builder.
-            local FRAME_MODES_COUNT = 3
+            -- Two: the two ticks. The explainer under them is prose, not a
+            -- setting. Nothing is hoisted, per the note above the builder.
+            local FRAME_MODES_COUNT = 2
 
             local modesMount, modesContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFrameModesGroup({ group = group, parent = holder, refreshStates = reflow })
@@ -3553,10 +3564,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- the page contradicting itself in two lines. The kit still shows the
             -- label and the count badge, which is what no summary is for.
             --
-            -- Five: the four ticks and the separator between the third and the
-            -- fourth. The separator is a widget in the group's roster like any
-            -- other, so the badge counts it -- the kit measures what is MOUNTED.
-            local BLIZZARD_FRAMES_COUNT = 5
+            -- Four ticks. The separator between the third and the fourth is a
+            -- widget in the group's roster, but it is not a SETTING -- and the
+            -- badge is a promise about settings, so it is not counted.
+            local BLIZZARD_FRAMES_COUNT = 4
 
             local blizMount, blizContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBlizzardFramesGroup({ group = group, parent = holder, refreshStates = reflow })
@@ -3779,10 +3790,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Five: the tick, its blurb, the live scale hint, the dropdown and the
-            -- blurb under it. Nothing is hoisted -- Pixel-Perfect Scaling is one
-            -- of two independent settings in here, not the group's on/off.
-            local RENDERING_COUNT = 5
+            -- Two: the tick and the dropdown. Its blurb, the live scale hint and
+            -- the blurb under the dropdown are prose. Nothing is hoisted --
+            -- Pixel-Perfect Scaling is one of two independent settings in here,
+            -- not the group's on/off.
+            local RENDERING_COUNT = 2
 
             local renderMount, renderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildRenderingGroup({ group = group, parent = holder, refreshStates = reflow })
@@ -3915,8 +3927,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return ""
             end
 
-            -- Four: the two dropdowns, the blurb and the classic-layout tick.
-            local PANEL_APPEARANCE_COUNT = 4
+            -- Three: the two dropdowns and the classic-layout tick. The blurb
+            -- between them is prose, not a setting.
+            local PANEL_APPEARANCE_COUNT = 3
 
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPanelAppearanceGroup({ group = group, parent = holder, refreshStates = reflow })
@@ -4229,8 +4242,35 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- "Start (Left/Top)" / "End (Right/Bottom)" and only titles needed
             -- refreshing -- true for a while, false again now. Deferred so it runs after
             -- the triggering dropdown's own click handler has finished unwinding.
+            --
+            -- ☠ ...AND THE PANEL THE USER IS STANDING IN COMES BACK. Every route
+            -- into a page builder closes every open row panel first, pinned ones
+            -- included, and CreatePopoutPageTools is right to: the rebuild retires
+            -- the rows those panels are about. But a rebuild is not the user
+            -- asking for the panel to go away -- it is this dropdown's own side
+            -- effect -- so the panel that dropdown was IN vanished under the hand
+            -- that changed it, while Frames Grow From (which needs no rebuild)
+            -- kept its. The row layout's own Text Designer solves the identical
+            -- problem the identical way; this is that, for one row.
+            --
+            -- Remembered by KEY rather than by identity, for the reason that page
+            -- gives: the rebuild mints new rows, so there is no object to hold on
+            -- to. Re-opened a frame later, because the new row has only just been
+            -- laid out, and re-PINNED if that is how it was left -- a pinned panel
+            -- is the user having said "keep this beside me".
             C_Timer.After(0, function()
+                local po      = layoutDirRow and layoutDirRow.popout
+                local wasOpen = (po and not po.closed) and true or false
+                local wasPin  = (wasOpen and po.pinned) and true or false
                 if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+                if not wasOpen then return end
+                C_Timer.After(0, function()
+                    local row = layoutDirRow
+                    if not (row and row.OpenPopout) then return end
+                    row:OpenPopout()
+                    local up = row.popout
+                    if wasPin and up and not up.closed and up.Pin then up:Pin(true) end
+                end)
             end)
         end
         
@@ -5067,6 +5107,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
         end
 
+        -- Dropped on EVERY build, classic included, and re-taken by the popout arm
+        -- below: a handle left over from the previous build points at a retired
+        -- row, and the flip TO classic is exactly the build that would leave one.
+        layoutDirRow = nil
+
         if classicLayout then
             local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
             layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
@@ -5147,6 +5192,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 build   = dirMount,
                 footerStrip = true,
             }))
+            layoutDirRow = dirRow
             tools.ClaimKeys(dirRow, dirContent)
             tools.WireModifiedTick(dirRow)
             tools.WireFooter(dirRow, ApplyLayoutDirection)
@@ -5821,8 +5867,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 return table.concat(parts, " \194\183 ")
             end
 
-            -- Three: the blurb, the tick and the list.
-            local GROUP_ORDER_COUNT = 3
+            -- Two: the tick and the list. The blurb above them is prose.
+            local GROUP_ORDER_COUNT = 2
 
             local groupOrderMount, groupOrderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildGroupOrderGroup({ group = group, parent = holder, refreshStates = reflow })

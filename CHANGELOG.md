@@ -45,6 +45,10 @@
 - (Settings) Fix settings inside an open panel staying greyed out after you turned on the option they depend on — ticking Solo Mode's Rested Indicator left Show ZZZ Icon and Show Frame Glow greyed.
 - (Settings) Fix a row not showing the value you just picked until you changed tab. Fonts, textures, sounds, colours and drag-to-reorder lists now update the row straight away.
 - (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
+- (Text Designer, Aura Designer) Switching a designer off now really does lock its settings, instead of only dimming them. You can still open a row and read what is in it, but nothing in there can be changed or added until you switch the designer back on.
+- (Frames) Changing Growth Direction no longer closes the settings panel you changed it in. If the panel was pinned it comes back pinned.
+- (Text Designer) The Texts and Text Groups tabs show how many elements they hold again.
+- (Settings) The number on a settings row now counts only the settings behind it. Descriptions, headings and notes were being counted too, so some rows promised more than they held.
 
 ### Changes
 
