@@ -1856,7 +1856,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local function debuffGroupCount(d)
                 return (DF.GetDebuffRowGroupCount and DF:GetDebuffRowGroupCount(d)) or 1
             end
-            local maxNote = group:AddWidget(GUI:CreateNote(parent, "", { tone = "caution", prefix = "Note" }), 30)
+            -- ☠ NO SLOT HEIGHT, ON PURPOSE. The sentence is 124 characters and wraps to
+            -- three lines at the pane's width, and a call-site number stamps the slot
+            -- explicit, which SUPPRESSES the label's own height converge -- so a fixed
+            -- 30 drew the third line over the control beneath it. Sized the way every
+            -- other page note is (CreatePandemicControls' notes): the group's inner width
+            -- so it wraps where it will be drawn, and the label re-measures itself after
+            -- each SetText and asks the host to move its slot.
+            local maxNote = group:AddWidget(GUI:CreateNote(parent, "",
+                { tone = "caution", prefix = "Note", width = GUI:GroupInnerWidth(group) }))
             maxNote.hideOn = function(d)
                 return not d.showDebuffs or (tonumber(d.debuffMax) or 0) <= 0
                     or debuffGroupCount(d) <= 1
