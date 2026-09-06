@@ -4,7 +4,7 @@
 
 ### New Features
 
-- (Aura Designer) New **Power Infusion Helper** for priests, added from the Other Buffs tab. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Choose where each signal appears — border, health bar, background, text colour, an icon or a square — turn on icons for any of it — their cooldowns, trinkets, potions and racials — to see what they pressed and how hard the burst is landing. Pick which classes count and add a sound; tanks and healers are skipped unless you say otherwise. (by Maelareth)
+- (Aura Designer) New **Power Infusion Helper** for priests, added from the Any Buff tab. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Choose where each signal appears — border, health bar, background, text colour, an icon or a square — turn on icons for any of it — their cooldowns, trinkets, potions and racials — to see what they pressed and how hard the burst is landing. Pick which classes count and add a sound; tanks and healers are skipped unless you say otherwise. (by Maelareth)
 - (Aura Designer) If you used the Power Infusion Helper in an earlier 5.4.0 alpha: the "Big cooldown with a trinket or potion" signal has been retired, and trinkets, potions and racials are now shown as icons alongside the cooldowns instead. Your helper updates itself the next time you open its settings. (by Maelareth)
 - (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon. It is the foundation for a shared positioning system across Danders addons — frame-to-frame snapping, anchoring elements to each other, undo/redo and save/discard. This release only includes the addon and its demo (`/mover demo`); DandersFrames' own frames move over to it in a later update.
 - (Frames) Party and raid frames can now be moved with DandersMover, including snapping them to and anchoring them onto other addons' elements.
@@ -39,6 +39,8 @@
 - (Settings) A setting shown on a row is no longer repeated inside that row's settings panel.
 - (Settings) The first setting inside a panel now greys out with the rest when the row's switch is off.
 - (Settings) Fix the new Frame page not appearing (old-style rows, no controls on the row) when another Danders addon loaded an older copy of the shared UI kit first.
+- (Highlights) Fix the animated and dashed borders stopping part-way along each edge on wide frames.
+- (Test Mode) Fix the Defensives preview staying greyed out after switching the Defensive Icon back on.
 
 ### Changes
 
