@@ -41,6 +41,10 @@
 - (Settings) Fix the new Frame page not appearing (old-style rows, no controls on the row) when another Danders addon loaded an older copy of the shared UI kit first.
 - (Highlights) Fix the animated and dashed borders stopping part-way along each edge on wide frames.
 - (Test Mode) Fix the Defensives preview staying greyed out after switching the Defensive Icon back on.
+- (Settings) Fix clicking a dropdown menu changing the setting behind it. Clicks landing on the menu's edge or its empty space went straight through to whatever was underneath.
+- (Settings) Fix settings inside an open panel staying greyed out after you turned on the option they depend on — ticking Solo Mode's Rested Indicator left Show ZZZ Icon and Show Frame Glow greyed.
+- (Settings) Fix a row not showing the value you just picked until you changed tab. Fonts, textures, sounds, colours and drag-to-reorder lists now update the row straight away.
+- (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
 
 ### Changes
 

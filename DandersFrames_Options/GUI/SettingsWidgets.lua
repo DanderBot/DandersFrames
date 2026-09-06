@@ -28,6 +28,29 @@ local OUTLINE_FLAG_ORDER = P.OUTLINE_FLAG_ORDER
 local LayoutPixelBorder = P.LayoutPixelBorder
 local pixelBordered = P.pixelBordered
 
+-- ☠ THE SEAM A COMMITTED WRITE HAS TO POKE, and every widget factory owes it
+-- one call. `RefreshStates` is stamped on whatever a control was parented to --
+-- classic's scroll child (Panel.lua) or a popout pane's holder (the stamp in
+-- Controls.lua's CreatePopoutPageTools) -- and running it is what re-reads every
+-- `disableOn` on the page AND every popout row's summary line. A factory that
+-- skips it leaves both stale until something unrelated refreshes: the reported
+-- rows that "don't update until a tab change" are exactly the widget families
+-- that never made this call (font/texture/sound dropdowns, colour pickers,
+-- drag-reorder lists).
+--
+-- ⚠ COMMIT ONLY, NEVER PREVIEW. A slider fires once per step crossed and a
+-- colour wheel once per mouse-move frame; the addon splits preview from commit
+-- precisely so those do no page-wide work, and this belongs on the commit side
+-- of that split.
+--
+-- rawget, not a plain read: headless the shim answers any unset field with a
+-- truthy no-op function, so a plain `if parent.RefreshStates` passes for the
+-- wrong reason and a test could never see the seam go missing.
+local function RefreshOwnerStates(parent)
+    if parent and rawget(parent, "RefreshStates") then parent:RefreshStates() end
+end
+P.RefreshOwnerStates = RefreshOwnerStates
+
 -- ---- from GUI.lua ----
 -- Sync a widget's slot height into its host SettingsGroup and re-flow. Used by any
 -- widget that only learns its true height AFTER construction (a measured label, an
@@ -2909,25 +2932,33 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         }
         
         -- Hook the OK button to run full update when confirmed
-        if useLightweight and lightweightCallback then
-            -- We need to run full update when picker is closed via OK
-            -- Use a frame to detect when color picker closes
-            if not container.colorPickerWatcher then
-                container.colorPickerWatcher = CreateFrame("Frame")
-            end
-            container.colorPickerWatcher:SetScript("OnUpdate", function(self)
-                if not ColorPickerFrame:IsShown() then
-                    self:SetScript("OnUpdate", nil)
-                    -- Only run if color changed (not cancelled)
-                    local cur = dbTable[dbKey]
-                    if cur.r ~= originalColor.r or cur.g ~= originalColor.g or 
-                       cur.b ~= originalColor.b or cur.a ~= originalColor.a then
+        --
+        -- ☠ ARMED FOR EVERY PICK NOW, not only a lightweight one, because the
+        -- close is the only moment either kind of pick has a COMMIT. The full
+        -- update and the callback stay behind the lightweight gate they were
+        -- always behind -- a non-lightweight pick already ran both on every
+        -- swatch tick -- but the page/pane state refresh belongs to neither
+        -- tick: it is what re-reads the popout row summary showing this colour,
+        -- and running it per tick would sweep the whole page once per
+        -- mouse-move frame of a wheel drag. Once, on close, is the whole job.
+        if not container.colorPickerWatcher then
+            container.colorPickerWatcher = CreateFrame("Frame")
+        end
+        container.colorPickerWatcher:SetScript("OnUpdate", function(self)
+            if not ColorPickerFrame:IsShown() then
+                self:SetScript("OnUpdate", nil)
+                -- Only run if color changed (not cancelled)
+                local cur = dbTable[dbKey]
+                if cur.r ~= originalColor.r or cur.g ~= originalColor.g or 
+                   cur.b ~= originalColor.b or cur.a ~= originalColor.a then
+                    if useLightweight and lightweightCallback then
                         DF:UpdateAll()
                         if callback then callback() end
                     end
+                    RefreshOwnerStates(parent)
                 end
-            end)
-        end
+            end
+        end)
         
         -- Attach default colour so the picker can offer a Default button
         -- dbTable.__dfDefaults is set by callers (e.g. Aura Designer proxies) that
@@ -3336,9 +3367,21 @@ function GUI:SeedBorderTexture(dbTable, prefix)
     if type(dbTable) ~= "table" or type(prefix) ~= "string" then return end
     if dbTable[prefix .. "BorderStyle"] ~= "TEXTURE" then return end
     local list = DF.GetBorderList and DF:GetBorderList() or nil
+    -- ☠ ANY VALUE THE LIST CANNOT ANSWER FOR, not just the three empty ones.
+    -- The list is keyed by LibSharedMedia NAME, and a stored PATH is none of
+    -- nil / "" / "SOLID" -- so it survived the seed, the dropdown had no label
+    -- for it and printed the raw path, and the border itself drew nothing
+    -- because Fetch could not resolve it either. The pandemic border shipped
+    -- exactly such a default; the Aura Designer per-aura proxies still carry
+    -- one, and this is what repairs both without a profile migration.
+    --
+    -- ⚠ `first` rather than `list`, because an EMPTY list is truthy. With LSM
+    -- absent GetBorderList returns {}, and the old guard wrote next({}) -- nil --
+    -- over whatever was stored. Nothing to seed FROM is nothing to seed.
+    local first = list and next(list)
     local t = dbTable[prefix .. "BorderTexture"]
-    if list and (not t or t == "" or t == "SOLID") then
-        dbTable[prefix .. "BorderTexture"] = next(list)
+    if first and (not t or t == "" or t == "SOLID" or not list[t]) then
+        dbTable[prefix .. "BorderTexture"] = first
     end
 end
 
