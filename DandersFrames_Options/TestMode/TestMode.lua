@@ -4629,24 +4629,18 @@ function DF:CreateTestPanel()
         if panel.buffValueText then panel.buffValueText:SetTextColor(lr, lg, lb) end
         if panel.debuffValueText then panel.debuffValueText:SetTextColor(lr, lg, lb) end
 
-        -- The Defensives count is its own on/off (0 = hidden), so nothing on this panel
-        -- gates it. What CAN make it inert is the addon-side feature being off — the
-        -- defensive drive requires `defensiveIconEnabled` — so grey it on that, which is
-        -- the only state where moving the slider does nothing.
-        local defOn = adb and adb.defensiveIconEnabled and true or false
-        if panel.defSlider and panel.defSlider.SetEnabled then
-            panel.defSlider:SetEnabled(defOn)
-        end
-        -- The box drives the same value, so it is inert in exactly the same state and
-        -- must grey with it -- a live-looking checkbox above a greyed slider would read
-        -- as the one control that still works.
-        if panel.showDefensivesCheck and panel.showDefensivesCheck.SetEnabled then
-            panel.showDefensivesCheck:SetEnabled(defOn)
-        end
-        local dr, dg, dbl = C_TEXT.r, C_TEXT.g, C_TEXT.b
-        if not defOn then dr, dg, dbl = C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b end
-        if panel.defSliderLabel then panel.defSliderLabel:SetTextColor(dr, dg, dbl) end
-        if panel.defValueText then panel.defValueText:SetTextColor(dr, dg, dbl) end
+        -- ☠ THE DEFENSIVES BOX AND SLIDER ARE DELIBERATELY UNGATED, and the addon-side
+        -- `defensiveIconEnabled` is the reason rather than the exception. This pair used
+        -- to grey whenever that profile setting was off, on the grounds that the preview
+        -- can do nothing without it. True -- but nothing ever tells this panel the setting
+        -- changed: RefreshDependentEnabled runs from the Show Auras tick and UpdateState
+        -- and nothing else, and the Defensive Icon settings page has no route to
+        -- DF.TestPanel. So the grey outlived the setting that caused it, and a disabled
+        -- box also swallows its own click-through to that page -- the one control on this
+        -- panel that could have switched the feature back on (aphoex, 2026-09-06).
+        -- Every other icon toggle in this section gates on Test Mode's own state or on
+        -- nothing at all, and the preview itself already no-ops while the feature is off,
+        -- so this pair now behaves the same way.
 
         -- Group Targeted Spells and the Targeted List are PARTY-ONLY features:
         -- the group cast detection is fingerprint-based and "Raid is intentionally
