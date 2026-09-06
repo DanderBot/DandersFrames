@@ -45,6 +45,13 @@
 - (Settings) Fix settings inside an open panel staying greyed out after you turned on the option they depend on — ticking Solo Mode's Rested Indicator left Show ZZZ Icon and Show Frame Glow greyed.
 - (Settings) Fix a row not showing the value you just picked until you changed tab. Fonts, textures, sounds, colours and drag-to-reorder lists now update the row straight away.
 - (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
+- (DandersMover) The top strip, the element panel, the undo toast and the mover's settings window can now be scaled — a new Scale slider under Settings > Editor. Movers themselves always match their frames.
+- (DandersMover) The mover's settings window now closes with Save & Exit or Discard when it was opened during a session, not only with Esc.
+- (DandersMover) Fix the Personal Targeted mover sitting underneath its own preview icons.
+- (DandersMover) Fix holding Alt to peek getting stuck faded out after alt-tabbing or a burst of fast Alt presses.
+- (DandersMover) Unlocking now fades the movers, strip and panel in, matching the fade-out when you lock.
+- (DandersMover) Fix a mover dropped onto a snap zone whose frame vanished mid-drag still anchoring to it. The drop now lands where the preview showed.
+- (DandersMover) A mover anchored to a stale frame can no longer be placed entirely off the screen, its handle always stays reachable on screen, and `/mover reset all` (or `/mover reset <addon>`) puts positions back to their defaults from chat.
 
 ### Changes
 

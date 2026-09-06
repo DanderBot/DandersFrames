@@ -81,6 +81,19 @@ do
     check(R:IsTargetAvailable(t4), "getRect returning a rect wins over a hidden frame")
     check(not R:IsTargetAvailable(t5), "getRect returning nil wins over a shown frame")
     check(not R:IsTargetAvailable(nil), "nil entry is not available")
+    -- Shown, but under a hidden parent: IsShown says yes (its own flag), IsVisible
+    -- says no (every ancestor's). Availability is "actually on screen", so it is
+    -- the second answer that counts -- and a frame that cannot answer it (the
+    -- geometry-only FakeFrame above) falls back to the first.
+    local underHidden = FakeFrame(0, 0, 10, 10)
+    underHidden.IsVisible = function() return false end
+    local t6 = R:RegisterAnchorTarget("A", "av_underhidden", { title = "t", frame = underHidden })
+    check(not R:IsTargetAvailable(t6), "a shown frame under a hidden parent is not available")
+    check(not R.IsFrameVisible(underHidden), "IsFrameVisible: IsVisible wins over IsShown")
+    check(R.IsFrameVisible(shown), "IsFrameVisible: no IsVisible -> the shown flag")
+    check(not R.IsFrameVisible(hidden), "IsFrameVisible: ...which can say no")
+    check(not R.IsFrameVisible(nil), "IsFrameVisible: nil frame")
+    R:Unregister("A", "av_underhidden")
     for _, key in ipairs({ "av_shown", "av_hidden", "av_noframe", "av_rect", "av_norect" }) do
         R:Unregister("A", key)
     end

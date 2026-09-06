@@ -19,6 +19,11 @@ local L = NS.L
 NS.UI = LibStub("DandersUI-1.0"):NewHost("DandersMover", {
     L     = L,
     print = function(msg) NS:Print(msg) end,
+    -- The kit's own floating chrome (popups, the colour picker) takes its scale
+    -- from here. The mover's chrome reads NS:ChromeScale directly; it lives in
+    -- Proxy.lua, which is why the call is guarded -- the hook is only ever
+    -- invoked long after every file has loaded.
+    getScale = function() return NS.ChromeScale and NS:ChromeScale() or 1 end,
 })
 NS.UI:SetAccent(0.18, 0.612, 0.792)   -- the mover's own blue, from the old Theme.C.accent
 
@@ -26,7 +31,7 @@ local Registry, Solver = NS.Registry, NS.Solver
 local pairs, ipairs, type, pcall, xpcall, geterrorhandler = pairs, ipairs, type, pcall, xpcall, geterrorhandler
 local InCombatLockdown, CreateFrame, UIParent = InCombatLockdown, CreateFrame, UIParent
 local tinsert, wipe, strsplit, strlower = table.insert, wipe, strsplit, string.lower
-local abs = math.abs
+local format, tconcat, tsort, abs = string.format, table.concat, table.sort, math.abs
 
 function NS:Print(msg) print("|cff2e9cc9DandersMover:|r " .. tostring(msg)) end
 function NS:Debug(msg) if NS.db and NS.db.debug then print("|cff888888DandersMover:|r " .. tostring(msg)) end end
@@ -50,6 +55,9 @@ NS.DEFAULTS = {
     keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
     -- Interacting with a mover's side panel pins it in place automatically; off = only the pin button pins.
     autoPinPanels = true,
+    -- Size of the session chrome (top strip, element panel, toast, settings
+    -- window). Never the slabs -- see NS:ChromeScale in Proxy.lua.
+    scale = 1,
     stripCollapsed = false,               -- top strip folded to its slim tab
     addons = {}, demo = {},
 }
@@ -121,6 +129,27 @@ end
 -- ============================================================
 function NS:ParentOf(id) return Registry:ParentId(id) end
 
+-- ☠ AN ANCHORED SOLVE IS THE ONE PATH THAT CAN PUT AN ELEMENT OFF THE SCREEN.
+-- A free drag, a nudge and a typed X/Y are all clamped (Session's DragTo and
+-- clampFree); the solve is not, because it follows its target wherever the
+-- target's rect says -- and a stale rect (a frame whose container is hidden
+-- still answers GetCenter) can say anywhere. The slab goes with the element,
+-- so the handle to drag it back leaves the screen too. Reported as "snapping to
+-- invisible frames ... frames out of the screen bounds, making them unclickable".
+--
+-- ⚠ ONLY A SOLVE WITH NOTHING LEFT ON SCREEN IS TOUCHED. An element seated so
+-- that it overhangs an edge keeps its seat exactly; one no part of which can be
+-- seen is pulled back to the nearest fully-visible spot. The anchor record is
+-- never changed, so the element re-solves as normal the moment its target moves.
+function NS.KeepOnScreen(cx, cy, w, h)
+    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    if not (sw and sh and w and h) then return cx, cy end
+    if Solver.RectOverlapArea({ x = 0, y = 0, w = sw, h = sh }, { x = cx, y = cy, w = w, h = h }) > 0 then
+        return cx, cy
+    end
+    return Solver.ClampToScreen(cx, cy, w, h, sw, sh)
+end
+
 -- Re-solves an anchored element's absolute x/y from its target's current rect.
 -- Returns true when x/y changed. Missing/zero-size target: hold (no change).
 function NS:ResolveElement(el)
@@ -138,6 +167,7 @@ function NS:ResolveElement(el)
     if not rect or not w then return false end
     local cx, cy = Solver.Resolve(a, w, h, rect, Solver.SPACING)
     if not cx then return false end
+    cx, cy = NS.KeepOnScreen(cx, cy, w, h)
     local changed = pos.point ~= "CENTER" or pos.x ~= cx or pos.y ~= cy
     pos.point, pos.x, pos.y = "CENTER", cx, cy
     return changed
@@ -224,8 +254,7 @@ NS.lastRect = {}
 local function targetRect(target)
     if not Registry:IsRelevant(target) then return nil end
     if target.getRect then return target.getRect() end
-    local f = Registry:GetFrame(target)
-    if not f or not f:IsShown() then return nil end
+    if not Registry.IsFrameVisible(Registry:GetFrame(target)) then return nil end
     return Registry:GetRect(target)
 end
 
@@ -456,6 +485,70 @@ function Lib.ApplyPosition(frame, pos)
 end
 
 -- ============================================================
+-- RESET
+-- Every element of one addon (or of all of them) back to the record its
+-- consumer declared as the default -- the centre of the screen when it declared
+-- none. The one rescue that needs no slab to click: an element solved off screen
+-- has its handle off screen with it, and the element panel's own Reset is only
+-- reachable through that handle. Inside a live session the reset goes through
+-- Session, so it is one undo step per element and Discard still puts it back;
+-- outside one (or suspended for combat) it applies straight away, deferring for
+-- secure elements the way every other write does.
+-- ============================================================
+function NS:ResetPositions(addon)
+    local sess = NS.Session
+    local live = sess and sess:IsActive() and not sess:IsSuspended()
+    local n = 0
+    for _, el in ipairs(Registry:SortedElements()) do
+        if not addon or el.addon == addon then
+            n = n + 1
+            if live and Registry:IsInSession(sess.filter, el) then
+                sess:Reset(el)
+            else
+                local pos = Registry:GetPos(el)
+                if el.default then
+                    NS.CopyPos(el.default, pos)
+                else
+                    wipe(pos)
+                    pos.point, pos.x, pos.y = "CENTER", 0, 0
+                end
+                if pos.anchor then NS:ResolveElement(el) end
+                NS:Notify(el, "reset")
+                NS:ReapplyDescendants(el.id, "parent")
+                if NS.Proxy then NS.Proxy:Refresh(el.id) end
+            end
+        end
+    end
+    return n
+end
+
+-- /mover reset all | <addon>. The addon is matched by its registry name, case
+-- blind (the slash line arrives lowercased). No argument, or one that names
+-- nothing, prints what there is to reset rather than resetting everything by
+-- surprise.
+function NS:ResetCommand(rest)
+    rest = (rest or ""):match("^%s*(.-)%s*$")
+    local names = {}
+    for name in pairs(Registry.addons) do tinsert(names, name) end
+    tsort(names)
+    local target
+    if rest == "all" then
+        target = false
+    else
+        for _, name in ipairs(names) do
+            if strlower(name) == rest then target = name end
+        end
+    end
+    if target == nil then
+        if rest ~= "" then NS:Print(format(L["No addon named %s has registered movers."], rest)) end
+        NS:Print(format(L["Usage: /mover reset all | <addon> — registered: %s"],
+            #names > 0 and tconcat(names, ", ") or L["None"]))
+        return
+    end
+    NS:Print(format(L["%d mover positions reset."], NS:ResetPositions(target or nil)))
+end
+
+-- ============================================================
 -- EVENTS
 -- ============================================================
 local events = CreateFrame("Frame")
@@ -491,10 +584,11 @@ SlashCmdList.DANDERSMOVER = function(msg)
     elseif cmd == "unlock" then Lib:Unlock()
     elseif cmd == "lock" then Lib:Lock()
     elseif cmd == "config" then if NS.Settings then NS.Settings:Toggle() end
+    elseif cmd == "reset" then NS:ResetCommand(rest)
     elseif cmd == "demo" then if NS.Demo then NS.Demo:Command(rest) end
     elseif cmd == "debug" then NS.db.debug = not NS.db.debug; NS:Print("debug " .. tostring(NS.db.debug))
     else
-        NS:Print(L["Usage: /mover [unlock|lock|config|demo]"])
+        NS:Print(L["Usage: /mover [unlock|lock|config|reset|demo]"])
     end
 end
 
