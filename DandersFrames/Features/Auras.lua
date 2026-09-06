@@ -1295,6 +1295,34 @@ function DF:BuildDebuffFilterRecords(dbLike, claimed)
     return BuildDirectDebuffFilters(dbLike, claimed)
 end
 
+-- ☠ HOW MANY GROUPS THE DEBUFF ROW WILL BUILD — i.e. what "Max Debuffs" actually
+-- multiplies by. Blizzard caps at maxFrameCount PER AURA GROUP and the engine has NO
+-- container-level cap (checked against Blizzard_AuraContainerGroups: maxFrameCount is
+-- group state, nothing sums across groups), so a row built from N records can render up
+-- to N x max. The row is split whenever the config needs per-group STYLING or mutually
+-- exclusive category records — Show All with the Important Debuffs highlight on is THREE
+-- groups, and that highlight is ON BY DEFAULT, so the stock configuration already has a
+-- ceiling of 3x. Category mode reaches five or six.
+--
+-- ⚠ THIS CANNOT BE FIXED BY BUDGETING THE GROUPS. Sharing one budget would need to know
+-- how many auras each group will actually match, and the ALL-mode records are separated
+-- only by candidate BOOLEANS (isBossOrRoleAura / isPriorityAura) which
+-- C_UnitAuras.GetUnitAuraInstanceIDs cannot evaluate — all three carry the same filter
+-- string, so a count would be identical for each. Dividing blindly under-shows the
+-- common case (a unit with only ordinary debuffs would get max/3), and collapsing the
+-- split to honour the cap silently deletes the highlight. Krathe's call, 2026-09-02:
+-- never lose debuffs or functionality — SAY SO INSTEAD.
+--
+-- Claims are deliberately NOT passed: an Aura Designer claim only ever REMOVES records,
+-- so ignoring them yields the worst case, which is what a ceiling should report. Nil
+-- records mean the show-all fallback, which is a single group.
+function DF:GetDebuffRowGroupCount(dbLike)
+    if not dbLike then return 1 end
+    local ok, recs = pcall(BuildDirectDebuffFilters, dbLike, nil)
+    if not ok or type(recs) ~= "table" then return 1 end
+    return math.max(1, #recs)
+end
+
 -- Build defensive filter table (BIG_DEFENSIVE + EXTERNAL_DEFENSIVE, nil if unavailable)
 -- Assigned to the forward-declared local at the top of the file so it is
 -- visible to code defined above this point.
@@ -2807,7 +2835,17 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
     -- while the colorblindMode CVar is on (test mode previews it regardless).
     local dispel
     if prefix == "debuff" then
-        local colorByType = db.debuffBorderColorByType
+        -- ☠ THE COLOUR RING IS A BORDER, SO IT OBEYS THE BORDER TOGGLE. This read the
+        -- by-type flag on its own, so a user with Show Border OFF still got a coloured
+        -- ring on every dispellable debuff — green on poison, brown on bleed — with no
+        -- visible setting to turn it off, because the by-type checkbox lives INSIDE the
+        -- Border section and is out of reach while that section is off. The only escape
+        -- was to re-enable the border, untick by-type, and disable the border again
+        -- (undëe, live 5.3.1).
+        -- ⚠ THE SYMBOL IS DELIBERATELY NOT GATED. The colourblind dispel letter is text,
+        -- not border art, and shipped decoupled on purpose — someone running without
+        -- borders should still get it. Only the RING answers to debuffShowBorder.
+        local colorByType = db.debuffBorderColorByType and db.debuffShowBorder ~= false
         local showSymbol = db.debuffDispelSymbolEnabled == true
         if colorByType or showSymbol then
             dispel = { showWhenHarmful = true }
@@ -3134,6 +3172,23 @@ end
 -- is "false" a re-parse that should have happened and did not.
 local function confirmRetarget(h, label, unit)
     if not (h and h.Refresh) then return end
+    -- ★ CONFIRM THE BINDING, NOT JUST THE PARSE. This only ever checked whether a
+    -- re-parse ran, which says nothing about WHICH UNIT it parsed. The container's
+    -- GetUnit returns a plain readable string (AuraContainerSharedMixin.unitToken), so
+    -- the one question that matters — is this row actually pointed at the player whose
+    -- frame it sits on — is answerable, and was simply never asked.
+    -- ⚠ Reported shape: a row or indicator showing a THIRD player's aura after roster
+    -- churn, healed only by /reload. A mismatch here names it outright instead of
+    -- leaving it to look like a filter fault.
+    local c = h.backend and h.backend.container
+    if c and c.GetUnit then
+        local okU, bound = pcall(c.GetUnit, c)
+        if okU and type(bound) == "string" and unit and bound ~= unit then
+            DF:DebugWarn("AURAROW", "%s: retarget MISMATCH - asked for %s, container is"
+                .. " bound to %s; this row is showing %s's auras",
+                label, tostring(unit), tostring(bound), tostring(bound))
+        end
+    end
     local reparsed = h:Refresh()
     if reparsed then
         DF:Debug("AURAROW", "%s: retarget re-parsed on %s", label, tostring(unit))

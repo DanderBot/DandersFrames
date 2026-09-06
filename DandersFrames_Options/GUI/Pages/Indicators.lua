@@ -1826,8 +1826,48 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     DF:RefreshAllVisibleFrames()
                 end), 30)
             end
-            local debuffMax = group:AddWidget(GUI:CreateSlider(parent, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+            -- ☠ THE CAP IS PER CATEGORY GROUP, NOT PER ROW, and that is an engine limit
+            -- we cannot close: Blizzard caps at maxFrameCount per aura group with no
+            -- container-level total, and the groups the row splits into cannot share a
+            -- budget (see DF:GetDebuffRowGroupCount for why counting them is impossible).
+            -- Reported as a bug — "set it to a maximum of 3, it shows 4 or more" — with
+            -- Show All and the stock settings, where the Important Debuffs highlight
+            -- already makes three groups.
+            -- ⚠ So the note states the REAL ceiling rather than the addon quietly
+            -- under-showing or dropping the highlight to make the number true. It is
+            -- recomputed on every state refresh because the group count moves with the
+            -- category checkboxes and the highlight toggle, and it stays silent at one
+            -- group, where the number means exactly what it says.
+            -- ⚠ tools2.refreshStates, NOT self:RefreshStates — this group is also built
+            -- into a popout, where the reflow callback is the right one (see the
+            -- Visibility popout's `refreshStates = reflow`). The note below has to
+            -- re-run when the number moves, or it would keep quoting the old ceiling.
+            local debuffMax = group:AddWidget(GUI:CreateSlider(parent, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function()
+                DF:RefreshAllVisibleFrames()
+                tools2.refreshStates()
+            end, true), 55)
             debuffMax.disableOn = function(d) return not d.showDebuffs end
+
+            -- ⚠ hideOn for VISIBILITY, refreshContent for TEXT — the two hooks the page
+            -- walker actually supports, and they are not interchangeable here.
+            -- RefreshChildStates only calls refreshContent on a widget that IS SHOWN, so
+            -- hiding this from inside refreshContent would freeze it hidden forever.
+            -- LayoutChildren evaluates hideOn first, so the pair composes correctly.
+            local function debuffGroupCount(d)
+                return (DF.GetDebuffRowGroupCount and DF:GetDebuffRowGroupCount(d)) or 1
+            end
+            local maxNote = group:AddWidget(GUI:CreateNote(parent, "", { tone = "caution", prefix = "Note" }), 30)
+            maxNote.hideOn = function(d)
+                return not d.showDebuffs or (tonumber(d.debuffMax) or 0) <= 0
+                    or debuffGroupCount(d) <= 1
+            end
+            maxNote.refreshContent = function(w, d)
+                local n = debuffGroupCount(d)
+                local per = tonumber(d.debuffMax) or 0
+                w:SetText(("|c%s%s:|r "):format(GUI:ToneHex("caution"), (L and L["Note"]) or "Note")
+                    .. L["The game applies this limit to each category separately. Your filters use %d categories, so up to %d debuffs can show at once."]:format(n, n * per))
+            end
+            maxNote:refreshContent(db)
         end
 
         -- What the whole page's gate costs when it moves, named once: the state pass,
