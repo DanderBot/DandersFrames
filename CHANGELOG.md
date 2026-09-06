@@ -39,6 +39,13 @@
 - (Settings) A setting shown on a row is no longer repeated inside that row's settings panel.
 - (Settings) The first setting inside a panel now greys out with the rest when the row's switch is off.
 - (Settings) Fix the new Frame page not appearing (old-style rows, no controls on the row) when another Danders addon loaded an older copy of the shared UI kit first.
+- (DandersMover) The top strip, the element panel, the undo toast and the mover's settings window can now be scaled — a new Scale slider under Settings > Editor. Movers themselves always match their frames.
+- (DandersMover) The mover's settings window now closes with Save & Exit or Discard when it was opened during a session, not only with Esc.
+- (DandersMover) Fix the Personal Targeted mover sitting underneath its own preview icons.
+- (DandersMover) Fix holding Alt to peek getting stuck faded out after alt-tabbing or a burst of fast Alt presses.
+- (DandersMover) Unlocking now fades the movers, strip and panel in, matching the fade-out when you lock.
+- (DandersMover) Fix a mover dropped onto a snap zone whose frame vanished mid-drag still anchoring to it. The drop now lands where the preview showed.
+- (DandersMover) A mover anchored to a stale frame can no longer be placed entirely off the screen, its handle always stays reachable on screen, and `/mover reset all` (or `/mover reset <addon>`) puts positions back to their defaults from chat.
 
 ### Changes
 

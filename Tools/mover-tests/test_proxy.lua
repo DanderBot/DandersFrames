@@ -30,11 +30,26 @@ local function stubFrame()
     local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10,
                 fxIn = false, fxOut = false, fxPop = false, fxPopOut = false, fxTo = false,
                 fxScale = false, fxMove = false, tagShown = false, hovered = false,
-                _mouse = false, _border = false }
+                _mouse = false, _border = false,
+                -- Recorded, not swallowed: the overlay's level (it decides whether
+                -- a slab draws over the frame it stands on), the slab's clamp (the
+                -- off-screen rescue), alpha (the peek and the entrance) and scale
+                -- (the chrome setting) are each only observable as the number
+                -- they were handed. Plain values, because the __index fallback
+                -- would answer an unset one with a truthy function.
+                _level = 0, _clamped = false, _alpha = 1, _scale = 1 }
     function f:CreateAnimationGroup() return stubAnimationGroup() end
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
     function f:IsShown() return self._shown end
+    function f:SetFrameLevel(v) self._level = v end
+    function f:GetFrameLevel() return self._level end
+    function f:SetClampedToScreen(v) self._clamped = v and true or false end
+    function f:SetAlpha(a) self._alpha = a end
+    function f:GetAlpha() return self._alpha end
+    function f:SetScale(s) self._scale = s end
+    function f:GetScale() return self._scale end
+    function f:GetEffectiveScale() return self._scale end
     function f:SetShown(v) self._shown = v and true or false end
     function f:GetCenter() return 0, 0 end
     -- Real sizes, because the slab layout drops the coords/icon/title below
@@ -85,9 +100,12 @@ CreateFrame = function() return stubFrame() end
 local cursorX, cursorY = 960, 540
 GetCursorPosition = function() return cursorX, cursorY end
 GameTooltip = stubFrame()
-local shiftDown, ctrlDown = false, false
+local shiftDown, ctrlDown, altDown = false, false, false
 IsShiftKeyDown = function() return shiftDown end
 IsControlKeyDown = function() return ctrlDown end
+-- Alt is the peek key; Proxy caches the global at load, so it has to exist
+-- BEFORE the load and be driven through this flag afterwards.
+IsAltKeyDown = function() return altDown end
 local COLORS = {
     textDim    = { r = 0.5,  g = 0.5,  b = 0.5 },
     text       = { r = 0.9,  g = 0.9,  b = 0.9 },
@@ -132,7 +150,24 @@ NS.UI = {
 }
 NS.Grid = { HidePreview = function() end, HideMeasure = function() end, SetAxisLock = function() end }
 NS.Lib = NS.Lib or { callbacks = { Fire = function() end } }   -- the winner marker the lost-copy guard checks
+-- A QUEUE, not an immediate-run stub: Proxy caches C_Timer at load, and what is
+-- on the global at that moment varies with which suites ran first (test_panel
+-- leaves a run-at-once one behind; a filtered run has none). Timers and tickers
+-- are recorded and only ever fired by the test that wants them, so the stagger,
+-- the legend's next-frame relayout and the peek poll are all deterministic.
+local timers, tickers = {}, {}
+local prevTimer = C_Timer
+C_Timer = {
+    After = function(d, fn) timers[#timers + 1] = { delay = d, fn = fn } end,
+    NewTicker = function(d, fn)
+        local t = { delay = d, fn = fn, cancelled = false }
+        function t:Cancel() self.cancelled = true end
+        tickers[#tickers + 1] = t
+        return t
+    end,
+}
 load_addon_file("Proxy.lua")
+C_Timer = prevTimer
 local P = NS.Proxy
 
 local function elDef(pos)
@@ -783,3 +818,227 @@ do
     NS.Session = nil
     NS.db = nil
 end
+
+-- ============================================================
+-- OVERLAY LEVEL AND THE SLAB CLAMP
+-- Strata orders frames first and LEVEL second, and a UIParent child starts at
+-- level 1 -- so the HIGH overlay sat one level above UIParent and anything else
+-- at HIGH with a few frames of nesting drew over the slabs (DF's personal
+-- targeted-spells block: HIGH, icons four deep). The overlay now takes a real
+-- level of its own, the plates that must sit UNDER the slabs take that level
+-- rather than a literal 1, and the slab is clamped so its handle is reachable
+-- even when the element it stands for has been solved off screen.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, snapToFrames = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("LV", { title = "LV" })
+    R:Register("LV", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("LV", "b", elDef({ point = "CENTER", x = 300, y = 0 }))
+    P:Build()
+    local uf = P:GetUnlockFrame()
+    check(type(uf._level) == "number" and uf._level >= 100, "overlay: the unlock frame takes a frame level well above UIParent's children")
+    check(P.proxies["LV:a"]._clamped, "slab: clamped to the screen, so the handle can always be reached")
+    -- A zone plate sits at the overlay's own level: one below the slabs, but
+    -- never back at 1.
+    P:ShowZones(R:Get("LV:a"))
+    check(P.zoneCount > 0, "zones: the other element offers seats")
+    eq(P.zones[1]._level, uf._level, "zones: a plate takes the overlay's level, not a literal 1")
+    P:HideZones()
+    P:DestroyAll()
+    R:UnregisterAddon("LV")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- ALT-PEEK: PAYLOAD FIRST, THEN A POLL WHILE PEEKING
+-- The release can go missing (an alt-tab out on a held Alt; a burst of fast
+-- presses), and the equality guard in SetPeek then swallowed the NEXT press too,
+-- so the overlay sat faded until a press AND a release had both arrived. The
+-- handler now reads the event's own payload for the direction, and while
+-- peeking a ticker asks the client whether Alt is really still down.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("PK", { title = "PK" })
+    R:Register("PK", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local uf = P:GetUnlockFrame()
+    local onEvent = uf:GetScript("OnEvent")
+    check(onEvent ~= nil, "peek: the overlay has its modifier handler")
+    local tickersBefore = #tickers
+
+    -- A press whose payload says DOWN peeks even when the poll has not caught
+    -- up (the client's own state can lag the event).
+    altDown = false
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    check(P.peeking == true, "peek: a press peeks on the event's own payload")
+    check(uf._alpha < 1, "peek: ...and the overlay drops its alpha")
+    eq(#tickers, tickersBefore + 1, "peek: peeking starts the poll")
+    local ticker = tickers[#tickers]
+
+    -- The release is lost (alt-tab). The poll sees Alt up and stands down.
+    altDown = false
+    ticker.fn()
+    check(P.peeking == false, "peek: the poll clears a peek whose release never arrived")
+    eq(uf._alpha, 1, "peek: ...and restores the overlay")
+    check(ticker.cancelled, "peek: standing down cancels the poll")
+
+    -- A release while the OTHER Alt is still held keeps the peek: the payload
+    -- says up, the poll says down.
+    altDown = true
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "RALT", 1)
+    check(P.peeking == true, "peek: right Alt peeks too")
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 0)
+    check(P.peeking == true, "peek: releasing one Alt with the other held keeps the peek")
+    altDown = false
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "RALT", 0)
+    check(P.peeking == false, "peek: the last release restores")
+    check(tickers[#tickers].cancelled, "peek: ...and cancels that peek's poll")
+
+    -- Other keys are ignored outright.
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LSHIFT", 1)
+    check(P.peeking == false, "peek: Shift is not a peek key")
+
+    -- Teardown mid-peek leaves no poll running into the next session.
+    altDown = true
+    onEvent(uf, "MODIFIER_STATE_CHANGED", "LALT", 1)
+    check(P.peeking == true, "peek: peeking again")
+    P:DestroyAll()
+    check(P.peeking == false, "peek: DestroyAll clears the peek")
+    check(tickers[#tickers].cancelled, "peek: ...and cancels its poll")
+    R:UnregisterAddon("PK")
+    R.ready = wasReady
+    altDown = false
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- THE ENTRANCE
+-- Lock fades the whole overlay out (DismissAll); unlock faded only the slabs in,
+-- and DandersFrames re-registers its per-unit targets ~0.1s into every session
+-- (RegistryChanged -> RebuildProxies -> DestroyAll + Build), which reset the
+-- overlay to alpha 1 and cut even that short. So: an animated Build fades the
+-- OVERLAY in, and a mid-session Rebuild remakes the slabs without touching it.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    local fadedIn, cancelled = {}, {}
+    local realFadeIn, realCancel = NS.Fx.FadeIn, NS.Fx.Cancel
+    NS.Fx.FadeIn = function(target, ...) fadedIn[#fadedIn + 1] = target; return realFadeIn(target, ...) end
+    NS.Fx.Cancel = function(target, ...) cancelled[#cancelled + 1] = target; return realCancel(target, ...) end
+    local function count(list, target)
+        local n = 0
+        for _, t in ipairs(list) do if t == target then n = n + 1 end end
+        return n
+    end
+    R:RegisterAddon("EN", { title = "EN" })
+    R:Register("EN", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    local uf = P:GetUnlockFrame()
+
+    -- A plain Build (a rebuild's shape) shows the overlay without a fade.
+    P:Build()
+    check(uf:IsShown(), "entrance: a plain Build shows the overlay")
+    eq(count(fadedIn, uf), 0, "entrance: ...with no fade")
+    P:DestroyAll()
+
+    -- The session-open Build fades the overlay itself in.
+    local timersBefore = #timers
+    P:Build(nil, true)
+    check(uf:IsShown(), "entrance: an animated Build shows the overlay")
+    eq(count(fadedIn, uf), 1, "entrance: ...through a fade-in on the overlay")
+    check(#timers > timersBefore, "entrance: the slabs still queue their stagger on top")
+
+    -- ~0.1s in: the consumer's re-registration rebuilds the slabs. The overlay
+    -- is left alone -- not cancelled, not hidden, event still registered.
+    local cancelsBefore = count(cancelled, uf)
+    local oldSlab = P.proxies["EN:a"]
+    R:Register("EN", "b", elDef({ point = "CENTER", x = 200, y = 0 }))
+    P:Rebuild(nil)
+    check(P.proxies["EN:b"] ~= nil, "rebuild: the new element gets a slab")
+    check(P.proxies["EN:a"] ~= oldSlab, "rebuild: the slabs really were remade")
+    eq(count(cancelled, uf), cancelsBefore, "rebuild: the overlay's entrance is not cancelled")
+    check(uf:IsShown(), "rebuild: the overlay stays up")
+    eq(count(fadedIn, uf), 1, "rebuild: ...and is not faded in a second time")
+
+    -- Lock -> unlock inside the dismiss fade: the next Build re-opens the
+    -- overlay (cancels the fade-out, restores it) rather than skipping it.
+    P:DismissAll()
+    P:Build(nil, true)
+    check(count(cancelled, uf) > cancelsBefore, "reopen: a Build during the dismiss fade cancels it")
+    eq(count(fadedIn, uf), 2, "reopen: ...and fades the overlay in again")
+
+    P:DestroyAll()
+    NS.Fx.FadeIn, NS.Fx.Cancel = realFadeIn, realCancel
+    R:UnregisterAddon("EN")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- ============================================================
+-- CHROME SCALE
+-- The strip, its folded tab and the toast wear DandersMoverDB.scale; a slab
+-- never does (it is exactly as big as the frame it stands in for). The reader
+-- lives here, next to the chrome, and ApplyChromeScale is the one call that
+-- re-sizes every piece -- the panel's and the settings window's included.
+-- ============================================================
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {}, scale = 1.25 }
+    NS.Session = { selected = nil }
+    eq(NS:ChromeScale(), 1.25, "scale: the reader answers the setting")
+    NS.db.scale = nil
+    eq(NS:ChromeScale(), 1, "scale: ...and 1 when the SV predate it")
+    NS.db.scale = 0
+    eq(NS:ChromeScale(), 1, "scale: ...and 1 for a value that would make the chrome vanish")
+    NS.db.scale = 1.25
+    R:RegisterAddon("SC", { title = "SC" })
+    R:Register("SC", "a", elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    eq(P.legend._scale, 1.25, "scale: the strip is built at the setting")
+    eq(P.stripTab._scale, 1.25, "scale: ...and so is its folded tab")
+    eq(P.proxies["SC:a"]._scale, 1, "scale: a slab is never scaled")
+    P:ShowToast("x")
+    eq(P.toast._scale, 1.25, "scale: the toast too")
+
+    local panelApplied, settingsApplied = 0, 0
+    NS.Panel = { ApplyChromeScale = function() panelApplied = panelApplied + 1 end,
+                 IsElementPinned = function() return false end, RefreshVerbs = function() end }
+    NS.Settings = { ApplyChromeScale = function() settingsApplied = settingsApplied + 1 end }
+    NS.db.scale = 0.8
+    P:ApplyChromeScale()
+    eq(P.legend._scale, 0.8, "apply: the strip takes the new value")
+    eq(P.stripTab._scale, 0.8, "apply: ...the tab")
+    eq(P.toast._scale, 0.8, "apply: ...the toast")
+    eq(panelApplied, 1, "apply: ...and the panel is told")
+    eq(settingsApplied, 1, "apply: ...and the settings window")
+    eq(P.proxies["SC:a"]._scale, 1, "apply: the slab is still not scaled")
+
+    -- The next session takes whatever the setting is by then (the settings
+    -- window opens with no session up).
+    P:DestroyAll()
+    NS.db.scale = 1.1
+    P:Build()
+    eq(P.legend._scale, 1.1, "scale: a new session re-reads the setting")
+
+    NS.Panel, NS.Settings = nil, nil
+    P:DestroyAll()
+    R:UnregisterAddon("SC")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+

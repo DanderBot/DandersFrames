@@ -77,6 +77,14 @@ local TAG_PAD = 3                        -- padding of the floating title pill
 -- FADE_OUT and only then tears it down (DismissAll). Combat suspend stays
 -- instant -- Session:Suspend hides the unlock frame directly.
 local FADE_IN, FADE_OUT, STAGGER = 0.45, 0.4, 0.035
+-- ☠ THE OVERLAY'S FRAME LEVEL, NOT JUST ITS STRATA. Strata orders frames first
+-- and level second, and a frame created under UIParent starts at level 1 -- so
+-- the overlay at HIGH sat one level above UIParent, and anything ELSE at HIGH
+-- with a few frames of nesting drew over the slabs. DandersFrames' personal
+-- targeted-spells block is HIGH with its icons four frames deep (+5 on the
+-- highlight), which is why its mover handle rendered underneath its own preview
+-- icons. Slabs, zones and the rest are children and level from here.
+local OVERLAY_LEVEL = 100
 local ZONE_DASH_W = 3                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
@@ -88,6 +96,7 @@ function P:GetUnlockFrame()
     local f = CreateFrame("Frame", "DandersMoverUnlockFrame", UIParent)
     f:SetAllPoints(UIParent)
     f:SetFrameStrata("HIGH")
+    f:SetFrameLevel(OVERLAY_LEVEL)
     -- ☠ The overlay must NEVER take the mouse. It covers the whole screen, so
     -- EnableMouse(true) on it captures every click a session is open for -- the
     -- camera cannot be dragged, nothing behind the movers can be clicked. It
@@ -97,8 +106,15 @@ function P:GetUnlockFrame()
     --
     -- Alt-peek. The event is only registered while a session is up (Build /
     -- DestroyAll), so this cannot fire outside one.
-    f:SetScript("OnEvent", function(_, _, key)
-        if key == "LALT" or key == "RALT" then P:SetPeek(IsAltKeyDown()) end
+    --
+    -- The event's OWN payload says which way this key went (1 = pressed); the
+    -- poll only decides whether the OTHER Alt is still holding the peek on a
+    -- release. Reading the poll for the direction too let a press whose state
+    -- the client had not caught up with yet read as a release.
+    f:SetScript("OnEvent", function(_, _, key, down)
+        if key ~= "LALT" and key ~= "RALT" then return end
+        local pressed = down == 1 or down == true
+        P:SetPeek(pressed or IsAltKeyDown())
     end)
     f:Hide()
     self.unlockFrame = f
@@ -119,6 +135,29 @@ function P:SetPeek(on)
     if self.peeking == on then return end
     self.peeking = on
     NS.Fx.FadeTo(self:GetUnlockFrame(), on and PEEK_ALPHA or 1, 0.1)
+    self:WatchPeek(on)
+end
+
+-- ☠ THE RELEASE CAN GO MISSING. MODIFIER_STATE_CHANGED does not reach an
+-- unfocused client, so an alt-tab out on a held Alt left peeking = true with
+-- nothing coming to clear it -- the overlay sat at PEEK_ALPHA until the next
+-- press AND release, because the press alone was swallowed by the equality
+-- guard above. A burst of fast presses can drop a release the same way. So
+-- while peeking, ask the client's own answer a few times a second and stand
+-- down the moment it says Alt is up; nothing runs while not peeking, because a
+-- press is an event and events are reliable in that direction. Guarded for a
+-- client or stub without a ticker, which just keeps the event-only behaviour.
+local PEEK_POLL = 0.2
+
+function P:WatchPeek(on)
+    if self.peekTicker then
+        self.peekTicker:Cancel()
+        self.peekTicker = nil
+    end
+    if not on or not (C_Timer and C_Timer.NewTicker) then return end
+    self.peekTicker = C_Timer.NewTicker(PEEK_POLL, function()
+        if not IsAltKeyDown() then P:SetPeek(false) end
+    end)
 end
 
 function P:CursorPos()
@@ -424,7 +463,15 @@ local function create(el)
     b:RegisterForClicks("LeftButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
-    b:SetClampedToScreen(false)
+    -- ☠ THE HANDLE STAYS ON SCREEN EVEN WHEN ITS ELEMENT DOES NOT. An anchored
+    -- solve can land an element outside the screen (a stale target rect --
+    -- Core's KeepOnScreen only catches the fully-off case), and a slab that
+    -- followed it there could never be clicked to bring it back. Clamped, the
+    -- slab hugs the edge instead; a drag from there re-places the element by the
+    -- cursor (DragTo positions the element at the slab's new centre), which is
+    -- the rescue. Free elements are already clamped by every write path, so the
+    -- slab and the element only ever part company in that one anchored case.
+    b:SetClampedToScreen(true)
 
     -- Role edge: full height, flush left, and UNDER the pixel border (which draws
     -- at ARTWORK sublevel 7) so the selection outline always reads over it.
@@ -493,16 +540,25 @@ end
 -- { addon = <string|nil>, keySet = <set|nil> }. The initiator's keys outside keySet
 -- get NO proxy at all, not a dimmed one (a party unlock must not put raid proxies on
 -- screen); other addons' elements get one only with showOtherAddons (Registry:WantsProxy).
--- animate: session open only -- slabs fade in with a small stagger in build
--- order. Rebuilds mid-session come through without it and stay instant.
+-- animate: session open only -- the whole overlay fades in (the mirror of
+-- DismissAll's fade out, so strip, slabs and panel all arrive together) and the
+-- slabs add a small stagger in build order on top. Rebuilds mid-session come
+-- through Rebuild, without it: new slabs are instant, but the overlay -- and
+-- an entrance still playing on it -- is left exactly as it is.
 function P:Build(filter, animate)
     local f = self:GetUnlockFrame()
-    -- A lock's dismiss fade may still be running (lock -> unlock inside FADE_OUT):
+    -- The OVERLAY half runs once per session (Rebuild leaves it up): a lock's
+    -- dismiss fade may still be running (lock -> unlock inside FADE_OUT), so
     -- invalidate its deferred teardown and restore the frame it was fading.
-    self.dismissToken = (self.dismissToken or 0) + 1
-    NS.Fx.Cancel(f)
-    self.peeking = false          -- Cancel above restored alpha 1
-    if f.RegisterEvent then f:RegisterEvent("MODIFIER_STATE_CHANGED") end
+    if not self.overlayUp then
+        self.overlayUp = true
+        self.dismissToken = (self.dismissToken or 0) + 1
+        NS.Fx.Cancel(f)
+        self.peeking = false          -- Cancel above restored alpha 1
+        self:WatchPeek(false)
+        if f.RegisterEvent then f:RegisterEvent("MODIFIER_STATE_CHANGED") end
+        if animate then NS.Fx.FadeIn(f, FADE_IN) else f:Show() end
+    end
     local n = 0
     for _, el in ipairs(Registry:SortedElements()) do
         if Registry:WantsProxy(filter, el) then
@@ -533,8 +589,21 @@ function P:Build(filter, animate)
             end
         end
     end
-    f:Show()
     self:ShowLegend()
+end
+
+-- Mid-session rebuild: the slabs are torn down and built again against the
+-- current filter; the overlay is not touched. This used to be DestroyAll +
+-- Build, and DestroyAll resets the overlay -- alpha back to 1, any entrance
+-- cancelled. DandersFrames re-registers its per-unit targets about 0.1s into
+-- every session (RegistryChanged -> Session:RebuildProxies), so the 0.45s
+-- fade-in never got past its first tenth: "unlock doesn't fade its frames in,
+-- but exiting the mode does fade out".
+function P:Rebuild(filter)
+    for id in pairs(self.proxies) do self:Remove(id) end
+    self:HideZones()
+    self:HideTethers()
+    self:Build(filter)
 end
 
 -- The GEOMETRY half of a refresh: the slab's size and centre re-measured from
@@ -624,6 +693,8 @@ end
 
 function P:DestroyAll()
     for id in pairs(self.proxies) do self:Remove(id) end
+    self.overlayUp = false
+    self:WatchPeek(false)
     if self.unlockFrame then
         if self.unlockFrame.UnregisterEvent then self.unlockFrame:UnregisterEvent("MODIFIER_STATE_CHANGED") end
         self.peeking = false
@@ -647,6 +718,8 @@ function P:DismissAll()
     local token = (self.dismissToken or 0) + 1
     self.dismissToken = token
     self.peeking = false          -- the fade below plays from full alpha
+    self:WatchPeek(false)
+    self.overlayUp = false        -- on its way out: the next Build re-opens it
     NS.Fx.FadeOut(f, FADE_OUT, function()
         if self.dismissToken == token and not (NS.Session and NS.Session:IsActive()) then
             self:DestroyAll()
@@ -862,6 +935,51 @@ end
 -- else.
 -- ============================================================
 local LEGEND_ROW = 18                    -- first row: dots left, buttons right
+
+-- ============================================================
+-- CHROME SCALE
+-- One number for everything a session draws that is NOT a slab: the top strip
+-- and its folded tab, the toast, the element panel (Panel.lua) and the settings
+-- window (Settings.lua). A slab is exactly as big as the frame it stands in for,
+-- so it never scales -- which is also why the whole overlay cannot simply be
+-- scaled: the slabs are its children and are placed in UIParent units.
+-- The mover is standalone, so this is its own setting (DandersMoverDB.scale)
+-- rather than a read of DandersFrames' window scale; a user who wants the two
+-- to match sets this one to match. Owned here, next to the chrome it sizes,
+-- and read by Core's getScale host hook for the kit's own floating surfaces.
+-- ============================================================
+function NS:ChromeScale()
+    local s = NS.db and NS.db.scale
+    if type(s) == "number" and s > 0 then return s end
+    return 1
+end
+
+-- A scaled frame's own units over UIParent's: what its GetWidth/GetHeight have
+-- to be multiplied by before they are compared with anything in screen space.
+-- 1 for a frame (or stub) that cannot answer.
+local function chromeRatio(f)
+    local fe = f and f.GetEffectiveScale and f:GetEffectiveScale()
+    local ue = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()
+    if type(fe) == "number" and type(ue) == "number" and ue > 0 then return fe / ue end
+    return 1
+end
+
+-- The setting moved (Settings > Editor > Scale), or a session opened: size
+-- every piece of chrome that exists. Panel and Settings load after this file,
+-- hence the guards; each owns its own frames.
+function P:ApplyChromeScale()
+    local s = NS:ChromeScale()
+    if self.legend then self.legend:SetScale(s) end
+    if self.stripTab then self.stripTab:SetScale(s) end
+    if self.toast then self.toast:SetScale(s) end
+    if self.legend and self.legend:IsShown() then
+        self.legend:Layout()
+        self:ResetLegendDodge()
+    end
+    if NS.Panel and NS.Panel.ApplyChromeScale then NS.Panel:ApplyChromeScale() end
+    if NS.Settings and NS.Settings.ApplyChromeScale then NS.Settings:ApplyChromeScale() end
+end
+
 local function buildLegend()
     local f = CreateFrame("Frame", "DandersMoverLegend", P:GetUnlockFrame(), "BackdropTemplate")
     f:SetFrameStrata("DIALOG")
@@ -1030,6 +1148,11 @@ end
 function P:ShowLegend()
     if not self.legend then self.legend = buildLegend() end
     if not self.stripTab then self.stripTab = buildStripTab() end
+    -- The setting can move between sessions (the settings window opens without
+    -- one), so the chrome takes its scale afresh on every show -- which is also
+    -- the only place it is set: a fresh build comes through here too.
+    self.legend:SetScale(NS:ChromeScale())
+    self.stripTab:SetScale(NS:ChromeScale())
     if NS.db.stripCollapsed then
         self.legend:Hide()
         self.stripTab:Show()
@@ -1088,11 +1211,15 @@ function P:UpdateLegendDodge(cx, cy, w, h)
     -- Proximity is measured against the legend's HOME rect (t = 0), not where
     -- the slide has taken it -- measuring the dodged position would read
     -- "clear" at once and bounce the strip straight back onto the drag.
-    local lh = f:GetHeight() or 0
+    -- The strip is scaled chrome: its own width/height (and the PAD it hangs
+    -- below the edge by) are in its own units, and the drag rect is in
+    -- UIParent's, so they are converted before the two are compared.
+    local k = chromeRatio(f)
+    local lh = (f:GetHeight() or 0) * k
     local home = {
         x = 0,
-        y = (UIParent:GetHeight() or 0) / 2 - PAD - lh / 2,
-        w = (f:GetWidth() or 0) + DODGE_MARGIN * 2,
+        y = (UIParent:GetHeight() or 0) / 2 - PAD * k - lh / 2,
+        w = (f:GetWidth() or 0) * k + DODGE_MARGIN * 2,
         h = lh + DODGE_MARGIN * 2,
     }
     local mx, my = self:CursorPos()
@@ -1126,6 +1253,7 @@ local TOAST_HOLD = 1.5
 local function buildToast()
     local t = CreateFrame("Frame", "DandersMoverToast", P:GetUnlockFrame(), "BackdropTemplate")
     t:SetFrameStrata("DIALOG")
+    t:SetScale(NS:ChromeScale())
     UI:CreateElementBackdrop(t, {
         bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
         borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
@@ -1186,11 +1314,19 @@ end
 -- ============================================================
 -- SNAP ZONES
 -- ============================================================
+-- A plate that must sit UNDER the slabs: the overlay's own level, one below the
+-- level its children default to. Not a literal 1 -- the overlay sits at
+-- OVERLAY_LEVEL, so 1 would put the plate under everything else at HIGH too.
+local function underSlabs(frame)
+    local lvl = P:GetUnlockFrame():GetFrameLevel()
+    if lvl then frame:SetFrameLevel(lvl) end
+end
+
 local function zoneFrame(i)
     local z = P.zones[i]
     if not z then
         z = CreateFrame("Frame", nil, P:GetUnlockFrame(), "BackdropTemplate")
-        z:SetFrameLevel(1)
+        underSlabs(z)
         UI:CreateElementBackdrop(z, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
         z.weight = ZONE_WEIGHT
         -- Dashed edges: 8x8 tiles (5-on/3-off dash in a 2px strip) tiled along
@@ -1354,7 +1490,7 @@ local function linkHighlight()
     local hl = P.linkHl
     if not hl then
         hl = CreateFrame("Frame", nil, P:GetUnlockFrame(), "BackdropTemplate")
-        hl:SetFrameLevel(1)
+        underSlabs(hl)
         UI:CreateElementBackdrop(hl, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
         hl.dashes = {}
         local function edge(p1, p2, horizontal)

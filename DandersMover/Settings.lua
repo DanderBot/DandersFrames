@@ -37,6 +37,12 @@ local function rebuildProxies()
     Sess:RebuildProxies()
 end
 
+-- The session chrome's scale. Proxy.lua owns the reader (it sizes the strip and
+-- the toast); guarded so a headless load with Proxy stubbed out still answers.
+local function chromeScale()
+    return NS.ChromeScale and NS:ChromeScale() or 1
+end
+
 local function addonDB(name)
     NS.db.addons[name] = NS.db.addons[name] or { enabled = true, elements = {} }
     return NS.db.addons[name]
@@ -124,6 +130,7 @@ local function build()
     -- is exactly where the frames being moved usually live.
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     f:SetFrameStrata("DIALOG")
+    f:SetScale(chromeScale())
     UI:CreatePanelBackdrop(f, { bgColor = UI.Colors.background })
     f:EnableMouse(true); f:SetMovable(true); f:SetClampedToScreen(true)
     f:RegisterForDrag("LeftButton")
@@ -209,6 +216,17 @@ local function build()
         { { value = "auto", text = L["Auto"] }, { value = "left", text = L["Left"] }, { value = "right", text = L["Right"] } },
         function() return NS.db.panelSide end,
         function(v) NS.db.panelSide = v; if NS.Panel then NS.Panel:Refresh() end end)
+    -- The session chrome's size -- strip, panel, toast, this window. Never the
+    -- slabs (see NS:ChromeScale). Committed on release, so the window is not
+    -- re-scaled under the cursor on every notch of the drag.
+    f.scaleSlider = UI:CreateSlider(editor.content, {
+        label = L["Scale"], min = 0.5, max = 1.5, step = 0.05,
+        tooltip = { title = L["Scale"],
+                    lines = { L["Size of the top strip, the element panel and this window. Movers themselves always match their frames."] } },
+        get = function() return NS.db.scale end,
+        set = function(v) NS.db.scale = v end,
+        onChanged = function() if Proxy and Proxy.ApplyChromeScale then Proxy:ApplyChromeScale() end end,
+    })
     stack(editor, {
         toggle(editor.content, L["Keyboard nudge"], "keyboardNudge", nil,
             { title = L["Keyboard nudge"], lines = { L["Arrow keys move the selected element. Shift ×10, Ctrl ×100."] } }),
@@ -219,6 +237,7 @@ local function build()
         -- anchor targets but not draggable unless this is on. Mirrored on the legend.
         toggle(editor.content, L["Show other addons' movers"], "showOtherAddons", rebuildProxies),
         f.sideRow,
+        f.scaleSlider,
     })
     place(editor)
 
@@ -334,6 +353,7 @@ function St:Refresh()
     f.gridSlider:RefreshValue()
     f.snapDistSlider:RefreshValue()
     f.zoneShowSlider:RefreshValue()
+    f.scaleSlider:RefreshValue()
     f.sideRow:Refresh()
 
     clearRows(f)
@@ -370,11 +390,30 @@ NS.Lib.RegisterCallback(St, "RegistryChanged", function()
     end)
 end)
 
+-- The window closes with the session it was opened in. It is a UIParent child,
+-- not a child of the unlock frame (it has to work with no session at all, from
+-- /mover config), so nothing took it down when Save & Exit tore the session
+-- down -- only Esc did, through UISpecialFrames. A window opened OUTSIDE a
+-- session is the user's own and is left alone when some later session ends.
+NS.Lib.RegisterCallback(St, "Locked", function()
+    if St.sessionOwned then St:Hide() end
+end)
+
 function St:Show()
     if not self.frame then self.frame = build() end
+    self.sessionOwned = (Sess and Sess.IsActive and Sess:IsActive()) and true or false
     self.frame:Show()
     self:Refresh()
 end
 
-function St:Hide() if self.frame then self.frame:Hide() end end
+function St:Hide()
+    self.sessionOwned = false
+    if self.frame then self.frame:Hide() end
+end
 function St:Toggle() if self.frame and self.frame:IsShown() then self:Hide() else self:Show() end end
+
+-- The Scale setting moved (its slider is in this very window): the window takes
+-- it too. Called by Proxy:ApplyChromeScale, which sizes everything else.
+function St:ApplyChromeScale()
+    if self.frame then self.frame:SetScale(chromeScale()) end
+end

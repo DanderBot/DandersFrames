@@ -981,11 +981,29 @@ end
 -- The mover does, so it computes the side itself and forces it -- least-covering
 -- against the other proxies and the legend strip.
 -- ============================================================
+-- The session chrome's scale. Proxy.lua owns the reader (it sizes the strip and
+-- the toast); guarded so a headless load with Proxy stubbed out still answers.
+local function chromeScale()
+    return NS.ChromeScale and NS:ChromeScale() or 1
+end
+
+-- A frame's own units over UIParent's. The legend strip and the panel itself
+-- wear the chrome scale (NS:ChromeScale), the slabs do not, and this file
+-- compares all three -- so everything measured off a frame is converted into
+-- UIParent units first. 1 for a frame (or stub) that cannot answer.
+local function ratioOf(fr)
+    local fe = fr and fr.GetEffectiveScale and fr:GetEffectiveScale()
+    local ue = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()
+    if type(fe) == "number" and type(ue) == "number" and ue > 0 then return fe / ue end
+    return 1
+end
+
 local function rectOf(fr)
     local cx, cy = fr:GetCenter()
     if not cx then return nil end
     local ux, uy = UIParent:GetCenter()
-    return { x = cx - ux, y = cy - uy, w = fr:GetWidth() or 0, h = fr:GetHeight() or 0 }
+    local k = ratioOf(fr)
+    return { x = cx * k - ux, y = cy * k - uy, w = (fr:GetWidth() or 0) * k, h = (fr:GetHeight() or 0) * k }
 end
 
 local function autoSide(po, proxy)
@@ -1002,7 +1020,10 @@ local function autoSide(po, proxy)
         local r = rectOf(Proxy.legend)
         if r then obstacles[#obstacles + 1] = r end
     end
-    return Solver.BestDockSide(pr, W, po.frame:GetHeight() or 0, DOCK_GAP, obstacles,
+    -- The panel's footprint in screen units: W and its height are in its own
+    -- (scaled) units.
+    local k = ratioOf(po.frame)
+    return Solver.BestDockSide(pr, W * k, (po.frame:GetHeight() or 0) * k, DOCK_GAP, obstacles,
         UIParent:GetWidth(), UIParent:GetHeight())
 end
 
@@ -1012,7 +1033,7 @@ local function dockSide(po, proxy)
     side = autoSide(po, proxy)
     if not side then
         -- Nothing fits: the old edge flip, and the shell clamps the overhang.
-        side = ((proxy:GetRight() or 0) + DOCK_GAP + W > (UIParent:GetRight() or 0)) and "left" or "right"
+        side = ((proxy:GetRight() or 0) + DOCK_GAP + W * ratioOf(po.frame) > (UIParent:GetRight() or 0)) and "left" or "right"
     end
     return side
 end
@@ -1093,10 +1114,25 @@ function Pn:Create()
             Proxy:Highlight(Sess.selected)
         end,
     })
+    -- The panel is chrome, so it wears the chrome scale. Set on every Create
+    -- (the shell pools instances, so this may be a revived one from a session
+    -- at a different scale); the shell's own rect maths converts through the
+    -- frame's effective scale, so the dock and the beam follow.
+    if po.frame and po.frame.SetScale then po.frame:SetScale(chromeScale()) end
     local found = false
     for _, other in ipairs(self.live) do if other == po then found = true end end
     if not found then self.live[#self.live + 1] = po end
     return po
+end
+
+-- The Scale setting moved: every live panel takes it, then re-docks, because a
+-- bigger panel may no longer fit on the side it chose.
+function Pn:ApplyChromeScale()
+    local s = chromeScale()
+    for _, po in ipairs(self.live) do
+        if not po.closed and po.frame and po.frame.SetScale then po.frame:SetScale(s) end
+    end
+    if Sess:IsActive() and not Sess:IsSuspended() then self:Refresh() end
 end
 
 -- Instant hide of one panel, animations cancelled.

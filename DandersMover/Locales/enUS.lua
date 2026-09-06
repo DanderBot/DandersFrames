@@ -8,6 +8,7 @@ local L = setmetatable({}, { __index = function(t, k) return k end })
 NS.L = L
 
 -- Strings are added here as tasks introduce them (alphabetical).
+L["%d mover positions reset."] = true
 L["Align"] = true
 L["Anchor"] = true
 L["Anchor %s"] = true
@@ -60,6 +61,7 @@ L["Left"] = true
 L["Move %s"] = true
 L["Movers cannot be unlocked in combat."] = true
 L["Movers suspended for combat."] = true
+L["No addon named %s has registered movers."] = true
 L["No addons have registered movers yet."] = true
 L["None"] = true
 -- The Target row's EMPTY state. "None" on its own names the state and stops;
@@ -82,6 +84,7 @@ L["Reset %s"] = true
 L["Right"] = true
 L["Save"] = true
 L["Save & Exit"] = true
+L["Scale"] = true
 L["Settings"] = true
 L["Shift: horizontal · Ctrl: vertical · Esc: back out"] = true
 L["Show distance measures"] = true
@@ -90,6 +93,7 @@ L["Show grid snap lines"] = true
 L["Show movers for hidden frames"] = true
 L["Show other addons' movers"] = true
 L["Show snap zones within"] = true
+L["Size of the top strip, the element panel and this window. Movers themselves always match their frames."] = true
 L["Snap distance"] = true
 L["Snap to frames"] = true
 L["Snap to grid"] = true
@@ -103,7 +107,8 @@ L["Typing in or clicking a mover's panel pins it in place. Off: only the pin but
 L["Redid: %s"] = true
 L["Undid: %s"] = true
 L["Undo"] = true
-L["Usage: /mover [unlock|lock|config|demo]"] = true
+L["Usage: /mover [unlock|lock|config|reset|demo]"] = true
+L["Usage: /mover reset all | <addon> — registered: %s"] = true
 L["What this element is anchored to. Picking one does not move it."] = true
 L["Where this element goes while the target above is off screen."] = true
 L["X"] = true

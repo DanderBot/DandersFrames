@@ -109,7 +109,7 @@ function Sess:Unlock(filter)
     Lib.callbacks:Fire("Unlocked")
     perfLog(tTotal, "Unlocked callbacks")
     local tBuild = perfStart()
-    Proxy:Build(filter, true)     -- animate: slabs fade in with a stagger
+    Proxy:Build(filter, true)     -- animate: the overlay fades in, slabs with a stagger
     perfLog(tBuild, "Proxy:Build")
     Grid:Refresh()
     self:EnableKeyboard(true)
@@ -178,8 +178,9 @@ function Sess:RebuildProxies()
     -- will not make one for an id that no longer exists, but the selection would
     -- keep pointing at it -- and the panel docks to the selected proxy.
     if self.selected and not Registry:Get(self.selected) then self.selected = nil end
-    Proxy:DestroyAll()
-    Proxy:Build(self.filter)          -- also re-draws the legend
+    -- Rebuild, not DestroyAll + Build: the overlay (and an entrance still
+    -- playing on it) stays; only the slabs are remade. Also re-draws the legend.
+    Proxy:Rebuild(self.filter)
     Grid:Refresh()
     panel("Refresh")                  -- hides itself when the selection is gone
 end
@@ -626,6 +627,13 @@ function Sess:EndDrag(el, cx, cy, zone)
     self.tether = nil
     local pos = Registry:GetPos(el)
     if zone and Registry:WouldCreateCycle(el.id, zone.target) then zone = nil end
+    -- ⚠ THE ZONES ARE A SNAPSHOT. Proxy:ShowZones collects them once at drag
+    -- start and nothing re-collects during the drag, so a target that went off
+    -- screen (or out of the registry) mid-drag still has its zone under the
+    -- cursor. Its rect is whatever it was; a solve against it lands the element
+    -- somewhere the preview never showed. Refused here: the drop goes through
+    -- as a plain move to the spot the preview DID show.
+    if zone and not Registry:IsTargetAvailable(Registry:GetTarget(zone.target)) then zone = nil end
     if zone then
         pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
         carryFallback(pos, before, zone.target)

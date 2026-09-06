@@ -313,6 +313,18 @@ function R:GetRect(entry)
     return { x = cx * ratio - ux, y = cy * ratio - uy, w = w, h = h }
 end
 
+-- "Actually on screen": IsVisible, which is the frame's own Show state AND every
+-- ancestor's. IsShown answers only the frame's own flag, so a unit frame whose
+-- container is hidden still says yes to it -- and was still offered as a snap
+-- target, with the stale rect its GetCenter keeps answering, and still counted
+-- as a mover-worthy frame with "movers for hidden frames" off. Falls back to
+-- IsShown for a stub or region that has no IsVisible.
+function R.IsFrameVisible(f)
+    if not f then return false end
+    if f.IsVisible then return f:IsVisible() and true or false end
+    return f.IsShown and f:IsShown() and true or false
+end
+
 -- Is this entry currently a usable anchor target / resolvable parent?
 -- A consumer that supplies getRect owns the "is it visible" question outright:
 -- returning nil is how it says "not meaningfully on screen right now", and that
@@ -326,8 +338,7 @@ function R:IsTargetAvailable(entry)
     -- than jumping to a rect that is not meaningfully on screen.
     if not self:IsRelevant(entry) then return false end
     if entry.getRect then return entry.getRect() ~= nil end
-    local f = self:GetFrame(entry)
-    return f ~= nil and f:IsShown() and true or false
+    return R.IsFrameVisible(self:GetFrame(entry))
 end
 
 function R:GetPos(el)
