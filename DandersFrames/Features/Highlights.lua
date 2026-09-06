@@ -78,9 +78,22 @@ end
 -- ANIMATED BORDER (Marching Ants)
 -- ============================================================
 
-local function CreateEdgeDashes(parent, count)
-    local dashes = {}
-    for i = 1, count do
+-- What each edge starts with. A FLOOR, not a ceiling -- see GrowEdgeDashes.
+local INITIAL_EDGE_DASHES = 20
+
+-- ☠ AN EDGE THAT WANTS MORE DASHES THAN ITS POOL HOLDS LOSES ITS TAIL IN SILENCE.
+-- The draw loops below ask for ceil(edge / PATTERN_LENGTH) + 2 and skip any index the
+-- pool cannot answer (the `and dash` guard), so while the pool was a hard 20 a frame
+-- past ~228 units wide simply stopped being painted part of the way along -- no error,
+-- nothing in the log, just a stretch of edge the ants never reached. Three settings
+-- walk into it: Frame Width (the slider goes to 300), a negative Inset (the run is
+-- width - 2*inset), and Frame Scale > 1, which multiplies the width an edge is
+-- measured at.
+--
+-- Growth is one-way and stays pooled on the container, so a frame that has once been
+-- wide keeps its textures and a resize never churns them.
+local function GrowEdgeDashes(parent, dashes, count)
+    for i = #dashes + 1, count do
         local dash = parent:CreateTexture(nil, "OVERLAY")
         dash:SetColorTexture(1, 1, 1, 1)
         dash:Hide()
@@ -89,13 +102,20 @@ local function CreateEdgeDashes(parent, count)
     return dashes
 end
 
-local function InitAnimatedBorder(ch)
+local function CreateEdgeDashes(parent, count)
+    return GrowEdgeDashes(parent, {}, count)
+end
+
+-- A method rather than a file-local, to match the DF:UpdateAnimatedBorder it pairs
+-- with: the draw takes the "no border yet" early-out until this has run, so the
+-- headless suite cannot exercise one without the other.
+function DF:InitAnimatedBorder(ch)
     if ch.animBorder then return ch.animBorder end
     ch.animBorder = {
-        topDashes = CreateEdgeDashes(ch, 20),
-        bottomDashes = CreateEdgeDashes(ch, 20),
-        leftDashes = CreateEdgeDashes(ch, 20),
-        rightDashes = CreateEdgeDashes(ch, 20),
+        topDashes = CreateEdgeDashes(ch, INITIAL_EDGE_DASHES),
+        bottomDashes = CreateEdgeDashes(ch, INITIAL_EDGE_DASHES),
+        leftDashes = CreateEdgeDashes(ch, INITIAL_EDGE_DASHES),
+        rightDashes = CreateEdgeDashes(ch, INITIAL_EDGE_DASHES),
     }
     return ch.animBorder
 end
@@ -120,6 +140,7 @@ end
 
 local function DrawHorizontalEdge(ch, border, dashes, isTop, edgeOffset, width, thick, inset, r, g, b, a)
     local numDashes = math.ceil(width / PATTERN_LENGTH) + 2
+    if numDashes > #dashes then GrowEdgeDashes(ch, dashes, numDashes) end
     -- Hide only the trailing dashes we won't touch this frame
     for i = numDashes + 1, #dashes do dashes[i]:Hide() end
     local startPos = -(edgeOffset % PATTERN_LENGTH)
@@ -153,6 +174,7 @@ end
 
 local function DrawVerticalEdge(ch, border, dashes, isRight, edgeOffset, height, thick, inset, r, g, b, a)
     local numDashes = math.ceil(height / PATTERN_LENGTH) + 2
+    if numDashes > #dashes then GrowEdgeDashes(ch, dashes, numDashes) end
     for i = numDashes + 1, #dashes do dashes[i]:Hide() end
     local startPos = -(edgeOffset % PATTERN_LENGTH)
     for i = 1, numDashes do
@@ -488,7 +510,7 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         top:Show() bottom:Show() left:Show() right:Show()
         
     elseif mode == "ANIMATED" or mode == "DASHED" then
-        InitAnimatedBorder(ch)
+        DF:InitAnimatedBorder(ch)
         ch.animThickness = thickness
         ch.animInset = inset
         ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
