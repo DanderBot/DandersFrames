@@ -30,6 +30,9 @@ local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
 local UnitIsUnit = UnitIsUnit
 local UnitIsVisible = UnitIsVisible
+-- ⚠ Localised like its neighbours: the visibility-latch edge below reads it twice per
+-- full update per unit, and this file's header calls that out as a per-tick path.
+local UnitGUID = UnitGUID
 -- ★ LATCH REGISTRIES, cached as upvalues. Frames\AuraContainer.lua is line 96 of the
 -- .toc and this file is line 99, so both tables exist by now; each is created once with
 -- `X = X or {}` and never replaced, so holding the reference is safe.
@@ -564,7 +567,26 @@ function DF:UpdateUnitFrame(frame, source)
     -- "player"` silently never matched your own frame.
     if DF.AuraContainer and DF.AuraContainer.SetUnitVisibilityLatched and UnitExists(unit) then
         local invisible = false
-        if not UnitIsUnit(unit, "player") then
+        -- ☠☠ THE SELF-EXEMPTION WAS A STATE TEST, AND IT RACED. `UnitIsUnit(unit,
+        -- "player")` answers FALSE for your OWN raidN token in the window after a reload
+        -- where UnitExists is already true and the roster has not resolved — so the
+        -- branch ran on yourself and latched you. Field, Krathe 2026-09-07: "--- UI
+        -- Reload ---" at 19:19:57, "visibility latch ON unit=raid9" — his own token — at
+        -- 19:19:58, one second later. Joining a raid is exactly when this window opens.
+        -- ⇒ Require the identity to have RESOLVED before trusting any answer, and treat
+        -- unresolved as "not latchable". Two GUIDs that both read back as plain strings
+        -- are settled; anything else (nil during roster build, a secret under identity
+        -- restriction, a pcall failure) leaves the unit SHOWN, which is this latch's
+        -- standing rule — blanking a healthy player is worse than the leak it closes.
+        -- ⚠ issecretvalue FIRST and as its own statement, on BOTH values: UnitGUID is
+        -- SecretWhenUnitIdentityRestricted, so comparing two of them unguarded throws.
+        local okMine, myGUID = pcall(UnitGUID, "player")
+        local okThem, uGUID  = pcall(UnitGUID, unit)
+        local mineSecret = issecretvalue and issecretvalue(myGUID) or false
+        local themSecret = issecretvalue and issecretvalue(uGUID) or false
+        local settled = okMine and okThem and not mineSecret and not themSecret
+            and type(myGUID) == "string" and type(uGUID) == "string"
+        if settled and uGUID ~= myGUID then
             local okv, vis = pcall(UnitIsVisible, unit)
             local secret = issecretvalue and issecretvalue(vis) or false
             if okv and not secret and not vis then invisible = true end
