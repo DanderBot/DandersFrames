@@ -8799,16 +8799,46 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
     end
     
     -- INCOMING_RESURRECT_CHANGED: Update resurrection icon
+    --
+    -- ☠☠ THE PAYLOAD IS DELIBERATELY IGNORED. This used to route the update to
+    -- unitFrameMap[arg1] -- the one frame whose token matches the event's -- and that
+    -- is the one status icon where a single missed update is PERMANENT.
+    --
+    -- Why permanent: UpdateResurrectionIcon's only SHOW driver is this event. Its
+    -- resCache "pending accept" (yellow) state is derived from having previously
+    -- OBSERVED the cast (resCache[unit] == 1), so a frame that never saw the casting
+    -- edge cannot reach either state -- it falls through to Hide(). ResTimerCleanup
+    -- only ever hides; it never discovers. The only recovery is UpdateAllStatusIcons,
+    -- reachable from a full-frame refresh or a combat transition -- so inside an M+
+    -- pull or a boss fight there is NO recovery at all, which is exactly the reported
+    -- envelope ("sometimes", "in M+", "all of my BRes").
+    --
+    -- Why the lookup can miss: the payload is typed UnitTokenVariant (retail dump,
+    -- UnitDocumentation.lua:3497) -- the token that arrives is not guaranteed to be the
+    -- token unitFrameMap is keyed by. party vs raid vs player naming for the same
+    -- player is the obvious case; a frame mid-reassignment is another.
+    --
+    -- ⚠ So DO NOT "optimise" this back into a map lookup. Blizzard's own
+    -- CompactUnitFrame registers this with a plain RegisterEvent and calls
+    -- CompactUnitFrame_UpdateCenterStatusIcon(self) WITHOUT reading the payload, i.e.
+    -- every frame refreshes itself. This mirrors that. It is affordable because the
+    -- event is rare -- it fires when a resurrection starts or stops on a group member,
+    -- not on a timer -- and each call is a cheap state read.
     if event == "INCOMING_RESURRECT_CHANGED" then
-        local unit = arg1
-        if unit then
-            local frame = unitFrameMap[unit]
-            if frame and frame.dfEventsEnabled ~= false then
-                if DF.UpdateResurrectionIcon then DF:UpdateResurrectionIcon(frame) end
+        if DF.UpdateResurrectionIcon then
+            if DF.IterateAllFrames then
+                DF:IterateAllFrames(function(frame)
+                    if frame.unit and frame.dfEventsEnabled ~= false then
+                        DF:UpdateResurrectionIcon(frame)
+                    end
+                end)
             end
-            local pinnedFrame = FindPinnedFrameForUnit(unit)
-            if pinnedFrame then
-                if DF.UpdateResurrectionIcon then DF:UpdateResurrectionIcon(pinnedFrame) end
+            -- ☠ DOT, NOT COLON, and a separate walk: IterateAllFrames has no pinned
+            -- arm, so pinned frames would keep a stale icon for the whole fight.
+            if DF.IteratePinnedFrames then
+                DF.IteratePinnedFrames(function(frame)
+                    if frame.unit then DF:UpdateResurrectionIcon(frame) end
+                end)
             end
         end
         return
