@@ -2994,7 +2994,11 @@ L["Another effect"] = true
 -- now -- excluding a role is a statement about what counts, not about how it is drawn -- so
 -- the old "Never Show On" heading went with the regroup.
 L["Groups without assigned roles show everyone."] = true
-L["Hide the helper while your Power Infusion is on cooldown"] = true
+-- ⚠ ASKED POSITIVELY, like every other tick on the panel. It was "Hide the helper while your
+-- Power Infusion is on cooldown" -- the one control in a box of enables that turned a
+-- SUPPRESSION on, which made the box read inconsistently. The stored value is unchanged and
+-- still defaults to gating, so this ships UNTICKED and nobody's saved choice changed meaning.
+L["Show even if your Power Infusion is on cooldown"] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
 -- finer; the pointer names the editor that does go spell by spell, so the limit is not a
 -- dead end.

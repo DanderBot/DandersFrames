@@ -6019,7 +6019,12 @@ S.BuildPIHelperCard = function(parent, opts)
     -- records really are created and deleted underneath. That was already true of the old
     -- card; the tick just stops making the user think it is a destructive act.
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    banner:SetHeight(52)
+    -- ⚠ ONE ROW, NOT TWO. The explaining sentence was a second line under the tick; it is a
+    -- tooltip now (Krathe, 2026-09-08). It earns a hover and not a permanent row: it is read
+    -- once, by someone deciding whether to turn the feature on, and after that it is a
+    -- sentence in the way of the settings every visit -- on a page whose own nav entry
+    -- already says Power Infusion Helper.
+    banner:SetHeight(32)
     banner:SetPoint("TOPLEFT", 8, yPos)
     banner:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
     GUI:CreatePanelBackdrop(banner, { borderColor = { r = 0.30, g = 0.30, b = 0.30, a = 0.5 } })
@@ -6043,16 +6048,16 @@ S.BuildPIHelperCard = function(parent, opts)
     cbLabel:SetText(L["Enable Power Infusion Helper"])
     cbLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
-    -- The one sentence that says what it does. Kept from the old card's face, because it is
-    -- the only place the feature explains itself -- and it stays visible when the tick is
-    -- OFF, which is exactly when someone needs to read it.
-    local desc = banner:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(desc, 10, "")
-    desc:SetPoint("TOPLEFT", banner, "TOPLEFT", 10, -30)
-    desc:SetPoint("TOPRIGHT", banner, "TOPRIGHT", -10, -30)
-    desc:SetJustifyH("LEFT")
-    desc:SetText(L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."])
-    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- ⚠ THE HIT AREA IS THE WHOLE BANNER, not just the 16px box. A tooltip on a checkbox the
+    -- size of a full-stop is a tooltip nobody finds; the row is what the eye is on.
+    banner:EnableMouse(true)
+    banner:SetScript("OnEnter", function(self)
+        GUI:ShowTooltip(self, {
+            title = L["Power Infusion Helper"],
+            lines = { L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] },
+        })
+    end)
+    banner:SetScript("OnLeave", function() GUI:HideTooltip() end)
 
     banner.checkbox = cb
     yPos = yPos - (banner:GetHeight() + GUI.Space.section)
@@ -6507,9 +6512,17 @@ local function pihAddGateAndNotes(g, t)
     -- single checkbox is more chrome than the setting is worth, and this label says
     -- what it does without a header to lean on -- which is the test for whether a
     -- control can live under a heading that does not quite describe it.
-    t.check(g, L["Hide the helper while your Power Infusion is on cooldown"],
-        function() return P.PIH_Settings().gateEnabled ~= false end,
-        function(v) P.PIH_SetGateEnabled(v) end)
+    -- ★ ASKED THE OTHER WAY ROUND (2026-09-08), for the same reason the roles were: every
+    -- other tick on this panel turns something ON when ticked, and this one turned a
+    -- SUPPRESSION on -- so the whole box read as a list of things you enable except for the
+    -- one that hid things. Krathe: "Hide the helper while on CD should be 'show even if PI is
+    -- on CD' off by default."
+    -- ⚠ THE STORE IS UNCHANGED AND THE DEFAULT ALREADY MATCHES. gateEnabled ships true, so
+    -- `not gateEnabled` reads as UNTICKED -- which is the off-by-default he asked for -- and
+    -- nobody's saved choice changes meaning. Inversion in the UI only, exactly like the roles.
+    t.check(g, L["Show even if your Power Infusion is on cooldown"],
+        function() return P.PIH_Settings().gateEnabled == false end,
+        function(v) P.PIH_SetGateEnabled(not v) end)
 
 
     -- ☠ THE CONTENTION NOTES ARE GONE, AND THE ARGUMENT THAT KEPT THEM WAS THE
@@ -6526,16 +6539,28 @@ local function pihAddGateAndNotes(g, t)
     -- icon group exists: position is not a question about icons that are not there.
 end
 
+-- ★★ ASKED POSITIVELY: "WATCH THESE ROLES", NOT "NEVER SHOW ON THESE" (2026-09-08).
+-- ☠ THE STORE IS STILL AN EXCLUSION SET AND THAT IS DELIBERATE. helperExcludedRoles is what
+-- the container gate reads, and it fails open on a missing entry -- a group with no assigned
+-- roles reads "no role" for everyone and nothing is hidden, which is the safe direction.
+-- Rewriting the store to a positive set would flip that: an empty table would mean "watch
+-- nobody" and the whole feature would go dark on a group without role assignments.
+-- ⇒ THE INVERSION IS IN THE UI ONLY. Ticked means watched, which is `not excluded`.
+-- ⚠ AND THE OLD DEFAULTS ALREADY ARE THE NEW ONES: the store ships { TANK, HEALER }
+-- excluded, which reads through this inversion as DPS on, Tanks and Healers off -- exactly
+-- what Krathe asked for. No migration, and nobody's saved choice changes meaning.
+-- ⚠ DAMAGER is a real UnitGroupRolesAssigned token (Core.lua's GetUnitRole passes it
+-- through), so unticking DPS excludes it the same way the other two do. It was simply never
+-- offered before, which made "watch DPS" an invisible always-on rather than a choice.
 local function pihAddRoles(g, t)
-    -- ⚠ FAILS OPEN. A group with no assigned roles reads as "no role" for everyone
-    -- and nothing is excluded. Marking a tank you did not want is a smaller failure
-    -- than silently hiding the signal on the damage dealers you did.
-    t.check(g, L["Tanks"],
-        function() return (P.PIH_Settings().roles or {}).TANK == true end,
-        function(v) P.PIH_SetRole("TANK", v) end)
-    t.check(g, L["Healers"],
-        function() return (P.PIH_Settings().roles or {}).HEALER == true end,
-        function(v) P.PIH_SetRole("HEALER", v) end)
+    local function roleCheck(label, token)
+        t.check(g, label,
+            function() return (P.PIH_Settings().roles or {})[token] ~= true end,
+            function(v) P.PIH_SetRole(token, not v) end)
+    end
+    roleCheck(L["DPS"],     "DAMAGER")
+    roleCheck(L["Tanks"],   "TANK")
+    roleCheck(L["Healers"], "HEALER")
     t.note(g,
         L["Groups without assigned roles show everyone."])
 end
@@ -6708,24 +6733,15 @@ S.BuildPIHelperBody = function(parent, opts)
         -- which for thirteen classes and a two-line note is a wall of text rather
         -- than a summary. The header alone says what is folded away, which is what
         -- a summary was for.
-        yPos = t.group(L["Classes and Cooldowns"], function(g)
-            pihAddClasses(g, t)
-            -- ★ THE WAY IN TO THE ACTUAL SPELL LIST. The class ticks say WHICH classes are
-            -- watched; the filter behind them holds the individual cooldowns, and until now
-            -- nothing on this page said that list existed or where to find it. Krathe:
-            -- "the link to edit the filter itself to tick on/off individual CD's as needed."
-            -- ⚠ A LINK, NOT A COPY OF THE LIST. The Filter Designer already edits these --
-            -- rebuilding a spell picker here would be a second place to maintain and a
-            -- second answer to "is this spell watched".
-            t.note(g, L["Individual cooldowns live in the filter this list drives."])
-            -- ⚠ PARENTED TO `parent`, NOT TO THE GROUP -- the same thing t.group does with
-            -- its own header widget. A SettingsGroup positions what it is given; it is not
-            -- the frame they hang off.
-            local btn = GUI:CreateButton(parent, L["Edit the cooldown list"], 170, 22, function()
-                if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
-            end)
-            g:AddWidget(btn, 26)
-        end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
+        -- ☠ NO SECOND FILTER LINK HERE. pihAddClasses ALREADY ends with one, and its button
+        -- uses GUI:OpenFilterInDesigner -- which switches the page AND scrolls to, selects
+        -- and pulses the cooldown filter. I added a bare SelectTab beside it without
+        -- checking, which gave the page two buttons to the same place, one of them the worse
+        -- version: the existing comment there records that a hand-written jump "landed you on
+        -- the page with nothing indicated, which is indistinguishable from a broken link".
+        -- Krathe, 2026-09-08: "We seem to have two links to it? and confusing messaging."
+        yPos = t.group(L["Classes and Cooldowns"], pihAddClasses, yPos,
+            { collapsible = true, collapseKey = "pihelper:onlywatch" })
     else
         yPos = t.group(L["Indicators"], function(g)
             t.signalRow(g, "burst", L["Big cooldown"])
