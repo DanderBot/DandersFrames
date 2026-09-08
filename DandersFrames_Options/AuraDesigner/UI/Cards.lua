@@ -950,22 +950,22 @@ function P.PIH_SurfaceOptions(key)
     -- setup is first-class. L["None"] is the addon's existing key, reused.
     opts.none = L["None"]
     table.insert(opts._order, 1, "none")
-    -- ⭐ THE ONE PLACED SURFACE LEFT, AND IT IS NOT A PLACEMENT CONTROL. Everything above is
-    -- the FRAME saying something about the unit; this is the Power Infusion artwork itself,
-    -- and it earns its place because it answers a question no colour can: on the "already
-    -- has it" signal it is the buff you would otherwise be about to waste, and on the
-    -- cooldown signal it is the spell you are being told to cast. A picture of Power
-    -- Infusion means Power Infusion; a gold border means whatever the user decided gold
-    -- means today.
-    -- ☠ SQUARE IS GONE (schema 3, 2026-09-08) -- a flat colour block at a coordinate is a
-    -- PLACEMENT decision, and placement is the Aura Designer's job. Existing ones migrate to
-    -- Border rather than vanishing; see step 4 in pihSweep. Do not re-add it here without
-    -- also reviving that migration's opposite, or a downgrade strands the record.
-    -- ⚠ Named for what it SHOWS, not for its shape. "Icon" was accurate and told the user
-    -- nothing -- it read as a sibling of Square, i.e. another placement, which is exactly
-    -- the reading this cut exists to remove.
-    opts.icon = L["Power Infusion icon"]
-    opts._order[#opts._order + 1] = "icon"
+    -- ⭐ SQUARE STAYS. A flat colour block is a HIGHLIGHT, which is all this feature ever
+    -- needs to say: someone popped a cooldown, mark them. It costs one colour and reads at
+    -- a glance, which is the whole job.
+    -- ☠☠ ICON IS GONE (schema 4, 2026-09-08), AND THE REASON IS THE FEATURE'S SCOPE, NOT ITS
+    -- SHAPE. An icon shows a SPECIFIC BUFF'S ARTWORK, so offering one implies the helper
+    -- tracks which cooldown each player popped -- and it does not need to. Krathe:
+    -- "we don't need to track each buff just the fact someone has popped a CD and we
+    -- highlight in some form." An icon promises per-buff detail the feature does not
+    -- deliver, which is a control that lies about its own scope.
+    -- ⚠ I ARGUED THE OPPOSITE ONE COMMIT AGO -- cut Square as "a placement", kept Icon as
+    -- "the one picture that carries meaning". That was shape reasoning; this is scope
+    -- reasoning, and scope wins. Recorded so the swap does not look like drift.
+    -- ⚠ Existing Icon surfaces migrate to Square (pihSweep step 4) -- the nearest thing
+    -- that still marks the same unit in the same place.
+    opts.square = L["Square"]
+    opts._order[#opts._order + 1] = "square"
     return opts
 end
 
@@ -5868,12 +5868,14 @@ P.OpenFilterPopout = OpenFilterPopout
 --
 -- ☠ The card becomes REMOVE once a helper exists on this preset, so there is one place to
 -- look for both. Create and remove are the same feature seen from either side.
--- ⚠ SPLIT INTO PARTS 2026-09-01, ONE DEFINITION STILL. The popout layout's pane
--- outgrew its page, so the builder is now: the CARD on its own
--- (S.BuildPIHelperCard), a shared section toolkit (pihMakeTools), one body
--- function per section, and TWO compositions -- S.BuildPIHelperPane stacks all
--- of them for the classic tab exactly as before, and S.PIHelperSections hands
--- the row page (AuraDesigner/UI/Rows.lua) the same bodies one popout row each.
+-- ⚠ SPLIT INTO PARTS 2026-09-01, ONE DEFINITION STILL. It was split because the popout
+-- layout's pane outgrew its page and needed the bodies one row at a time, so the builder
+-- became: the CARD on its own (S.BuildPIHelperCard), a shared section toolkit
+-- (pihMakeTools), and one body function per section.
+-- ⚠ THAT SECOND CONSUMER IS GONE (2026-09-08) -- the helper has its own page and the row
+-- band went with the move, taking S.PIHelperSections with it. The split is KEPT anyway: one
+-- body per section is what lets the page compose them in a different ORDER (Triggers before
+-- Indicators) without touching a single control.
 -- ── THE ONE-TIME SWEEP ──────────────────────────────────────────────────────────────
 -- The two-signal shape retired "Big cooldown with a trinket or potion" and moved racials
 -- out of the cooldown list. Neither change reaches a helper that already exists: its
@@ -5888,8 +5890,11 @@ P.OpenFilterPopout = OpenFilterPopout
 -- ⚠ STAMPED, NOT INFERRED. There is no way to tell "already swept" from "the user
 -- deliberately put a racial back", so a version stamp decides rather than a heuristic --
 -- otherwise the sweep would undo a hand edit on every login.
--- 3: Square retired as a helper surface, migrated to Border (see step 4 in pihSweep).
-local PIH_SCHEMA = 3
+-- 3: Square retired, migrated to Border. RETRACTED the same afternoon and never shipped --
+--    see the note on step 4. The number is burned rather than reused, so a client that ran
+--    it is not told it is on a schema it never saw.
+-- 4: Icon retired as a helper surface, migrated to Square (step 4 in pihSweep).
+local PIH_SCHEMA = 4
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -5945,34 +5950,40 @@ local function pihSweep()
     local ig = pihIconGroup("infused")
     if ig and P.DeleteLayoutGroup then P.DeleteLayoutGroup(ig.id) end
 
-    -- 4. SQUARE IS RETIRED AS A HELPER SURFACE (schema 3, 2026-09-08).
-    -- ☠ THE HELPER ANSWERS "WHO SHOULD I INFUSE", AND THAT IS A STATE OF THE FRAME, NOT A
-    -- THING PLACED ON IT. Border, health bar, background and the two texts are all the
-    -- frame saying something about the unit; a Square is a coloured block at a coordinate,
-    -- which is a PLACEMENT decision -- and placement is the Aura Designer's job, not this
-    -- feature's. Krathe, 2026-09-08, after we checked the addon that does only this:
-    -- PIHelper's entire vocabulary is a glow on the frame plus optional duration text.
-    -- Nothing placed. ⭐ Icon SURVIVES, but narrowed to one meaning -- see
-    -- PIH_SurfaceOptions: it is the Power Infusion artwork saying "this one already has it"
-    -- or "this one is worth it", not a free placement.
+    -- 4. ICON IS RETIRED AS A HELPER SURFACE (schema 4, 2026-09-08).
+    -- ☠ THE REASON IS SCOPE, NOT SHAPE. An icon shows a SPECIFIC BUFF'S artwork, so
+    -- offering one implies the helper tracks which cooldown each player popped. It does
+    -- not, and does not need to -- Krathe: "we don't need to track each buff just the fact
+    -- someone has popped a CD and we highlight in some form." A control that promises
+    -- per-buff detail the feature never delivers is a control that lies about its scope.
     --
-    -- ⚠ MIGRATED, NOT DELETED. Someone running a Square helper today would otherwise open
-    -- the panel to a signal reading "None" and no explanation -- indistinguishable from
-    -- their settings having been lost. Border is the nearest honest equivalent: it is a
-    -- contended surface like the Square was competing for attention, and pihCapture carries
-    -- the colour across so the signal keeps the shade they chose.
+    -- ⚠☠ SCHEMA 3 WENT THE OTHER WAY AND IS DELIBERATELY NOT PRESERVED. It retired SQUARE
+    -- and migrated it to Border, on the argument that a block at a coordinate is a
+    -- placement and placement is the designer's job. That was shape reasoning; this is
+    -- scope reasoning, and scope won. Schema 3 shipped nowhere -- it existed for part of one
+    -- afternoon on one developer's client -- so nothing in the wild ran it, and reviving its
+    -- inverse would mean tracking which of two contradictory migrations a profile had seen.
+    -- A profile that DID run it has borders where it had squares; that is a colour on a
+    -- different surface, not lost work, and it is not worth a third migration to undo.
+    --
+    -- ⚠ MIGRATED, NOT DELETED. Someone running an Icon helper would otherwise open the
+    -- panel to a signal reading "None" with no explanation -- indistinguishable from their
+    -- settings having been lost. Square is the nearest honest equivalent: it marks the same
+    -- unit in the same place, and it is what the surface list offers now.
     if type(pool) == "table" then
         for auraName, auraCfg in pairs(pool) do
             if type(auraCfg) == "table" then
                 for i = #(auraCfg.indicators or {}), 1, -1 do
                     local inst = auraCfg.indicators[i]
-                    if type(inst) == "table" and inst.pihSignal and inst.type == "square" then
+                    if type(inst) == "table" and inst.pihSignal and inst.type == "icon" then
                         local sig = inst.pihSignal
                         -- Captured BEFORE the removal, the same order pihSwap works in:
                         -- placing reads the carry and the instance is gone by then.
-                        local carried = { colour = inst.color, conditions = inst.conditions }
+                        -- An Icon carries no colour of its own, so the square falls back to
+                        -- the signal's default -- which is what pihPlace does with nil.
+                        local carried = { conditions = inst.conditions }
                         table.remove(auraCfg.indicators, i)
-                        pihPlace(sig, auraName, "border", carried)
+                        pihPlace(sig, auraName, "square", carried)
                     end
                 end
             end
@@ -6643,59 +6654,15 @@ local function pihAddSound(g, t)
     end
 end
 
--- ── THE ROW PAGE'S SECTION LIST ──
--- One entry per POPOUT ROW, in row order. `title` is the LOCALE KEY, resolved at
--- mount time (a file-scope L[...] would freeze on enUS -- the locale-refresh rule).
--- `gated` says whether the row EXISTS at all; the row page re-evaluates it on every
--- page build, which is why a gate flip must go through page:Refresh rather than an
--- in-place pane rebuild (Rows.lua owns that distinction).
--- build(parent, o) -> yEnd; o = { startY, Refresh, indent, header } -- the same
--- contract S.BuildPIHelperPane hands the bodies, minus the card.
---
--- ⚠ FINER THAN THE CLASSIC GROUPS ON PURPOSE. Classic's "What to Show" box (intro,
--- three signal rows, the gate, the display notes) measures ~600px at the pane's
--- 260px width -- taller than the whole page a popout pane must fit. So the popout
--- splits it four ways: an overview row and one row per signal. The classic composer
--- below does NOT iterate this list -- it folds the same bodies back into the same
--- boxes as ever, which is what keeps that layout byte-comparable.
-local function pihSection(bodyFn, gopts)
-    return function(parent, o)
-        o = o or {}
-        local t = pihMakeTools(parent, o)
-        local header = (o.header == false) and nil or (o.headerText or nil)
-        return t.group(header, bodyFn, o.startY or 0, gopts)
-    end
-end
-
--- ☠ THE SIGNALS SHARE ONE ROW, and that is a consequence of there being two of them.
--- With three signals plus an amplifiers box, one row each was the only way the popout pane
--- could hold them -- classic's single "What to Show" box measures about 600px, taller than
--- the page at the 260px pane width that split them up in the first place. Two signals and
--- their nested ticks fit, and splitting them now would mean three rows to say what one says:
--- the reader opens "What to show", and everything that answers that question is in front of
--- them. Four rows instead of six.
--- ⚠ If a third signal is ever added, measure before adding it here -- this row goes
--- back to being too tall, and the per-signal rows are the shape that fixed that.
-S.PIHelperSections = {
-    { key = "overview", title = "What to Show",
-      build = pihSection(function(g, t)
-          t.signalRow(g, "burst", L["Big cooldown"])
-          t.signalRow(g, "infused", L["Already has active Power Infusion"])
-          pihAddGateAndNotes(g, t)
-      end) },
-    { key = "roles", title = "Never Show On",
-      build = pihSection(pihAddRoles) },
-    { key = "classes", title = "Classes and Cooldowns",
-      build = function(parent, o)
-          o = o or {}
-          local t = pihMakeTools(parent, o)
-          t.classColumns = 2   -- see pihAddClasses; popout only
-          return t.group((o.header == false) and nil or (o.headerText or nil),
-              pihAddClasses, o.startY or 0, { innerColumns = 2 })
-      end },
-    { key = "sound", title = "Sound Alert",
-      build = pihSection(pihAddSound) },
-}
+-- ── THE ROW PAGE'S SECTION LIST: REMOVED, 2026-09-08 ──
+-- ☠ It described a layout that no longer exists. S.PIHelperSections existed so the popout
+-- page could mount each section behind its own row, and that band went when the helper got
+-- its own page -- leaving a table nothing read and a paragraph of reasoning about pane
+-- widths and row counts that would have gone on looking maintained.
+-- ⚠ The BODIES it wrapped are all still here (pihAddRoles / pihAddClasses / pihAddSound /
+-- pihAddGateAndNotes) and S.BuildPIHelperPane composes them directly. Only the row-page
+-- adapter went. If a second layout ever needs them again, wrap them again -- do not read
+-- this comment as a reason not to.
 
 -- ── THE CLASSIC COMPOSITION -- every section, one column, unchanged ──
 S.BuildPIHelperPane = function(parent, opts)
@@ -6707,13 +6674,20 @@ S.BuildPIHelperPane = function(parent, opts)
     -- S.BuildPIHelperCard's return.
     if open then
         local t = pihMakeTools(parent, opts)
-        yPos = t.group(L["What to Show"], function(g)
-            t.signalRow(g, "burst", L["Big cooldown"])
-            t.signalRow(g, "infused", L["Already has active Power Infusion"])
+
+        -- ★★ TRIGGERS FIRST, THEN INDICATORS (2026-09-08). Krathe's ordering, and it is the
+        -- order the feature is actually reasoned about: you decide WHAT COUNTS as worth
+        -- infusing, then you decide HOW that gets shown. The old grouping opened with "What
+        -- to Show" -- the answer -- and buried the question two boxes down, which is why the
+        -- panel read as a pile of settings rather than one decision followed by another.
+        --
+        -- ⚠ THE GATE MOVED HERE, out of the old "What to Show". "Hide the helper while your
+        -- own Power Infusion is on cooldown" is not a display choice -- it is a condition on
+        -- whether the helper has anything to say at all, which is what a trigger is.
+        yPos = t.group(L["Triggers"], function(g)
+            pihAddRoles(g, t)
             pihAddGateAndNotes(g, t)
         end, yPos)
-
-        yPos = t.group(L["Never Show On"], pihAddRoles, yPos)
 
         -- ☠ COLLAPSIBLE, AND THIRTEEN ROWS IS WHY. Everything else in this panel is
         -- two or three ticks; a class list is as long as the game has classes, and
@@ -6722,8 +6696,16 @@ S.BuildPIHelperPane = function(parent, opts)
         -- which for thirteen classes and a two-line note is a wall of text rather
         -- than a summary. The header alone says what is folded away, which is what
         -- a summary was for.
+        -- ⚠ A SIBLING OF Triggers RATHER THAN A CHILD OF IT: t.group draws a box, and a box
+        -- inside a box for a list this long reads as a nested pane rather than a fold. It
+        -- sits directly under Triggers, which is the grouping doing the work.
         yPos = t.group(L["Classes and Cooldowns"], pihAddClasses, yPos,
             { collapsible = true, collapseKey = "pihelper:onlywatch" })
+
+        yPos = t.group(L["Indicators"], function(g)
+            t.signalRow(g, "burst", L["Big cooldown"])
+            t.signalRow(g, "infused", L["Already has active Power Infusion"])
+        end, yPos)
 
         yPos = t.group(L["Sound Alert"], pihAddSound, yPos)
     end
@@ -6940,8 +6922,8 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     -- before it ever consults othersOnly -- and the helper watches OTHER people's
     -- cooldowns, so Any Buff remains the only pool where it can match anything. That is
     -- plumbing now; the user is never asked to know it.
-    -- ⚠ The builders are still HERE (S.BuildPIHelperCard / S.PIHelperSections /
-    -- S.BuildPIHelperPane, above). Only the MOUNT moved. The page composes them.
+    -- ⚠ The builders are still HERE (S.BuildPIHelperCard / S.BuildPIHelperPane and the
+    -- section bodies, above). Only the MOUNT moved. The page composes them.
 
     -- ── ACTIVE INDICATORS heading ──
     local activeHeader = parent:CreateFontString(nil, "OVERLAY")

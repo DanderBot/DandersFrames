@@ -103,6 +103,30 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         content:SetPoint("TOPRIGHT", 0, 0)
         content:SetHeight(1)
 
+        -- ── THE 50/50 SPLIT, THE DESIGNER'S OWN SHAPE ──
+        -- ☠ MEASURED, NOT ANCHORED TO CENTER. The designer's splitContainer can anchor its
+        -- halves to a CENTER point because it lives inside an island of known size; this
+        -- column is measured by the page harness AFTER the fact, so the halves take an
+        -- explicit width off the one number we do have. `w` is the host's real width, which
+        -- is why nothing here runs until the first size arrives.
+        -- ⚠ The 6px gutter and the CENTER-3 / CENTER+3 pair it comes from are the
+        -- designer's, and the Text Designer's before that -- borrowed rather than picked, so
+        -- three split panels in this addon do not drift to three different gaps.
+        local SPLIT_GAP  = 6
+        local halfW      = math.max(80, (w - SPLIT_GAP) / 2)
+
+        local leftPanel = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        leftPanel:SetPoint("TOPLEFT", 0, 0)
+        leftPanel:SetWidth(halfW)
+        -- ⚠ NO BORDER, and the designer's own note says why: the inner preview container
+        -- draws the visible dim border, and one on both stacks into a brighter doubled line.
+        GUI:CreatePanelBackdrop(leftPanel, { border = false })
+
+        local rightPanel = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        rightPanel:SetPoint("TOPRIGHT", 0, 0)
+        rightPanel:SetWidth(halfW)
+        GUI:CreatePanelBackdrop(rightPanel, { border = false })
+
         -- ── THE PREVIEW, THE DESIGNER'S OWN CANVAS ──
         -- ⚠ THE SAME FACTORY, NOT A LOOKALIKE. CreateFramePreview is what the designer
         -- mounts in both its layouts, and the scope-card tiles already prove it stands
@@ -119,7 +143,7 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- and rendering that here would show effects this page does not control.
         local pv
         if P and S.PIH_PreviewPool and P.CreateFramePreview then
-            pv = P.CreateFramePreview(content, 0, nil, { compact = true, hideLabel = true })
+            pv = P.CreateFramePreview(leftPanel, 0, nil, { compact = true, hideLabel = true })
             if pv then
                 S.framePreview = pv
                 if P.RefreshPreviewEffects then
@@ -127,24 +151,27 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 end
             end
         end
+        leftPanel:SetHeight(max(1, (pv and pv:GetHeight() or 0)))
 
-        -- ⚠ Refresh is THIS page's redraw, not S.SwitchTab. Every control in the pane
-        -- calls opts.Refresh when it changes something structural; inside the designer
-        -- that meant "rebuild the tab", and here it means "rebuild this page". Routing it
-        -- at S.SwitchTab would redraw a designer that may not even be open.
-        -- The pane starts below whatever the preview took. Read back rather than assumed:
-        -- CreateFramePreview sizes itself from the frame settings and the preview scale, so
-        -- the only honest number is the one it ended up with.
-        local previewH = pv and ((pv:GetHeight() or 0) + 10) or 0
-
-        local yEnd = S.BuildPIHelperPane(content, {
-            startY  = -previewH,
+        -- ── THE SETTINGS, IN THE RIGHT HALF ──
+        -- ⚠ Refresh is THIS page's redraw, not S.SwitchTab. Every control in the pane calls
+        -- opts.Refresh when it changes something structural; inside the designer that meant
+        -- "rebuild the tab", and here it means "rebuild this page". Routing it at
+        -- S.SwitchTab would redraw a designer that may not even be open.
+        local yEnd = S.BuildPIHelperPane(rightPanel, {
+            startY  = 0,
             Refresh = function()
                 if pageRef.Refresh then pcall(pageRef.Refresh, pageRef) end
             end,
         })
 
-        local h = max(1, -(yEnd or 0))
+        local rightH = max(1, -(yEnd or 0))
+        rightPanel:SetHeight(rightH)
+
+        -- ☠ THE COLUMN IS AS TALL AS ITS TALLER HALF. Sizing to the settings alone would
+        -- clip the preview whenever the helper is switched off and the panel is two rows
+        -- high; sizing to the preview alone would clip the settings in every other case.
+        local h = max(rightH, leftPanel:GetHeight() or 1)
         content:SetHeight(h)
         rebuilding = false
 

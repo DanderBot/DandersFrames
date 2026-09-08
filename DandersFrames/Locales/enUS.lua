@@ -2951,14 +2951,20 @@ L["Enable Power Infusion Helper"] = true
 -- The sentence under the tick — the only place the feature explains itself, and it stays on
 -- screen while the tick is OFF, which is exactly when someone needs to read it.
 L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] = true
--- ⚠ NAMED FOR WHAT IT SHOWS, not for its shape. This replaced a plain "Icon" in the
--- helper's surface menu, which read as a sibling of "Square" -- i.e. as another placement
--- choice -- when it is the one entry whose picture carries the meaning: Power Infusion's
--- own artwork, saying either "already has it" or "worth casting it on".
-L["Power Infusion icon"] = true
--- The three signals. Adding the helper turns on the first one only; the other two are ticked
--- on afterwards, so each label has to stand alone with just the line beneath it for context.
-L["What to Show"] = true
+-- ⚠ The helper's surface menu reuses the addon's existing L["Square"] and the frame-level
+-- labels; it needs no names of its own. It briefly had a "Power Infusion icon" string when
+-- Icon was the surviving placed surface -- that was reversed the same afternoon (the helper
+-- highlights that someone popped a cooldown; it does not track WHICH one, so a per-buff
+-- icon promised detail the feature never delivers) and the string went with it.
+-- ★★ THE PANEL'S TWO HALVES, in the order the feature is reasoned about: decide what COUNTS
+-- as worth infusing, then decide how it gets SHOWN. "What to Show" was the old heading for
+-- the second half and led the panel -- the answer before the question -- which is why it read
+-- as a pile of settings. Retired 2026-09-08 along with "Never Show On", whose two role ticks
+-- are inside Triggers now.
+-- ⚠ "Triggers" is this panel's own heading and needs no qualifier: the page it lives on is
+-- already named Power Infusion Helper. L["Indicators"] is the addon's existing key, reused.
+L["Triggers"] = true
+-- The signals. Each label has to stand alone with just the line beneath it for context.
 L["Big cooldown"] = true
 -- How the surface pickers behave. What the controls cannot show on their own: which
 -- surfaces stack, and which pick one winner.
@@ -2979,8 +2985,9 @@ L["%s already colours this text. Only one can show — raise this signal's prior
 L["%s and %d more"] = true
 L["Another effect"] = true
 -- Shared settings. These live on the helper, not on each effect: they are statements about
--- who you would infuse, and there is only one answer per player.
-L["Never Show On"] = true
+-- who you would infuse, and there is only one answer per player. They sit inside Triggers
+-- now -- excluding a role is a statement about what counts, not about how it is drawn -- so
+-- the old "Never Show On" heading went with the regroup.
 L["Groups without assigned roles show everyone."] = true
 L["Hide the helper while your Power Infusion is on cooldown"] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
