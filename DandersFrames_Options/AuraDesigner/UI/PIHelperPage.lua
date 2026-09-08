@@ -127,33 +127,7 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         rightPanel:SetWidth(halfW)
         GUI:CreatePanelBackdrop(rightPanel, { border = false })
 
-        -- ── THE PREVIEW, THE DESIGNER'S OWN CANVAS ──
-        -- ⚠ THE SAME FACTORY, NOT A LOOKALIKE. CreateFramePreview is what the designer
-        -- mounts in both its layouts, and the scope-card tiles already prove it stands
-        -- alone with no right panel. Reusing it is the only way this page can promise the
-        -- picture matches the live frame -- a second renderer is a second thing to drift.
-        -- ☠ S.framePreview IS A SINGLETON AND WE TAKE IT, which is safe for the same
-        -- reason the designer's two layouts can both assign it: only one options page
-        -- renders at a time, and whichever page builds next re-assigns it. Navigating away
-        -- leaves it pointing at a retired frame until the designer rebuilds and claims it
-        -- back -- exactly what already happens when the settings layout is flipped.
-        -- ⚠ PAINTED FROM THE HELPER'S OWN RECORDS, never the shared pool: S.PIH_PreviewPool
-        -- hands over the same cfg tables the designer would paint, filtered to the ones
-        -- carrying a helper mark. The Any Buff pool also holds the user's unrelated work,
-        -- and rendering that here would show effects this page does not control.
-        local pv
-        if P and S.PIH_PreviewPool and P.CreateFramePreview then
-            pv = P.CreateFramePreview(leftPanel, 0, nil, { compact = true, hideLabel = true })
-            if pv then
-                S.framePreview = pv
-                if P.RefreshPreviewEffects then
-                    pcall(P.RefreshPreviewEffects, { pool = S.PIH_PreviewPool() })
-                end
-            end
-        end
-        leftPanel:SetHeight(max(1, (pv and pv:GetHeight() or 0)))
-
-        -- ── THE SETTINGS, IN THE RIGHT HALF ──
+        -- ── THE SETTINGS FIRST, BECAUSE THEY DECIDE THE HEIGHT ──
         -- ⚠ Refresh is THIS page's redraw, not S.SwitchTab. Every control in the pane calls
         -- opts.Refresh when it changes something structural; inside the designer that meant
         -- "rebuild the tab", and here it means "rebuild this page". Routing it at
@@ -168,11 +142,49 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         local rightH = max(1, -(yEnd or 0))
         rightPanel:SetHeight(rightH)
 
-        -- ☠ THE COLUMN IS AS TALL AS ITS TALLER HALF. Sizing to the settings alone would
-        -- clip the preview whenever the helper is switched off and the panel is two rows
-        -- high; sizing to the preview alone would clip the settings in every other case.
-        local h = max(rightH, leftPanel:GetHeight() or 1)
+        -- ☠☠ THE PANEL IS SIZED BEFORE THE PREVIEW IS BUILT, AND THAT ORDER IS THE WHOLE
+        -- FIX. Without opts.thumb, CreateFramePreview anchors its container to ALL FOUR
+        -- CORNERS of the parent -- so the canvas takes its height FROM the panel. The first
+        -- cut built the preview into a 1px panel and then set the panel's height from the
+        -- preview: circular, and it resolved to 1px of nothing. The left half rendered as a
+        -- transparent gap with the game world showing through (Krathe, 2026-09-08).
+        -- ⇒ Decide the height, THEN build into it. The designer never hits this because its
+        -- leftPanel is anchored TOPLEFT+BOTTOMLEFT inside an island that already has a size.
+        -- ⚠ THE FLOOR IS THE CANVAS'S OWN NUMBER, NOT A GUESS. P.CanvasWantedHeight exists
+        -- for exactly this: "the host must size the band BEFORE calling the builder that
+        -- creates it". It derives from the frame height and the live preview scale, so the
+        -- canvas keeps fitting when either moves -- which a constant would not.
+        -- ⚠ It matters most in the state a new user sees FIRST: with the helper switched off
+        -- the settings are one banner tall, and a canvas sized to that cannot show a unit
+        -- frame at all. The page would look broken before it had done anything.
+        local canvasH = (P.CanvasWantedHeight and P.CanvasWantedHeight(true, nil)) or 260
+        local h = max(rightH, canvasH)
+        leftPanel:SetHeight(h)
         content:SetHeight(h)
+
+        -- ── THE PREVIEW, THE DESIGNER'S OWN CANVAS ──
+        -- ⚠ THE SAME FACTORY, NOT A LOOKALIKE. CreateFramePreview is what the designer
+        -- mounts in both its layouts, and the scope-card tiles already prove it stands
+        -- alone with no right panel. Reusing it is the only way this page can promise the
+        -- picture matches the live frame -- a second renderer is a second thing to drift.
+        -- ☠ S.framePreview IS A SINGLETON AND WE TAKE IT, which is safe for the same
+        -- reason the designer's two layouts can both assign it: only one options page
+        -- renders at a time, and whichever page builds next re-assigns it. Navigating away
+        -- leaves it pointing at a retired frame until the designer rebuilds and claims it
+        -- back -- exactly what already happens when the settings layout is flipped.
+        -- ⚠ PAINTED FROM THE HELPER'S OWN RECORDS, never the shared pool: S.PIH_PreviewPool
+        -- hands over the same cfg tables the designer would paint, filtered to the ones
+        -- carrying a helper mark. The Any Buff pool also holds the user's unrelated work,
+        -- and rendering that here would show effects this page does not control.
+        if P and S.PIH_PreviewPool and P.CreateFramePreview then
+            local pv = P.CreateFramePreview(leftPanel, 0, nil, { compact = true, hideLabel = true })
+            if pv then
+                S.framePreview = pv
+                if P.RefreshPreviewEffects then
+                    pcall(P.RefreshPreviewEffects, { pool = S.PIH_PreviewPool() })
+                end
+            end
+        end
         rebuilding = false
 
         if abs((host.layoutHeight or 0) - h) > 0.5 then
