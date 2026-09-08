@@ -2773,7 +2773,7 @@ local function GetOrCreatePreviewCustomBorder(mockFrame, key)
     return pool[key]
 end
 
-local function RefreshPreviewEffects()
+local function RefreshPreviewEffects(opts)
     if not S.framePreview then return end
     local mockFrame = S.framePreview.mockFrame
     if not mockFrame then return end
@@ -2817,8 +2817,14 @@ local function RefreshPreviewEffects()
     -- Indicators:Apply's `if state.X then return end`). Mirror that here so the
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
     -- in descending-priority order (tiebreak by name) and apply first-wins per type.
+    -- ⚠ THE POOL IS AN ARGUMENT NOW (2026-09-08), defaulting to exactly what it always was.
+    -- The Power Infusion Helper's page shows this same canvas but must paint ONLY the
+    -- helper's own records -- the Any Buff pool it shares holds the user's unrelated work
+    -- too, and a preview on a page about one feature that quietly renders another feature's
+    -- effects is worse than no preview. It passes a table holding the SAME cfg tables, so
+    -- every painter below is unchanged and cannot drift from the designer's rendering.
     local sortedAuras = {}
-    for auraName, auraCfg in pairs(CurrentAuraPool()) do
+    for auraName, auraCfg in pairs((opts and opts.pool) or CurrentAuraPool()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries
             sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = auraCfg, priority = auraCfg.priority or 5 }
         end

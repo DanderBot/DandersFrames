@@ -103,12 +103,42 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         content:SetPoint("TOPRIGHT", 0, 0)
         content:SetHeight(1)
 
+        -- ── THE PREVIEW, THE DESIGNER'S OWN CANVAS ──
+        -- ⚠ THE SAME FACTORY, NOT A LOOKALIKE. CreateFramePreview is what the designer
+        -- mounts in both its layouts, and the scope-card tiles already prove it stands
+        -- alone with no right panel. Reusing it is the only way this page can promise the
+        -- picture matches the live frame -- a second renderer is a second thing to drift.
+        -- ☠ S.framePreview IS A SINGLETON AND WE TAKE IT, which is safe for the same
+        -- reason the designer's two layouts can both assign it: only one options page
+        -- renders at a time, and whichever page builds next re-assigns it. Navigating away
+        -- leaves it pointing at a retired frame until the designer rebuilds and claims it
+        -- back -- exactly what already happens when the settings layout is flipped.
+        -- ⚠ PAINTED FROM THE HELPER'S OWN RECORDS, never the shared pool: S.PIH_PreviewPool
+        -- hands over the same cfg tables the designer would paint, filtered to the ones
+        -- carrying a helper mark. The Any Buff pool also holds the user's unrelated work,
+        -- and rendering that here would show effects this page does not control.
+        local pv
+        if P and S.PIH_PreviewPool and P.CreateFramePreview then
+            pv = P.CreateFramePreview(content, 0, nil, { compact = true, hideLabel = true })
+            if pv then
+                S.framePreview = pv
+                if P.RefreshPreviewEffects then
+                    pcall(P.RefreshPreviewEffects, { pool = S.PIH_PreviewPool() })
+                end
+            end
+        end
+
         -- ⚠ Refresh is THIS page's redraw, not S.SwitchTab. Every control in the pane
         -- calls opts.Refresh when it changes something structural; inside the designer
         -- that meant "rebuild the tab", and here it means "rebuild this page". Routing it
         -- at S.SwitchTab would redraw a designer that may not even be open.
+        -- The pane starts below whatever the preview took. Read back rather than assumed:
+        -- CreateFramePreview sizes itself from the frame settings and the preview scale, so
+        -- the only honest number is the one it ended up with.
+        local previewH = pv and ((pv:GetHeight() or 0) + 10) or 0
+
         local yEnd = S.BuildPIHelperPane(content, {
-            startY  = 0,
+            startY  = -previewH,
             Refresh = function()
                 if pageRef.Refresh then pcall(pageRef.Refresh, pageRef) end
             end,

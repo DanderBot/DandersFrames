@@ -2935,20 +2935,27 @@ L["Interrupted: %s"] = true
 L["Left-Click:"] = true
 L["Right-Click:"] = true
 
--- Power Infusion Helper (Aura Designer, priest only). One block, one card, and the card
--- flips between adding and removing -- so the two titles are a pair and must stay one
--- verb apart in every locale.
-L["POWER INFUSION HELPER"] = true
--- ⚠ TITLE CASE, AND A SEPARATE STRING FROM THE ALL-CAPS ONE ABOVE. This is the NAV ENTRY
--- (Auras > Power Infusion Helper); the caps version is the card's own heading inside the
--- page. Nav labels are title case everywhere in this addon and card headings are not, so
--- casing one from the other would be wrong in one of the two places -- and in a locale
--- where case is not a presentation choice, it would be wrong in both.
+-- Power Infusion Helper — its OWN page as of 2026-09-08 (Auras > Power Infusion Helper,
+-- priest only). It used to be a block inside the Aura Designer whose card flipped between
+-- "Add the helper" and "Remove the helper"; it is an enable tick now, so those two strings
+-- and the removal caption that went with them are gone rather than left for translators to
+-- work on text nobody will ever see.
+--
+-- The page's NAV ENTRY. Title case, because nav labels are title case everywhere in this
+-- addon — and a separate string rather than a case transform of anything, since in a locale
+-- where case is not a presentation choice a transform is wrong in both places.
 L["Power Infusion Helper"] = true
-L["Add the helper"] = true
-L["Remove the helper"] = true
+-- ⚠ ONE VERB APART FROM THE DESIGNER'S OWN "Enable Aura Designer", on purpose: two features
+-- that turn on the same way should read the same way.
+L["Enable Power Infusion Helper"] = true
+-- The sentence under the tick — the only place the feature explains itself, and it stays on
+-- screen while the tick is OFF, which is exactly when someone needs to read it.
 L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] = true
-L["Deletes its indicators and its spell lists. Nothing else is touched."] = true
+-- ⚠ NAMED FOR WHAT IT SHOWS, not for its shape. This replaced a plain "Icon" in the
+-- helper's surface menu, which read as a sibling of "Square" -- i.e. as another placement
+-- choice -- when it is the one entry whose picture carries the meaning: Power Infusion's
+-- own artwork, saying either "already has it" or "worth casting it on".
+L["Power Infusion icon"] = true
 -- The three signals. Adding the helper turns on the first one only; the other two are ticked
 -- on afterwards, so each label has to stand alone with just the line beneath it for context.
 L["What to Show"] = true

@@ -411,6 +411,39 @@ local function pihAnyIconGroup()
     return nil
 end
 
+-- ★ THE PREVIEW'S POOL — the helper's records and nothing else (2026-09-08).
+-- ☠ THE SHARED POOL IS NOT THE HELPER'S POOL. Its records live in Any Buff alongside
+-- whatever the user has built there themselves, so handing the preview painter
+-- CurrentAuraPool() on the helper's own page would render their unrelated indicators on a
+-- canvas that claims to be about Power Infusion. Wrong in the one direction a preview must
+-- never be wrong: it would show something the page does not control.
+-- ⚠ THE SAME TABLES, NOT COPIES. RefreshPreviewEffects paints from the cfg tables it is
+-- given, so sharing them is what keeps this canvas identical to the designer's rather than
+-- a second renderer that can drift. It also means a colour picked on a signal row is on the
+-- preview the moment the page redraws, with nothing to keep in step.
+function S.PIH_PreviewPool()
+    local out = {}
+    local pool = pihOtherPoolRead()
+    if type(pool) ~= "table" then return out end
+    local keys = P.FRAME_LEVEL_TYPE_KEYS or {}
+    for auraName, auraCfg in pairs(pool) do
+        if type(auraCfg) == "table" then
+            local mine = false
+            for _, typeKey in ipairs(keys) do
+                local cfg = auraCfg[typeKey]
+                if type(cfg) == "table" and cfg.pihSignal then mine = true break end
+            end
+            if not mine then
+                for _, inst in ipairs(auraCfg.indicators or {}) do
+                    if type(inst) == "table" and inst.pihSignal then mine = true break end
+                end
+            end
+            if mine then out[auraName] = auraCfg end
+        end
+    end
+    return out
+end
+
 -- The icon group counts as existing: without this, unticking all three signals while the
 -- icons stay on would flip the card back to "Add" and hide the panel -- stranding a running
 -- group with no control left that can reach it.
@@ -917,14 +950,22 @@ function P.PIH_SurfaceOptions(key)
     -- setup is first-class. L["None"] is the addon's existing key, reused.
     opts.none = L["None"]
     table.insert(opts._order, 1, "none")
-    -- Placed surfaces, after the colours: one Icon at a spot you choose (the aura's own
-    -- artwork), or a Square (a flat colour block -- the quietest signal there is). Gated
-    -- and role-excluded like everything else since the slot lane landed. Offered on both
-    -- signals now: the one that could not take them judged two things at once, and it is gone.
-    opts.icon   = L["Icon"]
-    opts.square = L["Square"]
+    -- ⭐ THE ONE PLACED SURFACE LEFT, AND IT IS NOT A PLACEMENT CONTROL. Everything above is
+    -- the FRAME saying something about the unit; this is the Power Infusion artwork itself,
+    -- and it earns its place because it answers a question no colour can: on the "already
+    -- has it" signal it is the buff you would otherwise be about to waste, and on the
+    -- cooldown signal it is the spell you are being told to cast. A picture of Power
+    -- Infusion means Power Infusion; a gold border means whatever the user decided gold
+    -- means today.
+    -- ☠ SQUARE IS GONE (schema 3, 2026-09-08) -- a flat colour block at a coordinate is a
+    -- PLACEMENT decision, and placement is the Aura Designer's job. Existing ones migrate to
+    -- Border rather than vanishing; see step 4 in pihSweep. Do not re-add it here without
+    -- also reviving that migration's opposite, or a downgrade strands the record.
+    -- ⚠ Named for what it SHOWS, not for its shape. "Icon" was accurate and told the user
+    -- nothing -- it read as a sibling of Square, i.e. another placement, which is exactly
+    -- the reading this cut exists to remove.
+    opts.icon = L["Power Infusion icon"]
     opts._order[#opts._order + 1] = "icon"
-    opts._order[#opts._order + 1] = "square"
     return opts
 end
 
@@ -5847,7 +5888,8 @@ P.OpenFilterPopout = OpenFilterPopout
 -- ⚠ STAMPED, NOT INFERRED. There is no way to tell "already swept" from "the user
 -- deliberately put a racial back", so a version stamp decides rather than a heuristic --
 -- otherwise the sweep would undo a hand edit on every login.
-local PIH_SCHEMA = 2
+-- 3: Square retired as a helper surface, migrated to Border (see step 4 in pihSweep).
+local PIH_SCHEMA = 3
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -5903,6 +5945,40 @@ local function pihSweep()
     local ig = pihIconGroup("infused")
     if ig and P.DeleteLayoutGroup then P.DeleteLayoutGroup(ig.id) end
 
+    -- 4. SQUARE IS RETIRED AS A HELPER SURFACE (schema 3, 2026-09-08).
+    -- ☠ THE HELPER ANSWERS "WHO SHOULD I INFUSE", AND THAT IS A STATE OF THE FRAME, NOT A
+    -- THING PLACED ON IT. Border, health bar, background and the two texts are all the
+    -- frame saying something about the unit; a Square is a coloured block at a coordinate,
+    -- which is a PLACEMENT decision -- and placement is the Aura Designer's job, not this
+    -- feature's. Krathe, 2026-09-08, after we checked the addon that does only this:
+    -- PIHelper's entire vocabulary is a glow on the frame plus optional duration text.
+    -- Nothing placed. ⭐ Icon SURVIVES, but narrowed to one meaning -- see
+    -- PIH_SurfaceOptions: it is the Power Infusion artwork saying "this one already has it"
+    -- or "this one is worth it", not a free placement.
+    --
+    -- ⚠ MIGRATED, NOT DELETED. Someone running a Square helper today would otherwise open
+    -- the panel to a signal reading "None" and no explanation -- indistinguishable from
+    -- their settings having been lost. Border is the nearest honest equivalent: it is a
+    -- contended surface like the Square was competing for attention, and pihCapture carries
+    -- the colour across so the signal keeps the shade they chose.
+    if type(pool) == "table" then
+        for auraName, auraCfg in pairs(pool) do
+            if type(auraCfg) == "table" then
+                for i = #(auraCfg.indicators or {}), 1, -1 do
+                    local inst = auraCfg.indicators[i]
+                    if type(inst) == "table" and inst.pihSignal and inst.type == "square" then
+                        local sig = inst.pihSignal
+                        -- Captured BEFORE the removal, the same order pihSwap works in:
+                        -- placing reads the carry and the instance is gone by then.
+                        local carried = { colour = inst.color, conditions = inst.conditions }
+                        table.remove(auraCfg.indicators, i)
+                        pihPlace(sig, auraName, "border", carried)
+                    end
+                end
+            end
+        end
+    end
+
     s.schema = PIH_SCHEMA
     if P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
 end
@@ -5914,44 +5990,65 @@ S.BuildPIHelperCard = function(parent, opts)
     pihSweep()
     local yPos = opts.startY or 0
     local Refresh = opts.Refresh or function() end
-    local tc = GetThemeColor()
     local exists = P.PIH_Exists()
-    local pihBlock = GUI:CreateChoiceCardGroup(parent, {
-        title    = L["POWER INFUSION HELPER"],
-        accent   = tc,
-        -- ⚠ WIDTH PASSED, NOT LEFT TO THE ANCHORS. Without it the card keeps its
-        -- fixed CHOICE_CARD_H and cannot measure its wrapped description -- fine
-        -- at the classic tab's width, where the sentence fits the floor, but in
-        -- the 260px popout pane the same sentence wraps past the card's bottom
-        -- edge. The parent is sized before this builder runs in both arms (the
-        -- pane by its mount, the classic host by its caller), and the 16 is the
-        -- block's two 8px insets below.
-        width    = (parent:GetWidth() or 320) - 16,
-        onToggle = function() Refresh() end,
-        cards = {
-            {
-                title = exists and L["Remove the helper"] or L["Add the helper"],
-                desc  = exists
-                    and L["Deletes its indicators and its spell lists. Nothing else is touched."]
-                    or  L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."],
-                art   = { kind = "border", color = { 1.00, 0.82, 0.25 } },
-                onClick = function()
-                    if P.PIH_Exists() then P.PIH_Remove() else P.PIH_Create() end
-                    Refresh()
-                end,
-            },
-        },
-    })
-    pihBlock:SetPoint("TOPLEFT", 8, yPos)
-    pihBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    yPos = yPos - (pihBlock.layoutHeight + GUI.Space.section)
-    -- ☠ THE SECOND RETURN GATES THE CLASSIC SECTIONS -- exists AND pihBlock.expanded.
-    -- The card group carries its own collapsing header and publishes whether it is
-    -- open; without asking, folding the header away would hide the card and leave its
-    -- settings stranded below a closed section, attached to nothing visible. One
-    -- header, the whole helper. (The row page ignores it: there each section sits
-    -- behind its own row, and the ROW is the fold.)
-    return yPos, (exists and pihBlock.expanded) and true or false
+
+    -- ── AN ENABLE TICK, NOT AN ADD/REMOVE CARD (2026-09-08) ──
+    -- ☠ "ADD" AND "REMOVE" WERE THE IMPLEMENTATION TALKING. They were literally true --
+    -- the helper creates and deletes Aura Designer records -- but that is plumbing the user
+    -- was never meant to know about, and on a page whose whole subject IS the helper a card
+    -- offering to add the thing you came here for is a step with nothing on the other side
+    -- of it. Krathe, 2026-09-08: "the add/remove helper is a pointless option now and
+    -- should just be an enable/disable setting like the AD enable/disable."
+    -- ⚠ SO IT READS LIKE THE DESIGNER'S OWN ENABLE, deliberately: the same banner, the same
+    -- styled check button, the same left-aligned label. Two features that turn on the same
+    -- way should look like they turn on the same way.
+    -- ⚠ AND YOUR SETTINGS SURVIVE THE ROUND TRIP. Unticking still routes to PIH_Remove,
+    -- which STASHES every customisation (pihStash), and PIH_Create lays the stash back over
+    -- the fresh defaults (pihRestoreGroup) -- so this behaves like an enable even though
+    -- records really are created and deleted underneath. That was already true of the old
+    -- card; the tick just stops making the user think it is a destructive act.
+    local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    banner:SetHeight(52)
+    banner:SetPoint("TOPLEFT", 8, yPos)
+    banner:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    GUI:CreatePanelBackdrop(banner, { borderColor = { r = 0.30, g = 0.30, b = 0.30, a = 0.5 } })
+
+    local cb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
+    cb:SetPoint("TOPLEFT", banner, "TOPLEFT", 10, -10)
+    DF.GUI:StyleCheckButton(cb)
+    cb:SetChecked(exists)
+    cb:SetScript("OnClick", function(self)
+        -- ⚠ READ THE WORLD, NOT THE BOX. The tick's own state is what the user just did;
+        -- whether a helper exists is what the pool says. A double click, a profile switch
+        -- landing mid-build or a stale page would otherwise create a second helper or try
+        -- to remove one that is already gone.
+        if P.PIH_Exists() then P.PIH_Remove() else P.PIH_Create() end
+        self:SetChecked(P.PIH_Exists())
+        Refresh()
+    end)
+
+    local cbLabel = banner:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    cbLabel:SetPoint("LEFT", cb, "RIGHT", 8, 0)
+    cbLabel:SetText(L["Enable Power Infusion Helper"])
+    cbLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    -- The one sentence that says what it does. Kept from the old card's face, because it is
+    -- the only place the feature explains itself -- and it stays visible when the tick is
+    -- OFF, which is exactly when someone needs to read it.
+    local desc = banner:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(desc, 10, "")
+    desc:SetPoint("TOPLEFT", banner, "TOPLEFT", 10, -30)
+    desc:SetPoint("TOPRIGHT", banner, "TOPRIGHT", -10, -30)
+    desc:SetJustifyH("LEFT")
+    desc:SetText(L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."])
+    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    banner.checkbox = cb
+    yPos = yPos - (banner:GetHeight() + GUI.Space.section)
+    -- ☠ THE SECOND RETURN STILL GATES THE SECTIONS, but on existence alone now. The old
+    -- card group carried its own collapsing header and published whether it was open, so
+    -- the sections had to respect a fold that no longer exists -- a banner does not fold.
+    return yPos, exists and true or false
 end
 
 -- ── THE SECTION TOOLKIT ──
