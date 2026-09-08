@@ -100,6 +100,10 @@ AuraDesigner\UI\Cards.lua
 # The popout layout's page (bands and rows). AFTER Cards.lua, whose helpers it
 # aliases at load; BEFORE Editor.lua, which calls S.BuildPoolStrip from here.
 AuraDesigner\UI\Rows.lua
+# The Power Infusion Helper's own page. AFTER Cards.lua, which owns the card and the
+# section builders it composes (S.BuildPIHelperPane / S.PIHelperSections); it adds a
+# page host and takes nothing else from the designer.
+AuraDesigner\UI\PIHelperPage.lua
 AuraDesigner\UI\Editor.lua
 
 # Text Designer editor

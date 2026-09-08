@@ -2939,6 +2939,12 @@ L["Right-Click:"] = true
 -- flips between adding and removing -- so the two titles are a pair and must stay one
 -- verb apart in every locale.
 L["POWER INFUSION HELPER"] = true
+-- ⚠ TITLE CASE, AND A SEPARATE STRING FROM THE ALL-CAPS ONE ABOVE. This is the NAV ENTRY
+-- (Auras > Power Infusion Helper); the caps version is the card's own heading inside the
+-- page. Nav labels are title case everywhere in this addon and card headings are not, so
+-- casing one from the other would be wrong in one of the two places -- and in a locale
+-- where case is not a presentation choice, it would be wrong in both.
+L["Power Infusion Helper"] = true
 L["Add the helper"] = true
 L["Remove the helper"] = true
 L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] = true

@@ -4837,6 +4837,28 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
     end)
 
+    -- Auras > Power Infusion Helper (priest only)
+    -- ☠ ITS OWN PAGE, AND THAT IS THE WHOLE POINT. The helper used to live inside the
+    -- designer's Any Buff tab, because that is the pool its records must go in -- the pool
+    -- decides a record's caster filter and the helper watches OTHER people's cooldowns.
+    -- That constraint is real and unchanged. What was wrong is that it also decided where
+    -- the user had to LOOK: four levels deep, behind a tab that is not the default, with
+    -- the behaviour in one panel and the appearance of what it created in a different card
+    -- further down the same page. The CARD does not have to live where the RECORDS live.
+    -- ⚠ A SIBLING OF THE DESIGNER, not a sub-page of it: this is a feature with its own
+    -- rules, not a mode of the editor -- and sitting here is also what gives it the
+    -- designer's chrome for nothing, since it inherits the same category and page harness.
+    -- ⚠ `hidden` is CreateSubTab's own fourth argument (GUI/Panel.lua:3077), so a
+    -- non-priest never has the entry built rather than seeing a greyed one for an ability
+    -- they cannot cast.
+    local pagePIHelper = CreateSubTab("auras", "auras_pihelper", L["Power Infusion Helper"],
+        not (DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()))
+    BuildPage(pagePIHelper, function(self, db, Add, AddSpace, AddSyncPoint)
+        if DF.BuildPIHelperPage then
+            DF.BuildPIHelperPage(GUI, self, db, Add, AddSpace)
+        end
+    end)
+
     -- Auras > Aura Blacklist: RETIRED as a standalone page. The debuff blacklist
     -- now lives inside the Filter Designer (Debuffs > Blacklist) — one home for
     -- all per-spell aura control. Backend unchanged (AuraBlacklist/Config.lua +

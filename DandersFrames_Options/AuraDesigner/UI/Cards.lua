@@ -6799,34 +6799,21 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     yPos = yPos - (addBlock.layoutHeight + 10)
     end
 
-    -- ── POWER INFUSION HELPER (priest only) ──
-    -- The block itself is S.BuildPIHelperPane above -- one definition, two
-    -- layouts, the same bargain the add flow's scope cards struck.
-    -- ☠ OTHER BUFFS ONLY, AND THAT IS NOT TIDINESS -- IT IS THE ONLY TAB WHERE IT WORKS.
-    -- The pool a record lives in decides its caster filter before anything else: My Buffs means
-    -- "auras I cast", and poolFilter returns that before it ever consults othersOnly. The helper
-    -- watches OTHER people's cooldowns, so My Buffs is the one place it is guaranteed to match
-    -- nothing. It was addable there and silently did nothing, which is a lying control.
+    -- ── POWER INFUSION HELPER: MOVED OUT, 2026-09-08 ──
+    -- ☠ DO NOT MOUNT IT HERE AGAIN. The helper now has its own page beside the designer
+    -- (Auras > Power Infusion Helper -- see AuraDesigner/UI/PIHelperPage.lua and the
+    -- CreateSubTab in GUI/Pages/Auras.lua). Krathe's call, 2026-09-08: the settings were
+    -- "not very clear how to use it or even how to find it", and the behaviour panel and
+    -- the appearance of the records it creates were on opposite ends of one page.
     --
-    -- ⚠ The recipe already writes into the Other Buffs pool wherever it is invoked from, so this
-    -- is no longer about correctness -- it is about not offering a button whose result lives
-    -- somewhere the user was not looking. Its indicators appear in that tab's list; the card
-    -- should be in the same place as the thing it creates.
-    -- ⭐ And a side benefit the user named: My Buffs is where most people work, and the helper's
-    -- rows would be clutter there for everyone who never uses it.
-    -- ☠ AND NOT IN THE ROW LAYOUT'S HEAD AREA. skipAdd is that layout's flag,
-    -- and it mounts the SAME builder behind its own "Power Infusion Helper"
-    -- popout row (AuraDesigner/UI/Rows.lua) -- drawn here too, the helper
-    -- would stand twice on one page.
-    if select(2, UnitClass("player")) == "PRIEST" and S.activeBuffTab == "other"
-        and not skipAdd then
-        yPos = S.BuildPIHelperPane(parent, {
-            startY  = yPos,
-            -- The split panel's own redraw verb -- exactly what every callback
-            -- in the inline block used to run.
-            Refresh = function() S.SwitchTab("effects") end,
-        })
-    end
+    -- ⚠ WHAT DID NOT CHANGE, so nobody re-derives it from an empty space: the helper's
+    -- records still live in THIS pool. The pool a record lives in decides its caster filter
+    -- before anything else -- My Buffs means "auras I cast", and poolFilter returns that
+    -- before it ever consults othersOnly -- and the helper watches OTHER people's
+    -- cooldowns, so Any Buff remains the only pool where it can match anything. That is
+    -- plumbing now; the user is never asked to know it.
+    -- ⚠ The builders are still HERE (S.BuildPIHelperCard / S.PIHelperSections /
+    -- S.BuildPIHelperPane, above). Only the MOUNT moved. The page composes them.
 
     -- ── ACTIVE INDICATORS heading ──
     local activeHeader = parent:CreateFontString(nil, "OVERLAY")
