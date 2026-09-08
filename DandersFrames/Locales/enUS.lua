@@ -2964,6 +2964,13 @@ L["Shows who is worth infusing, and goes dark while your Power Infusion is on co
 -- ⚠ "Triggers" is this panel's own heading and needs no qualifier: the page it lives on is
 -- already named Power Infusion Helper. L["Indicators"] is the addon's existing key, reused.
 L["Triggers"] = true
+-- ★ The Effects tab's add row, and the per-effect remove beside each one. A signal can hold
+-- several surfaces now (border AND health bar AND a square), so both of these repeat.
+-- ⚠ "Remove %s" TAKES THE SURFACE'S OWN NAME -- "Remove Border", "Remove Health Bar" -- and
+-- that is not decoration: with several effects listed, a bare "Remove" would sit beside three
+-- rows looking identical and the user could not tell which one it acted on.
+L["Add an effect"] = true
+L["Remove %s"] = true
 -- ⚠ The way in to the actual spell list. The class ticks say WHICH classes are watched; the
 -- filter behind them holds the individual cooldowns, and nothing on the page said that list
 -- existed. A LINK rather than a second copy of the picker -- one place edits these.

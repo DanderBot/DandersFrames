@@ -346,6 +346,60 @@ local function pihOtherPoolWrite()
     return P.GetOtherAuras and P.GetOtherAuras() or nil
 end
 
+-- ★★★ A SIGNAL CAN HOLD SEVERAL SURFACES AT ONCE (2026-09-08).
+-- ☠ THE STORE ALREADY ALLOWED IT; ONLY THIS LOOKUP AND ONE GATE SAID OTHERWISE. A pool
+-- record can carry many frame-level effects and many placed instances, so "border AND health
+-- bar AND a square" was always expressible -- pihFound simply wrote each hit over the last
+-- into out[signal], and pihCreateSignal refused a second add with "already on". Krathe wants
+-- what the designer does: add several, like the AD tiles.
+-- ⇒ pihFoundAll returns EVERY hit per signal; pihFound keeps its old one-per-signal shape
+-- over the top, so the dozen existing consumers are untouched by this change.
+-- ⚠ ORDERED BY SURFACE, not by pairs(). The pool walk is hash order, so "the first hit" was
+-- previously whichever the iterator happened to reach last -- harmless when a signal had one,
+-- and a source of flicker the moment it has three.
+-- ☠ ITS OWN TABLE RATHER THAN PIH_SURFACE_ORDER, and not for tidiness: that local is declared
+-- ~400 lines BELOW here, so naming it would compile as a nil GLOBAL read -- the exact
+-- "declared below its first caller" trap UnitExemptFromHelpfulGate documents in this file.
+-- Kept in the same order as the menu, and it only has to be self-consistent: this decides
+-- which hit is called primary, not what anything renders.
+local PIH_RANK = {
+    border = 1, healthbar = 2, background = 3, nametext = 4, healthtext = 5,
+    icon = 6, square = 7, bar = 8,
+}
+local function pihSurfaceRank(typeKey) return PIH_RANK[typeKey] or 99 end
+
+local function pihFoundAll()
+    local out = {}
+    local pool = pihOtherPoolRead()
+    if type(pool) ~= "table" then return out end
+    local keys = P.FRAME_LEVEL_TYPE_KEYS or {}
+    for auraName, auraCfg in pairs(pool) do
+        if type(auraCfg) == "table" then
+            for _, typeKey in ipairs(keys) do
+                local cfg = auraCfg[typeKey]
+                if type(cfg) == "table" and cfg.pihSignal then
+                    local l = out[cfg.pihSignal] or {}
+                    l[#l + 1] = { auraName = auraName, typeKey = typeKey, cfg = cfg }
+                    out[cfg.pihSignal] = l
+                end
+            end
+            for _, inst in ipairs(auraCfg.indicators or {}) do
+                if type(inst) == "table" and inst.pihSignal then
+                    local l = out[inst.pihSignal] or {}
+                    l[#l + 1] = { auraName = auraName, typeKey = inst.type,
+                                  cfg = inst, indicatorID = inst.id }
+                    out[inst.pihSignal] = l
+                end
+            end
+        end
+    end
+    for _, l in pairs(out) do
+        table.sort(l, function(a, b) return pihSurfaceRank(a.typeKey) < pihSurfaceRank(b.typeKey) end)
+    end
+    return out
+end
+P.PIH_FoundAll = pihFoundAll
+
 local function pihFound()
     local out = {}
     local pool = pihOtherPoolRead()
@@ -642,7 +696,25 @@ end
 local function pihCreateSignal(key, surfaceOverride)
     local def = PIH_SIGNALS[key]
     if not def then return false, "no such signal" end
-    if pihFound()[key] then return true, "already on" end
+    -- ☠ THE GATE IS PER SURFACE NOW, NOT PER SIGNAL (2026-09-08). It used to refuse any
+    -- second add outright -- "already on" -- which is what made a signal one-surface-only.
+    -- The STORE never required that: a pool record holds many frame effects and many placed
+    -- instances. Krathe wants the designer's behaviour, several at once.
+    -- ⚠ STILL REFUSES A DUPLICATE OF THE SAME SURFACE, and that part is not optional: two
+    -- border effects on one record cannot both exist (one key, one value) and two identical
+    -- squares would be an invisible double that only the store can see.
+    -- ⚠ Only checked when the caller NAMES a surface. Without an override the target is
+    -- resolved below from the stash or the signal's default, so the test would be against the
+    -- wrong thing -- and that path is the plain "turn this signal on", which wants its
+    -- default surface exactly once.
+    local existing = pihFoundAll()[key]
+    if surfaceOverride then
+        for _, hit in ipairs(existing or {}) do
+            if hit.typeKey == surfaceOverride then return true, "already on" end
+        end
+    elseif existing and existing[1] then
+        return true, "already on"
+    end
 
     local s = P.PIH_Settings()
     -- ⭐ A RE-ADDED SIGNAL COMES BACK WHERE THE USER LEFT IT. The surface is derived
@@ -743,8 +815,19 @@ local function pihCreateSignal(key, surfaceOverride)
     return true
 end
 
-local function pihDeleteSignal(key)
-    local hit = pihFound()[key]
+-- ⚠ `surface` IS OPTIONAL, and its absence means what it always meant: remove the signal's
+-- PRIMARY representation. Named, it removes exactly that one and leaves the signal's other
+-- surfaces alone -- which is what the per-effect remove button on the Effects tab needs now
+-- that a signal can hold several.
+local function pihDeleteSignal(key, surface)
+    local hit
+    if surface then
+        for _, h in ipairs(pihFoundAll()[key] or {}) do
+            if h.typeKey == surface then hit = h break end
+        end
+    else
+        hit = pihFound()[key]
+    end
     if not hit then return false end
     -- Before anything is deleted: the doomed cfg is the user's work (see the stash block).
     pihStash(key, hit)
@@ -1093,6 +1176,43 @@ function P.PIH_SetSurface(key, surface)
 
     pihRefresh()
     return true
+end
+
+-- ★★★ THE MULTI-SURFACE API (2026-09-08) — add and remove ONE surface at a time.
+-- ☠ THESE REPLACE THE DROPDOWN'S "MOVE THE SIGNAL THERE" MODEL. PIH_SetSurface answers
+-- "which single surface is this signal on", which is why picking an occupied one had to SWAP
+-- two signals -- there was nowhere for both to live. With several surfaces per signal the
+-- question changes to "is this surface among the ones it uses", and swapping stops being a
+-- concept: two signals wanting a border still contend, but that is the CLASH warning's job
+-- and it already says so at the moment it applies.
+-- ⚠ BOTH END AT PIH_Apply + pihRefresh, the chokepoint every other helper mutation uses.
+-- Writing the record alone leaves the frames on the previous set until something unrelated
+-- repaints them -- the same trap the colour picker had.
+function P.PIH_AddSurface(key, surface)
+    if not PIH_SIGNALS[key] then return false, "no such signal" end
+    if not surface or surface == "none" then return false, "no surface" end
+    local ok, why = pihCreateSignal(key, surface)
+    if ok then P.PIH_Apply() end
+    pihRefresh()
+    return ok, why
+end
+
+function P.PIH_RemoveSurface(key, surface)
+    if not PIH_SIGNALS[key] then return false, "no such signal" end
+    if not surface then return false, "no surface" end
+    local removed = pihDeleteSignal(key, surface)
+    if removed then P.PIH_Apply() end
+    pihRefresh()
+    return removed
+end
+
+-- The surfaces a signal currently holds, in menu order (pihFoundAll sorts them).
+-- ⚠ A LIST, NOT A SET: the Effects tab draws one row per entry, in this order, and a set
+-- would hand it hash order -- three effects reshuffling themselves on every redraw.
+function P.PIH_SurfacesOf(key)
+    local out = {}
+    for _, hit in ipairs(pihFoundAll()[key] or {}) do out[#out + 1] = hit.typeKey end
+    return out
 end
 
 -- ─────────────────────────────────────────────────────────────
@@ -6298,100 +6418,87 @@ local function pihMakeTools(parent, opts)
         -- exactly one thing -- which is what the old row could not say: its master tick, its
         -- icons tick and its three includes looked identical and worked at three different
         -- levels.
-        local surface = P.PIH_SurfaceOf(key) or "none"
+        -- ★★★ ONE SIGNAL, MANY SURFACES (2026-09-08). A dropdown asked "which ONE surface is
+        -- this on", so choosing an occupied one had to SWAP two signals -- there was nowhere
+        -- for both to live. Krathe wants the designer's behaviour: add several, border AND
+        -- health bar AND a square, each removable on its own.
+        -- ⇒ The row is now a LIST of what this signal shows plus a row of things it could
+        -- also show. No "None" entry either: removing the last effect is what "none" meant,
+        -- and a list that is empty says it without a word for it.
+        t.settingLabel(g, label)
 
-        -- The signal's NAME is the dropdown's label now, sitting above it the way every
-        -- other setting in these panels is labelled -- the row reads "Big cooldown: Border"
-        -- rather than needing a tick to say which signal the menu belongs to.
-        local dd = GUI:CreateDropdown(parent, label, P.PIH_SurfaceOptions(key),
-            nil, nil, nil,
-            -- ⚠ NEVER nil: this widget survives a profile switch for one frame,
-            -- and the shared dropdown's display refresh treats a nil answer as "try
-            -- the saved-variable fallback", which was never given -- a Lua error on
-            -- every profile switch away from the helper. "none" is a value the menu
-            -- owns, so a dying row reads honestly until it is rebuilt away.
-            function() return P.PIH_SurfaceOf(key) or "none" end,
-            function(v)
-                local ok, why = P.PIH_SetSurface(key, v)
-                if not ok then DF:DebugWarn("AURADESIGNER",
-                    "PIH: surface %s refused -- %s", tostring(v), tostring(why)) end
-                Refresh()   -- the other rows' menus re-grey around it
-            end,
-            nil)
-        -- The standalone form stamps its own row height, so the shared constant is the
-        -- honest measurement rather than the literal an inline dropdown needed.
-        g:AddWidget(dd, GUI.RowHeight.dropdown)
+        local held, heldSet = P.PIH_SurfacesOf(key), {}
+        for _, s in ipairs(held) do heldSet[s] = true end
 
-        -- ⚠ THE CLASH WARNING, AND IT IS SCOPED ON PURPOSE. pickWinner decides from
-        -- config alone and never asks what is on the unit, so a clash is fully knowable
-        -- while someone is setting it up -- no guessing, no "this might happen".
-        -- It appears only on the three surfaces that actually take a single winner, and
-        -- it names the fix that exists rather than describing the problem.
-        -- ⚠ Only while OUR effect is actually in the contest: the named fix
-        -- can be applied to our own signal too (custom-mode border), and the warning
-        -- must go when it is.
-        local selfIn = P.PIH_SelfContends(surface, key)
-        local clashes, who = 0, nil
-        if selfIn then clashes, who = P.PIH_ClashOn(surface) end
-        -- ⚠ OUR OWN SIBLING COUNTS TOO, on a contended surface across records.
-        -- PIH_ClashOn skips anything carrying a helper mark, because two signals on one
-        -- record are prevented outright rather than warned about. "Already infused" is
-        -- on its own record though, so it can genuinely lose a border or a text to one
-        -- of the other two -- a real contest that would otherwise go unwarned precisely
-        -- because it was ours.
-        local sibling = selfIn and P.PIH_SiblingContends
-            and P.PIH_SiblingContends(surface, key) or nil
-        if sibling then
-            clashes = clashes + 1
-            who = who or pihLabel(sibling)
-        end
-        if clashes > 0 then
-            who = who or L["Another effect"]
-            -- More than one contender: naming only the first would read as "fix this
-            -- one and you are done", which would not be true.
-            if clashes > 1 then who = format(L["%s and %d more"], who, clashes - 1) end
-            -- A CAUTION BOX, the addon's own construct for a warning panel -- the same
-            -- one the click-casting dialog and the profiler use. It briefly became gold
-            -- text on the belief that the box was what broke the layout; it was not, and
-            -- a warning that looks like every other warning is worth the box.
-            -- The checkbox's own label key rides as a placeholder so a translator
-            -- renders it ONCE -- hardcoding the words here let the sentence and the
-            -- control it points at drift apart in any other language.
-            t.note(g, (surface == "border")
-                and format(L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."], who, L["Give this aura its own border"])
-                or  format(L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."], who),
-                "caution")
+        local FL = S.FRAME_LEVEL_LABELS or {}
+        local PL = S.PLACED_TYPE_LABELS or {}
+        local function surfaceLabel(s) return PL[s] or FL[s] or s end
+
+        for _, hit in ipairs(pihFoundAll()[key] or {}) do
+            local s = hit.typeKey
+
+            -- ⚠ THE CLASH WARNING IS PER EFFECT NOW. It used to read the signal's single
+            -- surface; with several it has to ask about the one it is drawn under, or a
+            -- border clash would be reported on the health bar row beside it.
+            if P.PIH_SelfContends and P.PIH_SelfContends(s, key) then
+                local clashes, who = P.PIH_ClashOn(s)
+                local sibling = P.PIH_SiblingContends and P.PIH_SiblingContends(s, key) or nil
+                if sibling then clashes = clashes + 1; who = who or pihLabel(sibling) end
+                if clashes > 0 then
+                    who = who or L["Another effect"]
+                    if clashes > 1 then who = format(L["%s and %d more"], who, clashes - 1) end
+                    -- ⚠ THE EXACT STRINGS THE DROPDOWN USED, keys and placeholders unchanged.
+                    -- I paraphrased them while moving the block and invented two keys that do
+                    -- not exist -- which compiles, and renders blank. Copy locale lines, do
+                    -- not retype them.
+                    t.note(g, (s == "border")
+                        and format(L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."], who, L["Give this aura its own border"])
+                        or  format(L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."], who),
+                        "caution")
+                end
+            end
+
+            -- The colour, bound straight to the record. Offered only where one exists: an
+            -- Icon shows Power Infusion's own artwork and has no colour to set.
+            local ck = pihColorKey(s)
+            if type(hit.cfg[ck]) == "table" then
+                g:AddWidget(GUI:CreateColorPicker(parent, surfaceLabel(s), hit.cfg, ck, false,
+                    function() P.PIH_Apply(); pihRefresh() end), GUI.RowHeight.colorpicker)
+            else
+                t.settingLabel(g, surfaceLabel(s))
+            end
+
+            -- ⚠ REMOVE NAMES ITS SURFACE. PIH_RemoveSurface(key) with no surface would take
+            -- the signal's PRIMARY effect, which on a row about the health bar would delete
+            -- the border instead -- the classic "the button did something, just not this".
+            local rm = GUI:CreateButton(parent, format(L["Remove %s"], surfaceLabel(s)), 150, 22,
+                function() P.PIH_RemoveSurface(key, s); Refresh() end)
+            g:AddWidget(rm, 26)
         end
 
-        -- ── THE COLOUR, ON THE SIGNAL'S OWN ROW (2026-09-08) ──
-        -- ☠ THIS IS THE SPLIT THE USER NAMED. A signal's BEHAVIOUR was set here and its
-        -- COLOUR on the generated indicator's card further down the same page, so setting
-        -- up one signal end to end meant two places and no sign that they belonged
-        -- together. That division was consistency with the designer -- appearance lives on
-        -- effect rows there -- and on a page whose only subject IS the helper it has
-        -- nothing left to justify it.
-        -- ⚠ BOUND STRAIGHT TO THE RECORD, which is why this needs no accessor pair: the
-        -- colour already lives at cfg[pihColorKey(surface)] and CreateColorPicker writes
-        -- through a table+key exactly like every other colour in the addon. Re-fetched per
-        -- build rather than captured, so a surface swap (which changes both the record and
-        -- the key -- a border keeps its colour under BorderColor) rebinds instead of
-        -- writing to the record the signal just left.
-        -- ⚠ OFFERED ONLY WHERE A COLOUR EXISTS. An Icon has none -- pihPlace says so when
-        -- it declines to carry one -- and "None" has no record at all. A swatch on either
-        -- would be a control that writes somewhere nothing reads, which is the same class
-        -- of lying control as the add button this feature was moved away from.
-        local pihHit = pihFound()[key]
-        local pihCKey = pihHit and pihColorKey(pihHit.typeKey) or nil
-        if pihHit and pihCKey and type(pihHit.cfg[pihCKey]) == "table" then
-            g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], pihHit.cfg, pihCKey, false,
-                function()
-                    -- Same chokepoint every other helper mutation ends at: push the
-                    -- settings to the engine, then let pihRefresh re-derive the resident
-                    -- half. Writing the table alone would leave the frames on the old
-                    -- colour until something unrelated repainted them.
-                    P.PIH_Apply()
-                    pihRefresh()
-                end), GUI.RowHeight.colorpicker)
+        -- ── WHAT ELSE THIS SIGNAL COULD SHOW ──
+        -- ⚠ ONE BUTTON PER SURFACE IT DOES NOT ALREADY HAVE. Listing the held ones again
+        -- would be an add button that cannot add, which is the lying control this panel keeps
+        -- being cleaned of. The order is the menu's, so the list does not reshuffle.
+        local addable = { "border", "healthbar", "background", "nametext", "healthtext",
+                          "icon", "square", "bar" }
+        local anyAddable = false
+        for _, s in ipairs(addable) do
+            if not heldSet[s] then anyAddable = true break end
+        end
+        if anyAddable then
+            t.settingLabel(g, L["Add an effect"])
+            for _, s in ipairs(addable) do
+                if not heldSet[s] then
+                    local btn = GUI:CreateButton(parent, surfaceLabel(s), 150, 22, function()
+                        local ok, why = P.PIH_AddSurface(key, s)
+                        if not ok then DF:DebugWarn("AURADESIGNER",
+                            "PIH: could not add %s -- %s", tostring(s), tostring(why)) end
+                        Refresh()
+                    end)
+                    g:AddWidget(btn, 26)
+                end
+            end
         end
 
         -- Icons sit BESIDE the colour dropdown, equal weight: with "None" in the
@@ -6449,15 +6556,16 @@ local function pihMakeTools(parent, opts)
             end
         end
 
-        -- ☠ THE NOTE EXISTS TO TEACH THE ICONS-ONLY SETUP, not to warn about "None".
-        -- Only a signal with an icons row gets one: there, "None" plus icons off is a dead end
-        -- someone can land in without realising the two controls are meant to be used
-        -- independently. On a signal whose menu is its ONLY control, "None" means nothing
-        -- shows and says so on its face -- a note there would explain a word to someone who
-        -- just chose it.
+        -- ☠ THE NOTE EXISTS TO TEACH THE ICONS-ONLY SETUP, not to warn about an empty list.
+        -- Only a signal with an icons row gets one: there, no effects plus icons off is a
+        -- dead end someone can land in without realising the two controls are meant to be
+        -- used independently. On a signal whose effect list is its ONLY control, an empty
+        -- list says on its face that nothing shows.
+        -- ⚠ "NO EFFECTS" IS #held == 0 NOW, not a "None" menu entry -- the dropdown that had
+        -- one is gone with the multi-surface list above. Same question, asked of the new shape.
         -- ⚠ Reachable only while ANOTHER signal is keeping the helper alive: on the last
         -- one, this same state retires the helper and the row goes with it. Watched.
-        if which and surface == "none" and not anyIcons then
+        if which and #held == 0 and not anyIcons then
             -- The tick's own label rides as the placeholder, the same way the border clash
             -- warning names its remedy: a translator renders those words ONCE, so the
             -- sentence and the control it points at cannot drift apart in any language.
