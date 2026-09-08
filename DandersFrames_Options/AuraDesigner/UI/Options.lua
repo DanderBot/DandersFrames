@@ -578,10 +578,30 @@ P.GetSpecLayoutGroups = GetSpecLayoutGroups
 -- groups, migrations, the spec dropdown itself) deliberately do not.
 -- ============================================================
 
-S.activeBuffTab = "my"   -- "my" | "debuffs" | "other"
+S.activeBuffTab = "my"   -- "my" | "debuffs" | "other" | "pihelper"
 
+-- ★★★ THE POWER INFUSION HELPER IS A POOL TAB (2026-09-08), NOT A PAGE OF ITS OWN.
+-- ☠ IT WAS A SEPARATE PAGE FOR A DAY AND EVERY VERSION OF IT WAS A WORSE AURA DESIGNER.
+-- I rebuilt the add flow, then the effect list, then both again -- each time a lookalike of
+-- something that already existed twenty lines away. Krathe: "This should function EXACTLY as
+-- AD but with the triggers / effects. It should BE AD not a copy of it."
+-- ⇒ So it is a fourth pool, beside My Buffs / Debuffs / Any Buff. Every surface the designer
+-- already has -- the preview, the add flow, the effect cards, layout groups -- works on it
+-- unchanged, because all of them route through the four functions below. Nothing is
+-- reimplemented, so nothing can drift.
+local function IsPIHelperTab()
+    return S.activeBuffTab == "pihelper"
+end
+P.IsPIHelperTab = IsPIHelperTab
+
+-- ⚠ THE HELPER TAB *IS* THE OTHER POOL, filtered -- so everything that asks "is this the
+-- other pool" must say yes for it. That question is really "does this pool hold any caster's
+-- buffs, shared across specs" (as against My Buffs, which means your own casts on your own
+-- spec), and the helper's records are exactly that: they watch OTHER people's cooldowns.
+-- Answering no would give them My Buffs' caster filter, which is the one place they are
+-- guaranteed to match nothing -- the trap the old add button fell into.
 local function IsOtherTab()
-    return S.activeBuffTab == "other"
+    return S.activeBuffTab == "other" or S.activeBuffTab == "pihelper"
 end
 P.IsOtherTab = IsOtherTab
 
@@ -602,6 +622,17 @@ P.EMPTY_POOL = EMPTY_POOL
 -- READ access to the active tab's pool. Never creates adDB.otherAuras.
 -- `spec` is forwarded to GetSpecAuras on the My Buffs tab only.
 local function CurrentAuraPool(spec)
+    -- ☠ A FILTERED VIEW OF THE OTHER POOL, AND IT IS SAFE BECAUSE THE VALUES ARE THE LIVE
+    -- TABLES. Every consumer of this either iterates it or does `CurrentAuraPool()[name]` and
+    -- mutates the record it gets back -- both of which reach the real cfg through the shared
+    -- reference. The only thing a copy would break is adding a NEW record, and that goes
+    -- through CurrentAuraPoolWrite below, which hands back the genuine pool.
+    -- ⚠ So the helper tab shows the designer's own surfaces holding ONLY the helper's
+    -- records: the user's unrelated Any Buff work is not on this tab, and the helper's
+    -- records are hidden from every other one (see CollectAllEffects' includePIH).
+    if S.activeBuffTab == "pihelper" then
+        return (S.PIH_PreviewPool and S.PIH_PreviewPool()) or EMPTY_POOL
+    end
     if S.activeBuffTab == "other" then
         local adDB = GetAuraDesignerDB()
         if adDB and adDB.otherAuras then return GetOtherAuras() end
@@ -618,7 +649,11 @@ P.CurrentAuraPool = CurrentAuraPool
 -- WRITE access: creates the pool table (the other pool is born lazily on
 -- the first add — drag-drop, picker click, or add-by-ID).
 local function CurrentAuraPoolWrite()
-    if S.activeBuffTab == "other" then return GetOtherAuras() end
+    -- ⚠ THE HELPER WRITES INTO THE REAL OTHER POOL. Its READ view is filtered (see
+    -- CurrentAuraPool), but a new record has to land in the actual store or it would be
+    -- created into a temporary table and vanish on the next redraw -- the one thing the
+    -- filtered view cannot carry.
+    if S.activeBuffTab == "other" or S.activeBuffTab == "pihelper" then return GetOtherAuras() end
     return GetSpecAuras()
 end
 
@@ -626,8 +661,12 @@ end
 -- the other-pool record embeds "other:" .. auraName in the name segment
 -- (expandedCards "placed:other:<name>#<id>" / "frame:<type>:other:<name>",
 -- preview slot keys). The auraName itself never carries the prefix.
+-- ⚠ THE HELPER SHARES "other:" DELIBERATELY. The prefix identifies which POOL a record's
+-- name belongs to, and the helper's records are in the other pool -- a prefix of its own
+-- would key the same record two ways, so an effect card expanded on one tab would read as
+-- collapsed on the other.
 local function PoolKeyPrefix()
-    return (S.activeBuffTab == "other") and "other:" or ""
+    return IsOtherTab() and "other:" or ""
 end
 P.PoolKeyPrefix = PoolKeyPrefix
 
@@ -682,7 +721,12 @@ P.GetOtherLayoutGroups = GetOtherLayoutGroups
 -- (Debuffs never reaches these — its Layout Groups tab builds debuff
 -- category groups instead.)
 local function CurrentLayoutGroups()
-    if S.activeBuffTab == "other" then return GetOtherLayoutGroups(false) end
+    -- ⚠ THE STORE IS SHARED WITH THE OTHER POOL and stays whole for both -- this is the
+    -- accessor two LOGIC callers use (GetIndicatorLayoutGroup resolves an indicator's owning
+    -- group, DeleteLayoutGroup removes one by id), and hiding a group from those would make
+    -- the helper's own group unreachable and undeletable. The DISPLAY filter is
+    -- VisibleLayoutGroups below; that is where a tab decides what it shows.
+    if IsOtherTab() then return GetOtherLayoutGroups(false) end
     return GetSpecLayoutGroups()
 end
 P.CurrentLayoutGroups = CurrentLayoutGroups
@@ -696,10 +740,16 @@ P.CurrentLayoutGroups = CurrentLayoutGroups
 -- group and DeleteLayoutGroup removes one by id -- and hiding a group from those would
 -- make the helper's own group unreachable and undeletable by its own remove path. Display
 -- filters belong at the display site; the store stays whole.
+-- ⚠ THE TEST INVERTS ON THE HELPER'S OWN TAB. Everywhere else a helper group is somebody
+-- else's business and is hidden; on the helper tab it is the ONLY business, and the user's
+-- unrelated Any Buff groups are the ones that do not belong. One rule -- "show the groups
+-- this tab is about" -- read in both directions.
 local function VisibleLayoutGroups()
+    local want = IsPIHelperTab()
     local out = {}
     for _, g in ipairs(CurrentLayoutGroups()) do
-        if not (type(g) == "table" and g.pihSignal) then out[#out + 1] = g end
+        local mine = (type(g) == "table" and g.pihSignal) and true or false
+        if mine == want then out[#out + 1] = g end
     end
     return out
 end

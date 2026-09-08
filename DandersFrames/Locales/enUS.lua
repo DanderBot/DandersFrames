@@ -2948,6 +2948,10 @@ L["Power Infusion Helper"] = true
 -- ⚠ ONE VERB APART FROM THE DESIGNER'S OWN "Enable Aura Designer", on purpose: two features
 -- that turn on the same way should read the same way.
 L["Enable Power Infusion Helper"] = true
+-- The pool tab's tooltip, beside My Buffs / Debuffs / Any Buff. Three lines like its
+-- neighbours: what the pool is for, how you work it, and the spec-scope fact they all state.
+L["Who is worth casting Power Infusion on, and how that shows on the frame."] = true
+L["Set up its Triggers, then add effects the same way as any other pool."] = true
 -- The sentence under the tick — the only place the feature explains itself, and it stays on
 -- screen while the tick is OFF, which is exactly when someone needs to read it.
 L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] = true

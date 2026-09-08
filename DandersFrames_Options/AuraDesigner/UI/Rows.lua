@@ -109,8 +109,11 @@ local function PopoutWidth() return GUI.PopoutContentWidth or 260 end
 -- L[...] lookup, and a table built at load freezes whatever locale was live then
 -- -- the trap DF:RegisterLocaleRefresh exists for. Two callers now read it: the
 -- split panel's strip below and the scope row's picker.
+-- ⚠ A VERB, NOT A TABLE, and the fourth entry is why that matters twice over: every label is
+-- an L[...] lookup that must resolve at the live locale, AND the helper's tab is class-gated,
+-- so the list genuinely differs between characters. Built at load, it would freeze both.
 local function PoolDefs()
-    return {
+    local defs = {
         { key = "my",      label = L["My Buffs"], tooltip = {
             L["Buffs from your own class, and only when you cast them."],
             L["Set up separately for each specialization."],
@@ -125,6 +128,19 @@ local function PoolDefs()
             L["Shared across all your specializations."],
         } },
     }
+    -- ⚠ PRIEST ONLY, AND APPENDED RATHER THAN DECLARED ABOVE. Power Infusion is a priest
+    -- ability, so on anyone else this tab would be a fourth of the strip's width spent on a
+    -- pool that can never hold anything. Appending keeps the other three in their existing
+    -- order and positions -- the strip divides its width by #defs, so a conditional entry
+    -- anywhere but the end would move tabs people already know the position of.
+    if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() then
+        defs[#defs + 1] = { key = "pihelper", label = L["Power Infusion Helper"], tooltip = {
+            L["Who is worth casting Power Infusion on, and how that shows on the frame."],
+            L["Set up its Triggers, then add effects the same way as any other pool."],
+            L["Shared across all your specializations."],
+        } }
+    end
+    return defs
 end
 
 S.BuildPoolStrip = function(buffTabBar)

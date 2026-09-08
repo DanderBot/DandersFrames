@@ -7246,6 +7246,23 @@ end
 -- Wraps the existing BuildGlobalView into the tab content frame
 S.BuildGlobalTab = function()
     if not S.tabContentFrame then return end
+    -- ★★ ON THE HELPER'S POOL, "GLOBAL" IS ITS TRIGGERS. Every other pool's Global tab holds
+    -- the settings that apply to the whole POOL rather than to one effect -- which is exactly
+    -- what the helper's roles, class list, icon lists and cooldown gate are. Krathe's split:
+    -- "Triggers where people pick WHAT will show the effect... Then HOW it shows the
+    -- effects". WHAT lives here; HOW is the Effects tab, which is the designer's own and
+    -- needs nothing added to it at all.
+    -- ⚠ THE ENABLE TICK LEADS IT, because on this pool it governs everything below -- and it
+    -- has to be reachable when the helper is OFF, which is the state a new priest arrives in.
+    if P.IsPIHelperTab and P.IsPIHelperTab() and S.BuildPIHelperCard then
+        local parent = S.tabContentFrame
+        local Refresh = function() if S.SwitchTab then S.SwitchTab("global") end end
+        local yPos, open = S.BuildPIHelperCard(parent, { startY = -10, Refresh = Refresh })
+        if open and S.BuildPIHelperBody then
+            S.BuildPIHelperBody(parent, { startY = yPos, tab = "triggers", Refresh = Refresh })
+        end
+        return
+    end
     BuildGlobalView(S.tabContentFrame)
 end
 
