@@ -6660,30 +6660,42 @@ end
 -- its own page -- leaving a table nothing read and a paragraph of reasoning about pane
 -- widths and row counts that would have gone on looking maintained.
 -- ⚠ The BODIES it wrapped are all still here (pihAddRoles / pihAddClasses / pihAddSound /
--- pihAddGateAndNotes) and S.BuildPIHelperPane composes them directly. Only the row-page
+-- pihAddGateAndNotes) and S.BuildPIHelperBody composes them per tab. Only the row-page
 -- adapter went. If a second layout ever needs them again, wrap them again -- do not read
 -- this comment as a reason not to.
 
--- ── THE CLASSIC COMPOSITION -- every section, one column, unchanged ──
-S.BuildPIHelperPane = function(parent, opts)
+-- ★★ TWO TABS, THE SAME SHAPE THE DESIGNER'S RIGHT PANEL USES (2026-09-08).
+-- ☠ THE SPLIT IS THE FEATURE'S OWN TWO QUESTIONS, and they are answered at different
+-- times. TRIGGERS is "what counts as worth infusing" -- roles, the cooldown gate, which
+-- classes and which spells -- and is set up once, carefully, probably while reading a spell
+-- list. EFFECTS is "how do I want to be told" -- surface, colour, sound -- and gets fiddled
+-- with. One column holding both meant scrolling past the long class list every time you
+-- wanted to nudge a colour. Krathe: "we should also split on the right side Triggers and
+-- Effects."
+-- ⚠ THE KEYS ARE THE TAB IDS, and they are what the page's tab bar drives. Order matters:
+-- triggers first, because you cannot sensibly choose how to be told about something you
+-- have not yet said you care about.
+S.PIH_TABS = {
+    { key = "triggers", label = L["Triggers"] },
+    { key = "effects",  label = L["Effects"]  },
+}
+
+-- ── ONE TAB'S WORTH OF SETTINGS ──
+-- ⚠ THE CARD IS NOT HERE. It used to be, when this was S.BuildPIHelperPane and the whole
+-- panel was one column; now the page draws the enable banner, then the tab bar, then this.
+-- The banner has to sit ABOVE the tabs -- it turns the whole feature on, so it cannot be
+-- inside one of the two things it governs.
+-- ⚠ Returns the running y, exactly as before, so the caller keeps owning the layout.
+S.BuildPIHelperBody = function(parent, opts)
     opts = opts or {}
-    local yPos, open = S.BuildPIHelperCard(parent, opts)
+    local yPos = opts.startY or 0
+    local t = pihMakeTools(parent, opts)
+    local tab = opts.tab or "triggers"
 
-    -- ── THE SETTINGS, FOLDED WITH THE CARD ──
-    -- ☠ GATED ON THE CARD'S OWN expanded, NOT ONLY ON THE HELPER EXISTING -- see
-    -- S.BuildPIHelperCard's return.
-    if open then
-        local t = pihMakeTools(parent, opts)
-
-        -- ★★ TRIGGERS FIRST, THEN INDICATORS (2026-09-08). Krathe's ordering, and it is the
-        -- order the feature is actually reasoned about: you decide WHAT COUNTS as worth
-        -- infusing, then you decide HOW that gets shown. The old grouping opened with "What
-        -- to Show" -- the answer -- and buried the question two boxes down, which is why the
-        -- panel read as a pile of settings rather than one decision followed by another.
-        --
-        -- ⚠ THE GATE MOVED HERE, out of the old "What to Show". "Hide the helper while your
-        -- own Power Infusion is on cooldown" is not a display choice -- it is a condition on
-        -- whether the helper has anything to say at all, which is what a trigger is.
+    if tab == "triggers" then
+        -- ⚠ THE GATE LIVES HERE, not with the effects. "Hide the helper while your own Power
+        -- Infusion is on cooldown" is not a display choice -- it is a condition on whether
+        -- the helper has anything to say at all, which is what a trigger is.
         yPos = t.group(L["Triggers"], function(g)
             pihAddRoles(g, t)
             pihAddGateAndNotes(g, t)
@@ -6696,19 +6708,35 @@ S.BuildPIHelperPane = function(parent, opts)
         -- which for thirteen classes and a two-line note is a wall of text rather
         -- than a summary. The header alone says what is folded away, which is what
         -- a summary was for.
-        -- ⚠ A SIBLING OF Triggers RATHER THAN A CHILD OF IT: t.group draws a box, and a box
-        -- inside a box for a list this long reads as a nested pane rather than a fold. It
-        -- sits directly under Triggers, which is the grouping doing the work.
-        yPos = t.group(L["Classes and Cooldowns"], pihAddClasses, yPos,
-            { collapsible = true, collapseKey = "pihelper:onlywatch" })
-
+        yPos = t.group(L["Classes and Cooldowns"], function(g)
+            pihAddClasses(g, t)
+            -- ★ THE WAY IN TO THE ACTUAL SPELL LIST. The class ticks say WHICH classes are
+            -- watched; the filter behind them holds the individual cooldowns, and until now
+            -- nothing on this page said that list existed or where to find it. Krathe:
+            -- "the link to edit the filter itself to tick on/off individual CD's as needed."
+            -- ⚠ A LINK, NOT A COPY OF THE LIST. The Filter Designer already edits these --
+            -- rebuilding a spell picker here would be a second place to maintain and a
+            -- second answer to "is this spell watched".
+            t.note(g, L["Individual cooldowns live in the filter this list drives."])
+            -- ⚠ PARENTED TO `parent`, NOT TO THE GROUP -- the same thing t.group does with
+            -- its own header widget. A SettingsGroup positions what it is given; it is not
+            -- the frame they hang off.
+            local btn = GUI:CreateButton(parent, L["Edit the cooldown list"], 170, 22, function()
+                if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
+            end)
+            g:AddWidget(btn, 26)
+        end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
+    else
         yPos = t.group(L["Indicators"], function(g)
             t.signalRow(g, "burst", L["Big cooldown"])
             t.signalRow(g, "infused", L["Already has active Power Infusion"])
         end, yPos)
 
+        -- ⚠ SOUND IS AN EFFECT. It is another way of being told the same thing, so it
+        -- belongs beside the surfaces rather than with the conditions that fire them.
         yPos = t.group(L["Sound Alert"], pihAddSound, yPos)
     end
+
     return yPos
 end
 
@@ -6922,7 +6950,7 @@ S.BuildEffectsHeadArea = function(parent, yPos, opts)
     -- before it ever consults othersOnly -- and the helper watches OTHER people's
     -- cooldowns, so Any Buff remains the only pool where it can match anything. That is
     -- plumbing now; the user is never asked to know it.
-    -- ⚠ The builders are still HERE (S.BuildPIHelperCard / S.BuildPIHelperPane and the
+    -- ⚠ The builders are still HERE (S.BuildPIHelperCard / S.BuildPIHelperBody and the
     -- section bodies, above). Only the MOUNT moved. The page composes them.
 
     -- ── ACTIVE INDICATORS heading ──

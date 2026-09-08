@@ -2964,6 +2964,11 @@ L["Shows who is worth infusing, and goes dark while your Power Infusion is on co
 -- ⚠ "Triggers" is this panel's own heading and needs no qualifier: the page it lives on is
 -- already named Power Infusion Helper. L["Indicators"] is the addon's existing key, reused.
 L["Triggers"] = true
+-- ⚠ The way in to the actual spell list. The class ticks say WHICH classes are watched; the
+-- filter behind them holds the individual cooldowns, and nothing on the page said that list
+-- existed. A LINK rather than a second copy of the picker -- one place edits these.
+L["Individual cooldowns live in the filter this list drives."] = true
+L["Edit the cooldown list"] = true
 -- The signals. Each label has to stand alone with just the line beneath it for context.
 L["Big cooldown"] = true
 -- How the surface pickers behave. What the controls cannot show on their own: which

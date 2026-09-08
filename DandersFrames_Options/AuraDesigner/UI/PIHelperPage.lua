@@ -42,9 +42,9 @@ local max, abs = math.max, math.abs
 -- ============================================================
 -- ☠ THE HARNESS SIZES A WIDGET *AFTER* Add, NOT BEFORE. GUI/Panel.lua's Add only records
 -- layoutHeight/layoutCol; the actual SetWidth happens in PageRefreshStates' layout pass
--- (the `layoutCol == "both"` arm). S.BuildPIHelperPane needs a real width AT BUILD TIME —
--- the card measures its wrapped description against it, and falls back to 320 without one,
--- which is right for the 260px popout pane and wrong by half on a full-width page.
+-- (the `layoutCol == "both"` arm). The builders need a real width AT BUILD TIME — the
+-- settings groups size themselves against their parent, and the split's two halves are
+-- computed from it — so nothing here can run until the first real size arrives.
 --
 -- ⇒ Build LAZILY, on the first size we are given, and re-measure only when the width
 -- actually moves. The height then flows the other way: the pane returns its measured
@@ -63,7 +63,7 @@ local WIDTH_EPSILON = 2   -- sub-pixel jitter from the snapping pass is not a re
 -- GUI/Pages/Auras.lua and neither is a special case at the call site.
 function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
     if not (Add and pageRef and pageRef.child) then return end
-    if not (S and S.BuildPIHelperPane) then return end
+    if not (S and S.BuildPIHelperCard and S.BuildPIHelperBody) then return end
 
     local host = CreateFrame("Frame", nil, pageRef.child)
     host:SetHeight(1)
@@ -132,12 +132,56 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- opts.Refresh when it changes something structural; inside the designer that meant
         -- "rebuild the tab", and here it means "rebuild this page". Routing it at
         -- S.SwitchTab would redraw a designer that may not even be open.
-        local yEnd = S.BuildPIHelperPane(rightPanel, {
-            startY  = 0,
-            Refresh = function()
-                if pageRef.Refresh then pcall(pageRef.Refresh, pageRef) end
-            end,
+        local function pageRefresh()
+            if pageRef.Refresh then pcall(pageRef.Refresh, pageRef) end
+        end
+
+        -- The enable banner sits ABOVE the tabs: it turns the whole feature on, so it
+        -- cannot live inside one of the two things it governs.
+        local yPos, open = S.BuildPIHelperCard(rightPanel, {
+            startY = 0, Refresh = pageRefresh,
         })
+
+        -- ── THE TAB BAR, THE DESIGNER'S OWN STYLING ──
+        -- ⚠ GUI:StyleButton's `tab` mode is what the designer's right panel uses -- faint
+        -- cell when inactive, accent fill and underline when active -- so borrowing it is
+        -- what makes this read as the same kind of page rather than a lookalike.
+        -- ☠ THE ACTIVE TAB LIVES ON S, NOT IN A LOCAL. This whole builder re-runs on every
+        -- rebuild (a tick, a colour, a width change), and a local would reset the user to
+        -- Triggers every time they changed anything on Effects.
+        if open and S.PIH_TABS then
+            S.pihTab = S.pihTab or "triggers"
+            local TAB_GAP, TAB_H = 4, 26
+            local tabW = math.max(60, (halfW - 16 - TAB_GAP) / 2)
+            local prev
+            for _, def in ipairs(S.PIH_TABS) do
+                local btn = CreateFrame("Button", nil, rightPanel, "BackdropTemplate")
+                btn:SetSize(tabW, TAB_H)
+                if prev then
+                    btn:SetPoint("TOPLEFT", prev, "TOPRIGHT", TAB_GAP, 0)
+                else
+                    btn:SetPoint("TOPLEFT", 8, yPos)
+                end
+                GUI:StyleButton(btn, { tab = true, text = def.label, font = "DFFontHighlight" })
+                if btn.SetActive then btn:SetActive(S.pihTab == def.key) end
+                btn:SetScript("OnClick", function()
+                    if S.pihTab == def.key then return end
+                    S.pihTab = def.key
+                    pageRefresh()
+                end)
+                prev = btn
+            end
+            yPos = yPos - (TAB_H + 8)
+        end
+
+        local yEnd = yPos
+        if open then
+            yEnd = S.BuildPIHelperBody(rightPanel, {
+                startY  = yPos,
+                tab     = S.pihTab or "triggers",
+                Refresh = pageRefresh,
+            })
+        end
 
         local rightH = max(1, -(yEnd or 0))
         rightPanel:SetHeight(rightH)
@@ -150,17 +194,33 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- transparent gap with the game world showing through (Krathe, 2026-09-08).
         -- ⇒ Decide the height, THEN build into it. The designer never hits this because its
         -- leftPanel is anchored TOPLEFT+BOTTOMLEFT inside an island that already has a size.
-        -- ⚠ THE FLOOR IS THE CANVAS'S OWN NUMBER, NOT A GUESS. P.CanvasWantedHeight exists
-        -- for exactly this: "the host must size the band BEFORE calling the builder that
-        -- creates it". It derives from the frame height and the live preview scale, so the
-        -- canvas keeps fitting when either moves -- which a constant would not.
-        -- ⚠ It matters most in the state a new user sees FIRST: with the helper switched off
-        -- the settings are one banner tall, and a canvas sized to that cannot show a unit
-        -- frame at all. The page would look broken before it had done anything.
-        local canvasH = (P.CanvasWantedHeight and P.CanvasWantedHeight(true, nil)) or 260
-        local h = max(rightH, canvasH)
-        leftPanel:SetHeight(h)
-        content:SetHeight(h)
+        -- ☠☠ THE LEFT PANEL TAKES THE CANVAS'S HEIGHT, NEVER THE COLUMN'S. The mock frame is
+        -- anchored SetPoint("CENTER", container, "CENTER") and the container fills its
+        -- parent -- so a left panel stretched to match a long settings column centres the
+        -- frame halfway down that column, which is why it appeared stranded near the bottom
+        -- with empty space above it (Krathe, 2026-09-08). The designer does not show this
+        -- because its two halves are the same height BY CONSTRUCTION: they fill an island
+        -- sized to the viewport, and the settings side scrolls INSIDE it. This page is a
+        -- measured column in a scrolling page, so the halves are independent and only the
+        -- CONTENT height is shared.
+        --
+        -- ⚠ THE NUMBER IS THE CANVAS'S OWN, not one I picked. CanvasWantedHeight(false) is
+        -- the non-compact form's floor; CanvasWantedHeight(true) is the height that actually
+        -- fits the frame at the live preview scale, and the +30 is the file's own accounting
+        -- for what the band form saves by putting the scale behind a glyph instead of a
+        -- slider row ("that 30px goes straight into CANVAS_FURNITURE and back to the
+        -- frame"). Taking the larger keeps the frame fitting when the scale slider moves.
+        local canvasH = 260
+        if P.CanvasWantedHeight then
+            canvasH = max(P.CanvasWantedHeight(false, nil),
+                          P.CanvasWantedHeight(true, nil) + 30)
+        end
+        -- The column is as tall as its taller half; only the CONTENT height is shared, and
+        -- the two panels keep their own (see the note above -- a left panel stretched to
+        -- match the settings would centre the mock frame halfway down the page).
+        local colH = max(rightH, canvasH)
+        leftPanel:SetHeight(canvasH)
+        content:SetHeight(colH)
 
         -- ── THE PREVIEW, THE DESIGNER'S OWN CANVAS ──
         -- ⚠ THE SAME FACTORY, NOT A LOOKALIKE. CreateFramePreview is what the designer
@@ -177,7 +237,16 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- carrying a helper mark. The Any Buff pool also holds the user's unrelated work,
         -- and rendering that here would show effects this page does not control.
         if P and S.PIH_PreviewPool and P.CreateFramePreview then
-            local pv = P.CreateFramePreview(leftPanel, 0, nil, { compact = true, hideLabel = true })
+            -- ⚠ THE DESIGNER'S OWN FORM, not the band's. Non-compact is what gives this the
+            -- "FRAME PREVIEW" caption and the Preview Scale SLIDER rather than the band's
+            -- glyph in the corner -- Krathe asked for the designer's treatment and that is
+            -- the difference between the two.
+            -- ⚠ placement = false is the one thing suppressed: it gates the nine anchor
+            -- dots, the drag hint and the three instruction rows, all of which are about
+            -- POSITIONING an indicator. Nothing on this page can be dragged, so offering the
+            -- furniture for it would be three lines of instructions for a gesture that does
+            -- nothing. It does NOT gate the scale slider.
+            local pv = P.CreateFramePreview(leftPanel, 0, nil, { placement = false })
             if pv then
                 S.framePreview = pv
                 if P.RefreshPreviewEffects then
@@ -187,12 +256,12 @@ function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
         end
         rebuilding = false
 
-        if abs((host.layoutHeight or 0) - h) > 0.5 then
-            host.layoutHeight = h
-            host:SetHeight(h)
+        if abs((host.layoutHeight or 0) - colH) > 0.5 then
+            host.layoutHeight = colH
+            host:SetHeight(colH)
             relayout()
         else
-            host:SetHeight(h)
+            host:SetHeight(colH)
         end
     end
 
