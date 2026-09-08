@@ -39,15 +39,17 @@ local S = DF.AuraDesigner._uiState
 -- Signature mirrors DF.BuildAuraDesignerPage so the two register identically in
 -- GUI/Pages/Auras.lua and neither is a special case at the call site.
 function DF.BuildPIHelperPage(guiRef, pageRef, dbRef, Add, AddSpace)
-    -- ⚠ SET BEFORE THE BUILD, NOT AFTER. Every pool-routed accessor is read DURING
-    -- BuildAuraDesignerPage -- the preview paints from CurrentAuraPool, the effect list keys
-    -- itself off PoolKeyPrefix -- so a tab set afterwards would render one pool and label it
-    -- another for a frame.
-    -- ⚠ NOT RESTORED, deliberately, and this is the difference from a scoped swap: the user
-    -- is now LOOKING at the helper pool. Putting the tab back would leave the strip showing
-    -- Power Infusion Helper as active while every surface below it rendered My Buffs.
+    -- ☠☠ REQUESTED, NOT ASSIGNED, AND THE DIFFERENCE COST A BROKEN PAGE. Writing
+    -- S.activeBuffTab here does nothing on a FULL build: BuildAuraDesignerPage resets the
+    -- pool as part of its teardown, so the helper's own nav entry landed on My Buffs with
+    -- none of its controls on screen -- and only sometimes, because a REVISIT takes the
+    -- reuse path, which leaves the pool alone. Two behaviours from one click.
+    -- ⇒ S.pendingBuffTab is a one-shot the builder CONSUMES at the point it would otherwise
+    -- have defaulted. Set both: the pending one survives a full build, and the direct one is
+    -- what the reuse path (which never touches pending) reads.
     if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() then
-        S.activeBuffTab = "pihelper"
+        S.pendingBuffTab = "pihelper"
+        S.activeBuffTab  = "pihelper"
     end
     if DF.BuildAuraDesignerPage then
         DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)

@@ -1824,7 +1824,18 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     -- object (editingProfile == activeRuntimeProfile), so _adLayout alone
     -- misses the transition and the editing-banner offset is never applied.
     local _adEditing = (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
-    if S.mainFrame and prevDB == dbRef
+    -- ☠☠ THE ISLAND BELONGS TO ONE PAGE, AND TWO NAV ENTRIES NOW REACH THIS BUILDER. The
+    -- Aura Designer page and the Power Infusion Helper page both call it, and the reuse path
+    -- below REPARENTS S.mainFrame to whoever asked last -- so bouncing between them handed
+    -- one island back and forth while each page's own harness still believed it owned the
+    -- widgets it had Add'd around it. That is the overlapping strip in Krathe's screenshot.
+    -- ⇒ A different page is a different build, exactly like a mode switch. The teardown below
+    -- hides and unparents the old island first, so nothing is left stranded on the page we
+    -- came from.
+    -- ⚠ Compared by IDENTITY, not by name: the harness can rebuild a page object, and a
+    -- stale reference must read as "different" rather than matching a dead frame.
+    local sameOwner = (S.mainFrameOwner == pageRef)
+    if S.mainFrame and sameOwner and prevDB == dbRef
        and S.mainFrame.dfBuiltFrameW == _adW and S.mainFrame.dfBuiltFrameH == _adH
        and S.mainFrame.dfBuiltLayout == _adLayout
        and S.mainFrame.dfBuiltPreset == _adPreset
@@ -1846,7 +1857,18 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     wipe(effectCardPool)
 
     S.activeTab = "effects"
-    S.activeBuffTab = "my"
+    -- ☠☠ A FULL BUILD USED TO CLOBBER THE POOL UNCONDITIONALLY, AND THAT BROKE THE ONE
+    -- CALLER THAT ASKS FOR A SPECIFIC ONE. The Power Infusion Helper's nav entry sets the
+    -- pool and then builds this page; the line below then reset it to My Buffs, so the
+    -- helper's own entry landed on somebody else's pool with none of its controls on screen
+    -- -- and only on a FULL build, so it behaved differently on a revisit (which takes the
+    -- reuse path above and leaves the pool alone). Krathe, 2026-09-08: "selecting the PI
+    -- helper in the menu is totally fucked up and the trigger/effects are not showing."
+    -- ⚠ CONSUMED, NOT READ. A standing preference would pin the designer to that pool
+    -- forever; this is a one-shot request from whoever navigated here, and clearing it means
+    -- the next plain visit to the designer opens on My Buffs exactly as it always has.
+    S.activeBuffTab = S.pendingBuffTab or "my"
+    S.pendingBuffTab = nil
     S.activeFilter = "all"
     -- A shared picker left open on the OLD S.rightPanel dies with it (its
     -- close hook may already have run via the ancestor hide); drop the
@@ -1871,6 +1893,10 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     S.mainFrame.dfBuiltLayout = _adLayout
     S.mainFrame.dfBuiltPreset = _adPreset
     S.mainFrame.dfBuiltEditing = _adEditing
+    -- ...and WHICH PAGE it was built for, which the reuse guard now checks. Two nav entries
+    -- reach this builder (the designer's own and the Power Infusion Helper's), and an island
+    -- reparented between them leaves the page it left holding widgets anchored to nothing.
+    S.mainFrameOwner = pageRef
     -- Closing the settings window (or leaving this S.page) hides S.mainFrame with
     -- no refresh pass, which would leave the rendered preview pool's border
     -- animations ticking on the external driver (it ticks hidden secretRect
