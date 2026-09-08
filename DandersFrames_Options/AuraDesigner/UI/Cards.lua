@@ -6250,6 +6250,37 @@ local function pihMakeTools(parent, opts)
                 "caution")
         end
 
+        -- ── THE COLOUR, ON THE SIGNAL'S OWN ROW (2026-09-08) ──
+        -- ☠ THIS IS THE SPLIT THE USER NAMED. A signal's BEHAVIOUR was set here and its
+        -- COLOUR on the generated indicator's card further down the same page, so setting
+        -- up one signal end to end meant two places and no sign that they belonged
+        -- together. That division was consistency with the designer -- appearance lives on
+        -- effect rows there -- and on a page whose only subject IS the helper it has
+        -- nothing left to justify it.
+        -- ⚠ BOUND STRAIGHT TO THE RECORD, which is why this needs no accessor pair: the
+        -- colour already lives at cfg[pihColorKey(surface)] and CreateColorPicker writes
+        -- through a table+key exactly like every other colour in the addon. Re-fetched per
+        -- build rather than captured, so a surface swap (which changes both the record and
+        -- the key -- a border keeps its colour under BorderColor) rebinds instead of
+        -- writing to the record the signal just left.
+        -- ⚠ OFFERED ONLY WHERE A COLOUR EXISTS. An Icon has none -- pihPlace says so when
+        -- it declines to carry one -- and "None" has no record at all. A swatch on either
+        -- would be a control that writes somewhere nothing reads, which is the same class
+        -- of lying control as the add button this feature was moved away from.
+        local pihHit = pihFound()[key]
+        local pihCKey = pihHit and pihColorKey(pihHit.typeKey) or nil
+        if pihHit and pihCKey and type(pihHit.cfg[pihCKey]) == "table" then
+            g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], pihHit.cfg, pihCKey, false,
+                function()
+                    -- Same chokepoint every other helper mutation ends at: push the
+                    -- settings to the engine, then let pihRefresh re-derive the resident
+                    -- half. Writing the table alone would leave the frames on the old
+                    -- colour until something unrelated repainted them.
+                    P.PIH_Apply()
+                    pihRefresh()
+                end), GUI.RowHeight.colorpicker)
+        end
+
         -- Icons sit BESIDE the colour dropdown, equal weight: with "None" in the
         -- menu, one row enumerates colour-only / icons-only / both. Every row has
         -- the same flow -- tick, dropdown, icons -- which is what three earlier

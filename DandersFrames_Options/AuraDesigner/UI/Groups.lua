@@ -1483,8 +1483,22 @@ P.BADGE_COLORS = BADGE_COLORS
 
 -- Collect all configured effects into a flat, sorted list
 -- Returns: { { source="placed"|"frame", auraName, typeKey, ... }, ... }
-local function CollectAllEffects()
+-- ☠ HELPER-OWNED RECORDS ARE EXCLUDED BY DEFAULT (2026-09-08). A record carrying a
+-- `pihSignal` mark belongs to the Power Infusion Helper, which now has its own page
+-- (Auras > Power Infusion Helper). Krathe's requirement when it moved: "Anything added
+-- should show just on the PI helper page and not in AD itself." Left in this list they
+-- read as stray indicators the user does not remember making, and deleting one there
+-- silently half-dismantles a feature configured somewhere else.
+--
+-- ⚠ AN OPTION, NOT A HARD SKIP, and the difference matters. The helper's own page wants
+-- exactly these rows -- it is the one surface where they ARE the subject -- so the filter
+-- is a caller's choice and the display-name derivation below stays live rather than
+-- becoming unreachable code that looks maintained.
+-- ⚠ Callers that want the designer's behaviour pass nothing: every existing call site
+-- (Cards.lua's Active Indicators list, Rows.lua's) is a designer list and wants them gone.
+local function CollectAllEffects(opts)
     local effects = {}
+    local includePIH = opts and opts.includePIH and true or false
 
     local spec = ResolveSpec()
     local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
@@ -1542,6 +1556,7 @@ local function CollectAllEffects()
             -- Placed indicators
             if auraCfg.indicators then
                 for _, indicator in ipairs(auraCfg.indicators) do
+                    if includePIH or not indicator.pihSignal then
                     tinsert(effects, {
                         source      = "placed",
                         auraName    = auraName,
@@ -1554,6 +1569,7 @@ local function CollectAllEffects()
                         config      = indicator,
                         anchor      = indicator.anchor or "CENTER",
                     })
+                    end
                 end
             end
 
@@ -1562,7 +1578,8 @@ local function CollectAllEffects()
             -- 600-spell filter would mean 600 registrations.
             local isFilterOwned = DF.ParseADFilterRef and DF:ParseADFilterRef(auraName) ~= nil
             for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
-                if auraCfg[typeKey] and not (isFilterOwned and typeKey == "sound") then
+                if auraCfg[typeKey] and not (isFilterOwned and typeKey == "sound")
+                    and (includePIH or not auraCfg[typeKey].pihSignal) then
                     tinsert(effects, {
                         source      = "frame",
                         auraName    = auraName,

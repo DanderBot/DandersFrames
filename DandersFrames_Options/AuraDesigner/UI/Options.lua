@@ -687,6 +687,24 @@ local function CurrentLayoutGroups()
 end
 P.CurrentLayoutGroups = CurrentLayoutGroups
 
+-- ☠ THE LIST THE DESIGNER SHOWS, WHICH IS NOT THE LIST IT OPERATES ON. The Power Infusion
+-- Helper's icon group carries a `pihSignal` mark and belongs to its own page now
+-- (Auras > Power Infusion Helper), so the designer must not list it: shown there it reads
+-- as a stray group, and deleting it half-dismantles a feature configured elsewhere.
+-- ⚠ FILTERED HERE AND NOT IN CurrentLayoutGroups, deliberately. Two of that function's
+-- callers are LOGIC, not display -- GetIndicatorLayoutGroup resolves an indicator's owning
+-- group and DeleteLayoutGroup removes one by id -- and hiding a group from those would
+-- make the helper's own group unreachable and undeletable by its own remove path. Display
+-- filters belong at the display site; the store stays whole.
+local function VisibleLayoutGroups()
+    local out = {}
+    for _, g in ipairs(CurrentLayoutGroups()) do
+        if not (type(g) == "table" and g.pihSignal) then out[#out + 1] = g end
+    end
+    return out
+end
+P.VisibleLayoutGroups = VisibleLayoutGroups
+
 -- Display name for an OTHER-pool aura key: ad-hoc "#<id>" resolves live,
 -- SpellDB names resolve through GetSpellDisplay (localized), else the raw key.
 local function OtherPoolDisplayName(auraName)

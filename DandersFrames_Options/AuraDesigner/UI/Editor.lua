@@ -30,6 +30,9 @@ local CurrentAuraPool = P.CurrentAuraPool
 local PoolKeyPrefix = P.PoolKeyPrefix
 local DebuffGroupsRead = P.DebuffGroupsRead
 local CurrentLayoutGroups = P.CurrentLayoutGroups
+-- The DISPLAY half of that pair -- helper-owned groups filtered out. Its note in
+-- AuraDesigner/UI/Options.lua says why the filter is there and not in the store accessor.
+local VisibleLayoutGroups = P.VisibleLayoutGroups
 local OtherPoolDisplayName = P.OtherPoolDisplayName
 local RemoveIndicatorInstance = P.RemoveIndicatorInstance
 local GetAuraIcon = P.GetAuraIcon
@@ -962,7 +965,7 @@ S.BuildLayoutGroupsHeadArea = function(parent, yPos, opts)
     -- what gets created depends on the count. A card runs ~2.5x a button's
     -- height, which this ~260px column can only spare while there is no list
     -- underneath it -- hence cards or buttons, never both.
-    local hasGroups = #CurrentLayoutGroups() > 0
+    local hasGroups = #VisibleLayoutGroups() > 0
 
     -- Teaching prose, first visit only. The CARDS below are pinned permanently --
     -- they are the create action, so they have to be -- but this sentence is read
@@ -1040,7 +1043,7 @@ S.BuildLayoutGroupsTab = function()
     local yPos = S.BuildLayoutGroupsHeadArea(parent, -10)
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
 
-    local groups = CurrentLayoutGroups()
+    local groups = VisibleLayoutGroups()
 
     if #groups > 0 then
         -- ── LAYOUT GROUPS heading — mirrors the Effects tab's ACTIVE INDICATORS

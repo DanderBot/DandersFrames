@@ -46,6 +46,9 @@ local expandedCards            = P.expandedCards
 local mainTabButtons           = P.mainTabButtons
 -- ...and the Layout Groups / Global halves, which phase 3 brought over.
 local CurrentLayoutGroups        = P.CurrentLayoutGroups
+-- The DISPLAY half -- helper-owned groups filtered out, same as the classic layout's list.
+-- Its note in AuraDesigner/UI/Options.lua says why the filter is not in the store accessor.
+local VisibleLayoutGroups        = P.VisibleLayoutGroups
 local DebuffGroupsRead           = P.DebuffGroupsRead
 local GroupExpandKey             = P.GroupExpandKey
 local expandedGroups             = P.expandedGroups
@@ -1156,7 +1159,7 @@ local function BuildLayoutTabRows(ctx, shell)
         host:SetHeight(max(-(yPos or 0) + 4, 1))
     end)
 
-    local groups = isDebuffs and DebuffGroupsRead() or CurrentLayoutGroups()
+    local groups = isDebuffs and DebuffGroupsRead() or VisibleLayoutGroups()
 
     -- ⚠ NO SEPARATE EMPTY STATE. The head area above already IS one when the
     -- list is empty: it swaps in the teaching sentence that says what this tab
