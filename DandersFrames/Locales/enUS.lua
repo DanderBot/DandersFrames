@@ -2969,6 +2969,16 @@ L["Triggers"] = true
 -- ⚠ "Remove %s" TAKES THE SURFACE'S OWN NAME -- "Remove Border", "Remove Health Bar" -- and
 -- that is not decoration: with several effects listed, a bare "Remove" would sit beside three
 -- rows looking identical and the user could not tell which one it acted on.
+-- ★ The Effects tab is the DESIGNER'S add flow, scoped to the helper: two route cards (which
+-- signal) and then the designer's own effect tiles. Its heading is the designer's
+-- "ADD AN INDICATOR" one verb across -- an EFFECT, because on this page you are not adding a
+-- thing to track, only a way of showing what the helper already watches.
+L["ADD AN EFFECT"] = true
+L["Someone has popped a cooldown worth infusing"] = true
+L["Someone already has it, so do not double up"] = true
+-- ⚠ Names the NEXT STEP, not the absence. "Nothing here" tells someone what they can already
+-- see; this tells them the two clicks that fix it.
+L["Nothing yet. Pick a signal above, then choose how it should show."] = true
 L["Add an effect"] = true
 L["Remove %s"] = true
 -- ⚠ The way in to the actual spell list. The class ticks say WHICH classes are watched; the

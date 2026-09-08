@@ -6405,174 +6405,16 @@ local function pihMakeTools(parent, opts)
     -- Each tick creates or deletes one ordinary effect, which is why the signal rows
     -- also appear in Active Indicators: they ARE indicators, and hiding them there
     -- would mean a row you can see the colour of but cannot find.
-    function t.signalRow(g, key, label)
-        local Refresh = t.Refresh
-
-        -- ☠ NO MASTER TICK. Each signal used to open with a checkbox that turned the
-        -- whole thing on and off -- and its state was DERIVED from the two controls under it
-        -- (a signal is "on" when it has a colour or has icons), so it summarised its own
-        -- neighbours rather than deciding anything. With three signals that tick answered a
-        -- real question, "which of these do I want"; with two, both of which are the feature,
-        -- the only question left is HOW each one shows, and the dropdown's "None" already
-        -- answers it. Three controls per row became two, and every tick on the panel now does
-        -- exactly one thing -- which is what the old row could not say: its master tick, its
-        -- icons tick and its three includes looked identical and worked at three different
-        -- levels.
-        -- ★★★ ONE SIGNAL, MANY SURFACES (2026-09-08). A dropdown asked "which ONE surface is
-        -- this on", so choosing an occupied one had to SWAP two signals -- there was nowhere
-        -- for both to live. Krathe wants the designer's behaviour: add several, border AND
-        -- health bar AND a square, each removable on its own.
-        -- ⇒ The row is now a LIST of what this signal shows plus a row of things it could
-        -- also show. No "None" entry either: removing the last effect is what "none" meant,
-        -- and a list that is empty says it without a word for it.
-        t.settingLabel(g, label)
-
-        local held, heldSet = P.PIH_SurfacesOf(key), {}
-        for _, s in ipairs(held) do heldSet[s] = true end
-
-        local FL = S.FRAME_LEVEL_LABELS or {}
-        local PL = S.PLACED_TYPE_LABELS or {}
-        local function surfaceLabel(s) return PL[s] or FL[s] or s end
-
-        for _, hit in ipairs(pihFoundAll()[key] or {}) do
-            local s = hit.typeKey
-
-            -- ⚠ THE CLASH WARNING IS PER EFFECT NOW. It used to read the signal's single
-            -- surface; with several it has to ask about the one it is drawn under, or a
-            -- border clash would be reported on the health bar row beside it.
-            if P.PIH_SelfContends and P.PIH_SelfContends(s, key) then
-                local clashes, who = P.PIH_ClashOn(s)
-                local sibling = P.PIH_SiblingContends and P.PIH_SiblingContends(s, key) or nil
-                if sibling then clashes = clashes + 1; who = who or pihLabel(sibling) end
-                if clashes > 0 then
-                    who = who or L["Another effect"]
-                    if clashes > 1 then who = format(L["%s and %d more"], who, clashes - 1) end
-                    -- ⚠ THE EXACT STRINGS THE DROPDOWN USED, keys and placeholders unchanged.
-                    -- I paraphrased them while moving the block and invented two keys that do
-                    -- not exist -- which compiles, and renders blank. Copy locale lines, do
-                    -- not retype them.
-                    t.note(g, (s == "border")
-                        and format(L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."], who, L["Give this aura its own border"])
-                        or  format(L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."], who),
-                        "caution")
-                end
-            end
-
-            -- The colour, bound straight to the record. Offered only where one exists: an
-            -- Icon shows Power Infusion's own artwork and has no colour to set.
-            local ck = pihColorKey(s)
-            if type(hit.cfg[ck]) == "table" then
-                g:AddWidget(GUI:CreateColorPicker(parent, surfaceLabel(s), hit.cfg, ck, false,
-                    function() P.PIH_Apply(); pihRefresh() end), GUI.RowHeight.colorpicker)
-            else
-                t.settingLabel(g, surfaceLabel(s))
-            end
-
-            -- ⚠ REMOVE NAMES ITS SURFACE. PIH_RemoveSurface(key) with no surface would take
-            -- the signal's PRIMARY effect, which on a row about the health bar would delete
-            -- the border instead -- the classic "the button did something, just not this".
-            local rm = GUI:CreateButton(parent, format(L["Remove %s"], surfaceLabel(s)), 150, 22,
-                function() P.PIH_RemoveSurface(key, s); Refresh() end)
-            g:AddWidget(rm, 26)
-        end
-
-        -- ── WHAT ELSE THIS SIGNAL COULD SHOW ──
-        -- ⚠ ONE BUTTON PER SURFACE IT DOES NOT ALREADY HAVE. Listing the held ones again
-        -- would be an add button that cannot add, which is the lying control this panel keeps
-        -- being cleaned of. The order is the menu's, so the list does not reshuffle.
-        local addable = { "border", "healthbar", "background", "nametext", "healthtext",
-                          "icon", "square", "bar" }
-        local anyAddable = false
-        for _, s in ipairs(addable) do
-            if not heldSet[s] then anyAddable = true break end
-        end
-        if anyAddable then
-            t.settingLabel(g, L["Add an effect"])
-            for _, s in ipairs(addable) do
-                if not heldSet[s] then
-                    local btn = GUI:CreateButton(parent, surfaceLabel(s), 150, 22, function()
-                        local ok, why = P.PIH_AddSurface(key, s)
-                        if not ok then DF:DebugWarn("AURADESIGNER",
-                            "PIH: could not add %s -- %s", tostring(s), tostring(why)) end
-                        Refresh()
-                    end)
-                    g:AddWidget(btn, 26)
-                end
-            end
-        end
-
-        -- Icons sit BESIDE the colour dropdown, equal weight: with "None" in the
-        -- menu, one row enumerates colour-only / icons-only / both. Every row has
-        -- the same flow -- tick, dropdown, icons -- which is what three earlier
-        -- shapes kept breaking by parking the trinkets control under the wrong
-        -- signal. ⚠ Strong's tick is labelled by what it SHOWS -- its
-        -- amplifier half -- because icons cannot make its cooldown-AND-amplifier
-        -- judgement; a bare "As icons" there would over-promise. The colour tint
-        -- stays the only display that judges.
-        -- Only the cooldown signal has an icon row. Infused draws as a placed Icon through
-        -- the dropdown above -- the same picture, chosen where every other surface is chosen,
-        -- rather than through a second control that means the same thing.
-        local which = PIH_ICON_OF[key]
-        local st = which and P.PIH_Settings() or nil
-        local anyIcons = which and (P.PIH_IconsShow(which) or st.trinkets == true
-            or st.potions == true or st.racials == true) or false
-
-        if which then
-            -- ☠ FOUR LISTS, FOUR TICKS, AND A HEADER RATHER THAN A MASTER. The icon row
-            -- draws from four spell lists, and only three of them used to have a tick --
-            -- cooldowns were implicit, because the control sat under the cooldown signal and
-            -- was assumed to mean it. That asymmetry is what made "include" the only word
-            -- available for the other three: they read as extras to something unnamed.
-            --
-            -- ⚠ NO MASTER TICK, DELIBERATELY, and it was drawn both ways before this one
-            -- was chosen. A master would be DERIVED -- on when any child is on -- which is the
-            -- pattern removed from the signal rows for summarising its neighbours rather than
-            -- deciding anything. It also deadlocks the obvious reading: grey the children while
-            -- the master is off and no child can be ticked, so the only route back turns on all
-            -- four. A header names the set and costs nothing.
-            t.settingLabel(g, L["Icons"])
-            t.subCheck(g, L["Cooldowns"],
-                function() return P.PIH_IconsShow(which) end,
-                function(v) P.PIH_SetIconsShow(which, v); Refresh() end)
-            -- ⭐ THE AMPLIFIERS: what makes a burst BIGGER, as against the cooldown list, which
-            -- says one is happening at all. Equal ticks now, so any of them can show alone.
-            local function amp(label, field)
-                t.subCheck(g, label,
-                    function() return P.PIH_Settings()[field] == true end,
-                    function(v) P.PIH_SetAmplifier(field, v); Refresh() end)
-            end
-            amp(L["Trinkets"], "trinkets")
-            amp(L["Potions"],  "potions")
-            amp(L["Racials"],  "racials")
-
-            -- ☠ UNDER THE TICKS IT IS ABOUT. This used to be the LAST line in the box,
-            -- below the gate switch -- three controls away from the icons it explains, which is
-            -- the addon's convention read backwards: every CreateNote call site in the settings
-            -- puts its prose directly under the control it belongs to, one of them saying so
-            -- outright ("in the place the missing control would have occupied").
-            -- Only while a group exists: with no icons there is nothing to move or size.
-            if pihAnyIconGroup() then
-                t.note(g, L["Move and size the icons under Layout Groups."])
-            end
-        end
-
-        -- ☠ THE NOTE EXISTS TO TEACH THE ICONS-ONLY SETUP, not to warn about an empty list.
-        -- Only a signal with an icons row gets one: there, no effects plus icons off is a
-        -- dead end someone can land in without realising the two controls are meant to be
-        -- used independently. On a signal whose effect list is its ONLY control, an empty
-        -- list says on its face that nothing shows.
-        -- ⚠ "NO EFFECTS" IS #held == 0 NOW, not a "None" menu entry -- the dropdown that had
-        -- one is gone with the multi-surface list above. Same question, asked of the new shape.
-        -- ⚠ Reachable only while ANOTHER signal is keeping the helper alive: on the last
-        -- one, this same state retires the helper and the row goes with it. Watched.
-        if which and #held == 0 and not anyIcons then
-            -- The tick's own label rides as the placeholder, the same way the border clash
-            -- warning names its remedy: a translator renders those words ONCE, so the
-            -- sentence and the control it points at cannot drift apart in any language.
-            t.note(g, format(L["Cooldowns are not showing. Add a display from the dropdown, or tick '%s'."],
-                L["Cooldowns"]), "caution")
-        end
-    end
+    -- ── t.signalRow: REMOVED, 2026-09-08 ──
+    -- ☠ It was the whole per-signal control: a surface dropdown, a clash warning, a colour
+    -- swatch and the icon lists. The Effects tab is the DESIGNER's add flow and effect
+    -- cards now (pihBuildEffectsTab), so the first three are drawn by the designer's own
+    -- widgets and cannot drift from them -- which is the whole point of the change.
+    -- ⚠ THE ICON LISTS SURVIVED THE REMOVAL, deliberately: they moved to pihAddIconLists and
+    -- are drawn under Triggers, where they belong -- each tick decides which category of buff
+    -- COUNTS, not how anything is drawn. Deleting this function without lifting them would
+    -- have quietly removed four of Maelareth's settings (#263) as a side effect of a
+    -- layout change.
 
     return t
 end
@@ -6808,6 +6650,172 @@ end
 -- ⚠ THE KEYS ARE THE TAB IDS, and they are what the page's tab bar drives. Order matters:
 -- triggers first, because you cannot sensibly choose how to be told about something you
 -- have not yet said you care about.
+    -- ★★ THE ICON LISTS, LIFTED OUT OF THE OLD SIGNAL ROW (2026-09-08).
+    -- ☠ THEY WOULD OTHERWISE HAVE VANISHED. They lived inside t.signalRow, and the Effects
+    -- tab stopped calling it when the designer's own tiles and effect cards took over --
+    -- which would have removed four settings from the UI as a side effect of a layout
+    -- change, with nothing saying so. They are Maelareth's (#263).
+    -- ⚠ AND THEY BELONG UNDER TRIGGERS, not Effects. Each tick decides which category of
+    -- buff COUNTS as worth infusing -- cooldowns, trinkets, potions, racials -- which is the
+    -- same question the class list answers, not a question about how it is drawn.
+    -- ⚠ THE SIGNAL IS FIXED HERE. PIH_ICON_OF only ever answered for the cooldown signal;
+    -- the old code read it per row because it was inside a per-signal builder.
+    local function pihAddIconLists(g, t)
+        local which = PIH_ICON_OF["burst"]
+        if not which then return end
+        t.settingLabel(g, L["Icons"])
+        t.subCheck(g, L["Cooldowns"],
+            function() return P.PIH_IconsShow(which) end,
+            function(v) P.PIH_SetIconsShow(which, v) end)
+        local st = P.PIH_Settings()
+        t.subCheck(g, L["Trinkets"],
+            function() return st.trinkets == true end,
+            function(v) P.PIH_SetAmplifier("trinkets", v) end)
+        t.subCheck(g, L["Potions"],
+            function() return st.potions == true end,
+            function(v) P.PIH_SetAmplifier("potions", v) end)
+        t.subCheck(g, L["Racials"],
+            function() return st.racials == true end,
+            function(v) P.PIH_SetAmplifier("racials", v) end)
+    end
+
+-- ★★★ THE HELPER'S EFFECTS TAB — the designer's own furniture, scoped to the helper.
+--
+-- ☠ THE POOL TAB IS SET AROUND THE BUILD, AND THAT IS NOT A HACK. S.CreateEffectCard reads
+-- PoolKeyPrefix() and IsOtherTab() to key its expand state and to decide whether a spec
+-- applies -- both routed off S.activeBuffTab. The helper's records genuinely live in the
+-- Other/Any Buff pool, so pointing that at "other" while we build is telling the shared
+-- builder the truth, not lying to it. Restored immediately after, because the designer's own
+-- page reads the same field and a page switch must not inherit ours.
+--
+-- ⚠ WHICH SIGNAL AN EFFECT BELONGS TO IS THE HELPER'S VERSION OF "WHICH SPELL". The designer
+-- asks route -> spell -> type; there is no spell to choose here (the cooldown filter IS the
+-- spell), so it asks signal -> type. Two cards instead of three, then the same tile grid.
+local pihAddSignal = nil   -- which signal's tile grid is open, nil = none
+local function pihBuildEffectsTab(parent, yPos, t)
+    local tc = GetThemeColor()
+    local prevTab = S.activeBuffTab
+    S.activeBuffTab = "other"
+
+    -- ── ADD AN EFFECT ──
+    -- The route cards, one per signal. Same widget the designer opens its add flow with.
+    local routes = {}
+    for _, def in ipairs({
+        { key = "burst",   label = L["Big cooldown"],
+          desc = L["Someone has popped a cooldown worth infusing"] },
+        { key = "infused", label = L["Already has active Power Infusion"],
+          desc = L["Someone already has it, so do not double up"] },
+    }) do
+        local capturedKey = def.key
+        routes[#routes + 1] = {
+            title = def.label,
+            desc  = def.desc,
+            art   = { kind = "border", color = { 1.00, 0.82, 0.25 } },
+            onClick = function()
+                pihAddSignal = (pihAddSignal == capturedKey) and nil or capturedKey
+                if t.Refresh then t.Refresh() end
+            end,
+        }
+    end
+    local addBlock = GUI:CreateChoiceCardGroup(parent, {
+        title  = L["ADD AN EFFECT"],
+        accent = tc,
+        width  = (parent:GetWidth() or 320) - 16,
+        cards  = routes,
+    })
+    addBlock:SetPoint("TOPLEFT", 8, yPos)
+    addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    yPos = yPos - (addBlock.layoutHeight + GUI.Space.section)
+
+    -- ── THE TILE GRID, once a signal is chosen ──
+    -- ⚠ THE SAME TILES THE DESIGNER DRAWS: CreateFrameTile with PaintEffectOnThumb, so the
+    -- picture on each one is the real miniature of that effect rather than a label on a box.
+    -- ⚠ FILTERED TO WHAT THE HELPER CAN DO. Sound has its own section (it is not a surface),
+    -- and a type the signal already holds is left out -- an add button that cannot add is the
+    -- lying control this panel keeps being cleaned of.
+    if pihAddSignal then
+        local held = {}
+        for _, s in ipairs(P.PIH_SurfacesOf(pihAddSignal)) do held[s] = true end
+
+        local avail = {}
+        for _, eff in ipairs(P.AddFlowEffects and P.AddFlowEffects() or {}) do
+            if eff.type ~= "sound" and not held[eff.type] then avail[#avail + 1] = eff end
+        end
+
+        if #avail > 0 then
+            local CW = (parent:GetWidth() or 320) - 16
+            local TILE_COLS, TILE_GAP = 3, 7
+            local TILE_W = math.floor((CW - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
+            local rowTop, rowH = yPos, 0
+            for i, eff in ipairs(avail) do
+                local col = (i - 1) % TILE_COLS
+                local capturedType = eff.type
+                local tile = CreateFrameTile(parent, {
+                    width   = TILE_W,
+                    label   = eff.label,
+                    accent  = BADGE_COLORS[eff.type] or tc,
+                    tooltip = { title = eff.label, lines = { eff.desc } },
+                    Paint   = function(pv) PaintEffectOnThumb(pv, capturedType) end,
+                    onClick = function()
+                        local ok, why = P.PIH_AddSurface(pihAddSignal, capturedType)
+                        if not ok then DF:DebugWarn("AURADESIGNER",
+                            "PIH: could not add %s -- %s", tostring(capturedType), tostring(why)) end
+                        -- Fold the grid away on success, the way the designer's add flow
+                        -- closes once it has what it asked for.
+                        if ok then pihAddSignal = nil end
+                        if t.Refresh then t.Refresh() end
+                    end,
+                })
+                tile:SetPoint("TOPLEFT", 8 + col * (TILE_W + TILE_GAP), rowTop)
+                rowH = math.max(rowH, tile.layoutHeight or 72)
+                if col == TILE_COLS - 1 or i == #avail then
+                    rowTop = rowTop - (rowH + TILE_GAP)
+                    rowH = 0
+                end
+            end
+            yPos = rowTop - 4
+        end
+    end
+
+    -- ── ACTIVE EFFECTS ──
+    -- ⚠ CollectAllEffects({ includePIH = true }) is the designer's own collector asked for
+    -- the rows it normally hides from itself -- see its note. Then S.CreateEffectCard draws
+    -- each one: the same shell, badge, eye toggle, delete and expandable settings the
+    -- designer's Active Indicators list uses, because it IS that list.
+    local header = parent:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(header, 9, "")
+    header:SetPoint("TOPLEFT", 8, yPos)
+    header:SetText(L["ACTIVE INDICATORS"])
+    header:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 18
+
+    local mine = {}
+    for _, effect in ipairs(P.CollectAllEffects({ includePIH = true }) or {}) do
+        local cfg = effect.config
+        if type(cfg) == "table" and cfg.pihSignal then mine[#mine + 1] = effect end
+    end
+
+    if #mine == 0 then
+        local empty = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        empty:SetPoint("TOPLEFT", 8, yPos)
+        empty:SetText(L["Nothing yet. Pick a signal above, then choose how it should show."])
+        empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - 30
+    else
+        for _, effect in ipairs(mine) do
+            yPos = S.CreateEffectCard(parent, yPos, effect)
+        end
+    end
+
+    -- ── SOUND ──
+    -- Not a surface, so it has no tile and no effect card: it is a property of the helper
+    -- rather than something drawn on a frame. Its own box, as before.
+    yPos = t.group(L["Sound Alert"], pihAddSound, yPos)
+
+    S.activeBuffTab = prevTab
+    return yPos
+end
+
 S.PIH_TABS = {
     { key = "triggers", label = L["Triggers"] },
     { key = "effects",  label = L["Effects"]  },
@@ -6848,17 +6856,22 @@ S.BuildPIHelperBody = function(parent, opts)
         -- version: the existing comment there records that a hand-written jump "landed you on
         -- the page with nothing indicated, which is indistinguishable from a broken link".
         -- Krathe, 2026-09-08: "We seem to have two links to it? and confusing messaging."
-        yPos = t.group(L["Classes and Cooldowns"], pihAddClasses, yPos,
-            { collapsible = true, collapseKey = "pihelper:onlywatch" })
+        yPos = t.group(L["Classes and Cooldowns"], function(g)
+            pihAddClasses(g, t)
+            pihAddIconLists(g, t)
+        end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
     else
-        yPos = t.group(L["Indicators"], function(g)
-            t.signalRow(g, "burst", L["Big cooldown"])
-            t.signalRow(g, "infused", L["Already has active Power Infusion"])
-        end, yPos)
-
-        -- ⚠ SOUND IS AN EFFECT. It is another way of being told the same thing, so it
-        -- belongs beside the surfaces rather than with the conditions that fire them.
-        yPos = t.group(L["Sound Alert"], pihAddSound, yPos)
+        -- ★★★ THE DESIGNER'S OWN EFFECTS TAB, SCOPED TO THE HELPER (2026-09-08).
+        -- ☠ I BUILT A LOOKALIKE TWICE AND IT WAS WRONG BOTH TIMES -- a dropdown, then a
+        -- stack of plain buttons -- while the real thing sat one call away. Krathe: "It
+        -- should basically function exactly as AD. Just without the My buffs / Debuffs /
+        -- Any Buff tabs and AD only stuff."
+        -- ⇒ The helper's records ARE Aura Designer records. So this uses the designer's own
+        -- parts: CreateFrameTile + PaintEffectOnThumb for the add tiles (the same pictures,
+        -- the same tooltips) and S.CreateEffectCard for the list (the same expandable card,
+        -- badge, eye toggle and delete the designer draws). Nothing is reimplemented, so
+        -- nothing can drift from it.
+        yPos = pihBuildEffectsTab(parent, yPos, t)
     end
 
     return yPos
