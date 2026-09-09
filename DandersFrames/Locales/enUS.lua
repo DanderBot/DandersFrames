@@ -3054,22 +3054,37 @@ L["Potions"] = true
 -- other pool: there is no spell to choose here (the cooldown list IS the spell), so the tile
 -- grid is the whole flow.
 -- ⚠ THE ICON TILE NEEDS ITS OWN DESCRIPTION. The shared one reads "The spell's own artwork",
--- which is true in the designer and false here: a helper icon is PINNED to Power Infusion, so
--- it says "infuse this player" rather than reporting which cooldown they pressed.
-L["Shows the Power Infusion icon."] = true
+-- which is true in the designer and false here. Its key is gone: the answer stopped being
+-- "pinned to Power Infusion" the moment the tile grew a second step, and it is now the
+-- three-way description a few lines down.
 -- ★ THE HELPER'S ADD GRID. Two steps for the icon -- which KIND of indicator, then which
--- PICTURE -- because those two icons are as different from each other as an icon is from a
--- square, and every other choice on that grid is made by looking at a thumbnail.
--- ⚠ "Cooldown Icons" is the GROUP: one icon per cooldown the unit actually has up, as
--- against a single marker that shows one of them.
+-- ICON -- because the three icon answers are as different from each other as an icon is from
+-- a square, and every other choice on that grid is made by looking at a thumbnail.
+-- ★★ THREE ANSWERS BEHIND ONE TILE, on two axes: HOW MANY (a single marker, or one per
+-- cooldown they have up) and WHAT PICTURE (always Power Infusion, or the buff they used).
+-- "Cooldown Icons" is the GROUP and used to stand on the main grid beside Border and Square,
+-- which put a container among a row of effects -- see pihBuildAddTiles for why that mismatch
+-- is what made it confusing rather than merely untidy.
 L["Which icon?"] = true
 L["Power Infusion"] = true
 L["The same picture on everyone worth infusing."] = true
 L["Their cooldown"] = true
 L["The buff they actually used — one of them, if several are up at once."] = true
-L["Power Infusion, or the cooldown they used."] = true
+L["Power Infusion, their cooldown, or one per cooldown they have up."] = true
 L["Cooldown Icons"] = true
-L["One icon per cooldown they have up, instead of a single marker."] = true
+L["One icon per cooldown they have up, each showing its own."] = true
+-- ⚠ THE SECOND LINE OF A GREYED TILE'S TOOLTIP, and it has to say where the thing WENT --
+-- these tiles are greyed rather than removed precisely because a tile that vanished when you
+-- clicked it told nobody anything. The two single-icon tiles share one message: they are one
+-- effect seen from two sides, so adding either spends both, and the card's own tick is what
+-- switches between them.
+L["Already added. The card below switches which picture it shows."] = true
+L["Already added. Remove it from the list below to change it."] = true
+-- The cooldown-icon group's collapsed summary, in place of the filter count every other group
+-- shows. Its list is the cooldown list, which the Triggers tab owns -- so trinkets, potions
+-- and racials reach it automatically as they are ticked there, with no second control here
+-- that could disagree. The number is the list's own enabled total, so it moves when they do.
+L["%d spells, from your Triggers"] = true
 -- ★ THE ICON'S TWO CHOICES on the Power Infusion Helper's pool. The picture is pinned to
 -- Power Infusion by default -- "infuse this player" -- and can be swapped for the buff they
 -- actually used. The caveat in the first tooltip is real and not a hedge: a placed icon

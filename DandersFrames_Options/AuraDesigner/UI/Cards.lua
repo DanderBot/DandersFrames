@@ -111,6 +111,12 @@ local PIH_FILTERS = {
     cooldowns  = "Power Infusion Helper",
     amplifiers = "Power Infusion Helper (amplifiers)",
     infused    = "Power Infusion Helper (infused)",
+    -- ★ RACIALS BECAME A LIST (2026-09-10). It was four spell IDs written out below, which
+    -- made it the one Trigger source with no way in: Krathe, "racial show 4 and no edit
+    -- pencil?" The four are now the SEED of a curated list of ours, so the row gets the
+    -- pencil, a count that moves as you tick, and Reset to Default -- the same treatment the
+    -- cooldown list already has. PIH_RACIAL_IDS stays as the seed and the reset target.
+    racials    = "Power Infusion Helper (racials)",
 }
 
 local PIH_PI_SPELL_ID = 10060   -- Power Infusion, for the "already infused" mark
@@ -348,6 +354,41 @@ local function pihEnsureFilter(name, presetKeys, extraIDs, wipeFirst)
         if R.SetCuratedDefaults then R:SetCuratedDefaults(id, defaults) end
     end
     return id
+end
+
+-- ── THE RACIALS LIST ──
+-- ★ CREATED WITH THE HELPER, NOT WITH THE TICK. The Racials row on Triggers shows a count and
+-- a pencil whether or not the tick is on -- the same as Trinkets and Potions, whose lists are
+-- Danders' presets and therefore always exist. A list conjured by the tick would mean the row
+-- had no count and a dead pencil until you switched it on, which is the "lying control" this
+-- panel keeps being cleaned of. So it is seeded wherever the cooldown list is.
+-- ⚠ AND NEVER FROM A TICK. pihSyncTriggerExtras must not call this, for the reason its own
+-- note gives: a tick must not conjure the helper into existence.
+local function pihEnsureRacialFilter()
+    return pihEnsureFilter(PIH_FILTERS.racials, nil, PIH_RACIAL_IDS)
+end
+
+-- Every id in a curated list of ours, in ONE place because three callers need it and each
+-- would otherwise walk both buckets itself.
+-- ⚠ BOTH BUCKETS. AddSpellToCustom files a known id under `spells` and an unknown one under
+-- `rawIDs`, and which bucket a racial lands in depends on whether SpellDB knew it when it was
+-- added -- so a reader that consults one is right until the database is regenerated.
+-- ⚠ `everything` IGNORES THE TICKS, and the two callers want opposite things: the WANT set
+-- honours them (an unticked racial must stop firing) and the REMOVAL UNIVERSE must not (an
+-- unticked racial is exactly what has to be taken back out of the cooldown list).
+local function pihCustomFilterIDs(cfId, everything)
+    local R = DF.FilterRegistry
+    local f = cfId and R and R.GetCustomFilter and R:GetCustomFilter(cfId)
+    if not f then return nil end
+    local out = {}
+    for _, bucket in ipairs({ f.spells, f.rawIDs }) do
+        for sid in pairs(bucket or {}) do
+            if everything or not R.IsCustomSpellEnabled or R:IsCustomSpellEnabled(cfId, sid) then
+                out[#out + 1] = sid
+            end
+        end
+    end
+    return out
 end
 
 -- ─────────────────────────────────────────────────────────────
@@ -760,7 +801,13 @@ local function pihAmplifierIDs(s, everything)
     if s.potions  then addCat(PIH_SEED.amplifiers.potions)  end
     if s.trinkets then addCat(PIH_SEED.amplifiers.trinkets) end
     if s.racials  then
-        for _, id in ipairs(PIH_RACIAL_IDS) do out[#out + 1] = id end
+        -- ★ THE LIST IF THERE IS ONE, THE SEED IF THERE IS NOT. Racials is a curated list of
+        -- ours now, so its ticks are honoured exactly as a preset's are -- but the list only
+        -- exists once the helper does, and pihSyncTriggerExtras may reach this before then.
+        -- The literal is what the list will be seeded WITH, so the fallback is not a
+        -- different answer, only an earlier one.
+        local rids = pihCustomFilterIDs(pihFilterIdByName(PIH_FILTERS.racials), everything)
+        for _, id in ipairs(rids or PIH_RACIAL_IDS) do out[#out + 1] = id end
     end
     return out
 end
@@ -844,10 +891,20 @@ local function pihSyncTriggerExtras(s)
     if not id then return end
     local want = {}
     for _, sid in ipairs(pihAmplifierIDs(s)) do want[sid] = true end
+    -- ☠ A CLASS COOLDOWN IS NEVER TAKEN OUT BY AN AMPLIFIER TICK. The removal universe is
+    -- "every id any amplifier source could contribute", and since Racials became a list the
+    -- user can put anything in it -- including a spell that is also in the class-cooldown
+    -- seed. Unticking Racials would then delete a class cooldown from Triggers: an id
+    -- disappearing from a list nobody touched, with no control anywhere admitting to it.
+    -- ⚠ The seed, not the list's contents: a spell the user ADDED to the cooldown list is
+    -- theirs, but it is also not something an amplifier tick put there, so it is not in this
+    -- universe to begin with and needs no guard.
+    local keep = {}
+    for _, sid in ipairs(pihSeedIDs()) do keep[sid] = true end
     for _, sid in ipairs(pihAmplifierIDs(PIH_ALL_AMPLIFIERS, true)) do
         if want[sid] then
             if R.AddSpellToCustom then R:AddSpellToCustom(id, sid) end
-        elseif R.RemoveSpellFromCustom then
+        elseif not keep[sid] and R.RemoveSpellFromCustom then
             R:RemoveSpellFromCustom(id, sid)
         end
     end
@@ -891,6 +948,10 @@ local function pihCreateSignal(key, surfaceOverride)
 
     local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
     if not cdId then return false, "could not build the cooldown list" end
+    -- Seeded alongside, so the Racials row has a list to count and to open from the moment
+    -- the helper exists -- see pihEnsureRacialFilter. Not fatal if it fails: pihAmplifierIDs
+    -- falls back to the seed, so the trigger still works, only the pencil is dead.
+    pihEnsureRacialFilter()
     -- ☠ RECORDED FOR THE RESIDENT HALF, WHICH CANNOT SEE THIS FILE. The sound registrations run
     -- in the always-loaded addon and need this list; they used to find it by NAME and were
     -- looking for the scaffolding filter, so they resolved nothing and no sound could ever play.
@@ -1029,10 +1090,24 @@ local function pihPurgeStrayMarks()
     if type(adDB) ~= "table" then return 0, 0 end
     local groups, effects = 0, 0
 
+    -- ☠☠ THE ONE MARKED GROUP THAT IS NOT STRAY, AND THIS FUNCTION PREDATES IT EXISTING.
+    -- "Remove EVERY pihSignal group, not the one named burst" was correct when a marked group
+    -- could only ever be the retired one -- there was no legitimate home for such a group at
+    -- all. There is now: P.PIH_AddIconGroup puts the Cooldown Icons group in otherLayoutGroups
+    -- on purpose, and the user adds it from the Effects tab's own grid.
+    -- ⇒ Without this line the NEXT schema bump -- any schema bump, for any unrelated reason --
+    -- silently deletes it on the next Aura Designer build. It has not bitten yet only because
+    -- the group and schema 8 shipped together, so no profile carrying one has re-run this.
+    -- ⚠ ONE, NOT "ANYTHING IN THAT STORE". P.PIH_IconGroup returns the FIRST marked group
+    -- there, which is the one every reader resolves to; a second would be two containers
+    -- competing for the same corner, and purging it is the right answer.
+    -- ⚠ THE SAME SHAPE AS THE EFFECT HALF BELOW, which has always exempted its own home
+    -- (`poolT ~= home`). The group half simply had no home to exempt.
+    local keepGroup = P.PIH_IconGroup and P.PIH_IconGroup() or nil
     for _, store in ipairs(pihAllGroupStores(adDB)) do
         for i = #store, 1, -1 do
             local g = store[i]
-            if type(g) == "table" and g.pihSignal then
+            if type(g) == "table" and g.pihSignal and g ~= keepGroup then
                 table.remove(store, i)
                 -- The fold state is keyed by id and outlives the record; Groups.lua owns the
                 -- table, so it owns the forgetting.
@@ -1380,12 +1455,33 @@ function P.PIH_IconGroup()
     return nil
 end
 
+-- ★★ WHAT IT WATCHES, ON ITS OWN CARD (2026-09-10). Every other group's header carries a
+-- filter count, and this one's card deliberately has no Linked Filters block: its list is the
+-- cooldown list, which the Triggers tab owns end to end. That left a card saying nothing at
+-- all about its contents -- Krathe: "cooldown icons allows for trinkets + the other filters?
+-- don't see the option."
+-- ⇒ THE ANSWER IS YES, AUTOMATICALLY, and that is the thing to say. pihSyncTriggerExtras
+-- writes the trinket, potion and racial ids INTO the cooldown list, so a tick on Triggers
+-- reaches these icons with no second control and no way for the two to disagree. The count is
+-- the list's own enabled total, so it visibly moves when a tick over there does.
+function P.PIH_IconGroupSummary()
+    local R = DF.FilterRegistry
+    local id = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+    local on = 0
+    if id and R and R.CustomFilterCounts then on = R:CustomFilterCounts(id) end
+    return format(L["%d spells, from your Triggers"], on)
+end
+
 function P.PIH_AddIconGroup()
     if P.PIH_IconGroup() then return true end
     local adDB = GetAuraDesignerDB()
     if not adDB then return false, "no config" end
     local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
     if not cdId then return false, "could not build the cooldown list" end
+    -- Seeded alongside, so the Racials row has a list to count and to open from the moment
+    -- the helper exists -- see pihEnsureRacialFilter. Not fatal if it fails: pihAmplifierIDs
+    -- falls back to the seed, so the trigger still works, only the pencil is dead.
+    pihEnsureRacialFilter()
     -- ☠ THE OTHER STORE, NAMED. See the note above for what routing this through the
     -- pool-aware creator cost last time.
     local groups = P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(true)
@@ -1642,6 +1738,25 @@ end
 -- nil before the helper exists, which is also when the button that uses it must be dead.
 function P.PIH_CooldownFilterID()
     return pihFilterIdByName(PIH_FILTERS.cooldowns)
+end
+
+-- ...and the racials list's, for the pencil on its row. Same contract: nil until the helper
+-- exists, which is when that pencil must not be drawn.
+function P.PIH_RacialFilterID()
+    return pihFilterIdByName(PIH_FILTERS.racials)
+end
+
+-- How many racials are ON, and how many are in the list. Falls back to the seed's size before
+-- the list exists, so the row reads 4 rather than 0 on a helper that has not been created --
+-- which is the number that will be true the moment it is.
+function P.PIH_RacialCounts()
+    local R = DF.FilterRegistry
+    local id = pihFilterIdByName(PIH_FILTERS.racials)
+    if id and R and R.CustomFilterCounts then
+        local on, total = R:CustomFilterCounts(id)
+        if total > 0 then return on, total end
+    end
+    return #PIH_RACIAL_IDS, #PIH_RACIAL_IDS
 end
 
 -- ============================================================
@@ -6287,7 +6402,7 @@ P.OpenFilterPopout = OpenFilterPopout
 --    ⚠ THE LESSON: a mark written by a CREATE path reaches nobody who already has the
 --    thing. Stamping in the sweep is what reaches them, and the sweep is the one place
 --    that runs for a helper nobody is touching.
-local PIH_SCHEMA = 8
+local PIH_SCHEMA = 9
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -6504,6 +6619,18 @@ local function pihSweep()
             R:SetCuratedDefaults(infId, { PIH_PI_SPELL_ID })
         end
     end
+
+    -- 9. THE RACIALS LIST, FOR A HELPER THAT PREDATES IT. Four ids written out in this file
+    -- became a curated list so the row could have a pencil, a moving count and a reset --
+    -- Krathe, 2026-09-10: "racial show 4 and no edit pencil?"
+    -- ☠ ONLY WHERE THE HELPER ALREADY EXISTS. This sweep runs on every Aura Designer build
+    -- for a priest, helper or no helper, so an unconditional create would put a filter nobody
+    -- asked for into the Filter Designer of every priest who has never opened the feature.
+    -- The cooldown list is the helper's own footprint, so its presence is the condition.
+    -- ⚠ NO RE-SYNC NEEDED AFTER IT. Step 6 above ran pihSyncTriggerExtras while the list did
+    -- not exist yet, and pihAmplifierIDs falls back to the same four ids the list is seeded
+    -- with -- so the set it wrote is the set it would write now, not an earlier guess at it.
+    if pihFilterIdByName(PIH_FILTERS.cooldowns) then pihEnsureRacialFilter() end
 
     s.schema = PIH_SCHEMA
     S.activeBuffTab = prevPool
@@ -7111,17 +7238,21 @@ end
     -- ⚠ A LABEL WITH THE NUMBER IN IT, rather than a second right-aligned region. The row
     -- widget is a checkbox and the toolkit sizes it; a count anchored into it would be the one
     -- hand-placed element in a column that lays itself out. Numbers need no translating.
+    -- ⚠ ONE NUMBER WHEN NOTHING IS TICKED OFF, TWO WHEN SOMETHING IS. "41/41" spends a
+    -- fraction on the fact that nothing has been changed; "38/41" is the whole point of
+    -- showing a fraction at all. Same rule the Classes and Cooldowns header follows, so the
+    -- two boxes read the same way.
     local function pihCountLabel(text, a, b)
-        if b then return text .. "   " .. a .. "/" .. b end
-        return text .. "   " .. a
+        if b and b ~= a then return text .. "   " .. a .. "/" .. b end
+        return text .. "   " .. (b or a)
     end
 
-    local function pihSourceRow(g, t, label, count, get, set, link)
+    local function pihSourceRow(g, t, label, on, total, get, set, link)
         local w
         if set then
-            w = t.subCheck(g, pihCountLabel(label, count), get, set)
+            w = t.subCheck(g, pihCountLabel(label, on, total), get, set)
         else
-            w = t.settingLabel(g, pihCountLabel(label, count))
+            w = t.settingLabel(g, pihCountLabel(label, on, total))
         end
         -- ⚠ ANCHORED TO THE ROW, not placed at a y of its own. The group owns the layout and
         -- these rows flow with it; a glyph positioned against the panel would be correct until
@@ -7194,28 +7325,43 @@ end
         -- should be in with the Classes and maybe should still be a button Edit Cooldowns".
         -- That box is the BASELINE (always watched, narrowed by class); these three are
         -- additions you opt into, which is what makes them a box of their own.
-        local function catCount(catKey)
-            local recs = R and R.ByCategory and R.ByCategory[catKey]
-            return recs and #recs or 0
+        -- ⚠ ENABLED / TOTAL, NOT THE CATEGORY'S SIZE. This was #recs, which does not move when
+        -- a trinket is ticked off in the Filter Designer -- while pihAmplifierIDs, which
+        -- decides what actually fires, honours those ticks. So the row reported 41 for a list
+        -- feeding 38 spells: the same fault Krathe caught on the cooldown count one box up
+        -- ("the number does not change as I tick them on/off"), one row over.
+        local function catCounts(catKey)
+            local recs = (R and R.ByCategory and R.ByCategory[catKey]) or {}
+            local on = 0
+            for _, rec in ipairs(recs) do
+                if not R.IsSpellEnabled or R:IsSpellEnabled(catKey, rec) then on = on + 1 end
+            end
+            return on, #recs
         end
         local trink, potion = PIH_SEED.amplifiers.trinkets, PIH_SEED.amplifiers.potions
-        pihSourceRow(g, t, L["Trinkets"], catCount(trink),
+        local trinkOn, trinkAll = catCounts(trink)
+        pihSourceRow(g, t, L["Trinkets"], trinkOn, trinkAll,
             function() return st.trinkets == true end,
             function(v) P.PIH_SetAmplifier("trinkets", v) end,
             function() pihOpenFilter("preset", trink) end)
-        pihSourceRow(g, t, L["Potions"], catCount(potion),
+        local potOn, potAll = catCounts(potion)
+        pihSourceRow(g, t, L["Potions"], potOn, potAll,
             function() return st.potions == true end,
             function(v) P.PIH_SetAmplifier("potions", v) end,
             function() pihOpenFilter("preset", potion) end)
-        -- ⚠ FOUR, NOT THIRTEEN, and no link -- because there is no list to open. `racials` is
-        -- every racial ability and nine of its thirteen (Shadowmeld, Darkflight, Stoneform)
-        -- are the opposite of worth infusing behind, so this row is a hand-picked set rather
-        -- than a category. Linking to the category would offer to edit something that is not
-        -- what this row means.
-        pihSourceRow(g, t, L["Racials"], #PIH_RACIAL_IDS,
+        -- ★ FOUR, NOT THIRTEEN -- AND NOW A LIST YOU CAN OPEN. `racials` is every racial
+        -- ability and nine of its thirteen (Shadowmeld, Darkflight, Stoneform) are the
+        -- opposite of worth infusing behind, so this row can never be that category. It used
+        -- to be four ids written out in this file instead, which left it the only source with
+        -- no pencil -- "racial show 4 and no edit pencil?" (Krathe, 2026-09-10). The four are
+        -- the SEED of a curated list of ours now, so the row links to something that is
+        -- genuinely what it means, and a racial we missed can be added to it.
+        local racOn, racAll = P.PIH_RacialCounts()
+        local racID = P.PIH_RacialFilterID and P.PIH_RacialFilterID()
+        pihSourceRow(g, t, L["Racials"], racOn, racAll,
             function() return st.racials == true end,
             function(v) P.PIH_SetAmplifier("racials", v) end,
-            nil)
+            racID and function() pihOpenFilter("custom", racID) end or nil)
     end
 
 -- ★ THE ICON ASKS WHICH PICTURE, WITH PICTURES (2026-09-09).
@@ -7223,12 +7369,53 @@ end
 -- have a graphic like we do for the other types to then pick the type i.e an actual icon or a
 -- PI icon?" -- right, because those two are as different from each other as an icon is from a
 -- square, and every other such choice on this grid is made by looking at it.
--- ⚠ A SECOND STEP RATHER THAN TWO ICON TILES, because a signal holds one effect per surface:
--- two icon tiles side by side would both be "icon" and the second could never be added. The
--- choice is about one effect, so it is asked once that effect has been chosen.
+-- ⚠ A SECOND STEP RATHER THAN THREE ICON TILES ON THE MAIN GRID, because a signal holds one
+-- effect per surface: two of them would both be "icon" and the second could never be added.
+-- The choice is about one effect, so it is asked once that effect has been chosen.
 -- ⚠ The tick on the effect card stays -- it is how you change your mind later without
 -- deleting and re-adding.
+--
+-- ★★ ...AND COOLDOWN ICONS IS THE THIRD ANSWER, NOT A FOURTH TILE (2026-09-10). It stood on
+-- the main grid beside Border and Square, which put a CONTAINER among a row of EFFECTS -- and
+-- that mismatch is the whole of what Krathe kept hitting: it disappeared from the list it was
+-- added from, it turned up under a tab that grew a moment earlier, and the tile itself
+-- vanished once one existed. "I think for icon it would be best to have a sub menu so you
+-- click Icon then it has PI Icon, Cooldown Icons, and the other icon choices?"
+-- ⇒ Three icon answers on two axes -- HOW MANY (one marker, or one per cooldown up) and WHAT
+-- PICTURE (always Power Infusion, or the buff they used). The fourth cell is nonsense: four
+-- identical Power Infusion icons in a row. So: three tiles, behind Icon, and the difference
+-- between a container and an effect stops being the user's problem.
 local pihAddPick = nil   -- nil = the surface grid, "icon" = the art choice
+
+-- ── A ROW OF ICONS, AS THE GROUP ACTUALLY DRAWS ONE ──
+-- ☠ THE "HOW MANY" AXIS IS THE ONE PROSE KEEPS FAILING AT, which is why it is drawn. The
+-- Cooldown Icons tile used to paint the single-icon thumbnail, so the tile that means "one per
+-- cooldown" was a picture of one icon -- the two answers it had to be told apart from looked
+-- identical to it.
+-- ⚠ THE GROUP'S OWN GEOMETRY, not a decorative row: TOPRIGHT, growing LEFT, at the spacing
+-- P.PIH_AddIconGroup creates it with. If those defaults change, this picture is wrong and
+-- should be changed with them.
+local function PaintIconRowOnThumb(pv, n)
+    local mock = pv.mockFrame
+    if not mock then return end
+    local size = (TYPE_DEFAULTS and TYPE_DEFAULTS.icon and TYPE_DEFAULTS.icon.size) or 24
+    local SPACING = 2
+    for i = 1, (n or 3) do
+        local x = -((i - 1) * (size + SPACING))
+        local ring = mock:CreateTexture(nil, "OVERLAY", nil, 1)
+        ring:SetColorTexture(0, 0, 0, 0.85)
+        ring:SetSize(size + 2, size + 2)
+        ring:SetPoint("TOPRIGHT", mock, "TOPRIGHT", x, 0)
+        local ico = mock:CreateTexture(nil, "OVERLAY", nil, 2)
+        ico:SetSize(size, size)
+        ico:SetPoint("CENTER", ring, "CENTER", 0, 0)
+        ico:SetTexture(DEFAULT_TILE_ICON)
+        ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    end
+    -- ⚠ pv.spellIcon IS DELIBERATELY NOT PUBLISHED. It is the handle the designer's add pane
+    -- swaps a chosen spell's art through, and this tile has no single spell to swap in -- the
+    -- point of it is that the pictures are whatever they each turn out to be.
+end
 
 local function pihBuildAddTiles(parent, yPos, Refresh)
     local tc = GetThemeColor()
@@ -7254,10 +7441,18 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
                 width   = TILE_W,
                 label   = it.label,
                 accent  = it.accent or tc,
-                tooltip = { title = it.label, lines = { it.desc } },
+                -- ⚠ THE REASON IT IS OFF GOES IN THE TOOLTIP, second line, so the tile still
+                -- answers the question a greyed control always raises. See `taken` below.
+                tooltip = { title = it.label, lines = { it.desc, it.taken } },
                 Paint   = it.Paint,
                 onClick = it.onClick,
             })
+            -- ☠ GREYED, NOT REMOVED, and the Cooldown Icons tile is why. It used to be
+            -- dropped from the grid the moment one existed, so adding it made the thing you
+            -- had just clicked disappear -- half of "it's confusing when you add Cooldown
+            -- Icons from effects". A tile that stays put and says why it is off tells you
+            -- where your thing went; a tile that vanishes tells you nothing.
+            if it.taken then tile:SetTileState("disabled") end
             tile:SetPoint("TOPLEFT", 8 + col * (TILE_W + TILE_GAP), rowTop)
             rowH = math.max(rowH, tile.layoutHeight or 72)
             if col == TILE_COLS - 1 or i == #items then
@@ -7268,7 +7463,14 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
         return rowTop - 4
     end
 
-    -- ── STEP 2: WHICH PICTURE ──
+    -- What the helper is already wearing. Read once and used by both steps: step 1 needs it to
+    -- decide whether Icon has anything left to offer, step 2 to grey the answers it has.
+    local held = {}
+    for _, s in ipairs(P.PIH_SurfacesOf("burst")) do held[s] = true end
+    local hasGroup = (P.PIH_IconGroup and P.PIH_IconGroup()) and true or false
+
+    -- ── STEP 2: WHICH ICON ──
+    -- Three answers, and the two axes they differ on are in this function's header note.
     if pihAddPick == "icon" then
         local function add(showsAura)
             local ok, why = P.PIH_AddSurface("burst", "icon", showsAura)
@@ -7278,18 +7480,37 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
             if Refresh then Refresh() end
         end
         local accent = BADGE_COLORS.icon or tc
+        -- ⚠ ONE `taken` FOR BOTH SINGLE-ICON TILES, because they are one effect seen from two
+        -- sides: the icon surface holds one record, and which picture it wears is a tick on
+        -- its card. So once either has been added, BOTH are spent -- and the tooltip has to
+        -- say that switching is done on the card rather than by adding the other one.
+        local iconTaken = held.icon and L["Already added. The card below switches which picture it shows."] or nil
         yPos = grid({
-            { label = L["Power Infusion"], accent = accent,
+            { label = L["Power Infusion"], accent = accent, taken = iconTaken,
               desc  = L["The same picture on everyone worth infusing."],
               Paint = function(pv) PaintEffectOnThumb(pv, "icon", PIH_PI_SPELL_ID) end,
               onClick = function() add(false) end },
             -- ⚠ NO PINNED ART ON THIS TILE, so it draws the designer's placeholder -- which is
             -- honest here in a way it was not before: the picture genuinely is not known until
             -- a cooldown matches.
-            { label = L["Their cooldown"], accent = accent,
+            { label = L["Their cooldown"], accent = accent, taken = iconTaken,
               desc  = L["The buff they actually used — one of them, if several are up at once."],
               Paint = function(pv) PaintEffectOnThumb(pv, "icon") end,
               onClick = function() add(true) end },
+            -- ★ THE CONTAINER, AS THE THIRD ANSWER TO "WHICH ICON". It can stand beside the
+            -- other two here in a way it never could on the main grid: there the question was
+            -- "which kind of indicator", and a group is not one.
+            { label = L["Cooldown Icons"], accent = accent,
+              taken = hasGroup and L["Already added. Remove it from the list below to change it."] or nil,
+              desc  = L["One icon per cooldown they have up, each showing its own."],
+              Paint = function(pv) PaintIconRowOnThumb(pv, 3) end,
+              onClick = function()
+                  local ok, why = P.PIH_AddIconGroup()
+                  if not ok then DF:DebugWarn("AURADESIGNER",
+                      "PIH: could not add the cooldown icons -- %s", tostring(why)) end
+                  pihAddPick = nil
+                  if Refresh then Refresh() end
+              end },
         }, yPos)
         local back = GUI:CreateButton(parent, L["Back"], 90, 20, function()
             pihAddPick = nil
@@ -7303,19 +7524,21 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
     -- ⚠ FILTERED TO WHAT THE HELPER CAN DO. Sound is left out -- it is not a surface and has
     -- its own box below -- and so is a type the signal already holds: an add button that
     -- cannot add is the lying control this panel keeps being cleaned of.
-    local held = {}
-    for _, s in ipairs(P.PIH_SurfacesOf("burst")) do held[s] = true end
-
     local items = {}
     for _, eff in ipairs(P.AddFlowEffects and P.AddFlowEffects() or {}) do
-        if eff.type ~= "sound" and not held[eff.type] then
+        local isIcon = eff.type == "icon"
+        -- ☠ ICON SURVIVES ITS OWN SURFACE BEING TAKEN, and no other type does. Behind it are
+        -- THREE answers, only two of which spend the icon surface -- so hiding the tile the
+        -- moment a single icon exists would hide the only door to Cooldown Icons. It goes
+        -- when there is genuinely nothing left behind it, and not before.
+        local exhausted = isIcon and (held.icon and hasGroup) or (not isIcon and held[eff.type])
+        if eff.type ~= "sound" and not exhausted then
             local capturedType = eff.type
-            local isIcon = capturedType == "icon"
             items[#items + 1] = {
                 label  = eff.label,
                 accent = BADGE_COLORS[eff.type] or tc,
                 -- The Icon tile opens a choice now rather than describing one behaviour.
-                desc   = isIcon and L["Power Infusion, or the cooldown they used."] or eff.desc,
+                desc   = isIcon and L["Power Infusion, their cooldown, or one per cooldown they have up."] or eff.desc,
                 Paint  = function(pv)
                     PaintEffectOnThumb(pv, capturedType, isIcon and PIH_PI_SPELL_ID or nil)
                 end,
@@ -7332,24 +7555,6 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
                 end,
             }
         end
-    end
-
-    -- ★ THE GROUP IS A CHOICE ON THIS GRID, not a tick somewhere else -- which is half of what
-    -- went wrong with the last one. Offered only while none exists: a second would be two
-    -- containers competing for the same corner.
-    if not (P.PIH_IconGroup and P.PIH_IconGroup()) then
-        items[#items + 1] = {
-            label  = L["Cooldown Icons"],
-            accent = BADGE_COLORS.icon or tc,
-            desc   = L["One icon per cooldown they have up, instead of a single marker."],
-            Paint  = function(pv) PaintEffectOnThumb(pv, "icon") end,
-            onClick = function()
-                local ok, why = P.PIH_AddIconGroup()
-                if not ok then DF:DebugWarn("AURADESIGNER",
-                    "PIH: could not add the cooldown icons -- %s", tostring(why)) end
-                if Refresh then Refresh() end
-            end,
-        }
     end
 
     if #items == 0 then
@@ -7889,7 +8094,8 @@ S.BuildEffectsTab = function()
         -- holding only this card re-anchors everything that can move.
         local stack = P.CreateCardStack and P.CreateCardStack(parent, yPos)
         yPos = S.CreateLayoutGroupCard(parent, yPos, pihGroup, stack,
-            { refreshTab = "effects", omitFilters = true, asEffect = true })
+            { refreshTab = "effects", omitFilters = true, asEffect = true,
+              Summary = P.PIH_IconGroupSummary })
     end
 
     parent:SetHeight(max(-yPos + 20, 200))

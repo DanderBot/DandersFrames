@@ -1076,6 +1076,9 @@ end
 --                sentence is "it should just show as a normal effect", and a card sitting in
 --                ACTIVE INDICATORS in the one colour this panel uses to mean "layout group"
 --                would still be saying the thing he asked it to stop saying.
+--   Summary      what the collapsed header says after the name, replacing the filter count.
+--                Paired with omitFilters: a card with no Linked Filters block and the default
+--                "1 filter" summary says nothing at all about its own contents.
 -- ============================================================
 S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
     opts = opts or {}
@@ -1114,7 +1117,8 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
     nameText:SetPoint("RIGHT", header, "RIGHT", -60, 0)
     nameText:SetMaxLines(1)
     local isFilterGroup = (group.kind == "filter")
-    nameText:SetText(group.name .. "  -  " .. S.LayoutGroupSummary(group))
+    nameText:SetText(group.name .. "  -  "
+        .. ((opts.Summary and opts.Summary(group)) or S.LayoutGroupSummary(group)))
     nameText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
     -- Delete button

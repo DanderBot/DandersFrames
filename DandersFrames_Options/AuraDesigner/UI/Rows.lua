@@ -901,7 +901,8 @@ local function BuildEffectsTabRows(ctx, shell)
     end
 
     if pihGroup then
-        MountLayoutGroup(ctx, pihGroup, { refreshTab = "effects", omitFilters = true })
+        MountLayoutGroup(ctx, pihGroup, { refreshTab = "effects", omitFilters = true,
+                                          Summary = P.PIH_IconGroupSummary })
     end
 end
 
@@ -1159,6 +1160,9 @@ end
 --   refreshTab   the sub-tab a delete or an eye rebuilds. Defaults to "layout".
 --   omitFilters  drop the LINKED FILTERS row -- the helper's group watches OUR cooldown list,
 --                which its Triggers tab owns. See S.CreateLayoutGroupCard for the argument.
+--   Summary      what the collapsed header says after the name, replacing the filter count.
+--                Paired with omitFilters, which would otherwise leave the group silent about
+--                its own contents.
 function MountLayoutGroup(ctx, group, opts)
     opts = opts or {}
     local refreshTab = opts.refreshTab or "layout"
@@ -1190,7 +1194,9 @@ function MountLayoutGroup(ctx, group, opts)
         -- ⚠ ShowsOthersOnly, NOT IsOtherTab: the helper's pool answers yes to the second and
         -- its groups are othersOnly by construction. P.ShowsOthersOnly carries the argument.
         othersOnly = isFilterGroup and ShowsOthersOnly(),
-        Summary    = function() return S.LayoutGroupSummary(group) end,
+        Summary    = function()
+            return (opts.Summary and opts.Summary(group)) or S.LayoutGroupSummary(group)
+        end,
         Apply      = function()
             RefreshPlacedIndicators()
             local E = DF.AuraDesigner and DF.AuraDesigner.Engine
