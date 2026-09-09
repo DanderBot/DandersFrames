@@ -183,6 +183,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end
     end
 
+    -- ☠ A HELPER EFFECT HAS NOTHING TO COUNT. Krathe, 2026-09-09: "the PI 'icon' has stacks
+    -- but PI does not have stacks, you only get 1 charge so that setting should at least be
+    -- off by default if not hidden."
+    -- ⚠ AND IT IS WORSE THAN A DEAD SETTING ON THE ICON: that icon's art is PINNED to Power
+    -- Infusion while the aura it matched is somebody's cooldown, so a stack count there would
+    -- be a number describing a spell the picture is not of.
+    -- ⚠ THE WHOLE GROUP GOES, not just the tick. Stack Font, Scale, Outline, Anchor and Offset
+    -- are six controls for a number that is never drawn -- leaving them and unticking one is
+    -- how a panel fills up with settings that do nothing.
+    -- ⚠ HIDDEN, NOT GREYED, and that is the opposite call from GateSWM above -- deliberately.
+    -- Show When Missing is greyed WITH A REASON because ticking it would silently break the
+    -- cooldown gate, and the user needs to know why they cannot. Stacks are not broken, they
+    -- are irrelevant, and a greyed control invites a "why?" that has no interesting answer.
+    -- ⚠ The stored value is forced false as well (pihCreateSignal stamps it, pihSweep step 7
+    -- backfills), so what renders and what is stored agree rather than relying on this.
+    local pihNoStacks = (proxy and proxy.pihSignal) and true or false
+
     local function AddWidget(widget, height)
         -- Collect mode: the card has no stack, so a loose widget belongs to
         -- whichever pane's body is running. Sized by the group, not by hand.
@@ -814,6 +831,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Stack Count sits with Duration Text: they are the two TEXT elements on an icon,
         -- and tuning either means reading them as a pair.
+        -- ⚠ ...and neither exists on a helper effect. See pihNoStacks.
+        if not pihNoStacks then
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -825,6 +844,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        end   -- pihNoStacks
         -- Duration Bar (native SetDurationBar strip — shared with the square card). Closes
         -- the run of things drawn ON the icon, and keeps all three duration/count elements
         -- together rather than stranding the bar below the conditional reveals.
@@ -955,6 +975,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             UpdateHideAboveState()
         end)
         -- Stack Count sits with Duration Text — see the icon card for why.
+        -- ⚠ ...and is skipped on a helper effect. See pihNoStacks.
+        if not pihNoStacks then
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -966,6 +988,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        end   -- pihNoStacks
         -- Duration Bar (native SetDurationBar strip — shared with the icon card)
         AddDurationBarGroup()
         -- The two conditional reveals, adjacent, in the same order and last, as on every

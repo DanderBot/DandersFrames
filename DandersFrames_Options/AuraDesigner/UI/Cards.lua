@@ -851,6 +851,14 @@ local function pihCreateSignal(key, surfaceOverride)
         -- honoured it, and the live path now skips Blizzard's SetIcon bind when it is set so
         -- the engine cannot repaint our art with the matched aura's.
         if tgt == "icon" then inst.staticSpellID = PIH_PI_SPELL_ID end
+        -- ☠ NO STACK COUNT. showStacks DEFAULTS TRUE for icons and squares, so every helper
+        -- marker was drawing one -- a number read off whichever cooldown matched, printed on
+        -- an icon whose art is pinned to Power Infusion. Krathe, 2026-09-09: "PI does not have
+        -- stacks, you only get 1 charge."
+        -- ⚠ STORED false, not merely hidden in the panel, so the record says what the frame
+        -- draws. The Stack Count group is skipped on these effects too -- see pihNoStacks in
+        -- AuraDesigner/UI/Indicators.lua for why that one is hidden rather than greyed.
+        inst.showStacks = false
         -- ⚠ A COLOUR HAS NO POSITION; AN ICON DOES. Infused defaults to an icon now, and
         -- the generic default drops it top-left, over the name text. The top-right corner is
         -- where its retired layout group sat, so this default is unchanged from what anyone was
@@ -6036,7 +6044,11 @@ P.OpenFilterPopout = OpenFilterPopout
 --    id; Krathe's eight groups are in another (see pihPurgeStrayMarks). So the stamp says
 --    "swept" on profiles that were not, and the version has to move for the fixed step to get
 --    a second chance at them. A number is cheap; a stamp that lies is not.
-local PIH_SCHEMA = 6
+-- 7: Stack Count retired on helper markers. showStacks defaults TRUE for icons and
+--    squares, so every helper marker ever created is drawing a count read off whichever
+--    cooldown matched -- on an icon whose art is pinned to Power Infusion. New ones are
+--    stamped false at creation; step 7 does the ones already out there.
+local PIH_SCHEMA = 7
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -6214,6 +6226,27 @@ local function pihSweep()
     if R then
         local ampId = pihFilterIdByName(PIH_FILTERS.amplifiers)
         if ampId and R.DeleteCustomFilter then R:DeleteCustomFilter(ampId) end
+    end
+
+    -- 7. NO STACK COUNT ON A HELPER MARKER. Placed only -- a frame-level effect has no
+    -- stacks to begin with -- and set rather than cleared, because the FIELD being absent
+    -- means "inherit", and the inherited default is true.
+    -- ⚠ EVERY STORE, like step 5: an old marker can be sitting in a spec pool (see
+    -- pihPurgeStrayMarks for how it got there). Cheap -- the pools are small and this runs
+    -- once per profile.
+    do
+        local adDB7 = GetAuraDesignerDB()
+        for _, poolT in ipairs(adDB7 and pihAllAuraPools(adDB7) or {}) do
+            for _, auraCfg in pairs(poolT) do
+                if type(auraCfg) == "table" then
+                    for _, inst in ipairs(auraCfg.indicators or {}) do
+                        if type(inst) == "table" and inst.pihSignal then
+                            inst.showStacks = false
+                        end
+                    end
+                end
+            end
+        end
     end
 
     s.schema = PIH_SCHEMA
