@@ -3019,7 +3019,10 @@ L["Show even if your Power Infusion is on cooldown"] = true
 -- dead end.
 L["Classes and Cooldowns"] = true
 L["Classes"] = true
-L["To add or remove single cooldowns, edit the list in the Filter Designer."] = true
+-- ⚠ THE BUTTON REACHES ALL FOUR SOURCES, so the note must not name one. It said "to add
+-- or remove single cooldowns, edit the list in the Filter Designer" -- true when there was
+-- one list, and a quarter of the truth once the four trigger ticks went in above it.
+L["Edit any of these lists spell by spell in the Filter Designer."] = true
 L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
 -- on a filter-owned record, so it offers no row and no delete button for it either.
@@ -3050,6 +3053,19 @@ L["Potions"] = true
 -- which is true in the designer and false here: a helper icon is PINNED to Power Infusion, so
 -- it says "infuse this player" rather than reporting which cooldown they pressed.
 L["Shows the Power Infusion icon."] = true
+-- ★ THE HELPER'S ADD GRID. Two steps for the icon -- which KIND of indicator, then which
+-- PICTURE -- because those two icons are as different from each other as an icon is from a
+-- square, and every other choice on that grid is made by looking at a thumbnail.
+-- ⚠ "Cooldown Icons" is the GROUP: one icon per cooldown the unit actually has up, as
+-- against a single marker that shows one of them.
+L["Which icon?"] = true
+L["Power Infusion"] = true
+L["The same picture on everyone worth infusing."] = true
+L["Their cooldown"] = true
+L["The buff they actually used — one of them, if several are up at once."] = true
+L["Power Infusion, or the cooldown they used."] = true
+L["Cooldown Icons"] = true
+L["One icon per cooldown they have up, instead of a single marker."] = true
 -- ★ THE ICON'S TWO CHOICES on the Power Infusion Helper's pool. The picture is pinned to
 -- Power Infusion by default -- "infuse this player" -- and can be swapped for the buff they
 -- actually used. The caveat in the first tooltip is real and not a hedge: a placed icon

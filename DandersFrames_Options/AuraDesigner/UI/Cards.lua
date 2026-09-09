@@ -1283,10 +1283,22 @@ end
 -- ⚠ BOTH END AT PIH_Apply + pihRefresh, the chokepoint every other helper mutation uses.
 -- Writing the record alone leaves the frames on the previous set until something unrelated
 -- repaints them -- the same trap the colour picker had.
-function P.PIH_AddSurface(key, surface)
+-- ⚠ `showsAura` IS THE ICON'S ART, ASKED AT ADD TIME. The add flow now picks the picture
+-- with a tile rather than leaving it to a tick on the card afterwards, so the create has to
+-- be able to carry the answer. nil / false keeps the recipe's pin (Power Infusion).
+function P.PIH_AddSurface(key, surface, showsAura)
     if not PIH_SIGNALS[key] then return false, "no such signal" end
     if not surface or surface == "none" then return false, "no surface" end
     local ok, why = pihCreateSignal(key, surface)
+    -- Applied to the record the create just made, found by its mark -- the create path has
+    -- no return channel for the instance and does not need one for a single field.
+    if ok and showsAura and surface == "icon" then
+        for _, hit in ipairs(pihFoundAll()[key] or {}) do
+            if hit.typeKey == "icon" and type(hit.cfg) == "table" then
+                hit.cfg.staticSpellID = nil
+            end
+        end
+    end
     if ok then P.PIH_Apply() end
     pihRefresh()
     return ok, why
@@ -1317,6 +1329,76 @@ function P.PIH_ReDerive()
     if P.PIH_Exists() then return end
     local E = DF.AuraDesigner and DF.AuraDesigner.Engine
     if E and E.PIH_ApplySaved then E:PIH_ApplySaved() end
+end
+
+-- ★★★ THE COOLDOWN-ICON GROUP, BACK ON PURPOSE THIS TIME (2026-09-09).
+--
+-- ☠☠ READ THE RETIREMENT NOTE ABOVE BEFORE TOUCHING THIS. A version of this group shipped,
+-- got stuck on Krathe's frames and took three attempts to delete. Every one of those failures
+-- was PLUMBING, not the idea: it was created through the pool-routed CreateLayoutGroup from
+-- whatever tab happened to be open (so it landed in the SPEC store, where no finder looked),
+-- it was switched on by a tick captioned "Icons" buried under Classes and Cooldowns, and the
+-- helper had no Layout Groups tab, so nothing could see or configure it.
+-- ⇒ WHAT IS DIFFERENT, point by point, because "we fixed it" is not an argument:
+--   · CREATED DIRECTLY INTO adDB.otherLayoutGroups. Not through CreateLayoutGroup, whose
+--     store depends on the open tab -- the one line that caused the whole mess.
+--   · ADDED BY A TILE in the helper's own add grid, beside the surfaces, so it is a visible
+--     choice rather than a side effect of a tick.
+--   · CONFIGURABLE: the helper's pool has its Layout Groups sub-tab back, and
+--     VisibleLayoutGroups already shows exactly the marked groups there. It can be moved,
+--     sized and deleted like any other group.
+--   · pihPurgeStrayMarks still exists and still finds a marked group in ANY store, so the
+--     recovery path that eventually cleaned up the old one is unchanged.
+--
+-- ⭐ WHY IT EARNS ITS PLACE: a placed icon is ONE slot and shows one arbitrary match. This
+-- shows every cooldown the unit actually has up, one icon each -- which is the answer to
+-- "allow it to show multiple icons if they have them up" and was Danders' own recommendation
+-- for the feature ("build it on merit, not as a fallback").
+-- ⚠ THE NAME IS STORED DATA, raw and never L[] -- the same rule the three filter names
+-- follow. A translated string in the profile is a name that changes when the client does.
+local PIH_ICON_GROUP_NAME = "PI Helper — Cooldowns"
+
+function P.PIH_IconGroup()
+    for _, g in ipairs((P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(false)) or {}) do
+        if type(g) == "table" and g.pihSignal then return g end
+    end
+    return nil
+end
+
+function P.PIH_AddIconGroup()
+    if P.PIH_IconGroup() then return true end
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return false, "no config" end
+    local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
+    if not cdId then return false, "could not build the cooldown list" end
+    -- ☠ THE OTHER STORE, NAMED. See the note above for what routing this through the
+    -- pool-aware creator cost last time.
+    local groups = P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(true)
+    if not groups then return false, "layout groups unavailable" end
+    if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
+    local id = adDB.nextOtherLayoutGroupID
+    adDB.nextOtherLayoutGroupID = id + 1
+    groups[#groups + 1] = {
+        id = id,
+        name = PIH_ICON_GROUP_NAME,
+        kind = "filter",
+        -- ☠ THE MARK. buildFilterGroupConfig stamps dfGate from it, which is what puts these
+        -- icons under the cooldown gate and the role exclusions with everything else.
+        pihSignal = "burst",
+        -- ☠ OTHERS ONLY IS NOT INHERITED. poolFilter reads it off THIS group; without it the
+        -- filter is plain HELPFUL and the priest's own cooldowns light their own frame. The
+        -- exact trap the first group test found on the effects.
+        othersOnly = true,
+        filterSelection = { presets = {}, customs = { [cdId] = true } },
+        anchor = "TOPRIGHT",
+        offsetX = 0,
+        offsetY = 0,
+        growDirection = "LEFT_DOWN",
+        iconsPerRow = 4,
+        spacing = 2,
+    }
+    pihRefresh()
+    return true
 end
 
 -- The surfaces a signal currently holds, in menu order (pihFoundAll sorts them).
@@ -3251,9 +3333,18 @@ end
 -- reason it cannot be computed once.
 local function SubTabDefs()
     if IsPIHelperTab() then
+        -- ⚠ LAYOUT GROUPS IS BACK (2026-09-09), and the reason it went is the reason it
+        -- returns. It was cut because "the helper has no per-spell display to arrange" --
+        -- true while every effect was a single marker. The cooldown-icon group is exactly
+        -- such a display (one icon per cooldown the unit has up), so it needs somewhere to
+        -- be moved, sized and deleted. VisibleLayoutGroups already shows ONLY the marked
+        -- groups on this pool, so the tab needs nothing of its own.
+        -- ☠ AND THAT IS THE OTHER HALF OF WHY THE OLD GROUP GOT STUCK: it had no tab to
+        -- be configured from. A display with no controls is a display nobody can turn off.
         return {
             { key = "global",  label = L["Triggers"], accent = { r = 0.51, g = 0.86, b = 0.51 } },
             { key = "effects", label = L["Effects"],  accent = nil },
+            { key = "layout",  label = L["Layout Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 } },
         }
     end
     return {
@@ -3270,7 +3361,9 @@ P.SubTabDefs = SubTabDefs
 -- ⚠ Answers for EVERY pool, so a caller never has to know which one it is on.
 local function CoerceTabForPool(tabKey)
     if IsPIHelperTab() then
-        return (tabKey == "effects") and "effects" or "global"
+        -- All three of the helper's tabs are real now; only a Debuffs-only key coerces.
+        if tabKey == "effects" or tabKey == "layout" then return tabKey end
+        return "global"
     end
     if tabKey == "effects" and IsDebuffTab() then return "layout" end
     return tabKey
@@ -6977,12 +7070,15 @@ end
             function() return st.racials == true end,
             function(v) P.PIH_SetAmplifier("racials", v) end)
 
-    t.settingLabel(g, L["Cooldowns"])
-    -- ☠ THE ESCAPE HATCH FOR WHAT THE LIST CANNOT DO -- single spells rather than whole
-    -- classes -- so it sits under its own label at the end of the box rather than opening it.
-    -- It was above the ticks on the argument that a button below a long list goes unscrolled;
-    -- naming the half it belongs to ("Cooldowns", as against "Classes") does that job without
-    -- putting a button before the list it is an escape from.
+    -- ☠ NO HEADING OF ITS OWN ANY MORE, AND "Cooldowns" WAS THE WRONG ONE TWICE OVER.
+    -- It captioned this button back when the button opened the one list there was; now there
+    -- are four sources listed directly above it and the Filter Designer edits ANY of them,
+    -- so a "Cooldowns" heading here named one quarter of what the button reaches. Krathe,
+    -- 2026-09-09: "the cooldowns header/footer of the Filter Designer link is wrong, as
+    -- really they can modify all 4 filters in it."
+    -- ⚠ The button belongs to the tick list it follows -- it is the escape hatch for what
+    -- those four ticks cannot do, single spells rather than whole sources -- so it needs no
+    -- caption between them at all.
     --
     -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
     -- scrolls to this filter, selects it and pulses it. Its own comment records why:
@@ -7021,7 +7117,7 @@ end
     -- whole addon, and a panel a user can tell apart from every other page is the thing the
     -- convention exists to prevent.
     t.note(g,
-        L["To add or remove single cooldowns, edit the list in the Filter Designer."])
+        L["Edit any of these lists spell by spell in the Filter Designer."])
 
     end
 
@@ -7049,29 +7145,142 @@ end
 -- asking which of two things an effect is about was the question Krathe cut.
 --
 -- Returns the y to carry on at.
+-- ★ THE ICON ASKS WHICH PICTURE, WITH PICTURES (2026-09-09).
+-- ⚠ IT WAS A TICK ON THE CARD, AFTER THE FACT. Krathe: "when you add an icon it should then
+-- have a graphic like we do for the other types to then pick the type i.e an actual icon or a
+-- PI icon?" -- right, because those two are as different from each other as an icon is from a
+-- square, and every other such choice on this grid is made by looking at it.
+-- ⚠ A SECOND STEP RATHER THAN TWO ICON TILES, because a signal holds one effect per surface:
+-- two icon tiles side by side would both be "icon" and the second could never be added. The
+-- choice is about one effect, so it is asked once that effect has been chosen.
+-- ⚠ The tick on the effect card stays -- it is how you change your mind later without
+-- deleting and re-adding.
+local pihAddPick = nil   -- nil = the surface grid, "icon" = the art choice
+
 local function pihBuildAddTiles(parent, yPos, Refresh)
     local tc = GetThemeColor()
+    local CW = (parent:GetWidth() or 320) - 16
+    local TILE_COLS, TILE_GAP = 3, 7
+    local TILE_W = math.floor((CW - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
 
+    local head = parent:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(head, 9, "")
+    head:SetPoint("TOPLEFT", 8, yPos)
+    head:SetText(pihAddPick and L["Which icon?"] or L["ADD AN INDICATOR"])
+    head:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    yPos = yPos - 18
+
+    -- ⚠ ONE LAYOUT FOR BOTH STEPS. The grid is the same shape whichever question is being
+    -- asked, so it is written once and fed a list -- the alternative is two flow blocks that
+    -- drift apart in tile size and spacing.
+    local function grid(items, y)
+        local rowTop, rowH = y, 0
+        for i, it in ipairs(items) do
+            local col = (i - 1) % TILE_COLS
+            local tile = CreateFrameTile(parent, {
+                width   = TILE_W,
+                label   = it.label,
+                accent  = it.accent or tc,
+                tooltip = { title = it.label, lines = { it.desc } },
+                Paint   = it.Paint,
+                onClick = it.onClick,
+            })
+            tile:SetPoint("TOPLEFT", 8 + col * (TILE_W + TILE_GAP), rowTop)
+            rowH = math.max(rowH, tile.layoutHeight or 72)
+            if col == TILE_COLS - 1 or i == #items then
+                rowTop = rowTop - (rowH + TILE_GAP)
+                rowH = 0
+            end
+        end
+        return rowTop - 4
+    end
+
+    -- ── STEP 2: WHICH PICTURE ──
+    if pihAddPick == "icon" then
+        local function add(showsAura)
+            local ok, why = P.PIH_AddSurface("burst", "icon", showsAura)
+            if not ok then DF:DebugWarn("AURADESIGNER",
+                "PIH: could not add the icon -- %s", tostring(why)) end
+            pihAddPick = nil
+            if Refresh then Refresh() end
+        end
+        local accent = BADGE_COLORS.icon or tc
+        yPos = grid({
+            { label = L["Power Infusion"], accent = accent,
+              desc  = L["The same picture on everyone worth infusing."],
+              Paint = function(pv) PaintEffectOnThumb(pv, "icon", PIH_PI_SPELL_ID) end,
+              onClick = function() add(false) end },
+            -- ⚠ NO PINNED ART ON THIS TILE, so it draws the designer's placeholder -- which is
+            -- honest here in a way it was not before: the picture genuinely is not known until
+            -- a cooldown matches.
+            { label = L["Their cooldown"], accent = accent,
+              desc  = L["The buff they actually used — one of them, if several are up at once."],
+              Paint = function(pv) PaintEffectOnThumb(pv, "icon") end,
+              onClick = function() add(true) end },
+        }, yPos)
+        local back = GUI:CreateButton(parent, L["Back"], 90, 20, function()
+            pihAddPick = nil
+            if Refresh then Refresh() end
+        end)
+        back:SetPoint("TOPLEFT", 8, yPos)
+        return yPos - 26
+    end
+
+    -- ── STEP 1: WHICH KIND OF INDICATOR ──
     -- ⚠ FILTERED TO WHAT THE HELPER CAN DO. Sound is left out -- it is not a surface and has
     -- its own box below -- and so is a type the signal already holds: an add button that
     -- cannot add is the lying control this panel keeps being cleaned of.
     local held = {}
     for _, s in ipairs(P.PIH_SurfacesOf("burst")) do held[s] = true end
 
-    local avail = {}
+    local items = {}
     for _, eff in ipairs(P.AddFlowEffects and P.AddFlowEffects() or {}) do
-        if eff.type ~= "sound" and not held[eff.type] then avail[#avail + 1] = eff end
+        if eff.type ~= "sound" and not held[eff.type] then
+            local capturedType = eff.type
+            local isIcon = capturedType == "icon"
+            items[#items + 1] = {
+                label  = eff.label,
+                accent = BADGE_COLORS[eff.type] or tc,
+                -- The Icon tile opens a choice now rather than describing one behaviour.
+                desc   = isIcon and L["Power Infusion, or the cooldown they used."] or eff.desc,
+                Paint  = function(pv)
+                    PaintEffectOnThumb(pv, capturedType, isIcon and PIH_PI_SPELL_ID or nil)
+                end,
+                onClick = function()
+                    if isIcon then
+                        pihAddPick = "icon"
+                        if Refresh then Refresh() end
+                        return
+                    end
+                    local ok, why = P.PIH_AddSurface("burst", capturedType)
+                    if not ok then DF:DebugWarn("AURADESIGNER",
+                        "PIH: could not add %s -- %s", tostring(capturedType), tostring(why)) end
+                    if Refresh then Refresh() end
+                end,
+            }
+        end
     end
 
-    local head = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(head, 9, "")
-    head:SetPoint("TOPLEFT", 8, yPos)
-    head:SetText(L["ADD AN INDICATOR"])
-    head:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yPos = yPos - 18
+    -- ★ THE GROUP IS A CHOICE ON THIS GRID, not a tick somewhere else -- which is half of what
+    -- went wrong with the last one. Offered only while none exists: a second would be two
+    -- containers competing for the same corner.
+    if not (P.PIH_IconGroup and P.PIH_IconGroup()) then
+        items[#items + 1] = {
+            label  = L["Cooldown Icons"],
+            accent = BADGE_COLORS.icon or tc,
+            desc   = L["One icon per cooldown they have up, instead of a single marker."],
+            Paint  = function(pv) PaintEffectOnThumb(pv, "icon") end,
+            onClick = function()
+                local ok, why = P.PIH_AddIconGroup()
+                if not ok then DF:DebugWarn("AURADESIGNER",
+                    "PIH: could not add the cooldown icons -- %s", tostring(why)) end
+                if Refresh then Refresh() end
+            end,
+        }
+    end
 
-    if #avail == 0 then
-        -- Every surface is in use. Not an error and not empty: say so rather than drawing a
+    if #items == 0 then
+        -- Everything is in use. Not an error and not empty: say so rather than drawing a
         -- caption over nothing.
         local none = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         none:SetPoint("TOPLEFT", 8, yPos)
@@ -7082,47 +7291,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
         return yPos - (max(none:GetStringHeight(), 12) + 10)
     end
 
-    -- ⚠ THE SAME TILES THE DESIGNER DRAWS: CreateFrameTile with PaintEffectOnThumb, so the
-    -- picture on each one is the real miniature of that effect rather than a label on a box.
-    local CW = (parent:GetWidth() or 320) - 16
-    local TILE_COLS, TILE_GAP = 3, 7
-    local TILE_W = math.floor((CW - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
-    local rowTop, rowH = yPos, 0
-    for i, eff in ipairs(avail) do
-        local col = (i - 1) % TILE_COLS
-        local capturedType = eff.type
-        -- ⚠ THE ICON TILE SAYS WHAT IT ACTUALLY DOES HERE. Its shared description is "The
-        -- spell's own artwork", which is true in the designer and false on this pool: a
-        -- helper icon is pinned to Power Infusion (see pihCreateSignal). A tooltip that
-        -- describes the other pool's behaviour is worse than none.
-        local desc = (capturedType == "icon") and L["Shows the Power Infusion icon."] or eff.desc
-        -- ⚠ AND THE TILE SHOWS THAT ICON, rather than the designer's question-mark
-        -- placeholder. The placeholder is correct where a spell is chosen in a later step;
-        -- here there is no later step, so it would simply never be replaced. Same id the
-        -- created indicator pins (pihCreateSignal), so the picture and the effect cannot
-        -- disagree.
-        local pinned = (capturedType == "icon") and PIH_PI_SPELL_ID or nil
-        local tile = CreateFrameTile(parent, {
-            width   = TILE_W,
-            label   = eff.label,
-            accent  = BADGE_COLORS[eff.type] or tc,
-            tooltip = { title = eff.label, lines = { desc } },
-            Paint   = function(pv) PaintEffectOnThumb(pv, capturedType, pinned) end,
-            onClick = function()
-                local ok, why = P.PIH_AddSurface("burst", capturedType)
-                if not ok then DF:DebugWarn("AURADESIGNER",
-                    "PIH: could not add %s -- %s", tostring(capturedType), tostring(why)) end
-                if Refresh then Refresh() end
-            end,
-        })
-        tile:SetPoint("TOPLEFT", 8 + col * (TILE_W + TILE_GAP), rowTop)
-        rowH = math.max(rowH, tile.layoutHeight or 72)
-        if col == TILE_COLS - 1 or i == #avail then
-            rowTop = rowTop - (rowH + TILE_GAP)
-            rowH = 0
-        end
-    end
-    return rowTop - 4
+    return grid(items, yPos)
 end
 
 -- ── SOUND, WHICH IS NOT A SURFACE ──
