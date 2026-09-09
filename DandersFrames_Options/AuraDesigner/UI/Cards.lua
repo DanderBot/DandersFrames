@@ -4977,7 +4977,17 @@ P.AddFlowEffects = AddFlowEffects
 -- of that type is actually created with.
 local DEFAULT_TILE_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
-local function PaintEffectOnThumb(pv, typeKey)
+-- ⚠ `staticSpellID` PAINTS THE TILE WITH ONE SPELL'S ART AND FREEZES IT THERE. The question
+-- mark is the DESIGNER's honest placeholder: its add flow asks for a type first and a spell
+-- second, so at tile-paint time there is genuinely no artwork to show and the picture is
+-- swapped in later through pv.spellIcon.
+-- ☠ ON THE POWER INFUSION HELPER'S POOL THAT NEVER HAPPENS. There is no spell step -- the
+-- cooldown list IS the spell -- so nothing ever came back to swap the placeholder, and the
+-- one tile whose whole subject is a fixed picture was the one showing a question mark.
+-- Krathe, 2026-09-09: "on the example for icon it has a ? instead of the PI icon (on the GUI,
+-- works fine to actually show PI when their CD was active)" -- the live half was already
+-- right, which is what narrowed this to the tile.
+local function PaintEffectOnThumb(pv, typeKey, staticSpellID)
     local mock = pv.mockFrame
     if not mock then return end
     local c = BADGE_COLORS[typeKey] or GetThemeColor()
@@ -4994,12 +5004,18 @@ local function PaintEffectOnThumb(pv, typeKey)
         local ico = mock:CreateTexture(nil, "OVERLAY", nil, 2)
         ico:SetSize(size, size)
         ico:SetPoint("CENTER", ring, "CENTER", 0, 0)
-        ico:SetTexture(DEFAULT_TILE_ICON)
+        local pinned = staticSpellID and C_Spell and C_Spell.GetSpellTexture
+            and C_Spell.GetSpellTexture(staticSpellID) or nil
+        ico:SetTexture(pinned or DEFAULT_TILE_ICON)
         ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         -- Swapped for the chosen spell's own artwork once section 1 is answered:
         -- "the spell's own artwork" is the whole of what this effect does, so the
         -- picture is only honest when it is that spell's.
-        pv.spellIcon = ico
+        -- ☠ ...AND NOT PUBLISHED AT ALL WHEN THE ART IS PINNED. pv.spellIcon is the handle
+        -- the add pane swaps through; leaving it set on a pinned tile would let the pane
+        -- repaint Power Infusion with whatever spell was picked, which is the one thing the
+        -- pinned art exists to prevent.
+        if not pinned then pv.spellIcon = ico end
 
     elseif typeKey == "square" then
         local size = (defs and defs.size) or 24
@@ -7069,12 +7085,18 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
         -- helper icon is pinned to Power Infusion (see pihCreateSignal). A tooltip that
         -- describes the other pool's behaviour is worse than none.
         local desc = (capturedType == "icon") and L["Shows the Power Infusion icon."] or eff.desc
+        -- ⚠ AND THE TILE SHOWS THAT ICON, rather than the designer's question-mark
+        -- placeholder. The placeholder is correct where a spell is chosen in a later step;
+        -- here there is no later step, so it would simply never be replaced. Same id the
+        -- created indicator pins (pihCreateSignal), so the picture and the effect cannot
+        -- disagree.
+        local pinned = (capturedType == "icon") and PIH_PI_SPELL_ID or nil
         local tile = CreateFrameTile(parent, {
             width   = TILE_W,
             label   = eff.label,
             accent  = BADGE_COLORS[eff.type] or tc,
             tooltip = { title = eff.label, lines = { desc } },
-            Paint   = function(pv) PaintEffectOnThumb(pv, capturedType) end,
+            Paint   = function(pv) PaintEffectOnThumb(pv, capturedType, pinned) end,
             onClick = function()
                 local ok, why = P.PIH_AddSurface("burst", capturedType)
                 if not ok then DF:DebugWarn("AURADESIGNER",
