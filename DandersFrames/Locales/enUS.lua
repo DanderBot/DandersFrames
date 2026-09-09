@@ -2983,11 +2983,19 @@ L["Triggers"] = true
 -- no signal to choose: everything added is "worth infusing".
 L["Add an effect"] = true
 L["Remove %s"] = true
--- ⚠ The way in to the actual spell list. The class ticks say WHICH classes are watched; the
--- filter behind them holds the individual cooldowns, and nothing on the page said that list
--- existed. A LINK rather than a second copy of the picker -- one place edits these.
-L["Individual cooldowns live in the filter this list drives."] = true
+-- ⚠ THE BUTTON NAMES WHAT IT EDITS, not where it goes. It read "Filter Designer" -- a
+-- destination -- which is the wrong label on the one button in a box about a specific list,
+-- and left people hunting for a second route to the cooldowns when this was that route.
 L["Edit the cooldown list"] = true
+-- ☠ AND THE NOTE SAYS THE MODEL, because everything confusing about that box comes from
+-- not knowing it: the helper matches ONE list, and the three ticks under Additional Filters
+-- do not select filters it reads -- they COPY those filters' spells into this list when
+-- ticked. Which is why there is one link and not four.
+-- ⚠ It replaces "Edit any of these lists spell by spell in the Filter Designer", which
+-- implied the other three were lists the helper reads, and
+-- "Individual cooldowns live in the filter this list drives", an older phrasing that had
+-- already lost its reader.
+L["The helper matches this one list. Ticking Trinkets, Potions or Racials copies their spells into it."] = true
 -- Clash warnings. Shown only on the three surfaces that take a single winner, and each names
 -- the remedy that already exists rather than describing the problem.
 -- The offender is NAMED: "something else colours the border" sends someone hunting through
@@ -3019,10 +3027,6 @@ L["Show even if your Power Infusion is on cooldown"] = true
 -- dead end.
 L["Classes and Cooldowns"] = true
 L["Classes"] = true
--- ⚠ THE BUTTON REACHES ALL FOUR SOURCES, so the note must not name one. It said "to add
--- or remove single cooldowns, edit the list in the Filter Designer" -- true when there was
--- one list, and a quarter of the truth once the four trigger ticks went in above it.
-L["Edit any of these lists spell by spell in the Filter Designer."] = true
 L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
 -- on a filter-owned record, so it offers no row and no delete button for it either.

@@ -6990,7 +6990,13 @@ local function pihAddClasses(g, t)
     -- the hand-written version "landed you on the page with nothing indicated, which
     -- is indistinguishable from a broken link" -- which is exactly what was here.
     local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-    local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
+    -- ⚠ IT NAMES WHAT YOU WILL BE EDITING, not where you will end up. "Filter Designer"
+    -- is a destination, and a destination is the wrong label on the one button in a box
+    -- about a specific list -- it left the user looking for a second route to the cooldowns
+    -- ("it needs a link to the cooldowns to modify too", Krathe 2026-09-09) when this WAS
+    -- that route. L["Edit the cooldown list"] already existed unused; reusing it costs a key
+    -- rather than minting one.
+    local fdBtn = GUI:CreateButton(parent, L["Edit the cooldown list"], 140, 22, function()
         GUI:OpenFilterInDesigner("custom", cfID)
         -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
         -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
@@ -7021,8 +7027,16 @@ local function pihAddClasses(g, t)
     -- long list goes unread. That argument is about THIS list; the convention is about the
     -- whole addon, and a panel a user can tell apart from every other page is the thing the
     -- convention exists to prevent.
+    -- ☠ THE NOTE HAS TO SAY THE MODEL, because everything confusing about this box comes
+    -- from not knowing it. The helper matches ONE list. The three ticks under Additional
+    -- Filters do not select filters the helper reads -- they COPY those filters' spells
+    -- into this list when ticked (pihSyncTriggerExtras). Which is why there is one link
+    -- and not four: editing "Trinkets & Items" in the Filter Designer afterwards changes
+    -- nothing the helper reads, because it took a snapshot at tick time.
+    -- ⚠ THE THREE ARE NAMED rather than called "the filters below": a note that points at
+    -- a position is a note that breaks the next time the boxes are reordered.
     t.note(g,
-        L["Edit any of these lists spell by spell in the Filter Designer."])
+        L["The helper matches this one list. Ticking Trinkets, Potions or Racials copies their spells into it."])
 
 end
 
