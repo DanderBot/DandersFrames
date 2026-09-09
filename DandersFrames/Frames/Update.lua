@@ -33,6 +33,9 @@ local UnitIsVisible = UnitIsVisible
 -- ⚠ Localised like its neighbours: the visibility-latch edge below reads it twice per
 -- full update per unit, and this file's header calls that out as a per-tick path.
 local UnitGUID = UnitGUID
+-- The player's own GUID never changes within a session: read it once (guarded), then
+-- the visibility-latch edge below compares against the cached string.
+local playerGUID
 -- ★ LATCH REGISTRIES, cached as upvalues. Frames\AuraContainer.lua is line 96 of the
 -- .toc and this file is line 99, so both tables exist by now; each is created once with
 -- `X = X or {}` and never replaced, so holding the reference is safe.
@@ -573,6 +576,11 @@ function DF:UpdateUnitFrame(frame, source)
         -- branch ran on yourself and latched you. Field, Krathe 2026-09-07: "--- UI
         -- Reload ---" at 19:19:57, "visibility latch ON unit=raid9" — his own token — at
         -- 19:19:58, one second later. Joining a raid is exactly when this window opens.
+        -- ⚠ Review note (2026-09-09): the same trail also reads as raid9 being a DIFFERENT,
+        -- out-of-range player at 19:19:58 who became him after the shuffle — in which case
+        -- a plain GUID that differs latches exactly as UnitIsUnit did. This gate is a
+        -- fail-safe, not a proven cure; the derive-not-store actuation in AuraContainer is
+        -- what heals a stranded latch either way.
         -- ⇒ Require the identity to have RESOLVED before trusting any answer, and treat
         -- unresolved as "not latchable". Two GUIDs that both read back as plain strings
         -- are settled; anything else (nil during roster build, a secret under identity
@@ -580,12 +588,15 @@ function DF:UpdateUnitFrame(frame, source)
         -- standing rule — blanking a healthy player is worse than the leak it closes.
         -- ⚠ issecretvalue FIRST and as its own statement, on BOTH values: UnitGUID is
         -- SecretWhenUnitIdentityRestricted, so comparing two of them unguarded throws.
-        local okMine, myGUID = pcall(UnitGUID, "player")
-        local okThem, uGUID  = pcall(UnitGUID, unit)
-        local mineSecret = issecretvalue and issecretvalue(myGUID) or false
+        if not playerGUID then
+            local okMine, g = pcall(UnitGUID, "player")
+            local gSecret = issecretvalue and issecretvalue(g) or false
+            if okMine and not gSecret and type(g) == "string" then playerGUID = g end
+        end
+        local myGUID = playerGUID
+        local okThem, uGUID = pcall(UnitGUID, unit)
         local themSecret = issecretvalue and issecretvalue(uGUID) or false
-        local settled = okMine and okThem and not mineSecret and not themSecret
-            and type(myGUID) == "string" and type(uGUID) == "string"
+        local settled = myGUID and okThem and not themSecret and type(uGUID) == "string"
         if settled and uGUID ~= myGUID then
             local okv, vis = pcall(UnitIsVisible, unit)
             local secret = issecretvalue and issecretvalue(vis) or false
