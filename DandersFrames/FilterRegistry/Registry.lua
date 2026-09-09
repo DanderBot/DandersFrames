@@ -161,6 +161,82 @@ function R:DuplicateFilter(srcRef, name)
     return id
 end
 
+-- ============================================================
+-- ★★ A CURATED CUSTOM FILTER — a list WE seeded, not one the user built
+-- ============================================================
+-- ☠ THE TWO KINDS OF CUSTOM FILTER BEHAVE DIFFERENTLY, AND THE DIFFERENCE IS WHOSE LIST IT
+-- IS. One the user built by adding spells: membership IS the truth, so removing a spell with
+-- the ✕ is exactly right -- they put it there. One WE seeded from a curated set (the Power
+-- Infusion Helper's cooldown list): removing a spell is destructive and unrecoverable, and
+-- there was no way back. Krathe, 2026-09-09: "it's a pre created list by us that should
+-- toggle on off and be able to reset to default if someone ticks something off."
+--
+-- ⭐ SO A CURATED FILTER GETS WHAT A PRESET HAS: a per-spell ENABLED layer over a membership
+-- nobody edits, plus a reset. Deliberately the same shape as R:IsSpellEnabled /
+-- R:SetSpellEnabled / R:ResetPreset -- the two kinds of list now answer the same questions,
+-- so the UI can offer the same controls.
+--
+-- ⚠ THE STATE LIVES ON THE FILTER, not in the preset overrides table. It is per-filter data
+-- with the filter's own lifetime: it travels with a profile export and it dies with a
+-- DeleteCustomFilter, neither of which would be true of a side table keyed by filter id.
+-- ⚠ ABSENT MEANS ENABLED, so every existing custom filter behaves byte-for-byte as before
+-- and only one that has actually been ticked off carries anything.
+-- ⚠ `dfDefaults` IS THE MARK *AND* THE ANSWER. Its presence says "we seeded this"; its
+-- contents say what back-to-default means. One field, so the two cannot disagree.
+function R:IsCustomSpellEnabled(cfId, spellID)
+    local f = self:GetCustomFilter(cfId)
+    return not (f and f.disabled and f.disabled[spellID])
+end
+
+function R:SetCustomSpellEnabled(cfId, spellID, enabled)
+    local f = self:GetCustomFilter(cfId)
+    if not f then return end
+    if enabled then
+        if f.disabled then
+            f.disabled[spellID] = nil
+            if not next(f.disabled) then f.disabled = nil end
+        end
+    else
+        f.disabled = f.disabled or {}
+        f.disabled[spellID] = true
+    end
+end
+
+-- Is this a list we seeded, i.e. one with a default to go back to?
+function R:IsCuratedFilter(cfId)
+    local f = self:GetCustomFilter(cfId)
+    return (f and type(f.dfDefaults) == "table") and true or false
+end
+
+-- Record what this filter's default membership is. Called by whoever seeds it, right after
+-- it is created and filled.
+function R:SetCuratedDefaults(cfId, spellIDs)
+    local f = self:GetCustomFilter(cfId)
+    if not f then return end
+    local d = {}
+    for _, sid in ipairs(spellIDs or {}) do
+        sid = tonumber(sid)
+        if sid then d[sid] = true end
+    end
+    f.dfDefaults = next(d) and d or nil
+end
+
+-- ⚠ RESTORES, IT DOES NOT PRUNE. Everything we seeded comes back and every tick comes back
+-- on; a spell the USER added to our list afterwards is theirs and stays. "Reset to default"
+-- here means "undo what I turned off", which is what it is reached for -- a reset that also
+-- silently threw away someone's own additions would be the destructive act this replaces.
+function R:ResetCuratedFilter(cfId)
+    local f = self:GetCustomFilter(cfId)
+    if not (f and type(f.dfDefaults) == "table") then return false end
+    f.disabled = nil
+    for sid in pairs(f.dfDefaults) do
+        -- Through AddSpellToCustom so an id still snaps to its canonical record, exactly as
+        -- it did when the list was seeded. "exists" is the ordinary case, not an error.
+        self:AddSpellToCustom(cfId, sid)
+    end
+    return true
+end
+
 -- Returns "spell" (known — snapped to canonical), "raw" (unknown id), or "exists"
 function R:AddSpellToCustom(id, spellID)
     local f = self:GetCustomFilter(id)
@@ -1083,9 +1159,15 @@ function R:ResolveSelection(selection, showAll)
         for cfId in pairs(selection.customs) do
             local f = self:GetCustomFilter(cfId)
             if f then
+                -- ⚠ THE PER-SPELL TICK ON A CURATED LIST, and it is the exact mirror of the
+                -- preset arm above (IsSpellEnabled). Absent state means enabled, so a
+                -- hand-built custom filter -- which has no ticks and never will -- resolves
+                -- byte-for-byte as it always did.
                 for sid in pairs(f.spells) do
-                    local rec = R.ByID[sid]
-                    if rec then addLiveRecordIDs(self, map, rec) else map[sid] = true end
+                    if self:IsCustomSpellEnabled(cfId, sid) then
+                        local rec = R.ByID[sid]
+                        if rec then addLiveRecordIDs(self, map, rec) else map[sid] = true end
+                    end
                 end
                 -- What is left in rawIDs is genuinely unknown to the database, so
                 -- there is no record to narrow. A direct mute is still honoured:
@@ -1093,7 +1175,9 @@ function R:ResolveSelection(selection, showAll)
                 -- "muting never reveals" has to hold on every path, not just the
                 -- ones with a record behind them.
                 for rid in pairs(f.rawIDs) do
-                    if not self:IsSpellIDMuted(rid) then map[rid] = true end
+                    if self:IsCustomSpellEnabled(cfId, rid) and not self:IsSpellIDMuted(rid) then
+                        map[rid] = true
+                    end
                 end
             end
         end

@@ -1697,11 +1697,22 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     end)
     resetBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     resetBtn:Hide()
-    -- Presets only. It used to branch for the Optional Debuffs list; that list and
-    -- its reset moved to the Debuff Bar page together.
+    -- Presets, and CURATED CUSTOM LISTS -- the ones we seeded, which have a default to go
+    -- back to (R:IsCuratedFilter). It used to branch for the Optional Debuffs list; that
+    -- list and its reset moved to the Debuff Bar page together.
+    -- ⚠ THE TWO RESETS DIFFER IN WHAT THEY UNDO, and both match what the button says.
+    -- A preset's is an overrides layer, so clearing it restores every tick. A curated
+    -- list's ALSO restores any seeded spell that went missing -- but never prunes what
+    -- the user added to it themselves, which is theirs (R:ResetCuratedFilter).
     resetBtn:SetScript("OnClick", function()
-        if selKind ~= "preset" or not selKey then return end
-        R:ResetPreset(selKey)
+        if not selKey then return end
+        if selKind == "preset" then
+            R:ResetPreset(selKey)
+        elseif selKind == "custom" and R.ResetCuratedFilter then
+            if not R:ResetCuratedFilter(selKey) then return end
+        else
+            return
+        end
         DirectFilterChangedProxy()
         RefreshAll()
     end)
@@ -2302,7 +2313,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         addBtn:Show()
         -- Reset (header row 1, red danger tone): shown when a preset differs from its
         -- shipped defaults.
-        resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey)) or false)
+        -- ⚠ SHOWN ONLY WHEN THERE IS SOMETHING TO UNDO, for both kinds. A curated list
+        -- counts as modified once anything is ticked off -- `disabled` is exactly the
+        -- overrides table's role, so the two tests are the same question.
+        local curatedModified = false
+        if selKind == "custom" and selKey and R.IsCuratedFilter and R:IsCuratedFilter(selKey) then
+            local cf = R:GetCustomFilter(selKey)
+            curatedModified = (cf and cf.disabled and next(cf.disabled)) and true or false
+        end
+        resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey))
+            or curatedModified or false)
     end
 
     -- ========== LEFT ROW POOL ==========
@@ -2702,7 +2722,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- a preset and a custom filter. Indented from the left so the nesting is
         -- structural rather than a colour cue.
         local isChild = item.child and true or false
-        local showCheck = isPreset or isChild
+        -- ★ ...AND A CURATED CUSTOM LIST TICKS TOO. A filter WE seeded has a default to
+        -- go back to (R:IsCuratedFilter), so unticking a spell is reversible and the
+        -- destructive ✕ is the wrong verb for it. A list the USER built keeps the ✕ --
+        -- there, membership IS the truth and removing what they added is exactly right.
+        local isCurated = (not isPreset) and selKind == "custom" and selKey
+            and R.IsCuratedFilter and R:IsCuratedFilter(selKey) or false
+        local showCheck = isPreset or isChild or isCurated
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", isChild and 18 or 0, -y)
         row:SetPoint("TOPRIGHT", 0, -y)
@@ -2820,6 +2846,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                     -- The row's own tooltip already carries the reason, so a refusal is
                     -- a no-op rather than a tick that bounces back unexplained.
                     if not R:SetSpellIDMuted(childRec, sid, tracked) then return end
+                    DirectFilterChangedProxy()
+                    RefreshAll()
+                end
+            elseif isCurated then
+                -- Our own seeded list: the tick writes the filter's own disabled set,
+                -- which ResolveSelection honours. Reset to Default clears it wholesale.
+                local cfKey, sid = selKey, item.id
+                row._onAction = function()
+                    R:SetCustomSpellEnabled(cfKey, sid,
+                        not R:IsCustomSpellEnabled(cfKey, sid))
                     DirectFilterChangedProxy()
                     RefreshAll()
                 end
@@ -3225,6 +3261,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 put("ALL", {
                     id = id, name = nm, icon = icon or FALLBACK_ICON,
                     chip = name and L["not in database"] or L["unknown ID"],
+                    -- Curated lists tick their raw ids too; see the spells arm.
+                    enabled = (selKind == "custom" and selKey)
+                        and R:IsCustomSpellEnabled(selKey, id) or nil,
                     raw = true, tooltipID = id,
                 })
             end
@@ -3257,6 +3296,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                             put(rec.class, {
                                 rec = rec, id = sid, name = name, icon = icon,
                                 chip = RecordChip(rec),
+                                -- On a curated list the row shows a tick, so it needs
+                                -- the state to draw. Absent on a hand-built filter,
+                                -- whose rows show the ✕ and never read this.
+                                enabled = R:IsCustomSpellEnabled(selKey, sid),
                                 tooltipID = rec.id,
                             })
                             putRecordChildren(rec.class, rec, name)

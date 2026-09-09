@@ -326,6 +326,27 @@ local function pihEnsureFilter(name, presetKeys, extraIDs, wipeFirst)
         end
         for _, sid in ipairs(extraIDs or {}) do R:AddSpellToCustom(id, sid) end
     end
+    -- ★ RECORD WHAT "DEFAULT" MEANS, every time -- not only on the create branch.
+    -- ☠ THE MARK IS WHAT MAKES THE LIST BEHAVE LIKE OURS: with dfDefaults set, the Filter
+    -- Designer gives its rows the on/off tick instead of the destructive ✕ and offers Reset
+    -- to Default (R:IsCuratedFilter). Krathe, 2026-09-09: "it's a pre created list by us that
+    -- should toggle on off and be able to reset to default if someone ticks something off."
+    -- ⚠ OUTSIDE THE SEED BRANCH ON PURPOSE. An EXISTING list is not re-seeded (the note above
+    -- says why: a list that quietly refills itself is not a list anyone can own) -- but a
+    -- profile made before the mark existed still needs it, and re-stamping the same values on
+    -- every call is free and idempotent.
+    -- ⚠ THE DEFAULT IS THE RECIPE'S SET, not the list's current contents. Anything the user
+    -- has added since is theirs and is deliberately not part of what a reset restores.
+    do
+        local defaults = {}
+        for _, catKey in ipairs(presetKeys or {}) do
+            for _, rec in ipairs((R.ByCategory and R.ByCategory[catKey]) or {}) do
+                defaults[#defaults + 1] = rec.id
+            end
+        end
+        for _, sid in ipairs(extraIDs or {}) do defaults[#defaults + 1] = sid end
+        if R.SetCuratedDefaults then R:SetCuratedDefaults(id, defaults) end
+    end
     return id
 end
 
