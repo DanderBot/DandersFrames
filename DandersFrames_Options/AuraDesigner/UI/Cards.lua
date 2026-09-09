@@ -412,7 +412,8 @@ local function pihFoundAll()
     end
     return out
 end
-P.PIH_FoundAll = pihFoundAll
+-- ⚠ P.PIH_FoundAll was exported here and never read anywhere. The LOCAL is live -- the create
+-- gate, PIH_SurfacesOf and pihPurgeStrayMarks all use it; only the export went.
 
 local function pihFound()
     local out = {}
@@ -995,54 +996,32 @@ local function pihPurgeStrayMarks()
     return groups, effects
 end
 
--- ⚠ `surface` IS OPTIONAL, and its absence means what it always meant: remove the signal's
--- PRIMARY representation. Named, it removes exactly that one and leaves the signal's other
--- surfaces alone -- which is what the per-effect remove button on the Effects tab needs now
--- that a signal can hold several.
-local function pihDeleteSignal(key, surface)
-    local hit
-    if surface then
-        for _, h in ipairs(pihFoundAll()[key] or {}) do
-            if h.typeKey == surface then hit = h break end
-        end
-    else
-        hit = pihFound()[key]
-    end
-    if not hit then return false end
-    -- Before anything is deleted: the doomed cfg is the user's work (see the stash block).
-    pihStash(key, hit)
-    local pool = pihOtherPoolRead()
-    local auraCfg = pool and pool[hit.auraName]
-    if hit.indicatorID and auraCfg and type(auraCfg.indicators) == "table" then
-        -- A placed representation: remove the instance, not a frame key. Direct removal
-        -- rather than RemoveIndicatorInstance for the same reason the prune below bypasses
-        -- CleanupAdHocAura -- that helper resolves the pool off the OPEN TAB, and ours is
-        -- always the Other pool.
-        for i, inst in ipairs(auraCfg.indicators) do
-            if inst.id == hit.indicatorID then table.remove(auraCfg.indicators, i) break end
-        end
-    elseif auraCfg then
-        auraCfg[hit.typeKey] = nil
-    end
-    -- Drops the record once its last effect is gone -- the same prune the generic delete button
-    -- runs, so unticking here and deleting the row there leave the profile identical.
-    -- ⚠ NOT S.CleanupAdHocAura. It prunes an emptied record out of `CurrentAuraPool()` -- the
-    -- pool of whichever tab is open -- and ours are always in the Other Buffs pool, so it would
-    -- do nothing whenever the user happened to be on My Buffs. Same rule, same test
-    -- (AuraHoldsNoEffects, its own predicate), applied to the pool the record is actually in.
-    if pool and type(auraCfg) == "table" and P.AuraHoldsNoEffects
-        and P.AuraHoldsNoEffects(auraCfg) then
-        pool[hit.auraName] = nil
-    end
-    return true
-end
-
+-- ⚠ pihDeleteSignal WENT WITH ITS LAST CALLER (2026-09-09). It removed ONE of a signal's
+-- surfaces and stashed the doomed cfg on the way out; both of its callers were the retired
+-- surface API (PIH_SetSurface's move, PIH_RemoveSurface's per-row ✕).
+-- ⚠ NOTHING WAS LOST WITH IT. Removing one effect is the designer's own ✕ now, and that
+-- is deliberate rather than a round trip -- there is nothing to stash. The stash still
+-- runs where it is meant to: P.PIH_Remove, which is the ENABLE TICK going off, and which
+-- is the one path whose whole promise is that your customisations come back.
 
 -- ─────────────────────────────────────────────────────────────
--- WHICH SURFACE A SIGNAL DRAWS ON
+-- ⚠⚠ THE CLASH WARNING — INTACT, AND CURRENTLY UNREACHED. FLAGGED FOR KRATHE 2026-09-09.
 -- ─────────────────────────────────────────────────────────────
-local PIH_SURFACE_ORDER = { "border", "healthbar", "background", "nametext", "healthtext" }
-
+-- ☠ THE HAZARD IT WARNS ABOUT IS STILL REAL. Border, name text and health text take a SINGLE
+-- winner (pickWinner resolves one candidate per surface from config alone), so a helper border
+-- and one of the user's own borders on the same unit means one of them silently does not draw.
+-- Health bar and background are MULTI and cannot clash -- see PIH_CONTENDED below.
+-- ☠ WHAT WENT IS THE PLACE IT WAS SHOWN, not the machinery. The warning was rendered on the
+-- old per-signal rows, and those rows were replaced by the designer's own effect cards, which
+-- know nothing about it. So P.PIH_ClashOn / PIH_SiblingContends / PIH_SelfContends and the
+-- three helpers under them (pihPools, pihEffectName, pihContends) have NO CALLERS today.
+-- ⇒ KEPT RATHER THAN DELETED, deliberately and pending Krathe's call: deleting a safety
+-- warning is not a cleanup, and re-deriving this from scratch later costs far more than the
+-- lines do. If the answer is "we do not want it", this whole block goes in one cut.
+-- ⚠ Do not let it rot silently: it is dead code that LOOKS live, which is the one thing this
+-- file keeps auditing itself for.
+-- ⚠ PIH_SURFACE_ORDER went with the dropdown that walked it (see the note further down).
+-- ─────────────────────────────────────────────────────────────
 -- ☠ ONLY THREE OF THE FIVE CONTEND, and the difference is watched in game, not read.
 -- Border, name text and health text resolve through `pickWinner`, which takes ONE winner per
 -- surface from config alone and tears every other candidate down. Health bar and background
@@ -1116,32 +1095,11 @@ function P.PIH_ClashOn(surface)
     return n, name
 end
 
--- Which OTHER helper signal is sitting on this surface, if any.
--- ⚠ ONLY A SIGNAL ON THE *SAME RECORD* BLOCKS A SURFACE, and the first version of this got
--- that wrong -- it refused ANY signal sharing a surface, which quietly forbade a configuration
--- that works perfectly.
---
--- The rule survives the two-signal shape even though nothing shares a record today: a record
--- holds one effect per surface, so two signals on one record and one surface is an overwrite --
--- the second replaces the first and a signal disappears. Kept because it is a fact about the
--- store rather than about how many signals happen to exist.
---
--- ☠ "Already infused" is a DIFFERENT record, and there the answer flips. Two effects on
--- different records CAN share a health bar or a background -- watched in game 2026-08-23, two
--- tints on one unit rendered both colours mixed, because collectFrameTints is multi. Blocking
--- that was us inventing a limit the engine does not have. On border or either text it is a real
--- contest rather than an impossibility, and a contest is what the clash warning is for.
-local function pihSurfaceTakenBy(surface, exceptKey)
-    local mine = PIH_SIGNALS[exceptKey]
-    if not mine then return nil end
-    for key, hit in pairs(pihFound()) do
-        local other = PIH_SIGNALS[key]
-        if key ~= exceptKey and hit.typeKey == surface and other and other.list == mine.list then
-            return key
-        end
-    end
-    return nil
-end
+-- ⚠ pihSurfaceTakenBy WENT WITH THE DROPDOWN (2026-09-09). It answered "which other
+-- signal is already on this surface", a question only the swap logic ever asked -- the add
+-- tiles simply do not offer a surface the signal already holds, and two signals on
+-- DIFFERENT records never blocked each other in the first place. The contention that IS
+-- real on border and the two texts is pihSiblingContends' business, below.
 
 -- The same question for the CLASH WARNING, which cares about contention rather than
 -- impossibility: another of our signals, on a different record, on a surface that takes a
@@ -1174,77 +1132,16 @@ function P.PIH_SelfContends(surface, key)
     return (hit and pihContends(surface, hit.cfg)) and true or false
 end
 
-function P.PIH_SurfaceOf(key)
-    local hit = pihFound()[key]
-    if hit then return hit.typeKey end
-    -- ⚠ THE "icons-only" ANSWER WENT WITH THE ICON GROUP (schema 5). With no group there is
-    -- no state where a signal is on and holds no surface, so an absent mark is simply absent.
-    return nil
-end
-
--- The dropdown's option set, rebuilt per signal because what is available depends on where the
--- other two are sitting.
--- ⭐ EVERY SURFACE IS LISTED, AND AN OCCUPIED ONE SAYS WHAT PICKING IT DOES.
-function P.PIH_SurfaceOptions(key)
-    local labels = S.FRAME_LEVEL_LABELS or {}
-    local opts = { _order = {} }
-    for _, surface in ipairs(PIH_SURFACE_ORDER) do
-        -- Naming the swap is what makes a taken row honest. Two earlier answers were worse and
-        -- are worth knowing about before anyone changes this back:
-        --
-        -- ☠ GREYING IT IS NOT AVAILABLE. The dropdown has no disabled-row concept. `header = true`
-        -- is the only thing that stops a row being clickable, and it is the GROUP LABEL treatment,
-        -- not a disabled state: it uppercases the text, shrinks it to 0.85, draws a separator, and
-        -- sets a flag that INDENTS EVERY ROW BELOW IT -- so one unavailable entry turned the rest
-        -- of the menu into its children. Asked for as a real `disabled` row; until it exists,
-        -- greying here is a misuse of somebody else's mechanism.
-        --
-        -- ⚠ HIDING IT WAS THE OTHER ANSWER, and the user rejected it for the right reason: a
-        -- missing row reads as "that was never possible", when it is possible and simply taken.
-        local label   = labels[surface] or surface
-        local takenBy = pihSurfaceTakenBy(surface, key)
-        opts[surface] = takenBy and format(L["%s (swap with %s)"], label, pihLabel(takenBy)) or label
-        opts._order[#opts._order + 1] = surface
-    end
-    -- "None" makes colour VISIBLY optional -- it is the entry that lets one row enumerate
-    -- colour-only / icons-only / both. First in the list (user's call): an opt-out reads as
-    -- the baseline you depart from, not a footnote you discover. An icons-and-sound-only
-    -- setup is first-class. L["None"] is the addon's existing key, reused.
-    opts.none = L["None"]
-    table.insert(opts._order, 1, "none")
-    -- ⭐ SQUARE STAYS. A flat colour block is a HIGHLIGHT, which is all this feature ever
-    -- needs to say: someone popped a cooldown, mark them. It costs one colour and reads at
-    -- a glance, which is the whole job.
-    -- ☠☠ ICON IS GONE (schema 4, 2026-09-08), AND THE REASON IS THE FEATURE'S SCOPE, NOT ITS
-    -- SHAPE. An icon shows a SPECIFIC BUFF'S ARTWORK, so offering one implies the helper
-    -- tracks which cooldown each player popped -- and it does not need to. Krathe:
-    -- "we don't need to track each buff just the fact someone has popped a CD and we
-    -- highlight in some form." An icon promises per-buff detail the feature does not
-    -- deliver, which is a control that lies about its own scope.
-    -- ⚠ I ARGUED THE OPPOSITE ONE COMMIT AGO -- cut Square as "a placement", kept Icon as
-    -- "the one picture that carries meaning". That was shape reasoning; this is scope
-    -- reasoning, and scope wins. Recorded so the swap does not look like drift.
-    -- ⚠ Existing Icon surfaces migrate to Square (pihSweep step 4) -- the nearest thing
-    -- that still marks the same unit in the same place.
-    opts.square = L["Square"]
-    opts._order[#opts._order + 1] = "square"
-    return opts
-end
-
--- ☠ THE COLOUR TRAVELS; NOTHING ELSE DOES. Decided 2026-08-23 with the user. The five surfaces
--- do not share a settings vocabulary -- a border has a style, a thickness and an inset, a health
--- bar has Replace-vs-Tint and a blend -- so carrying settings across would mean inventing
--- equivalences that do not exist. The colour is the one thing every surface genuinely has, and
--- it is read from the OLD surface's key and written to the NEW one, because a border keeps its
--- colour under a different name (see pihColorKey).
--- What travels when a signal moves: its colour and its condition chain, nothing else. Captured
--- BEFORE anything is deleted, because a swap deletes both effects before rebuilding either.
-local function pihCapture(hit)
-    return {
-        colour     = hit.cfg[pihColorKey(hit.typeKey)],
-        conditions = hit.cfg.conditions,
-    }
-end
+-- ☠☠ THE SURFACE DROPDOWN'S WHOLE API LIVED HERE AND IS GONE (2026-09-09).
+-- P.PIH_SurfaceOf / P.PIH_SurfaceOptions / P.PIH_SetSurface, plus pihCapture and
+-- pihSurfaceTakenBy and the PIH_SURFACE_ORDER list they walked. They answered ONE question --
+-- "which single surface is this signal on" -- which is why picking an occupied row had to
+-- SWAP two signals: there was nowhere for both to live.
+-- ⇒ A signal holds SEVERAL surfaces now and they are added and removed one at a time
+-- through the designer's own tiles and effect cards, so "which one" has no answer to give and
+-- swapping is not a concept. Every caller went with the dropdown.
+-- ⚠ pihPlace SURVIVES: pihSweep's step 4 still uses it to migrate an old Icon to a Square.
+-- It is the only reader left, and it passes its own carry table inline.
 
 local function pihPlace(key, auraName, surface, carried)
     -- Bar rides with icon and square for the reason pihCreateSignal spells out: all three are
@@ -1300,66 +1197,6 @@ end
 --
 -- Only ever fires between signals on the SAME record, which is the only case that cannot simply
 -- coexist; see pihSurfaceTakenBy.
-function P.PIH_SetSurface(key, surface)
-    if not PIH_SIGNALS[key] then return false, "no such signal" end
-    local found = pihFound()
-    local hit = found[key]
-
-    -- "No colour": drop the effect and nothing else. With icons on, the signal lives on as
-    -- icons-only; with icons off there is nothing left and the signal honestly reads off.
-    if surface == "none" then
-        if hit then pihDeleteSignal(key); pihRefresh() end
-        return true
-    end
-    -- Coming FROM icons-only: no effect exists to move, so create one where asked. Fresh
-    -- default colour -- there was no colour to carry.
-    if not hit then
-        local ok, why = pihCreateSignal(key, surface)
-        pihRefresh()
-        return ok, why
-    end
-    if hit.typeKey == surface then return true end
-
-    -- ☠ A MOVE TOUCHING A PLACED REPRESENTATION takes the simple route: capture,
-    -- delete, recreate on the same record. No swap machinery -- instances are per-id and
-    -- never contend -- and the frame-swap path below would try to nil a frame key the
-    -- instance does not live under.
-    if hit.indicatorID or surface == "icon" or surface == "square" or surface == "bar" then
-        local carried = pihCapture(hit)
-        pihDeleteSignal(key)
-        if not pihPlace(key, hit.auraName, surface, carried) then
-            return false, "could not create the effect"
-        end
-        pihRefresh()
-        return true
-    end
-
-    local pool = pihOtherPoolRead()
-    local auraCfg = pool and pool[hit.auraName]
-    if not auraCfg then return false, "the record went missing" end
-
-    local swapKey = pihSurfaceTakenBy(surface, key)
-    local swapHit = swapKey and found[swapKey] or nil
-
-    -- Anything else sitting there is not ours to move. Cannot happen on a record identified by a
-    -- helper spell list, but refusing beats overwriting something we never read.
-    if auraCfg[surface] ~= nil and not swapHit then return false, "that surface is occupied" end
-
-    local mine, theirs = pihCapture(hit), swapHit and pihCapture(swapHit) or nil
-    local vacated = hit.typeKey
-
-    auraCfg[vacated] = nil
-    if swapHit then auraCfg[swapHit.typeKey] = nil end
-
-    if not pihPlace(key, hit.auraName, surface, mine) then
-        return false, "could not create the effect"
-    end
-    if swapHit then pihPlace(swapKey, swapHit.auraName, vacated, theirs) end
-
-    pihRefresh()
-    return true
-end
-
 -- ★★★ THE MULTI-SURFACE API (2026-09-08) — add and remove ONE surface at a time.
 -- ☠ THESE REPLACE THE DROPDOWN'S "MOVE THE SIGNAL THERE" MODEL. PIH_SetSurface answers
 -- "which single surface is this signal on", which is why picking an occupied one had to SWAP
@@ -1379,13 +1216,31 @@ function P.PIH_AddSurface(key, surface)
     return ok, why
 end
 
-function P.PIH_RemoveSurface(key, surface)
-    if not PIH_SIGNALS[key] then return false, "no such signal" end
-    if not surface then return false, "no surface" end
-    local removed = pihDeleteSignal(key, surface)
-    if removed then P.PIH_Apply() end
-    pihRefresh()
-    return removed
+-- ⚠ P.PIH_RemoveSurface WENT WITH THE PER-SIGNAL ROWS (2026-09-09). Removing one of a
+-- signal's surfaces is the designer's ✕ on the effect card now, which deletes the record
+-- the same way it deletes any other. What that button did NOT do is re-derive the engine
+-- when the last helper effect goes -- see P.PIH_ReDerive below, which is the half worth
+-- keeping from this function.
+
+-- ★★★ THE RE-DERIVE, FOR DELETES THAT DID NOT COME THROUGH THE HELPER (2026-09-09).
+--
+-- ☠☠ THE CHOKEPOINT STOPPED BEING A CHOKEPOINT WHEN THE EFFECTS TAB BECAME THE DESIGNER'S.
+-- pihRefresh's own note records why it exists: "Danders' review found the resident half left
+-- armed -- events registered, sound armed -- for a helper with nothing in it". Every helper
+-- mutation used to end there, so the re-derive could not be missed.
+-- ⇒ Helper effects are now deleted by the DESIGNER'S OWN card, whose ✕ removes the record and
+-- runs the AD refresh path -- and knows nothing about the helper. So deleting your last PI
+-- effect leaves PIH_Exists() false while the watcher and the sound stay registered for a
+-- feature that no longer has anything in it. Exactly the state that review caught, reachable
+-- again by a different door.
+-- ⚠ IDEMPOTENT AND CHEAP: one pool scan, only on a delete, never in a frame update. Safe to
+-- call when the deleted effect was not ours -- it early-outs on PIH_Exists.
+-- ⚠ IT DOES NOT REFRESH THE UI. The caller is mid-delete and already runs the designer's own
+-- redraw; this is only the ENGINE half, which is the half the designer cannot know about.
+function P.PIH_ReDerive()
+    if P.PIH_Exists() then return end
+    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+    if E and E.PIH_ApplySaved then E:PIH_ApplySaved() end
 end
 
 -- The surfaces a signal currently holds, in menu order (pihFoundAll sorts them).
@@ -4616,6 +4471,11 @@ S.CreateEffectCard = function(parent, yPos, effect)
         delBtn = GUI:CreateCloseButton(header, {
             size = 22,
             onClick = function()
+                -- ⚠ ASKED BEFORE THE REMOVAL, because after it there is no config left to
+                -- ask. See P.PIH_ReDerive: the helper's engine half is not the designer's
+                -- business, and deleting its last effect through this button would otherwise
+                -- leave the watcher and the sound armed for a feature with nothing in it.
+                local wasPIH = effect.config and effect.config.pihSignal
                 if isPlaced then
                     RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
                 else
@@ -4623,6 +4483,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                     if auraCfg then auraCfg[effect.typeKey] = nil end
                     S.CleanupAdHocAura(effect.auraName)  -- drop emptied ad-hoc "#<id>" entries
                 end
+                if wasPIH and P.PIH_ReDerive then P.PIH_ReDerive() end
                 expandedCards[cardKey] = nil
                 S.SwitchTab("effects")
                 RefreshPlacedIndicators()

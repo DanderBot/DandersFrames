@@ -2973,16 +2973,11 @@ L["Triggers"] = true
 -- ⚠ "Remove %s" TAKES THE SURFACE'S OWN NAME -- "Remove Border", "Remove Health Bar" -- and
 -- that is not decoration: with several effects listed, a bare "Remove" would sit beside three
 -- rows looking identical and the user could not tell which one it acted on.
--- ★ The Effects tab is the DESIGNER'S add flow, scoped to the helper: two route cards (which
--- signal) and then the designer's own effect tiles. Its heading is the designer's
--- "ADD AN INDICATOR" one verb across -- an EFFECT, because on this page you are not adding a
--- thing to track, only a way of showing what the helper already watches.
-L["ADD AN EFFECT"] = true
-L["Someone has popped a cooldown worth infusing"] = true
-L["Someone already has it, so do not double up"] = true
--- ⚠ Names the NEXT STEP, not the absence. "Nothing here" tells someone what they can already
--- see; this tells them the two clicks that fix it.
-L["Nothing yet. Pick a signal above, then choose how it should show."] = true
+-- ☠ THE HELPER'S PRIVATE EFFECTS TAB IS GONE (2026-09-09) AND SEVEN KEYS WENT WITH IT:
+-- its own "ADD AN EFFECT" heading, the two route cards that asked WHICH SIGNAL, their
+-- descriptions, its empty-state line, and the surface dropdown's swap label. The Effects
+-- tab is the DESIGNER'S now -- same heading, same tiles, same effect cards -- and there is
+-- no signal to choose: everything added is "worth infusing".
 L["Add an effect"] = true
 L["Remove %s"] = true
 -- ⚠ The way in to the actual spell list. The class ticks say WHICH classes are watched; the
@@ -2990,14 +2985,6 @@ L["Remove %s"] = true
 -- existed. A LINK rather than a second copy of the picker -- one place edits these.
 L["Individual cooldowns live in the filter this list drives."] = true
 L["Edit the cooldown list"] = true
--- The signals. Each label has to stand alone with just the line beneath it for context.
-L["Big cooldown"] = true
--- How the surface pickers behave. What the controls cannot show on their own: which
--- surfaces stack, and which pick one winner.
--- Surface picker. Every surface is listed; one already held by a signal on the same spell list
--- says what picking it does, because the two trade places rather than one being refused.
-L["%s (swap with %s)"] = true
-L["Already has active Power Infusion"] = true
 -- Clash warnings. Shown only on the three surfaces that take a single winner, and each names
 -- the remedy that already exists rather than describing the problem.
 -- The offender is NAMED: "something else colours the border" sends someone hunting through

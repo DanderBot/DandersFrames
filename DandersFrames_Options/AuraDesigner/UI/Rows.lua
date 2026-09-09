@@ -464,6 +464,8 @@ local function MountEffect(ctx, effect, shell)
         delBtn = GUI:CreateCloseButton(section, {
             size = 22,
             onClick = function()
+                -- Asked BEFORE the removal; see P.PIH_ReDerive and the card layout's twin.
+                local wasPIH = effect.config and effect.config.pihSignal
                 if isPlaced then
                     RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
                 else
@@ -471,6 +473,7 @@ local function MountEffect(ctx, effect, shell)
                     if auraCfg then auraCfg[effect.typeKey] = nil end
                     S.CleanupAdHocAura(effect.auraName)
                 end
+                if wasPIH and P.PIH_ReDerive then P.PIH_ReDerive() end
                 expandedCards[cardKey] = nil
                 S.SwitchTab("effects")
                 RefreshPlacedIndicators()
