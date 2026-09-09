@@ -2983,19 +2983,6 @@ L["Triggers"] = true
 -- no signal to choose: everything added is "worth infusing".
 L["Add an effect"] = true
 L["Remove %s"] = true
--- ⚠ THE BUTTON NAMES WHAT IT EDITS, not where it goes. It read "Filter Designer" -- a
--- destination -- which is the wrong label on the one button in a box about a specific list,
--- and left people hunting for a second route to the cooldowns when this was that route.
-L["Edit the cooldown list"] = true
--- ☠ AND THE NOTE SAYS THE MODEL, because everything confusing about that box comes from
--- not knowing it: the helper matches ONE list, and the three ticks under Additional Filters
--- do not select filters it reads -- they COPY those filters' spells into this list when
--- ticked. Which is why there is one link and not four.
--- ⚠ It replaces "Edit any of these lists spell by spell in the Filter Designer", which
--- implied the other three were lists the helper reads, and
--- "Individual cooldowns live in the filter this list drives", an older phrasing that had
--- already lost its reader.
-L["The helper matches this one list. Ticking Trinkets, Potions or Racials copies their spells into it."] = true
 -- Clash warnings. Shown only on the three surfaces that take a single winner, and each names
 -- the remedy that already exists rather than describing the problem.
 -- The offender is NAMED: "something else colours the border" sends someone hunting through
@@ -3023,9 +3010,11 @@ L["Groups without assigned roles show everyone."] = true
 -- still defaults to gating, so this ships UNTICKED and nobody's saved choice changed meaning.
 L["Show even if your Power Infusion is on cooldown"] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
--- finer; the pointer names the editor that does go spell by spell, so the limit is not a
--- dead end.
-L["Classes and Cooldowns"] = true
+-- finer; the row links out to the editor that does go spell by spell, so the limit is not
+-- a dead end.
+-- ⚠ L["Classes and Cooldowns"] WENT WHEN THE BOX SPLIT IN TWO. It named a box holding
+-- both, which is the arrangement that made the class ticks look as if they reached all
+-- four sources. The classes have their own box (L["Classes"]) below the sources now.
 L["Classes"] = true
 L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
@@ -3035,13 +3024,19 @@ L["Only plays while the helper is showing."] = true
 -- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
 -- missing-mode render path is the one place the helper's cooldown gate cannot reach.
 L["Not available on a Power Infusion Helper signal."] = true
--- ★ THE SOURCES THE CLASS TICKS CANNOT REACH, in a box of their own. Trinkets and potions
--- are items with no class; racials are tagged class = "ALL". The class ticks narrow only
--- the cooldown list, which is why that one lives with them under its own header instead.
--- Krathe, 2026-09-09: "the classes, they only effect the Cooldowns correct? Maybe we do
--- separate that out."
+-- ★ THE FOUR TRIGGER SOURCES, one row each with its count and a link to its own list.
+-- ⚠ THE ROWS REPLACED A SINGLE BUTTON AND A NOTE explaining that three of the four were
+-- not really editable -- Krathe: "the note below the link to edit the cooldown list is
+-- silly, the additional filters can also be edited, this really is an unclear mess." They
+-- ARE editable now (pihAmplifierIDs honours each preset's ticks and the copy is re-taken
+-- on every visit), so each row simply offers the way in and the panel says nothing.
+-- ⚠ "Class cooldowns" is the row for OUR curated list; the Classes box below narrows it,
+-- which is why that row has no tick of its own.
 -- ⚠ The counts are appended to these labels at render time and need no translating.
-L["Additional Filters"] = true
+L["Trigger Filters"] = true
+L["Class cooldowns"] = true
+L["Edit this list"] = true
+L["Open it in the Filter Designer."] = true
 -- The three sources in Additional Filters. Each tick puts that source's spells into the ONE
 -- list the helper matches on, so ticking Trinkets makes a trinket proc fire whatever effects
 -- have been added on the Effects tab.

@@ -734,12 +734,27 @@ end
 -- ☠ RACIALS ARRIVE AS IDS, NOT AS A PRESET. Every racial record carries only
 -- `cats = { racials = true }`, so there is no offensive-racial category to intersect -- the
 -- four worth marking are listed by hand in PIH_RACIAL_IDS.
-local function pihAmplifierIDs(s)
+-- ⚠ `everything` IGNORES THE PRESET TICKS, and the two callers need opposite answers.
+-- The WANT set is what should be in our list, so it honours them. The REMOVAL UNIVERSE is
+-- everything these ticks could ever have put there, so it must not -- filter it and a spell
+-- the user has just unticked in the preset drops out of the universe, is never visited by
+-- the removal loop, and stays in our list forever. The narrowing that makes preset edits
+-- REACH the helper would have made one direction of them unreachable.
+local function pihAmplifierIDs(s, everything)
     local R = DF.FilterRegistry
     local out = {}
+    -- ★ THE PRESET'S OWN TICKS ARE HONOURED, which is what makes editing one REACH the
+    -- helper. This walked every record in the category, so unticking a trinket in the
+    -- Filter Designer changed nothing here -- the panel offered a route to a list whose
+    -- edits went nowhere, and no wording could make that read as anything but broken.
+    -- ⚠ Paired with the re-sync on the Triggers build (S.BuildPIHelperCard): reading the
+    -- ticks is only half of it if nobody reads them again after they change.
     local function addCat(catKey)
         for _, rec in ipairs((R and R.ByCategory and R.ByCategory[catKey]) or {}) do
-            if rec.id then out[#out + 1] = rec.id end
+            if rec.id and (everything or not R.IsSpellEnabled
+                or R:IsSpellEnabled(catKey, rec)) then
+                out[#out + 1] = rec.id
+            end
         end
     end
     if s.potions  then addCat(PIH_SEED.amplifiers.potions)  end
@@ -829,7 +844,7 @@ local function pihSyncTriggerExtras(s)
     if not id then return end
     local want = {}
     for _, sid in ipairs(pihAmplifierIDs(s)) do want[sid] = true end
-    for _, sid in ipairs(pihAmplifierIDs(PIH_ALL_AMPLIFIERS)) do
+    for _, sid in ipairs(pihAmplifierIDs(PIH_ALL_AMPLIFIERS, true)) do
         if want[sid] then
             if R.AddSpellToCustom then R:AddSpellToCustom(id, sid) end
         elseif R.RemoveSpellFromCustom then
@@ -3330,19 +3345,22 @@ end
 -- reason it cannot be computed once.
 local function SubTabDefs()
     if IsPIHelperTab() then
-        -- ⚠ LAYOUT GROUPS IS BACK (2026-09-09), and the reason it went is the reason it
-        -- returns. It was cut because "the helper has no per-spell display to arrange" --
-        -- true while every effect was a single marker. The cooldown-icon group is exactly
-        -- such a display (one icon per cooldown the unit has up), so it needs somewhere to
-        -- be moved, sized and deleted. VisibleLayoutGroups already shows ONLY the marked
-        -- groups on this pool, so the tab needs nothing of its own.
-        -- ☠ AND THAT IS THE OTHER HALF OF WHY THE OLD GROUP GOT STUCK: it had no tab to
-        -- be configured from. A display with no controls is a display nobody can turn off.
-        return {
+        -- ⚠ LAYOUT GROUPS ONLY WHEN THERE IS ONE. It exists for the Cooldown Icons group --
+        -- somewhere to move, size and delete it -- and for a helper that has not added one it is
+        -- a third tab opening on nothing, which is how Krathe met it: "why is layout groups back
+        -- showing on PI helper?" A tab that is empty until you do something unrelated is a
+        -- question the panel asks the user instead of answering.
+        -- ★ IT APPEARS WITH THE GROUP AND GOES WITH IT, so the strip always describes what is
+        -- actually there.
+        local defs = {
             { key = "global",  label = L["Triggers"], accent = { r = 0.51, g = 0.86, b = 0.51 } },
             { key = "effects", label = L["Effects"],  accent = nil },
-            { key = "layout",  label = L["Layout Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 } },
         }
+        if P.PIH_IconGroup and P.PIH_IconGroup() then
+            defs[#defs + 1] = { key = "layout", label = L["Layout Groups"],
+                                accent = { r = 0.91, g = 0.66, b = 0.25 } }
+        end
+        return defs
     end
     return {
         { key = "effects", label = L["Effects"],       accent = nil },   -- theme-tracking
@@ -3358,8 +3376,10 @@ P.SubTabDefs = SubTabDefs
 -- ⚠ Answers for EVERY pool, so a caller never has to know which one it is on.
 local function CoerceTabForPool(tabKey)
     if IsPIHelperTab() then
-        -- All three of the helper's tabs are real now; only a Debuffs-only key coerces.
-        if tabKey == "effects" or tabKey == "layout" then return tabKey end
+        if tabKey == "effects" then return "effects" end
+        -- ⚠ Layout Groups only exists while a group does, so a stale "layout" -- from the
+        -- tab the user was on when they deleted it -- has to land somewhere real.
+        if tabKey == "layout" and P.PIH_IconGroup and P.PIH_IconGroup() then return "layout" end
         return "global"
     end
     if tabKey == "effects" and IsDebuffTab() then return "layout" end
@@ -6507,6 +6527,15 @@ S.BuildPIHelperCard = function(parent, opts)
     -- Before anything reads the pool: the panel is the first place an un-swept helper would
     -- show a control that does not match what is on screen.
     pihSweep()
+    -- ★ RE-TAKE THE CATEGORY SOURCES, so an edit made in the Filter Designer since the
+    -- last visit reaches the helper. The three ticks COPY a preset's spells into our list;
+    -- without this the copy is a snapshot from whenever the tick was clicked, and the
+    -- pencil beside each row would open a list whose edits went nowhere.
+    -- ⚠ SAFE TO REPEAT, and safe against the "a list that quietly refills itself" trap the
+    -- seeding code warns about: our list is CURATED now, so a spell the user does not want
+    -- is TICKED OFF (f.disabled) rather than removed -- and the tick survives a re-add.
+    -- Membership is ours to manage; the choice is theirs and this cannot touch it.
+    pihSyncTriggerExtras(P.PIH_Settings())
     local yPos = opts.startY or 0
     local Refresh = opts.Refresh or function() end
     -- ⚠ THE STORED FLAG, NOT THE RECORDS. "Is the helper on" and "does it hold any
@@ -6965,78 +6994,14 @@ local function pihAddClasses(g, t)
     end
     t.note(g, L["Untick a class to stop watching its cooldowns."])
 
-    -- ★ THE LINK LIVES IN THIS BOX, because this is the box whose list it opens.
-    -- ☠ IT WAS IN "Additional Filters", one box down, which is where it ended up when the
-    -- four sources were one list -- and once they were split it was a route to the cooldown
-    -- filter parked under three filters it has nothing to do with. Krathe, 2026-09-09: "it
-    -- needs a link to the cooldowns to modify too as it's not clear you have to go down to
-    -- filters and click to edit".
-    -- ⚠ STILL EXACTLY ONE LINK. A second in the other box would be the duplicate this
-    -- panel has already been cleaned of once -- and it is not needed: the Filter Designer
-    -- opens on the library, where every list including the other three is in the left column.
-    -- The note under it says so.
-    -- ☠ NO HEADING OF ITS OWN ANY MORE, AND "Cooldowns" WAS THE WRONG ONE TWICE OVER.
-    -- It captioned this button back when the button opened the one list there was; now there
-    -- are four sources listed directly above it and the Filter Designer edits ANY of them,
-    -- so a "Cooldowns" heading here named one quarter of what the button reaches. Krathe,
-    -- 2026-09-09: "the cooldowns header/footer of the Filter Designer link is wrong, as
-    -- really they can modify all 4 filters in it."
-    -- ⚠ The button belongs to the tick list it follows -- it is the escape hatch for what
-    -- those four ticks cannot do, single spells rather than whole sources -- so it needs no
-    -- caption between them at all.
-    --
-    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
-    -- scrolls to this filter, selects it and pulses it. Its own comment records why:
-    -- the hand-written version "landed you on the page with nothing indicated, which
-    -- is indistinguishable from a broken link" -- which is exactly what was here.
-    local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-    -- ⚠ IT NAMES WHAT YOU WILL BE EDITING, not where you will end up. "Filter Designer"
-    -- is a destination, and a destination is the wrong label on the one button in a box
-    -- about a specific list -- it left the user looking for a second route to the cooldowns
-    -- ("it needs a link to the cooldowns to modify too", Krathe 2026-09-09) when this WAS
-    -- that route. L["Edit the cooldown list"] already existed unused; reusing it costs a key
-    -- rather than minting one.
-    local fdBtn = GUI:CreateButton(parent, L["Edit the cooldown list"], 140, 22, function()
-        GUI:OpenFilterInDesigner("custom", cfID)
-        -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
-        -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
-        -- that range is still 0 -- so the clamp pins the scroll at the top and the
-        -- row it selected and pulsed is somewhere below the fold. The second call
-        -- runs after layout, when the range is real. The proper fix is a deferred
-        -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
-        -- list for him rather than edited from here.
-        if C_Timer and C_Timer.After then
-            C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
-        end
-    end)
-    if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
-        -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
-        -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
-        -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
-        -- backdrop with grey text, visibly unlike every other disabled button in the
-        -- addon. Caught in Danders' PR review.
-        if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
-        else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
-    end
-    -- Prose-width like the notes: only the class TICKS flow the popout's two tracks.
-    fdBtn.fullRow = true
-    g:AddWidget(fdBtn, 28)
-    -- ☠ UNDER THE CONTROL IT EXPLAINS. Every CreateNote in the settings sits below its
-    -- control -- one call site puts it "in the place the missing control would have occupied".
-    -- Both notes in this section used to open it instead, on the argument that a line under a
-    -- long list goes unread. That argument is about THIS list; the convention is about the
-    -- whole addon, and a panel a user can tell apart from every other page is the thing the
-    -- convention exists to prevent.
-    -- ☠ THE NOTE HAS TO SAY THE MODEL, because everything confusing about this box comes
-    -- from not knowing it. The helper matches ONE list. The three ticks under Additional
-    -- Filters do not select filters the helper reads -- they COPY those filters' spells
-    -- into this list when ticked (pihSyncTriggerExtras). Which is why there is one link
-    -- and not four: editing "Trinkets & Items" in the Filter Designer afterwards changes
-    -- nothing the helper reads, because it took a snapshot at tick time.
-    -- ⚠ THE THREE ARE NAMED rather than called "the filters below": a note that points at
-    -- a position is a note that breaks the next time the boxes are reordered.
-    t.note(g,
-        L["The helper matches this one list. Ticking Trinkets, Potions or Racials copies their spells into it."])
+    -- ☠ THE STANDALONE BUTTON AND ITS NOTE WERE HERE AND BOTH ARE GONE (2026-09-09).
+    -- One button captioned for one of four lists, and a paragraph underneath explaining that
+    -- the other three were not really editable -- an implementation detail leaking into the
+    -- panel and being apologised for. Krathe: "the note below the link to edit the cooldown
+    -- list is silly, the additional filters can also be edited, this really is an unclear
+    -- mess." Every source row carries its own link now (pihSourceRow), and the reason the note
+    -- existed was fixed rather than reworded -- see pihAmplifierIDs.
+
 
 end
 
@@ -7083,90 +7048,114 @@ end
 -- ⚠ THE KEYS ARE THE TAB IDS, and they are what the page's tab bar drives. Order matters:
 -- triggers first, because you cannot sensibly choose how to be told about something you
 -- have not yet said you care about.
-    -- ★★★ THE TRIGGER FILTERS — WHICH LISTS FIRE THE HELPER, PICKED THE WAY THE BUFF BAR
-    -- PICKS ITS OWN (2026-09-09).
+    -- ★★★ FOUR SOURCES, FOUR ROWS, EACH WITH THE WAY IN TO ITS OWN LIST (2026-09-09).
     --
-    -- ☠ THIS WAS THREE TICKS CAPTIONED "Also count" AND A LABEL CAPTIONED "Cooldowns" THAT
-    -- WAS NOT A CONTROL AT ALL. Krathe read it the way anyone would: "I assume Cooldowns is
-    -- our custom filter for PI helper and the other 3 are normal filters?" -- a reasonable
-    -- assumption, and wrong. All four were ONE custom list, with the ticks adding and removing
-    -- ids inside it, and the one that was always on had no tick to say so.
-    -- ⇒ Four rows, four ticks, each with the number in it: "select them and it should show the
-    -- number active next to them in a similar way to how you pick on the buff bar."
+    -- ☠ WHAT THIS REPLACES, AND WHY PROSE COULD NOT SAVE IT. The box had one button captioned
+    -- for one of the four lists and a NOTE underneath explaining that the other three were not
+    -- really lists you could edit -- an implementation detail (the ticks COPY a preset's spells
+    -- rather than referencing it) leaking into the panel and being apologised for. Krathe:
+    -- "the note below the link to edit the cooldown list is silly, the additional filters can
+    -- also be edited, this really is an unclear mess."
+    -- ⇒ He is right that they can be edited. The bug was that editing them did nothing, so the
+    -- panel had to talk you out of trying. Fixed at the source instead: pihAmplifierIDs honours
+    -- each preset's own ticks and S.BuildPIHelperCard re-takes the copy on every visit, so an
+    -- edit in the Filter Designer REACHES the helper -- and then every row can simply offer a
+    -- link to its own list and say nothing at all.
+    -- ⚠ NO NOTE. Four rows that each do the obvious thing need no paragraph underneath; a note
+    -- explaining why a control does not behave as it looks is a bug report in prose.
     --
-    -- ⚠ IT IS STILL ONE CANDIDATE LIST UNDERNEATH, and that is deliberate rather than a
-    -- shortcut. A helper effect resolves from ONE filter ref (its record key) -- a placed
-    -- indicator has no union at all, and giving it one means changing the Factory's resolve
-    -- path for every indicator in the addon. So the ticks go on meaning "put these spells in
-    -- the list", which is what they always did; what changed is that the panel now says so,
-    -- names each source, and counts it.
-    -- ⚠ THE COUNTS ARE REAL, NOT DECORATIVE. Cooldowns reports enabled/total off the curated
-    -- filter itself (R:CustomFilterCounts), so ticking a spell off in the Filter Designer
-    -- moves the number here too. The other three report how big that source is, because they
-    -- are all-in-or-all-out.
-    local function pihSourceCount(catKey)
-        local R = DF.FilterRegistry
-        local recs = R and R.ByCategory and R.ByCategory[catKey]
-        return recs and #recs or 0
-    end
-
+    -- ⚠ THE FIRST ROW HAS NO TICK, and that is not an oversight. The thirteen class ticks ARE
+    -- that source's switch -- unticking them all is turning class cooldowns off -- and a tick
+    -- here as well was removed for causing real harm: both read off the list, so toggling it
+    -- wiped and restored all forty cooldowns and silently undid whichever classes the user had
+    -- turned off. See P.PIH_CooldownCounts.
     -- ⚠ A LABEL WITH THE NUMBER IN IT, rather than a second right-aligned region. The row
-    -- widget is a checkbox and the toolkit sizes it; a count anchored into it would be the
-    -- one hand-placed element in a column that lays itself out. Numbers need no translating.
+    -- widget is a checkbox and the toolkit sizes it; a count anchored into it would be the one
+    -- hand-placed element in a column that lays itself out. Numbers need no translating.
     local function pihCountLabel(text, a, b)
         if b then return text .. "   " .. a .. "/" .. b end
         return text .. "   " .. a
     end
 
-    local function pihAddTriggerSources(g, t)
-        local st = P.PIH_Settings()
-        -- ⚠ NO SECTION LABEL AND NO COOLDOWNS ROW. This block is its own box now
-        -- ("Additional Filters"), so the header does the labelling -- and class cooldowns are
-        -- controlled by the class ticks in the box above, which is what makes a fourth row
-        -- here redundant. P.PIH_CooldownCounts has the whole argument.
-        -- ★ WHAT THESE THREE HAVE IN COMMON, and why they are a box of their own: no class
-        -- tick can reach any of them. Trinkets and potions are items with no class at all, and
-        -- racials are tagged class = "ALL". Krathe spotted the mismatch from the layout alone:
-        -- "the classes, they only effect the Cooldowns correct?"
-        t.subCheck(g, pihCountLabel(L["Trinkets"], pihSourceCount(PIH_SEED.amplifiers.trinkets)),
-            function() return st.trinkets == true end,
-            function(v) P.PIH_SetAmplifier("trinkets", v) end)
-        t.subCheck(g, pihCountLabel(L["Potions"], pihSourceCount(PIH_SEED.amplifiers.potions)),
-            function() return st.potions == true end,
-            function(v) P.PIH_SetAmplifier("potions", v) end)
-        -- ⚠ FOUR, NOT THIRTEEN, and the count says four so the row cannot mislead. `racials`
-        -- is every racial ability, and nine of the thirteen -- Shadowmeld, Darkflight,
-        -- Stoneform and the rest -- are the opposite of worth infusing behind. PIH_RACIAL_IDS
-        -- is the hand-picked offensive set; see its own note for why the data cannot pick them.
-        t.subCheck(g, pihCountLabel(L["Racials"], #PIH_RACIAL_IDS),
-            function() return st.racials == true end,
-            function(v) P.PIH_SetAmplifier("racials", v) end)
+    local function pihSourceRow(g, t, label, count, get, set, link)
+        local w
+        if set then
+            w = t.subCheck(g, pihCountLabel(label, count), get, set)
+        else
+            w = t.settingLabel(g, pihCountLabel(label, count))
+        end
+        -- ⚠ ANCHORED TO THE ROW, not placed at a y of its own. The group owns the layout and
+        -- these rows flow with it; a glyph positioned against the panel would be correct until
+        -- the first time a label wrapped.
+        if w and link and GUI.CreateGlyphButton then
+            local glyph = GUI:CreateGlyphButton(w, {
+                size = 18, iconSize = 14,
+                -- ☠ DOUBLE BACKSLASHES in FILTER_ICON -- Lua 5.1 passes an unrecognised escape
+                -- through as the bare character, so a single-backslash path draws nothing.
+                texture = FILTER_ICON,
+                color   = C_TEXT_DIM,
+                tooltip = { title = L["Edit this list"], lines = { L["Open it in the Filter Designer."] } },
+                onClick = link,
+            })
+            glyph:SetPoint("RIGHT", w, "RIGHT", -4, 0)
+        end
+        return w
     end
 
--- ★★★ THE HELPER'S ADD BLOCK — the designer's own tiles, with the spell question removed.
---
--- ☠☠ THIS REPLACES A WHOLE SECOND EFFECTS TAB, AND THAT TAB'S EXISTENCE WAS THE MISTAKE.
--- pihBuildEffectsTab drew route cards ("Big cooldown" / "Already has active Power Infusion"),
--- then a tile grid, then its own ACTIVE INDICATORS caption, then its own effect-card loop,
--- then the sound box -- a private copy of the designer's Effects tab standing beside the real
--- one. Krathe, 2026-09-09: "It should BE AD not a copy of it." And on the route cards, one
--- round earlier: "we don't need 'already has active power infusion' or 'big cooldowns?'"
--- ⇒ So there is ONE Effects tab -- the designer's -- and the helper contributes exactly one
--- thing to it: this block, in place of the three scope cards. Everything below it (the
--- caption, the type filter, the effect cards, the eye and the delete) is the designer's own,
--- unchanged, because the helper's records ARE Aura Designer records.
---
--- ⚠ NO SPELL QUESTION, AND THAT IS THE ONLY REAL DIFFERENCE. The designer asks route ->
--- spell -> type because a user's effect hangs off a spell they choose. The helper's hangs off
--- the cooldown list, which the Triggers tab owns -- so the spell is already answered and the
--- tile grid is the whole flow. One click adds.
---
--- ⚠ ONE SIGNAL. Everything added here is "worth infusing" (the `burst` mark). The second
--- signal survives in the DATA -- an existing "already has Power Infusion" effect still
--- renders, still lists itself and still deletes -- but nothing creates a new one, because
--- asking which of two things an effect is about was the question Krathe cut.
---
--- Returns the y to carry on at.
+    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND scrolls to
+    -- the list, selects it and pulses it -- Krathe's "flash link". Its own comment records why
+    -- the difference matters: a hand-written jump "landed you on the page with nothing
+    -- indicated, which is indistinguishable from a broken link".
+    -- ⚠ TWICE, ONE FRAME APART, and that is a workaround rather than belt-and-braces:
+    -- _fdFocusFilter clamps its scroll against GetVerticalScrollRange, which is still 0 on the
+    -- target page's FIRST build -- so the row it selected sits below the fold. The second call
+    -- runs after layout. The proper fix is a deferred retry inside _fdFocusFilter; that file is
+    -- Danders' and it is on the list for him rather than edited from here.
+    local function pihOpenFilter(kind, key)
+        if not (key and GUI.OpenFilterInDesigner and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
+            return
+        end
+        GUI:OpenFilterInDesigner(kind, key)
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function() GUI:OpenFilterInDesigner(kind, key) end)
+        end
+    end
+
+    local function pihAddTriggerSources(g, t)
+        local st = P.PIH_Settings()
+        local R = DF.FilterRegistry
+
+        -- CLASS COOLDOWNS -- our own curated list, and the only source whose count can move on
+        -- its own (a spell ticked off in the Filter Designer stops firing without leaving).
+        local cdID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+        local cdOn, cdTotal = P.PIH_CooldownCounts()
+        pihSourceRow(g, t, L["Class cooldowns"], cdOn, nil, nil,
+            cdID and function() pihOpenFilter("custom", cdID) end or nil)
+
+        local function catCount(catKey)
+            local recs = R and R.ByCategory and R.ByCategory[catKey]
+            return recs and #recs or 0
+        end
+        local trink, potion = PIH_SEED.amplifiers.trinkets, PIH_SEED.amplifiers.potions
+        pihSourceRow(g, t, L["Trinkets"], catCount(trink),
+            function() return st.trinkets == true end,
+            function(v) P.PIH_SetAmplifier("trinkets", v) end,
+            function() pihOpenFilter("preset", trink) end)
+        pihSourceRow(g, t, L["Potions"], catCount(potion),
+            function() return st.potions == true end,
+            function(v) P.PIH_SetAmplifier("potions", v) end,
+            function() pihOpenFilter("preset", potion) end)
+        -- ⚠ FOUR, NOT THIRTEEN, and no link -- because there is no list to open. `racials` is
+        -- every racial ability and nine of its thirteen (Shadowmeld, Darkflight, Stoneform)
+        -- are the opposite of worth infusing behind, so this row is a hand-picked set rather
+        -- than a category. Linking to the category would offer to edit something that is not
+        -- what this row means.
+        pihSourceRow(g, t, L["Racials"], #PIH_RACIAL_IDS,
+            function() return st.racials == true end,
+            function(v) P.PIH_SetAmplifier("racials", v) end,
+            nil)
+    end
+
 -- ★ THE ICON ASKS WHICH PICTURE, WITH PICTURES (2026-09-09).
 -- ⚠ IT WAS A TICK ON THE CARD, AFTER THE FACT. Krathe: "when you add an icon it should then
 -- have a graphic like we do for the other types to then pick the type i.e an actual icon or a
@@ -7388,27 +7377,23 @@ S.BuildPIHelperBody = function(parent, opts)
         -- you on the page with nothing indicated, which is indistinguishable from a broken
         -- link". Krathe, 2026-09-08: "We seem to have two links to it? and confusing messaging."
 
-        -- ★★ TWO BOXES, BECAUSE THE CLASS TICKS ONLY REACH ONE OF THE SOURCES.
-        -- ☠ THEY WERE ONE BOX AND THE ORDER SAID THE OPPOSITE: thirteen class ticks, then a
-        -- list of four sources, when no class tick can touch three of them -- trinkets and
-        -- potions are items with no class, and racials are tagged class = "ALL". Krathe read
-        -- the layout and asked the right question: "the classes, they only effect the Cooldowns
-        -- correct? Maybe we do separate that out."
-        -- ⇒ The classes sit WITH the source they narrow, under its count; the three sources
-        -- nothing narrows get a box of their own.
-        -- ⚠ THE COUNT IS ON THE HEADER because the source has no row of its own any more --
-        -- see P.PIH_CooldownCounts for why its tick was redundant AND harmful. Only shown as a
-        -- fraction when some are off, the same rule the Filter Designer's own rows follow.
-        local cdOn, cdTotal = P.PIH_CooldownCounts()
-        local cdHead = L["Classes and Cooldowns"] .. "   "
-            .. ((cdOn == cdTotal) and tostring(cdTotal) or (cdOn .. "/" .. cdTotal))
-        yPos = t.group(cdHead, function(g)
-            pihAddClasses(g, t)
-        end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
-
-        yPos = t.group(L["Additional Filters"], function(g)
+        -- ★★ SOURCES FIRST, THEN THE ONE THAT NARROWS ONE OF THEM.
+        -- ☠ THE ORDER USED TO SAY THE OPPOSITE OF THE TRUTH: thirteen class ticks, then the
+        -- sources, when the classes reach only the FIRST source -- trinkets and potions are
+        -- items with no class, and racials are tagged class = "ALL". Krathe read the layout and
+        -- asked exactly that: "the classes, they only effect the Cooldowns correct?"
+        -- ⚠ THE COUNT LEFT THE HEADER when Class cooldowns got a row of its own. A number on a
+        -- box header describing one of the rows inside it was the compromise that box needed;
+        -- the row does not need it.
+        -- ⚠ CLASSES STAYS COLLAPSIBLE: thirteen rows is the one list on this panel nobody can
+        -- scan, and most people will never open it.
+        yPos = t.group(L["Trigger Filters"], function(g)
             pihAddTriggerSources(g, t)
         end, yPos)
+
+        yPos = t.group(L["Classes"], function(g)
+            pihAddClasses(g, t)
+        end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
     end
 
     return yPos
