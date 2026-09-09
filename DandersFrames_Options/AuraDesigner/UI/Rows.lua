@@ -22,6 +22,7 @@ local OPTS                     = P.OPTS
 local ResolveSpec              = P.ResolveSpec
 local IsOtherTab               = P.IsOtherTab
 local IsPIHelperTab            = P.IsPIHelperTab
+local ShowsOthersOnly          = P.ShowsOthersOnly
 local IsDebuffTab              = P.IsDebuffTab
 local CurrentAuraPool          = P.CurrentAuraPool
 local CollectAllEffects        = P.CollectAllEffects
@@ -379,7 +380,9 @@ local function EffectTag(effect, indicatorGroup)
             parts[#parts + 1] = format(L["+%d triggers"], #triggers - 1)
         end
     end
-    if IsOtherTab() and effect.config and effect.config.othersOnly then
+    -- ⚠ NOT ON THE HELPER'S POOL, where it is a constant rather than a state -- see
+    -- P.ShowsOthersOnly.
+    if ShowsOthersOnly() and effect.config and effect.config.othersOnly then
         parts[#parts + 1] = L["Others Only"]
     end
     return table.concat(parts, " \194\183 ")
@@ -638,7 +641,9 @@ local function MountEffect(ctx, effect, shell)
     -- column already IS that checkbox -- the Modules page's rule for a group with
     -- nothing in it but the switch. The trade is the group's two footer verbs,
     -- which for one boolean the modified dot on the control itself covers.
-    if IsOtherTab() and effect.typeKey ~= "sound" then
+    -- ⚠ ...AND NOT ON THE HELPER'S POOL: there the caster rule is stamped by the recipe and
+    -- is not the user's to change. P.ShowsOthersOnly carries the reasoning.
+    if ShowsOthersOnly() and effect.typeKey ~= "sound" then
         -- The page's STATE pass, never a rebuild: a rebuild here would retire the
         -- row the click landed on. Named once so the row and the search entry it
         -- registers run the same thing.

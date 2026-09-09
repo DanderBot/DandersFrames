@@ -29,6 +29,7 @@ local ShowBuffCoexistPopup = P.ShowBuffCoexistPopup
 local ResolveSpec = P.ResolveSpec
 local IsOtherTab = P.IsOtherTab
 local IsPIHelperTab = P.IsPIHelperTab
+local ShowsOthersOnly = P.ShowsOthersOnly
 local IsDebuffTab = P.IsDebuffTab
 local CurrentAuraPool = P.CurrentAuraPool
 local PoolKeyPrefix = P.PoolKeyPrefix
@@ -4587,7 +4588,9 @@ S.CreateEffectCard = function(parent, yPos, effect)
     end
     -- Other Buffs: surface the per-effect Others Only state on the collapsed
     -- header (prototype's "Others only" chip, as a text suffix).
-    if IsOtherTab() and effect.config and effect.config.othersOnly then
+    -- ⚠ NOT ON THE HELPER'S POOL, where it is a constant rather than a state -- see
+    -- P.ShowsOthersOnly for the whole argument.
+    if ShowsOthersOnly() and effect.config and effect.config.othersOnly then
         infoStr = infoStr .. "  -  " .. L["Others Only"]
     end
     local infoText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4780,7 +4783,9 @@ S.CreateEffectCard = function(parent, yPos, effect)
         -- through the pool-pinned proxy; the filter string ("HELPFUL|!PLAYER")
         -- binds at container build, so toggling is STRUCTURAL (B1 folds it
         -- into every struct sig → the factory Rebuilds).
-        if IsOtherTab() and effect.typeKey ~= "sound" then
+        -- ⚠ ...AND NOT ON THE HELPER'S POOL: there the caster rule is stamped by the recipe
+        -- and is not the user's to change. P.ShowsOthersOnly carries the reasoning.
+        if ShowsOthersOnly() and effect.typeKey ~= "sound" then
             local ooCb = GUI:CreateCheckbox(body, L["Others Only"], proxy, "othersOnly",
                                             S.EffectOthersOnlyChanged)
             ooCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 12))

@@ -605,6 +605,25 @@ local function IsOtherTab()
 end
 P.IsOtherTab = IsOtherTab
 
+-- ☠ ...AND THE ONE PLACE THE TWO POOLS PART COMPANY: DOES THE USER GET TO DECIDE THE CASTER
+-- RULE? On Any Buff, yes -- that pool means "any caster including you", so Others Only is the
+-- switch that narrows it and the choice is the whole point.
+-- On the Power Infusion Helper it is not a choice at all. Krathe, 2026-09-09: "we don't need
+-- the others only setting or even note that on the Active indicators either, we only care
+-- about using it on others anyway, it's a pointless option." He is right, and the recipe
+-- already agreed with him: pihCreateSignal STAMPS othersOnly on every effect it builds,
+-- because a helper watching your own cooldowns would be telling you to infuse yourself.
+-- ⇒ The STORED VALUE is unchanged -- it is what makes the effect correct, and the engine
+-- still reads it. What goes is the control that pretends it is up for discussion, and the
+-- suffix on the row that reports a constant as though it were a setting.
+-- ⚠ THE SUFFIX MATTERS AS MUCH AS THE TICK. "PI Helper - Center - Others Only" spends the
+-- row's summary on something true of every helper effect ever created -- the same
+-- constant-on-every-line fault the "Big cooldown" label had.
+local function ShowsOthersOnly()
+    return IsOtherTab() and not IsPIHelperTab()
+end
+P.ShowsOthersOnly = ShowsOthersOnly
+
 -- C2: the Debuffs tab hosts debuff CATEGORY groups (spec-independent, no
 -- spell pool, no placed indicators). Its Effects sub-tab frosts, the spec
 -- dropdown greys, and CurrentAuraPool reads empty.
