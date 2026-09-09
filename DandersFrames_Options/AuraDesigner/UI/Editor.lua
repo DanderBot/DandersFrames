@@ -1856,6 +1856,11 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     wipe(expandedCards)
     wipe(effectCardPool)
 
+    -- Retire whatever an older Power Infusion Helper schema left running -- above all the
+    -- cooldown-icon group, which draws with no control left that can reach it. Priests only,
+    -- schema-stamped, so this is one comparison on every build after the first.
+    if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() and P.PIH_Sweep then P.PIH_Sweep() end
+
     S.activeTab = "effects"
     -- ☠☠ A FULL BUILD USED TO CLOBBER THE POOL UNCONDITIONALLY, AND THAT BROKE THE ONE
     -- CALLER THAT ASKS FOR A SPECIFIC ONE. The Power Infusion Helper's nav entry sets the
@@ -2084,6 +2089,14 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     tabBaseline:SetPoint("BOTTOMRIGHT", 0, 0)
     tabBaseline:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
 
+    -- ☠ ALL THREE ARE BUILT, WHATEVER THE POOL SHOWS. The strip is created ONCE inside
+    -- S.mainFrame and a pool switch does not rebuild it (SetMainTab redraws the tab CONTENT
+    -- and leaves the panel standing), so a button not built here could never appear later.
+    -- P.ApplySubTabStrip then decides per pool which of them are anchored, in what order and
+    -- under which label -- two on the Power Infusion Helper's pool, three everywhere else.
+    -- ⚠ THE LABELS BELOW ARE THE DEFAULT-POOL ONES and are overwritten on the first
+    -- ApplySubTabStrip pass; they are still worth passing, because StyleButton sizes its
+    -- label region from the text it is given.
     local TAB_GAP = 4
     local TAB_DEFS = {
         { key = "effects", label = L["Effects"],       accent = nil },  -- theme-tracking
@@ -2134,13 +2147,11 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
     UpdateLayoutTabState()
 
     -- Equal-width tabs (accounting for the gaps) on parent resize.
-    S.tabBar:SetScript("OnSizeChanged", function(self, w, h)
-        local n = #TAB_DEFS
-        local tabW = (w - (n - 1) * TAB_GAP) / n
-        for _, def in ipairs(TAB_DEFS) do
-            local btn = tabButtons[def.key]
-            if btn then btn:SetWidth(tabW) end
-        end
+    -- ⚠ THROUGH ApplySubTabStrip, NOT A LOCAL DIVISION. #TAB_DEFS is 3 and the strip on the
+    -- helper's pool has 2 buttons -- dividing by the built count would leave a third of the
+    -- band empty there, and widen the two hidden buttons that are not on screen anyway.
+    S.tabBar:SetScript("OnSizeChanged", function()
+        if P.ApplySubTabStrip then P.ApplySubTabStrip() end
     end)
 
     -- ── TAB CONTENT (scrollable) ──
@@ -2199,15 +2210,16 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
         S.tabContentFrame:SetWidth(initW)
     end
 
-    S.SwitchTab("effects")
+    -- ☠ THE POOL DECIDES WHERE THE STRIP LANDS. The helper's pool has no Effects tab in
+    -- first position -- Triggers is -- so a hardcoded "effects" would open its own nav entry
+    -- on the wrong one of its two tabs. P.CoerceTabForPool answers for every pool, and the
+    -- activeBuffTab it reads was settled a few dozen lines above (S.pendingBuffTab).
+    S.SwitchTab((P.CoerceTabForPool and P.CoerceTabForPool("effects")) or "effects")
     C_Timer.After(0, function()
-        if S.tabBar and S.tabBar:IsVisible() and S.tabBar:GetWidth() > 10 then
-            local tabW = (S.tabBar:GetWidth() - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS
-            for _, def in ipairs(TAB_DEFS) do
-                if tabButtons[def.key] then
-                    tabButtons[def.key]:SetWidth(tabW)
-                end
-            end
+        -- The strip's real width only exists after the first layout pass; ApplySubTabStrip
+        -- divides whatever it finds, and early-outs on a bar too narrow to be real.
+        if S.tabBar and S.tabBar:IsVisible() and P.ApplySubTabStrip then
+            P.ApplySubTabStrip()
         end
     end)
     RefreshPlacedIndicators()

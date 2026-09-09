@@ -1994,7 +1994,18 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
         -- Every sibling path (square fill above, filter/debuff groups, missing badge)
         -- already used 0.
         local inset = borderSpec and borderArtInset(borderSpec) or 0
-        style.icon = { show = not hideIcon, inset = inset }
+        -- ★ staticSpellID: PIN THE ART TO ONE SPELL, whatever aura matched.
+        -- ☠ IT IS THE CONTAINER'S OWN FIELD, NOT A NEW ONE. AuraContainer's styleButton has
+        -- honoured iconSpec.staticSpellID since the curated-art work -- it was simply never
+        -- reachable from a placed indicator, because nothing wrote it onto one.
+        -- ⚠ WHO WRITES IT: the Power Infusion Helper, on its Icon surface, with Power
+        -- Infusion's own id. Its trigger is a list of other people's cooldowns and its
+        -- MESSAGE is "infuse this player" -- so the picture must not be whichever cooldown
+        -- happened to match, which is the scope objection that got Icon cut once already.
+        -- ⚠ NOT VALIDATED HERE. A number is what the container asks for and an unknown one
+        -- resolves to no texture, which is the same outcome as the field being absent.
+        local staticID = tonumber(indicator.staticSpellID)
+        style.icon = { show = not hideIcon, inset = inset, staticSpellID = staticID }
     end
 
     -- Cooldown swipe: Blizzard drives it from the matched aura's Duration object
@@ -2277,7 +2288,21 @@ end
 -- edit. The tracked spell-ID map used to live here; it is live-tunable via
 -- candidateFilters and now rides placedTuningSig.
 local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs)
+    -- ⚠ DERIVED HERE RATHER THAN PASSED. Both call sites already hand over the indicator, and
+    -- an eighth positional argument on a seven-argument sig is how the wrong value gets passed
+    -- at one of two sites and nobody notices for a month. A square never binds an icon, so the
+    -- question only means anything on the icon branch.
+    local staticArt = (not isSquare) and tonumber(indicator.staticSpellID) and true or false
     return (isSquare and "sq" or "ic")
+        -- ★ PINNED ART IS STRUCTURAL, and it is structural for a BIND-ONCE reason rather than
+        -- a region one. bindNative registers slot.dfIcon with Blizzard's SetIcon exactly once
+        -- per slot (slot._boundIcon) and skips that registration when the spec pins a spell --
+        -- because a bound icon is repainted from the matched aura, which is the one thing a
+        -- pinned picture must not do. A slot pooled from one kind to the other would keep the
+        -- binding decision it was created with, so the two kinds must never share a slot.
+        -- ⚠ THE FLAG, NOT THE ID. Changing WHICH spell is pinned only needs the texture set
+        -- again (ApplyStyle does that); changing WHETHER one is pinned changes the binding.
+        .. "|" .. (staticArt and "sa" or "")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
         .. "|" .. (showDuration and "du" or "")

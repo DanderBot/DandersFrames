@@ -21,6 +21,7 @@ local C_TEXT_DIM = GUI.Colors.textDim
 local OPTS                     = P.OPTS
 local ResolveSpec              = P.ResolveSpec
 local IsOtherTab               = P.IsOtherTab
+local IsPIHelperTab            = P.IsPIHelperTab
 local IsDebuffTab              = P.IsDebuffTab
 local CurrentAuraPool          = P.CurrentAuraPool
 local CollectAllEffects        = P.CollectAllEffects
@@ -697,6 +698,21 @@ local function BuildEffectsTabRows(ctx, shell)
     -- where (Cards.lua's S.BuildAddIndicatorPane). It holds no settings, so it
     -- takes neither a modified tick nor a footer -- the same rule the Members and
     -- Linked Filters rows follow.
+    --
+    -- ☠☠ ...AND THE HELPER'S POOL HAS NO SPELL TO PICK, SO IT HAS NO ROW. That panel is the
+    -- three-step spell-first flow, and the helper's aura is the cooldown list its Triggers tab
+    -- owns -- so the only step left is the tile grid, which is small enough to sit on the page
+    -- rather than behind a door.
+    -- ⚠ THE SAME BUILDER THE SPLIT PANEL USES (S.BuildPIHelperAddArea), mounted as one band.
+    -- Two layouts, one add flow: a second copy of it is what produced every Power Infusion
+    -- Helper bug of the last two days.
+    if IsPIHelperTab() then
+        GUI:AddDesignerLegacyTab(shell, function(host)
+            host:SetWidth(tools.BandWidth())
+            local y = S.BuildPIHelperAddArea(host, -4, function() S.SwitchTab("effects") end)
+            host:SetHeight(max(-(y or 0) + 4, 1))
+        end)
+    else
     local addBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
     local addRow
     -- ⚠ A LIST, NOT ONE HANDLE. PopoutContent is a FACTORY: pin a panel and click
@@ -762,6 +778,7 @@ local function BuildEffectsTabRows(ctx, shell)
     end
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
+    end   -- the helper's tile band / the designer's Add Indicator row
 
     -- ── POWER INFUSION HELPER: MOVED OUT, 2026-09-08 ──
     -- ☠ DO NOT MOUNT IT HERE AGAIN. This layout used to carry the helper as a band of
@@ -811,7 +828,10 @@ local function BuildEffectsTabRows(ctx, shell)
     end)
     if pickerOpen then return end
 
-    local effects = CollectAllEffects()
+    -- includePIH on the helper's pool -- see the note on the split panel's own list
+    -- (S.BuildEffectsTab): the collector hides helper rows from the designer by default, and
+    -- on the helper's pool they are the only rows there are.
+    local effects = CollectAllEffects({ includePIH = IsPIHelperTab() })
     local filtered = {}
     for _, effect in ipairs(effects) do
         if S.activeFilter == "all" or effect.typeKey == S.activeFilter then
@@ -1269,6 +1289,30 @@ end
 local function BuildGlobalTabRows(ctx, shell)
     local page, tools, Add = ctx.page, ctx.tools, ctx.Add
 
+    -- ★★ ON THE HELPER'S POOL, "GLOBAL" IS ITS TRIGGERS -- the same branch the split panel's
+    -- S.BuildGlobalTab makes, and it has to be made here too or the popout layout would draw
+    -- the DESIGNER's global settings under a tab labelled Triggers. Every other pool's Global
+    -- tab holds what applies to the whole POOL rather than to one effect, which is exactly
+    -- what the helper's roles, class list and cooldown gate are.
+    -- ⚠ THE ENABLE TICK LEADS IT, because on this pool it governs everything below -- and it
+    -- has to be reachable when the helper is OFF, which is the state a new priest arrives in.
+    -- ⚠ ONE BAND, NOT POPOUT ROWS. The helper's sections are the card builder's own column
+    -- layout (S.BuildPIHelperCard / S.BuildPIHelperBody run a y cursor and anchor into their
+    -- parent); re-expressing them as rows is the second copy that this feature has already
+    -- paid for twice.
+    if IsPIHelperTab() and S.BuildPIHelperCard then
+        GUI:AddDesignerLegacyTab(shell, function(host)
+            host:SetWidth(tools.BandWidth())
+            local Refresh = function() S.SwitchTab("global") end
+            local y, open = S.BuildPIHelperCard(host, { startY = -4, Refresh = Refresh })
+            if open and S.BuildPIHelperBody then
+                y = S.BuildPIHelperBody(host, { startY = y, Refresh = Refresh, indent = 8 })
+            end
+            host:SetHeight(max(-(y or 0) + 4, 1))
+        end)
+        return
+    end
+
     -- ☠ page.child AS THE HOST, AND IT IS NEVER TOUCHED. Collect mode builds
     -- nothing, sizes nothing and stamps nothing onto the host it is handed; the
     -- argument exists only because the section bodies read it, and each of them
@@ -1342,12 +1386,24 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
     S.leftPanel, S.rightPanel = nil, nil
     S.tabBar, S.tabScrollFrame, S.tabContentFrame = nil, nil, nil
     S.activeTab      = S.activeTab or "effects"
-    S.activeBuffTab  = S.activeBuffTab or "my"
+    -- ☠ THE ONE-SHOT THE NAV ENTRY LEAVES BEHIND, CONSUMED HERE TOO. The Power Infusion
+    -- Helper's nav row asks for its pool and then opens this page; the split panel's builder
+    -- consumes the request in its own full-build path, and this arm has to do the same or the
+    -- popout layout would open that entry on whatever pool was last used.
+    S.activeBuffTab  = S.pendingBuffTab or S.activeBuffTab or "my"
+    S.pendingBuffTab = nil
     S.activeFilter   = S.activeFilter or "all"
-    if S.activeTab == "effects" and IsDebuffTab() then S.activeTab = "layout" end
+    -- Every pool's coercion in one call -- Effects frosts on Debuffs, Layout Groups does not
+    -- exist on the helper's pool. See P.CoerceTabForPool.
+    S.activeTab = (P.CoerceTabForPool and P.CoerceTabForPool(S.activeTab)) or S.activeTab
 
     local tools = GUI:CreatePopoutPageTools(page)
     if not tools then return end   -- classic; the caller took the island arm
+
+    -- Retire whatever an older Power Infusion Helper schema left running -- above all the
+    -- cooldown-icon group, which draws with no control left that can reach it. Priests only,
+    -- schema-stamped, so this is one comparison on every build after the first.
+    if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() and P.PIH_Sweep then P.PIH_Sweep() end
 
     -- ☠ FROM THE MODE, NOT THE PRESET. The enable switch writes the MODE's own
     -- key; reading it off the preset is what made the tick un-stick once already.
@@ -1465,16 +1521,30 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             { height = SCOPEROW_H, build = function(host) S.BuildScopeRow(host) end },
         },
 
-        tabs = {
-            { key = "effects", label = L["Effects"], accent = nil,
-              -- Effects is buff-pool-only: category groups have no per-spell
-              -- placed indicators, so it frosts on the Debuffs pool.
-              disabled = function() return IsDebuffTab() end,
-              tooltip  = { title = L["Effects"], onlyWhenDisabled = true,
-                           lines = { L["Not available for Debuffs. Use Layout Groups instead."] } } },
-            { key = "layout",  label = L["Layout Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 } },
-            { key = "global",  label = L["Global"],        accent = { r = 0.51, g = 0.86, b = 0.51 } },
-        },
+        -- ⚠ ONE DEFINITION, SHARED WITH THE SPLIT PANEL. P.SubTabDefs decides which sub-tabs
+        -- a pool has, in what order and under what label -- Triggers then Effects on the
+        -- Power Infusion Helper's pool, the usual three everywhere else. This layout rebuilds
+        -- the whole page on a pool switch, so simply reading it here is enough; the split
+        -- panel keeps its strip standing and re-lays it (P.ApplySubTabStrip).
+        -- ⚠ THE FROSTED-EFFECTS ARM IS STAMPED ON HERE rather than carried in the shared
+        -- defs, because `disabled` and `tooltip` are this shell's vocabulary and the split
+        -- panel expresses the same fact through SetDisabled and a HookScript.
+        tabs = (function()
+            local out = {}
+            for _, def in ipairs(P.SubTabDefs()) do
+                if def.key == "effects" then
+                    -- Effects is buff-pool-only: category groups have no per-spell
+                    -- placed indicators, so it frosts on the Debuffs pool.
+                    out[#out + 1] = { key = "effects", label = def.label, accent = def.accent,
+                        disabled = function() return IsDebuffTab() end,
+                        tooltip  = { title = L["Effects"], onlyWhenDisabled = true,
+                                     lines = { L["Not available for Debuffs. Use Layout Groups instead."] } } }
+                else
+                    out[#out + 1] = { key = def.key, label = def.label, accent = def.accent }
+                end
+            end
+            return out
+        end)(),
         activeTab = S.activeTab,
         onTab     = function(key) S.SwitchTab(key) end,
 

@@ -3034,13 +3034,27 @@ L["Only plays while the helper is showing."] = true
 -- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
 -- missing-mode render path is the one place the helper's cooldown gate cannot reach.
 L["Not available on a Power Infusion Helper signal."] = true
--- The icons row on the cooldown signal, and the three amplifier ticks nested under it.
--- Amplifiers are one category with three sources: what makes a burst BIGGER, as against the
--- cooldown list, which says a burst is happening at all. They are icons only -- a border
--- lighting for a trinket on its own would be noise.
+-- The three extra trigger ticks, under the class list. They used to feed a separate spell
+-- list that only the cooldown-icon group ever read; that group is retired, so they write into
+-- the ONE list the helper matches on -- ticking Trinkets makes a trinket proc fire whatever
+-- effects have been added on the Effects tab. "Also count" is the caption above them.
+-- ⚠ L["Cooldowns"] is kept: the tick that used it is gone, but the string is a plain noun
+-- other surfaces use.
+L["Also count"] = true
 L["Cooldowns"] = true
 L["Trinkets"] = true
 L["Potions"] = true
+-- The helper's add block, which stands where the designer's three scope cards stand on every
+-- other pool: there is no spell to choose here (the cooldown list IS the spell), so the tile
+-- grid is the whole flow.
+-- ⚠ THE ICON TILE NEEDS ITS OWN DESCRIPTION. The shared one reads "The spell's own artwork",
+-- which is true in the designer and false here: a helper icon is PINNED to Power Infusion, so
+-- it says "infuse this player" rather than reporting which cooldown they pressed.
+L["Shows the Power Infusion icon."] = true
+L["Every indicator is already in use. Remove one below to add it again."] = true
+-- The stub page behind the nav row, reached by the settings SEARCH rather than by clicking
+-- the row -- which links straight to the designer's Power Infusion Helper tab.
+L["The Power Infusion Helper is a tab inside the Aura Designer."] = true
 -- Shown under a signal that has no colour and no icons -- a state the panel can reach and
 -- could not previously explain. Names both remedies; the second form is for a signal with no
 -- icons row of its own, where the menu is the only door.

@@ -2930,7 +2930,21 @@ local EMPTY_DUR_SPEC = {}
 local function bindNative(slot, config)
     local style = config.style or {}
 
-    if slot.dfIcon and slot.SetIcon and not slot._boundIcon then
+    -- ☠ A PINNED ICON IS NEVER BOUND, AND NOT BINDING IT IS THE WHOLE MECHANISM.
+    -- SetIcon hands our texture to Blizzard, which then repaints it from the MATCHED AURA on
+    -- every display update -- so a slot that pins its own art (style.icon.staticSpellID, set
+    -- once by styleButton) must stay unbound or the art it was given is overwritten by the
+    -- first aura that matches. Unbound, the texture is an ordinary DF-owned region: nothing
+    -- else writes it, and the ENGINE still owns whether the button is SHOWN at all, which is
+    -- exactly the division we want -- Blizzard decides "does this unit match", we decide what
+    -- the marker looks like.
+    -- ⚠ Only reachable through the Power Infusion Helper's Icon surface today. Its trigger is
+    -- a list of other people's cooldowns and its message is "infuse this player", so the
+    -- picture is Power Infusion rather than whichever cooldown matched.
+    -- ⚠ _boundIcon IS BIND-ONCE PER SLOT, so a slot must not be pooled between the two kinds
+    -- -- placedStructSig carries the pinned-vs-dynamic flag for exactly that reason.
+    local pinnedArt = style.icon and style.icon.staticSpellID
+    if slot.dfIcon and slot.SetIcon and not slot._boundIcon and not pinnedArt then
         slot._boundIcon = true
         slot:SetIcon(slot.dfIcon)
     end
