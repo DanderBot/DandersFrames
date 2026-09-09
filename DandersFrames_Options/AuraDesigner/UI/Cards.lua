@@ -666,13 +666,58 @@ local PIH_RECIPE_OWNED = {
     id = true, type = true,
 }
 
-local function pihStash(key, hit)
+-- ☠☠ THE STASH HELD ONE SURFACE PER SIGNAL, AND THE SIGNAL CAN HOLD SEVERAL (fixed
+-- 2026-09-09). It was written when a signal WAS one effect, so `retainedCfg[key]` was one
+-- {surface, cfg} pair -- and the multi-surface work never revisited it.
+-- ⇒ Krathe: "when I disable the PI tracker, it seems to remove my border effect I added."
+-- Exactly what it did. Disable deleted every marked effect, stashed ONE of them, and
+-- re-enabling rebuilt that one. A border, an icon and a square went in; a border came back,
+-- and the other two were gone with nothing anywhere that remembered them.
+-- ⇒ The stash is a LIST now, in menu order (pihFoundAll sorts), and PIH_Create rebuilds all
+-- of it. The promise the enable tick has always made -- "this behaves like a switch even
+-- though records really are created and deleted underneath" -- is only true if it does.
+--
+-- ⚠ THE OLD SHAPE IS STILL READ. A profile stashed by a previous build carries
+-- {surface=, cfg=}; pihKeptCfg and pihKeptSurfaces answer for both, so nobody's retained
+-- customisation is lost by the fix for losing retained customisations.
+local function pihStashHits(key, hits)
     local s = P.PIH_Settings()
-    if not (s and hit and type(hit.cfg) == "table") then return end
+    if not s or not (hits and hits[1]) then return end
     s.retainedCfg = s.retainedCfg or {}
-    -- The surface rides along: a stash is only restored onto the SAME surface,
-    -- because the five surfaces do not share a settings vocabulary (see pihCapture).
-    s.retainedCfg[key] = { surface = hit.typeKey, cfg = pihDeepCopy(hit.cfg) }
+    local surfaces, order = {}, {}
+    for _, hit in ipairs(hits) do
+        -- The surface rides along: a stash is only restored onto the SAME surface, because
+        -- the surfaces do not share a settings vocabulary (a border has a style and a
+        -- thickness; a health bar has Replace-vs-Tint).
+        if type(hit.cfg) == "table" and not surfaces[hit.typeKey] then
+            surfaces[hit.typeKey] = pihDeepCopy(hit.cfg)
+            order[#order + 1] = hit.typeKey
+        end
+    end
+    s.retainedCfg[key] = { surfaces = surfaces, order = order }
+end
+
+-- One stashed surface's cfg, from either shape.
+local function pihKeptCfg(key, surface)
+    local s = P.PIH_Settings()
+    local kept = s and s.retainedCfg and s.retainedCfg[key]
+    if type(kept) ~= "table" then return nil end
+    if type(kept.surfaces) == "table" then
+        local c = kept.surfaces[surface]
+        return (type(c) == "table") and c or nil
+    end
+    if kept.surface == surface and type(kept.cfg) == "table" then return kept.cfg end
+    return nil
+end
+
+-- Every stashed surface for a signal, in the order they should be rebuilt.
+local function pihKeptSurfaces(key)
+    local s = P.PIH_Settings()
+    local kept = s and s.retainedCfg and s.retainedCfg[key]
+    if type(kept) ~= "table" then return {} end
+    if type(kept.order) == "table" and kept.order[1] then return kept.order end
+    if kept.surface then return { kept.surface } end
+    return {}
 end
 
 -- Overlay the stash onto a freshly created cfg. Runs AFTER the recipe's default
@@ -680,10 +725,9 @@ end
 -- touching anything the recipe must control (those were stamped before this runs and
 -- are skipped here, so they stand).
 local function pihRestoreInto(cfg, key, surface)
-    local s = P.PIH_Settings()
-    local kept = s and s.retainedCfg and s.retainedCfg[key]
-    if not (kept and kept.surface == surface and type(kept.cfg) == "table") then return end
-    for k, v in pairs(kept.cfg) do
+    local kept = pihKeptCfg(key, surface)
+    if not kept then return end
+    for k, v in pairs(kept) do
         if not PIH_RECIPE_OWNED[k] then cfg[k] = pihDeepCopy(v) end
     end
 end
@@ -806,9 +850,11 @@ local function pihCreateSignal(key, surfaceOverride)
     local s = P.PIH_Settings()
     -- ⭐ A RE-ADDED SIGNAL COMES BACK WHERE THE USER LEFT IT. The surface is derived
     -- from where the mark is found, so after a remove nothing else remembers it --
-    -- the stash is the only memory. An explicit dropdown choice still outranks it.
-    local kept = s.retainedCfg and s.retainedCfg[key] or nil
-    local tgt = surfaceOverride or (kept and kept.surface) or def.surface
+    -- the stash is the only memory. A named surface still outranks it.
+    -- ⚠ THE STASH'S FIRST SURFACE, not "the" surface: a signal can hold several and
+    -- pihKeptSurfaces returns them in menu order. PIH_Create names each one explicitly, so
+    -- this fallback only decides where a BARE create lands.
+    local tgt = surfaceOverride or pihKeptSurfaces(key)[1] or def.surface
 
     local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
     if not cdId then return false, "could not build the cooldown list" end
@@ -1377,7 +1423,23 @@ end
 -- stored setting itself now, because there is no group left to read the truth off.
 
 function P.PIH_Create()
-    local ok, why = pihCreateSignal("burst")
+    -- ⭐ EVERY SURFACE THE STASH REMEMBERS, not just one. Turning the tick back on has to put
+    -- back what turning it off took away -- see pihStashHits for the shape and for the report
+    -- that found it ("it seems to remove my border effect I added"). Named explicitly rather
+    -- than left to pihCreateSignal's fallback, which can only choose one.
+    -- ⚠ FIRST WINS FOR THE RESULT. A later surface refusing ("already on") must not turn a
+    -- successful rebuild into a failure, and a first-surface failure is the one worth
+    -- reporting -- so `ok` latches true and `why` keeps the first refusal.
+    local ok, why
+    local wanted = pihKeptSurfaces("burst")
+    if wanted[1] then
+        for _, surface in ipairs(wanted) do
+            local o, w = pihCreateSignal("burst", surface)
+            if o then ok = true elseif not why then why = w end
+        end
+    else
+        ok, why = pihCreateSignal("burst")
+    end
     -- A silent refusal is indistinguishable from a dead button: every PIH_ path that can
     -- turn something down returns a reason, and this is where the add card reads it.
     if not ok then
@@ -1396,21 +1458,55 @@ end
 
 function P.PIH_Remove()
     local pool = pihOtherPoolRead()
-    local found = pihFound()
+    -- ⚠ pihFoundAll, NOT pihFound: the latter answers ONE hit per signal, which is what made
+    -- this stash a quarter of the user's work and this delete a guess at the rest.
+    local all = pihFoundAll()
     local names, n = {}, 0
-    for key, hit in pairs(found) do
-        -- Wholesale removal skips pihDeleteSignal, so the stash write goes here.
-        pihStash(key, hit)
-        names[hit.auraName] = true; n = n + 1
+
+    -- STASH FIRST, EVERY SURFACE, BEFORE ANYTHING IS REMOVED.
+    for key, hits in pairs(all) do pihStashHits(key, hits) end
+
+    -- ☠ THE MARKED EFFECTS GO, ONE AT A TIME -- NOT THE WHOLE RECORD.
+    -- It used to nil the pool key outright, on the argument that "a record here is identified
+    -- BY a helper spell list, so nothing of the user's own can be sitting on it". That is not
+    -- true: the designer's From a Filter flow will happily hang an effect off the Power
+    -- Infusion Helper filter, and that effect lands on this exact record. Turning the helper
+    -- off would have taken it with no warning and no stash.
+    -- ⚠ Precise removal is also what the multi-surface shape needs anyway -- there is no
+    -- longer one effect per record to reason about.
+    for _, hits in pairs(all) do
+        for _, hit in ipairs(hits) do
+            local auraCfg = pool and pool[hit.auraName]
+            if auraCfg then
+                if hit.indicatorID and type(auraCfg.indicators) == "table" then
+                    for i, inst in ipairs(auraCfg.indicators) do
+                        if inst.id == hit.indicatorID then
+                            table.remove(auraCfg.indicators, i)
+                            break
+                        end
+                    end
+                else
+                    auraCfg[hit.typeKey] = nil
+                end
+                names[hit.auraName] = true
+                n = n + 1
+            end
+        end
     end
 
-    -- ☠ THE WHOLE RECORD GOES, not only the marked surfaces. A helper record can carry a
-    -- `sound` entry that the generic effects list refuses to show on a filter-owned record
-    -- (Groups.lua) -- so it offers no delete button for it, and anything left behind there is
-    -- unreachable. Safe to take wholesale: a record here is identified BY a helper spell list,
-    -- so nothing of the user's own can be sitting on it.
-    if pool then
-        for name in pairs(names) do pool[name] = nil end
+    -- ...and the helper-owned SOUND entry, which is the reason the wholesale delete existed.
+    -- The generic effects list refuses to show `sound` on a filter-owned record (Groups.lua),
+    -- so it offers no delete button for it and anything left behind there is unreachable.
+    -- Clearing that one key keeps the original intent without taking the user's own effects
+    -- with it; the record itself goes only once it holds nothing at all.
+    for name in pairs(names) do
+        local auraCfg = pool and pool[name]
+        if type(auraCfg) == "table" then
+            auraCfg.sound = nil
+            if P.AuraHoldsNoEffects and P.AuraHoldsNoEffects(auraCfg) then
+                pool[name] = nil
+            end
+        end
     end
 
     -- The lists go too. They exist only to feed these effects, and three "Power Infusion
@@ -1481,7 +1577,10 @@ function P.PIH_Remove()
     if Engine and Engine.PIH_ApplySaved then Engine:PIH_ApplySaved() end
 
     pihRefresh()
-    return true, ("removed %d signal(s) and their spell lists"):format(n)
+    -- ⚠ EFFECTS, not signals: `n` counts every marked surface removed now that a signal can
+    -- hold several. The old wording said "signal(s)" while counting one per signal, which was
+    -- true then and would have quietly under-reported ever since.
+    return true, ("removed %d effect(s) and their spell lists"):format(n)
 end
 
 function P.PIH_SetRole(role, on)
