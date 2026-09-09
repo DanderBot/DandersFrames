@@ -469,6 +469,9 @@ L["%d override"] = true
 L["%d overrides"] = true
 L["%d players"] = true
 L["%d spells"] = true
+-- The header on a CURATED custom filter once some of its spells are ticked off. The plain
+-- form above still serves every other case, so an ordinary filter's header never changes.
+L["%d of %d spells"] = true
 L["%d-%d players"] = true
 L["%d-%d%%"] = true
 L["%d-%ds"] = true

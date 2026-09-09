@@ -700,12 +700,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         return ids
     end
 
-    local function CustomSpellCount(f)
-        local n = 0
-        for _ in pairs(f.spells) do n = n + 1 end
-        for _ in pairs(f.rawIDs) do n = n + 1 end
-        return n
-    end
+    -- ⚠ CustomSpellCount WENT TO THE REGISTRY as R:CustomFilterCounts, because it was one
+    -- of THREE places counting the same thing and none of them honoured a curated list's
+    -- per-spell ticks. One counter, three consumers -- this file's left list and header,
+    -- and R:ListFilters, which the Buff Bar's picker reads.
 
     -- Display name of the current selection (duplicate-prompt prefill)
     local function CurrentDisplayName()
@@ -2998,8 +2996,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             used = used + 1
             local row = AcquireLeftRow(used)
             local id = cfId
+            -- ★ A CURATED LIST READS LIKE A PRESET: "34/39" once something is ticked off,
+            -- and the modified dot beside it. A hand-built one answers enabled == total
+            -- (nothing can be off), so it keeps the single number it always had -- no
+            -- branch on the kind, just the shared counter.
+            local onN, totalN = R:CustomFilterCounts(id)
             BindLeftRow(row, y, "custom", id, f.name or id,
-                tostring(CustomSpellCount(f)), false,
+                (onN == totalN) and tostring(totalN) or (onN .. "/" .. totalN),
+                R.IsCuratedFilterModified and R:IsCuratedFilterModified(id) or false,
                 selKind == "custom" and selKey == id)
             y = y + LEFT_ROW_H
         end
@@ -3093,7 +3097,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             eyebrowText:SetText(L["Editing custom filter"])
             local f = R:GetCustomFilter(selKey)
             titleText:SetText(f and (f.name or selKey) or "")
-            countText:SetText(format(L["%d spells"], f and CustomSpellCount(f) or 0))
+            -- Same shape as the left row: the fraction only appears once something is
+            -- actually off, so an ordinary custom filter's header is unchanged.
+            local onN, totalN = R:CustomFilterCounts(selKey)
+            countText:SetText((onN == totalN) and format(L["%d spells"], totalN)
+                or format(L["%d of %d spells"], onN, totalN))
         end
         -- Both texts are now set, so the name can be capped against what the count
         -- actually takes up on this pass.

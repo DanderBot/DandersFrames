@@ -202,6 +202,37 @@ function R:SetCustomSpellEnabled(cfId, spellID, enabled)
     end
 end
 
+-- How many of a custom filter's spells are ON, and how many there are.
+-- ⚠ ONE COUNTER, THREE CONSUMERS: the Filter Designer's left list, its right-hand header, and
+-- R:ListFilters (which the Buff Bar's picker reads). They showed a plain total each, computed
+-- three ways, and none of them moved when a curated list's spell was ticked off -- Krathe,
+-- 2026-09-09: "the number does not change as I tick them on/off". A count that ignores the
+-- control next to it is worse than no count.
+-- ⚠ A HAND-BUILT FILTER ANSWERS enabled == total, because IsCustomSpellEnabled is true when
+-- there is no disabled set -- so those rows keep the single number they have always shown and
+-- no caller needs to branch on which kind it is.
+function R:CustomFilterCounts(cfId)
+    local f = self:GetCustomFilter(cfId)
+    if not f then return 0, 0 end
+    local on, total = 0, 0
+    for sid in pairs(f.spells) do
+        total = total + 1
+        if self:IsCustomSpellEnabled(cfId, sid) then on = on + 1 end
+    end
+    for rid in pairs(f.rawIDs) do
+        total = total + 1
+        if self:IsCustomSpellEnabled(cfId, rid) then on = on + 1 end
+    end
+    return on, total
+end
+
+-- Has a curated list been altered from its default? The same question IsPresetModified asks
+-- of a preset, and the same answer shape, so a row can carry the same "modified" dot.
+function R:IsCuratedFilterModified(cfId)
+    local f = self:GetCustomFilter(cfId)
+    return (f and f.disabled and next(f.disabled)) and true or false
+end
+
 -- Is this a list we seeded, i.e. one with a default to go back to?
 function R:IsCuratedFilter(cfId)
     local f = self:GetCustomFilter(cfId)
@@ -835,13 +866,12 @@ function R:ListFilters(isLinked)
     end)
     for _, cfId in ipairs(customs) do
         local cf = self:GetCustomFilter(cfId)
-        local n = 0
-        if cf then
-            for _ in pairs(cf.spells) do n = n + 1 end
-            for _ in pairs(cf.rawIDs) do n = n + 1 end
-        end
+        -- ⚠ THROUGH THE SHARED COUNTER, which honours a curated list's per-spell ticks. This
+        -- counted membership twice over and reported enabled == total unconditionally, so a
+        -- ticked-off spell still counted as on everywhere this list is read.
+        local on, total = self:CustomFilterCounts(cfId)
         out[#out + 1] = { kind = "custom", key = cfId, custom = true,
-                          name = (cf and cf.name) or cfId, enabled = n, total = n }
+                          name = (cf and cf.name) or cfId, enabled = on, total = total }
     end
     return out
 end
