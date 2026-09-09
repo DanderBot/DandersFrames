@@ -7039,7 +7039,16 @@ S.BuildPIHelperBody = function(parent, opts)
         -- ⚠ THE GATE LIVES HERE, not with the effects. "Hide the helper while your own Power
         -- Infusion is on cooldown" is not a display choice -- it is a condition on whether
         -- the helper has anything to say at all, which is what a trigger is.
-        yPos = t.group(L["Triggers"], function(g)
+        -- ⚠ "Roles", NOT "Triggers" (Krathe, 2026-09-09). The box was named after the TAB it
+        -- sits on, so the Triggers tab opened with a box captioned Triggers -- a heading that
+        -- repeats its own parent tells you nothing, and the one thing it could have told you
+        -- (that this box is the ROLE filter) was the thing it left out.
+        -- ⚠ THE COOLDOWN GATE STAYS IN IT, and that was already argued: see the long note in
+        -- pihAddGateAndNotes -- a whole titled group around a single checkbox is more chrome
+        -- than the setting is worth, and "Show even if your Power Infusion is on cooldown"
+        -- says what it does without a header to lean on. That note names this exact case as
+        -- the test for a control living under a heading that does not quite describe it.
+        yPos = t.group(L["Roles"], function(g)
             pihAddRoles(g, t)
             pihAddGateAndNotes(g, t)
         end, yPos)

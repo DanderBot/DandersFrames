@@ -2998,9 +2998,13 @@ L["%s already colours this text. Only one can show — raise this signal's prior
 L["%s and %d more"] = true
 L["Another effect"] = true
 -- Shared settings. These live on the helper, not on each effect: they are statements about
--- who you would infuse, and there is only one answer per player. They sit inside Triggers
--- now -- excluding a role is a statement about what counts, not about how it is drawn -- so
--- the old "Never Show On" heading went with the regroup.
+-- who you would infuse, and there is only one answer per player. They sit on the Triggers TAB
+-- -- excluding a role is a statement about what counts, not about how it is drawn -- so the
+-- old "Never Show On" heading went with the regroup.
+-- ⚠ THE BOX IS "Roles" AND THE TAB IS "Triggers" (Krathe, 2026-09-09). It was Triggers for
+-- both, so the tab opened with a box repeating its own name -- which says nothing, while the
+-- thing it could have said (this box is the ROLE filter) went unsaid.
+L["Roles"] = true
 L["Groups without assigned roles show everyone."] = true
 -- ⚠ ASKED POSITIVELY, like every other tick on the panel. It was "Hide the helper while your
 -- Power Infusion is on cooldown" -- the one control in a box of enables that turned a
