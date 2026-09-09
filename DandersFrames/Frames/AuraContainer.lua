@@ -1042,12 +1042,59 @@ end
 -- worse story than one, and collapsing them would hide it. _pushOK == false is called out
 -- separately because a REFUSED push with a replay queued is expected in combat and is not
 -- the same fault as a push that was never made.
+-- ★★★ THE VISIBILITY VERDICT IS DERIVED, NEVER STORED (2026-09-07).
+--
+-- ☠☠ WHY: the registry is keyed by UNIT and the actuation was keyed by CONTAINER, and
+-- containers are RETARGETED. SetUnitVisibilityLatched(unit, ...) only ever reached
+-- handles whose config.unit / owner.unit was that unit AT THAT INSTANT, so a container
+-- latched while pointed at unit A and retargeted to unit B before A's clear arrived was
+-- never reached by A's clear — and Handle:SetUnit then re-seeded it from B, which during
+-- a raid join is very likely also latched. The latch MIGRATED WITH THE CONTAINER instead
+-- of staying with the unit, and no clear path could see it again: ReconcileLatches walks
+-- the registry and calls the same unit-scoped function, and checkDarkMismatch only warns
+-- in the LEAK direction (believed dark, not locked), never the BLANKING one. Only a
+-- /reload recovered it, because a reload discards every handle.
+-- ☠ FIELD, Krathe 2026-09-07: joined a raid from player housing; the gate trail shows
+-- "visibility latch ON unit=raid9" (his OWN token) at 19:19:58, "OFF unit=raid9" at
+-- 19:20:12, containers ping-ponging raid8<->raid9 four times in between and a five-way
+-- cascade at 19:20:32 — and his Aura Designer icons stayed blank until he reloaded.
+--
+-- ⇒ Nothing stores the verdict now. Every actuation ASKS the registry for the unit it is
+-- CURRENTLY bound to, so a retarget cannot carry a stale answer and there is nothing left
+-- to strand. `_visLatched` survives ONLY as a memo of what was last applied, to gate
+-- redundant work — the same shape a peer uses (recompute the probe, memoise the write).
+-- ★ It is the converse of [[unit_state_never_edged_on_frame_flags]], which we fixed in
+-- August: that said an actuation keyed by UNIT needs an edge keyed by UNIT. This is the
+-- half never checked — an edge keyed by UNIT needs an ACTUATION keyed by UNIT too.
+--
+-- ⚠ SOURCE-RELATIVE ONLY (see the note above SetUnitVisibilityLatched before changing
+-- this). The leak this guard closes is the PLAYER filter token failing open, which can
+-- only affect pools whose filter names PLAYER; a plain HELPFUL or HARMFUL|RAID pool has
+-- no caster term to fail. Krathe's session: 2 of his 10 container filters were
+-- source-relative and all 10 were being darkened.
+local function unitVisLatched(unit)
+    local reg = AuraContainer._invisibleUnits
+    return (unit and reg and reg[unit]) and true or nil
+end
+-- Group-container half: the handle's own token.
+local function handleVisDark(h)
+    if not h or not h._idGateSourceRelative then return false end
+    return unitVisLatched(h.config and h.config.unit) and true or false
+end
+-- Slot half: slots inherit their unit from the shared owner, never from themselves.
+local function slotVisDark(s)
+    if not s or not s._idGateSourceRelative then return false end
+    return unitVisLatched(s.owner and s.owner.unit) and true or false
+end
+AuraContainer._handleVisDark = handleVisDark
+AuraContainer._slotVisDark   = slotVisDark
+
 local darkWarned = {}
 local function checkDarkMismatch()
     local parkCF = AuraContainer.SLOT_PARK_CF
     if not parkCF then return end
     for h in pairs(AuraContainer._slotHandles or {}) do
-        local dark = h.parked or h._deathLatched or h._visLatched
+        local dark = h.parked or h._deathLatched or slotVisDark(h)
         if dark and h._cfPushed ~= parkCF and not darkWarned[h.key] then
             darkWarned[h.key] = true
             DF:DebugWarn(DBG,
@@ -1057,7 +1104,7 @@ local function checkDarkMismatch()
                 tostring(h.key), tostring(h.owner and h.owner.unit),
                 tostring(h.parked and true or false),
                 tostring(h._deathLatched and true or false),
-                tostring(h._visLatched and true or false),
+                tostring(slotVisDark(h)),
                 tostring(h._pushOK),
                 h._pendingTuning and ", replay queued" or "")
         end
@@ -6213,8 +6260,10 @@ function Handle:_applyVisibility()
     -- Post-demolition composition: consumer intent + the death latch. (The identity
     -- gate's hide and the cinematic latch used to sit here — see the demolition note
     -- above SetUnitDeathLatched.)
+    -- ☠ ASKED, NOT REMEMBERED — see unitVisLatched. self._visLatched is a memo of the
+    -- last application and must never be the authority here: a retarget would carry it.
     local want = (self._intendedShown ~= false) and not self._deathLatched
-        and not self._visLatched
+        and not handleVisDark(self)
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
     -- ping-pong against the park's own deferred hide.
@@ -6276,12 +6325,18 @@ end
 -- Same actuation, same re-parse on clear (a unit that was outside your world produced
 -- no aura events while it was away, so the standing parse is stale by definition).
 -- See AuraContainer.SetUnitVisibilityLatched for what drives it and why it exists.
-function Handle:_setVisLatch(on)
-    on = on or nil
-    if self._visLatched == on then return end
-    self._visLatched = on
+-- ⚠ THE ARGUMENT IS IGNORED ON PURPOSE. Callers used to pass the verdict they had just
+-- computed for SOME unit; the only correct verdict is the one for the unit this handle is
+-- bound to RIGHT NOW, so we recompute. Keeping the parameter means every existing caller
+-- (SetUnitVisibilityLatched, Handle:SetUnit, the slot-owner retarget) becomes correct
+-- without changing a single call site, and a caller that reasons about the wrong unit can
+-- no longer poison this handle.
+function Handle:_setVisLatch(_on)
+    local want = handleVisDark(self) or nil
+    if self._visLatched == want then return end
+    self._visLatched = want          -- memo of what was applied, NOT the authority
     self:_applyVisibility()
-    if not on then self:Refresh() end
+    if not want then self:Refresh() end
 end
 
 -- ============================================================
@@ -8062,7 +8117,8 @@ function SlotHandle:_pushFilter()
     -- (The identity-gate terms that used to sit here — _gateHidden, _cineLatched,
     -- _pendingGateReparse — died with the gate; see the demolition note above
     -- SetUnitDeathLatched.)
-    local unitHidden = (self._deathLatched or self._visLatched) and true or false
+    -- ☠ ASKED, NOT REMEMBERED — see unitVisLatched above checkDarkMismatch.
+    local unitHidden = (self._deathLatched or slotVisDark(self)) and true or false
     local anchor = self.owner.anchor
     if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
     local dark = (self.parked or unitHidden) and true or false
@@ -8179,10 +8235,11 @@ end
 -- way the death latch does (owner anchor + park string + the CF park lock, all through
 -- _pushFilter, whose dark->live transition carries the re-parse on clear).
 -- ⚠ A separate flag, NOT a second writer of _deathLatched — see the handle half.
-function SlotHandle:_setVisLatch(on)
-    on = on or nil
-    if self._visLatched == on then return end
-    self._visLatched = on
+-- ⚠ Argument ignored, exactly as in the handle half — see the note there.
+function SlotHandle:_setVisLatch(_on)
+    local want = slotVisDark(self) or nil
+    if self._visLatched == want then return end
+    self._visLatched = want          -- memo of what was applied, NOT the authority
     local ok = self:_pushFilter()
     if not ok or InCombatLockdown() then
         self._pendingTuning = true
@@ -8249,7 +8306,7 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     -- _pushFilter's dark test.
     -- Through _cf(), never the raw value: _cf() carries BOTH the helper gate (a tuning
     -- pass on a gated-dark slot must not un-gate it) and the caster lock.
-    if candidatesChanged and not (self.parked or self._deathLatched or self._visLatched) then
+    if candidatesChanged and not (self.parked or self._deathLatched or slotVisDark(self)) then
         local cfOut = self:_cf()
         pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfOut)
         if not InCombatLockdown() then self._cfPushed = cfOut end
@@ -8830,11 +8887,28 @@ end
 -- last time. This latch closes the instance boundary. That is all it claims.
 --
 -- ⚠ WHY A LATCH AND NOT A FILTER FIX: nothing in readable Lua can express "cast by me"
--- — DoesAuraPassCandidateFilters has 13 fields and not one tests caster identity. When
--- a unit is out of your world EVERY pool it renders is stale, not just source-relative
--- ones; restricting the response to "mine" filters once left a cross-instance unit
--- showing a full debuff row and dispel overlay while its buff bar was correctly blanked
--- (Krathe, 2026-08-18). So the actuation is per UNIT, like the death latch.
+-- — DoesAuraPassCandidateFilters has 13 fields and not one tests caster identity.
+--
+-- ☠☠ THE "EVERY POOL IS STALE" ARGUMENT WAS OVERRULED ON 2026-09-07, DELIBERATELY, BY
+-- KRATHE — read this before widening the scope back. It used to say: when a unit is out
+-- of your world every pool it renders is stale, not just source-relative ones, and
+-- restricting the response to "mine" filters once left a cross-instance unit showing a
+-- full debuff row and dispel overlay while its buff bar was correctly blanked
+-- (2026-08-18). That observation stands and is NOT retracted. What changed is the price:
+--   * The blanket response fires on OUT-OF-RENDER-RANGE group members, not only
+--     cross-instance ones — measured, Krathe 2026-09-07: 17 raid units latched in one
+--     tick while their containers were still reporting live helpful counts (raid18 held
+--     8 buffs throughout). "Out of your world" is not what UnitIsVisible answers.
+--   * The leak itself is source-relative BY CONSTRUCTION. The PLAYER-token partition
+--     broke 5 times in that session and EVERY one carried vis=0, while the same probe
+--     ran 32 times at vis=1 without a break — but a pool with no caster term has nothing
+--     to fail. 2 of Krathe's 10 container filters were source-relative; all 10 went dark.
+-- ⇒ A stale debuff row on a genuinely cross-instance unit is a smaller, self-correcting
+-- harm than a healer's whole Aura Designer going blank on a raid join. If the 2026-08-18
+-- symptom returns and matters more than this one, the switch is _idGateSourceRelative in
+-- handleVisDark/slotVisDark — not a rewrite.
+-- ⚠ The actuation stays per UNIT for the DEATH latch, which has no such narrowing: death
+-- really does freeze every pool, with no aura event to follow.
 AuraContainer._invisibleUnits = AuraContainer._invisibleUnits or {}
 
 function AuraContainer.SetUnitVisibilityLatched(unit, on)
@@ -8912,12 +8986,42 @@ function AuraContainer.ReconcileLatches(reason)
         end
     end
 
+    -- ★★ RE-ASK EVERY CONTAINER (2026-09-07). Clearing the registry above is not enough
+    -- on its own: the loops in SetUnitVisibilityLatched only reach containers bound to
+    -- that unit, so one stranded by a retarget was never visited by ANY clear path and
+    -- only a /reload recovered it (Krathe, raid join from housing). Both setters are now
+    -- recompute-and-memo, so calling them unconditionally is a cheap idempotent re-ask:
+    -- a container that already agrees returns on the memo check without touching the
+    -- engine, and one that has drifted heals here instead of at the next reload.
+    -- ⚠ This is the BLANKING direction, which had no detector at all — checkDarkMismatch
+    -- only ever warned about "believed dark but not locked", the leak. A container held
+    -- dark for a unit that is not latched is the failure the user actually reports, and
+    -- it was the one thing nothing looked for.
+    local healed = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and h._visLatched and not handleVisDark(h) then
+            healed = healed + 1
+        end
+        pcall(function() h:_setVisLatch() end)
+    end
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        if s._visLatched and not slotVisDark(s) then healed = healed + 1 end
+        pcall(function() s:_setVisLatch() end)
+    end
+
     -- Silent when there was nothing to do: this runs on every zone-in and every combat
     -- drop, and a line per run would drown the trail it shares with the latch
     -- transitions. A line here means a latch had genuinely gone stale — which is a bug
     -- worth seeing, not routine bookkeeping.
     if cleared > 0 then
         GateLog("reconcile (%s): cleared %d stale latch(es)", reason or "sweep", cleared)
+    end
+    if healed > 0 then
+        DF:DebugWarn(DBG, "reconcile (%s): %d container(s) were held DARK for a unit that"
+            .. " is not latched — a retarget stranded the verdict. Healed. This is the"
+            .. " blanking failure class (auras missing until /reload); if it recurs, the"
+            .. " actuation has found another way to outlive its unit.",
+            tostring(reason or "sweep"), healed)
     end
 end
 
@@ -9084,9 +9188,10 @@ function AuraContainer.DebugDumpIdentityGate()
         local byOwner = {}
         for h in pairs(AuraContainer._slotHandles or {}) do
             total = total + 1
-            local dark = h.parked or h._deathLatched or h._visLatched
+            local visDark = AuraContainer._slotVisDark(h)
+            local dark = h.parked or h._deathLatched or visDark
             if h.parked then parked = parked + 1 end
-            if h._deathLatched or h._visLatched then latched = latched + 1 end
+            if h._deathLatched or visDark then latched = latched + 1 end
             if not dark then live = live + 1 end
             local ow = h.owner
             if ow then byOwner[ow] = (byOwner[ow] or 0) + 1 end
