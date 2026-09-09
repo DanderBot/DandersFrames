@@ -1079,6 +1079,9 @@ end
 -- Group-container half: the handle's own token.
 local function handleVisDark(h)
     if not h or not h._idGateSourceRelative then return false end
+    -- Nested containers follow their parent's visibility; every other latch path skips
+    -- them (SetUnitVisibilityLatched, the build-time seed), so the derive must too.
+    if h.config and h.config.parentDrivenVisibility then return false end
     return unitVisLatched(h.config and h.config.unit) and true or false
 end
 -- Slot half: slots inherit their unit from the shared owner, never from themselves.
@@ -9018,7 +9021,8 @@ function AuraContainer.ReconcileLatches(reason)
     end
     if healed > 0 then
         DF:DebugWarn(DBG, "reconcile (%s): %d container(s) were held DARK for a unit that"
-            .. " is not latched — a retarget stranded the verdict. Healed. This is the"
+            .. " is not latched — a retarget stranded the verdict, or a retune dropped its PLAYER"
+            .. " token. Healed. This is the"
             .. " blanking failure class (auras missing until /reload); if it recurs, the"
             .. " actuation has found another way to outlive its unit.",
             tostring(reason or "sweep"), healed)

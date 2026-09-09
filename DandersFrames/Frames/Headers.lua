@@ -8833,10 +8833,11 @@ headerChildEventFrame:SetScript("OnEvent", function(self, event, arg1)
                     end
                 end)
             end
-            -- ☠ DOT, NOT COLON, and a separate walk: IterateAllFrames has no pinned
-            -- arm, so pinned frames would keep a stale icon for the whole fight.
-            if DF.IteratePinnedFrames then
-                DF.IteratePinnedFrames(function(frame)
+            -- A separate walk: IterateAllFrames has no pinned arm, so pinned frames
+            -- would keep a stale icon for the whole fight. Same local the other
+            -- branches of this handler use.
+            if IteratePinnedFrames then
+                IteratePinnedFrames(function(frame)
                     if frame.unit then DF:UpdateResurrectionIcon(frame) end
                 end)
             end
