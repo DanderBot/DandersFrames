@@ -7423,12 +7423,43 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
     local TILE_COLS, TILE_GAP = 3, 7
     local TILE_W = math.floor((CW - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS)
 
-    local head = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(head, 9, "")
-    head:SetPoint("TOPLEFT", 8, yPos)
-    head:SetText(pihAddPick and L["Which icon?"] or L["ADD AN INDICATOR"])
-    head:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yPos = yPos - 18
+    -- ── THE HEADING, AND ON STEP 2 THE WAY BACK OUT ──
+    -- ☠ AN ✕ ON THE HEADING ROW, NOT A "Back" BUTTON UNDER THE GRID. Krathe, 2026-09-10:
+    -- "no back use X like we do on the other AD effects." The designer's OWN picker is
+    -- directly above this function (S.BuildEffectsHeadArea's S.effectsPicker arm): a head
+    -- frame with the question on the left and GUI:CreateCloseButton on the right, captioned
+    -- there as "the only way out that does not commit to anything". This is the same
+    -- question in the same place, so it is the same control -- and a Back button was a
+    -- second vocabulary for leaving invented for one grid.
+    -- ⚠ TWO SHAPES, ONE PER STEP. Step 1 is a section CAPTION -- small-caps, dim, no way out
+    -- because there is nothing to leave -- and step 2 is a PICKER HEAD, in the picker's own
+    -- font and colour. Sharing one fontstring made step 2 quietly the wrong kind of object.
+    if pihAddPick then
+        local head = CreateFrame("Frame", nil, parent)
+        head:SetHeight(22)
+        head:SetPoint("TOPLEFT", 8, yPos)
+        head:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+
+        local headText = head:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        headText:SetPoint("LEFT", 0, 0)
+        headText:SetText(L["Which icon?"])
+        headText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+        local close = GUI:CreateCloseButton(head, { size = 18, iconSize = 11 })
+        close:SetPoint("RIGHT", 0, 0)
+        close:SetScript("OnClick", function()
+            pihAddPick = nil
+            if Refresh then Refresh() end
+        end)
+        yPos = yPos - 26
+    else
+        local head = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(head, 9, "")
+        head:SetPoint("TOPLEFT", 8, yPos)
+        head:SetText(L["ADD AN INDICATOR"])
+        head:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - 18
+    end
 
     -- ⚠ ONE LAYOUT FOR BOTH STEPS. The grid is the same shape whichever question is being
     -- asked, so it is written once and fed a list -- the alternative is two flow blocks that
@@ -7512,12 +7543,9 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
                   if Refresh then Refresh() end
               end },
         }, yPos)
-        local back = GUI:CreateButton(parent, L["Back"], 90, 20, function()
-            pihAddPick = nil
-            if Refresh then Refresh() end
-        end)
-        back:SetPoint("TOPLEFT", 8, yPos)
-        return yPos - 26
+        -- ⚠ NOTHING UNDER THE GRID. The way out is the ✕ on the heading above -- see the
+        -- note there for why this stopped being a Back button.
+        return yPos
     end
 
     -- ── STEP 1: WHICH KIND OF INDICATOR ──

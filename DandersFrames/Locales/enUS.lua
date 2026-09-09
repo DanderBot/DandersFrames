@@ -228,7 +228,6 @@ L["Are you sure?"] = true
 L["Aura Designer Template"] = true
 L["Auto-Create Profiles"] = true
 L["Auto-create profiles for loadouts"] = true
-L["Back"] = true
 L["Binding:"] = true
 L["Bindings only cast their assigned spell"] = true
 L["cast a resurrection spell instead."] = true
