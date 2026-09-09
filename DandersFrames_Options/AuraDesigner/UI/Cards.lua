@@ -1461,12 +1461,19 @@ function P.PIH_Remove()
     -- group since schema 5 and pihSweep deletes the ones older builds made -- but a profile
     -- can arrive here unswept (a preset switched into after this panel was last opened), and
     -- a helper being removed must not leave icons running whatever made them.
+    -- ⚠ POOL-INDEPENDENT, for the reason pihSweep step 5 records: this loop FINDS the group
+    -- in adDB.otherLayoutGroups, so it must DELETE from there too rather than from whichever
+    -- store the open tab resolves to. It was the tab-routed delete, and it was only ever safe
+    -- because this ran from an other-routed tab -- which is a property of the caller, not of
+    -- the code, and exactly the assumption that broke the sweep.
     local ig = pihAnyIconGroup()
-    while ig and P.DeleteLayoutGroup do
-        P.DeleteLayoutGroup(ig.id)
-        local nextG = pihAnyIconGroup()
-        if nextG == ig then break end   -- see pihSweep step 5: never spin on a failed delete
-        ig = nextG
+    while ig do
+        if not (P.RemoveOtherLayoutGroupByID and P.RemoveOtherLayoutGroupByID(ig.id)) then
+            DF:DebugWarn("AURADESIGNER",
+                "PIH: could not delete the cooldown-icon group (id %s)", tostring(ig.id))
+            break
+        end
+        ig = pihAnyIconGroup()
     end
 
     -- ☠ SOUND IS NOT A CONTAINER, so nothing above reaches it. Removing the helper has to
@@ -6098,6 +6105,23 @@ local function pihSweep()
     local s = P.PIH_Settings()
     if not s or s.schema == PIH_SCHEMA then return end
 
+    -- ☠☠ THE POOL IS PINNED FOR THE WHOLE SWEEP, AND SKIPPING THIS SHIPPED A BROKEN SWEEP.
+    -- Several editor helpers this function reaches resolve their STORE from S.activeBuffTab:
+    -- EnsureAuraConfig (step 4's Icon -> Square migration writes through it) and the shared
+    -- layout-group delete both do. That was invisible while the only caller was the helper's
+    -- own panel, which by definition ran on an other-routed tab -- and became wrong the moment
+    -- the sweep moved to page-build time, where the pool is still whatever the last session
+    -- left, usually My Buffs. Step 5's delete then searched the SPEC store for a group that
+    -- lives in the OTHER one, removed nothing, and said nothing about it.
+    -- ⚠ THIS IS NOT A LIE TOLD TO A SHARED HELPER. The helper's records genuinely live in the
+    -- Any Buff pool -- that is the constraint the whole feature is built around -- so pointing
+    -- the pool accessor at it while we work on them is telling it the truth.
+    -- ⚠ RESTORED UNCONDITIONALLY. Nothing between here and the restore can error out (no
+    -- pcall, no early return below this line), and a sweep that left the pool moved would hand
+    -- the page it was called from somebody else's records.
+    local prevPool = S.activeBuffTab
+    S.activeBuffTab = "other"
+
     local R = DF.FilterRegistry
     local pool = pihOtherPoolRead()
 
@@ -6200,15 +6224,23 @@ local function pihSweep()
     -- ⚠ AND THE STASH GOES. pihRestoreGroup would otherwise lay a deleted group's position
     -- and appearance back over the next one created -- and after this step there is no next
     -- one, so the stash is a copy of something with nowhere left to go.
+    -- ⚠ THROUGH THE POOL-INDEPENDENT REMOVER, NOT THE TAB-ROUTED DELETE. The finder reads
+    -- adDB.otherLayoutGroups directly; a deleter that resolves its store from the open tab
+    -- cannot be trusted to look in the same place. See RemoveOtherLayoutGroupByID.
+    -- ⚠ AND IT SAYS SO WHEN IT FAILS. The first version broke out of the loop on a delete
+    -- that removed nothing -- correct, in that a spin is worse than a stale group, and silent,
+    -- which is how the same bug survived a second round. There is no manual escape either:
+    -- a marked group is hidden from the Layout Groups list on every pool that still has one.
     do
         local ig = pihAnyIconGroup()
-        while ig and P.DeleteLayoutGroup do
-            P.DeleteLayoutGroup(ig.id)
-            local nextG = pihAnyIconGroup()
-            -- Refuse to spin: a delete that did not remove the group would loop forever, and
-            -- a settings panel that hangs the client is worse than a stale group.
-            if nextG == ig then break end
-            ig = nextG
+        while ig do
+            if not (P.RemoveOtherLayoutGroupByID and P.RemoveOtherLayoutGroupByID(ig.id)) then
+                DF:DebugWarn("AURADESIGNER",
+                    "PIH: could not delete the retired cooldown-icon group (id %s)",
+                    tostring(ig.id))
+                break
+            end
+            ig = pihAnyIconGroup()
         end
         if s.retainedCfg then s.retainedCfg.iconGroups = nil end
     end
@@ -6227,6 +6259,7 @@ local function pihSweep()
     end
 
     s.schema = PIH_SCHEMA
+    S.activeBuffTab = prevPool
     if P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
 end
 -- ☠ EXPORTED, AND THE REASON IS WHO NEVER OPENS THIS PANEL. The sweep used to run only from
