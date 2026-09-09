@@ -6940,7 +6940,16 @@ local function pihAddClasses(g, t)
             and DF.FilterRegistry.ClassDisplayName(classFile)) or classFile
         local w = t.check(g, name,
             function() return P.PIH_ClassOn(classFile) end,
-            function(v) P.PIH_SetClassOn(classFile, v) end,
+            -- ⚠ t.Refresh AS WELL AS THE WRITE, because this tick changes the BOX HEADER.
+            -- The count beside "Classes and Cooldowns" is read at build time, and
+            -- P.PIH_SetClassOn ends at pihRefresh -- which redraws the FRAMES and the
+            -- preview, not the panel. So the number sat stale until the page was rebuilt
+            -- by something else: "the number does not update unless you go back to the
+            -- page as you tick off classes" (Krathe, 2026-09-09).
+            -- ⚠ THE ONLY TICK IN THIS BOX THAT NEEDS IT. The amplifier ticks show category
+            -- sizes, which are constants, and they add to the list rather than to the seed
+            -- set the header counts -- so nothing on screen moves when they change.
+            function(v) P.PIH_SetClassOn(classFile, v); t.Refresh() end,
             wrapW)
         -- ☠ CLASS-COLOURED, THROUGH THE SHARED HELPER. Thirteen identical grey rows is
         -- the one list on this panel nobody can scan -- and the addon already answers that
@@ -6955,6 +6964,65 @@ local function pihAddClasses(g, t)
         end
     end
     t.note(g, L["Untick a class to stop watching its cooldowns."])
+
+    -- ★ THE LINK LIVES IN THIS BOX, because this is the box whose list it opens.
+    -- ☠ IT WAS IN "Additional Filters", one box down, which is where it ended up when the
+    -- four sources were one list -- and once they were split it was a route to the cooldown
+    -- filter parked under three filters it has nothing to do with. Krathe, 2026-09-09: "it
+    -- needs a link to the cooldowns to modify too as it's not clear you have to go down to
+    -- filters and click to edit".
+    -- ⚠ STILL EXACTLY ONE LINK. A second in the other box would be the duplicate this
+    -- panel has already been cleaned of once -- and it is not needed: the Filter Designer
+    -- opens on the library, where every list including the other three is in the left column.
+    -- The note under it says so.
+    -- ☠ NO HEADING OF ITS OWN ANY MORE, AND "Cooldowns" WAS THE WRONG ONE TWICE OVER.
+    -- It captioned this button back when the button opened the one list there was; now there
+    -- are four sources listed directly above it and the Filter Designer edits ANY of them,
+    -- so a "Cooldowns" heading here named one quarter of what the button reaches. Krathe,
+    -- 2026-09-09: "the cooldowns header/footer of the Filter Designer link is wrong, as
+    -- really they can modify all 4 filters in it."
+    -- ⚠ The button belongs to the tick list it follows -- it is the escape hatch for what
+    -- those four ticks cannot do, single spells rather than whole sources -- so it needs no
+    -- caption between them at all.
+    --
+    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
+    -- scrolls to this filter, selects it and pulses it. Its own comment records why:
+    -- the hand-written version "landed you on the page with nothing indicated, which
+    -- is indistinguishable from a broken link" -- which is exactly what was here.
+    local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+    local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
+        GUI:OpenFilterInDesigner("custom", cfID)
+        -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
+        -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
+        -- that range is still 0 -- so the clamp pins the scroll at the top and the
+        -- row it selected and pulsed is somewhere below the fold. The second call
+        -- runs after layout, when the range is real. The proper fix is a deferred
+        -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
+        -- list for him rather than edited from here.
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
+        end
+    end)
+    if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
+        -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
+        -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
+        -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
+        -- backdrop with grey text, visibly unlike every other disabled button in the
+        -- addon. Caught in Danders' PR review.
+        if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
+        else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
+    end
+    -- Prose-width like the notes: only the class TICKS flow the popout's two tracks.
+    fdBtn.fullRow = true
+    g:AddWidget(fdBtn, 28)
+    -- ☠ UNDER THE CONTROL IT EXPLAINS. Every CreateNote in the settings sits below its
+    -- control -- one call site puts it "in the place the missing control would have occupied".
+    -- Both notes in this section used to open it instead, on the argument that a line under a
+    -- long list goes unread. That argument is about THIS list; the convention is about the
+    -- whole addon, and a panel a user can tell apart from every other page is the thing the
+    -- convention exists to prevent.
+    t.note(g,
+        L["Edit any of these lists spell by spell in the Filter Designer."])
 
 end
 
@@ -7037,10 +7105,6 @@ end
     end
 
     local function pihAddTriggerSources(g, t)
-        -- ⚠ t.parent, and it is needed because the Filter Designer button at the foot of
-        -- this function came WITH the block: it was pihAddClasses' tail, where `parent` was
-        -- that function's own local. Moving code moves what it closes over.
-        local parent = t.parent
         local st = P.PIH_Settings()
         -- ⚠ NO SECTION LABEL AND NO COOLDOWNS ROW. This block is its own box now
         -- ("Additional Filters"), so the header does the labelling -- and class cooldowns are
@@ -7063,56 +7127,6 @@ end
         t.subCheck(g, pihCountLabel(L["Racials"], #PIH_RACIAL_IDS),
             function() return st.racials == true end,
             function(v) P.PIH_SetAmplifier("racials", v) end)
-
-    -- ☠ NO HEADING OF ITS OWN ANY MORE, AND "Cooldowns" WAS THE WRONG ONE TWICE OVER.
-    -- It captioned this button back when the button opened the one list there was; now there
-    -- are four sources listed directly above it and the Filter Designer edits ANY of them,
-    -- so a "Cooldowns" heading here named one quarter of what the button reaches. Krathe,
-    -- 2026-09-09: "the cooldowns header/footer of the Filter Designer link is wrong, as
-    -- really they can modify all 4 filters in it."
-    -- ⚠ The button belongs to the tick list it follows -- it is the escape hatch for what
-    -- those four ticks cannot do, single spells rather than whole sources -- so it needs no
-    -- caption between them at all.
-    --
-    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND
-    -- scrolls to this filter, selects it and pulses it. Its own comment records why:
-    -- the hand-written version "landed you on the page with nothing indicated, which
-    -- is indistinguishable from a broken link" -- which is exactly what was here.
-    local cfID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-    local fdBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
-        GUI:OpenFilterInDesigner("custom", cfID)
-        -- ⚠ TWICE, ONE FRAME APART, AND THAT IS A WORKAROUND. _fdFocusFilter reads
-        -- GetVerticalScrollRange to clamp its scroll, and on the page's FIRST build
-        -- that range is still 0 -- so the clamp pins the scroll at the top and the
-        -- row it selected and pulsed is somewhere below the fold. The second call
-        -- runs after layout, when the range is real. The proper fix is a deferred
-        -- retry inside _fdFocusFilter itself; that file is Danders' and it is on the
-        -- list for him rather than edited from here.
-        if C_Timer and C_Timer.After then
-            C_Timer.After(0, function() GUI:OpenFilterInDesigner("custom", cfID) end)
-        end
-    end)
-    if not (cfID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
-        -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes
-        -- through StyleButton, which owns SetDisabled: dim backdrop, faint border, label
-        -- alpha, wash suppressed. Disable() plus a literal text colour rendered a NORMAL
-        -- backdrop with grey text, visibly unlike every other disabled button in the
-        -- addon. Caught in Danders' PR review.
-        if fdBtn.SetDisabled then fdBtn:SetDisabled(true)
-        else fdBtn:Disable(); fdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
-    end
-    -- Prose-width like the notes: only the class TICKS flow the popout's two tracks.
-    fdBtn.fullRow = true
-    g:AddWidget(fdBtn, 28)
-    -- ☠ UNDER THE CONTROL IT EXPLAINS. Every CreateNote in the settings sits below its
-    -- control -- one call site puts it "in the place the missing control would have occupied".
-    -- Both notes in this section used to open it instead, on the argument that a line under a
-    -- long list goes unread. That argument is about THIS list; the convention is about the
-    -- whole addon, and a panel a user can tell apart from every other page is the thing the
-    -- convention exists to prevent.
-    t.note(g,
-        L["Edit any of these lists spell by spell in the Filter Designer."])
-
     end
 
 -- ★★★ THE HELPER'S ADD BLOCK — the designer's own tiles, with the spell question removed.
