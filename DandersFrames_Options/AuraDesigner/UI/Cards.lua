@@ -264,8 +264,20 @@ end
 -- for one signal disagreeing on screen. The addon's own rule ("never store L[...] as a db
 -- value") says it plainly; caught in Danders' PR review, and it blocked the merge because bad
 -- data outlives the fix. `pihSignal` is the stored truth and the label is derived from it.
+-- ☠ IT NAMES THE FEATURE, NOT THE TRIGGER. The rows read "PI Helper — Big cooldown - Center -
+-- Others Only", and Krathe asked the right question of it: "why? It should just say PI Helper
+-- - Icon/Border/Square etc". "Big cooldown" is the TRIGGER, which every helper effect shares
+-- and which the Triggers tab is entirely about -- so on an effect row it is a constant
+-- printed on every line, taking the space where the row's own identity should be.
+-- ⚠ THE TYPE IS ALREADY THERE, AS THE BADGE. Every effect row draws a coloured type badge to
+-- the left of its name (Icon, Border, Square...), which is how the designer distinguishes two
+-- effects on the same spell. Repeating it in the text would be the same word twice on one row.
+-- ⚠ THE SECOND SIGNAL KEEPS ITS OWN NAME, because it is genuinely a different thing and the
+-- badge cannot say so. Nothing creates one any more (see pihBuildAddTiles), but existing ones
+-- still list and delete, and a row that cannot be told apart from its neighbour is a row
+-- somebody deletes the wrong one of.
 local function pihLabel(key)
-    if key == "burst"   then return L["PI Helper — Big cooldown"]    end
+    if key == "burst"   then return L["PI Helper"] end
     if key == "infused" then return L["PI Helper — Already has active Power Infusion"] end
 end
 
@@ -3497,6 +3509,18 @@ local function ApplySubTabStrip()
 end
 P.ApplySubTabStrip = ApplySubTabStrip
 
+-- Which POOL tab reads as selected. Lifted out of SetMainTab because the REUSE path needs it
+-- too: a page revisit that changes the pool without rebuilding the panel (the Power Infusion
+-- Helper's nav row does exactly that) left the strip lit on the pool the panel was BUILT for.
+-- Krathe, 2026-09-09: "it takes you to the enable PI page but ... is not highlighting Power
+-- Infusion Helper tab up top."
+local function SyncPoolTabs()
+    for key, btn in pairs(mainTabButtons) do
+        if btn.SetActive then btn:SetActive(key == S.activeBuffTab) end
+    end
+end
+P.SyncPoolTabs = SyncPoolTabs
+
 local function UpdateLayoutTabState()
     ApplySubTabStrip()
     local layoutBtn = tabButtons and tabButtons.layout
@@ -3541,9 +3565,7 @@ local function SetMainTab(tabKey)
     -- it survive a pool switch.
     CloseADPicker()
     if GUI then GUI:CloseAllMenus() end   -- an open dropdown (e.g. spec) must not outlive the tab
-    for key, btn in pairs(mainTabButtons) do
-        btn:SetActive(key == tabKey)
-    end
+    SyncPoolTabs()
     UpdateSpecDropdownState()
     UpdateLayoutTabState()
     -- ☠ THE TAB YOU WERE ON MAY NOT EXIST ON THE POOL YOU JUST PICKED. Effects is frosted on

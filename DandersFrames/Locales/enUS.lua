@@ -3062,6 +3062,10 @@ L["Cooldowns are not showing. Add a display from the dropdown, or tick '%s'."] =
 L["Move and size the icons under Layout Groups."] = true
 -- Row labels, so a signal names itself in the effects list rather than reading as its
 -- spell list. Resolved at render from the mark; never stored.
-L["PI Helper — Big cooldown"] = true
+-- ⚠ THE FIRST ONE NAMES THE FEATURE, NOT THE TRIGGER. It was "PI Helper — Big cooldown",
+-- which is what fires the effect rather than what the effect IS -- the same words on every
+-- row, where the row's own identity should be. The effect's TYPE is already on the row as a
+-- coloured badge (Icon, Border, Square), so the text does not repeat it.
+L["PI Helper"] = true
 L["PI Helper — Already has active Power Infusion"] = true
 --@end-do-not-package@

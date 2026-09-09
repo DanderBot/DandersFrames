@@ -1840,6 +1840,18 @@ local function BuildAuraDesignerIsland(guiRef, pageRef, dbRef)
        and S.mainFrame.dfBuiltLayout == _adLayout
        and S.mainFrame.dfBuiltPreset == _adPreset
        and S.mainFrame.dfBuiltEditing == _adEditing then
+        -- ☠ CONSUMED ON THIS PATH TOO, and it was not. S.pendingBuffTab is a one-shot from
+        -- whoever navigated here, and only the FULL build read it -- so the Power Infusion
+        -- Helper's nav row, which almost always lands on this reuse path (its own Invalidate
+        -- drops the harness cache, not the island), left the request standing. It would then
+        -- be picked up by the next unrelated full build and pin the designer to the helper's
+        -- pool for a visit nobody asked it of.
+        -- ⚠ The direct write it also makes is what actually moved the pool here; this is about
+        -- clearing the request, and about the two paths reading the same field.
+        if S.pendingBuffTab then
+            S.activeBuffTab = S.pendingBuffTab
+            S.pendingBuffTab = nil
+        end
         S.mainFrame:SetParent(parent)
         S.mainFrame:SetAllPoints()
         S.mainFrame:Show()
@@ -2323,6 +2335,18 @@ function DF:AuraDesigner_RefreshPage()
             S.framePreview:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         end
     end
+
+    -- ☠☠ THE POOL CAN HAVE MOVED WITHOUT THE PANEL BEING REBUILT, and both strips were left
+    -- describing the pool the panel was BUILT for. The Power Infusion Helper's nav row asks
+    -- for its pool and reopens this page, which takes the island's REUSE path -- so the pool
+    -- tab stayed lit on Any Buff and the sub-tab strip still read Effects / Layout Groups /
+    -- Global while the content below it was the helper's. Krathe, 2026-09-09: "it shows
+    -- global/layout group and is not highlighting Power Infusion Helper tab up top."
+    -- ⚠ BEFORE SwitchTab, because ApplySubTabStrip decides which sub-tab buttons EXIST for
+    -- this pool and SwitchTab decides which of them is active. The other order lights a button
+    -- that is about to be hidden.
+    if P.SyncPoolTabs then P.SyncPoolTabs() end
+    if P.UpdateLayoutTabState then P.UpdateLayoutTabState() end
 
     -- Rebuild the current tab to reflect data changes
     if S.activeTab and S.SwitchTab then

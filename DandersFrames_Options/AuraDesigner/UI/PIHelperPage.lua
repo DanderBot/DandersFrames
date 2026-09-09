@@ -86,6 +86,12 @@ function DF.OpenPIHelperInDesigner()
     local page = GUI.Pages["auras_auradesigner"]
     if page and page.Invalidate then page:Invalidate() end
     GUI.SelectTab("auras_auradesigner")
+    -- ⚠ AND THE RAIL GOES ON THE ROW THEY CLICKED, not on the row that owns the page.
+    -- SelectTab has just lit the Aura Designer, which is true about the page and wrong about
+    -- the click. Krathe: "clicking power infusion helper on the menu should highlight it."
+    -- ⚠ AFTER SelectTab, never before -- its own tail clears every row and lights one, so a
+    -- highlight set first would simply be undone.
+    if GUI.SetNavHighlight then GUI.SetNavHighlight("auras_pihelper") end
     return true
 end
 
