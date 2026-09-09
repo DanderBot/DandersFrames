@@ -1268,36 +1268,14 @@ local function DebuffSelectionView(sel)
 end
 P.DebuffSelectionView = DebuffSelectionView
 
--- ☠☠ DELETE A GROUP FROM THE *OTHER* STORE, WHATEVER TAB IS OPEN.
--- DeleteLayoutGroup below resolves its store through CurrentLayoutGroups(), which is
--- POOL-ROUTED off S.activeBuffTab -- correct for a user clicking a delete on the tab the
--- group is listed on, and wrong for any caller that FOUND the group some other way.
---
--- ⚠ THAT MISMATCH SHIPPED. The Power Infusion Helper's sweep finds its retired cooldown-icon
--- group by reading adDB.otherLayoutGroups directly (the helper's groups are always there),
--- then handed the id to the pool-routed delete -- which, running at page-build time with the
--- pool still set to My Buffs, searched the SPEC store, found nothing and removed nothing.
--- Silently: the delete has no return value, so the caller could not tell. Krathe, twice:
--- "I'm still seeing PI helper - Cooldowns on my AD despite it not being an option anymore."
--- ⇒ A finder that does not depend on the pool needs a deleter that does not either.
---
--- ⚠ NO MEMBER CASCADE, and none is needed: the other store's member groups are handled by
--- the pool-routed path above, and every caller of THIS function deletes a FILTER group, which
--- owns no placed indicators (it carries filterSelection, not members). Kept narrow on purpose
--- -- a second general-purpose delete would be a second set of rules about cascades.
--- Returns true when a group was actually removed, so a caller can say so when it was not.
-local function RemoveOtherLayoutGroupByID(groupID)
-    local groups = GetOtherLayoutGroups(false)
-    for i, group in ipairs(groups) do
-        if group.id == groupID then
-            tremove(groups, i)
-            expandedGroups[GroupExpandKey(groupID)] = nil
-            return true
-        end
-    end
-    return false
+-- Drop a group's remembered fold state. Exported for the one kind of caller that removes a
+-- group WITHOUT going through DeleteLayoutGroup: a store-wide sweep, which walks the raw
+-- arrays because the group it is hunting may be in any of them (see pihPurgeStrayMarks in
+-- Cards.lua). The expand table is a file local, so the removal cannot clear it itself.
+local function ForgetGroupExpandState(groupID)
+    expandedGroups[GroupExpandKey(groupID)] = nil
 end
-P.RemoveOtherLayoutGroupByID = RemoveOtherLayoutGroupByID
+P.ForgetGroupExpandState = ForgetGroupExpandState
 
 -- Delete a layout group by ID (from the ACTIVE tab's store; the member-
 -- indicator cascade removes from the active pool via RemoveIndicatorInstance's

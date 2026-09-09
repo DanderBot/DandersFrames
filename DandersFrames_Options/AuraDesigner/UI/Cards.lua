@@ -466,21 +466,71 @@ end
 -- (others-only), "infused" is its own one-icon group -- SEPARATE because one container has
 -- ONE caster rule, and infused needs the opposite rule from everything else (own casts
 -- allowed; it IS an own cast). User's design, second group session.
-local function pihIconGroup(sig)
-    local groups = P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(false)
-    for _, g in ipairs(groups or {}) do
-        if type(g) == "table" and g.pihSignal == (sig or "burst") then return g end
+-- ☠☠☠ AND THE HELPER'S OWN DATA IS NOT ALWAYS IN THE HELPER'S OWN STORE. READ THIS BEFORE
+-- WRITING ANOTHER FINDER.
+-- Every PIH_* question in this file reads adDB.otherAuras / adDB.otherLayoutGroups, because
+-- that is where the helper's records BELONG -- the pool decides a record's caster filter and
+-- the helper watches other people's cooldowns, so Any Buff is the only pool where one can
+-- match anything. That is a statement about where they belong. It is not a statement about
+-- where they ARE.
+--
+-- ☠ KRATHE'S PROFILE, READ OUT OF SAVEDVARIABLES 2026-09-09 after he reported the same stuck
+-- group for the third time:
+--     layoutGroups/HolyPriest       -> EIGHT "PI Helper — Cooldown icons" groups
+--     auras/HolyPriest/@custom:cf9  -> one marked icon indicator
+--     otherAuras/@custom:cf12       -> one marked icon indicator   (the only one in the
+--                                      store every finder in this file looks in)
+-- The old icon tick called P.CreateLayoutGroup, which is POOL-ROUTED off S.activeBuffTab, and
+-- the panel it lived on was mounted in S.BuildEffectsHeadArea -- drawn on EVERY pool's
+-- Effects tab, not only Any Buff, whatever the comment beside it claimed. So ticking it on My
+-- Buffs created a group in the SPEC store; the finder then could not see it, reported the
+-- icons as off, and the next tick made another one. Eight times.
+--
+-- ⇒ NOTHING COULD REACH THEM. Not the helper (wrong store), not the Layout Groups tab
+-- (VisibleLayoutGroups hides marked groups from every pool that is not the helper's), and not
+-- the sweep. A record that no control can see is a record no control can turn off, which is
+-- exactly what Krathe was looking at.
+--
+-- ⇒ SO THE SWEEP HUNTS BY MARK, ACROSS EVERY STORE, and these two walkers are how. The
+-- ordinary finders stay narrow on purpose -- they answer "what is the helper showing", and
+-- the answer must not include records that cannot work -- but anything CLEANING UP has to
+-- look where the data actually went. See [[ad-storage-map]] for the store list itself.
+local function pihAllGroupStores(adDB)
+    local out = {}
+    if type(adDB.otherLayoutGroups) == "table" then out[#out + 1] = adDB.otherLayoutGroups end
+    local lg = adDB.layoutGroups
+    if type(lg) == "table" then
+        -- ⚠ SPEC-KEYED SINCE V2, WITH A LEGACY FLAT ARRAY STILL POSSIBLE. An entry carrying
+        -- `.id` is a group record, which means THIS table is the store; otherwise its values
+        -- are the per-spec arrays. Same test [[ad-storage-map]] records for the font walkers.
+        if type(lg[1]) == "table" and lg[1].id then
+            out[#out + 1] = lg
+        else
+            for _, arr in pairs(lg) do
+                if type(arr) == "table" then out[#out + 1] = arr end
+            end
+        end
     end
-    return nil
+    return out
 end
 
-local function pihAnyIconGroup()
-    local groups = P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(false)
-    for _, g in ipairs(groups or {}) do
-        if type(g) == "table" and g.pihSignal then return g end
+local function pihAllAuraPools(adDB)
+    local out = {}
+    if type(adDB.otherAuras) == "table" then out[#out + 1] = adDB.otherAuras end
+    if type(adDB.auras) == "table" then
+        -- adDB.auras is SPEC-KEYED: its values are the pools, not the records.
+        for _, poolT in pairs(adDB.auras) do
+            if type(poolT) == "table" then out[#out + 1] = poolT end
+        end
     end
-    return nil
+    return out
 end
+
+-- ⚠ pihAnyIconGroup AND pihIconGroup ARE GONE WITH THE LAST THING THAT USED THEM. Both
+-- searched adDB.otherLayoutGroups for a mark and handed the id to a store-routed delete --
+-- one store, one id -- which is the shape that failed three times. pihPurgeStrayMarks hunts
+-- by mark across every store instead, so there is nothing left for a single-store finder to
+-- answer that is not a wrong answer waiting to happen.
 
 -- ★ THE PREVIEW'S POOL — the helper's records and nothing else (2026-09-08).
 -- ☠ THE SHARED POOL IS NOT THE HELPER'S POOL. Its records live in Any Buff alongside
@@ -863,6 +913,73 @@ local function pihCreateSignal(key, surfaceOverride)
     -- -- the colour and the healthbar mode included.
     pihRestoreInto(cfg, key, tgt)
     return true
+end
+
+-- ★★★ THE STORE-WIDE PURGE — every mark that is somewhere no control can reach it.
+--
+-- Two kinds, and the difference is what "stray" means for each:
+--   GROUPS  — ALL of them, in every store. The cooldown-icon group is retired outright
+--             (schema 5), so a marked group is stray wherever it sits.
+--   EFFECTS — only those OUTSIDE adDB.otherAuras. The other pool is the helper's real home
+--             and its records are live; a marked effect in a SPEC pool is a different animal.
+--
+-- ☠ A SPEC-POOL HELPER EFFECT CANNOT WORK AND CANNOT BE REMOVED, which is why deleting one is
+-- not the loss it looks like. poolFilter answers "HELPFUL|PLAYER" for a My Buffs record before
+-- it ever consults othersOnly, so an effect there is asking for "other people's cooldowns,
+-- cast by me" -- a condition nobody can satisfy. And no list shows it: pihFound and
+-- S.PIH_PreviewPool read the other pool only, while CollectAllEffects hides marked rows from
+-- every pool that is not the helper's. It renders nothing, lists nowhere, deletes never.
+--
+-- Returns the two counts so the caller can say what it did rather than guessing.
+local function pihPurgeStrayMarks()
+    local adDB = GetAuraDesignerDB()
+    if type(adDB) ~= "table" then return 0, 0 end
+    local groups, effects = 0, 0
+
+    for _, store in ipairs(pihAllGroupStores(adDB)) do
+        for i = #store, 1, -1 do
+            local g = store[i]
+            if type(g) == "table" and g.pihSignal then
+                table.remove(store, i)
+                -- The fold state is keyed by id and outlives the record; Groups.lua owns the
+                -- table, so it owns the forgetting.
+                if P.ForgetGroupExpandState and g.id then P.ForgetGroupExpandState(g.id) end
+                groups = groups + 1
+            end
+        end
+    end
+
+    local home = adDB.otherAuras
+    for _, poolT in ipairs(pihAllAuraPools(adDB)) do
+        if poolT ~= home then
+            for auraName, auraCfg in pairs(poolT) do
+                if type(auraCfg) == "table" then
+                    for _, typeKey in ipairs(P.FRAME_LEVEL_TYPE_KEYS or {}) do
+                        local cfg = auraCfg[typeKey]
+                        if type(cfg) == "table" and cfg.pihSignal then
+                            auraCfg[typeKey] = nil
+                            effects = effects + 1
+                        end
+                    end
+                    for i = #(auraCfg.indicators or {}), 1, -1 do
+                        local inst = auraCfg.indicators[i]
+                        if type(inst) == "table" and inst.pihSignal then
+                            table.remove(auraCfg.indicators, i)
+                            effects = effects + 1
+                        end
+                    end
+                    -- ⚠ THE EMPTIED RECORD GOES TOO, and NOT through S.CleanupAdHocAura --
+                    -- that helper prunes from CurrentAuraPool(), the pool of whichever tab is
+                    -- open, and this walk is deliberately not asking the open tab anything.
+                    if P.AuraHoldsNoEffects and P.AuraHoldsNoEffects(auraCfg) then
+                        poolT[auraName] = nil
+                    end
+                end
+            end
+        end
+    end
+
+    return groups, effects
 end
 
 -- ⚠ `surface` IS OPTIONAL, and its absence means what it always meant: remove the signal's
@@ -1461,20 +1578,10 @@ function P.PIH_Remove()
     -- group since schema 5 and pihSweep deletes the ones older builds made -- but a profile
     -- can arrive here unswept (a preset switched into after this panel was last opened), and
     -- a helper being removed must not leave icons running whatever made them.
-    -- ⚠ POOL-INDEPENDENT, for the reason pihSweep step 5 records: this loop FINDS the group
-    -- in adDB.otherLayoutGroups, so it must DELETE from there too rather than from whichever
-    -- store the open tab resolves to. It was the tab-routed delete, and it was only ever safe
-    -- because this ran from an other-routed tab -- which is a property of the caller, not of
-    -- the code, and exactly the assumption that broke the sweep.
-    local ig = pihAnyIconGroup()
-    while ig do
-        if not (P.RemoveOtherLayoutGroupByID and P.RemoveOtherLayoutGroupByID(ig.id)) then
-            DF:DebugWarn("AURADESIGNER",
-                "PIH: could not delete the cooldown-icon group (id %s)", tostring(ig.id))
-            break
-        end
-        ig = pihAnyIconGroup()
-    end
+    -- ⚠ THE SAME STORE-WIDE PURGE THE SWEEP RUNS, and for the same reason: this used to hunt
+    -- one store by id through a store-routed delete, which is how eight of Krathe's groups
+    -- survived three attempts to remove them.
+    pihPurgeStrayMarks()
 
     -- ☠ SOUND IS NOT A CONTAINER, so nothing above reaches it. Removing the helper has to
     -- silence it explicitly or the announcements outlive the feature that made them.
@@ -6099,11 +6206,27 @@ P.OpenFilterPopout = OpenFilterPopout
 --    same time -- pinned to Power Infusion's own artwork, which is what schema 4's objection
 --    was actually about -- but nothing needs migrating for that: schema 4 already turned every
 --    existing Icon into a Square, and a square is a perfectly good marker to leave someone on.
-local PIH_SCHEMA = 5
+-- 6: ☠ SCHEMA 5 STAMPED ITSELF AND DELETED NOTHING. Its group delete searched one store by
+--    id; Krathe's eight groups are in another (see pihPurgeStrayMarks). So the stamp says
+--    "swept" on profiles that were not, and the version has to move for the fixed step to get
+--    a second chance at them. A number is cheap; a stamp that lies is not.
+local PIH_SCHEMA = 6
 
 local function pihSweep()
     local s = P.PIH_Settings()
-    if not s or s.schema == PIH_SCHEMA then return end
+    if not s then return end
+    -- ☠☠ THE STEPS ARE GATED ON WHERE THE PROFILE IS COMING FROM, NOT ONLY ON WHETHER IT HAS
+    -- ARRIVED. Every step used to run whenever the stamp differed, which was harmless while
+    -- the stamp only ever moved forward by one -- and became destructive the moment it moved
+    -- for a reason unrelated to a given step.
+    -- ⚠ THE CONCRETE HAZARD, AND IT WOULD HAVE HIT KRATHE FIRST: step 4 migrates every marked
+    -- Icon to a Square. Icon is a legitimate surface again in schema 5, so re-running step 4
+    -- on the way to 6 would convert an icon the user had just added through the new tiles --
+    -- silently, on the next page build, as a side effect of a migration about something else.
+    -- ⇒ `from` is the version the profile is actually on, and each step names the version it
+    -- was written for. [[feedback-migration-before-defaults-backfill]] is the sibling trap.
+    local from = tonumber(s.schema) or 0
+    if from == PIH_SCHEMA then return end
 
     -- ☠☠ THE POOL IS PINNED FOR THE WHOLE SWEEP, AND SKIPPING THIS SHIPPED A BROKEN SWEEP.
     -- Several editor helpers this function reaches resolve their STORE from S.activeBuffTab:
@@ -6125,6 +6248,12 @@ local function pihSweep()
     local R = DF.FilterRegistry
     local pool = pihOtherPoolRead()
 
+    -- ── STEPS 1-4: ONLY FOR A PROFILE COMING FROM BEFORE SCHEMA 4 ──
+    -- ⚠ STEP 4 IS THE ONE THAT MAKES THIS MANDATORY: it turns every marked Icon into a
+    -- Square, and Icon is a supported surface again as of schema 5. Re-running it on the way
+    -- to 6 would convert an icon the user had just added through the new tiles, silently, on
+    -- the next page build, as a side effect of a migration about something else entirely.
+    if from < 4 then
     -- 1. The retired signal, in both its representations.
     if type(pool) == "table" then
         for auraName, auraCfg in pairs(pool) do
@@ -6166,9 +6295,11 @@ local function pihSweep()
         if had then s.racials = true end
     end
 
-    -- 3. The infused icon group: the Icon surface replaced it, and nothing represents it now.
-    local ig = pihIconGroup("infused")
-    if ig and P.DeleteLayoutGroup then P.DeleteLayoutGroup(ig.id) end
+    -- 3. ☠ THE INFUSED ICON GROUP'S OWN STEP IS GONE, FOLDED INTO STEP 5. It read
+    -- pihIconGroup("infused") and handed the id to the store-routed delete -- one store, one
+    -- id, the exact shape that failed three times on the cooldown group. Step 5 takes every
+    -- marked group in every store, which is a superset of what this did and cannot miss for
+    -- the reason this did.
 
     -- 4. ICON IS RETIRED AS A HELPER SURFACE (schema 4, 2026-09-08).
     -- ☠ THE REASON IS SCOPE, NOT SHAPE. An icon shows a SPECIFIC BUFF'S artwork, so
@@ -6224,23 +6355,24 @@ local function pihSweep()
     -- ⚠ AND THE STASH GOES. pihRestoreGroup would otherwise lay a deleted group's position
     -- and appearance back over the next one created -- and after this step there is no next
     -- one, so the stash is a copy of something with nowhere left to go.
-    -- ⚠ THROUGH THE POOL-INDEPENDENT REMOVER, NOT THE TAB-ROUTED DELETE. The finder reads
-    -- adDB.otherLayoutGroups directly; a deleter that resolves its store from the open tab
-    -- cannot be trusted to look in the same place. See RemoveOtherLayoutGroupByID.
-    -- ⚠ AND IT SAYS SO WHEN IT FAILS. The first version broke out of the loop on a delete
-    -- that removed nothing -- correct, in that a spin is worse than a stale group, and silent,
-    -- which is how the same bug survived a second round. There is no manual escape either:
-    -- a marked group is hidden from the Layout Groups list on every pool that still has one.
+    end   -- from < 4
+
+    -- ── STEPS 5-6: EVERY PROFILE THAT IS NOT ALREADY ON THE CURRENT SCHEMA ──
+    -- Both are safe to re-run: one removes records that should not exist, the other writes a
+    -- set of ids that is derived from the ticks rather than added to them.
+
+    -- ⚠ BY MARK, ACROSS EVERY STORE -- not by id through a store-routed delete. Two earlier
+    -- attempts failed here and both failed the same way: they searched the ONE store the
+    -- helper's records are supposed to be in, and Krathe's eight groups are in the spec store.
+    -- pihPurgeStrayMarks has the full account.
     do
-        local ig = pihAnyIconGroup()
-        while ig do
-            if not (P.RemoveOtherLayoutGroupByID and P.RemoveOtherLayoutGroupByID(ig.id)) then
-                DF:DebugWarn("AURADESIGNER",
-                    "PIH: could not delete the retired cooldown-icon group (id %s)",
-                    tostring(ig.id))
-                break
-            end
-            ig = pihAnyIconGroup()
+        local nGroups, nEffects = pihPurgeStrayMarks()
+        -- ⚠ IN THE LOG, NOT BEHIND A COMMAND. A migration that deletes stored records must
+        -- say what it deleted, and the debug log is where a report can quote it from.
+        if (nGroups + nEffects) > 0 then
+            DF:Debug("AURADESIGNER",
+                "PIH sweep: removed %d retired icon group(s) and %d unreachable effect(s)",
+                nGroups, nEffects)
         end
         if s.retainedCfg then s.retainedCfg.iconGroups = nil end
     end
