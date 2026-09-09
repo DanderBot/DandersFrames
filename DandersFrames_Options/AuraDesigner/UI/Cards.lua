@@ -609,6 +609,29 @@ end
 -- Push the shared settings into the running engine. Config alone changes nothing: the gate
 -- reads its own state, so a saved setting that was never pushed is a setting that does not
 -- apply until something else happens to re-derive it.
+-- ★★★ THE FEATURE SWITCH -- ONE STORED BOOLEAN, LIKE THE DESIGNER'S OWN (2026-09-09).
+--
+-- ☠ IT USED TO BE DERIVED FROM WHETHER RECORDS EXIST, which is why "off" had to DELETE them.
+-- Krathe: "it should function like the rest of AD" -- and AD writes modeDB.auraDesignerEnabled
+-- and deletes nothing. See the engine's pihEnabled for the render half.
+--
+-- ⚠ NOT IN PIH_Settings' DEFAULT TABLE, deliberately. Seeding `enabled` there would make the
+-- backfill below unreachable -- the exact "a defaults entry seeds the key so the presence-
+-- gated migration never fires" trap this addon has hit three times. The default lives HERE,
+-- where it can still tell "never set" from "set to false".
+-- ⚠ ABSENT MEANS ON IFF RECORDS EXIST. A profile from before the flag with helper records had
+-- a working helper, so it must come back on; one with no records was showing nothing, so it
+-- comes back off and the tick reads honestly. Written once, so this is a real backfill rather
+-- than a recomputation that could flip later.
+-- ⚠ THE ENGINE DEFAULTS TRUE for the same absent case (`s.enabled ~= false`) and does NOT
+-- consult the records -- it cannot, cheaply, from the always-loaded half. That is safe
+-- because a profile with no records draws nothing whatever the flag says.
+function P.PIH_IsEnabled()
+    local s = P.PIH_Settings()
+    if s.enabled == nil then s.enabled = P.PIH_Exists() end
+    return s.enabled and true or false
+end
+
 function P.PIH_Apply()
     local s = P.PIH_Settings()
     if DF.AuraContainer and DF.AuraContainer.SetHelperExcludedRoles then
@@ -619,6 +642,10 @@ function P.PIH_Apply()
     -- Gate off means "never hide": force the gate open and leave it there.
     local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
     if Engine and Engine.PIH_SetGateEnabled then Engine:PIH_SetGateEnabled(s.gateEnabled ~= false) end
+    -- ...then the FEATURE switch, which outranks it. Order matters: turning the helper back on
+    -- resumes from the gate's setting, so that setting has to be in place first. The engine
+    -- says the same thing from its own side (Engine:PIH_SetEnabled).
+    if Engine and Engine.PIH_SetEnabled then Engine:PIH_SetEnabled(P.PIH_IsEnabled()) end
     -- After the gate, never before: the sound arms against the gate's current state, so doing
     -- it first would arm against the state we are about to leave.
     if P.PIH_ApplySound then P.PIH_ApplySound() end
@@ -626,120 +653,19 @@ function P.PIH_Apply()
     if Engine and Engine.PIH_SyncWatcher then Engine:PIH_SyncWatcher() end
 end
 
--- ─────────────────────────────────────────────────────────────
--- RETAINED CUSTOMISATIONS -- remove-and-re-add keeps the user's edits
--- ─────────────────────────────────────────────────────────────
--- ☠ DELETING A SIGNAL USED TO DELETE THE USER'S WORK WITH IT. The recipe creates
--- ordinary effects, the user customises them through the effect's own card (border
--- style, thickness, animation, any typeCfg field), and a remove-then-re-add came back
--- with the recipe's defaults -- everything they had done, silently gone. So every
--- delete path stashes a DEEP COPY of the doomed cfg into the helper's own settings
--- table first (adDB.pihelper.retainedCfg -- the one piece of helper state that
--- SURVIVES a remove), and every create path restores from it.
---
--- ⚠ DEEP COPIES BOTH WAYS. The stash lives in the profile beside the live pools, and
--- a shared table reference between the two is exactly what profile export and the
--- AD's shared-table conventions punish: edit one, silently edit the other.
-local function pihDeepCopy(src)
-    if type(src) ~= "table" then return src end
-    local out = {}
-    for k, v in pairs(src) do out[k] = pihDeepCopy(v) end
-    return out
-end
-
--- ☠ WHAT THE RECIPE OWNS, IN ONE TABLE, because scattered re-stamps are how a field
--- gets restored that must not be. These are the fields the create path MUST write for
--- the helper to be correct -- everything else on a stashed cfg is the user's and is
--- restored verbatim:
---   pihSignal  -- the mark: ownership itself, the field every PIH_* question reads
---   othersOnly -- the caster rule; per-signal correctness (infused deliberately inverts it)
---   enabled    -- a re-added signal must be live, or "on" would show nothing
---   conditions -- kept owned though no signal sets one today: a chain names filter IDS and
---                 the lists are re-minted on every create, so a stashed chain from an older
---                 build would come back pointing at filters that no longer exist
---   id, type   -- placed-instance identity, minted fresh per placement
--- NOT owned, deliberately: colour, healthbar mode, and every other appearance field.
--- The recipe writes them as DEFAULTS on a fresh create; a stashed copy is the user's
--- choice and outranks them.
-local PIH_RECIPE_OWNED = {
-    pihSignal = true, othersOnly = true, enabled = true, conditions = true,
-    id = true, type = true,
-}
-
--- ☠☠ THE STASH HELD ONE SURFACE PER SIGNAL, AND THE SIGNAL CAN HOLD SEVERAL (fixed
--- 2026-09-09). It was written when a signal WAS one effect, so `retainedCfg[key]` was one
--- {surface, cfg} pair -- and the multi-surface work never revisited it.
--- ⇒ Krathe: "when I disable the PI tracker, it seems to remove my border effect I added."
--- Exactly what it did. Disable deleted every marked effect, stashed ONE of them, and
--- re-enabling rebuilt that one. A border, an icon and a square went in; a border came back,
--- and the other two were gone with nothing anywhere that remembered them.
--- ⇒ The stash is a LIST now, in menu order (pihFoundAll sorts), and PIH_Create rebuilds all
--- of it. The promise the enable tick has always made -- "this behaves like a switch even
--- though records really are created and deleted underneath" -- is only true if it does.
---
--- ⚠ THE OLD SHAPE IS STILL READ. A profile stashed by a previous build carries
--- {surface=, cfg=}; pihKeptCfg and pihKeptSurfaces answer for both, so nobody's retained
--- customisation is lost by the fix for losing retained customisations.
-local function pihStashHits(key, hits)
-    local s = P.PIH_Settings()
-    if not s or not (hits and hits[1]) then return end
-    s.retainedCfg = s.retainedCfg or {}
-    local surfaces, order = {}, {}
-    for _, hit in ipairs(hits) do
-        -- The surface rides along: a stash is only restored onto the SAME surface, because
-        -- the surfaces do not share a settings vocabulary (a border has a style and a
-        -- thickness; a health bar has Replace-vs-Tint).
-        if type(hit.cfg) == "table" and not surfaces[hit.typeKey] then
-            surfaces[hit.typeKey] = pihDeepCopy(hit.cfg)
-            order[#order + 1] = hit.typeKey
-        end
-    end
-    s.retainedCfg[key] = { surfaces = surfaces, order = order }
-end
-
--- One stashed surface's cfg, from either shape.
-local function pihKeptCfg(key, surface)
-    local s = P.PIH_Settings()
-    local kept = s and s.retainedCfg and s.retainedCfg[key]
-    if type(kept) ~= "table" then return nil end
-    if type(kept.surfaces) == "table" then
-        local c = kept.surfaces[surface]
-        return (type(c) == "table") and c or nil
-    end
-    if kept.surface == surface and type(kept.cfg) == "table" then return kept.cfg end
-    return nil
-end
-
--- Every stashed surface for a signal, in the order they should be rebuilt.
-local function pihKeptSurfaces(key)
-    local s = P.PIH_Settings()
-    local kept = s and s.retainedCfg and s.retainedCfg[key]
-    if type(kept) ~= "table" then return {} end
-    if type(kept.order) == "table" and kept.order[1] then return kept.order end
-    if kept.surface then return { kept.surface } end
-    return {}
-end
-
--- Overlay the stash onto a freshly created cfg. Runs AFTER the recipe's default
--- stamps, so a stashed field wins over a default -- and the owned list keeps it from
--- touching anything the recipe must control (those were stamped before this runs and
--- are skipped here, so they stand).
-local function pihRestoreInto(cfg, key, surface)
-    local kept = pihKeptCfg(key, surface)
-    if not kept then return end
-    for k, v in pairs(kept) do
-        if not PIH_RECIPE_OWNED[k] then cfg[k] = pihDeepCopy(v) end
-    end
-end
-
--- ☠ THE GROUP STASH IS GONE WITH THE GROUPS (schema 5, 2026-09-09). PIH_GROUP_OWNED,
--- pihStashGroup and pihRestoreGroup kept a deleted cooldown-icon group's position, size and
--- appearance so a re-tick brought it back where the user had dragged it. There is no re-tick
--- and no group any more -- pihSweep step 5 deletes both the groups and the stash -- so a
--- writer with no reader is all that would be left, which is the dead-mechanism half of the
--- lying-control problem this file keeps auditing itself for. The EFFECT stash above is
--- untouched and still does its job: unticking Enable really does delete records, and
--- pihRestoreInto is what makes that behave like a switch.
+-- ☠☠ THE RETAINED-CUSTOMISATION STASH IS GONE (2026-09-09), AND SO IS THE REASON FOR IT.
+-- pihStashHits / pihKeptCfg / pihKeptSurfaces / pihRestoreInto / PIH_RECIPE_OWNED existed to
+-- survive the enable tick's round trip, back when "off" DELETED every helper record. It does
+-- not: the tick writes adDB.pihelper.enabled and the records stay exactly where they are, so
+-- there is nothing to remember and nothing to lay back over a rebuild.
+-- ⚠ THE BUG THAT KILLED THE MODEL, for anyone tempted to bring it back: the stash held ONE
+-- surface per signal (written when a signal WAS one effect), while a signal can hold several.
+-- Border + icon + square went in, one was stashed, all three were deleted, and re-enabling
+-- rebuilt the one. Krathe: "when I disable the PI tracker, it seems to remove my border
+-- effect I added." A switch that has to remember what it destroyed will keep finding new
+-- things it forgot; a switch that destroys nothing cannot.
+-- ⚠ adDB.pihelper.retainedCfg survives in old profiles. Inert, a few bytes, and deliberately
+-- not swept: a migration that deletes data to tidy up is a worse trade than the bytes.
 
 -- ─────────────────────────────────────────────────────────────
 -- BUILDING AND UNBUILDING ONE SIGNAL
@@ -854,7 +780,11 @@ local function pihCreateSignal(key, surfaceOverride)
     -- ⚠ THE STASH'S FIRST SURFACE, not "the" surface: a signal can hold several and
     -- pihKeptSurfaces returns them in menu order. PIH_Create names each one explicitly, so
     -- this fallback only decides where a BARE create lands.
-    local tgt = surfaceOverride or pihKeptSurfaces(key)[1] or def.surface
+    -- ⚠ NO STASH TO CONSULT ANY MORE. This used to prefer the surface the signal was
+    -- last removed from, because the enable tick DELETED and rebuilt. It does not delete,
+    -- so a re-enable finds its records where it left them and nothing is ever rebuilt from
+    -- memory -- a bare create is only ever a FIRST create, and its home is the default.
+    local tgt = surfaceOverride or def.surface
 
     local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
     if not cdId then return false, "could not build the cooldown list" end
@@ -930,11 +860,7 @@ local function pihCreateSignal(key, surfaceOverride)
         -- TOPLEFT), so the field is never nil by the time we see it and the line read as a
         -- default while doing nothing. Watched top-left in game. A guard that cannot fire is
         -- worse than no guard -- it says the case is handled.
-        -- The user's own position still wins: pihRestoreInto runs after this and anchor is not
-        -- recipe-owned, so a stashed placement comes back over it.
         if key == "infused" then inst.anchor = "TOPRIGHT" end
-        -- The user's customisations come back over the defaults; see the stash block.
-        pihRestoreInto(inst, key, tgt)
         return true
     end
 
@@ -968,10 +894,6 @@ local function pihCreateSignal(key, surfaceOverride)
     -- Always nil now: no signal judges two things at once since strong window was retired.
     -- Written explicitly because it CLEARS a chain left behind by an older build.
     cfg.conditions = nil
-    -- ⭐ LAST, OVER THE DEFAULTS. Everything above is either recipe-owned (and the
-    -- overlay skips it) or a default the user's stashed edit is entitled to replace
-    -- -- the colour and the healthbar mode included.
-    pihRestoreInto(cfg, key, tgt)
     return true
 end
 
@@ -1422,166 +1344,47 @@ end
 -- trinkets / potions / racials into the ONE list the helper matches on. The reader is the
 -- stored setting itself now, because there is no group left to read the truth off.
 
-function P.PIH_Create()
-    -- ⭐ EVERY SURFACE THE STASH REMEMBERS, not just one. Turning the tick back on has to put
-    -- back what turning it off took away -- see pihStashHits for the shape and for the report
-    -- that found it ("it seems to remove my border effect I added"). Named explicitly rather
-    -- than left to pihCreateSignal's fallback, which can only choose one.
-    -- ⚠ FIRST WINS FOR THE RESULT. A later surface refusing ("already on") must not turn a
-    -- successful rebuild into a failure, and a first-surface failure is the one worth
-    -- reporting -- so `ok` latches true and `why` keeps the first refusal.
-    local ok, why
-    local wanted = pihKeptSurfaces("burst")
-    if wanted[1] then
-        for _, surface in ipairs(wanted) do
-            local o, w = pihCreateSignal("burst", surface)
-            if o then ok = true elseif not why then why = w end
-        end
-    else
-        ok, why = pihCreateSignal("burst")
-    end
-    -- A silent refusal is indistinguishable from a dead button: every PIH_ path that can
-    -- turn something down returns a reason, and this is where the add card reads it.
-    if not ok then
-        DF:DebugWarn("AURADESIGNER", "PIH: could not add the helper -- %s", tostring(why))
-    end
-    if ok then
-        -- ☠ PUSH THE DEFAULTS NOW. Creating writes the settings table (tanks and
-        -- healers excluded, gate on) but writing is not applying -- without this push the
-        -- engine ran on its own defaults until a reload or the first tick of any control,
-        -- so a freshly added helper marked the tank while the panel said it would not.
-        P.PIH_Apply()
-        pihRefresh()
-    end
-    return ok, why
-end
-
-function P.PIH_Remove()
-    local pool = pihOtherPoolRead()
-    -- ⚠ pihFoundAll, NOT pihFound: the latter answers ONE hit per signal, which is what made
-    -- this stash a quarter of the user's work and this delete a guess at the rest.
-    local all = pihFoundAll()
-    local names, n = {}, 0
-
-    -- STASH FIRST, EVERY SURFACE, BEFORE ANYTHING IS REMOVED.
-    for key, hits in pairs(all) do pihStashHits(key, hits) end
-
-    -- ☠ THE MARKED EFFECTS GO, ONE AT A TIME -- NOT THE WHOLE RECORD.
-    -- It used to nil the pool key outright, on the argument that "a record here is identified
-    -- BY a helper spell list, so nothing of the user's own can be sitting on it". That is not
-    -- true: the designer's From a Filter flow will happily hang an effect off the Power
-    -- Infusion Helper filter, and that effect lands on this exact record. Turning the helper
-    -- off would have taken it with no warning and no stash.
-    -- ⚠ Precise removal is also what the multi-surface shape needs anyway -- there is no
-    -- longer one effect per record to reason about.
-    for _, hits in pairs(all) do
-        for _, hit in ipairs(hits) do
-            local auraCfg = pool and pool[hit.auraName]
-            if auraCfg then
-                if hit.indicatorID and type(auraCfg.indicators) == "table" then
-                    for i, inst in ipairs(auraCfg.indicators) do
-                        if inst.id == hit.indicatorID then
-                            table.remove(auraCfg.indicators, i)
-                            break
-                        end
-                    end
-                else
-                    auraCfg[hit.typeKey] = nil
-                end
-                names[hit.auraName] = true
-                n = n + 1
-            end
+-- ⚠ IT LIVES HERE, NOT BESIDE PIH_IsEnabled, BECAUSE OF ONE UPVALUE. It calls
+-- pihCreateSignal, a `local function` declared further up the file than the settings
+-- accessors -- referencing it from up there compiles as a nil GLOBAL read, which luac -p
+-- is blind to and only the _ENV globals diff catches. Same trap as the one
+-- UnitExemptFromHelpfulGate documents.
+-- ⚠ TURNING IT ON WITH NOTHING THERE SEEDS THE DEFAULT EFFECT, and that is the one place this
+-- differs from AD's switch. AD is enabled and then you add indicators; the helper is a recipe,
+-- and a first-ever enable that lit up an empty Effects tab would be a switch with nothing on
+-- the other side of it. Only when the pool holds NOTHING of ours -- a re-enable finds its
+-- records where it left them and adds nothing.
+function P.PIH_SetEnabled(on)
+    local s = P.PIH_Settings()
+    s.enabled = on and true or false
+    if s.enabled and not P.PIH_Exists() then
+        local ok, why = pihCreateSignal("burst")
+        if not ok then
+            DF:DebugWarn("AURADESIGNER", "PIH: could not seed the helper -- %s", tostring(why))
         end
     end
-
-    -- ...and the helper-owned SOUND entry, which is the reason the wholesale delete existed.
-    -- The generic effects list refuses to show `sound` on a filter-owned record (Groups.lua),
-    -- so it offers no delete button for it and anything left behind there is unreachable.
-    -- Clearing that one key keeps the original intent without taking the user's own effects
-    -- with it; the record itself goes only once it holds nothing at all.
-    for name in pairs(names) do
-        local auraCfg = pool and pool[name]
-        if type(auraCfg) == "table" then
-            auraCfg.sound = nil
-            if P.AuraHoldsNoEffects and P.AuraHoldsNoEffects(auraCfg) then
-                pool[name] = nil
-            end
-        end
-    end
-
-    -- The lists go too. They exist only to feed these effects, and three "Power Infusion
-    -- Helper" entries left in the filter list after the helper is gone are cruft only their
-    -- author could explain.
-    -- ☠ BUT THE LISTS ARE ACCOUNT-WIDE AND THE HELPER IS PER-PRESET. Deleting them
-    -- while another preset still carries helper effects leaves that helper referencing lists
-    -- that no longer exist -- signals that silently render nothing, with no missing row to
-    -- explain it. So they only go when no helper mark remains in either mode of this profile.
-    -- ⚠ Another PROFILE's helper is not scanned: profiles are separate saved-variable
-    -- branches with their own preset resolution, and walking them all from here is machinery
-    -- out of proportion to the case. A cross-profile remove leaving orphaned references is
-    -- accepted and recorded.
-    local marksElsewhere = false
-    if DF.GetModeBaseAuraDesigner then
-        for _, mode in ipairs({ "party", "raid" }) do
-            local adDB = DF:GetModeBaseAuraDesigner(mode)
-            for _, auraCfg in pairs((adDB and adDB.otherAuras) or {}) do
-                if type(auraCfg) == "table" then
-                    for _, tCfg in pairs(auraCfg) do
-                        if type(tCfg) == "table" and tCfg.pihSignal then
-                            marksElsewhere = true
-                            break
-                        end
-                    end
-                end
-                if marksElsewhere then break end
-            end
-            -- Icon groups reference the cooldown list by id, so they hold it alive too.
-            for _, g in ipairs((adDB and adDB.otherLayoutGroups) or {}) do
-                if type(g) == "table" and g.pihSignal then marksElsewhere = true break end
-            end
-            if marksElsewhere then break end
-        end
-    end
-    if not marksElsewhere then
-        local R = DF.FilterRegistry
-        for _, name in pairs(PIH_FILTERS) do
-            local id = pihFilterIdByName(name)
-            if id and R and R.DeleteCustomFilter then R:DeleteCustomFilter(id) end
-        end
-    end
-
-    -- ⚠ A BELT-AND-BRACES SWEEP, NOT A LIVE PATH ANY MORE. Nothing creates a cooldown-icon
-    -- group since schema 5 and pihSweep deletes the ones older builds made -- but a profile
-    -- can arrive here unswept (a preset switched into after this panel was last opened), and
-    -- a helper being removed must not leave icons running whatever made them.
-    -- ⚠ THE SAME STORE-WIDE PURGE THE SWEEP RUNS, and for the same reason: this used to hunt
-    -- one store by id through a store-routed delete, which is how eight of Krathe's groups
-    -- survived three attempts to remove them.
-    pihPurgeStrayMarks()
-
-    -- ☠ SOUND IS NOT A CONTAINER, so nothing above reaches it. Removing the helper has to
-    -- silence it explicitly or the announcements outlive the feature that made them.
-    -- The SETTING is left alone: it is behaviour, and behaviour survives a remove.
-    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
-    if Engine and Engine.PIH_SetSound then Engine:PIH_SetSound(nil) end
-
-    -- The recorded list id goes with the list. Leaving it would point the resident half at a
-    -- filter that no longer exists -- harmless today, and exactly the kind of stale pointer that
-    -- reads as a bug the next time someone adds a helper and it resolves the wrong thing.
-    local st = P.PIH_Settings()
-    if st then st.cooldownFilterID = nil end
-
-    -- Re-derive the engine from whatever helper remains (another preset's, or none). This
-    -- resets roles and the gate, and releases the watcher's registrations when nothing is
-    -- left to drive.
-    if Engine and Engine.PIH_ApplySaved then Engine:PIH_ApplySaved() end
-
+    P.PIH_Apply()
     pihRefresh()
-    -- ⚠ EFFECTS, not signals: `n` counts every marked surface removed now that a signal can
-    -- hold several. The old wording said "signal(s)" while counting one per signal, which was
-    -- true then and would have quietly under-reported ever since.
-    return true, ("removed %d effect(s) and their spell lists"):format(n)
+    return s.enabled
 end
+
+-- ☠☠ P.PIH_Create AND P.PIH_Remove ARE GONE, AND SO IS EVERYTHING THAT SERVED THEM
+-- (2026-09-09). They were the delete-and-rebuild model of the enable tick: Remove deleted
+-- every marked record and stashed copies, Create rebuilt from the stash. The tick writes a
+-- stored flag now (P.PIH_SetEnabled) and the records are never touched, so both verbs -- and
+-- pihStashHits, pihKeptCfg, pihKeptSurfaces, pihRestoreInto and PIH_RECIPE_OWNED with them --
+-- answer a question nobody asks.
+--
+-- ⚠ WHAT WENT WITH THEM, SAID OUT LOUD SO NOBODY REDISCOVERS IT AS A BUG:
+--   · THE SPELL LISTS ARE NO LONGER AUTO-DELETED. PIH_Remove used to delete the three
+--     "Power Infusion Helper" custom filters once no mark remained in either mode. Nothing
+--     removes them now -- correct, because the records that reference them are no longer
+--     removed either. They are ordinary custom filters, visible and deletable in the Filter
+--     Designer, which is where a user would look for them. A lingering list is cruft; a
+--     silently deleted one that an effect still points at is a broken effect.
+--   · THE RETAINED-CUSTOMISATION STASH IS UNNECESSARY, not lost. It existed only to survive
+--     a round trip that no longer destroys anything. adDB.pihelper.retainedCfg may still sit
+--     in old profiles; it is inert and costs a few bytes.
 
 function P.PIH_SetRole(role, on)
     local s = P.PIH_Settings()
@@ -6434,7 +6237,11 @@ S.BuildPIHelperCard = function(parent, opts)
     pihSweep()
     local yPos = opts.startY or 0
     local Refresh = opts.Refresh or function() end
-    local exists = P.PIH_Exists()
+    -- ⚠ THE STORED FLAG, NOT THE RECORDS. "Is the helper on" and "does it hold any
+    -- effects" are two different questions since the switch stopped deleting -- a
+    -- disabled helper keeps every record it had. P.PIH_IsEnabled backfills the flag once
+    -- for a profile that predates it.
+    local enabled = P.PIH_IsEnabled()
 
     -- ── AN ENABLE TICK, NOT AN ADD/REMOVE CARD (2026-09-08) ──
     -- ☠ "ADD" AND "REMOVE" WERE THE IMPLEMENTATION TALKING. They were literally true --
@@ -6465,14 +6272,17 @@ S.BuildPIHelperCard = function(parent, opts)
     local cb = CreateFrame("CheckButton", nil, banner, "BackdropTemplate")
     cb:SetPoint("TOPLEFT", banner, "TOPLEFT", 10, -10)
     DF.GUI:StyleCheckButton(cb)
-    cb:SetChecked(exists)
+    cb:SetChecked(enabled)
     cb:SetScript("OnClick", function(self)
-        -- ⚠ READ THE WORLD, NOT THE BOX. The tick's own state is what the user just did;
-        -- whether a helper exists is what the pool says. A double click, a profile switch
-        -- landing mid-build or a stale page would otherwise create a second helper or try
-        -- to remove one that is already gone.
-        if P.PIH_Exists() then P.PIH_Remove() else P.PIH_Create() end
-        self:SetChecked(P.PIH_Exists())
+        -- ⚠ READ THE STORED FLAG, NOT THE BOX. The tick's own state is what the user just
+        -- did; the flag is what the profile says. A double click, a profile switch landing
+        -- mid-build or a stale page would otherwise write the wrong direction.
+        -- ☠ AND IT NO LONGER DELETES ANYTHING. This used to be
+        -- `if P.PIH_Exists() then P.PIH_Remove() else P.PIH_Create() end` -- off meant
+        -- destroying every helper record and stashing a copy to fake reversibility, which is
+        -- how Krathe's border went missing. The flag is the switch now; the records stay.
+        P.PIH_SetEnabled(not P.PIH_IsEnabled())
+        self:SetChecked(P.PIH_IsEnabled())
         Refresh()
     end)
 
@@ -6494,10 +6304,11 @@ S.BuildPIHelperCard = function(parent, opts)
 
     banner.checkbox = cb
     yPos = yPos - (banner:GetHeight() + GUI.Space.section)
-    -- ☠ THE SECOND RETURN STILL GATES THE SECTIONS, but on existence alone now. The old
-    -- card group carried its own collapsing header and published whether it was open, so
-    -- the sections had to respect a fold that no longer exists -- a banner does not fold.
-    return yPos, exists and true or false
+    -- ☠ THE SECOND RETURN GATES THE SECTIONS, on the SWITCH now rather than on whether
+    -- records exist. The old card group carried its own collapsing header and published
+    -- whether it was open, so the sections had to respect a fold that no longer exists --
+    -- a banner does not fold.
+    return yPos, enabled
 end
 
 -- ── THE SECTION TOOLKIT ──

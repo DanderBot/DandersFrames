@@ -372,6 +372,26 @@ local function pihStopTicker()
     if pihReadyTicker then pihReadyTicker:Cancel(); pihReadyTicker = nil end
 end
 
+-- ★★★ THE FEATURE SWITCH, AS DISTINCT FROM THE COOLDOWN GATE (2026-09-09).
+--
+-- ☠☠ "DISABLE" USED TO MEAN "DELETE THE RECORDS". The helper had no enabled flag of its own
+-- -- its existence WAS its records -- so the panel's tick implemented off as a wholesale
+-- delete with a stash to fake reversibility. Every bug in that area had one root: a switch
+-- pretending to be a switch while actually being a delete. Krathe, 2026-09-09: "when I disable
+-- the PI tracker, it seems to remove my border effect I added", then "it should function like
+-- the rest of AD" -- and the rest of AD writes ONE BOOLEAN (modeDB.auraDesignerEnabled) and
+-- deletes nothing.
+-- ⇒ The records stay exactly where they are. This is what makes them not draw, and it costs
+-- one file-local, because the gate's own machinery already means "dark, and nothing will
+-- open it".
+--
+-- ⚠ TWO SWITCHES, THREE STATES, AND THEY DO NOT COLLAPSE INTO ONE:
+--     enabled = false                -> forced DARK  (the feature is off)
+--     enabled, gateEnabled = false   -> forced OPEN  (never hide, not even on cooldown)
+--     enabled, gateEnabled           -> the watcher drives
+-- Reusing pihGateEnabled for both would make "off" and "always show" the same field.
+local pihEnabled = true
+
 local function pihSet(dark)
     pihGateOpen = not dark
     local n = 0
@@ -386,10 +406,16 @@ local function pihSet(dark)
         -- ⚠ Never under a manual hold: the tick body refuses to act while held (below),
         -- so a ticker started here would idle at 2 Hz for the rest of the session. Handing
         -- control back re-enters through pihSet and starts it then, if still dark.
-        if not pihReadyTicker and pihManual == nil and C_Timer and C_Timer.NewTicker then
+        -- ⚠ ...AND NEVER WHILE THE FEATURE IS OFF. This ticker exists to REOPEN the gate when
+        -- the cooldown clears, which for a disabled helper would undo the very thing the
+        -- switch just did -- and poll at 2 Hz forever to do it.
+        if not pihReadyTicker and pihManual == nil and pihEnabled
+            and C_Timer and C_Timer.NewTicker then
             pihReadyTicker = C_Timer.NewTicker(0.5, function()
                 -- Held by hand: never fight a gate the user is holding themselves.
                 if pihManual ~= nil then return end
+                -- Re-asked every tick, not only at start: the switch can move under us.
+                if not pihEnabled then return end
                 if pihReadReady() then
                     pihStopTicker()
                     if not pihGateOpen then pihSet(false) end
@@ -411,8 +437,32 @@ end
 -- the setting says.
 local pihGateEnabled = true
 
+-- The FEATURE switch. Off is a forced dark that nothing reopens; on hands control back to
+-- whichever of the two remaining states applies. See pihEnabled for the three-state table.
+-- ⚠ CALLED AFTER PIH_SetGateEnabled, always: turning the feature back on has to resume from
+-- the gate's own setting, so that setting must already be in place. PIH_ApplySaved orders
+-- them; so does the panel's P.PIH_Apply.
+function Engine:PIH_SetEnabled(on)
+    pihEnabled = on and true or false
+    -- A manual hold is a debugging affordance and must not survive either transition -- the
+    -- same reasoning as the gate switch below.
+    pihManual = nil
+    if not pihEnabled then
+        pihSet(true)                    -- dark, and nothing will open it
+    elseif not pihGateEnabled then
+        pihSet(false)                   -- the gate is switched off: never hide
+    else
+        pihSet(not pihReadReady())      -- resume from the real cooldown state
+    end
+    return pihEnabled
+end
+
 function Engine:PIH_SetGateEnabled(on)
     pihGateEnabled = on and true or false
+    -- ⚠ THE FEATURE SWITCH OUTRANKS THIS ONE. With the helper off, neither branch below may
+    -- run: "never hide" and "resume from the cooldown" both mean SHOW, and there is nothing
+    -- to show. Without this, ticking the cooldown option while disabled lit the helper up.
+    if not pihEnabled then return pihGateEnabled end
     if not pihGateEnabled then
         pihManual = nil
         pihSet(false)          -- open, and nothing will shut it
@@ -464,6 +514,7 @@ function Engine:PIH_ApplySaved()
         end
         pihManual = nil
         pihGateEnabled = true
+        pihEnabled = true          -- no helper here; the switch has nothing to suppress
         Engine:PIH_SetSound(nil)   -- tears down every live registration
         pihSet(false)              -- open; nothing is left to hide
         if pihSyncWatcher then pihSyncWatcher() end
@@ -476,6 +527,13 @@ function Engine:PIH_ApplySaved()
         DF.AuraContainer.SetHelperExcludedRoles(any and s.roles or nil)
     end
     Engine:PIH_SetGateEnabled(s.gateEnabled ~= false)
+    -- ⚠ AFTER THE GATE: turning the feature on resumes from the gate's setting, so the gate
+    -- has to be in place first (PIH_SetEnabled says the same from its side).
+    -- ⚠ DEFAULTS TRUE FOR A PROFILE THAT PREDATES THE FLAG. `enabled` did not exist before
+    -- 2026-09-09, and every such profile that has helper records had a WORKING helper -- so
+    -- absent must read as on, or the fix for a destructive switch would silently switch
+    -- everyone off. A profile with no records shows nothing either way.
+    Engine:PIH_SetEnabled(s.enabled ~= false)
     -- After the gate, never before: SetSound arms against the gate's current state, so calling
     -- it first would arm against the state we are about to leave.
     Engine:PIH_SetSound(s.soundOn and s.soundLSMKey or nil)
@@ -559,6 +617,7 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
         return
     end
     if event ~= "PLAYER_ENTERING_WORLD" then
+        if not pihEnabled then return end       -- feature off: the gate stays dark
         if not pihGateEnabled then return end   -- switched off: nothing shuts or opens it
         if pihManual ~= nil then return end
     end
@@ -579,7 +638,10 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
         -- this, a saved "don't hide" was overridden by the cooldown read below: reload
         -- mid-cooldown and the helper hid anyway -- the exact opposite of the setting --
         -- for the rest of that cooldown.
-        if not pihGateEnabled or pihManual ~= nil then return end
+        -- ⚠ pihEnabled joins the same re-check, and for the identical reason: ApplySaved has
+        -- just loaded it, and the cooldown read below would otherwise light up a helper the
+        -- user has switched off.
+        if not pihEnabled or not pihGateEnabled or pihManual ~= nil then return end
         -- ☠ THE ONE PLACE isActive MAY SHUT THE GATE. On load we never saw the cast, so a
         -- reload mid-cooldown would otherwise leave the helper showing for the rest of it.
         -- Safe here specifically because nothing is being cast at this instant, so a true
