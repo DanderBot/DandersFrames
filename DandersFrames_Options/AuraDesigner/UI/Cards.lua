@@ -6136,7 +6136,17 @@ P.OpenFilterPopout = OpenFilterPopout
 --    squares, so every helper marker ever created is drawing a count read off whichever
 --    cooldown matched -- on an icon whose art is pinned to Power Infusion. New ones are
 --    stamped false at creation; step 7 does the ones already out there.
-local PIH_SCHEMA = 7
+-- 8: ☠ THE CURATED MARK NEVER LANDED ON AN EXISTING PROFILE. dfDefaults is what makes
+--    the Filter Designer give our list the on/off tick and the Reset button, and it is
+--    stamped by pihEnsureFilter -- which only RUNS when the helper creates or repairs a
+--    signal. A helper that already exists and is not being edited never calls it, so
+--    Krathe's list still showed the destructive ✕ and no Reset. Shipped and reported in
+--    one round: "the seeded list does not have the same toggle on/off as other filters
+--    and it does not have a reset option?"
+--    ⚠ THE LESSON: a mark written by a CREATE path reaches nobody who already has the
+--    thing. Stamping in the sweep is what reaches them, and the sweep is the one place
+--    that runs for a helper nobody is touching.
+local PIH_SCHEMA = 8
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -6334,6 +6344,23 @@ local function pihSweep()
                     end
                 end
             end
+        end
+    end
+
+    -- 8. STAMP THE CURATED DEFAULTS ON A LIST THAT ALREADY EXISTS.
+    -- ⚠ THE SAME VALUES pihEnsureFilter WOULD HAVE WRITTEN, from the same seed functions --
+    -- not the list's CURRENT contents. Default means what the recipe seeds, so anything the
+    -- user has added since is theirs and is deliberately not part of what a reset restores.
+    -- ⚠ Only when the mark is missing: re-stamping would be harmless but re-deriving the
+    -- seed set on every sweep is work for nothing.
+    if R and R.SetCuratedDefaults and R.IsCuratedFilter then
+        local cdId = pihFilterIdByName(PIH_FILTERS.cooldowns)
+        if cdId and not R:IsCuratedFilter(cdId) then
+            R:SetCuratedDefaults(cdId, pihSeedIDs())
+        end
+        local infId = pihFilterIdByName(PIH_FILTERS.infused)
+        if infId and not R:IsCuratedFilter(infId) then
+            R:SetCuratedDefaults(infId, { PIH_PI_SPELL_ID })
         end
     end
 

@@ -4768,6 +4768,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Filters" implied it covered debuffs too.
     local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Filter Designer"])
     BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
+        -- ☠ THE HELPER'S SWEEP RUNS HERE TOO, AND THIS PAGE IS WHY IT HAD TO. The sweep marks
+        -- the Power Infusion Helper's seeded lists as CURATED (dfDefaults), which is what gives
+        -- their rows the on/off tick instead of the destructive ✕ and puts Reset on screen. It
+        -- ran only on the Aura Designer's page build -- so opening the Filter Designer FIRST,
+        -- which is exactly what someone inspecting that list does, showed the unmarked version.
+        -- Krathe, 2026-09-09, one round after the mark shipped.
+        -- ⚠ A MIGRATION HOOK, not a dependency: schema-stamped, so it is one comparison after
+        -- the first run, and priest-gated so it costs nothing for anyone else.
+        if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()
+            and DF.AuraDesigner and DF.AuraDesigner._priv
+            and DF.AuraDesigner._priv.PIH_Sweep then
+            DF.AuraDesigner._priv.PIH_Sweep()
+        end
         -- ⚠ MIRRORED IN DF.SECTION_PREFIXES.auras_filterdesigner (GUI.lua) — change both.
         -- ☠ THIS PAGE OWNS NO PER-MODE KEYS ANY MORE, and its Copy/Sync/Reset list is
         -- deliberately EMPTY. It used to carry buffFilterSelection, debuffFilter*,
