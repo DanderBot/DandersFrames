@@ -450,10 +450,14 @@ local function MountEffect(ctx, effect, shell)
 
     -- The aura's own tracking warning, where the card put it: after the identity,
     -- before the actions.
+    -- ...and the helper's clash warning on the same badge, exactly as the card mounts it.
+    -- See P.PIH_ClashText.
     AttachWarningBadge(section, GetAuraWarningKey(
         (not IsOtherTab()) and ResolveSpec() or nil, effect.auraName), {
         point = "RIGHT", relativeTo = section, relativePoint = "RIGHT",
         offsetX = -76, offsetY = 0, size = 16,
+        text = (effect.config and effect.config.pihSignal and P.PIH_ClashText)
+            and P.PIH_ClashText(effect.config, effect.typeKey) or nil,
     })
 
     -- ── THE HEADER'S TWO ACTIONS ──

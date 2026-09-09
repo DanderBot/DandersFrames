@@ -536,14 +536,22 @@ P.GetAuraWarningKey = GetAuraWarningKey
 --             offsetX/Y     -- default 3, 3
 --             size          -- default 16
 --             color         -- { r, g, b } default red { 1.0, 0.25, 0.25 }
+-- ⚠ opts.text: THE SAME BADGE, WITH THE TEXT SUPPLIED RATHER THAN LOOKED UP. Every caller
+-- until now had a config warning KEY, so the text came from GetWarningText. The Power Infusion
+-- Helper's clash warning is composed at render time -- it names the offending effect and how
+-- many others contend -- so there is no key it could be filed under.
+-- ⚠ A key still wins when both are given: a tracking limitation is a fact about the SPELL and
+-- outranks a fact about this configuration. In practice they never collide (a helper record is
+-- filter-owned, so it has no spec entry and no warning key).
 local function AttachWarningBadge(host, warnKey, opts)
     if not host then return end
     local badge = host.dfWarningBadge
-    if not warnKey then
+    local supplied = opts and opts.text
+    if not warnKey and not supplied then
         if badge then badge:Hide() end
         return
     end
-    local tooltipText = GetWarningText(warnKey)
+    local tooltipText = warnKey and GetWarningText(warnKey) or supplied
     if not tooltipText then
         if badge then badge:Hide() end
         return

@@ -1095,41 +1095,53 @@ function P.PIH_ClashOn(surface)
     return n, name
 end
 
--- ⚠ pihSurfaceTakenBy WENT WITH THE DROPDOWN (2026-09-09). It answered "which other
--- signal is already on this surface", a question only the swap logic ever asked -- the add
--- tiles simply do not offer a surface the signal already holds, and two signals on
--- DIFFERENT records never blocked each other in the first place. The contention that IS
--- real on border and the two texts is pihSiblingContends' business, below.
+-- ⚠ pihSurfaceTakenBy, pihSiblingContends AND P.PIH_SelfContends WENT WITH THE DROPDOWN AND
+-- THE PER-SIGNAL ROWS (2026-09-09). All three asked their question through pihFound(), which
+-- returns ONE hit per signal -- fine when a signal had exactly one surface, and wrong the day
+-- it could hold several: "does our border contend" was answered about whichever surface the
+-- hash order happened to land on, which might be the square.
+-- ⇒ P.PIH_ClashText below asks about THE EFFECT IN FRONT OF IT instead -- the card hands over
+-- its own config -- so the answer is about the row the badge is on. The sibling term went too:
+-- only one signal is creatable now, and one record holds one effect per surface, so "another
+-- of OUR signals contends here" is unreachable rather than merely unlikely.
 
--- The same question for the CLASH WARNING, which cares about contention rather than
--- impossibility: another of our signals, on a different record, on a surface that takes a
--- single winner. PIH_ClashOn deliberately skips our own effects when counting the user's --
--- this is what puts the ones that genuinely contend back in.
-local function pihSiblingContends(surface, exceptKey)
+-- ★★★ THE CLASH WARNING, RESTORED TO THE EFFECT CARD (2026-09-09).
+--
+-- ☠ THE HAZARD IS REAL AND SILENT. Border, name text and health text resolve through
+-- pickWinner, which takes ONE winner per surface from config alone and tears every other
+-- candidate down -- so a helper border plus one of the user's own borders means one of them
+-- simply does not draw, with nothing on screen to say which or why. Health bar and background
+-- are MULTI (collectFrameTints renders each on its own container) and cannot clash, which is
+-- what PIH_CONTENDED encodes.
+--
+-- ★ AND ON BORDER THERE IS A WAY TO HAVE BOTH, which is Krathe's own observation
+-- (2026-09-09): "with border they can just offset and be able to show two borders like you can
+-- with AD anyway?" -- exactly right, and the string has always named it. Ticking "Give this
+-- aura its own border" opts that effect OUT of the contest (collectStackedBorders draws it
+-- alongside, sorted by priority), so both rings show. The text surfaces have no equivalent
+-- opt-out; there the remedy is the Priority slider, which is what their string names.
+-- ⚠ SO THE WARNING NAMES A REMEDY THAT STILL EXISTS in both cases -- checked, not assumed:
+-- the "own border" checkbox and the Priority slider are both live on the effect card.
+--
+-- ⚠ IT VANISHES WHEN THE REMEDY IS APPLIED. pihContends runs the REAL candidacy test on our
+-- own cfg first, so ticking "own border" on this effect removes the warning from it -- a
+-- warning that survives its own fix teaches people to ignore warnings.
+-- ⚠ `cfg` IS THE ROW'S OWN CONFIG, not a lookup. See the note above for why that matters.
+function P.PIH_ClashText(cfg, surface)
     if not PIH_CONTENDED[surface] then return nil end
-    local mine = PIH_SIGNALS[exceptKey]
-    if not mine then return nil end
-    for key, hit in pairs(pihFound()) do
-        local other = PIH_SIGNALS[key]
-        -- Through the real candidacy test: a sibling that opted OUT of the contest
-        -- (custom-mode border, disabled) is not a clash, and warning about it would survive
-        -- the very fix the warning names.
-        if key ~= exceptKey and hit.typeKey == surface and other and other.list ~= mine.list
-            and pihContends(surface, hit.cfg) then
-            return key
-        end
+    if not pihContends(surface, cfg) then return nil end
+    local n, name = P.PIH_ClashOn(surface)
+    if n == 0 then return nil end
+    local who = name or L["Another effect"]
+    if n > 1 then who = format(L["%s and %d more"], who, n - 1) end
+    if surface == "border" then
+        return format(
+            L["%s already colours the border. Only one can show — tick '%s' on one of them, or move this signal somewhere else."],
+            who, L["Give this aura its own border"])
     end
-    return nil
-end
-P.PIH_SiblingContends = pihSiblingContends
-
--- Does OUR OWN signal actually enter the contest on this surface? The warning has to vanish
--- when the named fix is applied to our effect itself -- a warning that survives its own
--- remedy teaches people to ignore warnings.
-function P.PIH_SelfContends(surface, key)
-    if not PIH_CONTENDED[surface] then return false end
-    local hit = pihFound()[key]
-    return (hit and pihContends(surface, hit.cfg)) and true or false
+    return format(
+        L["%s already colours this text. Only one can show — raise this signal's priority, or move it somewhere else."],
+        who)
 end
 
 -- ☠☠ THE SURFACE DROPDOWN'S WHOLE API LIVED HERE AND IS GONE (2026-09-09).
@@ -4412,7 +4424,14 @@ S.CreateEffectCard = function(parent, yPos, effect)
 
     -- Warning badge for auras with API-level tracking limitations
     -- (positioned to the right of the type badge)
+    -- ★ ...AND THE HELPER'S CLASH WARNING, on the same badge. A helper border sitting under one
+    -- of the user's own borders draws nothing and says nothing; this is where it says it. See
+    -- P.PIH_ClashText: it asks about THIS row's own config, names the offender, and names a
+    -- remedy that still exists (tick "Give this aura its own border" and BOTH rings show, or
+    -- raise Priority on a text surface).
     local warnKey = GetAuraWarningKey(spec, effect.auraName)
+    local clashText = (effect.config and effect.config.pihSignal and P.PIH_ClashText)
+        and P.PIH_ClashText(effect.config, effect.typeKey) or nil
     AttachWarningBadge(header, warnKey, {
         point = "LEFT",
         relativeTo = badgeBg,
@@ -4420,6 +4439,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
         offsetX = 4,
         offsetY = 0,
         size = 16,
+        text = clashText,
     })
 
     -- Aura name + anchor/trigger/group info
