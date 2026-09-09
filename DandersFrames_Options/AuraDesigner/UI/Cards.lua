@@ -731,6 +731,73 @@ end
 
 local PIH_ALL_AMPLIFIERS = { potions = true, trinkets = true, racials = true }
 
+-- ★★★ THE ICON'S TWO CHOICES (2026-09-09) -- what picture, and what it is allowed to show.
+--
+-- ☠ THE PICTURE IS staticSpellID's PRESENCE, and there is no second field recording the
+-- choice. Pinned = Power Infusion, absent = the engine binds and paints whatever matched.
+-- One truth: the field that DOES the thing is the field the control reads.
+--
+-- ⚠ "ONE OF THEM, IF SEVERAL ARE UP" IS THE HONEST CAVEAT, and it is why the second control
+-- exists at all. A placed icon renders ONE slot; when a player has a class cooldown and a
+-- trinket proc and a racial running together, which one the engine hands us is not ours to
+-- choose and can change between parses. That is exactly the case the "Also count" ticks make
+-- COMMON rather than rare -- racials and trinkets are things people press ALONGSIDE a
+-- cooldown, which is what made them "amplifiers" in the first place.
+--
+-- ⭐ SO THE NARROWING RIDES mutedSpellIDs -- the SAME store the Tracked IDs ticks write, not a
+-- parallel one. That is the whole reason this needs no new render concept: the resolver
+-- already narrows a placement by its mutes (narrowByPlacementMutes), already handles
+-- "everything muted = matches nothing", and the fine-grained per-ID ticks are simply the same
+-- setting at maximum resolution. A coarse control and a fine control over one store.
+-- ⚠ AND THE TICK IS DERIVED, NEVER STORED. It reads "are ALL the currently-ticked amplifier
+-- ids muted on this record", so ticking Racials ON in Triggers later makes it read FALSE by
+-- itself -- the new ids are not muted, and the icon really can show them. Storing a boolean
+-- would leave the box claiming "ignored" while racials appeared. Same doctrine as the class
+-- ticks: the tick reads the list, the click edits the list, nothing in between can disagree.
+P.PIH_PI_SPELL_ID = PIH_PI_SPELL_ID
+
+function P.PIH_AmplifierIDs()
+    return pihAmplifierIDs(P.PIH_Settings())
+end
+
+function P.PIH_IgnoresAmplifiers(rec)
+    local ids = P.PIH_AmplifierIDs()
+    -- Nothing ticked = nothing to ignore. Reads false so the box is not claiming to suppress
+    -- an empty set, which would tick itself the moment the user turned one on.
+    if not ids[1] then return false end
+    local m = type(rec) == "table" and rec.mutedSpellIDs
+    if type(m) ~= "table" then return false end
+    for _, id in ipairs(ids) do
+        if not m[id] then return false end
+    end
+    return true
+end
+
+function P.PIH_SetIgnoreAmplifiers(rec, on)
+    if type(rec) ~= "table" then return end
+    local ids = P.PIH_AmplifierIDs()
+    if on then
+        rec.mutedSpellIDs = rec.mutedSpellIDs or {}
+        for _, id in ipairs(ids) do rec.mutedSpellIDs[id] = true end
+    elseif type(rec.mutedSpellIDs) == "table" then
+        -- ⚠ ONLY OUR IDS COME BACK OUT. A per-ID tick the user set by hand on some other
+        -- cooldown is theirs and is not ours to clear.
+        for _, id in ipairs(ids) do rec.mutedSpellIDs[id] = nil end
+        if not next(rec.mutedSpellIDs) then rec.mutedSpellIDs = nil end
+    end
+    pihRefresh()
+end
+
+-- The picture. `on` = show the cooldown's own artwork; off = pin Power Infusion.
+-- ⚠ STRUCTURAL: placedStructSig carries the pinned-vs-dynamic flag (bindNative's SetIcon bind
+-- is once per slot), so the container must rebuild rather than restyle. pihRefresh's
+-- InvalidateAuraLayout + ForceRefreshAllFrames is that rebuild.
+function P.PIH_SetIconShowsAura(rec, on)
+    if type(rec) ~= "table" then return end
+    rec.staticSpellID = on and nil or PIH_PI_SPELL_ID
+    pihRefresh()
+end
+
 local function pihSyncTriggerExtras(s)
     local R = DF.FilterRegistry
     if not R then return end

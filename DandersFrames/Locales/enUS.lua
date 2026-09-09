@@ -3042,6 +3042,15 @@ L["Potions"] = true
 -- which is true in the designer and false here: a helper icon is PINNED to Power Infusion, so
 -- it says "infuse this player" rather than reporting which cooldown they pressed.
 L["Shows the Power Infusion icon."] = true
+-- ★ THE ICON'S TWO CHOICES on the Power Infusion Helper's pool. The picture is pinned to
+-- Power Infusion by default -- "infuse this player" -- and can be swapped for the buff they
+-- actually used. The caveat in the first tooltip is real and not a hedge: a placed icon
+-- renders ONE slot, so with a cooldown and a trinket up together the engine's pick is not
+-- ours to make. The second tick is the answer to that, and names the case it is for.
+L["Show the triggering cooldown's icon"] = true
+L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."] = true
+L["Ignore trinkets, potions and racials"] = true
+L["This icon only — the Triggers tab still decides what the helper watches. Useful with the icon showing their cooldown, since an amplifier is usually pressed alongside one."] = true
 L["Every indicator is already in use. Remove one below to add it again."] = true
 -- The stub page behind the nav row, reached by the settings SEARCH rather than by clicking
 -- the row -- which links straight to the designer's Power Infusion Helper tab.

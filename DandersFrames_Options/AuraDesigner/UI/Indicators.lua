@@ -658,6 +658,49 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         --
         -- ★ Frame Level and Alpha are the canaries: they belong to Appearance on every type,
         -- without exception. If a review finds either anywhere else, the card has drifted.
+        -- ★★★ THE HELPER'S OWN TWO QUESTIONS, AND THEY LEAD FOR THE REASON SHOW WHEN MISSING
+        -- USUALLY DOES: they are prior to everything below. "Which picture is this" and "what
+        -- is it allowed to show" decide what the indicator IS; the rest decide how it looks.
+        -- ⚠ ONE GROUP, HELPER ONLY. They are meaningless on an ordinary icon (whose picture is
+        -- its spell's by definition) and would be two dead rows on every other card.
+        -- ⚠ THE ICON ONLY, of all the helper's surfaces. A border or a square looks the same
+        -- whichever trigger fired, so "which one is this" has no answer to give there -- the
+        -- icon is the only surface that carries the information, and therefore the only one
+        -- where choosing between several matters. If it ever generalises, both verbs already
+        -- take a record rather than assuming one.
+        if pihNoStacks then   -- the same "this is a helper effect" test; see its note
+            local pihRec
+            do
+                local pool = CurrentAuraPool()
+                local auraCfg = pool and pool[auraName]
+                for _, x in ipairs((type(auraCfg) == "table" and auraCfg.indicators) or {}) do
+                    if x.id == indicatorID then pihRec = x; break end
+                end
+            end
+            if pihRec then
+                AddGroup(L["Power Infusion Helper"], function(g)
+                    -- ⚠ customGet/customSet, not a db key: the stored value is a SPELL ID or
+                    -- nil rather than a boolean, and the field that does the work is the field
+                    -- the control reads. Same shape as the border card's "own border" tick.
+                    local artCb = GUI:CreateCheckbox(parent,
+                        L["Show the triggering cooldown's icon"], nil, nil,
+                        function() if RPL then RPL() end end,
+                        function() return pihRec.staticSpellID == nil end,
+                        function(v) P.PIH_SetIconShowsAura(pihRec, v) end)
+                    artCb.tooltip = L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."]
+                    g:AddWidget(artCb, 28)
+
+                    local ampCb = GUI:CreateCheckbox(parent,
+                        L["Ignore trinkets, potions and racials"], nil, nil,
+                        function() if RPL then RPL() end end,
+                        function() return P.PIH_IgnoresAmplifiers(pihRec) end,
+                        function(v) P.PIH_SetIgnoreAmplifiers(pihRec, v) end)
+                    ampCb.tooltip = L["This icon only — the Triggers tab still decides what the helper watches. Useful with the icon showing their cooldown, since an amplifier is usually pressed alongside one."]
+                    g:AddWidget(ampCb, 28)
+                end)
+            end
+        end
+
         AddGroup(L["Show When Missing"], function(g)
             local desatCb
             local function UpdateDesatState()
