@@ -7128,7 +7128,23 @@ end
         -- the first time a label wrapped.
         if w and link and GUI.CreateGlyphButton then
             local glyph = GUI:CreateGlyphButton(w, {
-                size = 18, iconSize = 14,
+                -- ☠☠ A BOX BIGGER THAN THE ART, AND THE LABEL'S TOOLTIP HIT IS WHY (2026-09-10).
+                -- Krathe: "trying to click the edit pencils is very hard like the hit detection
+                -- is wrong on them."
+                -- ⇒ GUI:CreateCheckbox ends with GUI:AttachTooltip(container, label, txt),
+                -- which builds a motion-only hit frame over the LABEL's rect at the container's
+                -- level + 5 -- and t.check re-anchors that label to the container's RIGHT edge
+                -- so it wraps. So the label's hover rect covers this whole row INCLUDING this
+                -- button: the pencil never got an OnEnter, never brightened, never showed its
+                -- own tooltip, and hovering it raised the ROW's tooltip instead. The clicks did
+                -- land (AttachTooltip's hit takes motion and explicitly not clicks -- see its
+                -- own note), but a control that gives no sign it is under the cursor is a
+                -- control you are guessing at, which is exactly what "hit detection is wrong"
+                -- feels like from the other side.
+                -- ⇒ Three parts, and all three are needed: a forgiving 26x22 box around a
+                -- 14px pencil, a frame level above that hit (below), and the hit itself pulled
+                -- back off the button (below) so the pencil owns its own corner of the row.
+                width = 26, height = 22, iconSize = 14,
                 -- ⚠ THE EDIT PENCIL, NOT THE FILTER GLYPH. The filter icon means "narrow
                 -- what is listed" everywhere else in this addon -- it is what the ACTIVE
                 -- INDICATORS caption uses to pick which kinds to show -- and this button
@@ -7143,7 +7159,28 @@ end
                 tooltip = { title = L["Edit this list"], lines = { L["Open it in the Filter Designer."] } },
                 onClick = link,
             })
-            glyph:SetPoint("RIGHT", w, "RIGHT", -4, 0)
+            glyph:SetPoint("RIGHT", w, "RIGHT", -2, 0)
+
+            -- ☠ ABOVE THE LABEL'S HIT, AND MEASURED RATHER THAN GUESSED. The hit frame's
+            -- level is the container's + 5 AS IT WAS WHEN THE CHECKBOX WAS BUILT, and
+            -- g:AddWidget has run since -- so "+6" from here is arithmetic on a number that
+            -- may have moved. Reading both and adding one cannot be wrong.
+            local base = w:GetFrameLevel() or 0
+            local hit = w.dfTooltipHit
+            if hit then base = max(base, hit:GetFrameLevel() or 0) end
+            glyph:SetFrameLevel(base + 1)
+
+            -- ...and the hit stops before the button. Level alone gives the pencil the hover
+            -- back, but the label's rect would still be a hole the row's own tooltip fires
+            -- from on the way in and out. `dfTooltipHit` is exposed for exactly this -- see
+            -- UI:AttachTooltip, "a caller that needs to re-anchor it" -- and the two corners
+            -- below are its own, with the right edge pulled in by the button's width plus its
+            -- gap. Still anchored to the LABEL, so it keeps tracking a re-set or re-fonted one.
+            if hit and w.label then
+                hit:ClearAllPoints()
+                hit:SetPoint("TOPLEFT", w.label, "TOPLEFT", 0, 2)
+                hit:SetPoint("BOTTOMRIGHT", w.label, "BOTTOMRIGHT", -30, -2)
+            end
         end
         return w
     end
