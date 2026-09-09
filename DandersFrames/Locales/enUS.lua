@@ -3012,9 +3012,14 @@ L["Show even if your Power Infusion is on cooldown"] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
 -- finer; the row links out to the editor that does go spell by spell, so the limit is not
 -- a dead end.
--- ⚠ L["Classes and Cooldowns"] WENT WHEN THE BOX SPLIT IN TWO. It named a box holding
--- both, which is the arrangement that made the class ticks look as if they reached all
--- four sources. The classes have their own box (L["Classes"]) below the sources now.
+-- ★ THE BASELINE BOX: the class ticks, the note, and the button that edits the list they
+-- narrow. Its count rides the header because the source has no row of its own.
+L["Classes and Cooldowns"] = true
+-- ⚠ A BUTTON, NOT A PENCIL. The pencils sit on the Additional Filters ROWS, beside the
+-- tick that includes each source; this box has no source row -- the class ticks are the
+-- control -- so a full-width button reads as belonging to the box rather than to whichever
+-- row it happened to be nearest. Krathe, 2026-09-10.
+L["Edit Cooldowns"] = true
 L["Classes"] = true
 L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
@@ -3030,11 +3035,11 @@ L["Not available on a Power Infusion Helper signal."] = true
 -- silly, the additional filters can also be edited, this really is an unclear mess." They
 -- ARE editable now (pihAmplifierIDs honours each preset's ticks and the copy is re-taken
 -- on every visit), so each row simply offers the way in and the panel says nothing.
--- ⚠ "Class cooldowns" is the row for OUR curated list; the Classes box below narrows it,
--- which is why that row has no tick of its own.
+-- ⚠ THE FOURTH SOURCE IS NOT HERE. Class cooldowns live in the "Classes and Cooldowns"
+-- box with the ticks that narrow them and the button that edits them -- that box is the
+-- baseline, and these three are what you add to it.
 -- ⚠ The counts are appended to these labels at render time and need no translating.
-L["Trigger Filters"] = true
-L["Class cooldowns"] = true
+L["Additional Filters"] = true
 L["Edit this list"] = true
 L["Open it in the Filter Designer."] = true
 -- The three sources in Additional Filters. Each tick puts that source's spells into the ONE

@@ -6944,6 +6944,29 @@ end
 -- button for single spells bolted on top, which is two different questions -- WHOSE cooldowns,
 -- and WHICH cooldowns -- under one name that only answered the first. Each half now carries a
 -- label at setting weight, and the box is named for both.
+-- ⚠ DECLARED ABOVE ITS CALLERS, and it has two now: the source rows' pencils and the
+-- Edit Cooldowns button inside pihAddClasses. Moving the button into that function put a
+-- caller ABOVE this definition, which compiles as a nil GLOBAL read -- invisible to
+-- luac -p and caught only by the _ENV globals diff.
+-- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND scrolls to
+-- the list, selects it and pulses it -- Krathe's "flash link". Its own comment records why
+-- the difference matters: a hand-written jump "landed you on the page with nothing
+-- indicated, which is indistinguishable from a broken link".
+-- ⚠ TWICE, ONE FRAME APART, and that is a workaround rather than belt-and-braces:
+-- _fdFocusFilter clamps its scroll against GetVerticalScrollRange, which is still 0 on the
+-- target page's FIRST build -- so the row it selected sits below the fold. The second call
+-- runs after layout. The proper fix is a deferred retry inside _fdFocusFilter; that file is
+-- Danders' and it is on the list for him rather than edited from here.
+local function pihOpenFilter(kind, key)
+    if not (key and GUI.OpenFilterInDesigner and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
+        return
+    end
+    GUI:OpenFilterInDesigner(kind, key)
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function() GUI:OpenFilterInDesigner(kind, key) end)
+    end
+end
+
 local function pihAddClasses(g, t)
     local parent = t.parent
     t.settingLabel(g, L["Classes"])
@@ -6994,13 +7017,32 @@ local function pihAddClasses(g, t)
     end
     t.note(g, L["Untick a class to stop watching its cooldowns."])
 
-    -- ☠ THE STANDALONE BUTTON AND ITS NOTE WERE HERE AND BOTH ARE GONE (2026-09-09).
-    -- One button captioned for one of four lists, and a paragraph underneath explaining that
-    -- the other three were not really editable -- an implementation detail leaking into the
-    -- panel and being apologised for. Krathe: "the note below the link to edit the cooldown
-    -- list is silly, the additional filters can also be edited, this really is an unclear
-    -- mess." Every source row carries its own link now (pihSourceRow), and the reason the note
-    -- existed was fixed rather than reworded -- see pihAmplifierIDs.
+    -- ★ THE BUTTON IS BACK, IN THE BOX THAT OWNS THE LIST. Krathe, 2026-09-10: "Cooldowns
+    -- should be in with the Classes and maybe should still be a button Edit Cooldowns".
+    -- ☠ WHAT WENT WRONG BEFORE WAS NEVER THE BUTTON. It was a button captioned for one of four
+    -- lists standing in a box that held all four, with a NOTE underneath apologising that the
+    -- other three were not really editable. The three have their own rows and their own pencils
+    -- now, so this one is unambiguous: it belongs to the list the ticks above it narrow, and it
+    -- says which list that is.
+    -- ⚠ A BUTTON RATHER THAN A PENCIL, deliberately: the pencils sit on ROWS, beside the tick
+    -- that includes that source. This box has no source row -- the thirteen class ticks are the
+    -- control -- so there is nothing for a glyph to sit on, and a full-width button reads as
+    -- belonging to the box rather than to whichever row it happened to be nearest.
+    local cdID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+    local cdBtn = GUI:CreateButton(parent, L["Edit Cooldowns"], 140, 22, function()
+        pihOpenFilter("custom", cdID)
+    end)
+    if not (cdID and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
+        -- ⚠ THE SHARED TREATMENT, not a hand-written grey. CreateButton routes through
+        -- StyleButton, which owns SetDisabled: dim backdrop, faint border, label alpha, wash
+        -- suppressed. Disable() plus a literal text colour rendered a NORMAL backdrop with grey
+        -- text, visibly unlike every other disabled button in the addon. Caught in review.
+        if cdBtn.SetDisabled then cdBtn:SetDisabled(true)
+        else cdBtn:Disable(); cdBtn.Text:SetTextColor(0.4, 0.4, 0.4) end
+    end
+    -- Prose-width like the notes: only the class TICKS flow the popout's two tracks.
+    cdBtn.fullRow = true
+    g:AddWidget(cdBtn, 28)
 
 
 end
@@ -7090,9 +7132,16 @@ end
         if w and link and GUI.CreateGlyphButton then
             local glyph = GUI:CreateGlyphButton(w, {
                 size = 18, iconSize = 14,
-                -- ☠ DOUBLE BACKSLASHES in FILTER_ICON -- Lua 5.1 passes an unrecognised escape
-                -- through as the bare character, so a single-backslash path draws nothing.
-                texture = FILTER_ICON,
+                -- ⚠ THE EDIT PENCIL, NOT THE FILTER GLYPH. The filter icon means "narrow
+                -- what is listed" everywhere else in this addon -- it is what the ACTIVE
+                -- INDICATORS caption uses to pick which kinds to show -- and this button
+                -- opens a list for editing. Two verbs, one picture, and the wrong one:
+                -- "you did not use the edit pencil you used a filter icon instead"
+                -- (Krathe, 2026-09-10). Media/Icons/edit is the pencil every other
+                -- edit-this affordance in the addon uses (Rename, the nickname rows).
+                -- ☠ DOUBLE BACKSLASHES -- Lua 5.1 passes an unrecognised escape through as
+                -- the bare character, so a single-backslash path draws nothing at all.
+                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
                 color   = C_TEXT_DIM,
                 tooltip = { title = L["Edit this list"], lines = { L["Open it in the Filter Designer."] } },
                 onClick = link,
@@ -7102,36 +7151,15 @@ end
         return w
     end
 
-    -- ⭐ GUI:OpenFilterInDesigner, NOT a bare SelectTab. It switches the page AND scrolls to
-    -- the list, selects it and pulses it -- Krathe's "flash link". Its own comment records why
-    -- the difference matters: a hand-written jump "landed you on the page with nothing
-    -- indicated, which is indistinguishable from a broken link".
-    -- ⚠ TWICE, ONE FRAME APART, and that is a workaround rather than belt-and-braces:
-    -- _fdFocusFilter clamps its scroll against GetVerticalScrollRange, which is still 0 on the
-    -- target page's FIRST build -- so the row it selected sits below the fold. The second call
-    -- runs after layout. The proper fix is a deferred retry inside _fdFocusFilter; that file is
-    -- Danders' and it is on the list for him rather than edited from here.
-    local function pihOpenFilter(kind, key)
-        if not (key and GUI.OpenFilterInDesigner and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
-            return
-        end
-        GUI:OpenFilterInDesigner(kind, key)
-        if C_Timer and C_Timer.After then
-            C_Timer.After(0, function() GUI:OpenFilterInDesigner(kind, key) end)
-        end
-    end
-
     local function pihAddTriggerSources(g, t)
         local st = P.PIH_Settings()
         local R = DF.FilterRegistry
 
-        -- CLASS COOLDOWNS -- our own curated list, and the only source whose count can move on
-        -- its own (a spell ticked off in the Filter Designer stops firing without leaving).
-        local cdID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-        local cdOn, cdTotal = P.PIH_CooldownCounts()
-        pihSourceRow(g, t, L["Class cooldowns"], cdOn, nil, nil,
-            cdID and function() pihOpenFilter("custom", cdID) end or nil)
-
+        -- ⚠ CLASS COOLDOWNS IS NOT A ROW HERE. It lives with the class ticks that narrow
+        -- it, under its own header and its own button -- Krathe, 2026-09-10: "Cooldowns
+        -- should be in with the Classes and maybe should still be a button Edit Cooldowns".
+        -- That box is the BASELINE (always watched, narrowed by class); these three are
+        -- additions you opt into, which is what makes them a box of their own.
         local function catCount(catKey)
             local recs = R and R.ByCategory and R.ByCategory[catKey]
             return recs and #recs or 0
@@ -7377,23 +7405,30 @@ S.BuildPIHelperBody = function(parent, opts)
         -- you on the page with nothing indicated, which is indistinguishable from a broken
         -- link". Krathe, 2026-09-08: "We seem to have two links to it? and confusing messaging."
 
-        -- ★★ SOURCES FIRST, THEN THE ONE THAT NARROWS ONE OF THEM.
-        -- ☠ THE ORDER USED TO SAY THE OPPOSITE OF THE TRUTH: thirteen class ticks, then the
-        -- sources, when the classes reach only the FIRST source -- trinkets and potions are
-        -- items with no class, and racials are tagged class = "ALL". Krathe read the layout and
-        -- asked exactly that: "the classes, they only effect the Cooldowns correct?"
-        -- ⚠ THE COUNT LEFT THE HEADER when Class cooldowns got a row of its own. A number on a
-        -- box header describing one of the rows inside it was the compromise that box needed;
-        -- the row does not need it.
-        -- ⚠ CLASSES STAYS COLLAPSIBLE: thirteen rows is the one list on this panel nobody can
-        -- scan, and most people will never open it.
-        yPos = t.group(L["Trigger Filters"], function(g)
-            pihAddTriggerSources(g, t)
-        end, yPos)
-
-        yPos = t.group(L["Classes"], function(g)
+        -- ★★ THE BASELINE FIRST, THEN WHAT YOU ADD TO IT.
+        -- ☠ THESE WERE ONE BOX AND THE ORDER SAID THE OPPOSITE OF THE TRUTH: thirteen class
+        -- ticks, then a list of four sources, when the classes reach only ONE of them -- trinkets
+        -- and potions are items with no class, and racials are tagged class = "ALL". Krathe read
+        -- the layout and asked exactly that: "the classes, they only effect the Cooldowns
+        -- correct?"
+        -- ⚠ SO THE CLASS COOLDOWNS LIVE WITH THEIR CLASSES. The box is the whole of that
+        -- source: the ticks that narrow it, the note, and the button that edits it. The three
+        -- sources nothing narrows are additions, in a box that says so.
+        -- ⚠ THE COUNT IS ON THIS HEADER because the source has no row of its own -- see
+        -- P.PIH_CooldownCounts for why a tick here was redundant AND harmful. Shown as a
+        -- fraction only when some are switched off, the same rule the Filter Designer follows.
+        -- ⚠ COLLAPSIBLE: thirteen rows is the one list on this panel nobody can scan, and most
+        -- people will never open it.
+        local cdOn, cdTotal = P.PIH_CooldownCounts()
+        local cdHead = L["Classes and Cooldowns"] .. "   "
+            .. ((cdOn == cdTotal) and tostring(cdTotal) or (cdOn .. "/" .. cdTotal))
+        yPos = t.group(cdHead, function(g)
             pihAddClasses(g, t)
         end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
+
+        yPos = t.group(L["Additional Filters"], function(g)
+            pihAddTriggerSources(g, t)
+        end, yPos)
     end
 
     return yPos
