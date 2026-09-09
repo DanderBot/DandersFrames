@@ -3031,19 +3031,19 @@ L["Only plays while the helper is showing."] = true
 -- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
 -- missing-mode render path is the one place the helper's cooldown gate cannot reach.
 L["Not available on a Power Infusion Helper signal."] = true
--- ★ THE FOUR TRIGGER SOURCES, each a tick with its own count -- the shape the Buff Bar
--- uses to pick its filters. "Cooldowns" was a HEADING before, above a link, with no tick to
--- say it was on; the other three were captioned "Also count", counted "also" to something
--- the panel never named. Krathe, 2026-09-09: "you should select them and it should show the
--- number active next to them in a similar way to how you pick on the buff bar."
--- ⚠ The numbers are appended to these labels at render time and need no translating.
-L["Trigger Filters"] = true
--- Three of the four trigger sources. Each tick puts that source's spells into the ONE list
--- the helper matches on, so ticking Trinkets makes a trinket proc fire whatever effects have
--- been added on the Effects tab. The fourth is L["Cooldowns"], our own curated list.
--- ⚠ L["Cooldowns"] is kept: the tick that used it is gone, but the string is a plain noun
--- other surfaces use.
-L["Cooldowns"] = true
+-- ★ THE SOURCES THE CLASS TICKS CANNOT REACH, in a box of their own. Trinkets and potions
+-- are items with no class; racials are tagged class = "ALL". The class ticks narrow only
+-- the cooldown list, which is why that one lives with them under its own header instead.
+-- Krathe, 2026-09-09: "the classes, they only effect the Cooldowns correct? Maybe we do
+-- separate that out."
+-- ⚠ The counts are appended to these labels at render time and need no translating.
+L["Additional Filters"] = true
+-- The three sources in Additional Filters. Each tick puts that source's spells into the ONE
+-- list the helper matches on, so ticking Trinkets makes a trinket proc fire whatever effects
+-- have been added on the Effects tab.
+-- ⚠ L["Cooldowns"] WENT WITH ITS ROW. The fourth source has no tick of its own any more --
+-- the class ticks are its control, so it is named by the "Classes and Cooldowns" header
+-- instead. See P.PIH_CooldownCounts for why a tick there was redundant AND harmful.
 L["Trinkets"] = true
 L["Potions"] = true
 -- The helper's add block, which stands where the designer's three scope cards stand on every

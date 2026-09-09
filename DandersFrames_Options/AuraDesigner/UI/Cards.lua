@@ -1580,38 +1580,35 @@ end
 -- ⚠ ONE WRITE, NOT TWO. It used to write the setting, rebuild a separate amplifier filter,
 -- and then link or unlink that filter on the cooldown-icon group -- three facts that could
 -- disagree. Now the setting is the choice and pihSyncTriggerExtras is the consequence.
--- ★ THE COOLDOWNS SOURCE, AS A TICK LIKE THE OTHER THREE (2026-09-09).
--- ☠ IT WAS ALWAYS-ON AND HAD NO CONTROL, which is what made "Cooldowns" read as a heading
--- rather than a source -- and left the panel unable to say what it was the other three were
--- being counted "also" to. A tick per source, and the same question asked of each.
--- ⚠ READ OFF THE LIST, like the class ticks and for the same reason: the list is the truth,
--- and a stored boolean beside it is a second copy that drifts the moment anyone edits the
--- filter by hand. On means "any of the seeded cooldowns is still in it".
--- ⚠ NOT THE SAME QUESTION AS R:CustomFilterCounts' `enabled`. A spell ticked OFF in the
--- Filter Designer is still IN the list, so this stays on -- "is this source included at all"
--- and "how much of it is switched on" are different, and the row shows both.
-function P.PIH_CooldownsOn()
+-- ★ HOW MANY CLASS COOLDOWNS ARE ACTUALLY LIVE, for the "Classes and Cooldowns" header.
+--
+-- ☠ THE COOLDOWNS *TICK* THAT WAS HERE IS GONE, AND IT WAS REDUNDANT AND HARMFUL. Redundant
+-- because unticking all thirteen classes IS turning class cooldowns off -- the classes are the
+-- control. Harmful because both it and the class ticks READ OFF THE LIST (no stored booleans,
+-- deliberately, so nothing can drift): unticking the source removed all forty cooldowns, which
+-- made every class tick read off, and ticking it back re-added all forty -- silently undoing
+-- whichever classes the user had turned off. A switch that quietly reverts your other choices
+-- is worse than no switch, and the alternative -- remembering the class states -- is the stored
+-- copy of a derived truth that the class ticks exist to avoid.
+--
+-- ⚠ THE SEED SET, NOT THE WHOLE LIST. The list also holds trinkets, potions and racials once
+-- those are ticked, and counting them under a "Classes and Cooldowns" header would be a number
+-- describing something else. Enabled, too: a spell ticked off in the Filter Designer is in the
+-- list and not firing, so it is not live.
+function P.PIH_CooldownCounts()
     local R = DF.FilterRegistry
     local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
     local f = id and R and R.GetCustomFilter and R:GetCustomFilter(id)
-    if not f then return false end
-    for _, sid in ipairs(pihSeedIDs()) do
-        if f.spells[sid] or f.rawIDs[sid] then return true end
+    local ids = pihSeedIDs()
+    if not f then return 0, #ids end
+    local on = 0
+    for _, sid in ipairs(ids) do
+        if (f.spells[sid] or f.rawIDs[sid])
+            and (not R.IsCustomSpellEnabled or R:IsCustomSpellEnabled(id, sid)) then
+            on = on + 1
+        end
     end
-    return false
-end
-
--- ⚠ SURGICAL, exactly like pihApplyClass: it adds or removes the SEEDED ids and nothing
--- else, so a spell the user put in our list by hand survives being switched off and back on.
-function P.PIH_SetCooldownsOn(on)
-    local R = DF.FilterRegistry
-    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
-    if not (id and R) then return end
-    for _, sid in ipairs(pihSeedIDs()) do
-        if on then R:AddSpellToCustom(id, sid)
-        elseif R.RemoveSpellFromCustom then R:RemoveSpellFromCustom(id, sid) end
-    end
-    pihRefresh()
+    return on, #ids
 end
 
 function P.PIH_SetAmplifier(which, on)
@@ -7045,17 +7042,14 @@ end
         -- that function's own local. Moving code moves what it closes over.
         local parent = t.parent
         local st = P.PIH_Settings()
-        t.settingLabel(g, L["Trigger Filters"])
-
-        -- COOLDOWNS -- our own curated list, and the only row whose count can move on its own.
-        local cdID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-        local R = DF.FilterRegistry
-        local cdOn, cdTotal = 0, 0
-        if cdID and R and R.CustomFilterCounts then cdOn, cdTotal = R:CustomFilterCounts(cdID) end
-        t.subCheck(g, pihCountLabel(L["Cooldowns"], cdOn, (cdOn ~= cdTotal) and cdTotal or nil),
-            function() return P.PIH_CooldownsOn() end,
-            function(v) P.PIH_SetCooldownsOn(v) end)
-
+        -- ⚠ NO SECTION LABEL AND NO COOLDOWNS ROW. This block is its own box now
+        -- ("Additional Filters"), so the header does the labelling -- and class cooldowns are
+        -- controlled by the class ticks in the box above, which is what makes a fourth row
+        -- here redundant. P.PIH_CooldownCounts has the whole argument.
+        -- ★ WHAT THESE THREE HAVE IN COMMON, and why they are a box of their own: no class
+        -- tick can reach any of them. Trinkets and potions are items with no class at all, and
+        -- racials are tagged class = "ALL". Krathe spotted the mismatch from the layout alone:
+        -- "the classes, they only effect the Cooldowns correct?"
         t.subCheck(g, pihCountLabel(L["Trinkets"], pihSourceCount(PIH_SEED.amplifiers.trinkets)),
             function() return st.trinkets == true end,
             function(v) P.PIH_SetAmplifier("trinkets", v) end)
@@ -7359,17 +7353,34 @@ S.BuildPIHelperBody = function(parent, opts)
         -- which for thirteen classes and a two-line note is a wall of text rather
         -- than a summary. The header alone says what is folded away, which is what
         -- a summary was for.
-        -- ☠ NO SECOND FILTER LINK HERE. pihAddClasses ALREADY ends with one, and its button
-        -- uses GUI:OpenFilterInDesigner -- which switches the page AND scrolls to, selects
-        -- and pulses the cooldown filter. I added a bare SelectTab beside it without
-        -- checking, which gave the page two buttons to the same place, one of them the worse
-        -- version: the existing comment there records that a hand-written jump "landed you on
-        -- the page with nothing indicated, which is indistinguishable from a broken link".
-        -- Krathe, 2026-09-08: "We seem to have two links to it? and confusing messaging."
-        yPos = t.group(L["Classes and Cooldowns"], function(g)
+        -- ☠ NO SECOND FILTER LINK ANYWHERE. There is exactly one, at the foot of the second
+        -- box, and it uses GUI:OpenFilterInDesigner -- which switches the page AND scrolls to,
+        -- selects and pulses the filter. A bare SelectTab beside it once gave the page two
+        -- buttons to the same place, one of them the worse version: a hand-written jump "landed
+        -- you on the page with nothing indicated, which is indistinguishable from a broken
+        -- link". Krathe, 2026-09-08: "We seem to have two links to it? and confusing messaging."
+
+        -- ★★ TWO BOXES, BECAUSE THE CLASS TICKS ONLY REACH ONE OF THE SOURCES.
+        -- ☠ THEY WERE ONE BOX AND THE ORDER SAID THE OPPOSITE: thirteen class ticks, then a
+        -- list of four sources, when no class tick can touch three of them -- trinkets and
+        -- potions are items with no class, and racials are tagged class = "ALL". Krathe read
+        -- the layout and asked the right question: "the classes, they only effect the Cooldowns
+        -- correct? Maybe we do separate that out."
+        -- ⇒ The classes sit WITH the source they narrow, under its count; the three sources
+        -- nothing narrows get a box of their own.
+        -- ⚠ THE COUNT IS ON THE HEADER because the source has no row of its own any more --
+        -- see P.PIH_CooldownCounts for why its tick was redundant AND harmful. Only shown as a
+        -- fraction when some are off, the same rule the Filter Designer's own rows follow.
+        local cdOn, cdTotal = P.PIH_CooldownCounts()
+        local cdHead = L["Classes and Cooldowns"] .. "   "
+            .. ((cdOn == cdTotal) and tostring(cdTotal) or (cdOn .. "/" .. cdTotal))
+        yPos = t.group(cdHead, function(g)
             pihAddClasses(g, t)
-            pihAddTriggerSources(g, t)
         end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
+
+        yPos = t.group(L["Additional Filters"], function(g)
+            pihAddTriggerSources(g, t)
+        end, yPos)
     end
 
     return yPos
