@@ -68,6 +68,14 @@ local BuildGlobalView            = P.BuildGlobalView
 --   P.CollectLayoutGroupSections   P.CollectDebuffGroupSections
 --   P.EnsureDebuffSelection
 
+-- ⚠ FORWARD-DECLARED, not moved. The Effects tab mounts the helper's cooldown-icon group
+-- (see BuildEffectsTabRows) and is written above the group builder; hoisting a 300-line
+-- function to satisfy the reading order would be a diff nobody can check. The upvalue is
+-- filled at load and every call happens long after.
+-- ☠ AND THEY MUST STAY DECLARED. `function MountGroup(...)` below assigns the LOCAL only
+-- while this line exists; delete it and both become globals that happen to work.
+local MountGroup, MountLayoutGroup
+
 -- The SPLIT PANEL's pool tab strip. The band layout has its own strip now (see
 -- S.BuildPoolTabs) and it is the same height, so the two layouts spend the same
 -- 30px on the same three words.
@@ -851,7 +859,17 @@ local function BuildEffectsTabRows(ctx, shell)
         end
     end
 
-    if #filtered == 0 then
+    -- The helper's cooldown-icon group is one of this tab's rows -- see the note on the split
+    -- panel's own list (S.BuildEffectsTab) for why it is here and not behind a tab, and
+    -- MountLayoutGroup for what it is mounted with. It draws icons, so it obeys the type
+    -- filter the same way an icon effect does.
+    local pihGroup = nil
+    if IsPIHelperTab() and P.PIH_IconGroup then
+        local af = S.activeFilter or "all"
+        if af == "all" or af == "icon" then pihGroup = P.PIH_IconGroup() end
+    end
+
+    if #filtered == 0 and not pihGroup then
         -- ⚠ THE EMPTY STATE IS A BANNER, NOT A CENTRED FONTSTRING. A column of
         -- bands has no half-panel to centre anything in, and CreateInfoBanner is
         -- the shared shape for "nothing here yet, and here is why".
@@ -880,6 +898,10 @@ local function BuildEffectsTabRows(ctx, shell)
 
     for _, effect in ipairs(filtered) do
         MountEffect(ctx, effect, shell)
+    end
+
+    if pihGroup then
+        MountLayoutGroup(ctx, pihGroup, { refreshTab = "effects", omitFilters = true })
     end
 end
 
@@ -920,7 +942,7 @@ end
 -- Everything a group's rows are built from, for both group stores. The two
 -- differ in which sections they collect, which record their rows measure against
 -- and what their headers say; the machinery below is one copy.
-local function MountGroup(ctx, group, spec)
+function MountGroup(ctx, group, spec)
     local page, tools, Add = ctx.page, ctx.tools, ctx.Add
     local bandW = tools.BandWidth()
     local cardKey = spec.cardKey
@@ -1060,7 +1082,9 @@ local function MountGroup(ctx, group, spec)
     local verbs = {
         -- A LIST moved. Both layouts redraw the page; the panel goes with it,
         -- which is honest -- what was being edited is gone.
-        Rebuild = function() S.SwitchTab("layout") end,
+        -- ⚠ WHICH TAB IS THE CALLER'S. A group is not always on Layout Groups any more: the
+        -- helper's cooldown-icon group is a row on its Effects tab (MountLayoutGroup).
+        Rebuild = function() S.SwitchTab(spec.refreshTab or "layout") end,
         -- A VALUE moved and the widgets around it must re-read their greying. A
         -- rebuild here would retire the tick the user just clicked, so the page's
         -- STATE pass runs instead and the panes re-flow themselves.
@@ -1122,6 +1146,64 @@ local function MountGroup(ctx, group, spec)
     end
 
     Add(band, nil, "both")
+end
+
+-- ── ONE LAYOUT GROUP, MOUNTED ──
+-- ★★ EXTRACTED SO TWO TABS CAN MOUNT ONE (2026-09-10), the band layout's half of the split
+-- panel's S.CreateLayoutGroupCard. The helper's cooldown-icon group is added from the Effects
+-- tab and now lives there -- Krathe: "It's confusing when you add Cooldown Icons from effects
+-- and it appears as a layout group, it should just show as a normal effect for PI helper" --
+-- and everything that made this block Layout-Groups-only was the tab key it typed out twice.
+--
+-- opts (all optional):
+--   refreshTab   the sub-tab a delete or an eye rebuilds. Defaults to "layout".
+--   omitFilters  drop the LINKED FILTERS row -- the helper's group watches OUR cooldown list,
+--                which its Triggers tab owns. See S.CreateLayoutGroupCard for the argument.
+function MountLayoutGroup(ctx, group, opts)
+    opts = opts or {}
+    local refreshTab = opts.refreshTab or "layout"
+    local isFilterGroup = (group.kind == "filter")
+
+    -- `true`: the row layout draws Others Only itself, as a control
+    -- row, so the Growth section must not draw it as well.
+    local sections = P.CollectLayoutGroupSections(group, true)
+    -- Index 1 is "what fills this group" for both kinds -- Linked Filters on a filter group,
+    -- Members on the other. See the same removal in S.CreateLayoutGroupCard.
+    if opts.omitFilters and isFilterGroup then tremove(sections, 1) end
+
+    local function Structural()
+        S.SwitchTab(refreshTab)
+        RefreshPlacedIndicators()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+        if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+    end
+
+    MountGroup(ctx, group, {
+        cardKey    = GroupExpandKey(group.id),
+        record     = GroupRecordView(group),
+        refreshTab = refreshTab,
+        sections   = sections,
+        appearance = isFilterGroup,
+        showEye    = isFilterGroup,
+        -- ⚠ ShowsOthersOnly, NOT IsOtherTab: the helper's pool answers yes to the second and
+        -- its groups are othersOnly by construction. P.ShowsOthersOnly carries the argument.
+        othersOnly = isFilterGroup and ShowsOthersOnly(),
+        Summary    = function() return S.LayoutGroupSummary(group) end,
+        Apply      = function()
+            RefreshPlacedIndicators()
+            local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+            if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+        end,
+        onDelete = function()
+            DeleteLayoutGroup(group.id)
+            -- Deleting a group deletes its member indicators -- the same
+            -- structural refresh as the effect row's delete.
+            Structural()
+        end,
+        onEye = Structural,
+    })
 end
 
 -- ── THE LAYOUT GROUPS TAB ──
@@ -1254,42 +1336,7 @@ local function BuildLayoutTabRows(ctx, shell)
                 onEye = StructuralDebuffGroupRefresh,
             })
         else
-            local isFilterGroup = (group.kind == "filter")
-            MountGroup(ctx, group, {
-                cardKey    = GroupExpandKey(group.id),
-                record     = GroupRecordView(group),
-                -- `true`: the row layout draws Others Only itself, as a control
-                -- row, so the Growth section must not draw it as well.
-                sections   = P.CollectLayoutGroupSections(group, true),
-                appearance = isFilterGroup,
-                showEye    = isFilterGroup,
-                othersOnly = isFilterGroup and IsOtherTab(),
-                Summary    = function() return S.LayoutGroupSummary(group) end,
-                Apply      = function()
-                    RefreshPlacedIndicators()
-                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
-                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
-                end,
-                onDelete = function()
-                    DeleteLayoutGroup(group.id)
-                    S.SwitchTab("layout")
-                    RefreshPlacedIndicators()
-                    -- Deleting a group deletes its member indicators -- the same
-                    -- structural refresh as the effect row's delete.
-                    DF:InvalidateAuraLayout()
-                    DF:UpdateAllFrames()
-                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
-                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
-                end,
-                onEye = function()
-                    S.SwitchTab("layout")
-                    RefreshPlacedIndicators()
-                    DF:InvalidateAuraLayout()
-                    DF:UpdateAllFrames()
-                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
-                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
-                end,
-            })
+            MountLayoutGroup(ctx, group)
         end
     end
 end

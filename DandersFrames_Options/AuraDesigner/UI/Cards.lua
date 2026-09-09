@@ -3345,22 +3345,18 @@ end
 -- reason it cannot be computed once.
 local function SubTabDefs()
     if IsPIHelperTab() then
-        -- ⚠ LAYOUT GROUPS ONLY WHEN THERE IS ONE. It exists for the Cooldown Icons group --
-        -- somewhere to move, size and delete it -- and for a helper that has not added one it is
-        -- a third tab opening on nothing, which is how Krathe met it: "why is layout groups back
-        -- showing on PI helper?" A tab that is empty until you do something unrelated is a
-        -- question the panel asks the user instead of answering.
-        -- ★ IT APPEARS WITH THE GROUP AND GOES WITH IT, so the strip always describes what is
-        -- actually there.
-        local defs = {
+        -- ☠ TWO, AND NEVER A THIRD. The Cooldown Icons group briefly grew one -- a Layout
+        -- Groups tab that appeared the moment you added the group -- and Krathe met it twice:
+        -- "why is layout groups back showing on PI helper?", then "It's confusing when you add
+        -- Cooldown Icons from effects and it appears as a layout group, it should just show as
+        -- a normal effect for PI helper."
+        -- ⇒ The group is now a card in ACTIVE INDICATORS on the Effects tab, drawn by the
+        -- designer's own S.CreateLayoutGroupCard (see S.BuildEffectsTab). It is added there and
+        -- it lives there; a tab that grows and shrinks under the user is gone with it.
+        return {
             { key = "global",  label = L["Triggers"], accent = { r = 0.51, g = 0.86, b = 0.51 } },
             { key = "effects", label = L["Effects"],  accent = nil },
         }
-        if P.PIH_IconGroup and P.PIH_IconGroup() then
-            defs[#defs + 1] = { key = "layout", label = L["Layout Groups"],
-                                accent = { r = 0.91, g = 0.66, b = 0.25 } }
-        end
-        return defs
     end
     return {
         { key = "effects", label = L["Effects"],       accent = nil },   -- theme-tracking
@@ -3376,10 +3372,11 @@ P.SubTabDefs = SubTabDefs
 -- ⚠ Answers for EVERY pool, so a caller never has to know which one it is on.
 local function CoerceTabForPool(tabKey)
     if IsPIHelperTab() then
-        if tabKey == "effects" then return "effects" end
-        -- ⚠ Layout Groups only exists while a group does, so a stale "layout" -- from the
-        -- tab the user was on when they deleted it -- has to land somewhere real.
-        if tabKey == "layout" and P.PIH_IconGroup and P.PIH_IconGroup() then return "layout" end
+        -- ⚠ "layout" LANDS ON EFFECTS, not on Triggers. The helper has no Layout Groups tab,
+        -- and the one thing that would have sent someone here asking for it -- the Cooldown
+        -- Icons group -- is a card in the Effects list now, so Effects is where they meant to
+        -- go. (Krathe hit the old landing twice; see SubTabDefs.)
+        if tabKey == "effects" or tabKey == "layout" then return "effects" end
         return "global"
     end
     if tabKey == "effects" and IsDebuffTab() then return "layout" end
@@ -7805,7 +7802,26 @@ S.BuildEffectsTab = function()
         end
     end
 
-    if #filtered == 0 then
+    -- ★★ THE COOLDOWN-ICON GROUP IS A ROW IN THIS LIST (2026-09-10). Krathe: "It's confusing
+    -- when you add Cooldown Icons from effects and it appears as a layout group, it should
+    -- just show as a normal effect for PI helper." It is offered by a tile in THIS tab's add
+    -- grid, so this tab is where it has to come back -- a thing that vanishes from where you
+    -- made it and reappears behind a tab that grew a moment ago is two surprises, not one.
+    -- ⚠ THE DESIGNER'S OWN GROUP CARD (S.CreateLayoutGroupCard), told to rebuild "effects"
+    -- rather than "layout" and to drop its filter picker: what these icons watch is the
+    -- cooldown list on Triggers, and offering a second way to say it here would let the two
+    -- disagree. Everything else -- name, eye, delete, placement, growth, appearance -- is the
+    -- card every other group gets.
+    -- ⚠ IT OBEYS THE TYPE FILTER. The group draws icons, so "Showing: Icons" must keep it and
+    -- "Showing: Borders" must not: a row that ignores the filter reads as one the filter
+    -- failed to remove.
+    local pihGroup = nil
+    if IsPIHelperTab() and P.PIH_IconGroup and S.CreateLayoutGroupCard then
+        local af = S.activeFilter or "all"
+        if af == "all" or af == "icon" then pihGroup = P.PIH_IconGroup() end
+    end
+
+    if #filtered == 0 and not pihGroup then
         local empty = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         empty:SetPoint("TOP", parent, "TOP", 0, yPos - 30)
         empty:SetWidth(220)
@@ -7826,6 +7842,17 @@ S.BuildEffectsTab = function()
         for _, effect in ipairs(filtered) do
             yPos = S.CreateEffectCard(parent, yPos, effect)
         end
+    end
+
+    if pihGroup then
+        -- ⚠ ITS OWN STACK, and one card in it is not a waste. The appearance sections inside
+        -- an expanded group card re-flow in place and call stack:Reflow(); without a stack
+        -- that call has nothing to reach and the card keeps the height it was built at, with
+        -- its own controls hanging out of the bottom. Nothing is drawn below it, so a stack
+        -- holding only this card re-anchors everything that can move.
+        local stack = P.CreateCardStack and P.CreateCardStack(parent, yPos)
+        yPos = S.CreateLayoutGroupCard(parent, yPos, pihGroup, stack,
+            { refreshTab = "effects", omitFilters = true, asEffect = true })
     end
 
     parent:SetHeight(max(-yPos + 20, 200))
