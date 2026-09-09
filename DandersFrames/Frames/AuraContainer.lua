@@ -8837,6 +8837,10 @@ function AuraContainer.SetUnitDeathLatched(unit, on)
     -- per real death/rez — the gate log's densest writer in a battleground, and
     -- exactly the edge the missing-HoTs class turned on.
     GateLog("death latch %s unit=%s", on and "ON" or "OFF", unit)
+    -- The same self-heal the visibility latch arms, and for the same reason: a unit that dies
+    -- and is released far away can leave a latch with no edge left to clear it. Its own edge
+    -- is the primary path and is unchanged; this is the net under it.
+    if on and AuraContainer._scheduleLatchTick then AuraContainer._scheduleLatchTick() end
     for h in pairs(AuraContainer._handles or {}) do
         if not h._destroyed and h.config and h.config.unit == unit
             and not h.config.parentDrivenVisibility then
@@ -8916,6 +8920,11 @@ function AuraContainer.SetUnitVisibilityLatched(unit, on)
     AuraContainer._invisibleUnits[unit] = on and true or nil
     -- Edge-driven from Frames/Update.lua, so this is one line per instance crossing.
     GateLog("visibility latch %s unit=%s", on and "ON" or "OFF", unit)
+    -- ⚠ ARM THE SELF-HEAL. Out of combat and inside one zone nothing else would ever re-ask
+    -- (the full reconcile runs on regen-enabled and zone-in only, and the SET path needs a
+    -- full frame update that a range crossing does not produce). Resolved through the table
+    -- rather than as an upvalue: the scheduler is declared beside ReconcileLatches, below.
+    if on and AuraContainer._scheduleLatchTick then AuraContainer._scheduleLatchTick() end
     for h in pairs(AuraContainer._handles or {}) do
         if not h._destroyed and h.config and h.config.unit == unit
             and not h.config.parentDrivenVisibility then
@@ -8951,6 +8960,84 @@ end
 -- ⚠ Both loops CLEAR the table they are traversing. That is legal Lua: setting an
 -- EXISTING key to nil during a pairs() traversal is explicitly permitted (adding a new
 -- key is not, and neither loop does). Both setters only ever nil an existing key here.
+-- ★★★ ONE UNIT'S VISIBILITY LATCH, RE-ASKED ON DEMAND (2026-09-09).
+--
+-- ☠☠ THE FULL RECONCILE RUNS ON *TWO EVENTS ONLY* — PLAYER_REGEN_ENABLED and
+-- PLAYER_ENTERING_WORLD — and the SET runs on the full-update path, which needs roster or
+-- zone traffic. A party member walking out of visible range and back produces NEITHER. So
+-- out of combat, standing in one zone, a latch set by a range transition had nothing left
+-- that could clear it.
+--
+-- ☠ FIELD, Krathe 2026-09-09: "AD indicators not showing on a player in my party until I
+-- reload again, seems to happen every time I go out of range and back into range." His trail:
+--     01:53:39  visibility latch ON unit=party1
+--     01:53:49  range IN unit=party1                 <- back, and nothing asked again
+--     01:54:17  visibility latch OFF unit=party1     <- 38s later, and ONLY because combat
+--                                                       ended (+2s == the regen reconcile)
+-- Out of combat that OFF never arrives at all, which is the "until I reload" half.
+--
+-- ⚠ RANGE-IN IS A STRICTLY STRONGER SIGNAL THAN VISIBLE, which is what makes it a safe
+-- trigger: UnitInRange is spell range (~40yd) and UnitIsVisible is the render radius, so a
+-- unit cannot re-enter the smaller circle without being inside the larger one. We still ASK
+-- rather than assume -- the clear must be earned by a definite, non-secret answer, exactly as
+-- the sweep below earns it.
+--
+-- ⚠ CLEARS ONLY, like ReconcileLatches. Setting needs the frame context and belongs to the
+-- edge; a second setter would race the first. The worst case here is one extra re-parse.
+-- ⚠ THE REGISTRY READ COMES FIRST so the common case -- a unit that is not latched crossing
+-- the range edge -- costs one table lookup and no C calls at all. This rides a path that
+-- fires for every group member on every real crossing.
+function AuraContainer.ReconcileUnitLatch(unit)
+    if AuraContainer._testMode then return false end
+    if type(unit) ~= "string" then return false end
+    if not AuraContainer._invisibleUnits[unit] then return false end
+    local gone = not UnitExists(unit)
+    local visible = false
+    if not gone then
+        -- issecretvalue FIRST, as its own statement -- see the UnitInRange fix at :844.
+        local okv, vis = pcall(UnitIsVisible, unit)
+        local secret = issecretvalue and issecretvalue(vis) or false
+        if okv and not secret and vis then visible = true end
+    end
+    if gone or visible then
+        AuraContainer.SetUnitVisibilityLatched(unit, nil)
+        return true
+    end
+    return false
+end
+
+-- ★★ ...AND A HEARTBEAT WHILE ANYTHING IS LATCHED AT ALL.
+-- ☠ THE RANGE EDGE DOES NOT COVER EVERY WAY BACK. A unit can become VISIBLE again (the
+-- render radius) without ever re-entering SPELL range, and then no crossing fires -- so the
+-- edge above fixes the reported case and leaves a smaller version of the same hole.
+-- ⇒ While the registry holds anything, re-ask every few seconds. This is the property Krathe
+-- chose the VuhDo shape FOR ("it did self heal pretty quickly which is much better than stuck
+-- stale or hidden", 2026-09-07) -- it simply was not true out of combat.
+-- ⚠ IT EXISTS ONLY WHILE A LATCH DOES. Started by the setter when one goes on, and it stops
+-- itself the moment both registries are empty -- so the steady-state cost of this is zero
+-- ticks, not a permanent 3s timer. A latch is rare and short; a timer that outlived it would
+-- be a per-session cost for a per-crossing problem.
+-- ⚠ RE-ENTRY GUARDED. C_Timer.After schedules a NEW callback each time, so without the flag
+-- a second latch going on during the window would start a second chain, and they multiply.
+local LATCH_TICK = 3
+local latchTicking = false
+local function anyLatched()
+    return next(AuraContainer._invisibleUnits) ~= nil
+        or next(AuraContainer._deathLatchedUnits) ~= nil
+end
+local function scheduleLatchTick()
+    if latchTicking or AuraContainer._testMode then return end
+    if not anyLatched() then return end
+    latchTicking = true
+    C_Timer.After(LATCH_TICK, function()
+        latchTicking = false
+        if AuraContainer._testMode then return end
+        AuraContainer.ReconcileLatches("latch tick")
+        scheduleLatchTick()   -- only re-arms while something is still latched
+    end)
+end
+AuraContainer._scheduleLatchTick = scheduleLatchTick
+
 function AuraContainer.ReconcileLatches(reason)
     if AuraContainer._testMode then return end
     local cleared = 0
