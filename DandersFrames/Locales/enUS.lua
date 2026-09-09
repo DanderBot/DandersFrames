@@ -3028,13 +3028,18 @@ L["Only plays while the helper is showing."] = true
 -- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
 -- missing-mode render path is the one place the helper's cooldown gate cannot reach.
 L["Not available on a Power Infusion Helper signal."] = true
--- The three extra trigger ticks, under the class list. They used to feed a separate spell
--- list that only the cooldown-icon group ever read; that group is retired, so they write into
--- the ONE list the helper matches on -- ticking Trinkets makes a trinket proc fire whatever
--- effects have been added on the Effects tab. "Also count" is the caption above them.
+-- ★ THE FOUR TRIGGER SOURCES, each a tick with its own count -- the shape the Buff Bar
+-- uses to pick its filters. "Cooldowns" was a HEADING before, above a link, with no tick to
+-- say it was on; the other three were captioned "Also count", counted "also" to something
+-- the panel never named. Krathe, 2026-09-09: "you should select them and it should show the
+-- number active next to them in a similar way to how you pick on the buff bar."
+-- ⚠ The numbers are appended to these labels at render time and need no translating.
+L["Trigger Filters"] = true
+-- Three of the four trigger sources. Each tick puts that source's spells into the ONE list
+-- the helper matches on, so ticking Trinkets makes a trinket proc fire whatever effects have
+-- been added on the Effects tab. The fourth is L["Cooldowns"], our own curated list.
 -- ⚠ L["Cooldowns"] is kept: the tick that used it is gone, but the string is a plain noun
 -- other surfaces use.
-L["Also count"] = true
 L["Cooldowns"] = true
 L["Trinkets"] = true
 L["Potions"] = true

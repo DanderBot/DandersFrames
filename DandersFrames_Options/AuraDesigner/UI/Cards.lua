@@ -1498,6 +1498,40 @@ end
 -- ⚠ ONE WRITE, NOT TWO. It used to write the setting, rebuild a separate amplifier filter,
 -- and then link or unlink that filter on the cooldown-icon group -- three facts that could
 -- disagree. Now the setting is the choice and pihSyncTriggerExtras is the consequence.
+-- ★ THE COOLDOWNS SOURCE, AS A TICK LIKE THE OTHER THREE (2026-09-09).
+-- ☠ IT WAS ALWAYS-ON AND HAD NO CONTROL, which is what made "Cooldowns" read as a heading
+-- rather than a source -- and left the panel unable to say what it was the other three were
+-- being counted "also" to. A tick per source, and the same question asked of each.
+-- ⚠ READ OFF THE LIST, like the class ticks and for the same reason: the list is the truth,
+-- and a stored boolean beside it is a second copy that drifts the moment anyone edits the
+-- filter by hand. On means "any of the seeded cooldowns is still in it".
+-- ⚠ NOT THE SAME QUESTION AS R:CustomFilterCounts' `enabled`. A spell ticked OFF in the
+-- Filter Designer is still IN the list, so this stays on -- "is this source included at all"
+-- and "how much of it is switched on" are different, and the row shows both.
+function P.PIH_CooldownsOn()
+    local R = DF.FilterRegistry
+    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local f = id and R and R.GetCustomFilter and R:GetCustomFilter(id)
+    if not f then return false end
+    for _, sid in ipairs(pihSeedIDs()) do
+        if f.spells[sid] or f.rawIDs[sid] then return true end
+    end
+    return false
+end
+
+-- ⚠ SURGICAL, exactly like pihApplyClass: it adds or removes the SEEDED ids and nothing
+-- else, so a spell the user put in our list by hand survives being switched off and back on.
+function P.PIH_SetCooldownsOn(on)
+    local R = DF.FilterRegistry
+    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    if not (id and R) then return end
+    for _, sid in ipairs(pihSeedIDs()) do
+        if on then R:AddSpellToCustom(id, sid)
+        elseif R.RemoveSpellFromCustom then R:RemoveSpellFromCustom(id, sid) end
+    end
+    pihRefresh()
+end
+
 function P.PIH_SetAmplifier(which, on)
     local s = P.PIH_Settings()
     s[which] = on and true or false
@@ -6832,6 +6866,117 @@ local function pihAddClasses(g, t)
     end
     t.note(g, L["Untick a class to stop watching its cooldowns."])
 
+end
+
+
+local function pihAddSound(g, t)
+    local parent, Refresh = t.parent, t.Refresh
+    -- ☠ TWO SETTINGS, NOT ONE. The key remembers WHICH sound, the switch remembers
+    -- WHETHER -- so turning it off and back on does not make anyone hunt for their
+    -- sound a second time. Silent until chosen, either way: a cue nobody asked for
+    -- is the fastest route to the whole feature being switched off.
+    t.check(g, L["Play a sound when someone becomes worth infusing"],
+        function() return P.PIH_Settings().soundOn == true end,
+        function(v) P.PIH_SetSoundOn(v); Refresh() end)
+    if P.PIH_Settings().soundOn then
+        g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"],
+            P.PIH_Settings(), "soundLSMKey",
+            function() P.PIH_ApplySound() end), GUI.RowHeight.dropdown)
+        -- ⚠ Stated rather than discovered in a fight: sound rides the same gate as
+        -- the visuals, and it announces new windows only -- a window already open
+        -- when the gate re-opens stays silent, because the visuals already carry it.
+        t.note(g,
+            L["Only plays while the helper is showing."])
+    end
+end
+
+-- ── THE ROW PAGE'S SECTION LIST: REMOVED, 2026-09-08 ──
+-- ☠ It described a layout that no longer exists. S.PIHelperSections existed so the popout
+-- page could mount each section behind its own row, and that band went when the helper got
+-- its own page -- leaving a table nothing read and a paragraph of reasoning about pane
+-- widths and row counts that would have gone on looking maintained.
+-- ⚠ The BODIES it wrapped are all still here (pihAddRoles / pihAddClasses / pihAddSound /
+-- pihAddGateAndNotes) and S.BuildPIHelperBody composes them per tab. Only the row-page
+-- adapter went. If a second layout ever needs them again, wrap them again -- do not read
+-- this comment as a reason not to.
+
+-- ★★ TWO TABS, THE SAME SHAPE THE DESIGNER'S RIGHT PANEL USES (2026-09-08).
+-- ☠ THE SPLIT IS THE FEATURE'S OWN TWO QUESTIONS, and they are answered at different
+-- times. TRIGGERS is "what counts as worth infusing" -- roles, the cooldown gate, which
+-- classes and which spells -- and is set up once, carefully, probably while reading a spell
+-- list. EFFECTS is "how do I want to be told" -- surface, colour, sound -- and gets fiddled
+-- with. One column holding both meant scrolling past the long class list every time you
+-- wanted to nudge a colour. Krathe: "we should also split on the right side Triggers and
+-- Effects."
+-- ⚠ THE KEYS ARE THE TAB IDS, and they are what the page's tab bar drives. Order matters:
+-- triggers first, because you cannot sensibly choose how to be told about something you
+-- have not yet said you care about.
+    -- ★★★ THE TRIGGER FILTERS — WHICH LISTS FIRE THE HELPER, PICKED THE WAY THE BUFF BAR
+    -- PICKS ITS OWN (2026-09-09).
+    --
+    -- ☠ THIS WAS THREE TICKS CAPTIONED "Also count" AND A LABEL CAPTIONED "Cooldowns" THAT
+    -- WAS NOT A CONTROL AT ALL. Krathe read it the way anyone would: "I assume Cooldowns is
+    -- our custom filter for PI helper and the other 3 are normal filters?" -- a reasonable
+    -- assumption, and wrong. All four were ONE custom list, with the ticks adding and removing
+    -- ids inside it, and the one that was always on had no tick to say so.
+    -- ⇒ Four rows, four ticks, each with the number in it: "select them and it should show the
+    -- number active next to them in a similar way to how you pick on the buff bar."
+    --
+    -- ⚠ IT IS STILL ONE CANDIDATE LIST UNDERNEATH, and that is deliberate rather than a
+    -- shortcut. A helper effect resolves from ONE filter ref (its record key) -- a placed
+    -- indicator has no union at all, and giving it one means changing the Factory's resolve
+    -- path for every indicator in the addon. So the ticks go on meaning "put these spells in
+    -- the list", which is what they always did; what changed is that the panel now says so,
+    -- names each source, and counts it.
+    -- ⚠ THE COUNTS ARE REAL, NOT DECORATIVE. Cooldowns reports enabled/total off the curated
+    -- filter itself (R:CustomFilterCounts), so ticking a spell off in the Filter Designer
+    -- moves the number here too. The other three report how big that source is, because they
+    -- are all-in-or-all-out.
+    local function pihSourceCount(catKey)
+        local R = DF.FilterRegistry
+        local recs = R and R.ByCategory and R.ByCategory[catKey]
+        return recs and #recs or 0
+    end
+
+    -- ⚠ A LABEL WITH THE NUMBER IN IT, rather than a second right-aligned region. The row
+    -- widget is a checkbox and the toolkit sizes it; a count anchored into it would be the
+    -- one hand-placed element in a column that lays itself out. Numbers need no translating.
+    local function pihCountLabel(text, a, b)
+        if b then return text .. "   " .. a .. "/" .. b end
+        return text .. "   " .. a
+    end
+
+    local function pihAddTriggerSources(g, t)
+        -- ⚠ t.parent, and it is needed because the Filter Designer button at the foot of
+        -- this function came WITH the block: it was pihAddClasses' tail, where `parent` was
+        -- that function's own local. Moving code moves what it closes over.
+        local parent = t.parent
+        local st = P.PIH_Settings()
+        t.settingLabel(g, L["Trigger Filters"])
+
+        -- COOLDOWNS -- our own curated list, and the only row whose count can move on its own.
+        local cdID = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
+        local R = DF.FilterRegistry
+        local cdOn, cdTotal = 0, 0
+        if cdID and R and R.CustomFilterCounts then cdOn, cdTotal = R:CustomFilterCounts(cdID) end
+        t.subCheck(g, pihCountLabel(L["Cooldowns"], cdOn, (cdOn ~= cdTotal) and cdTotal or nil),
+            function() return P.PIH_CooldownsOn() end,
+            function(v) P.PIH_SetCooldownsOn(v) end)
+
+        t.subCheck(g, pihCountLabel(L["Trinkets"], pihSourceCount(PIH_SEED.amplifiers.trinkets)),
+            function() return st.trinkets == true end,
+            function(v) P.PIH_SetAmplifier("trinkets", v) end)
+        t.subCheck(g, pihCountLabel(L["Potions"], pihSourceCount(PIH_SEED.amplifiers.potions)),
+            function() return st.potions == true end,
+            function(v) P.PIH_SetAmplifier("potions", v) end)
+        -- ⚠ FOUR, NOT THIRTEEN, and the count says four so the row cannot mislead. `racials`
+        -- is every racial ability, and nine of the thirteen -- Shadowmeld, Darkflight,
+        -- Stoneform and the rest -- are the opposite of worth infusing behind. PIH_RACIAL_IDS
+        -- is the hand-picked offensive set; see its own note for why the data cannot pick them.
+        t.subCheck(g, pihCountLabel(L["Racials"], #PIH_RACIAL_IDS),
+            function() return st.racials == true end,
+            function(v) P.PIH_SetAmplifier("racials", v) end)
+
     t.settingLabel(g, L["Cooldowns"])
     -- ☠ THE ESCAPE HATCH FOR WHAT THE LIST CANNOT DO -- single spells rather than whole
     -- classes -- so it sits under its own label at the end of the box rather than opening it.
@@ -6878,79 +7023,6 @@ local function pihAddClasses(g, t)
     t.note(g,
         L["To add or remove single cooldowns, edit the list in the Filter Designer."])
 
-end
-
-local function pihAddSound(g, t)
-    local parent, Refresh = t.parent, t.Refresh
-    -- ☠ TWO SETTINGS, NOT ONE. The key remembers WHICH sound, the switch remembers
-    -- WHETHER -- so turning it off and back on does not make anyone hunt for their
-    -- sound a second time. Silent until chosen, either way: a cue nobody asked for
-    -- is the fastest route to the whole feature being switched off.
-    t.check(g, L["Play a sound when someone becomes worth infusing"],
-        function() return P.PIH_Settings().soundOn == true end,
-        function(v) P.PIH_SetSoundOn(v); Refresh() end)
-    if P.PIH_Settings().soundOn then
-        g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"],
-            P.PIH_Settings(), "soundLSMKey",
-            function() P.PIH_ApplySound() end), GUI.RowHeight.dropdown)
-        -- ⚠ Stated rather than discovered in a fight: sound rides the same gate as
-        -- the visuals, and it announces new windows only -- a window already open
-        -- when the gate re-opens stays silent, because the visuals already carry it.
-        t.note(g,
-            L["Only plays while the helper is showing."])
-    end
-end
-
--- ── THE ROW PAGE'S SECTION LIST: REMOVED, 2026-09-08 ──
--- ☠ It described a layout that no longer exists. S.PIHelperSections existed so the popout
--- page could mount each section behind its own row, and that band went when the helper got
--- its own page -- leaving a table nothing read and a paragraph of reasoning about pane
--- widths and row counts that would have gone on looking maintained.
--- ⚠ The BODIES it wrapped are all still here (pihAddRoles / pihAddClasses / pihAddSound /
--- pihAddGateAndNotes) and S.BuildPIHelperBody composes them per tab. Only the row-page
--- adapter went. If a second layout ever needs them again, wrap them again -- do not read
--- this comment as a reason not to.
-
--- ★★ TWO TABS, THE SAME SHAPE THE DESIGNER'S RIGHT PANEL USES (2026-09-08).
--- ☠ THE SPLIT IS THE FEATURE'S OWN TWO QUESTIONS, and they are answered at different
--- times. TRIGGERS is "what counts as worth infusing" -- roles, the cooldown gate, which
--- classes and which spells -- and is set up once, carefully, probably while reading a spell
--- list. EFFECTS is "how do I want to be told" -- surface, colour, sound -- and gets fiddled
--- with. One column holding both meant scrolling past the long class list every time you
--- wanted to nudge a colour. Krathe: "we should also split on the right side Triggers and
--- Effects."
--- ⚠ THE KEYS ARE THE TAB IDS, and they are what the page's tab bar drives. Order matters:
--- triggers first, because you cannot sensibly choose how to be told about something you
--- have not yet said you care about.
-    -- ★★ WHAT ELSE COUNTS AS WORTH INFUSING -- three ticks under the class list.
-    -- ☠ THIS WAS "Icons", AND THE HEADING WAS THE BUG. Four ticks sat under it: a
-    -- "Cooldowns" one that created a Filter Group of live cooldown icons, and these three,
-    -- which fed a second spell list that only that group ever read. So a control captioned
-    -- Icons, filed under Classes and Cooldowns, was the only way to switch a whole display on
-    -- -- and once the display was on, nothing on the page said where it had come from.
-    -- Krathe found the result rather than the control: "I have stuck PI Helper Cooldown -
-    -- Icons on my AD despite that not even being an option now for PI helper."
-    -- ⇒ The icons tick is gone with the group (pihSweep step 5). These three stay, because
-    -- they are genuinely triggers -- "this CD/trinket being used" is Krathe's own definition
-    -- of one -- and they now write into the ONE list the effects match on, so ticking
-    -- Trinkets makes a trinket proc light whatever the user has added on the Effects tab.
-    -- ⚠ THEY ARE STILL Maelareth's (#263). The setting survives; only its consumer moved.
-    -- ⚠ READ OFF THE SETTING, not off the list. The class ticks read the list because a
-    -- class OWNS its spells and hand edits there are meaningful; these three are categories
-    -- that overlap nothing and whose ids are pulled from a shared database, so the stored
-    -- choice is the only stable record of what was asked for.
-    local function pihAddTriggerExtras(g, t)
-        local st = P.PIH_Settings()
-        t.settingLabel(g, L["Also count"])
-        t.subCheck(g, L["Trinkets"],
-            function() return st.trinkets == true end,
-            function(v) P.PIH_SetAmplifier("trinkets", v) end)
-        t.subCheck(g, L["Potions"],
-            function() return st.potions == true end,
-            function(v) P.PIH_SetAmplifier("potions", v) end)
-        t.subCheck(g, L["Racials"],
-            function() return st.racials == true end,
-            function(v) P.PIH_SetAmplifier("racials", v) end)
     end
 
 -- ★★★ THE HELPER'S ADD BLOCK — the designer's own tiles, with the spell question removed.
@@ -7127,7 +7199,7 @@ S.BuildPIHelperBody = function(parent, opts)
         -- Krathe, 2026-09-08: "We seem to have two links to it? and confusing messaging."
         yPos = t.group(L["Classes and Cooldowns"], function(g)
             pihAddClasses(g, t)
-            pihAddTriggerExtras(g, t)
+            pihAddTriggerSources(g, t)
         end, yPos, { collapsible = true, collapseKey = "pihelper:onlywatch" })
     end
 
