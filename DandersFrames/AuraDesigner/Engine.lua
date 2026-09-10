@@ -506,7 +506,54 @@ end
 -- out: roles, the gate, and above all the sound registrations, which would otherwise keep
 -- playing for a helper that no longer exists anywhere.
 local pihSyncWatcher   -- defined beside the watcher below; registration follows helper existence
+-- ★★★ NOT A PRIEST: THE WHOLE FEATURE IS A NO-OP (2026-09-10).
+--
+-- ☠ REPORTED FROM THE ALPHA: helper borders and icons rendering for NON-PRIESTS. There was
+-- no class gate on this side at all -- only the Options UI checked (DF.IsPIHelperAvailable
+-- hides the page, Rows.lua omits the pool tab), and hiding the controls does nothing about
+-- records that already exist. A profile shared across an account, an imported preset, or a
+-- priest's own profile opened on an alt all carry the marked records, and the factory renders
+-- what the pool holds -- it has never asked whose class it is.
+--
+-- ⚠ DARK, NOT "NO HELPER". The `if not s` branch below opens the gate ("nothing is left to
+-- hide"), which is right when the pool genuinely holds nothing and exactly wrong here: a
+-- non-priest with marked records needs them SUPPRESSED, and an open gate renders them. The
+-- two cases look alike and mean opposite things, which is why this is its own branch rather
+-- than another condition on that one.
+--
+-- ⚠ PIH_SetEnabled(false) IS THE LEVER, not a new one. It is the feature switch: forced dark
+-- that nothing reopens, the readiness ticker refused, the manual hold released, and sound
+-- disarmed through pihSet. Everything a class gate needs, already written and already tested.
+-- ⚠ THE RECORDS ARE NOT TOUCHED. Deleting a priest's work because their alt logged in would
+-- be destroying data over a display question -- and the same profile on the priest must come
+-- back intact. Suppression only.
+--
+-- ⚠ READ AT CALL TIME, NOT AT LOAD. UnitClass("player") is not dependable before login, and
+-- this function runs on login and on every profile switch, which is exactly when it is.
+-- A character's class cannot change, so there is nothing to re-check afterwards.
+local function pihIsPriest()
+    local _, class = UnitClass("player")
+    return class == "PRIEST"
+end
+Engine.PIH_IsPriest = pihIsPriest
+
 function Engine:PIH_ApplySaved()
+    if not pihIsPriest() then
+        if DF.AuraContainer then
+            if DF.AuraContainer.SetHelperExcludedRoles then
+                DF.AuraContainer.SetHelperExcludedRoles(nil)
+            end
+            if DF.AuraContainer.SetHelperAllowedPlayers then
+                DF.AuraContainer.SetHelperAllowedPlayers(nil)
+            end
+        end
+        -- Cleared BEFORE the switch, so nothing can re-arm behind it: PIH_SetEnabled goes
+        -- through pihSet, which disarms against whatever cfg is standing at that moment.
+        Engine:PIH_SetSound(nil)
+        Engine:PIH_SetEnabled(false)
+        if pihSyncWatcher then pihSyncWatcher() end
+        return false
+    end
     local s = pihSettings()
     if not s then
         if DF.AuraContainer and DF.AuraContainer.SetHelperExcludedRoles then
@@ -605,7 +652,11 @@ local PIH_WATCH_EVENTS = { "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES",
                            "UNIT_SPELLCAST_SUCCEEDED", "GROUP_ROSTER_UPDATE" }
 local pihWatching = false
 pihSyncWatcher = function()
-    local want = pihSettings() ~= nil
+    -- ⚠ AND NOT FOR A NON-PRIEST, whatever the pool holds. PIH_ApplySaved already forces
+    -- the feature off for them, so the watcher's own tick would early-out anyway -- but a
+    -- registration that can only ever decline to act is five events on every alt of every
+    -- priest who shares a profile, for a feature they cannot enable. Same fact, one test.
+    local want = pihIsPriest() and pihSettings() ~= nil
     -- The container's own backstop frame follows the same fact, from the same test -- one
     -- definition of "a helper exists" driving both registrations. Called unconditionally
     -- (it is idempotent) so it self-corrects even when our own state has not moved.
