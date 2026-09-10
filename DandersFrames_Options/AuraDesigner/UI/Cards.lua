@@ -718,8 +718,13 @@ function P.PIH_Apply()
         for _ in pairs(s.roles or {}) do any = true break end
         DF.AuraContainer.SetHelperExcludedRoles(any and s.roles or nil)
     end
-    -- Gate off means "never hide": force the gate open and leave it there.
     local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    -- ⚠ BEFORE THE GATE, because the gate setter resolves through pihShouldShow and that
+    -- reads this. Pushed afterwards it would settle the gate from the OLD value and leave
+    -- it wrong until the next combat transition. The engine's own load path (PIH_ApplySaved)
+    -- orders these two the same way, and for the same reason.
+    if Engine and Engine.PIH_SetCombatOnly then Engine:PIH_SetCombatOnly(s.combatOnly == true) end
+    -- Gate off means "never hide for the COOLDOWN": combat-only may still be holding it.
     if Engine and Engine.PIH_SetGateEnabled then Engine:PIH_SetGateEnabled(s.gateEnabled ~= false) end
     -- ...then the FEATURE switch, which outranks it. Order matters: turning the helper back on
     -- resumes from the gate's setting, so that setting has to be in place first. The engine
@@ -2071,6 +2076,15 @@ end
 
 function P.PIH_SetGateEnabled(on)
     P.PIH_Settings().gateEnabled = on and true or false
+    P.PIH_Apply()
+end
+
+-- ★ SHOW IN COMBAT ONLY. Stored beside the gate because it is the same KIND of thing: a
+-- condition on whether the helper has anything to say at all, not a display choice.
+-- ⚠ ABSENT MEANS OFF, so nothing changes for an existing profile -- and the engine reads it
+-- the same way (s.combatOnly == true), so there is no defaults entry to keep in step.
+function P.PIH_SetCombatOnly(on)
+    P.PIH_Settings().combatOnly = on and true or nil
     P.PIH_Apply()
 end
 
@@ -7546,6 +7560,22 @@ local function pihAddGateAndNotes(g, t)
         gateCb.tooltip = { lines = {
             L["Off: the helper's effects only appear while your Power Infusion is off cooldown."],
             L["On: they appear even while it is on cooldown."],
+        } }
+    end
+
+    -- ★ SHOW IN COMBAT ONLY (2026-09-10), asked for by Krathe. It sits with the cooldown
+    -- gate because it is the same kind of thing -- a condition on whether the helper has
+    -- anything to say at all -- and under the same heading for the same reason that one is:
+    -- a titled box around a single tick is more chrome than either setting is worth.
+    -- ⚠ THE TWO ARE INDEPENDENT, and the tooltip says so rather than leaving the reader to
+    -- work out how two conditions on one feature combine. Both must pass.
+    local combatCb = t.check(g, L["Show in combat only"],
+        function() return P.PIH_Settings().combatOnly == true end,
+        function(v) P.PIH_SetCombatOnly(v) end)
+    if combatCb then
+        combatCb.tooltip = { lines = {
+            L["Off: the helper works wherever you are."],
+            L["On: nothing shows until you are in combat. Independent of the cooldown setting above -- both have to pass."],
         } }
     end
 

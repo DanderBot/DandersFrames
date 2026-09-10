@@ -155,6 +155,12 @@ local pihGateOpen = true        -- true = show (gate spell ready), false = dark 
 -- nil = watcher drives; true/false = held by hand until `/df debug pi auto`.
 local pihManual = nil
 
+-- ★★★ SHOW IN COMBAT ONLY (2026-09-10), an option Krathe asked for.
+-- ⚠ FORWARD-DECLARED. pihShouldShow reads pihGateEnabled, declared a couple of hundred lines
+-- below, while pihSet -- which is above it -- has to call it. Same idiom as pihSyncWatcher.
+local pihCombatOnly = false
+local pihShouldShow
+
 -- The helper sound choice, written by the settings panel through PIH_SetSound and restored on
 -- login by PIH_ApplySaved. ⚠ SILENT UNTIL CHOSEN -- nil registers nothing, because an
 -- audio cue nobody asked for is the fastest way to have a feature switched off wholesale.
@@ -416,7 +422,9 @@ local function pihSet(dark)
                 if pihManual ~= nil then return end
                 -- Re-asked every tick, not only at start: the switch can move under us.
                 if not pihEnabled then return end
-                if pihReadReady() then
+                -- ⚠ THE COMPOSITE, not the spell alone: with "combat only" on, a cooldown
+                -- clearing out of combat must NOT reopen the gate.
+                if pihShouldShow() then
                     pihStopTicker()
                     if not pihGateOpen then pihSet(false) end
                 end
@@ -437,6 +445,39 @@ end
 -- the setting says.
 local pihGateEnabled = true
 
+-- ★★ EVERY GLOBAL CONDITION, IN ONE ANSWER. As against helperUnitExcluded, which is the
+-- per-UNIT half (role, and the named-player list) -- this is the half that is true of the
+-- whole helper at once.
+--
+-- ☠ THE COMBAT TEST COMES FIRST AND IGNORES THE COOLDOWN GATE. "Show in combat only" and
+-- "show while Power Infusion is on cooldown" are independent: someone who has switched the
+-- cooldown gate OFF still means it when they say combat only, and folding this in after the
+-- `not pihGateEnabled` early-return would have silently ignored them.
+--
+-- ☠☠ `inCombat` IS AN ARGUMENT BECAUSE OF AN EVENT RACE. DF.playerInCombat is the house
+-- source and is written by Core.lua from PLAYER_REGEN_DISABLED / _ENABLED -- the same two
+-- events this file now watches. Handler order between two frames is not defined, so reading
+-- the flag from inside our own handler can see the value from BEFORE the transition and
+-- resolve the gate backwards. The regen branch passes the truth the event itself carries;
+-- every other caller omits it and gets the flag, which by then has settled.
+-- ⚠ NEVER InCombatLockdown() -- that is the addon-restriction state, not the player's
+-- combat state, and this addon has a standing rule about the difference.
+function pihShouldShow(inCombat)
+    if inCombat == nil then inCombat = DF.playerInCombat and true or false end
+    if pihCombatOnly and not inCombat then return false end
+    if not pihGateEnabled then return true end   -- cooldown gate off: never hide for THAT
+    return pihReadReady()
+end
+
+-- Stored on the helper; pushed by PIH_ApplySaved and by the panel through this setter.
+function Engine:PIH_SetCombatOnly(on)
+    pihCombatOnly = on and true or false
+    if not pihEnabled then return pihCombatOnly end   -- the feature switch outranks it
+    pihManual = nil
+    pihSet(not pihShouldShow())
+    return pihCombatOnly
+end
+
 -- The FEATURE switch. Off is a forced dark that nothing reopens; on hands control back to
 -- whichever of the two remaining states applies. See pihEnabled for the three-state table.
 -- ⚠ CALLED AFTER PIH_SetGateEnabled, always: turning the feature back on has to resume from
@@ -452,7 +493,7 @@ function Engine:PIH_SetEnabled(on)
     elseif not pihGateEnabled then
         pihSet(false)                   -- the gate is switched off: never hide
     else
-        pihSet(not pihReadReady())      -- resume from the real cooldown state
+        pihSet(not pihShouldShow())     -- resume from every live condition
     end
     return pihEnabled
 end
@@ -463,16 +504,18 @@ function Engine:PIH_SetGateEnabled(on)
     -- run: "never hide" and "resume from the cooldown" both mean SHOW, and there is nothing
     -- to show. Without this, ticking the cooldown option while disabled lit the helper up.
     if not pihEnabled then return pihGateEnabled end
+    -- ⚠ BOTH ARMS GO THROUGH pihShouldShow NOW. Switching the cooldown gate off no longer
+    -- means "open" outright -- "combat only" may still be holding it shut, and forcing it
+    -- open here would have ignored that setting entirely.
     if not pihGateEnabled then
         pihManual = nil
-        pihSet(false)          -- open, and nothing will shut it
+        pihSet(not pihShouldShow())
     else
         -- ⚠ Re-enabling releases a manual hold too. Without this, "gate enabled" and
         -- "held by hand" could both be true at once, with the watcher suspended and nothing
         -- on screen to say so.
         pihManual = nil
-        local ready = pihReadReady()
-        pihSet(not ready)      -- resume from the real cooldown state
+        pihSet(not pihShouldShow())   -- resume from every live condition
     end
     return pihGateEnabled
 end
@@ -569,6 +612,7 @@ function Engine:PIH_ApplySaved()
         end
         pihManual = nil
         pihGateEnabled = true
+        pihCombatOnly = false      -- a stale hold would outlive the profile that set it
         pihEnabled = true          -- no helper here; the switch has nothing to suppress
         Engine:PIH_SetSound(nil)   -- tears down every live registration
         pihSet(false)              -- open; nothing is left to hide
@@ -597,6 +641,10 @@ function Engine:PIH_ApplySaved()
         end
         DF.AuraContainer.SetHelperAllowedPlayers(map)
     end
+    -- ⚠ BEFORE THE GATE SETTERS, because both resolve through pihShouldShow, which reads
+    -- this. Loading it afterwards would settle the gate from the OLD value and leave it
+    -- wrong until the next transition -- the same ordering the sound line below records.
+    pihCombatOnly = s.combatOnly == true
     Engine:PIH_SetGateEnabled(s.gateEnabled ~= false)
     -- ⚠ AFTER THE GATE: turning the feature on resumes from the gate's setting, so the gate
     -- has to be in place first (PIH_SetEnabled says the same from its side).
@@ -648,8 +696,14 @@ pihWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
 -- GROUP_ROSTER_UPDATE is for SOUND: registrations are per unit and are otherwise only made
 -- on gate edges, so anyone who joined after the last edge got no cue -- and the player's own
 -- no-register guard went stale when sorting moved them to another token.
+-- ⚠ BOTH COMBAT TRANSITIONS, and the EXIT half is the one that goes missing: this addon has
+-- a standing note that a gate keyed on combat needs a refresh on entering AND on leaving,
+-- and that leaving is the half people forget. Registered unconditionally rather than with
+-- the setting -- the watcher only exists for a priest who has a helper at all, and two more
+-- events on that frame is cheaper than a re-registration dance every time the tick moves.
 local PIH_WATCH_EVENTS = { "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES",
-                           "UNIT_SPELLCAST_SUCCEEDED", "GROUP_ROSTER_UPDATE" }
+                           "UNIT_SPELLCAST_SUCCEEDED", "GROUP_ROSTER_UPDATE",
+                           "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED" }
 local pihWatching = false
 pihSyncWatcher = function()
     -- ⚠ AND NOT FOR A NON-PRIEST, whatever the pool holds. PIH_ApplySaved already forces
@@ -691,6 +745,27 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
         end
         return
     end
+    -- ★★ COMBAT TRANSITIONS. Ahead of the cooldown guards below, deliberately: those
+    -- return early when the cooldown gate is switched off, and "combat only" is a separate
+    -- setting that still has to act for that user.
+    -- ☠ THE EVENT CARRIES THE TRUTH, and we pass it rather than reading DF.playerInCombat.
+    -- Core.lua writes that flag from these same two events, and handler order between two
+    -- frames is undefined -- so reading it here can see the value from BEFORE the
+    -- transition and resolve the gate backwards. See pihShouldShow.
+    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+        if not pihCombatOnly then return end   -- nothing here concerns anyone else
+        if not pihEnabled or pihManual ~= nil then return end
+        local want = pihShouldShow(event == "PLAYER_REGEN_DISABLED")
+        if want ~= pihGateOpen then
+            local n = pihSet(not want)
+            DF:Debug("AURADESIGNER", "PIH gate -> %s on combat %s (%d container%s)",
+                want and "OPEN" or "DARK",
+                event == "PLAYER_REGEN_DISABLED" and "start" or "end",
+                n, n == 1 and "" or "s")
+        end
+        return
+    end
+
     if event ~= "PLAYER_ENTERING_WORLD" then
         if not pihEnabled then return end       -- feature off: the gate stays dark
         if not pihGateEnabled then return end   -- switched off: nothing shuts or opens it
@@ -716,13 +791,16 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
         -- ⚠ pihEnabled joins the same re-check, and for the identical reason: ApplySaved has
         -- just loaded it, and the cooldown read below would otherwise light up a helper the
         -- user has switched off.
-        if not pihEnabled or not pihGateEnabled or pihManual ~= nil then return end
+        -- ⚠ pihGateEnabled IS NO LONGER AN EARLY-OUT HERE. It used to be, because it was the
+        -- only condition below; pihShouldShow now folds it in alongside "combat only", and
+        -- returning early would skip the combat test for anyone with the cooldown gate off.
+        if not pihEnabled or pihManual ~= nil then return end
         -- ☠ THE ONE PLACE isActive MAY SHUT THE GATE. On load we never saw the cast, so a
         -- reload mid-cooldown would otherwise leave the helper showing for the rest of it.
         -- Safe here specifically because nothing is being cast at this instant, so a true
         -- reading is a real cooldown rather than a GCD.
-        local ready = pihReadReady()
-        if ready ~= pihGateOpen then pihSet(not ready) end
+        local want = pihShouldShow()
+        if want ~= pihGateOpen then pihSet(not want) end
         return
     end
 
@@ -736,8 +814,9 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
     -- already open there is nothing to do and no reason to pay for a cooldown read -- and
     -- this event fires on every global cooldown, all fight long.
     if pihGateOpen then return end
-    local ready = pihReadReady()
-    if not ready then return end
+    -- ⚠ THE COMPOSITE. A cleared cooldown is not enough on its own when the helper is set
+    -- to combat only and we are standing in a city.
+    if not pihShouldShow() then return end
     local n = pihSet(false)
     DF:Debug("AURADESIGNER", "PIH gate -> OPEN, cooldown cleared (%d container%s)",
         n, n == 1 and "" or "s")

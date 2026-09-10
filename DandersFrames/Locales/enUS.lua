@@ -3061,6 +3061,12 @@ L["Show when Power Infusion is on Cooldown"] = true
 -- than reaching for "ready" -- one idea, one word for it.
 L["Off: the helper's effects only appear while your Power Infusion is off cooldown."] = true
 L["On: they appear even while it is on cooldown."] = true
+-- ★ SHOW IN COMBAT ONLY, beside the cooldown gate and independent of it: both conditions
+-- have to pass, and the tooltip says so rather than leaving the reader to work out how two
+-- conditions on one feature combine. Off first, as above, because off is the default.
+L["Show in combat only"] = true
+L["Off: the helper works wherever you are."] = true
+L["On: nothing shows until you are in combat. Independent of the cooldown setting above -- both have to pass."] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
 -- finer; the row links out to the editor that does go spell by spell, so the limit is not
 -- a dead end.
