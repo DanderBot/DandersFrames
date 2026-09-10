@@ -881,33 +881,58 @@ function P.PIH_SetIconShowsAura(rec, on)
     pihRefresh()
 end
 
+-- ★★★ THE THREE AMPLIFIER TICKS WRITE A REFERENCE, NOT A COPY (2026-09-10).
+--
+-- ☠ WHAT THIS FUNCTION USED TO DO, AND WHY IT WAS WRONG. It copied every spell id out of the
+-- Trinkets, Potions and Racials lists into our cooldown list, so ticking all three took it
+-- from 40 spells to 91 and the same ids existed in two places at once. Krathe: "despite the
+-- fact those additional filters link to our actual filters, ticking them on actually just adds
+-- those to the PI helper filter, so they are now twice on? this is very confusing."
+-- ⇒ Each row has a PENCIL that opens the real list. That promises a reference; the tick made a
+-- copy. The row was writing a cheque the mechanism did not cash, and no wording fixes that.
+--
+-- ★ WHAT REPLACES IT: `f.includes`, read by R:ResolveSelection (see foldIncludes there for why
+-- the fold lives in the registry and not in the Aura Designer). Our list stays the 40 class
+-- cooldowns -- which is what "Edit Cooldowns" has always claimed to open -- and names the
+-- other three rather than swallowing them.
+--
+-- ⭐ AND A WHOLE HAZARD CLASS GOES WITH THE COPY. Gone: the removal universe, the `everything`
+-- parameter's second reader, and yesterday's guard against an amplifier tick deleting a class
+-- cooldown that happened to be in one of those lists. None of them were defending against
+-- anything real -- they were defending against the copy.
+-- ⚠ ALSO GONE: hand-rolling "honour the preset's own ticks". ResolveSelection has always done
+-- that for a selected preset (recordSelected calls IsSpellEnabled), so a trinket switched off
+-- in the Filter Designer now stops firing here for free rather than by our re-derivation.
+--
+-- ⚠ NEVER pihEnsureFilter HERE. This runs from a tick, and a tick must not conjure the
+-- helper's cooldown list into existence -- that is the enable switch's job.
+-- ⚠ WHOLESALE, NOT INCREMENTAL. The whole `includes` table is rebuilt from the three ticks
+-- every call, so it cannot drift from them and there is nothing to take back out.
+-- ⭐ AND THAT IS WHAT SURVIVES AN IMPORT. R:ImportCustomFilters copies `spells` and `rawIDs`
+-- and nothing else, so an imported helper list arrives with no includes at all -- while the
+-- three ticks travel in adDB.pihelper with the rest of the profile. The next Triggers build
+-- re-derives from them and the references are back, because the ticks are the truth and this
+-- table is only ever their shadow.
 local function pihSyncTriggerExtras(s)
     local R = DF.FilterRegistry
     if not R then return end
-    -- ⚠ NEVER pihEnsureFilter HERE. This runs from a tick, and a tick must not conjure the
-    -- helper's cooldown list into existence -- that is the enable switch's job. With no list
-    -- there is nothing to add to and nothing to take out of.
     local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
-    if not id then return end
-    local want = {}
-    for _, sid in ipairs(pihAmplifierIDs(s)) do want[sid] = true end
-    -- ☠ A CLASS COOLDOWN IS NEVER TAKEN OUT BY AN AMPLIFIER TICK. The removal universe is
-    -- "every id any amplifier source could contribute", and since Racials became a list the
-    -- user can put anything in it -- including a spell that is also in the class-cooldown
-    -- seed. Unticking Racials would then delete a class cooldown from Triggers: an id
-    -- disappearing from a list nobody touched, with no control anywhere admitting to it.
-    -- ⚠ The seed, not the list's contents: a spell the user ADDED to the cooldown list is
-    -- theirs, but it is also not something an amplifier tick put there, so it is not in this
-    -- universe to begin with and needs no guard.
-    local keep = {}
-    for _, sid in ipairs(pihSeedIDs()) do keep[sid] = true end
-    for _, sid in ipairs(pihAmplifierIDs(PIH_ALL_AMPLIFIERS, true)) do
-        if want[sid] then
-            if R.AddSpellToCustom then R:AddSpellToCustom(id, sid) end
-        elseif not keep[sid] and R.RemoveSpellFromCustom then
-            R:RemoveSpellFromCustom(id, sid)
-        end
+    local f = id and R.GetCustomFilter and R:GetCustomFilter(id)
+    if not f then return end
+    local presets, customs = {}, {}
+    if s.trinkets then presets[PIH_SEED.amplifiers.trinkets] = true end
+    if s.potions  then presets[PIH_SEED.amplifiers.potions]  = true end
+    if s.racials  then
+        local rid = pihFilterIdByName(PIH_FILTERS.racials)
+        -- ⚠ NO FALLBACK TO THE SEED IDs HERE. Without the list there is nothing to point at,
+        -- and quietly copying the four in would be the exact behaviour this change removes.
+        -- The list is seeded wherever the cooldown list is, so this is a first-run ordering
+        -- window and not a state anyone stays in.
+        if rid then customs[rid] = true end
     end
+    -- nil rather than an empty table: `includes` absent is the shape every other filter has,
+    -- and foldIncludes short-circuits on it.
+    f.includes = (next(presets) or next(customs)) and { presets = presets, customs = customs } or nil
 end
 
 local function pihCreateSignal(key, surfaceOverride)
@@ -1460,16 +1485,13 @@ end
 -- cooldown list, which the Triggers tab owns end to end. That left a card saying nothing at
 -- all about its contents -- Krathe: "cooldown icons allows for trinkets + the other filters?
 -- don't see the option."
--- ⇒ THE ANSWER IS YES, AUTOMATICALLY, and that is the thing to say. pihSyncTriggerExtras
--- writes the trinket, potion and racial ids INTO the cooldown list, so a tick on Triggers
--- reaches these icons with no second control and no way for the two to disagree. The count is
--- the list's own enabled total, so it visibly moves when a tick over there does.
+-- ⇒ THE ANSWER IS YES, AUTOMATICALLY, and that is the thing to say. The cooldown list NAMES
+-- the trinket, potion and racial lists (pihSyncTriggerExtras writes `includes`), so a tick on
+-- Triggers reaches these icons with no second control and no way for the two to disagree.
+-- ⚠ P.PIH_WatchedCount, not this list's own size -- since the amplifiers stopped being copied
+-- in, our list is 40 and the number a user is looking for is the whole watched set.
 function P.PIH_IconGroupSummary()
-    local R = DF.FilterRegistry
-    local id = P.PIH_CooldownFilterID and P.PIH_CooldownFilterID()
-    local on = 0
-    if id and R and R.CustomFilterCounts then on = R:CustomFilterCounts(id) end
-    return format(L["%d spells, from your Triggers"], on)
+    return format(L["%d spells, from your Triggers"], P.PIH_WatchedCount and P.PIH_WatchedCount() or 0)
 end
 
 function P.PIH_AddIconGroup()
@@ -1744,6 +1766,39 @@ end
 -- exists, which is when that pencil must not be drawn.
 function P.PIH_RacialFilterID()
     return pihFilterIdByName(PIH_FILTERS.racials)
+end
+
+-- How many of a preset category are ON, and how many it holds.
+-- ⚠ ENABLED / TOTAL, NOT #recs. A spell ticked off in the Filter Designer stops being
+-- selected by ResolveSelection (recordSelected calls IsSpellEnabled), so a row reporting the
+-- raw size claims a number the engine does not act on -- the fault Krathe caught on the
+-- cooldown count, "the number does not change as I tick them on/off".
+function P.PIH_PresetCounts(catKey)
+    local R = DF.FilterRegistry
+    local recs = (R and R.ByCategory and R.ByCategory[catKey]) or {}
+    local on = 0
+    for _, rec in ipairs(recs) do
+        if not R.IsSpellEnabled or R:IsSpellEnabled(catKey, rec) then on = on + 1 end
+    end
+    return on, #recs
+end
+
+-- ★ EVERYTHING THE HELPER WATCHES, COUNTED THE WAY THE PANEL COUNTS IT: the cooldown list
+-- plus each ticked source, each contributing its own ENABLED total.
+-- ☠ NOT THE RESOLVED MAP. R:ResolveSelection returns spell IDs with every variant expanded,
+-- which for this set is several hundred -- a true number of a thing nobody is counting. The
+-- rows on the Triggers tab say 40, 41, 6 and 4; this has to be their sum or the two screens
+-- disagree about the same feature.
+function P.PIH_WatchedCount()
+    local R = DF.FilterRegistry
+    local total = 0
+    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    if id and R and R.CustomFilterCounts then total = R:CustomFilterCounts(id) end
+    local s = P.PIH_Settings()
+    if s.trinkets then total = total + P.PIH_PresetCounts(PIH_SEED.amplifiers.trinkets) end
+    if s.potions  then total = total + P.PIH_PresetCounts(PIH_SEED.amplifiers.potions)  end
+    if s.racials  then total = total + P.PIH_RacialCounts() end
+    return total
 end
 
 -- How many racials are ON, and how many are in the list. Falls back to the seed's size before
@@ -6402,7 +6457,7 @@ P.OpenFilterPopout = OpenFilterPopout
 --    ⚠ THE LESSON: a mark written by a CREATE path reaches nobody who already has the
 --    thing. Stamping in the sweep is what reaches them, and the sweep is the one place
 --    that runs for a helper nobody is touching.
-local PIH_SCHEMA = 9
+local PIH_SCHEMA = 10
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -6632,6 +6687,46 @@ local function pihSweep()
     -- with -- so the set it wrote is the set it would write now, not an earlier guess at it.
     if pihFilterIdByName(PIH_FILTERS.cooldowns) then pihEnsureRacialFilter() end
 
+    -- 10. ☠☠ THE COPIED AMPLIFIER SPELLS COME BACK OUT OF THE COOLDOWN LIST.
+    -- Until now the three amplifier ticks COPIED their lists in, so a helper with all three on
+    -- carries 91 spells where it should carry 40 -- Krathe's "so they are now twice on? this is
+    -- very confusing". The ticks write `includes` now (see pihSyncTriggerExtras); this takes
+    -- back what the old ones left behind, or the list would keep watching those spells twice
+    -- over and reading 91 forever.
+    -- ⚠ dfDefaults IS THE FENCE. Anything in the seed stays, whatever else it is also in --
+    -- an offensive cooldown that happens to sit in the trinket list is OURS by seed and is not
+    -- what this step is hunting. Step 8 above guarantees the mark is there to read.
+    -- ⚠ A HAND-ADDED TRINKET GOES TOO, and that is accepted rather than overlooked: a copied id
+    -- and one the user typed in are indistinguishable in the store, and the include brings it
+    -- straight back for anyone who has that source ticked. The alternative is leaving 51
+    -- unexplainable rows behind to be safe about one hypothetical.
+    -- ⚠ THE PER-SPELL TICK GOES WITH THE SPELL. A `disabled` entry for an id that is no longer
+    -- a member is invisible dead weight that would spring back if the id ever returned.
+    do
+        local cdId = pihFilterIdByName(PIH_FILTERS.cooldowns)
+        local f = cdId and R and R.GetCustomFilter and R:GetCustomFilter(cdId)
+        if f and R.RemoveSpellFromCustom then
+            local seeded = f.dfDefaults or {}
+            local n = 0
+            for _, sid in ipairs(pihAmplifierIDs(PIH_ALL_AMPLIFIERS, true)) do
+                if not seeded[sid] and (f.spells[sid] or f.rawIDs[sid]) then
+                    R:RemoveSpellFromCustom(cdId, sid)
+                    if f.disabled then f.disabled[sid] = nil end
+                    n = n + 1
+                end
+            end
+            if f.disabled and not next(f.disabled) then f.disabled = nil end
+            if n > 0 then
+                DF:Debug("AURADESIGNER",
+                    "PIH sweep: removed %d amplifier spell(s) copied into the cooldown list; "
+                    .. "they are referenced now", n)
+            end
+        end
+    end
+    -- ...and the references go in, in the same pass. Step 6's own call ran before the racials
+    -- list was guaranteed to exist (step 9), so the racials arm could have written nothing.
+    pihSyncTriggerExtras(s)
+
     s.schema = PIH_SCHEMA
     S.activeBuffTab = prevPool
     if P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
@@ -6651,14 +6746,15 @@ S.BuildPIHelperCard = function(parent, opts)
     -- Before anything reads the pool: the panel is the first place an un-swept helper would
     -- show a control that does not match what is on screen.
     pihSweep()
-    -- ★ RE-TAKE THE CATEGORY SOURCES, so an edit made in the Filter Designer since the
-    -- last visit reaches the helper. The three ticks COPY a preset's spells into our list;
-    -- without this the copy is a snapshot from whenever the tick was clicked, and the
-    -- pencil beside each row would open a list whose edits went nowhere.
-    -- ⚠ SAFE TO REPEAT, and safe against the "a list that quietly refills itself" trap the
-    -- seeding code warns about: our list is CURATED now, so a spell the user does not want
-    -- is TICKED OFF (f.disabled) rather than removed -- and the tick survives a re-add.
-    -- Membership is ours to manage; the choice is theirs and this cannot touch it.
+    -- ⚠ RE-STAMP THE REFERENCES, and this is a REPAIR now rather than a re-sync. The ticks
+    -- write `includes` on the cooldown list, and that list travels: a profile import copies
+    -- `spells` and `rawIDs` and nothing else, so an imported helper arrives with its ticks
+    -- intact and its references missing. Running it here means the first visit puts them back.
+    -- ☠ IT USED TO BE LOAD-BEARING. The ticks COPIED each preset's spells into our list, so
+    -- this was how an edit made in the Filter Designer since the last visit reached the helper
+    -- at all -- and a pencil that opened a list whose edits went nowhere is precisely what
+    -- made the copy indefensible. References need no such visit; see pihSyncTriggerExtras.
+    -- ⚠ CHEAP AND IDEMPOTENT: three ticks read, one small table written.
     pihSyncTriggerExtras(P.PIH_Settings())
     local yPos = opts.startY or 0
     local Refresh = opts.Refresh or function() end
@@ -7223,10 +7319,14 @@ end
     -- "the note below the link to edit the cooldown list is silly, the additional filters can
     -- also be edited, this really is an unclear mess."
     -- ⇒ He is right that they can be edited. The bug was that editing them did nothing, so the
-    -- panel had to talk you out of trying. Fixed at the source instead: pihAmplifierIDs honours
-    -- each preset's own ticks and S.BuildPIHelperCard re-takes the copy on every visit, so an
-    -- edit in the Filter Designer REACHES the helper -- and then every row can simply offer a
-    -- link to its own list and say nothing at all.
+    -- panel had to talk you out of trying.
+    -- ★ AND THE REAL FIX CAME TWO ROUNDS LATER (2026-09-10). The first attempt kept the copy
+    -- and made it honour each preset's ticks, re-taking it on every visit -- which made edits
+    -- reach the helper, and left the list reading 91 spells with the same ids in two places:
+    -- "so they are now twice on? this is very confusing." A copy that tracks its source is
+    -- still a copy, and the pencil still promises something the tick does not do.
+    -- ⇒ The ticks write `includes` now and nothing is copied at all (pihSyncTriggerExtras).
+    -- Each row links to the list it names, and that list is the one being read.
     -- ⚠ NO NOTE. Four rows that each do the obvious thing need no paragraph underneath; a note
     -- explaining why a control does not behave as it looks is a bug report in prose.
     --
@@ -7318,33 +7418,22 @@ end
 
     local function pihAddTriggerSources(g, t)
         local st = P.PIH_Settings()
-        local R = DF.FilterRegistry
 
         -- ⚠ CLASS COOLDOWNS IS NOT A ROW HERE. It lives with the class ticks that narrow
         -- it, under its own header and its own button -- Krathe, 2026-09-10: "Cooldowns
         -- should be in with the Classes and maybe should still be a button Edit Cooldowns".
         -- That box is the BASELINE (always watched, narrowed by class); these three are
         -- additions you opt into, which is what makes them a box of their own.
-        -- ⚠ ENABLED / TOTAL, NOT THE CATEGORY'S SIZE. This was #recs, which does not move when
-        -- a trinket is ticked off in the Filter Designer -- while pihAmplifierIDs, which
-        -- decides what actually fires, honours those ticks. So the row reported 41 for a list
-        -- feeding 38 spells: the same fault Krathe caught on the cooldown count one box up
-        -- ("the number does not change as I tick them on/off"), one row over.
-        local function catCounts(catKey)
-            local recs = (R and R.ByCategory and R.ByCategory[catKey]) or {}
-            local on = 0
-            for _, rec in ipairs(recs) do
-                if not R.IsSpellEnabled or R:IsSpellEnabled(catKey, rec) then on = on + 1 end
-            end
-            return on, #recs
-        end
+        -- ⚠ ENABLED / TOTAL, NOT THE CATEGORY'S SIZE, and shared with the count on the
+        -- Cooldown Icons card (P.PIH_WatchedCount) so the two screens cannot report the same
+        -- feature differently. See P.PIH_PresetCounts for why the raw size was wrong.
         local trink, potion = PIH_SEED.amplifiers.trinkets, PIH_SEED.amplifiers.potions
-        local trinkOn, trinkAll = catCounts(trink)
+        local trinkOn, trinkAll = P.PIH_PresetCounts(trink)
         pihSourceRow(g, t, L["Trinkets"], trinkOn, trinkAll,
             function() return st.trinkets == true end,
             function(v) P.PIH_SetAmplifier("trinkets", v) end,
             function() pihOpenFilter("preset", trink) end)
-        local potOn, potAll = catCounts(potion)
+        local potOn, potAll = P.PIH_PresetCounts(potion)
         pihSourceRow(g, t, L["Potions"], potOn, potAll,
             function() return st.potions == true end,
             function(v) P.PIH_SetAmplifier("potions", v) end,

@@ -1103,8 +1103,80 @@ end
 -- See the fail-open branch inside ResolveSelection.
 local failOpenLogged = setmetatable({}, { __mode = "k" })
 
+-- ★★★ A CUSTOM FILTER MAY NAME OTHER FILTERS (`f.includes`), AND THIS IS WHERE THAT IS READ.
+--
+-- ☠ WHAT IT REPLACES: COPYING. The Power Infusion Helper's three amplifier ticks used to copy
+-- 51 spell IDs out of the Trinkets, Potions and Racials lists INTO its own, so its list read
+-- 91 and the same spells existed in two places. Krathe, 2026-09-10: "despite the fact those
+-- additional filters link to our actual filters, ticking them on actually just adds those to
+-- the PI helper filter, so they are now twice on? this is very confusing." He is right: each
+-- row has a pencil that opens the real list, which promises a REFERENCE, and the tick made a
+-- COPY. The pencil was a promise the tick did not keep.
+--
+-- ⚠ HERE AND NOT IN THE AURA DESIGNER, and the reason is that a filter must mean ONE thing.
+-- The AD resolves a filter ref through DF:ResolveADFilterRef, the layout groups resolve a
+-- selection of their own, and the helper's SOUND registrations resolve a third way
+-- (Engine.lua's pihResolvedMap) -- and the user can also pick that same list in the Buff Bar's
+-- own picker. Folding in any one of those would make one list mean different things in
+-- different places, which is a worse fault than the copy it replaces.
+--
+-- ⚠ INERT FOR EVERY FILTER WITHOUT `includes`, which today is every filter but ours: no
+-- allocation, the caller's own table is handed straight back, and nothing else in this file
+-- learns a new shape.
+--
+-- ☠ ONE LEVEL, DELIBERATELY, AND SO NO RECURSION GUARD IS NEEDED. An included filter's own
+-- includes are NOT folded. Nothing writes a chain today (the helper includes two presets and
+-- one flat list of ours), and "resolve until it stops changing" on the render path is a cycle
+-- waiting to be created by hand-editing a profile. If a chain is ever wanted, it needs a seen
+-- set and a depth cap, not the removal of this sentence.
+local function foldIncludes(self, selection)
+    if not (selection and selection.customs) then return selection end
+    local addP, addC
+    for cfId in pairs(selection.customs) do
+        local f = self:GetCustomFilter(cfId)
+        local inc = f and f.includes
+        if type(inc) == "table" then
+            for k in pairs(inc.presets or {}) do
+                if not (selection.presets and selection.presets[k]) then
+                    addP = addP or {}; addP[k] = true
+                end
+            end
+            for k in pairs(inc.customs or {}) do
+                -- ⚠ Skip one already selected, or a filter that included itself would be
+                -- merely redundant rather than a problem. (It cannot loop: see above.)
+                if not selection.customs[k] then addC = addC or {}; addC[k] = true end
+            end
+        end
+    end
+    if not (addP or addC) then return selection end
+    -- ☠ A COPY, NEVER A MUTATION. Callers pass PROFILE tables here (db.buffFilterSelection, an
+    -- Aura Designer group's filterSelection) -- the same fact the fail-open latch below had to
+    -- learn the hard way. Writing the expansion into one would put it in SavedVariables and in
+    -- every profile export, where it would look like a selection the user made.
+    local out = { uncategorised = selection.uncategorised, presets = {}, customs = {} }
+    for k, v in pairs(selection.presets or {}) do out.presets[k] = v end
+    for k, v in pairs(selection.customs or {}) do out.customs[k] = v end
+    for k in pairs(addP or {}) do out.presets[k] = true end
+    for k in pairs(addC or {}) do out.customs[k] = true end
+    return out
+end
+
+-- Everything an `includes` filter pulls in, as one flat selection -- for a caller that needs to
+-- COUNT or LIST what a filter really covers rather than resolve it to a spell map.
+function R:ExpandSelection(selection)
+    return foldIncludes(self, selection)
+end
+
 function R:ResolveSelection(selection, showAll)
     if showAll or not selection then return { kind = "all" } end
+    -- ⚠ BEFORE THE FAIL-OPEN TEST BELOW, not after. A filter whose only content is its
+    -- includes has no presets and no customs of its own, and the empty-selection branch
+    -- resolves to SHOW EVERYTHING -- so folding afterwards would turn "watch the trinket
+    -- list" into "watch every buff in the game".
+    -- ⚠ A FOLD ALWAYS ADDS, so the table that comes back is never emptier than the one that
+    -- went in -- which is also why the fail-open latch below still dedupes: a folded selection
+    -- (a fresh table, and so a fresh latch key) can never reach that branch.
+    selection = foldIncludes(self, selection)
     local anySel = (selection.presets and next(selection.presets))
         or (selection.customs and next(selection.customs))
     if not anySel and not selection.uncategorised then
