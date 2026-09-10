@@ -160,6 +160,11 @@ local pihManual = nil
 -- below, while pihSet -- which is above it -- has to call it. Same idiom as pihSyncWatcher.
 local pihCombatOnly = false
 local pihShouldShow
+-- ☠ AND pihGateEnabled, HOISTED FOR THE SAME REASON -- caught by the _ENV globals diff,
+-- not by review: pihSet logs it and pihSet is declared ABOVE the original `local`, so the
+-- read compiled to a nil GLOBAL and the log line would have reported "nil" forever while
+-- looking perfectly correct in the source. Its value is still assigned at its own site.
+local pihGateEnabled = true
 
 -- The helper sound choice, written by the settings panel through PIH_SetSound and restored on
 -- login by PIH_ApplySaved. ⚠ SILENT UNTIL CHOSEN -- nil registers nothing, because an
@@ -418,9 +423,38 @@ local pihEnabled = true
 
 local function pihSet(dark)
     pihGateOpen = not dark
-    local n = 0
+    local n, deferred = 0, 0
     if DF.AuraContainer and DF.AuraContainer.SetHelperGate then
-        n = DF.AuraContainer.SetHelperGate(dark)
+        n, deferred = DF.AuraContainer.SetHelperGate(dark)
+        deferred = deferred or 0
+    end
+
+    -- ★★★ ONE LINE PER EDGE, IN THE LOG, CARRYING EVERYTHING (2026-09-10).
+    -- ☠ KRATHE CANNOT RUN A SLASH COMMAND MID-RAID, and said so twice before I listened.
+    -- A readout behind "/df debug pi" is useless for a fault that only happens with twenty
+    -- people in combat: by the time it can be typed, the state has moved. This goes in the
+    -- persisted log, so a reload is the whole reporting procedure.
+    -- ⚠ THE COUNTS WERE THE THING THAT LIED. "98 containers" looked healthy while every
+    -- placed slot among them had merely QUEUED -- so pushed and deferred are separate, and
+    -- a non-zero deferred is the fault named outright.
+    -- ⚠ CONTEXT ON EVERY LINE, because the question is never only "did it flip": which
+    -- conditions were in force decides whether the flip was even right.
+    -- ⚠ ONE LINE PER EDGE -- twice a Power Infusion cycle, not per frame -- and guarded by
+    -- DebugActive so the slot walk that builds it is not paid for with logging off.
+    if DF.DebugActive and DF:DebugActive("AURADESIGNER") then
+        local AC = DF.AuraContainer
+        local tot, dk, pend, parked = 0, 0, 0, 0
+        if AC and AC.GetHelperSlotStatus then tot, dk, pend, parked = AC.GetHelperSlotStatus() end
+        local allow = AC and AC.GetHelperAllowedPlayers and AC.GetHelperAllowedPlayers()
+        local nAllow = 0
+        if allow then for _ in pairs(allow) do nAllow = nAllow + 1 end end
+        DF:Debug("AURADESIGNER",
+            "PIH gate -> %s | pushed=%d deferred=%d | slots %d tot/%d dark/%d pending/%d parked"
+            .. " | enabled=%s gateEnabled=%s combatOnly=%s inCombat=%s manual=%s | players=%s",
+            dark and "DARK" or "OPEN", n, deferred, tot, dk, pend, parked,
+            tostring(pihEnabled), tostring(pihGateEnabled), tostring(pihCombatOnly),
+            tostring(DF.playerInCombat), tostring(pihManual),
+            allow and tostring(nAllow) or "everyone")
     end
     -- Sound rides the SAME edge as the visuals. It is not a container, so the gate cannot
     -- reach it -- without this it would keep announcing while we are silent.
@@ -461,7 +495,9 @@ end
 -- Off means FORCE OPEN and stay there: the watcher stops driving, so a cooldown starting or
 -- ending changes nothing. Not "ignore the events" -- the gate is genuinely open, which is what
 -- the setting says.
-local pihGateEnabled = true
+-- ⚠ DECLARED ABOVE (with pihCombatOnly): pihSet reads it and is written earlier in the
+-- file. This is the assignment, not the declaration.
+pihGateEnabled = true
 
 -- ★★ EVERY GLOBAL CONDITION, IN ONE ANSWER. As against helperUnitExcluded, which is the
 -- per-UNIT half (role, and the named-player list) -- this is the half that is true of the

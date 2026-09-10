@@ -6716,13 +6716,20 @@ function AuraContainer.SetHelperGate(dark)
     -- not a local: the registry is declared thousands of lines below this function, and a
     -- later-declared local here would silently read as a nil global (this file has been
     -- bitten by exactly that; see the note above GateAppliesTo).
+    local deferred = 0
     for h in pairs(AuraContainer._slotHandles or {}) do
         if h.config and h.config.dfGate and h._applyHelperGate then
-            local ok, applied = pcall(h._applyHelperGate, h)
-            if ok and applied then n = n + 1 end
+            local ok, applied, queued = pcall(h._applyHelperGate, h)
+            if ok and applied then
+                n = n + 1
+                if queued then deferred = deferred + 1 end
+            end
         end
     end
-    return n
+    -- ⚠ REPORTED SEPARATELY. A queued slot is not a pushed one, and counting them
+    -- together is what made a log full of healthy-looking edges hide a raid's worth of
+    -- icons that never went dark.
+    return n, deferred
 end
 
 function AuraContainer.GetHelperGate() return helperGateDark end
@@ -8499,12 +8506,33 @@ function SlotHandle:_applyHelperGate()
     if self.parked then return false end
     local c = self.owner and self.owner.container
     if not c then return false end
-    if InCombatLockdown() then
+    -- ★★★ ATTEMPT, THEN DEFER -- and it used to be defer-always (2026-09-10).
+    --
+    -- ☠ WHAT DEFER-ALWAYS COST, from Krathe's raid log: 33 clean gate edges, "DARK on cast"
+    -- and "OPEN, cooldown cleared" alternating across 72-98 containers -- the watcher, the
+    -- gate and the broadcast all working perfectly, and the placed icons still showing on
+    -- people while his Power Infusion was on cooldown. In a raid you are in combat for the
+    -- whole pull, so EVERY edge on a placed slot queued for PLAYER_REGEN_ENABLED and none
+    -- of them landed during the fight. "The border DID go away but the PI icon did not" was
+    -- this, from the first report onwards.
+    --
+    -- ⚠ AND THE COUNT IN THAT LOG WAS OVER-REPORTING, which is why it read as healthy: the
+    -- deferred branch returned TRUE, so SetHelperGate counted a queued slot as a pushed
+    -- one. It returns a second value now and the caller counts them apart.
+    --
+    -- ⚠ THE PRECEDENT IS IN THE SAME WALK. SetHelperGate's other half, applyGroupTuning,
+    -- has always called native tuning setters on this edge with NO combat guard at all --
+    -- in combat, twice per Power Infusion cycle, and its own note says so. Two lanes of one
+    -- broadcast cannot both be right about whether that is allowed; the guard was the
+    -- inconsistency, not the unguarded call.
+    -- ⚠ STILL DEFERS IF THE CALL ACTUALLY FAILS, which is the point of trying: a refusal is
+    -- now MEASURED rather than assumed, and the regen replay is still there to catch it.
+    local ok = pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
+    if not ok then
         self._pendingTuning = true
         registerSlotRegen(self)
-        return true
+        return true, true    -- queued, not pushed
     end
-    pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
 
     -- ★★★ ...AND ARM THE PROCESSOR, or the push is a note nobody reads until later.
     --
