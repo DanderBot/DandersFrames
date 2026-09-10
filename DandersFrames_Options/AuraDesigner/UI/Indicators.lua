@@ -690,13 +690,37 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     artCb.tooltip = L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."]
                     g:AddWidget(artCb, 28)
 
-                    local ampCb = GUI:CreateCheckbox(parent,
-                        L["Ignore trinkets, potions and racials"], nil, nil,
-                        function() if RPL then RPL() end end,
-                        function() return P.PIH_IgnoresAmplifiers(pihRec) end,
-                        function(v) P.PIH_SetIgnoreAmplifiers(pihRec, v) end)
-                    ampCb.tooltip = L["This icon only — the Triggers tab still decides what the helper watches. Useful with the icon showing their cooldown, since an amplifier is usually pressed alongside one."]
-                    g:AddWidget(ampCb, 28)
+                    -- ★★ THE SAME FOUR SOURCES THE COOLDOWN ICONS GROUP HAS (2026-09-10).
+                    -- Krathe: "yes build the icon block the same". This was ONE tick --
+                    -- "Ignore trinkets, potions and racials" -- over all three amplifiers at
+                    -- once, which is the same mechanism (per-record mutes) at a coarser
+                    -- grain. Nothing to migrate: a record saved by that tick carries exactly
+                    -- the mutes these read, so "all three ignored" reads back as three off.
+                    -- ⚠ SUBTRACTIVE, and the footer says so. A placed effect is keyed by one
+                    -- filter reference and can only narrow what that resolves to -- showing
+                    -- something Triggers is NOT watching needs a filter of its own, which is
+                    -- what the group is for. So a source Triggers has off is GREYED here
+                    -- rather than hidden: hiding it would make the two cards disagree about
+                    -- how many sources this feature has.
+                    for _, d in ipairs({
+                        { key = "cooldowns", label = L["Class cooldowns"] },
+                        { key = "trinkets",  label = L["Trinkets"] },
+                        { key = "potions",   label = L["Potions"] },
+                        { key = "racials",   label = L["Racials"] },
+                    }) do
+                        local key = d.key
+                        local cb = GUI:CreateCheckbox(parent, d.label, nil, nil,
+                            function() if RPL then RPL() end end,
+                            function() return P.PIH_IconSourceOn(pihRec, key) end,
+                            function(v) P.PIH_SetIconSourceOn(pihRec, key, v) end)
+                        if not P.PIH_IconSourceAvailable(key) then
+                            if cb.SetEnabled then cb:SetEnabled(false) end
+                            cb.tooltip = L["Switch this on under Triggers first — the helper is not watching it."]
+                        end
+                        g:AddWidget(cb, 28)
+                    end
+                    g:AddWidget(GUI:CreateNote(parent,
+                        L["This icon only. It can show less than the Triggers tab watches, never more."]), 34)
                 end)
             end
         end

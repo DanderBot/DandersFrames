@@ -3153,8 +3153,16 @@ L["%d spells"] = true
 -- ours to make. The second tick is the answer to that, and names the case it is for.
 L["Show the triggering cooldown's icon"] = true
 L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."] = true
-L["Ignore trinkets, potions and racials"] = true
-L["This icon only — the Triggers tab still decides what the helper watches. Useful with the icon showing their cooldown, since an amplifier is usually pressed alongside one."] = true
+-- ★★ THE ICON'S FOUR SOURCES, matching the Cooldown Icons group's SHOW block. These replace
+-- one tick ("Ignore trinkets, potions and racials") that muted all three amplifiers at once:
+-- same mechanism, per source. Krathe, 2026-09-10: "yes build the icon block the same".
+-- ⚠ SUBTRACTIVE, AND THE FOOTER SAYS SO. A placed effect is keyed by ONE filter reference,
+-- so it can show less than Triggers watches and never more -- showing more needs a filter of
+-- its own, which is what the group is for. A source Triggers has off is GREYED rather than
+-- hidden, with its own reason, or the two cards would disagree about how many sources exist.
+-- L["Class cooldowns"], L["Trinkets"], L["Potions"] and L["Racials"] are reused.
+L["This icon only. It can show less than the Triggers tab watches, never more."] = true
+L["Switch this on under Triggers first — the helper is not watching it."] = true
 L["Every indicator is already in use. Remove one below to add it again."] = true
 -- The stub page behind the nav row, reached by the settings SEARCH rather than by clicking
 -- the row -- which links straight to the designer's Power Infusion Helper tab.

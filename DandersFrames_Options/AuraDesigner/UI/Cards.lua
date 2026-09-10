@@ -843,33 +843,79 @@ function P.PIH_AmplifierIDs()
     return pihAmplifierIDs(P.PIH_Settings())
 end
 
-function P.PIH_IgnoresAmplifiers(rec)
-    local ids = P.PIH_AmplifierIDs()
-    -- Nothing ticked = nothing to ignore. Reads false so the box is not claiming to suppress
-    -- an empty set, which would tick itself the moment the user turned one on.
-    if not ids[1] then return false end
-    local m = type(rec) == "table" and rec.mutedSpellIDs
-    if type(m) ~= "table" then return false end
-    for _, id in ipairs(ids) do
-        if not m[id] then return false end
-    end
-    return true
+-- ★★★ ONE PLACED EFFECT'S OWN SOURCES (2026-09-10), the same four the Cooldown Icons group
+-- got -- Krathe: "yes build the icon block the same".
+--
+-- ⭐ THROUGH mutedSpellIDs, WHICH ALREADY DID THIS COARSELY. A placed effect is keyed by ONE
+-- filter reference, so it cannot carry a selection of its own the way the group can; what it
+-- can carry is a per-record NARROWING of the resolved map (narrowByPlacementMutes in
+-- Factory.lua). "Ignore trinkets, potions and racials" was that mechanism with one tick over
+-- all three sources at once. These are the same mechanism with the tick per source.
+-- ⚠ SO IT CAN ONLY EVER SUBTRACT, and that is the honest shape rather than a limitation to
+-- apologise for: the Triggers tab decides what the helper watches, and an effect may show
+-- less than that. An effect showing something Triggers does not watch would need its own
+-- filter, which is what the GROUP is for.
+-- ☠ CLASS COOLDOWNS IS THE ONE THAT CANNOT BE MUTED AWAY CHEAPLY. Muting it means muting
+-- every seeded id, which is forty entries in the record for "show trinkets only" -- workable,
+-- and it is what this does, because the alternative is a fourth source the box has to explain
+-- the absence of.
+-- ☠ A TABLE FIELD, NOT A LOCAL, AND luac IS WHY -- third refusal today. This file is at
+-- Lua's 200-local ceiling in its main chunk, so `local function` here is a compile error
+-- rather than a preference. P.* costs no local slot.
+function P.PIH_SourceIDs(key)
+    if key == "cooldowns" then return pihSeedIDs() end
+    local one = { trinkets = false, potions = false, racials = false }
+    one[key] = true
+    return pihAmplifierIDs(one, true)
 end
 
-function P.PIH_SetIgnoreAmplifiers(rec, on)
+-- Is this source currently SHOWN on this record? Muted-in-full = off.
+-- ⚠ A SOURCE THE TRIGGERS TAB IS NOT WATCHING READS OFF, not on: the box would otherwise
+-- offer a lit tick for spells that can never arrive. P.PIH_IconSourceAvailable is what the
+-- panel greys on.
+function P.PIH_IconSourceOn(rec, key)
+    if not P.PIH_IconSourceAvailable(key) then return false end
+    local ids = P.PIH_SourceIDs(key)
+    if not ids[1] then return false end
+    local m = type(rec) == "table" and rec.mutedSpellIDs
+    if type(m) ~= "table" then return true end   -- nothing muted = everything shows
+    for _, id in ipairs(ids) do
+        if not m[id] then return true end        -- one survivor is enough to read ON
+    end
+    return false
+end
+
+-- Cooldowns is always available (the helper is built on it); the other three follow the
+-- Triggers ticks, because muting what is not watched changes nothing.
+function P.PIH_IconSourceAvailable(key)
+    if key == "cooldowns" then return true end
+    return P.PIH_Settings()[key] == true
+end
+
+function P.PIH_SetIconSourceOn(rec, key, on)
     if type(rec) ~= "table" then return end
-    local ids = P.PIH_AmplifierIDs()
+    local ids = P.PIH_SourceIDs(key)
     if on then
+        if type(rec.mutedSpellIDs) == "table" then
+            for _, id in ipairs(ids) do rec.mutedSpellIDs[id] = nil end
+            -- ⚠ EMPTY GOES. An empty mute table is a narrowing that narrows nothing, and it
+            -- would travel in every profile export looking like a setting.
+            if not next(rec.mutedSpellIDs) then rec.mutedSpellIDs = nil end
+        end
+    else
         rec.mutedSpellIDs = rec.mutedSpellIDs or {}
         for _, id in ipairs(ids) do rec.mutedSpellIDs[id] = true end
-    elseif type(rec.mutedSpellIDs) == "table" then
-        -- ⚠ ONLY OUR IDS COME BACK OUT. A per-ID tick the user set by hand on some other
-        -- cooldown is theirs and is not ours to clear.
-        for _, id in ipairs(ids) do rec.mutedSpellIDs[id] = nil end
-        if not next(rec.mutedSpellIDs) then rec.mutedSpellIDs = nil end
     end
     pihRefresh()
 end
+
+-- ☠ P.PIH_IgnoresAmplifiers / P.PIH_SetIgnoreAmplifiers WENT WITH THE TICK THEY SERVED
+-- (2026-09-10). That was one checkbox muting all three amplifier sources at once; the icon
+-- card offers the four sources individually now (P.PIH_IconSourceOn above) through the
+-- same per-record mutes.
+-- ⚠ NOTHING TO MIGRATE, which is why they could simply go: a record saved by the old tick
+-- carries exactly the mutes the new readers read, so "all three ignored" reads back as
+-- three ticks off with no conversion step and no schema bump.
 
 -- The picture. `on` = show the cooldown's own artwork; off = pin Power Infusion.
 -- ⚠ STRUCTURAL: placedStructSig carries the pinned-vs-dynamic flag (bindNative's SetIcon bind
