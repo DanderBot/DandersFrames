@@ -1119,30 +1119,28 @@ P.GetIndicatorLayoutGroup = GetIndicatorLayoutGroup
 -- (GetUngroupedIndicators removed — uncalled since the group picker moved to
 -- the full spell-picker "group" mode; reclaimed for the 200-locals ceiling.)
 
--- Create a new layout group. kind: nil/"members" = classic member arranger
--- (legacy records carry no kind); "filter" = a container-backed group linked to
--- registry filters (stable preset keys / custom ids in filterSelection) with
--- uniform per-group styling (iconSize / maxIcons on top of the shared layout).
-local function CreateLayoutGroup(name, kind)
-    local adDB = GetAuraDesignerDB()
-    if not adDB then return nil end
-    -- Pool-routed: the Other Buffs tab creates into the flat spec-independent
-    -- store (born lazily HERE — the first add) with its own id counter.
-    local groups, id
-    if IsOtherTab() then
-        groups = GetOtherLayoutGroups(true)  -- the first add creates the store
-        if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
-        id = adDB.nextOtherLayoutGroupID
-        adDB.nextOtherLayoutGroupID = id + 1
-    else
-        groups = GetSpecLayoutGroups()
-        if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
-        id = adDB.nextLayoutGroupID
-        adDB.nextLayoutGroupID = id + 1
-    end
+-- ★★ WHAT A NEW LAYOUT GROUP *IS*, IN ONE PLACE (2026-09-10).
+--
+-- ☠ EXTRACTED BECAUSE A SECOND CREATOR DRIFTED FROM IT AND SHIPPED. The Power Infusion
+-- Helper's cooldown-icon group is built directly into adDB.otherLayoutGroups rather than
+-- through CreateLayoutGroup below -- deliberately, and for a good reason: that function picks
+-- its store from the OPEN TAB, which is the one line that put eight stray groups in Krathe's
+-- spec store and took three attempts to clean up. What it also did was hand-write the record,
+-- and a hand-written record omitted `iconSize` and `maxIcons`. Krathe: "Max icons should
+-- default to 4 it's showing blank but seems to look like 8? Icon size is also showing blank on
+-- the slider." Both sliders bind the field directly, so nil draws blank -- and the factory
+-- falls back to 8 for a filter group's max, which is exactly what he was seeing.
+-- ⇒ The two callers now share the RECORD and differ only in the STORE. Copying a field list
+-- is how they drifted; there is no longer a field list to copy.
+--
+-- kind: nil/"members" = classic member arranger (legacy records carry no kind); "filter" = a
+-- container-backed group linked to registry filters (stable preset keys / custom ids in
+-- filterSelection) with uniform per-group styling (iconSize / maxIcons on top of the shared
+-- layout). The caller owns `id` and `name` -- both come from the store it is inserting into.
+local function NewLayoutGroupRecord(id, name, kind)
     local group = {
         id = id,
-        name = name or NextGroupName(groups, (kind == "filter") and "Filter Group" or "Group"),
+        name = name,
         anchor = "TOPLEFT",
         offsetX = 0,
         offsetY = 0,
@@ -1161,6 +1159,31 @@ local function CreateLayoutGroup(name, kind)
     else
         group.members = {}
     end
+    return group
+end
+P.NewLayoutGroupRecord = NewLayoutGroupRecord
+
+-- Create a new layout group in the ACTIVE TAB's store. See NewLayoutGroupRecord for the
+-- record itself, and for why a second creator exists that does not come through here.
+local function CreateLayoutGroup(name, kind)
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return nil end
+    -- Pool-routed: the Other Buffs tab creates into the flat spec-independent
+    -- store (born lazily HERE — the first add) with its own id counter.
+    local groups, id
+    if IsOtherTab() then
+        groups = GetOtherLayoutGroups(true)  -- the first add creates the store
+        if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
+        id = adDB.nextOtherLayoutGroupID
+        adDB.nextOtherLayoutGroupID = id + 1
+    else
+        groups = GetSpecLayoutGroups()
+        if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
+        id = adDB.nextLayoutGroupID
+        adDB.nextLayoutGroupID = id + 1
+    end
+    local group = NewLayoutGroupRecord(id,
+        name or NextGroupName(groups, (kind == "filter") and "Filter Group" or "Group"), kind)
     tinsert(groups, group)
     return group
 end

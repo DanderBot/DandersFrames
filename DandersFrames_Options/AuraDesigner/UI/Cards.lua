@@ -1511,25 +1511,30 @@ function P.PIH_AddIconGroup()
     if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
     local id = adDB.nextOtherLayoutGroupID
     adDB.nextOtherLayoutGroupID = id + 1
-    groups[#groups + 1] = {
-        id = id,
-        name = PIH_ICON_GROUP_NAME,
-        kind = "filter",
-        -- ☠ THE MARK. buildFilterGroupConfig stamps dfGate from it, which is what puts these
-        -- icons under the cooldown gate and the role exclusions with everything else.
-        pihSignal = "burst",
-        -- ☠ OTHERS ONLY IS NOT INHERITED. poolFilter reads it off THIS group; without it the
-        -- filter is plain HELPFUL and the priest's own cooldowns light their own frame. The
-        -- exact trap the first group test found on the effects.
-        othersOnly = true,
-        filterSelection = { presets = {}, customs = { [cdId] = true } },
-        anchor = "TOPRIGHT",
-        offsetX = 0,
-        offsetY = 0,
-        growDirection = "LEFT_DOWN",
-        iconsPerRow = 4,
-        spacing = 2,
-    }
+    -- ☠☠ THE SHARED RECORD, AND WRITING IT BY HAND HERE ONCE SHIPPED A BROKEN GROUP. This was
+    -- a table literal listing the fields it thought a filter group had, and it did not think of
+    -- `iconSize` or `maxIcons` -- both of which CreateLayoutGroup has always set. The sliders
+    -- bind those fields directly, so both drew BLANK, and the factory's own fallback for a
+    -- filter group's max is 8: "Max icons should default to 4 it's showing blank but seems to
+    -- look like 8? Icon size is also showing blank on the slider" (Krathe, 2026-09-10).
+    -- ⇒ P.NewLayoutGroupRecord is that list now, and this function overrides only what it
+    -- genuinely means differently. What stays hand-rolled is the STORE, which is the whole
+    -- reason this does not call CreateLayoutGroup -- see the note above.
+    local g = P.NewLayoutGroupRecord(id, PIH_ICON_GROUP_NAME, "filter")
+    -- ☠ THE MARK. buildFilterGroupConfig stamps dfGate from it, which is what puts these
+    -- icons under the cooldown gate and the role exclusions with everything else.
+    g.pihSignal = "burst"
+    -- ☠ OTHERS ONLY IS NOT INHERITED. poolFilter reads it off THIS group; without it the
+    -- filter is plain HELPFUL and the priest's own cooldowns light their own frame. The
+    -- exact trap the first group test found on the effects.
+    g.othersOnly = true
+    g.filterSelection = { presets = {}, customs = { [cdId] = true } }
+    -- Top-right growing left, so a row of cooldown icons runs away from the unit's own name
+    -- and health text rather than across them. The shared record's TOPLEFT/RIGHT_DOWN is the
+    -- designer's default for a group the user places themselves.
+    g.anchor = "TOPRIGHT"
+    g.growDirection = "LEFT_DOWN"
+    groups[#groups + 1] = g
     pihRefresh()
     return true
 end
@@ -6457,7 +6462,7 @@ P.OpenFilterPopout = OpenFilterPopout
 --    ⚠ THE LESSON: a mark written by a CREATE path reaches nobody who already has the
 --    thing. Stamping in the sweep is what reaches them, and the sweep is the one place
 --    that runs for a helper nobody is touching.
-local PIH_SCHEMA = 10
+local PIH_SCHEMA = 11
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -6726,6 +6731,29 @@ local function pihSweep()
     -- ...and the references go in, in the same pass. Step 6's own call ran before the racials
     -- list was guaranteed to exist (step 9), so the racials arm could have written nothing.
     pihSyncTriggerExtras(s)
+
+    -- 11. THE ICON GROUP GETS THE FIELDS ITS HAND-WRITTEN RECORD OMITTED.
+    -- P.PIH_AddIconGroup built its record as a table literal and forgot `iconSize` and
+    -- `maxIcons`; both sliders bind the field directly, so both drew blank, and the factory
+    -- falls back to 8 for a filter group's max. Krathe: "Max icons should default to 4 it's
+    -- showing blank but seems to look like 8? Icon size is also showing blank on the slider."
+    -- ⚠ NIL ONLY. A group somebody has already sized is theirs; this fills the gaps a bad
+    -- create left, it does not restore defaults.
+    -- ⚠ READ OFF P.NewLayoutGroupRecord rather than typed here, so this step cannot disagree
+    -- with what a fresh group is made of -- which is the fault it exists to repair.
+    -- ⚠ ANCHOR AND GROW ARE NOT IN THE LIST. The helper's group means TOPRIGHT/LEFT_DOWN and
+    -- the shared record means TOPLEFT/RIGHT_DOWN, so filling those from it would move an
+    -- existing group. They are set on every create and cannot be nil.
+    do
+        local g = P.PIH_IconGroup and P.PIH_IconGroup()
+        if g and P.NewLayoutGroupRecord then
+            local def = P.NewLayoutGroupRecord(g.id, g.name, "filter")
+            for _, k in ipairs({ "iconSize", "maxIcons", "iconsPerRow", "spacing",
+                                 "offsetX", "offsetY" }) do
+                if g[k] == nil then g[k] = def[k] end
+            end
+        end
+    end
 
     s.schema = PIH_SCHEMA
     S.activeBuffTab = prevPool
