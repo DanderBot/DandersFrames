@@ -1523,6 +1523,55 @@ function P.PIH_IconGroup()
     return nil
 end
 
+-- ★★ THE SOURCES SECTION ON THE GROUP'S CARD (2026-09-10), which is what stands where the
+-- generic LINKED FILTERS block was dropped. That block offered a filter picker over the
+-- helper's own plumbing; this offers the four sources the feature actually has, by name.
+-- ⚠ THE SECTION SHAPE IS CollectLayoutGroupSections', because the card and the row layout
+-- both run these through their own placer -- see RunCardSections and PaneEnv. `place` sizes
+-- and anchors; the builder only says which controls and in what order.
+function P.PIH_GroupSourceSection(group)
+    return {
+        header  = L["Show"],
+        caption = L["SHOW"],
+        build   = function(env)
+            local place, host = env.place, env.host
+            local defs = {
+                { key = "cooldowns", label = L["Class cooldowns"] },
+                { key = "trinkets",  label = L["Trinkets"] },
+                { key = "potions",   label = L["Potions"] },
+                { key = "racials",   label = L["Racials"] },
+            }
+            for _, d in ipairs(defs) do
+                local key = d.key
+                local cb = GUI:CreateCheckbox(host, d.label, nil, nil, nil,
+                    function() return P.PIH_GroupSources(group)[key] end,
+                    function(v)
+                        P.PIH_SetGroupSource(group, key, v)
+                        -- ⚠ Rebuild: the footer below says whether this group is following
+                        -- Triggers, and the first tick is what stops it doing so.
+                        env.Rebuild()
+                    end)
+                place(cb, 26, { indent = 8 })
+            end
+            -- ⚠ THE FOOTER IS A STATE READOUT, not a caption. Four ticks that happen to match
+            -- the Triggers tab look identical whether they are INHERITING it or were set by
+            -- hand to the same thing -- and the difference is whether a later change over
+            -- there still reaches this group. So the line says which, and offers the way back.
+            if P.PIH_GroupFollowsTriggers(group) then
+                local note = GUI:CreateNote(host, L["Following the Triggers tab. Changing one of these stops that."])
+                note.fullRow = true
+                place(note, 34, { indent = 8, stretch = true })
+            else
+                local btn = GUI:CreateButton(host, L["Follow Triggers"], 120, 20, function()
+                    P.PIH_ResetGroupSources(group)
+                    env.Rebuild()
+                end)
+                place(btn, 28, { indent = 8, width = false })
+            end
+        end,
+    }
+end
+
 -- ★★ WHAT IT WATCHES, ON ITS OWN CARD (2026-09-10). Every other group's header carries a
 -- filter count, and this one's card deliberately has no Linked Filters block: its list is the
 -- cooldown list, which the Triggers tab owns end to end. That left a card saying nothing at
@@ -1535,6 +1584,101 @@ end
 -- in, our list is 40 and the number a user is looking for is the whole watched set.
 function P.PIH_IconGroupSummary()
     return format(L["%d spells, from your Triggers"], P.PIH_WatchedCount and P.PIH_WatchedCount() or 0)
+end
+
+-- ★★★ THE COOLDOWN-ICON GROUP PICKS ITS OWN SOURCES (2026-09-10).
+--
+-- ⭐ WHY IT IS NOT SIMPLY THE TRIGGERS SET. Krathe: "we should let people toggle cooldowns and
+-- the sub filters on/off so they can pick from any of the 4... it might be the case they want
+-- to trigger from a trinket but only show a CD etc." Triggers answers WHEN the helper fires;
+-- this answers WHAT the row of icons then shows, and those are genuinely different questions
+-- once you have both a marker and a row.
+--
+-- ⚠ ABSENT MEANS FOLLOW, and that is the whole compatibility story. `g.pihSources` unset =>
+-- the group links the cooldown list and nothing else, whose own `includes` bring in whatever
+-- Triggers has ticked -- exactly what it did before this existed, with no migration.
+-- ⚠ SET MEANS SPELT OUT. The moment the user touches one tick the group stops inheriting and
+-- names all four itself, with selection.noIncludes so the cooldown list is taken literally
+-- rather than dragging its own includes in behind it (see foldIncludes in Registry.lua).
+-- Materialised from the EFFECTIVE set, so the first click changes exactly the one thing
+-- clicked and the other three keep whatever they were showing a moment earlier.
+--
+-- ☠ NO FILE-SCOPE TABLE FOR THE FOUR KEYS, and that is not a style choice: this file sits
+-- at Lua's 200-local ceiling in its main chunk (see the GetUngroupedIndicators removal, which
+-- reclaimed one). A `local PIH_SOURCE_ORDER = {...}` here is a COMPILE ERROR, not a smell --
+-- luac says "too many local variables". The order lives in the section builder below, which
+-- is its only reader anyway.
+--
+-- The four as they resolve RIGHT NOW: the stored override, or Triggers' own answer.
+-- ⚠ COOLDOWNS IS ALWAYS ON WHEN FOLLOWING. It is the baseline the helper is built around --
+-- the class list narrows it, nothing switches it off -- so the inherited answer is `true`,
+-- and only an explicit override can drop it.
+function P.PIH_GroupSources(g)
+    local st = P.PIH_Settings()
+    local src = type(g) == "table" and g.pihSources or nil
+    if type(src) == "table" then
+        return {
+            cooldowns = src.cooldowns ~= false,
+            trinkets  = src.trinkets  == true,
+            potions   = src.potions   == true,
+            racials   = src.racials   == true,
+        }
+    end
+    return {
+        cooldowns = true,
+        trinkets  = st.trinkets == true,
+        potions   = st.potions  == true,
+        racials   = st.racials  == true,
+    }
+end
+
+function P.PIH_GroupFollowsTriggers(g)
+    return not (type(g) == "table" and type(g.pihSources) == "table")
+end
+
+-- Rebuild filterSelection from the group's effective sources. The ONE place that shape is
+-- written, so "what does this group watch" has a single answer.
+local function pihApplyGroupSelection(g)
+    if type(g) ~= "table" then return end
+    local cdId = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    if P.PIH_GroupFollowsTriggers(g) then
+        -- Inherit: link the cooldown list and let its includes do the rest.
+        g.filterSelection = { presets = {}, customs = cdId and { [cdId] = true } or {} }
+        return
+    end
+    local s = P.PIH_GroupSources(g)
+    local presets, customs = {}, {}
+    if s.cooldowns and cdId then customs[cdId] = true end
+    if s.trinkets then presets[PIH_SEED.amplifiers.trinkets] = true end
+    if s.potions  then presets[PIH_SEED.amplifiers.potions]  = true end
+    if s.racials then
+        local rid = pihFilterIdByName(PIH_FILTERS.racials)
+        if rid then customs[rid] = true end
+    end
+    -- ☠ noIncludes, or "cooldowns only" is unsayable: the cooldown list NAMES the other three
+    -- and selecting it would bring them along. See foldIncludes.
+    g.filterSelection = { presets = presets, customs = customs, noIncludes = true }
+end
+P.PIH_ApplyGroupSelection = pihApplyGroupSelection
+
+function P.PIH_SetGroupSource(g, key, on)
+    if type(g) ~= "table" then return end
+    -- Materialised from what is on screen, so the first click is not also a silent reset of
+    -- the other three to some other default.
+    local s = P.PIH_GroupSources(g)
+    s[key] = on and true or false
+    g.pihSources = s
+    pihApplyGroupSelection(g)
+    pihRefresh()
+end
+
+-- Back to inheriting. ⚠ The KEY GOES, rather than being written to match Triggers today:
+-- "follow" has to keep following, so a later change on the Triggers tab still reaches it.
+function P.PIH_ResetGroupSources(g)
+    if type(g) ~= "table" then return end
+    g.pihSources = nil
+    pihApplyGroupSelection(g)
+    pihRefresh()
 end
 
 function P.PIH_AddIconGroup()
@@ -1571,7 +1715,10 @@ function P.PIH_AddIconGroup()
     -- filter is plain HELPFUL and the priest's own cooldowns light their own frame. The
     -- exact trap the first group test found on the effects.
     g.othersOnly = true
-    g.filterSelection = { presets = {}, customs = { [cdId] = true } }
+    -- ⚠ THROUGH THE SHARED BUILDER, so a new group and an edited one cannot disagree about
+    -- the shape. With no pihSources yet this writes exactly what the literal did -- link the
+    -- cooldown list, inherit its includes -- which is what "follow Triggers" means.
+    pihApplyGroupSelection(g)
     -- Top-right growing left, so a row of cooldown icons runs away from the unit's own name
     -- and health text rather than across them. The shared record's TOPLEFT/RIGHT_DOWN is the
     -- designer's default for a group the user places themselves.
@@ -8468,7 +8615,8 @@ S.BuildEffectsTab = function()
         -- holding only this card re-anchors everything that can move.
         local stack = P.CreateCardStack and P.CreateCardStack(parent, yPos)
         yPos = S.CreateLayoutGroupCard(parent, yPos, pihGroup, stack,
-            { refreshTab = "effects", omitFilters = true, asEffect = true,
+            { refreshTab = "effects", asEffect = true,
+              filtersSection = P.PIH_GroupSourceSection(pihGroup),
               Summary = P.PIH_IconGroupSummary })
     end
 

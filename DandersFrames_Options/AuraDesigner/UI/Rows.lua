@@ -901,7 +901,8 @@ local function BuildEffectsTabRows(ctx, shell)
     end
 
     if pihGroup then
-        MountLayoutGroup(ctx, pihGroup, { refreshTab = "effects", omitFilters = true,
+        MountLayoutGroup(ctx, pihGroup, { refreshTab = "effects",
+                                          filtersSection = P.PIH_GroupSourceSection(pihGroup),
                                           Summary = P.PIH_IconGroupSummary })
     end
 end
@@ -1172,8 +1173,12 @@ function MountLayoutGroup(ctx, group, opts)
     -- row, so the Growth section must not draw it as well.
     local sections = P.CollectLayoutGroupSections(group, true)
     -- Index 1 is "what fills this group" for both kinds -- Linked Filters on a filter group,
-    -- Members on the other. See the same removal in S.CreateLayoutGroupCard.
-    if opts.omitFilters and isFilterGroup then tremove(sections, 1) end
+    -- Members on the other. Substituted rather than removed when the caller has something
+    -- better to put there; see the same handling in S.CreateLayoutGroupCard.
+    if isFilterGroup and (opts.omitFilters or opts.filtersSection) then
+        if opts.filtersSection then sections[1] = opts.filtersSection
+        else tremove(sections, 1) end
+    end
 
     local function Structural()
         S.SwitchTab(refreshTab)

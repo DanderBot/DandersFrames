@@ -1129,7 +1129,13 @@ local failOpenLogged = setmetatable({}, { __mode = "k" })
 -- one flat list of ours), and "resolve until it stops changing" on the render path is a cycle
 -- waiting to be created by hand-editing a profile. If a chain is ever wanted, it needs a seen
 -- set and a depth cap, not the removal of this sentence.
+-- ⚠ `selection.noIncludes` OPTS OUT, for a consumer that names its sources itself. The Power
+-- Infusion Helper's Cooldown Icons group can be set to show, say, class cooldowns only while
+-- the Triggers tab still fires on trinkets -- and it says so by listing the sources it wants.
+-- Without this flag it could not: selecting our cooldown list would drag that list's own
+-- includes in behind it, and "cooldowns only" would be unsayable.
 local function foldIncludes(self, selection)
+    if selection and selection.noIncludes then return selection end
     if not (selection and selection.customs) then return selection end
     local addP, addC
     for cfId in pairs(selection.customs) do

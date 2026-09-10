@@ -3022,6 +3022,19 @@ L["Groups without assigned roles show everyone."] = true
 -- a filter that has been switched off when it means the exact opposite. One sentence is the
 -- difference between a default and an apparent fault.
 L["Players"] = true
+-- ★★ THE COOLDOWN-ICON GROUP'S OWN SOURCES. Krathe, 2026-09-10: "we should let people
+-- toggle cooldowns and the sub filters on/off so they can pick from any of the 4... it might
+-- be the case they want to trigger from a trinket but only show a CD etc." Triggers answers
+-- WHEN the helper fires; this answers WHAT the row of icons then shows.
+-- ⚠ THE FOOTER IS A STATE READOUT, NOT A CAPTION. Four ticks matching the Triggers tab look
+-- identical whether they are INHERITING it or were set by hand to the same thing, and the
+-- difference is whether a later change over there still reaches this group. So one line says
+-- which, and the button is the way back to following.
+-- L["Show"], L["Trinkets"], L["Potions"], L["Racials"] and L["Class cooldowns"] are reused.
+L["SHOW"] = true
+L["Class cooldowns"] = true
+L["Following the Triggers tab. Changing one of these stops that."] = true
+L["Follow Triggers"] = true
 L["Empty means everyone. Add players here to watch only them."] = true
 -- The compact picker's row button, which toggles. Both states are spelled out because the
 -- glyph alone (a chevron, or a tick) says which state you are IN and not what a click does.

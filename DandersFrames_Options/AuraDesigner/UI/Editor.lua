@@ -1238,10 +1238,17 @@ S.CreateLayoutGroupCard = function(parent, yPos, group, stack, opts)
         -- Members / Linked Filters, then Placement, then Growth -- the
         -- SAME list the row layout mounts, run down the card's cursor.
         local sections = CollectLayoutGroupSections(group)
-        -- ⚠ REMOVED BY POSITION, and CollectLayoutGroupSections is why that is safe: Linked
+        -- ⚠ REPLACED BY POSITION, and CollectLayoutGroupSections is why that is safe: Linked
         -- Filters is its FIRST entry on a filter group and Members is the first on the other
         -- kind, so index 1 is "what fills this group" in both cases and nothing else can be.
-        if opts.omitFilters and isFilterGroup then tremove(sections, 1) end
+        -- ⚠ opts.filtersSection SUBSTITUTES rather than removing. The helper's group had that
+        -- slot emptied when the generic filter picker was dropped from it -- correct, and it
+        -- left the card silent about its own contents. It now holds the four sources the
+        -- feature actually has, by name; see P.PIH_GroupSourceSection.
+        if isFilterGroup and (opts.omitFilters or opts.filtersSection) then
+            if opts.filtersSection then sections[1] = opts.filtersSection
+            else tremove(sections, 1) end
+        end
         by = RunCardSections(body, bodyWidth, by, sections, refreshTab)
 
         if isFilterGroup then
