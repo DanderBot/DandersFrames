@@ -6454,6 +6454,14 @@ function Handle:SetUnit(unit)
     -- Same re-seed for visibility: the new unit may already be outside your world, and
     -- that edge will not fire again just because a handle changed hands.
     self:_setVisLatch(AuraContainer._invisibleUnits[unit] or nil)
+    -- ☠ THE HELPER GATE FOLLOWS THE UNIT HERE TOO. config.unit is updated above, so
+    -- recordCandidateFilters would DERIVE the right answer -- but nothing re-pushes it,
+    -- and the bounce below re-parses against whatever map the container is still holding.
+    -- Same fault as the slot lane (see SetSlotOwnerUnit), same narrowing to our own
+    -- configs so a retarget does not re-tune every group in the addon.
+    if self.config.dfGate and self.backend and self.backend.applyGroupTuning then
+        pcall(self.backend.applyGroupTuning, self.backend)
+    end
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
     if InCombatLockdown() then self:_queueOp("retarget"); return end
@@ -8768,6 +8776,23 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     for _, h in pairs(owner.slots) do
         pcall(function() h:_setDeathLatch(latched) end)
         pcall(function() h:_setVisLatch(invis) end)
+        -- ☠☠ AND THE HELPER GATE, WHICH IS UNIT STATE TOO -- the omission Krathe found:
+        -- "it's not working in my raid but I could see it on people before my auto layout
+        -- kicked in." Auto layout is a MASS RETARGET. A slot gated dark for unit A (a tank,
+        -- excluded by role, or someone off a named-player list) migrates to unit B and keeps
+        -- the DEAD candidate filter it was handed for A -- because _cf() re-derives at READ
+        -- time but nothing PUSHES after a retarget, and the next push only comes on a gate
+        -- edge. The verdict travelled with the container.
+        -- ⚠ EXACTLY THE CLASS THE TWO LINES ABOVE EXIST FOR. Death and visibility are
+        -- re-seeded here because "the new unit may already be dead, and that edge will never
+        -- fire again"; role exclusion is the same sentence with a different noun. It was
+        -- missed because it is derived rather than stored, which makes it look like it
+        -- cannot go stale -- the DERIVATION is fresh, the PUSH is not.
+        -- ⚠ NARROWED TO OURS, like SetHelperGate's own walk: SetAuraSlotCandidateFilters
+        -- has no engine-side equality guard, so an unnarrowed call would re-parse every
+        -- placed indicator in the addon on every retarget -- and a raid auto-layout change
+        -- retargets the whole roster at once.
+        if h.config and h.config.dfGate then pcall(h._applyHelperGate, h) end
     end
     -- ☠ SetUnit ALONE DOES NOT RENDER THE RETARGET — it writes the token and marks
     -- FullAuraRebuild, but it cannot ARM the private-side dirty processor, so the
