@@ -3013,7 +3013,17 @@ L["Groups without assigned roles show everyone."] = true
 -- "Show while on cooldown" would have read as the tracked one. Krathe's wording, verbatim,
 -- capital C included: a label he typed is a label he can find again.
 L["Show when Power Infusion is on Cooldown"] = true
-L["Off: markers appear only while your Power Infusion is ready, so you are never pointed at someone you cannot infuse. On: they appear whatever your own cooldown is doing."] = true
+-- ⚠ "EFFECTS", NOT "MARKERS". This panel's own word is the one the Effects tab and ACTIVE
+-- INDICATORS use; "marker" belongs to the raid target icon and the dispel corner mark, which
+-- are other features. Krathe, 2026-09-10: "markers? it should be effects and the wording
+-- itself is not very clear on the tooltip rethink it."
+-- ⚠ ONE LINE PER STATE, each a plain sentence, off first because off is the default. What
+-- these replace stated a consequence of the rule ("so you are never pointed at someone you
+-- cannot infuse") before finishing the rule itself.
+-- ⚠ The label says "on Cooldown", so these say "off cooldown" / "on cooldown" back rather
+-- than reaching for "ready" -- one idea, one word for it.
+L["Off: the helper's effects only appear while your Power Infusion is off cooldown."] = true
+L["On: they appear even while it is on cooldown."] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
 -- finer; the row links out to the editor that does go spell by spell, so the limit is not
 -- a dead end.
@@ -3069,7 +3079,7 @@ L["Potions"] = true
 -- ★ THE HELPER'S ADD GRID. Two steps for the icon -- which KIND of indicator, then which
 -- ICON -- because the three icon answers are as different from each other as an icon is from
 -- a square, and every other choice on that grid is made by looking at a thumbnail.
--- ★★ THREE ANSWERS BEHIND ONE TILE, on two axes: HOW MANY (a single marker, or one per
+-- ★★ THREE ANSWERS BEHIND ONE TILE, on two axes: HOW MANY (one effect, or one per
 -- cooldown they have up) and WHAT PICTURE (always Power Infusion, or the buff they used).
 -- "Cooldown Icons" is the GROUP and used to stand on the main grid beside Border and Square,
 -- which put a container among a row of effects -- see pihBuildAddTiles for why that mismatch

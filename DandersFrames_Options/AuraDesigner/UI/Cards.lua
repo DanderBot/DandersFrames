@@ -7155,13 +7155,25 @@ local function pihAddGateAndNotes(g, t)
     local gateCb = t.check(g, L["Show when Power Infusion is on Cooldown"],
         function() return P.PIH_Settings().gateEnabled == false end,
         function(v) P.PIH_SetGateEnabled(not v) end)
-    -- ⚠ A BARE STRING, so the tooltip's title is the label -- which is the right title here.
-    -- The sound tick passes a table instead because ITS label is "Enable", which titles
-    -- nothing; this one names its own setting.
-    -- ⚠ OFF FIRST. The default is off, so the first line is the behaviour the reader
-    -- currently has -- the same shape as the icon tick's "Off: ... On: ..." explainer.
+    -- ⚠ NO TITLE, WHICH MEANS THE LABEL. ResolveTooltipSpec fills a missing title from the
+    -- widget's label, and this label names its own setting -- unlike the sound tick, which
+    -- passes a title because "Enable" heads nothing.
+    -- ⚠ TWO LINES, ONE STATE EACH, and each one a plain sentence. What was here read
+    -- "markers appear only while your Power Infusion is ready, so you are never pointed at
+    -- someone you cannot infuse" -- a clause explaining a consequence of a rule it had not
+    -- finished stating, in a vocabulary this panel does not use. Krathe, 2026-09-10:
+    -- "markers? it should be effects and the wording itself is not very clear."
+    -- ⚠ "EFFECTS" IS THE PANEL'S OWN WORD -- what the Effects tab lists and what ACTIVE
+    -- INDICATORS holds. "Marker" belongs to the raid target icon and the dispel corner mark,
+    -- which are other features entirely.
+    -- ⚠ OFF FIRST. Off is the default, so the reader's first line is the behaviour they have.
+    -- ⚠ "off cooldown" / "on cooldown" ECHOES THE LABEL rather than reaching for a synonym:
+    -- the tick says on Cooldown, so the explanation says the same words back.
     if gateCb then
-        gateCb.tooltip = L["Off: markers appear only while your Power Infusion is ready, so you are never pointed at someone you cannot infuse. On: they appear whatever your own cooldown is doing."]
+        gateCb.tooltip = { lines = {
+            L["Off: the helper's effects only appear while your Power Infusion is off cooldown."],
+            L["On: they appear even while it is on cooldown."],
+        } }
     end
 
 
@@ -7528,7 +7540,7 @@ end
 -- added from, it turned up under a tab that grew a moment earlier, and the tile itself
 -- vanished once one existed. "I think for icon it would be best to have a sub menu so you
 -- click Icon then it has PI Icon, Cooldown Icons, and the other icon choices?"
--- ⇒ Three icon answers on two axes -- HOW MANY (one marker, or one per cooldown up) and WHAT
+-- ⇒ Three icon answers on two axes -- HOW MANY (one effect, or one per cooldown up) and WHAT
 -- PICTURE (always Power Infusion, or the buff they used). The fourth cell is nonsense: four
 -- identical Power Infusion icons in a row. So: three tiles, behind Icon, and the difference
 -- between a container and an effect stops being the user's problem.
