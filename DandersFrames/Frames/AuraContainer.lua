@@ -8497,6 +8497,42 @@ function SlotHandle:_applyHelperGate()
         return true
     end
     pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
+
+    -- ★★★ ...AND ARM THE PROCESSOR, or the push is a note nobody reads until later.
+    --
+    -- ☠ SetAuraSlotCandidateFilters IS A DIRTY-MARK, NOT A REPAINT. The container re-reads
+    -- on its next processor pass -- the unit's next UNIT_AURA, or the next OnUpdate while
+    -- visible (68569; see the note at the top of this file). So "stop matching" is a
+    -- request the engine honours WHEN IT NEXT LOOKS, and how long that takes depends
+    -- entirely on what is happening to that unit.
+    -- ⇒ Krathe, 2026-09-10: "the PI icon does clear when I use PI on them but it seems to
+    -- take longer than the border/icons and other indicators." It is not stuck, it is
+    -- QUEUED -- and the intermittency is the queue: the frame-level border is painted by
+    -- DF on the same frame, while the slot waits for traffic that may be a moment or a
+    -- couple of seconds away.
+    -- ⚠ UpdateAllAuras IS ITSELF ONLY A MARK -- it arms the processor rather than parsing
+    -- inline -- so this collapses the wait to the next frame rather than making it
+    -- instant. That is the whole of what is available; there is no synchronous re-parse.
+    -- ⚠ ON THE GATE EDGE ONLY. This function runs twice per Power Infusion cycle, not per
+    -- frame and not per aura event, so arming here costs nothing measurable.
+    -- ⚠ pcall(fn, self), NOT pcall(function() ... end) -- this file's own rule, recorded at
+    -- applyGroupTuning's tail: the closure form allocates one per call for no gain and the
+    -- protection is identical. SetHelperGate's own note names THIS path as the reason the
+    -- rule exists.
+    -- ⚠ NOT IN THE COMBAT BRANCH ABOVE: nothing was pushed there, so there is no new filter
+    -- to re-read and arming would be pure work.
+    -- ☠ AND THE COMBAT DEFERRAL DOES NOT COME BACK THROUGH HERE -- checked, not assumed.
+    -- _replayTuning clears _cfPushed and calls _pushFilter, which re-derives park vs live
+    -- at drain time and pushes candidates ITSELF; it never re-enters this function. So a
+    -- gate edge that happened in combat still drains without an arm of its own, and picks
+    -- up whatever the combat-exit kick does (reparseContainer / the chunked bounce).
+    -- ⚠ _pushFilter IS DELIBERATELY LEFT ALONE. Arming there would cover the drain -- and
+    -- also park, restore and the death latch, which is a far wider blast radius than the
+    -- symptom this line answers. If the lag is ever seen on THOSE paths it should be its
+    -- own change, with its own testing.
+    if type(c.UpdateAllAuras) == "function" then
+        pcall(c.UpdateAllAuras, c)
+    end
     return true
 end
 
