@@ -193,6 +193,41 @@ end
 local ANIM_GOLD  = { r = 0.95, g = 0.95, b = 0.32, a = 1 }
 local ANIM_WHITE = { r = 1, g = 1, b = 1, a = 1 }
 
+-- ★★ THE EFFECT'S BLEND MODE, A SETTING RATHER THAN A CONSTANT (2026-09-10).
+--
+-- ☠ THE BUG THIS ANSWERS. Krathe: "if I've set it to red it will show orange when over a
+-- yellow border." DF Chase's sparkles were created with a hardcoded SetBlendMode("ADD"), and
+-- ADD means "add my colour to whatever is behind me" -- so the effect showed its true colour
+-- over the dark icon in the corner of his frame and turned orange the moment it crossed the
+-- yellow border. Working exactly as written, and not what a colour picker promises.
+--
+-- ☠☠ AND IT WAS INCONSISTENT, WHICH IS THE REAL FAULT. When c4b4e5eb replaced LibCustomGlow
+-- with our own effects, each one had a blend mode chosen by hand: DF_ORBIT and DF_PROC got
+-- ADD, and the other three got none at all, which is BLEND. Same colour picker, two different
+-- meanings depending on which effect you happened to pick, and nothing anywhere saying so.
+--
+-- ⚠ THE DEFAULTS ARE EXACTLY WHAT WAS HARDCODED. Nobody's frames change appearance. ADD is
+-- WHY a glow reads as glowing -- the same art in BLEND looks like a flat sticker on a dark
+-- frame -- so the two glow effects keep it and the choice is now the user's to make.
+-- ⚠ DF_PULSATE IS ABSENT ON PURPOSE. It has no textures of its own: it modulates the border's
+-- OWN edges, which already have spec.blendMode. Offering a second blend mode for it would be
+-- two controls over one texture, and the loser would be whichever ran last.
+local ANIM_BLEND_DEFAULT = {
+    DF_ORBIT = "ADD",   -- DF Chase: additive sparkles
+    DF_PROC  = "ADD",   -- DF Proc: additive glow flipbook
+    -- DF_DASH / DF_PIXEL / BLINK / DF_FLASH: BLEND, which is what setting nothing gave them.
+}
+local ANIM_BLEND_VALID = { BLEND = true, ADD = true, MOD = true, DISABLE = true }
+
+-- ⚠ VALIDATED, because this value reaches SetBlendMode, which throws on an unknown string --
+-- and it comes out of SavedVariables, which is to say out of anywhere. An unrecognised mode
+-- falls back to the effect's own default rather than erroring the whole animation pass.
+local function animBlendMode(anim)
+    local want = anim and anim.blendMode
+    if want and ANIM_BLEND_VALID[want] then return want end
+    return (anim and ANIM_BLEND_DEFAULT[anim.type]) or "BLEND"
+end
+
 -- Resolve a colour from either an array {r,g,b,a} or a keyed {r=,g=,b=,a=}
 -- table, so consumers can pass whichever they already store.
 local function readColor(color)
@@ -370,6 +405,10 @@ function Border:BuildSpec(dbTable, prefix, ctx)
             mask         = dbTable[k("BorderAnimationMask")],
             sidesAxis    = dbTable[k("BorderAnimationSidesAxis")],
             cornerLength = dbTable[k("BorderAnimationCornerLength")],
+            -- ⚠ NIL MEANS THE EFFECT'S OWN DEFAULT, not BLEND -- see ANIM_BLEND_DEFAULT. An
+            -- absent key has to keep DF Chase and DF Proc additive, or every existing profile
+            -- would quietly change appearance on the first login after this shipped.
+            blendMode    = dbTable[k("BorderAnimationBlendMode")],
             -- PROC only: play the one-shot "proc start" flash on each start.
             -- Opt-in (default off) because PROC is used here as a CONTINUOUS
             -- border animation that re-applies often; the flash is a one-shot
@@ -1272,6 +1311,12 @@ local function setupOrbitParticles(border, anim)
     local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     border.orbitTex = border.orbitTex or {}
     local tex = border.orbitTex
+    -- ☠ OUTSIDE THE CREATION GUARD, AND THAT IS THE HALF THAT MAKES IT A SETTING. These
+    -- textures are POOLED and reused across every re-apply, so a blend mode set only on the
+    -- `if not t` branch is the mode the first frame happened to be born with -- changing the
+    -- option would do nothing at all until a reload, which reads as the option being broken.
+    -- Same reason SetVertexColor is out here. See animBlendMode.
+    local bm = animBlendMode(anim)
     for i = 1, total do
         local t = tex[i]
         if not t then
@@ -1279,10 +1324,10 @@ local function setupOrbitParticles(border, anim)
             t:SetTexture(ORBIT_SHINE_TEX)
             t:SetTexCoord(ORBIT_SHINE_COORD[1], ORBIT_SHINE_COORD[2], ORBIT_SHINE_COORD[3], ORBIT_SHINE_COORD[4])
             t:SetDesaturated(true)
-            t:SetBlendMode("ADD")
             tex[i] = t
         end
         t:SetParent(host)
+        t:SetBlendMode(bm)
         t:SetVertexColor(r, g, b, a)
         t:Show()
     end
@@ -1700,8 +1745,21 @@ end
 
 -- Redraw all four edges' dashes at a marching offset (counter-clockwise:
 -- bottom → left → top → right, matching the highlight system).
+-- ⚠ STAMPED ON CHANGE, NOT EVERY FRAME. The dash pool is 96 fixed textures and this runs on
+-- the OnUpdate tick, so the mode is compared once and written only when it actually moved.
+-- The pool is created at a fixed size and never grows, so nothing can be born unstamped.
+local function stampDashBlend(border, pool)
+    local bm = border._animBlend or "BLEND"
+    if border._dashBlendApplied == bm then return end
+    border._dashBlendApplied = bm
+    for _, edge in pairs(pool) do
+        for _, d in ipairs(edge) do d:SetBlendMode(bm) end
+    end
+end
+
 local function drawDashes(border, offset, th, inset, r, g, b, a)
     local pool = ensureDashPool(border)
+    stampDashBlend(border, pool)
     local fw, fh = border._knownW or border:GetWidth(), border._knownH or border:GetHeight()
     if not fw or not fh or fw <= 0 or fh <= 0 then return end
     local width  = fw - inset * 2
@@ -1756,6 +1814,7 @@ local function buildDashAnims(border, anim, th, inset, r, g, b, a, marchSpeed)
         for i = 1, count do
             local dashStart = startPos + (i - 1) * P
             local q = marchQuad(e, i)
+            q:SetBlendMode(animBlendMode(anim))
             q:SetColorTexture(r, g, b, a)
             q:ClearAllPoints()
             if ed.horiz then
@@ -1808,6 +1867,10 @@ local function setupPixelParticles(border, anim)
     local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     border.pixelTex = border.pixelTex or {}
     local tex = border.pixelTex
+    -- ⚠ DF Pixel set NO blend mode, which is BLEND -- so this is the same picture it has
+    -- always drawn, now said out loud and overridable. Half the effects were additive and half
+    -- were not, with nothing anywhere admitting to it; see ANIM_BLEND_DEFAULT.
+    local bm = animBlendMode(anim)
     for i = 1, N do
         local t = tex[i]
         if not t then
@@ -1816,6 +1879,7 @@ local function setupPixelParticles(border, anim)
             tex[i] = t
         end
         t:SetParent(host)
+        t:SetBlendMode(bm)
         t:SetVertexColor(r, g, b, a)
         t:Show()
     end
@@ -1933,6 +1997,7 @@ local function buildPixelAnims(border, anim)
             local at = first + (i - 1) * space
             local q = marchQuad(e, i)
             q:SetTexture(PIXEL_TEX)
+            q:SetBlendMode(animBlendMode(anim))
             q:SetVertexColor(r, g, b, a)
             q:SetSize(ed.sx, ed.sy)
             q:ClearAllPoints()
@@ -2036,24 +2101,27 @@ local function setupProcGlow(border, anim)
     -- its final frame — so playing the burst fully then swapping to the loop reads
     -- as one smooth motion (no cross-fade). Alpha-only visibility (never IsShown —
     -- a secret boolean on container buttons).
+    -- Applied on every pass, not on the create branch: these textures are pooled and reused,
+    -- so a mode set at birth is the mode the first frame happened to get. See animBlendMode.
+    local bm = animBlendMode(anim)
     local t = border.procTex
     if not t then
         t = host:CreateTexture(nil, "OVERLAY")
-        t:SetBlendMode("ADD")
         border.procTex = t
     end
     t:SetParent(host); t:ClearAllPoints(); t:SetAllPoints(host)
     if border._procAtlas then t:SetTexture(border._procAtlas.file) end
+    t:SetBlendMode(bm)
     t:SetDesaturated(desat); t:SetVertexColor(r, g, b, a)
     local s = border.procStartTex
     if not s then
         s = host:CreateTexture(nil, "OVERLAY")
-        s:SetBlendMode("ADD")
         border.procStartTex = s
     end
     s:SetParent(host); s:ClearAllPoints()
     s:SetPoint("CENTER", host, "CENTER", 0, 0)   -- size set in the tick (needs the rect)
     if border._procStartAtlas then s:SetTexture(border._procStartAtlas.file) end
+    s:SetBlendMode(bm)
     s:SetDesaturated(desat); s:SetVertexColor(r, g, b, a)
     -- anim.procStart = the "Hide Intro Flash" toggle (default nil/false plays it).
     local showIntro = not anim.procStart
@@ -2279,7 +2347,11 @@ local function setupFlashGlow(border, anim)
     ants:SetParent(host); ants:ClearAllPoints()
     ants:SetPoint("CENTER", host, "CENTER", 0, 0)   -- size set in the tick (0.85 × F)
     ants:SetTexture(FLASH_ANTS_TEX)
+    -- ⚠ EVERY PASS, on the pooled textures -- see animBlendMode. DF Flash set no mode, so its
+    -- default is the BLEND it has always drawn with.
+    local bm = animBlendMode(anim)
     for _, t in next, { spark, inner, innerOver, outer, outerOver, ants } do
+        t:SetBlendMode(bm)
         t:SetDesaturated(desat); t:SetVertexColor(r, g, b, 1); t:Show()
     end
     border._flashMaxA = a   -- the colour's alpha caps every layer
@@ -2761,6 +2833,11 @@ local function animSpecHash(anim)
         tostring(anim.mask),
         tostring(anim.sidesAxis), tostring(anim.cornerLength),
         tostring(anim.procStart),
+        -- ☠ IN THE HASH OR THE SETTING IS INERT. StartAnimation returns early on an unchanged
+        -- hash, so a blend mode missing from here would apply only when some OTHER tunable
+        -- moved -- the "change it and nothing happens, nudge the frequency and it appears"
+        -- symptom this file already carries a note about for the driver check.
+        tostring(anim.blendMode),
         tostring(cr), tostring(cg), tostring(cb), tostring(ca),
     }, "|")
 end
@@ -2801,6 +2878,13 @@ function Border:StartAnimation(border, spec)
             return
         end
     end
+
+    -- The resolved blend mode, stashed for the paths that cannot reach `anim`: the DF Dash
+    -- OnUpdate tick redraws its pooled quads through drawDashes, which is handed geometry and
+    -- a colour and nothing else. Set here rather than threaded through four call layers.
+    -- ⚠ animSpecHash CARRIES blendMode, so a change to it fails the equality above and reaches
+    -- this line -- without that the setting would look inert until some other tunable moved.
+    border._animBlend = animBlendMode(anim)
 
     -- DF_PULSATE retune-in-place: the spec changed, but if a DF Pulsate is
     -- already running on this border, NEVER tear it down — just update its

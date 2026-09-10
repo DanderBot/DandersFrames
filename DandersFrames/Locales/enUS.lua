@@ -2076,6 +2076,17 @@ L["Animation Length"] = true
 L["Animation Particles"] = true
 L["Animation Scale"] = true
 L["Animation Thickness"] = true
+-- ★★ HOW THE EFFECT'S COLOUR MIXES WITH WHAT IS BEHIND IT. Krathe, 2026-09-10: "if I've set
+-- it to red it will show orange when over a yellow border... I'm sure we used to offer up a
+-- blend mode for animation?" We never did -- L["Border Blend Mode"] governs the border's own
+-- EDGES, not the effect over them, which is an easy pair to read as one control.
+-- ⚠ THE TOOLTIP NAMES HIS EXACT SYMPTOM, because that is the sentence that tells someone
+-- looking at an orange effect they picked red for which control they are looking for.
+-- ⚠ "Default" IS A REAL OPTION, not a placeholder: each effect had its own hardcoded mode
+-- (DF Chase and DF Proc additive, the rest not), and Default is how a profile keeps it.
+-- The value labels reuse L["Blend"] / L["Add"] / L["Modulate"] / L["Disable"] / L["Default"].
+L["Animation Blend Mode"] = true
+L["How the effect's colour mixes with what is behind it. Add brightens whatever it crosses, so a red effect reads orange over a yellow border — it is what makes a glow glow. Blend draws the colour exactly as picked. Default keeps this effect's original look."] = true
 L["Border Animation"] = true
 L["Blink"] = true
 L["Corner Length"] = true

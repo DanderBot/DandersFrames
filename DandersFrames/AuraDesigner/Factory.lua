@@ -1643,6 +1643,11 @@ local PLACED_BORDER_KEYS = {
     "BorderAnimationInset", "BorderAnimationOffsetX", "BorderAnimationOffsetY",
     "BorderAnimationMask", "BorderAnimationSidesAxis", "BorderAnimationCornerLength",
     "BorderAnimationProcStart",
+    -- ⚠ ADDED 2026-09-10 WITH THE SETTING ITSELF. Every scalar BuildSpec folds into
+    -- spec.animation belongs here or the border goes stale until /reload -- and this one
+    -- is also STRUCTURAL below, because a container button's animation groups are frozen
+    -- at build and cannot be retuned in place.
+    "BorderAnimationBlendMode",
     -- Colour-source keys: not exposed by the AD border UI today (source is always CUSTOM),
     -- but hashed defensively so an imported profile or a future class/role border option
     -- can't leave the border stale until /reload.
@@ -1698,6 +1703,7 @@ local function rawBorderAnimStructTok(t, borderOn)
         .. "," .. tostring(t.BorderAnimationSidesAxis)
         .. "," .. tostring(t.BorderAnimationCornerLength)
         .. "," .. tostring(t.BorderAnimationProcStart)
+        .. "," .. tostring(t.BorderAnimationBlendMode)
         .. "," .. colSig(t.BorderAnimationColor)
 end
 
