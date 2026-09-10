@@ -1821,6 +1821,33 @@ function P.PIH_SetGateEnabled(on)
     P.PIH_Apply()
 end
 
+-- ★★ THE NAMED-PLAYER ALLOWLIST (2026-09-10). Krathe: "in guild groups it would be useful to
+-- only have the PI alert for the DPS you know who should be getting PI instead of every DPS in
+-- the raid who uses a CD."
+-- ⚠ AN ARRAY OF "Name-Realm", the picker's own order of entry, and the same key the pinned
+-- frames list writes -- so a name means the same thing in both and could be pasted between
+-- them. The ENGINE turns it into a map (see Engine:PIH_ApplySaved); the panel keeps the array
+-- because a list you edit has an order and a set does not.
+-- ⚠ EMPTY IS ABSENT. Removing the last name has to leave the helper exactly as it was before
+-- the first was added, so the key goes rather than becoming an empty table -- the engine reads
+-- a present list as "these players and nobody else".
+function P.PIH_Players()
+    return P.PIH_Settings().players or {}
+end
+
+function P.PIH_SetPlayers(list)
+    local s = P.PIH_Settings()
+    local out
+    for _, fullName in ipairs(list or {}) do
+        if type(fullName) == "string" and fullName ~= "" then
+            out = out or {}
+            out[#out + 1] = fullName
+        end
+    end
+    s.players = out
+    P.PIH_Apply()
+end
+
 -- The cooldown list's registry id, for deep-linking straight to it in the Filter Designer.
 -- nil before the helper exists, which is also when the button that uses it must be dead.
 function P.PIH_CooldownFilterID()
@@ -7583,6 +7610,37 @@ end
             racID and function() pihOpenFilter("custom", racID) end or nil)
     end
 
+    -- ★★ THE PLAYER PICKER, MOUNTED (2026-09-10).
+    -- ⚠ THE NOTE COMES FIRST, and it is the one sentence that makes an empty list readable: a
+    -- picker with nothing in it looks like a filter that has been switched off, when it is
+    -- actually the default and means the opposite. Everything else on this tab narrows by
+    -- ticking things ON; this one narrows by having anything in it at all.
+    -- ⚠ GUI:CreateCompactRosterWidget, not the pinned-frames widget. That one is 460 wide with
+    -- two 224px panes and this column is ~230 -- one of its columns alone is the whole
+    -- surface. The compact one is the same rows, the same role icons and class colours and the
+    -- same Add-by-name field, in one list whose button toggles both ways. Krathe: "it can just
+    -- be based around it... as long as it looks and functions in the same way, but is adjusted
+    -- for the more narrow width".
+    -- ⚠ SIZED FROM THE GROUP, NOT FROM THE PANEL. g.padding is 10 and AddWidget insets, so the
+    -- widget asks the group for its own width rather than deriving one from t.noteW and being
+    -- wrong the first time either number moves.
+    local function pihAddPlayers(g, t)
+        t.note(g, L["Empty means everyone. Add players here to watch only them."])
+        if not GUI.CreateCompactRosterWidget then return end
+        local w = GUI:CreateCompactRosterWidget(t.parent, {
+            width = (t.noteW or 230),
+            rows = 6,
+            getPlayers = function() return P.PIH_Players() end,
+            setPlayers = function(list) P.PIH_SetPlayers(list) end,
+            -- ⚠ REBUILDS THE TAB, because the header carries the count. The widget refreshes
+            -- itself for the list; this is for the number above it.
+            onChange = function() t.Refresh() end,
+        })
+        w.fullRow = true
+        -- The widget knows its own height (list + the add row); AddWidget wants it up front.
+        g:AddWidget(w, (w:GetHeight() or 160) + 6)
+    end
+
 -- ★ THE ICON ASKS WHICH PICTURE, WITH PICTURES (2026-09-09).
 -- ⚠ IT WAS A TICK ON THE CARD, AFTER THE FACT. Krathe: "when you add an icon it should then
 -- have a graphic like we do for the other types to then pick the type i.e an actual icon or a
@@ -7967,6 +8025,23 @@ S.BuildPIHelperBody = function(parent, opts)
         yPos = t.group(L["Additional Filters"], function(g)
             pihAddTriggerSources(g, t)
         end, yPos)
+
+        -- ★★ NAMED PLAYERS, LAST, AND COLLAPSED (2026-09-10). Krathe: "in guild groups it
+        -- would be useful to only have the PI alert for the DPS you know who should be getting
+        -- PI instead of every DPS in the raid who uses a CD."
+        -- ⚠ LAST, BECAUSE IT IS THE NARROWEST THING ON THE TAB. Every box above answers "what
+        -- makes this fire"; this one answers "and for whom", which only means anything once
+        -- the rest is settled. It is also the only one most people will never touch.
+        -- ⚠ COLLAPSIBLE, like the class list and for the same reason: a roster is as long as
+        -- the raid, and an empty allowlist is the default.
+        -- ⚠ THE COUNT IS ON THE HEADER, so the box says whether it is doing anything while
+        -- shut -- which is the whole question about a folded filter. No count means no list
+        -- means everyone, and the note inside says so in words.
+        local pn = #P.PIH_Players()
+        local pHead = L["Players"] .. (pn > 0 and ("   " .. pn) or "")
+        yPos = t.group(pHead, function(g)
+            pihAddPlayers(g, t)
+        end, yPos, { collapsible = true, collapseKey = "pihelper:players" })
     end
 
     return yPos

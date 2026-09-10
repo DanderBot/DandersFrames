@@ -4453,13 +4453,16 @@ function Factory:SetHelperSoundsArmed(frame, armed, map, cfg)
     -- Power Infusion back onto the priest.
     if UnitIsUnit(frame.unit, "player") then return 0, "own unit (never registered, by design)" end
 
-    -- ☠ ROLE EXCLUSION HOLDS HERE TOO. The visual gate skips excluded roles at the
-    -- container funnel, which sound never passes through -- without this, a tank's cooldown
-    -- played the cue while nothing marked them: a signal with nobody to act on. Checked at
-    -- arm time, the same staleness window as everything else on this path.
-    if DF.AuraContainer and DF.AuraContainer.IsHelperRoleExcluded
-        and DF.AuraContainer.IsHelperRoleExcluded(frame.unit) then
-        return 0, "role excluded"
+    -- ☠ THE PER-UNIT NARROWINGS HOLD HERE TOO -- role, and now the named-player allowlist.
+    -- The visual gate applies them at the container funnel, which sound never passes through:
+    -- without this a tank's cooldown played the cue while nothing marked them, a signal with
+    -- nobody to act on. Checked at arm time, the same staleness window as everything else on
+    -- this path.
+    -- ⚠ ONE VERB (IsHelperUnitExcluded), not a test per narrowing, so a third one added later
+    -- cannot reach the visuals and miss the sound -- which is exactly how this one started.
+    if DF.AuraContainer and DF.AuraContainer.IsHelperUnitExcluded
+        and DF.AuraContainer.IsHelperUnitExcluded(frame.unit) then
+        return 0, "unit excluded (role or player list)"
     end
 
     local argKey, argVal = resolveSoundArg(cfg or {})

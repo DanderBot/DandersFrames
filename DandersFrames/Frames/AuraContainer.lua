@@ -1477,6 +1477,18 @@ local function helperUnitRole(unit)
     return DF.GetUnitRole and DF:GetUnitRole(unit)
 end
 
+-- ★★ THE NAMED-PLAYER ALLOWLIST (2026-09-10). Krathe: "in guild groups it would be useful to
+-- only have the PI alert for the DPS you know who should be getting PI instead of every DPS in
+-- the raid who uses a CD."
+--
+-- ⚠ AN ALLOWLIST, AND THEREFORE nil MEANS EVERYONE. The roles table above is an EXCLUDE list,
+-- so an empty one excludes nobody and the two read in opposite directions -- which is right
+-- for what each says, and exactly why the nil case is spelled out at both ends. A profile that
+-- has never used this has no list, and nothing changes for it.
+-- ⚠ KEYED "Name-Realm", the same key the picker writes (GUI.RosterSnapshot). Realm-qualified
+-- because a guild group can be cross-realm and because two Bobs is not a hypothetical.
+local helperAllowedPlayers = nil   -- e.g. { ["Bob-Draenor"] = true }; nil = everyone
+
 local function helperRoleExcluded(unit)
     if not (helperExcludedRoles and unit) then return false end
     local role = helperUnitRole(unit)
@@ -1484,10 +1496,34 @@ local function helperRoleExcluded(unit)
     return helperExcludedRoles[role] == true
 end
 
+-- ⚠ THE NAME TEST FAILS OPEN TWICE OVER, and both are deliberate: no list means everyone (an
+-- allowlist nobody has written is not a filter), and a unit whose name we cannot read is
+-- shown rather than hidden. The failure this feature can afford is marking one person too
+-- many; the one it cannot is going silent for the raid because a name lookup blinked.
+-- ☠ "" AS WELL AS nil FOR THE REALM -- see GUI.RosterSnapshot, which writes these keys. Which
+-- of the two UnitName returns for a same-realm unit is not something to bet a key on, and
+-- "Bob-" would match nothing while looking exactly like a name that should.
+local function helperPlayerExcluded(unit)
+    if not (helperAllowedPlayers and unit) then return false end
+    local name, realm = UnitName(unit)
+    if not name or name == "" then return false end        -- fail open
+    if realm == "" then realm = nil end
+    return not helperAllowedPlayers[name .. "-" .. (realm or GetRealmName())]
+end
+
+-- Both narrowings, one verb. Every consumer asks this rather than picking a test, so the
+-- container funnel and the sound path cannot come to different answers about one unit.
+local function helperUnitExcluded(unit)
+    return helperRoleExcluded(unit) or helperPlayerExcluded(unit)
+end
+
 -- Shared with the SOUND path (Factory): sound registers per unit and never passes the
--- container funnel, so role exclusion must be answerable from outside it -- or a cue plays
+-- container funnel, so exclusion must be answerable from outside it -- or a cue plays
 -- for a unit nothing marks.
-function AuraContainer.IsHelperRoleExcluded(unit) return helperRoleExcluded(unit) end
+-- ⚠ THE NAME KEPT ITS "Role", so the one caller in Factory.lua did not have to change while
+-- the ANSWER widened. That is the wrong trade -- a name that describes half of what it does
+-- is how the next reader gets it wrong -- so the verb is renamed and the caller with it.
+function AuraContainer.IsHelperUnitExcluded(unit) return helperUnitExcluded(unit) end
 
 -- A record's candidateFilters REPLACES the config-wide set for that group/slot
 -- (the dispel overlay's per-type slots) — see normalizeFilters.
@@ -1656,7 +1692,7 @@ local function recordCandidateFilters(rec, config)
     -- Ownership is read off the CONFIG, never off the map -- see `config.dfGate` above.
     -- ORDER: helper gate FIRST, caster lock second. A gated-dark map is the dead map and
     -- needs no lock; everything live gets the PLAYER-token caster lock (see applyCasterLock).
-    if config.dfGate and (helperGateDark or helperRoleExcluded(config.unit)) then
+    if config.dfGate and (helperGateDark or helperUnitExcluded(config.unit)) then
         return HELPER_GATE_DEAD_CF
     end
     return applyCasterLock(rec.f, rec.candidateFilters or config.candidateFilters)
@@ -6690,6 +6726,19 @@ end
 
 function AuraContainer.GetHelperExcludedRoles() return helperExcludedRoles end
 
+-- The named-player allowlist. `map` is { ["Name-Realm"] = true } or nil for everyone.
+-- ⚠ THE SAME RE-PUSH THE ROLES GET, for the same reason: the container is carrying an answer
+-- derived from the old list until something makes it ask again.
+-- ⚠ AND THE SAME EVENT SET COVERS IT. PIH_REGEN_EVENTS already re-pushes on GROUP_ROSTER_UPDATE,
+-- which is what fires when the named player actually joins -- so a list written before the raid
+-- forms takes effect the moment they walk in, with no work of its own.
+function AuraContainer.SetHelperAllowedPlayers(map)
+    helperAllowedPlayers = map
+    return AuraContainer.SetHelperGate(helperGateDark)
+end
+
+function AuraContainer.GetHelperAllowedPlayers() return helperAllowedPlayers end
+
 -- Backstop for pushes swallowed during lockdown by the pcall'd native setters. Idempotent,
 -- out of combat, and the same shape the identity gate already uses for its combat-exit
 -- re-verify.
@@ -8388,7 +8437,7 @@ end
 function SlotHandle:_cf()
     local cf = self._lastCandidateFilters
     if cf ~= nil and self.config and self.config.dfGate
-        and (helperGateDark or helperRoleExcluded(self.owner and self.owner.unit)) then
+        and (helperGateDark or helperUnitExcluded(self.owner and self.owner.unit)) then
         return HELPER_GATE_DEAD_CF
     end
     return cf

@@ -512,6 +512,14 @@ function Engine:PIH_ApplySaved()
         if DF.AuraContainer and DF.AuraContainer.SetHelperExcludedRoles then
             DF.AuraContainer.SetHelperExcludedRoles(nil)
         end
+        -- ☠ AND THE ALLOWLIST, ON THE RESET PATH AS MUCH AS THE APPLY ONE. A named-player list
+        -- left pushed after a switch to a profile with no helper would go on narrowing a
+        -- feature that is not there -- and would then narrow the NEXT helper the user builds,
+        -- from a list they wrote somewhere else entirely. Same reasoning as the roles above,
+        -- and the same reason this whole branch exists.
+        if DF.AuraContainer and DF.AuraContainer.SetHelperAllowedPlayers then
+            DF.AuraContainer.SetHelperAllowedPlayers(nil)
+        end
         pihManual = nil
         pihGateEnabled = true
         pihEnabled = true          -- no helper here; the switch has nothing to suppress
@@ -525,6 +533,22 @@ function Engine:PIH_ApplySaved()
         local any = false
         for _ in pairs(s.roles or {}) do any = true break end
         DF.AuraContainer.SetHelperExcludedRoles(any and s.roles or nil)
+    end
+    -- ★ THE NAMED-PLAYER ALLOWLIST, stored as an ARRAY (the picker's order of entry) and
+    -- pushed as a MAP (the container asks "is this unit in it", once per unit per push).
+    -- ⚠ AN EMPTY LIST IS nil, NOT AN EMPTY MAP. The container reads a present map as "these
+    -- players and nobody else", so an empty one would silence the helper completely -- for a
+    -- user who had added two names and removed them again, which is exactly the moment they
+    -- would expect it to go back to normal rather than break.
+    if DF.AuraContainer and DF.AuraContainer.SetHelperAllowedPlayers then
+        local map
+        for _, fullName in ipairs(s.players or {}) do
+            if type(fullName) == "string" and fullName ~= "" then
+                map = map or {}
+                map[fullName] = true
+            end
+        end
+        DF.AuraContainer.SetHelperAllowedPlayers(map)
     end
     Engine:PIH_SetGateEnabled(s.gateEnabled ~= false)
     -- ⚠ AFTER THE GATE: turning the feature on resumes from the gate's setting, so the gate

@@ -3003,6 +3003,19 @@ L["Another effect"] = true
 -- thing it could have said (this box is the ROLE filter) went unsaid.
 L["Roles"] = true
 L["Groups without assigned roles show everyone."] = true
+-- ★★ THE NAMED-PLAYER ALLOWLIST. "In guild groups it would be useful to only have the PI
+-- alert for the DPS you know who should be getting PI instead of every DPS in the raid who
+-- uses a CD" (Krathe, 2026-09-10).
+-- ☠ THE NOTE IS LOAD-BEARING, NOT DECORATION. Every other control on this tab narrows by being
+-- ticked ON; this one narrows by having anything in it AT ALL -- so an empty picker looks like
+-- a filter that has been switched off when it means the exact opposite. One sentence is the
+-- difference between a default and an apparent fault.
+L["Players"] = true
+L["Empty means everyone. Add players here to watch only them."] = true
+-- The compact picker's row button, which toggles. Both states are spelled out because the
+-- glyph alone (a chevron, or a tick) says which state you are IN and not what a click does.
+L["Click to watch this player."] = true
+L["Click to stop watching this player."] = true
 -- ⚠ ASKED POSITIVELY, like every other tick on the panel. It was "Hide the helper while your
 -- Power Infusion is on cooldown" -- the one control in a box of enables that turned a
 -- SUPPRESSION on, which made the box read inconsistently. The stored value is unchanged and
