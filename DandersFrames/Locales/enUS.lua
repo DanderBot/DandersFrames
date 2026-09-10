@@ -3179,5 +3179,13 @@ L["Move and size the icons under Layout Groups."] = true
 -- row, where the row's own identity should be. The effect's TYPE is already on the row as a
 -- coloured badge (Icon, Border, Square), so the text does not repeat it.
 L["PI Helper"] = true
+-- ⚠ THE TWO ICONS ARE NAMED; NOTHING ELSE IS. Every other helper effect is unique on the
+-- signal, so its type BADGE distinguishes it and a suffix would print the same word twice on
+-- one row. The two icons differ only in their artwork and the badge says "Icon" for both --
+-- so since the pair became addable at once, two rows in ACTIVE INDICATORS read identically.
+-- Krathe, 2026-09-10: "a placed PI icon should show as PI Helper - PI Icon / Icon / Icons,
+-- right now only the last actually shows." ("Icons" is the GROUP, whose name is stored data.)
+L["PI Helper — PI Icon"] = true
+L["PI Helper — Icon"] = true
 L["PI Helper — Already has active Power Infusion"] = true
 --@end-do-not-package@

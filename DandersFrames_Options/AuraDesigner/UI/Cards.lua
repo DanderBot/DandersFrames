@@ -283,9 +283,26 @@ end
 -- badge cannot say so. Nothing creates one any more (see pihBuildAddTiles), but existing ones
 -- still list and delete, and a row that cannot be told apart from its neighbour is a row
 -- somebody deletes the wrong one of.
-local function pihLabel(key)
-    if key == "burst"   then return L["PI Helper"] end
+-- ★★ ...AND THE TWO ICONS DO NEED THEIR NAMES (2026-09-10), which is the one exception the
+-- argument above generates rather than contradicts. Krathe: "a placed PI icon should show as
+-- PI Helper - PI Icon / Icon / Icons, right now only the last actually shows."
+-- ⚠ THE BADGE STOPPED BEING ENOUGH THE DAY BOTH COULD EXIST. It says "Icon" for the
+-- Power-Infusion-pinned one and "Icon" for the one showing their cooldown -- so the pair
+-- Krathe asked for two changes ago arrives as two rows reading identically, which is the
+-- "somebody deletes the wrong one" case the note above is about, now reachable.
+-- ⚠ STILL NO SUFFIX ON ANY OTHER TYPE. Border, Square and the rest are each unique on the
+-- signal, so the badge does distinguish them and repeating it would be the same word twice
+-- on one row. The suffix appears where it disambiguates and nowhere else.
+-- ☠ staticSpellID'S PRESENCE IS THE ART, as everywhere else -- there is no second field
+-- recording the choice (see P.PIH_SetIconShowsAura). A frame-level cfg carries no `type`,
+-- so it can never match this branch; only placed instances do.
+local function pihLabel(key, cfg)
     if key == "infused" then return L["PI Helper — Already has active Power Infusion"] end
+    if key ~= "burst" then return nil end
+    if type(cfg) == "table" and cfg.type == "icon" then
+        return cfg.staticSpellID and L["PI Helper — PI Icon"] or L["PI Helper — Icon"]
+    end
+    return L["PI Helper"]
 end
 
 -- The effects list (Groups.lua) resolves helper rows through this: same derivation, one

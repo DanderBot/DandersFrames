@@ -1654,8 +1654,10 @@ local function CollectAllEffects(opts)
                         auraName    = auraName,
                         -- Same derivation as the frame-level rows below: a marked indicator
                         -- (a helper Icon or Square) names itself, from the mark.
+                        -- ⚠ THE RECORD GOES IN TOO, not just the signal: the two helper ICONS
+                        -- differ only in their art, and the type badge says "Icon" for both.
                         displayName = (indicator.pihSignal and P.PIH_SignalLabel
-                            and P.PIH_SignalLabel(indicator.pihSignal)) or displayName,
+                            and P.PIH_SignalLabel(indicator.pihSignal, indicator)) or displayName,
                         indicatorID = indicator.id,
                         typeKey     = indicator.type,
                         config      = indicator,
@@ -1682,7 +1684,7 @@ local function CollectAllEffects(opts)
                         -- is a translated string frozen into the profile, so it would keep the
                         -- locale it was created in while every other name followed the client.
                         displayName = (auraCfg[typeKey].pihSignal and P.PIH_SignalLabel
-                            and P.PIH_SignalLabel(auraCfg[typeKey].pihSignal)) or displayName,
+                            and P.PIH_SignalLabel(auraCfg[typeKey].pihSignal, auraCfg[typeKey])) or displayName,
                         typeKey     = typeKey,
                         config      = auraCfg[typeKey],
                     })
