@@ -3023,7 +3023,11 @@ L["Classes"] = true
 L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
 -- on a filter-owned record, so it offers no row and no delete button for it either.
-L["Play a sound when someone becomes worth infusing"] = true
+-- ⚠ THE TICK IS LABELLED "Enable" AND EXPLAINS ITSELF IN A TOOLTIP. Its label was the whole
+-- sentence below, under a box already captioned Sound Alert -- the feature stated twice, and
+-- wrapping to two lines to do it. Krathe: "too verbose, make it Enable with a tooltip
+-- explaining what it does in better english." L["Enable"] and L["Sound Alert"] already exist.
+L["Plays your chosen sound when a group member's cooldown makes them worth infusing."] = true
 L["Only plays while the helper is showing."] = true
 -- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
 -- missing-mode render path is the one place the helper's cooldown gate cannot reach.

@@ -7302,9 +7302,22 @@ local function pihAddSound(g, t)
     -- WHETHER -- so turning it off and back on does not make anyone hunt for their
     -- sound a second time. Silent until chosen, either way: a cue nobody asked for
     -- is the fastest route to the whole feature being switched off.
-    t.check(g, L["Play a sound when someone becomes worth infusing"],
+    -- ⚠ "Enable", NOT A SENTENCE. The box is already captioned Sound Alert, so a label
+    -- restating the whole feature says it twice and wraps to two lines doing it -- Krathe,
+    -- 2026-09-10: "too verbose, make it Enable with a tooltip explaining what it does in
+    -- better english". The explanation goes where an explanation goes.
+    -- ⚠ A TABLE SPEC, so the tooltip keeps the BOX's title. ResolveTooltipSpec defaults a
+    -- bare string's title to the LABEL, and "Enable" heading its own tooltip tells nobody
+    -- which setting they are reading about.
+    local soundCb = t.check(g, L["Enable"],
         function() return P.PIH_Settings().soundOn == true end,
         function(v) P.PIH_SetSoundOn(v); Refresh() end)
+    if soundCb then
+        soundCb.tooltip = {
+            title = L["Sound Alert"],
+            lines = { L["Plays your chosen sound when a group member's cooldown makes them worth infusing."] },
+        }
+    end
     if P.PIH_Settings().soundOn then
         g:AddWidget(GUI:CreateSoundDropdown(parent, L["Sound"],
             P.PIH_Settings(), "soundLSMKey",
