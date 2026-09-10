@@ -931,6 +931,18 @@ SlashCmdList["DFPI"] = function(msg)
             local t = {}; for k in pairs(r) do t[#t + 1] = k end; table.sort(t)
             return table.concat(t, ", ")
         end)())
+        -- ⚠ READ OFF THE CONTAINER, NOT THE PROFILE, and that is the whole value of the
+        -- line. The panel stores this list and something has to PUSH it; when the push
+        -- was missing (it was, until 2026-09-10) the profile showed names and the engine
+        -- held none, with nothing anywhere able to say so. A field that repeated the
+        -- setting would have agreed with the panel and hidden the fault.
+        :Field("players watched", (function()
+            local AC = DF.AuraContainer
+            local m = AC and AC.GetHelperAllowedPlayers and AC.GetHelperAllowedPlayers()
+            if not m then return "everyone (no list)" end
+            local t = {}; for k in pairs(m) do t[#t + 1] = k end; table.sort(t)
+            return ("%d: %s"):format(#t, table.concat(t, ", "))
+        end)())
         :Field("watching events", pihWatching and "yes" or "no (no helper installed)")
         -- The per-frame wiring, which no setting above can show. Registrations counted at the
         -- LAST arm pass (armed on zero frames = the login-ordering failure); containers

@@ -718,6 +718,28 @@ function P.PIH_Apply()
         for _ in pairs(s.roles or {}) do any = true break end
         DF.AuraContainer.SetHelperExcludedRoles(any and s.roles or nil)
     end
+    -- ☠☠ AND THE PLAYER LIST, WHICH THIS FORGOT. Krathe, 2026-09-10: "I've added a list of
+    -- players and it was showing the effects on other players not just them." The list was
+    -- written to the profile and pushed NOWHERE: only Engine:PIH_ApplySaved sent it to the
+    -- container, and that runs on login and profile switch -- so a list edited in the panel
+    -- did nothing at all until the next reload, while the panel showed it filled in.
+    -- ⚠ THE SAME SHAPE AS THE ROLES ABOVE, and that is the tell: they are the two halves of
+    -- one narrowing (helperUnitExcluded reads both), and only one of them was here. A
+    -- setting the panel stores but never pushes is the "lying control" this feature has
+    -- been cleaned of three times; it arrived again through a path nobody re-read.
+    -- ⚠ ARRAY IN, MAP OUT -- the same conversion Engine:PIH_ApplySaved does, and empty is
+    -- nil rather than an empty map: a present map means "these players and nobody else", so
+    -- an empty one would silence the helper for someone who just removed their last name.
+    if DF.AuraContainer and DF.AuraContainer.SetHelperAllowedPlayers then
+        local map
+        for _, fullName in ipairs(s.players or {}) do
+            if type(fullName) == "string" and fullName ~= "" then
+                map = map or {}
+                map[fullName] = true
+            end
+        end
+        DF.AuraContainer.SetHelperAllowedPlayers(map)
+    end
     local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
     -- ⚠ BEFORE THE GATE, because the gate setter resolves through pihShouldShow and that
     -- reads this. Pushed afterwards it would settle the gate from the OLD value and leave
