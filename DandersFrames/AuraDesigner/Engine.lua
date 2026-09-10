@@ -795,6 +795,33 @@ SlashCmdList["DFPI"] = function(msg)
             -- would teach the reader to ignore the line that matters.
             (pihSoundCfg and pihGateOpen and pihLastArmCount == 0
              and GetNumGroupMembers and GetNumGroupMembers() > 1) and "bad" or "neutral")
+        -- ★★ THE PLACED SLOTS, WHICH NOTHING ABOVE COULD SEE. Krathe, over four reports:
+        -- the border cleared and the icon did not; the sound played and nothing drew; the
+        -- group and border drew and the icon did not. Every one of those is a slot whose
+        -- LAST PUSH disagrees with the gate, and no field here could show it.
+        -- ⚠ READ THIS AGAINST "gate intends" ABOVE:
+        --   gate OPEN + dark 0 + pending 0   -> the slots agree; look elsewhere.
+        --   gate OPEN + pending > 0          -> a push deferred to PLAYER_REGEN_ENABLED and
+        --                                       not yet drained. Power Infusion is pressed IN
+        --                                       COMBAT, so this is the expected shape of the
+        --                                       "icon lags the border" report.
+        --   gate OPEN + dark > 0             -> a per-UNIT exclusion (role, or the named
+        --                                       player list), not the gate.
+        :Field("helper slots", (function()
+            local AC = DF.AuraContainer
+            if not (AC and AC.GetHelperSlotStatus) then return "n/a" end
+            local total, dark, pending, parked = AC.GetHelperSlotStatus()
+            if total == 0 then return "none (no placed helper effect)" end
+            return ("%d total, %d would go dark, %d push deferred, %d parked")
+                :format(total, dark, pending, parked)
+        end)(), (function()
+            local AC = DF.AuraContainer
+            if not (AC and AC.GetHelperSlotStatus) then return "neutral" end
+            local _, _, pending = AC.GetHelperSlotStatus()
+            -- A deferral outstanding while the gate is open IS the fault, so it is marked as
+            -- one -- that is the whole point of adding this line.
+            return (pending > 0 and pihGateOpen) and "bad" or "neutral"
+        end)())
         :Field("gated containers live", (function()
             local AC = DF.AuraContainer
             local n = 0

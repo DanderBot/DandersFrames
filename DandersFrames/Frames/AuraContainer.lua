@@ -6719,6 +6719,41 @@ end
 
 function AuraContainer.GetHelperGate() return helperGateDark end
 
+-- ★★★ WHAT THE HELPER'S SLOTS ARE ACTUALLY CARRYING (2026-09-10).
+--
+-- ☠ THE READOUT COULD SEE EVERY SETTING AND NONE OF THE WIRING. "/df debug pi" already
+-- prints what the gate INTENDS against what the chokepoint SAYS -- deliberately as two lines,
+-- because they are allowed to differ -- and the sound registrations per frame. It could not
+-- see the third state, which is what Krathe kept hitting: a slot whose LAST PUSH was the dead
+-- filter while the gate has since re-opened, so the border and the group render and one placed
+-- icon does not. Four reports, four different theories, no measurement.
+--
+-- ⚠ `pending` IS THE ONE THAT NAMES THE CAUSE. SlotHandle:_applyHelperGate cannot call a
+-- native tuning setter in combat, so it defers to PLAYER_REGEN_ENABLED -- and Power Infusion
+-- is pressed in combat by definition. A slot sitting at pending>0 with the gate OPEN is that
+-- deferral, visible for the first time.
+-- ⚠ DERIVED, NEVER STORED. Each answer is re-asked off the live handle, so this cannot drift
+-- from what the slots are doing -- the fault every "same config, different outcome" hunt in
+-- this addon has come down to.
+-- Returns: total helper slots, how many would be handed the DEAD filter right now, how many
+-- are waiting on a deferred push, and how many are parked.
+function AuraContainer.GetHelperSlotStatus()
+    local total, dark, pending, parked = 0, 0, 0, 0
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        if h and h.config and h.config.dfGate then
+            total = total + 1
+            if h.parked then parked = parked + 1 end
+            if h._pendingTuning then pending = pending + 1 end
+            -- The verdict the slot would be handed on its next push, asked the same way
+            -- SlotHandle:_cf asks it.
+            if helperGateDark or helperUnitExcluded(h.owner and h.owner.unit) then
+                dark = dark + 1
+            end
+        end
+    end
+    return total, dark, pending, parked
+end
+
 function AuraContainer.SetHelperExcludedRoles(roles)
     helperExcludedRoles = roles
     return AuraContainer.SetHelperGate(helperGateDark)   -- re-push so it takes effect now
