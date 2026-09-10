@@ -9086,11 +9086,11 @@ function AuraContainer.ReconcileLatches(reason)
         if not h._destroyed and h._visLatched and not handleVisDark(h) then
             healed = healed + 1
         end
-        pcall(function() h:_setVisLatch() end)
+        pcall(h._setVisLatch, h)   -- method pcall, no closure: this now runs on the 3s latch tick
     end
     for s in pairs(AuraContainer._slotHandles or {}) do
         if s._visLatched and not slotVisDark(s) then healed = healed + 1 end
-        pcall(function() s:_setVisLatch() end)
+        pcall(s._setVisLatch, s)
     end
 
     -- Silent when there was nothing to do: this runs on every zone-in and every combat
