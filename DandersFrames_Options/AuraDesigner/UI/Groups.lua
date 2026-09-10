@@ -22,6 +22,7 @@ local GetOtherAuras = P.GetOtherAuras
 local NextGroupName = P.NextGroupName
 local GetSpecLayoutGroups = P.GetSpecLayoutGroups
 local IsOtherTab = P.IsOtherTab
+local IsPIHelperTab = P.IsPIHelperTab
 local IsDebuffTab = P.IsDebuffTab
 local EMPTY_POOL = P.EMPTY_POOL
 local CurrentAuraPool = P.CurrentAuraPool
@@ -29,6 +30,10 @@ local PoolKeyPrefix = P.PoolKeyPrefix
 local DebuffGroupsRead = P.DebuffGroupsRead
 local GetOtherLayoutGroups = P.GetOtherLayoutGroups
 local CurrentLayoutGroups = P.CurrentLayoutGroups
+-- ☠ THE DISPLAY HALF OF THAT PAIR. CurrentLayoutGroups is the STORE and is what logic reads;
+-- this is what a surface SHOWS. The preview canvas used the store and painted the helper's
+-- group on every pool -- see PIHShowsMark for the whole account.
+local VisibleLayoutGroups = P.VisibleLayoutGroups
 local OtherPoolDisplayName = P.OtherPoolDisplayName
 local EnsureAuraConfig = P.EnsureAuraConfig
 local EnsureTypeConfig = P.EnsureTypeConfig
@@ -1536,6 +1541,53 @@ P.BADGE_COLORS = BADGE_COLORS
 -- becoming unreachable code that looks maintained.
 -- ⚠ Callers that want the designer's behaviour pass nothing: every existing call site
 -- (Cards.lua's Active Indicators list, Rows.lua's) is a designer list and wants them gone.
+-- ☠☠ THE SAME RULE, FOR THE SURFACE THAT NEVER LEARNED IT (2026-09-10).
+-- CollectAllEffects hides helper-owned records from every pool but the helper's; the PREVIEW
+-- CANVAS was written before that rule existed and kept painting them. Krathe: "any buff tab on
+-- AD is showing our PI helper indicators, it should not."
+-- ⚠ THREE LEAKS, ONE CAUSE, and all three are display sites reading a STORE accessor:
+--   · the filter-group placeholder loop read CurrentLayoutGroups (the store) instead of
+--     VisibleLayoutGroups (the display filter) -- the exact split that accessor's own note
+--     describes, applied everywhere except here;
+--   · the placed-instance loop iterated CurrentAuraPool without testing the mark;
+--   · RefreshPreviewEffects did the same for frame-level effects, so a helper BORDER painted
+--     itself over the Any Buff preview.
+-- ⚠ READ IN BOTH DIRECTIONS, exactly like VisibleLayoutGroups: on the helper's own tab the
+-- marked records are the ONLY ones that belong, and the user's unrelated Any Buff work is
+-- what does not. One rule -- "show what this tab is about" -- not two lists of exceptions.
+local function PIHShowsMark(marked)
+    return ((marked and true or false) == IsPIHelperTab())
+end
+P.PIHShowsMark = PIHShowsMark
+
+-- The record this tab may paint, with the frame-level effects it may not removed.
+-- ⚠ PER TYPE KEY, NOT PER RECORD. A helper record is keyed by its filter reference, and
+-- nothing stops the user adding an effect of their own to that same filter from the Any Buff
+-- tab -- so "this record is the helper's" would hide their work along with ours. Same
+-- granularity CollectAllEffects uses.
+-- ⚠ NO COPY IN THE COMMON CASE: a record with nothing to hide is handed straight back, which
+-- is every record in every profile that has never opened the helper.
+-- ☠ A REAL COPY, NOT AN __index PROXY. The painters read auraCfg.border, auraCfg.healthbar and
+-- so on directly, and a metatable would answer every one of those from the original -- hiding
+-- nothing while looking like it did.
+local function PIHVisibleRecord(auraCfg)
+    local hide
+    for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
+        local cfg = auraCfg[typeKey]
+        if type(cfg) == "table" and not PIHShowsMark(cfg.pihSignal) then
+            hide = hide or {}
+            hide[typeKey] = true
+        end
+    end
+    if not hide then return auraCfg end
+    local out = {}
+    for k, v in pairs(auraCfg) do
+        if not hide[k] then out[k] = v end
+    end
+    return out
+end
+P.PIHVisibleRecord = PIHVisibleRecord
+
 local function CollectAllEffects(opts)
     local effects = {}
     local includePIH = opts and opts.includePIH and true or false
@@ -2723,7 +2775,11 @@ local function RefreshPlacedIndicators()
         local fgPoolKey = isOther and "dfADOtherFilterGroupSlots" or "dfADFilterGroupSlots"
         local fgPool = mockFrame[fgPoolKey]
         if not fgPool then fgPool = {}; mockFrame[fgPoolKey] = fgPool end
-        for _, group in ipairs(specGroups) do
+        -- ⚠ VisibleLayoutGroups, NOT `specGroups`. This is a DISPLAY loop and specGroups is the
+        -- STORE -- it is kept raw above because the placement pass before it is LOGIC (it
+        -- resolves an indicator's owning group and must find one wherever it lives). Reading
+        -- the store here drew the helper's Cooldown Icons group on the Any Buff preview.
+        for _, group in ipairs(VisibleLayoutGroups()) do
             if group.kind == "filter" and group.enabled ~= false then
                 tinsert(placedIndicators,
                     DrawGroupPlaceholderSlot(mockFrame, fgPool, group, 8, 8,
@@ -2763,7 +2819,10 @@ local function RefreshPlacedIndicators()
         local info = infoLookup[auraName]
         if type(auraCfg) == "table" and (isOther or info or AdHocSpellID(auraName)) and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
-              if indicator.enabled ~= false then
+              -- ⚠ AND THE MARK, which this loop never tested: the Any Buff pool holds the
+              -- helper's records too, so every helper icon and square painted itself on the
+              -- designer's own canvas. See PIHShowsMark.
+              if indicator.enabled ~= false and PIHShowsMark(indicator.pihSignal) then
                 local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
                 local capturedAura = auraName
                 local capturedID = indicator.id
@@ -2866,7 +2925,14 @@ local function RefreshPreviewEffects(opts)
     local sortedAuras = {}
     for auraName, auraCfg in pairs((opts and opts.pool) or CurrentAuraPool()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries
-            sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = auraCfg, priority = auraCfg.priority or 5 }
+            -- ⚠ THE HELPER'S FRAME-LEVEL EFFECTS ARE STRIPPED FOR THE DESIGNER, and ONLY the
+            -- helper's -- PIHVisibleRecord hides per type key, so a user's own effect on the
+            -- same filter record still paints. Without it a helper BORDER drew itself over the
+            -- Any Buff preview, which is the half of Krathe's report that had no card to
+            -- explain it: the effects list already hid the row, so the colour on the mock frame
+            -- came from nowhere the panel would admit to.
+            local cfg = PIHVisibleRecord(auraCfg)
+            sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = cfg, priority = cfg.priority or 5 }
         end
     end
     sort(sortedAuras, function(a, b)

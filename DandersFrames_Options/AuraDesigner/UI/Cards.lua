@@ -935,7 +935,7 @@ local function pihSyncTriggerExtras(s)
     f.includes = (next(presets) or next(customs)) and { presets = presets, customs = customs } or nil
 end
 
-local function pihCreateSignal(key, surfaceOverride)
+local function pihCreateSignal(key, surfaceOverride, showsAura)
     local def = PIH_SIGNALS[key]
     if not def then return false, "no such signal" end
     -- ☠ THE GATE IS PER SURFACE NOW, NOT PER SIGNAL (2026-09-08). It used to refuse any
@@ -945,6 +945,17 @@ local function pihCreateSignal(key, surfaceOverride)
     -- ⚠ STILL REFUSES A DUPLICATE OF THE SAME SURFACE, and that part is not optional: two
     -- border effects on one record cannot both exist (one key, one value) and two identical
     -- squares would be an invisible double that only the store can see.
+    -- ★★ ...EXCEPT THAT TWO ICONS ARE NOT NECESSARILY A DUPLICATE (2026-09-10). Krathe: "we
+    -- can't add Power Infusion and Their CD at the same time, we should allow this if we can?"
+    -- We can, and the store always could -- pihPlace's own note says so: a placed target mints
+    -- an INSTANCE, instances are per-id, and "two signals as icons coexist where two frame
+    -- effects on one key cannot". The blanket refusal was the guard being coarser than the
+    -- reason for it.
+    -- ⚠ THE PAIR IS THE POINT: one icon pinned to Power Infusion ("infuse this person") beside
+    -- one showing the buff they actually pressed ("here is why"). Two icons in the SAME art
+    -- mode are still the invisible double the guard exists to stop, so that is what it tests
+    -- now -- the art, not merely the surface.
+    -- ⚠ ONLY ICONS. A square carries no such distinction, so two of them remain a duplicate.
     -- ⚠ Only checked when the caller NAMES a surface. Without an override the target is
     -- resolved below from the stash or the signal's default, so the test would be against the
     -- wrong thing -- and that path is the plain "turn this signal on", which wants its
@@ -952,7 +963,13 @@ local function pihCreateSignal(key, surfaceOverride)
     local existing = pihFoundAll()[key]
     if surfaceOverride then
         for _, hit in ipairs(existing or {}) do
-            if hit.typeKey == surfaceOverride then return true, "already on" end
+            if hit.typeKey == surfaceOverride then
+                if surfaceOverride ~= "icon" then return true, "already on" end
+                -- staticSpellID's PRESENCE is the art choice -- there is no second field
+                -- recording it, deliberately (see P.PIH_SetIconShowsAura).
+                local pinned = (type(hit.cfg) == "table") and hit.cfg.staticSpellID ~= nil
+                if pinned == (not showsAura) then return true, "already on" end
+            end
         end
     elseif existing and existing[1] then
         return true, "already on"
@@ -1015,6 +1032,14 @@ local function pihCreateSignal(key, surfaceOverride)
     -- have drawn. Unreachable while the menu offered no bar; reachable the moment the add
     -- tiles did.
     if tgt == "icon" or tgt == "square" or tgt == "bar" then
+        -- ⚠ COUNTED BEFORE THE CREATE, because CreateIndicatorInstance appends to the very
+        -- list this measures. Used by the nudge below.
+        local siblings = 0
+        if tgt == "icon" then
+            for _, hit in ipairs(pihFoundAll()[key] or {}) do
+                if hit.typeKey == "icon" then siblings = siblings + 1 end
+            end
+        end
         local inst = CreateIndicatorInstance and CreateIndicatorInstance(ref, tgt)
         if not inst then return false, "could not create the indicator" end
         inst.pihSignal = key
@@ -1039,7 +1064,27 @@ local function pihCreateSignal(key, surfaceOverride)
         -- iconSpec.staticSpellID), not a field invented here -- the test path already
         -- honoured it, and the live path now skips Blizzard's SetIcon bind when it is set so
         -- the engine cannot repaint our art with the matched aura's.
-        if tgt == "icon" then inst.staticSpellID = PIH_PI_SPELL_ID end
+        -- ★ THE ART IS DECIDED HERE NOW (2026-09-10), not pinned unconditionally and unpinned
+        -- afterwards. P.PIH_AddSurface used to do the second half by walking EVERY icon the
+        -- signal held and clearing staticSpellID on all of them -- harmless while a signal
+        -- could hold only one icon, and a bug the moment it can hold two: adding "Their
+        -- cooldown" would have stripped the Power Infusion pin off the icon already there.
+        if tgt == "icon" then
+            inst.staticSpellID = (not showsAura) and PIH_PI_SPELL_ID or nil
+        end
+        -- ★ A SECOND ICON DOES NOT LAND ON TOP OF THE FIRST. Both take the type's default
+        -- corner, so without this the pair arrives perfectly stacked and reads as one icon
+        -- that ignored the click. One icon-width plus a gap, away from whichever edge the
+        -- anchor names, so the new one moves ONTO the frame rather than off it.
+        -- ⚠ A STARTING POSITION, NOT A LAYOUT. The effect card's own Placement controls own it
+        -- from here; this only has to make both visible on arrival.
+        if siblings > 0 then
+            local step = ((TYPE_DEFAULTS and TYPE_DEFAULTS.icon and TYPE_DEFAULTS.icon.size)
+                or 24) + 2
+            local a = inst.anchor or ""
+            inst.offsetX = (inst.offsetX or 0)
+                + (a:find("RIGHT") and -step or step) * siblings
+        end
         -- ☠ NO STACK COUNT. showStacks DEFAULTS TRUE for icons and squares, so every helper
         -- marker was drawing one -- a number read off whichever cooldown matched, printed on
         -- an icon whose art is pinned to Power Infusion. Krathe, 2026-09-09: "PI does not have
@@ -1404,16 +1449,14 @@ end
 function P.PIH_AddSurface(key, surface, showsAura)
     if not PIH_SIGNALS[key] then return false, "no such signal" end
     if not surface or surface == "none" then return false, "no surface" end
-    local ok, why = pihCreateSignal(key, surface)
-    -- Applied to the record the create just made, found by its mark -- the create path has
-    -- no return channel for the instance and does not need one for a single field.
-    if ok and showsAura and surface == "icon" then
-        for _, hit in ipairs(pihFoundAll()[key] or {}) do
-            if hit.typeKey == "icon" and type(hit.cfg) == "table" then
-                hit.cfg.staticSpellID = nil
-            end
-        end
-    end
+    -- ☠ showsAura GOES IN, IT IS NOT APPLIED AFTERWARDS. This used to call the create and then
+    -- walk every icon the signal held clearing staticSpellID -- correct while one icon was the
+    -- most a signal could have, and destructive now that two are allowed: it would have
+    -- unpinned the Power Infusion icon already on the frame. The create knows which instance
+    -- it just made; nothing else does, which is exactly why the fix-up loop had to guess.
+    -- ⚠ AND THE GUARD NEEDS IT TOO -- two icons are only a duplicate when they show the same
+    -- art. See pihCreateSignal.
+    local ok, why = pihCreateSignal(key, surface, showsAura)
     if ok then P.PIH_Apply() end
     pihRefresh()
     return ok, why
@@ -1537,6 +1580,23 @@ function P.PIH_AddIconGroup()
     groups[#groups + 1] = g
     pihRefresh()
     return true
+end
+
+-- ★ WHICH OF THE TWO ICON ARTS A SIGNAL ALREADY HOLDS (2026-09-10). Returns two booleans:
+-- pinned (the Power Infusion picture) and dynamic (the buff they actually pressed).
+-- ⚠ THE SURFACE IS NO LONGER THE WHOLE ANSWER. P.PIH_SurfacesOf says "an icon exists", which
+-- was enough to grey the add tiles while a signal could hold one; it can hold both now, so the
+-- grid has to ask which, or one legitimate half of the pair would arrive greyed out.
+-- ⚠ READ OFF staticSpellID's PRESENCE, the field that DOES the thing -- there is no second
+-- field recording the choice, deliberately (see P.PIH_SetIconShowsAura).
+function P.PIH_IconArtHeld(key)
+    local pinned, dynamic = false, false
+    for _, hit in ipairs(pihFoundAll()[key] or {}) do
+        if hit.typeKey == "icon" and type(hit.cfg) == "table" then
+            if hit.cfg.staticSpellID ~= nil then pinned = true else dynamic = true end
+        end
+    end
+    return pinned, dynamic
 end
 
 -- The surfaces a signal currently holds, in menu order (pihFoundAll sorts them).
@@ -7708,13 +7768,18 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
         -- an unrelated fourth spell -- the tiles differ in HOW MANY, and picking different art
         -- for each would put a second difference in the picture that means nothing.
         local egIDs = pihExampleSpellIDs(3)
-        -- ⚠ ONE `taken` FOR BOTH SINGLE-ICON TILES, because they are one effect seen from two
-        -- sides: the icon surface holds one record, and which picture it wears is a tick on
-        -- its card. So once either has been added, BOTH are spent -- and the tooltip has to
-        -- say that switching is done on the card rather than by adding the other one.
-        local iconTaken = held.icon and L["Already added. The card below switches which picture it shows."] or nil
+        -- ★ ONE `taken` EACH, BECAUSE THEY ARE TWO EFFECTS NOW (2026-09-10). They used to share
+        -- one: the icon surface held a single record and which picture it wore was a tick on
+        -- its card, so adding either spent both. Krathe: "we can't add Power Infusion and Their
+        -- CD at the same time, we should allow this if we can?" We can -- placed instances are
+        -- per-id -- so each tile greys only when ITS OWN art is already on the frame.
+        -- ⚠ The tick on the effect card stays and still switches one icon's picture. It is how
+        -- you change your mind about an icon you have; these tiles are how you get a second.
+        local pinnedHeld, dynamicHeld = P.PIH_IconArtHeld("burst")
+        local alreadyAdded = L["Already added. Remove it from the list below to change it."]
         yPos = grid({
-            { label = L["Power Infusion"], accent = accent, taken = iconTaken,
+            { label = L["Power Infusion"], accent = accent,
+              taken = pinnedHeld and alreadyAdded or nil,
               desc  = L["The same picture on everyone worth infusing."],
               Paint = function(pv) PaintEffectOnThumb(pv, "icon", PIH_PI_SPELL_ID) end,
               onClick = function() add(false) end },
@@ -7722,7 +7787,8 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
             -- parameter the tile above uses, and means something different: there the art IS
             -- what you will get, here it is one of the things you might. The label and the
             -- description carry that; a question mark carried nothing. See pihExampleSpellIDs.
-            { label = L["Their cooldown"], accent = accent, taken = iconTaken,
+            { label = L["Their cooldown"], accent = accent,
+              taken = dynamicHeld and alreadyAdded or nil,
               desc  = L["The buff they actually used — one of them, if several are up at once."],
               Paint = function(pv) PaintEffectOnThumb(pv, "icon", egIDs[1]) end,
               onClick = function() add(true) end },
@@ -7754,10 +7820,16 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
     for _, eff in ipairs(P.AddFlowEffects and P.AddFlowEffects() or {}) do
         local isIcon = eff.type == "icon"
         -- ☠ ICON SURVIVES ITS OWN SURFACE BEING TAKEN, and no other type does. Behind it are
-        -- THREE answers, only two of which spend the icon surface -- so hiding the tile the
-        -- moment a single icon exists would hide the only door to Cooldown Icons. It goes
-        -- when there is genuinely nothing left behind it, and not before.
-        local exhausted = isIcon and (held.icon and hasGroup) or (not isIcon and held[eff.type])
+        -- THREE answers -- two arts and the group -- so hiding the tile the moment ONE icon
+        -- exists would hide the door to the other two. It goes when all three are spent, and
+        -- not before.
+        local exhausted
+        if isIcon then
+            local pinnedHeld, dynamicHeld = P.PIH_IconArtHeld("burst")
+            exhausted = pinnedHeld and dynamicHeld and hasGroup
+        else
+            exhausted = held[eff.type]
+        end
         if eff.type ~= "sound" and not exhausted then
             local capturedType = eff.type
             items[#items + 1] = {

@@ -3094,10 +3094,11 @@ L["Cooldown Icons"] = true
 L["One icon per cooldown they have up, each showing its own."] = true
 -- ⚠ THE SECOND LINE OF A GREYED TILE'S TOOLTIP, and it has to say where the thing WENT --
 -- these tiles are greyed rather than removed precisely because a tile that vanished when you
--- clicked it told nobody anything. The two single-icon tiles share one message: they are one
--- effect seen from two sides, so adding either spends both, and the card's own tick is what
--- switches between them.
-L["Already added. The card below switches which picture it shows."] = true
+-- clicked it told nobody anything.
+-- ⚠ ONE MESSAGE FOR ALL THREE. The two single-icon tiles briefly shared a different one
+-- ("the card below switches which picture it shows") because adding either spent both; they
+-- are two independent effects now -- Krathe asked for the pair -- so each greys on its own and
+-- the honest instruction is the same as the group's: remove it from the list below.
 L["Already added. Remove it from the list below to change it."] = true
 -- The cooldown-icon group's collapsed summary, in place of the filter count every other group
 -- shows. Its list is the cooldown list, which the Triggers tab owns -- so trinkets, potions
