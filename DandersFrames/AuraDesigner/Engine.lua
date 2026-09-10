@@ -423,10 +423,10 @@ local pihEnabled = true
 
 local function pihSet(dark)
     pihGateOpen = not dark
-    local n, deferred = 0, 0
+    local n, deferred, hSkip = 0, 0, 0
     if DF.AuraContainer and DF.AuraContainer.SetHelperGate then
-        n, deferred = DF.AuraContainer.SetHelperGate(dark)
-        deferred = deferred or 0
+        n, deferred, hSkip = DF.AuraContainer.SetHelperGate(dark)
+        deferred, hSkip = deferred or 0, hSkip or 0
     end
 
     -- ★★★ ONE LINE PER EDGE, IN THE LOG, CARRYING EVERYTHING (2026-09-10).
@@ -445,13 +445,17 @@ local function pihSet(dark)
         local AC = DF.AuraContainer
         local tot, dk, pend, parked = 0, 0, 0, 0
         if AC and AC.GetHelperSlotStatus then tot, dk, pend, parked = AC.GetHelperSlotStatus() end
+        local hTot, hLive, hDark = 0, 0, 0
+        if AC and AC.GetHelperHandleStatus then hTot, hLive, hDark = AC.GetHelperHandleStatus() end
         local allow = AC and AC.GetHelperAllowedPlayers and AC.GetHelperAllowedPlayers()
         local nAllow = 0
         if allow then for _ in pairs(allow) do nAllow = nAllow + 1 end end
         DF:Debug("AURADESIGNER",
-            "PIH gate -> %s | pushed=%d deferred=%d | slots %d tot/%d dark/%d pending/%d parked"
+            "PIH gate -> %s | pushed=%d deferred=%d handlesSkipped=%d"
+            .. " | groups %d tot/%d live/%d dark | slots %d tot/%d dark/%d pending/%d parked"
             .. " | enabled=%s gateEnabled=%s combatOnly=%s inCombat=%s manual=%s | players=%s",
-            dark and "DARK" or "OPEN", n, deferred, tot, dk, pend, parked,
+            dark and "DARK" or "OPEN", n, deferred, hSkip,
+            hTot, hLive, hDark, tot, dk, pend, parked,
             tostring(pihEnabled), tostring(pihGateEnabled), tostring(pihCombatOnly),
             tostring(DF.playerInCombat), tostring(pihManual),
             allow and tostring(nAllow) or "everyone")

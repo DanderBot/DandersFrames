@@ -6696,9 +6696,14 @@ end
 -- ☠ ONLY OUR CONTAINERS. applyGroupTuning runs an immediate UpdateAllAuras per group key and
 -- has no equality guard of its own, so broadcasting to every handle in the addon would cost a
 -- full aura re-parse on each one for a gate flip that concerns a handful.
+-- ⚠ THE COUNTS COME BACK SPLIT: handles pushed, handles SKIPPED, slots pushed, slots
+-- queued. One combined number could not say which LANE ignored a gate edge, and the two
+-- lanes fail for completely different reasons -- a handle is skipped when it is destroyed
+-- or has no backend, a slot when it is parked or the push is refused. Krathe's log showed
+-- 72 pushed and icons still on screen, and no way to tell which 72.
 function AuraContainer.SetHelperGate(dark)
     helperGateDark = dark and true or false
-    local n = 0
+    local n, hSkip = 0, 0
     for h in pairs(AuraContainer._handles or {}) do
         local b = h and h.backend
         if b and b.applyGroupTuning and not h._destroyed and helperGateHandleIsOurs(h) then
@@ -6707,7 +6712,12 @@ function AuraContainer.SetHelperGate(dark)
             -- and protection is identical. A gate edge walks every owned handle twice a Power
             -- Infusion cycle, in combat, so this is exactly the path that rule was written for.
             local ok = pcall(b.applyGroupTuning, b)
-            if ok then n = n + 1 end
+            if ok then n = n + 1 else hSkip = hSkip + 1 end
+        elseif h and h.config and h.config.dfGate then
+            -- OURS, and not reachable: destroyed, or its backend is gone (a build
+            -- deferred to combat end). It renders whatever it last had, and nothing
+            -- here can correct it -- so it is COUNTED rather than passed over in silence.
+            hSkip = hSkip + 1
         end
     end
     -- ☠ SLOTS TOO, NARROWED TO OURS. SetAuraSlotCandidateFilters has no engine-side
@@ -6729,7 +6739,7 @@ function AuraContainer.SetHelperGate(dark)
     -- ⚠ REPORTED SEPARATELY. A queued slot is not a pushed one, and counting them
     -- together is what made a log full of healthy-looking edges hide a raid's worth of
     -- icons that never went dark.
-    return n, deferred
+    return n, deferred, hSkip
 end
 
 function AuraContainer.GetHelperGate() return helperGateDark end
@@ -6752,6 +6762,23 @@ function AuraContainer.GetHelperGate() return helperGateDark end
 -- this addon has come down to.
 -- Returns: total helper slots, how many would be handed the DEAD filter right now, how many
 -- are waiting on a deferred push, and how many are parked.
+-- The HANDLE lane's equivalent -- how many group containers carry our mark, and how many of
+-- those are currently reachable (a live backend that can be tuned). The Cooldown Icons
+-- group is a handle, not a slot, so nothing in GetHelperSlotStatus can see it.
+function AuraContainer.GetHelperHandleStatus()
+    local total, live, dark = 0, 0, 0
+    for h in pairs(AuraContainer._handles or {}) do
+        if h and h.config and h.config.dfGate then
+            total = total + 1
+            if h.backend and h.backend.applyGroupTuning and not h._destroyed then
+                live = live + 1
+            end
+            if helperGateDark or helperUnitExcluded(h.config.unit) then dark = dark + 1 end
+        end
+    end
+    return total, live, dark
+end
+
 function AuraContainer.GetHelperSlotStatus()
     local total, dark, pending, parked = 0, 0, 0, 0
     for h in pairs(AuraContainer._slotHandles or {}) do
