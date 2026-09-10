@@ -8,6 +8,7 @@
 
 * (Auras) Fix one player's buffs, debuffs and Aura Designer icons all staying blank until a reload, most often after they died and were resurrected. (by Krathe)
 * (Auras) Fix "Only My Buffs" showing other players' buffs on a group member who is in a different instance to you. Those buffs now hide until they are back with you. Group members merely far out of range are unaffected. (by Krathe)
+* (Auras) Fix a group member's buffs, debuffs and Aura Designer indicators staying blank after they walked out of range and back, until combat ended or you reloaded. (by Krathe)
 * (Aura Designer) Fix every Aura Designer icon vanishing until a reload after joining a raid, your own frame included. (by Krathe)
 * (Aura Designer) Fix debuffs appearing in the place of buff indicators, most visibly after swapping to a spec with no Aura Designer setup, until a reload. (by Krathe)
 * (Aura Designer) Fix filter, debuff and layout group icons staying at full brightness on out-of-range players while the indicators next to them faded. (by Krathe)
