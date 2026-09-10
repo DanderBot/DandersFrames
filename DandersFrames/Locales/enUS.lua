@@ -3007,7 +3007,12 @@ L["Groups without assigned roles show everyone."] = true
 -- Power Infusion is on cooldown" -- the one control in a box of enables that turned a
 -- SUPPRESSION on, which made the box read inconsistently. The stored value is unchanged and
 -- still defaults to gating, so this ships UNTICKED and nobody's saved choice changed meaning.
-L["Show even if your Power Infusion is on cooldown"] = true
+-- ⚠ ...AND THEN SHORTENED. It spelled the whole rule out on the row and wrapped doing it;
+-- the rule moved to the tooltip below. What the LABEL has to carry is whose cooldown is meant
+-- -- this box is otherwise full of other people's -- and "I can't infuse" carries it, where
+-- "Show while on cooldown" would have read as the tracked one.
+L["Show when I can't infuse"] = true
+L["Off: markers appear only while your Power Infusion is ready, so you are never pointed at someone you cannot infuse. On: they appear whatever your own cooldown is doing."] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
 -- finer; the row links out to the editor that does go spell by spell, so the limit is not
 -- a dead end.

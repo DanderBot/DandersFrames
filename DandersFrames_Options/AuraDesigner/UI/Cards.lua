@@ -7135,6 +7135,14 @@ local function pihAddGateAndNotes(g, t)
     -- single checkbox is more chrome than the setting is worth, and this label says
     -- what it does without a header to lean on -- which is the test for whether a
     -- control can live under a heading that does not quite describe it.
+    -- ⚠ THAT TEST IS STILL MET BY A SHORTER LABEL. "Show even if your Power Infusion is on
+    -- cooldown" spelled the whole rule out on the row and wrapped doing it; Krathe, 2026-09-10:
+    -- "less verbose with tooltip and more clear." What the row has to carry is which of your
+    -- OWN cooldowns is meant, and "I can't infuse" carries it in three words -- the rest is an
+    -- explanation, and explanations go in tooltips.
+    -- ☠ NOT "Show while on cooldown", which was shorter still and ambiguous in the one way
+    -- that matters here: this box is full of other people's cooldowns, so a label that does
+    -- not say WHOSE reads as the tracked one.
     -- ★ ASKED THE OTHER WAY ROUND (2026-09-08), for the same reason the roles were: every
     -- other tick on this panel turns something ON when ticked, and this one turned a
     -- SUPPRESSION on -- so the whole box read as a list of things you enable except for the
@@ -7143,9 +7151,17 @@ local function pihAddGateAndNotes(g, t)
     -- ⚠ THE STORE IS UNCHANGED AND THE DEFAULT ALREADY MATCHES. gateEnabled ships true, so
     -- `not gateEnabled` reads as UNTICKED -- which is the off-by-default he asked for -- and
     -- nobody's saved choice changes meaning. Inversion in the UI only, exactly like the roles.
-    t.check(g, L["Show even if your Power Infusion is on cooldown"],
+    local gateCb = t.check(g, L["Show when I can't infuse"],
         function() return P.PIH_Settings().gateEnabled == false end,
         function(v) P.PIH_SetGateEnabled(not v) end)
+    -- ⚠ A BARE STRING, so the tooltip's title is the label -- which is the right title here.
+    -- The sound tick passes a table instead because ITS label is "Enable", which titles
+    -- nothing; this one names its own setting.
+    -- ⚠ OFF FIRST. The default is off, so the first line is the behaviour the reader
+    -- currently has -- the same shape as the icon tick's "Off: ... On: ..." explainer.
+    if gateCb then
+        gateCb.tooltip = L["Off: markers appear only while your Power Infusion is ready, so you are never pointed at someone you cannot infuse. On: they appear whatever your own cooldown is doing."]
+    end
 
 
     -- ☠ THE CONTENTION NOTES ARE GONE, AND THE ARGUMENT THAT KEPT THEM WAS THE
@@ -7819,9 +7835,10 @@ S.BuildPIHelperBody = function(parent, opts)
         -- (that this box is the ROLE filter) was the thing it left out.
         -- ⚠ THE COOLDOWN GATE STAYS IN IT, and that was already argued: see the long note in
         -- pihAddGateAndNotes -- a whole titled group around a single checkbox is more chrome
-        -- than the setting is worth, and "Show even if your Power Infusion is on cooldown"
-        -- says what it does without a header to lean on. That note names this exact case as
-        -- the test for a control living under a heading that does not quite describe it.
+        -- than the setting is worth, and "Show when I can't infuse" says what it does without
+        -- a header to lean on. That note names this exact case as the test for a control
+        -- living under a heading that does not quite describe it, and records why the label
+        -- shrank to those four words rather than three.
         yPos = t.group(L["Roles"], function(g)
             pihAddRoles(g, t)
             pihAddGateAndNotes(g, t)
