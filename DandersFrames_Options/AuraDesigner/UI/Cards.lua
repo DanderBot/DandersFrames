@@ -7476,6 +7476,34 @@ end
 -- between a container and an effect stops being the user's problem.
 local pihAddPick = nil   -- nil = the surface grid, "icon" = the art choice
 
+-- ── EXAMPLE ART FOR THE TWO TILES WHOSE PICTURE IS NOT KNOWN IN ADVANCE ──
+-- ★ REAL COOLDOWNS, NOT QUESTION MARKS (2026-09-10). Krathe: "can we get the preview card
+-- here to actually show some example icons instead of ??"
+-- ☠ AND THE PLACEHOLDER WAS DEFENSIBLE RIGHT UP TO THE POINT IT WAS LOOKED AT. The designer's
+-- add flow asks for a TYPE first and a SPELL second, so its tiles genuinely have no artwork to
+-- show yet and the `?` is honest there -- I argued the same for these, since the helper's
+-- picture really is unknown until a cooldown matches. But a tile is a picture of what the
+-- thing LOOKS like, and three question marks in a row is a picture of an error. The unknown
+-- is WHICH cooldown, never WHETHER there is art.
+-- ⚠ FROM THE SEED, NOT FROM THE LIVE LIST, and sorted. The user's list moves with the class
+-- ticks, so sampling it would make these tiles change picture when someone unticked Warrior --
+-- a tile is not a live readout. Sorting makes the choice the same on every client and every
+-- build rather than whatever pairs() said first.
+-- ⚠ ONLY IDS THE CLIENT CAN DRAW. GetSpellTexture returns nil for a spell whose data is not
+-- cached, and one `?` standing among two real icons reads worse than three of them.
+local function pihExampleSpellIDs(n)
+    local ids = pihSeedIDs()
+    table.sort(ids)
+    local out = {}
+    for _, sid in ipairs(ids) do
+        if C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid) then
+            out[#out + 1] = sid
+            if #out >= n then break end
+        end
+    end
+    return out
+end
+
 -- ── A ROW OF ICONS, AS THE GROUP ACTUALLY DRAWS ONE ──
 -- ☠ THE "HOW MANY" AXIS IS THE ONE PROSE KEEPS FAILING AT, which is why it is drawn. The
 -- Cooldown Icons tile used to paint the single-icon thumbnail, so the tile that means "one per
@@ -7484,7 +7512,10 @@ local pihAddPick = nil   -- nil = the surface grid, "icon" = the art choice
 -- ⚠ THE GROUP'S OWN GEOMETRY, not a decorative row: TOPRIGHT, growing LEFT, at the spacing
 -- P.PIH_AddIconGroup creates it with. If those defaults change, this picture is wrong and
 -- should be changed with them.
-local function PaintIconRowOnThumb(pv, n)
+-- ⚠ `ids` IS A LIST OF EXAMPLE SPELLS (pihExampleSpellIDs), one per slot. Short or empty is
+-- fine -- a slot with no id falls back to the designer's placeholder, which is what a client
+-- that has not cached those spells yet will show, and it is still a row of the right length.
+local function PaintIconRowOnThumb(pv, ids, n)
     local mock = pv.mockFrame
     if not mock then return end
     local size = (TYPE_DEFAULTS and TYPE_DEFAULTS.icon and TYPE_DEFAULTS.icon.size) or 24
@@ -7498,7 +7529,10 @@ local function PaintIconRowOnThumb(pv, n)
         local ico = mock:CreateTexture(nil, "OVERLAY", nil, 2)
         ico:SetSize(size, size)
         ico:SetPoint("CENTER", ring, "CENTER", 0, 0)
-        ico:SetTexture(DEFAULT_TILE_ICON)
+        local sid = ids and ids[i]
+        local tex = sid and C_Spell and C_Spell.GetSpellTexture
+            and C_Spell.GetSpellTexture(sid) or nil
+        ico:SetTexture(tex or DEFAULT_TILE_ICON)
         ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     end
     -- ⚠ pv.spellIcon IS DELIBERATELY NOT PUBLISHED. It is the handle the designer's add pane
@@ -7600,6 +7634,10 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
             if Refresh then Refresh() end
         end
         local accent = BADGE_COLORS.icon or tc
+        -- Sampled ONCE for both tiles, so the single icon is the first of the row rather than
+        -- an unrelated fourth spell -- the tiles differ in HOW MANY, and picking different art
+        -- for each would put a second difference in the picture that means nothing.
+        local egIDs = pihExampleSpellIDs(3)
         -- ⚠ ONE `taken` FOR BOTH SINGLE-ICON TILES, because they are one effect seen from two
         -- sides: the icon surface holds one record, and which picture it wears is a tick on
         -- its card. So once either has been added, BOTH are spent -- and the tooltip has to
@@ -7610,12 +7648,13 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
               desc  = L["The same picture on everyone worth infusing."],
               Paint = function(pv) PaintEffectOnThumb(pv, "icon", PIH_PI_SPELL_ID) end,
               onClick = function() add(false) end },
-            -- ⚠ NO PINNED ART ON THIS TILE, so it draws the designer's placeholder -- which is
-            -- honest here in a way it was not before: the picture genuinely is not known until
-            -- a cooldown matches.
+            -- ⚠ AN EXAMPLE COOLDOWN, NOT A PINNED ONE. It goes through the same staticSpellID
+            -- parameter the tile above uses, and means something different: there the art IS
+            -- what you will get, here it is one of the things you might. The label and the
+            -- description carry that; a question mark carried nothing. See pihExampleSpellIDs.
             { label = L["Their cooldown"], accent = accent, taken = iconTaken,
               desc  = L["The buff they actually used — one of them, if several are up at once."],
-              Paint = function(pv) PaintEffectOnThumb(pv, "icon") end,
+              Paint = function(pv) PaintEffectOnThumb(pv, "icon", egIDs[1]) end,
               onClick = function() add(true) end },
             -- ★ THE CONTAINER, AS THE THIRD ANSWER TO "WHICH ICON". It can stand beside the
             -- other two here in a way it never could on the main grid: there the question was
@@ -7623,7 +7662,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
             { label = L["Cooldown Icons"], accent = accent,
               taken = hasGroup and L["Already added. Remove it from the list below to change it."] or nil,
               desc  = L["One icon per cooldown they have up, each showing its own."],
-              Paint = function(pv) PaintIconRowOnThumb(pv, 3) end,
+              Paint = function(pv) PaintIconRowOnThumb(pv, egIDs, 3) end,
               onClick = function()
                   local ok, why = P.PIH_AddIconGroup()
                   if not ok then DF:DebugWarn("AURADESIGNER",
