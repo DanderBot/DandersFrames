@@ -29,6 +29,8 @@
 
 ### Changes
 
+* (Aura Filters) The built-in spell list is refreshed from the latest raid and dungeon logs: 23 spells added, two dropped, several trinket and item names corrected, and six items that were bundled under one name now list separately.
+* (Aura Filters) A handful of spells go back to their default on or off state in the Filter Designer, because the way they are stored changed.
 * (Aura Designer) Border animations are back on aura icons. Placed icons and squares, aura bars, and filter, debuff and layout group icons can all animate their borders again, in combat included. Each one is set from its own Border section in the Aura Designer, alongside the colour and thickness. Aura icons always start on the effect's settled loop — only the frame border still plays the opening flash. (by Krathe)
 * (Aura Designer) Debuff Groups have a new **Hide Duplicates Between Groups** switch, on by default, so a debuff matching several groups shows only in the first one that matches. (by Krathe)
 
