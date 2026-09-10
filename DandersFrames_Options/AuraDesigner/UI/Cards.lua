@@ -995,7 +995,34 @@ local function pihSyncTriggerExtras(s)
     end
     -- nil rather than an empty table: `includes` absent is the shape every other filter has,
     -- and foldIncludes short-circuits on it.
-    f.includes = (next(presets) or next(customs)) and { presets = presets, customs = customs } or nil
+    local want = (next(presets) or next(customs))
+        and { presets = presets, customs = customs } or nil
+
+    -- ☠☠ A CHANGE HERE MUST INVALIDATE THE AURA LAYOUT, AND UNTIL NOW NOTHING DID.
+    -- The two consumers of this list do NOT resolve it the same way:
+    --   · the SOUND registrations resolve fresh on every arm (Engine.lua pihResolvedMap);
+    --   · the VISUALS go through DF:ResolveADFilterRef, which MEMOISES the resolved map
+    --     and only clears when DF.auraLayoutVersion moves.
+    -- So a rewrite of `includes` with no version bump leaves the border and the icon
+    -- matching yesterday's spell set while the cue plays off today's -- a trinket that
+    -- makes a NOISE and draws NOTHING, which is a fault with no visible cause at all.
+    -- ⚠ P.PIH_SetAmplifier already invalidated via pihRefresh; the paths that did not are
+    -- the ones nobody clicks: the schema sweep (which writes these for the first time on
+    -- every upgrading profile) and the Triggers panel build.
+    -- ⚠ ONLY ON A REAL CHANGE. This runs on every panel build and every sweep, and an
+    -- unconditional invalidate there would re-resolve every filter ref in the addon each
+    -- time the tab is opened.
+    local function sameSet(a, b)
+        for k in pairs(a or {}) do if not (b and b[k]) then return false end end
+        for k in pairs(b or {}) do if not (a and a[k]) then return false end end
+        return true
+    end
+    local had = f.includes
+    local changed = (had == nil) ~= (want == nil)
+        or (had and want and not (sameSet(had.presets, want.presets)
+                                  and sameSet(had.customs, want.customs)))
+    f.includes = want
+    if changed and DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
 end
 
 local function pihCreateSignal(key, surfaceOverride, showsAura)
