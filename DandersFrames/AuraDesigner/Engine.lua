@@ -212,10 +212,28 @@ end
 -- resolve -- taking the first is a choice, not a derivation. Party first because that is where
 -- the feature is used. A preset whose settings table survived a Remove no longer shadows one
 -- that actually has a helper, because the marks decide.
+-- ☠☠ THE *LIVE* DESIGNER, NOT THE MODE BASE (2026-09-10). This read GetModeBaseAuraDesigner,
+-- which is the EDITOR's variant -- Presets.lua says so directly: "GetMode*Designer ... the
+-- ACTIVE designer a mode resolves to right now ... Used by LIVE consumers (SoundEngine,
+-- migrations) that must match what's on screen. The EDITOR uses the GetModeBase* variants".
+-- The helper is a live consumer and was reading the editor's answer.
+--
+-- ☠ WHAT IT COST, from Krathe's raid: a raid auto-layout can point its own AD PRESET at
+-- something other than the mode base -- his 21-30 layout uses a "Flex 21-30" preset. The
+-- frames render from THAT (DF:ResolveAuraDesigner honours the overlay) and it holds no
+-- helper, so nothing draws; this read carried on finding the helper in the BASE preset and
+-- happily armed the gate, the roles and THE SOUND for a preset that is not on screen.
+-- ⇒ "I could hear the sound trigger but did not see the border or PI icon at all" is this,
+-- and so is a status readout that reports a healthy helper while nothing renders. The
+-- feature could not diagnose itself because its two halves were reading different presets.
+-- ⚠ IT DOES NOT MAKE HIS HELPER APPEAR -- the records genuinely are not in that preset,
+-- which is a choice the preset system offers and the user has to make. What it fixes is
+-- the engine agreeing with the screen: no helper there means silent, ungated, and a
+-- readout that SAYS so.
 local function pihSettings()
-    if not DF.GetModeBaseAuraDesigner then return nil end
+    if not DF.GetModeAuraDesigner then return nil end
     for _, mode in ipairs(PIH_MODES) do
-        local adDB = DF:GetModeBaseAuraDesigner(mode)
+        local adDB = DF:GetModeAuraDesigner(mode)
         local s = adDB and adDB.pihelper
         if s and pihHasHelper(adDB) then return s end
     end
