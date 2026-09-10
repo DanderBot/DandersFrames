@@ -3142,6 +3142,10 @@ L["Already added. Remove it from the list below to change it."] = true
 -- and racials reach it automatically as they are ticked there, with no second control here
 -- that could disagree. The number is the list's own enabled total, so it moves when they do.
 L["%d spells, from your Triggers"] = true
+-- ⚠ AND THE PLAIN COUNT, for a group that has been given its own SHOW set. Saying "from your
+-- Triggers" on a group that no longer follows them would be the header contradicting the block
+-- directly beneath it, which says it has stopped following.
+L["%d spells"] = true
 -- ★ THE ICON'S TWO CHOICES on the Power Infusion Helper's pool. The picture is pinned to
 -- Power Infusion by default -- "infuse this player" -- and can be swapped for the buff they
 -- actually used. The caveat in the first tooltip is real and not a hedge: a placed icon

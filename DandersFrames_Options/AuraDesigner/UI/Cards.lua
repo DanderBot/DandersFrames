@@ -1514,7 +1514,15 @@ end
 -- for the feature ("build it on merit, not as a fallback").
 -- ⚠ THE NAME IS STORED DATA, raw and never L[] -- the same rule the three filter names
 -- follow. A translated string in the profile is a name that changes when the client does.
-local PIH_ICON_GROUP_NAME = "PI Helper — Cooldowns"
+-- ★ "Icons", NOT "Cooldowns" (2026-09-10). Krathe: "maybe it should be called PI Helper -
+-- Icons not cooldowns as it can be trinkets etc too?" -- right, and more so since the group
+-- gained its own SHOW block: it can be set to trinkets only, in which case a name saying
+-- Cooldowns is not merely vague but wrong. PIH_ICON_GROUP_OLD_NAME is what the rename
+-- migration recognises; see sweep step 12 for why it matches on the exact old string.
+-- ☠ ONE LOCAL, NOT TWO. This file is at Lua's 200-local ceiling in its main chunk, so the
+-- old name a migration has to recognise lives inline in sweep step 12 rather than beside
+-- this one -- which is also where it is explained. luac refuses the second local outright.
+local PIH_ICON_GROUP_NAME = "PI Helper — Icons"
 
 function P.PIH_IconGroup()
     for _, g in ipairs((P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(false)) or {}) do
@@ -1582,8 +1590,16 @@ end
 -- Triggers reaches these icons with no second control and no way for the two to disagree.
 -- ⚠ P.PIH_WatchedCount, not this list's own size -- since the amplifiers stopped being copied
 -- in, our list is 40 and the number a user is looking for is the whole watched set.
-function P.PIH_IconGroupSummary()
-    return format(L["%d spells, from your Triggers"], P.PIH_WatchedCount and P.PIH_WatchedCount() or 0)
+-- ⚠ COUNTED OVER THE GROUP'S OWN SOURCES, and the wording follows: a group that has been
+-- given its own set is no longer reporting "from your Triggers", and a header that said so
+-- while the SHOW block underneath disagreed would be the panel contradicting itself one row
+-- apart. Following => the Triggers phrasing; overridden => the count alone.
+function P.PIH_IconGroupSummary(group)
+    local n = P.PIH_WatchedCount and P.PIH_WatchedCount(P.PIH_GroupSources(group)) or 0
+    if P.PIH_GroupFollowsTriggers(group) then
+        return format(L["%d spells, from your Triggers"], n)
+    end
+    return format(L["%d spells"], n)
 end
 
 -- ★★★ THE COOLDOWN-ICON GROUP PICKS ITS OWN SOURCES (2026-09-10).
@@ -2022,18 +2038,32 @@ function P.PIH_PresetCounts(catKey)
     return on, #recs
 end
 
--- ★ EVERYTHING THE HELPER WATCHES, COUNTED THE WAY THE PANEL COUNTS IT: the cooldown list
--- plus each ticked source, each contributing its own ENABLED total.
+-- ★ EVERYTHING A SET OF SOURCES WATCHES, COUNTED THE WAY THE PANEL COUNTS IT: each ticked
+-- source contributing its own ENABLED total.
 -- ☠ NOT THE RESOLVED MAP. R:ResolveSelection returns spell IDs with every variant expanded,
 -- which for this set is several hundred -- a true number of a thing nobody is counting. The
 -- rows on the Triggers tab say 40, 41, 6 and 4; this has to be their sum or the two screens
 -- disagree about the same feature.
-function P.PIH_WatchedCount()
+-- ⚠ `sources` IS AN ARGUMENT, defaulting to the Triggers ticks. Krathe, 2026-09-10: "the
+-- number of spells tracked does not seem to update on the show toggles but only on the
+-- triggers" -- because this read P.PIH_Settings() outright, so the Cooldown Icons header
+-- reported what the HELPER fires on while the card under it listed what the GROUP shows. Two
+-- numbers for two different questions, and only one of them was being asked.
+-- ⚠ COOLDOWNS IS A SOURCE HERE TOO, not an always-on baseline: the group can switch it off,
+-- and a count that added the class list regardless would over-report by forty.
+function P.PIH_WatchedCount(sources)
     local R = DF.FilterRegistry
+    local s = sources
+    if not s then
+        local st = P.PIH_Settings()
+        s = { cooldowns = true, trinkets = st.trinkets == true,
+              potions = st.potions == true, racials = st.racials == true }
+    end
     local total = 0
     local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
-    if id and R and R.CustomFilterCounts then total = R:CustomFilterCounts(id) end
-    local s = P.PIH_Settings()
+    if s.cooldowns and id and R and R.CustomFilterCounts then
+        total = R:CustomFilterCounts(id)
+    end
     if s.trinkets then total = total + P.PIH_PresetCounts(PIH_SEED.amplifiers.trinkets) end
     if s.potions  then total = total + P.PIH_PresetCounts(PIH_SEED.amplifiers.potions)  end
     if s.racials  then total = total + P.PIH_RacialCounts() end
@@ -6696,7 +6726,7 @@ P.OpenFilterPopout = OpenFilterPopout
 --    ⚠ THE LESSON: a mark written by a CREATE path reaches nobody who already has the
 --    thing. Stamping in the sweep is what reaches them, and the sweep is the one place
 --    that runs for a helper nobody is touching.
-local PIH_SCHEMA = 11
+local PIH_SCHEMA = 12
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -6986,6 +7016,25 @@ local function pihSweep()
                                  "offsetX", "offsetY" }) do
                 if g[k] == nil then g[k] = def[k] end
             end
+        end
+    end
+
+    -- 12. THE GROUP IS CALLED "Icons", NOT "Cooldowns". Krathe, 2026-09-10: "maybe it should
+    -- be called PI Helper - Icons not cooldowns as it can be trinkets etc too?" -- and more so
+    -- since it gained a SHOW block that can set it to trinkets ONLY, where the old name is not
+    -- vague but wrong.
+    -- ⚠ ONLY IF IT STILL HOLDS THE EXACT OLD STRING. The card has an editable Group Name
+    -- field, so anything else is a name the USER typed -- renaming that would be this addon
+    -- overwriting their words to satisfy its own tidiness.
+    -- ☠ THE OLD NAME IS A LITERAL, NOT A CONSTANT, and only because this file is at Lua's
+    -- 200-local ceiling -- see the note on PIH_ICON_GROUP_NAME. It is written once, here, in
+    -- the one place that needs to recognise it.
+    -- ⚠ THE NAME IS STORED DATA, never L[]: a translated string in the profile is a name that
+    -- changes when the client's language does. Same rule the three filter names follow.
+    do
+        local g = P.PIH_IconGroup and P.PIH_IconGroup()
+        if g and g.name == "PI Helper — Cooldowns" then
+            g.name = PIH_ICON_GROUP_NAME
         end
     end
 
