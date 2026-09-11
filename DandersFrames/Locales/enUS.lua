@@ -3035,7 +3035,21 @@ L["SHOW"] = true
 L["Class cooldowns"] = true
 L["Following the Triggers tab. Changing one of these stops that."] = true
 L["Follow Triggers"] = true
-L["Empty means everyone. Add players here to watch only them."] = true
+-- ★★ THE ALLOWLIST'S OWN SWITCH (2026-09-11), and the note shrank to make room for it.
+-- ⚠ RETIRED: L["Empty means everyone. Add players here to watch only them."]. Its first
+-- sentence described a rule that has moved into the tick's tooltip, where it belongs now that
+-- emptiness is no longer what decides anything.
+-- ⚠ "ONLY WATCH THESE PLAYERS" reads correctly in both positions -- ticked it is the rule,
+-- unticked it is the rule you are not using -- which a label like "Use player list" does not:
+-- that one names a mechanism and leaves the reader to work out its effect.
+L["Add players here to watch only them."] = true
+L["Only watch these players"] = true
+-- ⚠ OFF FIRST, because off is the state this switch was asked for: Krathe, 2026-09-11, wants
+-- to keep a raid team written down and stop applying it on a pug night. The promise that the
+-- list survives is the whole point, so it is the sentence that leads.
+-- ⚠ THE EMPTY-LIST RULE SITS ON THE ON LINE, which is the only state it can apply in.
+L["Off: the helper watches everyone. Your list is kept for next time."] = true
+L["On: only the players listed below. An empty list still means everyone."] = true
 -- The compact picker's row button, which toggles. Both states are spelled out because the
 -- glyph alone (a chevron, or a tick) says which state you are IN and not what a click does.
 L["Click to watch this player."] = true

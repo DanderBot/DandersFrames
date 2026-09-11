@@ -689,12 +689,23 @@ function Engine:PIH_ApplySaved()
     -- players and nobody else", so an empty one would silence the helper completely -- for a
     -- user who had added two names and removed them again, which is exactly the moment they
     -- would expect it to go back to normal rather than break.
+    -- ⚠ AND `playersOn` DECIDES WHETHER IT IS PUSHED AT ALL (2026-09-11). The list used to be
+    -- its own switch -- names meant narrowing, none meant everyone -- which made "stop
+    -- narrowing tonight" and "throw the names away" the same action. Krathe: "I might want to
+    -- add my raid team to the list but turn off showing only for those players in a pug group
+    -- without having to add/remove them all each time."
+    -- ⚠ ABSENT MEANS ON, so every profile written before today loads exactly as it did.
+    -- ⚠ THE PANEL'S P.PIH_Apply MAKES THE SAME DECISION THE SAME WAY. These are the two halves
+    -- of one push (login and live edit) and they have drifted apart once already -- the live
+    -- half simply did not exist, so an edited list did nothing until the next reload.
     if DF.AuraContainer and DF.AuraContainer.SetHelperAllowedPlayers then
         local map
-        for _, fullName in ipairs(s.players or {}) do
-            if type(fullName) == "string" and fullName ~= "" then
-                map = map or {}
-                map[fullName] = true
+        if s.playersOn ~= false then
+            for _, fullName in ipairs(s.players or {}) do
+                if type(fullName) == "string" and fullName ~= "" then
+                    map = map or {}
+                    map[fullName] = true
+                end
             end
         end
         DF.AuraContainer.SetHelperAllowedPlayers(map)

@@ -730,12 +730,18 @@ function P.PIH_Apply()
     -- ⚠ ARRAY IN, MAP OUT -- the same conversion Engine:PIH_ApplySaved does, and empty is
     -- nil rather than an empty map: a present map means "these players and nobody else", so
     -- an empty one would silence the helper for someone who just removed their last name.
+    -- ⚠ AND NOTHING AT ALL WHEN THE SWITCH IS OFF (see P.PIH_PlayersOn): the names stay in the
+    -- profile, the container is simply never told about them. Pushing nil rather than skipping
+    -- the call is the point -- a list left pushed from before the switch moved would go on
+    -- narrowing a feature the user has just told to stop.
     if DF.AuraContainer and DF.AuraContainer.SetHelperAllowedPlayers then
         local map
-        for _, fullName in ipairs(s.players or {}) do
-            if type(fullName) == "string" and fullName ~= "" then
-                map = map or {}
-                map[fullName] = true
+        if s.playersOn ~= false then
+            for _, fullName in ipairs(s.players or {}) do
+                if type(fullName) == "string" and fullName ~= "" then
+                    map = map or {}
+                    map[fullName] = true
+                end
             end
         end
         DF.AuraContainer.SetHelperAllowedPlayers(map)
@@ -2134,6 +2140,29 @@ function P.PIH_SetPlayers(list)
         end
     end
     s.players = out
+    P.PIH_Apply()
+end
+
+-- ★★ THE LIST IS DATA; THE NARROWING IS A SWITCH (2026-09-11). Krathe: "I might want to add my
+-- raid team to the list but turn off showing only for those players in a pug group without
+-- having to add/remove them all each time."
+-- ☠ THE EMPTINESS RULE WAS DOING TWO JOBS AT ONCE -- it stored WHO and decided WHETHER, so the
+-- only way to stop narrowing was to destroy the names. That is the same fault as the enable
+-- tick that used to delete records: a switch whose off position throws data away. Split them
+-- and both become honest.
+-- ⚠ ABSENT MEANS ON, and that is exactly backwards-compatible: a profile with names was
+-- narrowing and still does; a profile with none was not and still is not (an empty list is
+-- everyone either way, below). Only an explicit OFF is stored, so there is no defaults entry to
+-- keep in step and nothing for a migration to fire on.
+-- ⚠ AN EMPTY LIST IS STILL EVERYONE even with this ON. "Watch nobody" is not a state anyone
+-- asks for by emptying a box, and silently blanking the whole feature is the worse failure --
+-- the same reason the engine reads an empty list as nil rather than as an empty map.
+function P.PIH_PlayersOn()
+    return P.PIH_Settings().playersOn ~= false
+end
+
+function P.PIH_SetPlayersOn(on)
+    P.PIH_Settings().playersOn = on and nil or false
     P.PIH_Apply()
 end
 
@@ -7963,7 +7992,27 @@ end
     -- widget asks the group for its own width rather than deriving one from t.noteW and being
     -- wrong the first time either number moves.
     local function pihAddPlayers(g, t)
-        t.note(g, L["Empty means everyone. Add players here to watch only them."])
+        -- ★★ THE SWITCH, ABOVE THE LIST IT GOVERNS (2026-09-11). See P.PIH_PlayersOn for why
+        -- the list stopped deciding this for itself.
+        -- ⚠ THE LIST STAYS EDITABLE WHILE THIS IS OFF, deliberately -- greying it out would
+        -- defeat the whole request, which is to keep a raid team written down between raids and
+        -- edit it whenever. Off means "not applied", not "not available".
+        -- ⚠ REFRESHES THE TAB because the header carries the count, and the count now depends on
+        -- this tick. Same reason the roster widget's onChange does.
+        local onCb = t.check(g, L["Only watch these players"],
+            function() return P.PIH_PlayersOn() end,
+            function(v) P.PIH_SetPlayersOn(v); t.Refresh() end)
+        -- ⚠ OFF FIRST, because off is what a pug night wants and the sentence that matters is
+        -- the promise that the list survives it.
+        -- ⚠ THE EMPTY-LIST RULE LIVES ON THE ON LINE, where it applies. It used to be the note's
+        -- first sentence, back when emptiness WAS the switch.
+        if onCb then
+            onCb.tooltip = { lines = {
+                L["Off: the helper watches everyone. Your list is kept for next time."],
+                L["On: only the players listed below. An empty list still means everyone."],
+            } }
+        end
+        t.note(g, L["Add players here to watch only them."])
         if not GUI.CreateCompactRosterWidget then return end
         local w = GUI:CreateCompactRosterWidget(t.parent, {
             width = (t.noteW or 230),
@@ -8373,9 +8422,12 @@ S.BuildPIHelperBody = function(parent, opts)
         -- ⚠ COLLAPSIBLE, like the class list and for the same reason: a roster is as long as
         -- the raid, and an empty allowlist is the default.
         -- ⚠ THE COUNT IS ON THE HEADER, so the box says whether it is doing anything while
-        -- shut -- which is the whole question about a folded filter. No count means no list
-        -- means everyone, and the note inside says so in words.
-        local pn = #P.PIH_Players()
+        -- shut -- which is the whole question about a folded filter.
+        -- ⚠ THE COUNT ANSWERS "HOW MANY IS THIS NARROWING TO", NOT "HOW MANY ARE SAVED", so a
+        -- switched-off list shows none -- it is narrowing to nobody, exactly like an empty one.
+        -- Printing 5 beside a switch that is off would be the header lying about the one thing
+        -- it exists to report. The names are one click away and the tick inside says why.
+        local pn = P.PIH_PlayersOn() and #P.PIH_Players() or 0
         local pHead = L["Players"] .. (pn > 0 and ("   " .. pn) or "")
         yPos = t.group(pHead, function(g)
             pihAddPlayers(g, t)
