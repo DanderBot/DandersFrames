@@ -2,8 +2,6 @@
 
 ## [5.3.2]
 
-**Alpha testers on 5.4.0:** this is a hotfix candidate for the live 5.3.1 release, not a 5.4.0 alpha. Skip it — installing it would downgrade you, and your settings would look reset until you go back.
-
 ### Bug Fixes
 
 * (Auras) Fix one player's buffs, debuffs and Aura Designer icons all staying blank until a reload, most often after they died and were resurrected. (by Krathe)
