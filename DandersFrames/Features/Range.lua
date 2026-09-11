@@ -631,6 +631,35 @@ function DF:UpdateRange(frame)
         pcall(DF.AuraContainer.NoteRangeTransition, unit, inRange)
     end
 
+    -- ★★ COMING BACK INTO RANGE CLEARS A STALE VISIBILITY LATCH.
+    -- ☠ NOTHING ELSE WAS ASKING. The latch is set on the frames' full-update path and cleared
+    -- by a reconcile that runs on PLAYER_REGEN_ENABLED and PLAYER_ENTERING_WORLD only -- and a
+    -- party member walking out of visible range and back produces neither. Krathe, 2026-09-09:
+    -- "AD indicators not showing on a player in my party until I reload again, seems to happen
+    -- every time I go out of range and back into range." His trail shows the latch going on at
+    -- 01:53:39, the unit back in range at 01:53:49, and the latch clearing at 01:54:17 -- 38
+    -- seconds later, and only because combat happened to end. Out of combat it never clears.
+    -- ⚠ THIS PATH IS THE RIGHT ONE because it is the only place that knows a unit came BACK.
+    -- Range-in is a strictly stronger condition than visible (spell range is inside the render
+    -- radius), so it cannot fire for a unit that is still away -- and the verb re-asks
+    -- UnitIsVisible anyway rather than trusting the implication.
+    -- ⚠ COSTS A TABLE LOOKUP when the unit is not latched, which is every crossing but the
+    -- ones this exists for: ReconcileUnitLatch reads the registry before it touches the API.
+    -- ⚠ pcall'd for the same reason as the diagnostic above -- a heal must never be able to
+    -- break the range pass it rides on.
+    -- ☠☠ issecretvalue FIRST, AS ITS OWN STATEMENT, and this file is why the rule exists:
+    -- `inRange` comes from the UnitInRange fallback and CAN be secret -- the cache comparison
+    -- twenty lines up says so in as many words. A bare `if inRange then` boolean-tests it and
+    -- throws, taking the range pass with it. The local `isSecret` above is not the right test
+    -- either: it folds in the CACHED value, so it reads true for a clean inRange beside a
+    -- secret cached one, and we would skip a heal we could have made.
+    -- ⚠ A SECRET READ SIMPLY DOES NOT HEAL HERE. The 3s tick is the net under it.
+    local rangeSecret = issecretvalue and issecretvalue(inRange) or false
+    if not rangeSecret and inRange
+        and DF.AuraContainer and DF.AuraContainer.ReconcileUnitLatch then
+        pcall(DF.AuraContainer.ReconcileUnitLatch, unit)
+    end
+
     frame.dfInRange = inRange
 
     if DF.UpdateRangeAppearance then
