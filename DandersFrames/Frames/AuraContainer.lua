@@ -1409,7 +1409,33 @@ end
 --
 -- The dead map is a populated set matching nothing, never an empty table: an empty include
 -- set reads as "no selection", which the engine is free to treat as "everything passes".
-local HELPER_GATE_DEAD_CF = { includeSpellIDs = { [1] = true } }
+-- ☠☠☠ THE DEAD FILTER IS THE VERIFIED PARK LEVER, NOT AN INCLUDE MAP (2026-09-11).
+--
+-- This was { includeSpellIDs = { [1] = true } } -- "match only spell 1", i.e. nothing.
+-- Krathe's raid logs proved the broadcast reaching it: 30 group handles and 30 slots on
+-- every edge, pushed=60, deferred=0, skipped=0, in combat -- and the helper icons and
+-- borders carried on showing on his allowed players while Power Infusion was on cooldown.
+-- The gate flipped, the push landed, the filter did not blank the slot.
+--
+-- ☠ BECAUSE includeSpellIDs CAN FAIL OPEN. It is evaluated INSIDE
+-- CanApplyIdentityCandidateFilters, and when the identity gate declines -- range,
+-- visibility, a cinematic, any of the reasons the latch work exists -- the include map is
+-- skipped entirely and EVERY helpful aura passes (see the IDENTITY-GATE EXPOSURE note
+-- below, and memory §15: "gate decline => include AND exclude maps SKIPPED"). A "dead"
+-- filter built on it is dead only while the gate happens to be applied, which in a raid
+-- is intermittently -- and every report of this bug was intermittent.
+--
+-- ✅ maxDuration = 0 IS EVALUATED OUTSIDE THAT GATE, in readable Lua
+-- (DoesAuraPassCandidateFilters), and excludes every aura unconditionally: a timed one
+-- fails `duration > 0`, a permanent one fails `duration == 0`. Verified in game
+-- 2026-08-30 against a unit carrying eight live buffs -- see SLOT_PARK_CF, which is this
+-- same lever and is why parking works when this did not.
+--
+-- ⚠ A SEPARATE CONSTANT FROM SLOT_PARK_CF, DELIBERATELY. _cf() returns this by identity
+-- and the value-tracked push compares against it; sharing the park's table would make a
+-- gated slot indistinguishable from a parked one to every reader that asks "which lock
+-- is this", and the two are cleared by different things.
+local HELPER_GATE_DEAD_CF = { maxDuration = 0 }
 local helperGateDark = false
 
 -- ☠ OWNERSHIP: `config.dfGate`. The gate must only ever darken our own effects. The first cut
