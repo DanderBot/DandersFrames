@@ -2931,7 +2931,9 @@ local function alertCompanionCoSig(frame, indicator, isBar, alpha, defs)
         "sx=" .. tostring(sx), "sy=" .. tostring(sy),
         -- scale is icon/square-only (the bar has no global for it, and buildBarLayout reads
         -- it raw), so this passes `defs` not `gdefs` — on a bar both resolve identically.
-        "sc=" .. tostring(tonumber(defOf(indicator, "scale", isBar and nil or defs, 1)) or 1),
+        -- (Was `isBar and nil or defs`, which always yields defs; written out so the
+        -- expression says what it does. Same result either way, per the note above.)
+        "sc=" .. tostring(tonumber(defOf(indicator, "scale", defs, 1)) or 1),
         "fo=" .. tostring(defOf(indicator, "durationFont", gdefs, nil)),
         "al=" .. tostring(alpha),
     }, "|")

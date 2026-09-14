@@ -9621,7 +9621,9 @@ do
         local ok, can = GateAssistProbe(unit)
         if not ok then return true, "assist-err(open)" end
         if issecretvalue and issecretvalue(can) then can = true end
-        return can and true or false, can and nil or "cannot-assist"
+        -- `can and nil or "cannot-assist"` named every trusted unit cannot-assist too.
+        if can then return true, nil end
+        return false, "cannot-assist"
     end
 
     -- created, shownN, hiddenN, unreadableN, widthTxt. Child buttons belong

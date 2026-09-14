@@ -5108,7 +5108,10 @@ S.CreateEffectCard = function(parent, yPos, effect)
 
     -- Spell icon (small, before type badge). Other-pool records resolve
     -- icon/identity spec-independently (nil spec → ad-hoc / SpellDB fallback).
-    local spec = IsOtherTab() and nil or ResolveSpec()
+    -- ☠ NOT `IsOtherTab() and nil or ResolveSpec()` -- with nil as the true arm that
+    -- always yields the spec, so the Other tab resolved its icons spec-keyed after all.
+    local spec
+    if not IsOtherTab() then spec = ResolveSpec() end
     local iconTex = GetAuraIcon(spec, effect.auraName)
     -- ⚠ A filter-owned record shows our GLYPH here, not a spell icon, and the two
     -- need different treatment. The 0.08/0.92 crop below exists to trim the border

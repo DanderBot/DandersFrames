@@ -2816,7 +2816,10 @@ local function RefreshPlacedIndicators()
     -- "other:" prefix so the two pools' slots can't collide in the store.
     -- Hidden indicators (eye toggle, enabled == false) don't render — same as live.
     -- (keyPrefix hoisted above the group-position pass — same value.)
-    local idSpec = isOther and nil or spec
+    -- ☠ NOT `isOther and nil or spec` -- that always yields spec (nil never wins an
+    -- and/or), so the Other pool was previewing with the spec it must not use.
+    local idSpec
+    if not isOther then idSpec = spec end
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         local info = infoLookup[auraName]
         if type(auraCfg) == "table" and (isOther or info or AdHocSpellID(auraName)) and auraCfg.indicators then
@@ -3062,7 +3065,10 @@ S.RefreshPreviewLightweight = function()
     -- Re-apply placed indicator instances using current settings
     -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their
     -- slot; keyPrefix hoisted above the group-position pass — same value)
-    local idSpec = isOther and nil or spec
+    -- ☠ NOT `isOther and nil or spec` -- that always yields spec (nil never wins an
+    -- and/or), so the Other pool was previewing with the spec it must not use.
+    local idSpec
+    if not isOther then idSpec = spec end
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         if type(auraCfg) == "table" and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
