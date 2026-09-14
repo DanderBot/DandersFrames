@@ -973,7 +973,14 @@ end
 -- InvalidateAuraLayout + ForceRefreshAllFrames is that rebuild.
 function P.PIH_SetIconShowsAura(rec, on)
     if type(rec) ~= "table" then return end
-    rec.staticSpellID = on and nil or PIH_PI_SPELL_ID
+    -- ☠ EXPLICIT if, NOT `on and nil or PIH_PI_SPELL_ID` -- that always yields the spell
+    -- id, so "show the cooldown's own artwork" pinned Power Infusion regardless. Found in
+    -- the sweep after the same idiom broke the players tick (2026-09-14).
+    if on then
+        rec.staticSpellID = nil
+    else
+        rec.staticSpellID = PIH_PI_SPELL_ID
+    end
     pihRefresh()
 end
 
@@ -2162,7 +2169,15 @@ function P.PIH_PlayersOn()
 end
 
 function P.PIH_SetPlayersOn(on)
-    P.PIH_Settings().playersOn = on and nil or false
+    -- ☠ EXPLICIT if, NOT `on and nil or false`: with nil as the "true" arm the and/or
+    -- idiom collapses to false on BOTH inputs, so the tick could be switched off and never
+    -- back on again (Krathe, 2026-09-14: "I can't seem to tick it, it's not doing anything").
+    -- The same trap is called out beside the PTR lane's slot enable bit; it bit here anyway.
+    if on then
+        P.PIH_Settings().playersOn = nil
+    else
+        P.PIH_Settings().playersOn = false
+    end
     P.PIH_Apply()
 end
 
