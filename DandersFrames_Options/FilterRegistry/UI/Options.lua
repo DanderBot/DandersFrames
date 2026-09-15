@@ -429,9 +429,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     local tools = (Add and GUI.CreatePopoutPageTools and not DF:IsClassicSettingsLayout())
                   and GUI:CreatePopoutPageTools(pageRef) or nil
     local rowsMode = (Add ~= nil) and (tools ~= nil)
-    -- DandersUI's own numbers for a popout row: a 44px plate and the 6px gap under
-    -- it. Named because the page-height arithmetic has to spend it.
-    local FILTERROW_H = 50
+    -- (FILTERROW_H is gone. It named DandersUI's plate-plus-gap so the page-height
+    -- arithmetic could reserve two popout rows above the detail; the band arm has
+    -- neither a fixed number of rows nor a detail band to reserve for, and its one
+    -- band of rows reports its own height through the group it lives in. A constant
+    -- nothing spends is a number waiting to disagree with the kit.)
     -- The gap the island puts between its stacked pieces, kept so the band arm has
     -- the same rhythm rather than a second set of numbers.
     --
@@ -1084,13 +1086,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- the placeholder is a space rather than "". With "" there is no fontstring and
     -- the first refresh errors on b.Text.
     local chipButtons = {}
-    -- ...and the BAND ARM's copy of the same three, which live in a panel rather
-    -- than on a row. Declared here so the refresh below can reach them: the row
-    -- itself is built ~2,000 lines down, inside the `rowsMode` arm.
-    local consumerButtons = {}
+    -- ...and the BAND ARM's own standing buttons, which live on the ACTION BAND
+    -- above the filter list rather than on this row. Declared here so the theme
+    -- pass below can reach them: the band itself is built ~2,000 lines down,
+    -- inside the `rowsMode` arm.
+    local bandButtons = {}
     -- Assigned in that same arm. Forward-declared so RefreshAll -- which is
     -- written before it -- can call it without capturing a nil upvalue.
-    local RefreshConsumers
+    local RefreshFilterRows
     for i = 1, CHIP_POOL_N do
         local b = CreateFrame("Button", nil, chipRow, "BackdropTemplate")
         GUI:StyleButton(b, { width = CHIP_MIN_W, height = CHIP_H, text = " " })
@@ -1980,20 +1983,30 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- so scrolling it into view is part of the cue. A pulse below the fold is no
     -- cue at all, and it would fail silently.
     local addRowY = 0   -- set by RefreshLeft, which owns the list's geometry
-    -- ☠ IN THE BAND LAYOUT THE MASTER IS BEHIND A ROW, so "scroll it into view and
-    -- pulse it" has to OPEN that row's panel first. A pulse inside a shut panel is
-    -- no cue at all -- which is the same argument that made the scroll part of these
-    -- two entry points in the first place.
+    -- ☠ IN THE BAND LAYOUT THERE IS NO SINGLE FILTER LIST TO OPEN -- the PAGE is
+    -- the list, one row per filter -- so this means "put the filter band where the
+    -- eye is". The row-level cue is the other half, and it belongs to the two entry
+    -- points below because only they know WHICH filter is wanted.
     --
-    -- ⚠ READS pageRef._fdFilterRow AT CALL TIME. The row is built by the adopt pass
-    -- at the foot of this function, long after this closure is created; an upvalue
-    -- captured here would freeze nil. A no-op in the island, which has no row.
+    -- ⚠ READS pageRef AT CALL TIME. The band is built at the foot of this function,
+    -- long after this closure is created; an upvalue captured here would freeze nil.
+    -- A no-op in the island, which has no band.
     local function OpenFilterList()
-        local row = pageRef._fdFilterRow
-        if row and row.OpenPopout then row:OpenPopout() end
+        local scrollTo = pageRef._fdScrollToFilters
+        if scrollTo then scrollTo() end
     end
     pageRef._fdFocusNewFilter = function()
         OpenFilterList()
+        -- ☠ THE BAND ARM CREATES THE FILTER, IT DOES NOT POINT AT THE BUTTON. With
+        -- a row per filter there is a panel to land in, so "Create Filter" can finish
+        -- the job it was asked for: name it, make it, open it. The island has no such
+        -- landing -- its add row is one line in a scrolling list -- so it keeps the
+        -- scroll-and-pulse below.
+        local newFilter = pageRef._fdNewFilter
+        if newFilter then
+            newFilter()
+            return
+        end
         local range = leftScroll:GetVerticalScrollRange() or 0
         leftScroll:SetVerticalScroll(math.max(0, math.min(addRowY - 8, range)))
         if DF.HighlightWidget then DF:HighlightWidget(addRow) end
@@ -2464,6 +2477,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         if not (kind and key) then return end
         OpenFilterList()
         SelectFilter(kind, key)
+        -- ☠ THE BAND ARM HAS NO LIST ROW TO PULSE -- it has a POPOUT ROW per filter,
+        -- and the cue is opening that filter's own panel. Asked AFTER SelectFilter for
+        -- exactly the reason the island reads its pool after it: RefreshAll re-binds
+        -- row i, so a row read before that belongs to a different filter.
+        local openPanel = pageRef._fdOpenFilterPanel
+        if openPanel and openPanel(kind, key) then return end
         for _, row in ipairs(leftRows) do
             if row:IsShown() and row._kind == kind and row._key == key then
                 local range = leftScroll:GetVerticalScrollRange() or 0
@@ -2876,9 +2895,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         for _, b in ipairs(chipButtons) do
             if b.UpdateTheme then b.UpdateTheme() end
         end
-        -- ...and the band arm's, whose parent is a popout pane rather than the page
-        -- child. Same rule, same list, stated rather than assumed.
-        for _, b in ipairs(consumerButtons) do
+        -- ...and the band arm's, whose parent is the ACTION BAND rather than the page
+        -- child. Same rule, same list, stated rather than assumed. (A filter pane's
+        -- own buttons are re-themed by that pane's repaint instead, so only the panes
+        -- the user can actually see are ever walked.)
+        for _, b in ipairs(bandButtons) do
             if b.UpdateTheme then b.UpdateTheme() end
         end
 
@@ -3352,9 +3373,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- including from another page, which is why this rides RefreshAll rather
         -- than the tick handlers.
         RefreshChips()
-        -- ...and the band arm's copy of the same three, which live in a panel.
-        -- Guarded: it is only assigned in that arm.
-        if RefreshConsumers then RefreshConsumers() end
+        -- ...and the band arm's list of filter rows: it re-binds row i to filter i
+        -- after a create, a rename or a delete, and repaints every panel the user
+        -- currently has open. Guarded: it is only assigned in that arm.
+        if RefreshFilterRows then RefreshFilterRows() end
         UpdateActionStates()
         -- Keep the picker coherent: hide it when the selection moved off its
         -- target custom filter (or the filter was deleted); otherwise
@@ -3407,167 +3429,1294 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     pageRef._fdThemeListener = themeListener
 
     -- ============================================================
-    -- THE BAND ARM -- FIVE ROOTS, RE-HOMED
+    -- THE BAND ARM -- THE PAGE IS THE LIST OF FILTERS
     -- ------------------------------------------------------------
-    -- Everything above built the island: five frames chained off `parent` --
-    -- banner, chip row, left panel, right area, freshness note -- with every
-    -- control inside them anchored to its own root. That last part is what makes
-    -- this cheap: re-anchor the five roots and their contents follow.
+    -- Everything above built the island: a two-column master/detail chained off
+    -- `parent`. The band arm no longer re-homes any of it. It builds a COLUMN OF
+    -- FILTERS instead -- one popout row per filter -- and each row's panel carries
+    -- that filter's OWN header and its OWN spell list.
     --
-    -- The column, top to bottom:
+    --     [ info banner                          ]
+    --     [ Filters   [+ New] [+ Import]  [?]    ]   the action band
+    --     [ Healing                            > ]   one row per filter
+    --     [ Defensives                         > ]
+    --     [ ...                                 > ]
+    --     [ spell database: ...                 ]
     --
-    --     [ info banner                     ]
-    --     [ consumer chips           [?]    ]   wraps below ~316px
-    --     [ Filters   <the one you picked> >]   THE MASTER, behind a row
-    --     [ header + spell list             ]   THE DETAIL, the page's own band
-    --     [ spell database: ...             ]
+    -- ☠ THE MASTER ROW IS GONE, AND SO IS THE DETAIL BAND. e879d644 put the filter
+    -- list behind ONE row to fix a WIDTH problem, and it fixed it -- but it left
+    -- the page answering the wrong question: you could not see the list of filters
+    -- and a filter's contents at the same time, and you could never see two filters
+    -- at once. A row each answers both, because DF popouts dock OUTSIDE the window
+    -- and two of them can stand side by side.
     --
-    -- ☠ THE MASTER GOES IN A POPOUT, NOT A SECOND BAND. Two tall lists stacked in
-    -- one column is a page you scroll to change what you are looking at. Behind a
-    -- row it is the all-rows rule -- more than one option opens a panel -- and DF
-    -- popouts dock OUTSIDE the window, so a docked filter list standing beside a
-    -- narrow window is the old two-column view with the window's width back.
+    -- ☠ THE PAGE BUILDS ITS FRAMES ONCE (_filterDesignerBuilt) AND FILTERS ARE
+    -- CREATED AT RUNTIME. Those two facts are what make this hard, and the way
+    -- through is a property of this page that is easy to miss: CreatePopoutPageTools
+    -- is called BELOW the guard's early return, so it runs exactly once here and the
+    -- `mounted` list and holder registry it closes over live for the session. A row
+    -- created on the fortieth filter, an hour after the page was built, joins the
+    -- same registry as the first -- there is no build pass to be outside of. So rows
+    -- are ACQUIRED on demand (AcquireFilterRow) exactly as the island's list rows
+    -- are, and never destroyed.
     --
-    -- ☠ ITS HEIGHT IS FIXED, and PANEL_H does not reach it. A pane taller than 60%
-    -- of the screen grows a scroll frame of its own (DandersUI's PopoutRow cap), and
-    -- the master already HAS one -- leftScroll -- so a viewport-sized master would
-    -- be a list scrolling inside a list.
-    local PANE_MASTER_H = PANEL_H_MIN
+    -- ⚠ REJECTED: clearing _filterDesignerBuilt to force a rebuild when a filter is
+    -- added. Frames cannot be garbage-collected in this client, so every rebuild
+    -- would leak the whole page; and CreatePopoutPageTools closes every open panel
+    -- on every build, so the panel the user is working in would snap shut each time.
+    --
+    -- ☠ NOTHING ABOVE THIS POINT IS BRANCHED ON IT. The island builds exactly as it
+    -- always did; the band arm takes its three roots DOWN (the chip row, the master
+    -- panel, the detail) and builds its own column beside them.
     if rowsMode then
         local paneW = GUI.PopoutContentWidth or 260
-        local filterMount = tools.PopoutContent(function(group, holder)
-            -- ☠ A FRAME, WHICH IS THE ONLY REASON THIS TRAVELS. PopoutContent builds
-            -- into a HIDDEN holder and moves FRAMES into the group; a REGION made on
-            -- that holder -- a FontString -- stays behind and is never drawn, in
-            -- silence. Everything the master owns is inside leftPanel, and leftPanel
-            -- is a Frame, so the whole thing moves as one object.
-            leftPanel:SetParent(holder)
-            leftPanel:ClearAllPoints()
-            leftPanel:SetSize(paneW, PANE_MASTER_H)
-            group:AddWidget(leftPanel, PANE_MASTER_H)
-        end)
-        local filterRow = GUI:CreatePopoutRow(parent, {
-            label   = L["Filters"],
-            db      = tools.RowDB,
-            -- The summary IS the answer to "which one am I editing", which is the
-            -- question the left column used to answer by having a highlighted row.
-            summary = function() return CurrentDisplayName() end,
-            window  = DF.GUIFrame,
-            clipTo  = pageRef,
-            build   = filterMount,
-            footerStrip = true,
-        })
-        pageRef._fdFilterRow = filterRow
 
-        -- ── THE CONSUMERS GO BEHIND A ROW TOO ──
-        -- ☠ THE CHIPS TRUNCATE AT EVERY WIDTH THIS WINDOW CAN BE, and that is a
-        -- different fault from the one already fixed. They wrap and they re-report
-        -- their height (LayoutChips), so nothing overlaps any more -- but the LABELS
-        -- still ellipsise: at the 640 default the band is ~410, which leaves ~382 for
-        -- three chips and their gutters, so each gets ~123px with ~113 for text, and
-        -- "Defensive Icon  2 filters" needs half as much again. At the 520 minimum
-        -- they wrap to two rows of ~133 and truncate there as well. A chip with an
-        -- ellipsis where its count should be is a control that has stopped answering
-        -- the question it exists for.
-        --
-        -- The all-rows rule already says where this belongs: several options go in a
-        -- panel. At the popout's own content width each consumer gets a full row and
-        -- writes its name and its count out in full, at any window size, in any
-        -- locale -- because the panel's width does not depend on the window's.
-        --
-        -- ⚠ AND "HOW THIS WORKS" COMES WITH THEM. On the band it was a 22px glyph
-        -- eating a chip's worth of the row it was explaining, identifiable only by
-        -- hovering it. In the panel it is a labelled button with room for its name.
-        local consumerMount = tools.PopoutContent(function(group, holder)
-            -- ⚠ FRAMES, NOT REGIONS. PopoutContent builds into a HIDDEN holder and
-            -- moves FRAMES into the group; a FontString made on that holder stays
-            -- behind and is never drawn, in silence.
-            --
-            -- ⚠ AND NOTHING IS HAND-ANCHORED. AddWidget gives the group both axes,
-            -- so no child takes SetPoint("RIGHT", host, "RIGHT", ...) against a host
-            -- whose height has not been settled -- which is the anchor that emptied
-            -- the Aura Designer's own add panel.
-            wipe(consumerButtons)
-            for i = 1, CHIP_POOL_N do
-                local def = CHIP_DEFS_BUFF[i]
-                local b = CreateFrame("Button", nil, holder, "BackdropTemplate")
-                -- The label is passed at build so StyleButton creates btn.Text at all
-                -- -- it omits the fontstring entirely for an empty string, and the
-                -- refresh below writes through it.
-                GUI:StyleButton(b, { width = paneW, height = CHIP_H, text = def.label })
-                b.chipDef = def
-                b:SetScript("OnClick", function(self)
-                    if self.chipDef then fdBannerLinkClick(self.chipDef.pageId) end
-                end)
-                b:HookScript("OnEnter", function(self)
-                    if self.chipDef then
-                        GUI:ShowTooltip(self, { title = self.chipDef.label,
-                                                lines = { self.chipDef.tip } })
+        -- ---- THE PANE'S OWN ARITHMETIC ----
+        -- ☠ FIXED, AND DECIDED AT BUILD RATHER THAN FROM THE VIEWPORT. DandersUI
+        -- caps a pane at 60% of the screen and WRAPS anything taller in a scroll
+        -- frame of its own (PopoutRow's capHeight, read at build time) -- and this
+        -- pane already carries one, round its spell list. A viewport-sized pane
+        -- would therefore be a list scrolling inside a list, which is the same
+        -- refusal the master's own fixed height used to state. UIParent is 768 tall
+        -- at every UI scale the client allows below the default, so the ceiling to
+        -- stay under is ~460 and the sum below is 414.
+        -- ☠ ONE TABLE, NOT TWENTY LOCALS, AND THAT IS A HARD LIMIT RATHER THAN A
+        -- preference. Lua 5.1 allows a function 200 ACTIVE locals and this builder is
+        -- one 3,000-line closure that was already at 171 before this arm existed --
+        -- a constant per header row compiles to "function at line 370 has more than
+        -- 200 local variables", which is a PARSE error, so the whole file fails to
+        -- load. Fields cost nothing; names cost a slot each.
+        local PANE = {}
+        PANE.gap, PANE.titleH, PANE.ebH, PANE.btnH, PANE.echoH = 6, 18, 24, 22, 13
+        -- CreateEditBox drops its editbox 15px to clear a label slot this page leaves
+        -- empty, so a box whose VISIBLE top is wanted at y is anchored 15 higher.
+        PANE.ebDrop = 15
+        PANE.actionLabelH, PANE.actionBtnH = 20, 22
+        -- ☠ WRITTEN AS THE SUM OF THE SIX HEADER PARTS, IN READING ORDER, for the
+        -- reason the island's ROW2_Y / ROW3_Y are written as sums: this file has
+        -- twice shipped a header row whose neighbours were not told it had arrived.
+        -- A part added here must be a term added here.
+        PANE.yEyebrow = 0                                              -- (1) kind
+        PANE.yTitle   = PANE.yEyebrow + EYEBROW_H                      -- (2) name + count
+        PANE.yStatus  = PANE.yTitle + PANE.titleH                      -- (3) used by
+        PANE.ySearch  = PANE.yStatus + STATUS_ROW_H + PANE.gap         -- (4) search
+        PANE.yAdd     = PANE.ySearch + PANE.ebH + PANE.gap             -- (5) spell id + Add
+        PANE.yDB      = PANE.yAdd + PANE.ebH + PANE.gap                -- (6) add from database
+        PANE.yEcho    = PANE.yDB + PANE.btnH + 2
+        PANE.headH    = PANE.yEcho + PANE.echoH
+        PANE.listH    = 170
+        -- Three 20px rows, two 4px gutters, and the rule that marks them as chrome
+        -- rather than more list. The island's own strip, one column narrower.
+        PANE.actH     = 80
+        PANE.paneH    = PANE.headH + PANE.gap + PANE.listH + PANE.gap + PANE.actH
+
+        -- Assigned below, once the row pool exists. Forward-declared because the
+        -- pane builder -- written first, because the rows are built from it -- ends
+        -- several of its verbs by opening the panel of a filter it has just made.
+        local FocusFilterPanel
+        local NewFilterFlow
+
+        -- ============================================================
+        -- WHAT IS IN ONE FILTER, AS A LIST OF ITEMS
+        -- ------------------------------------------------------------
+        -- ONE collector for every pane rather than one per pane: the answer depends
+        -- on (kind, key, query) and on nothing a pane owns, so a copy per pane would
+        -- be seventeen places for the sort rule to drift.
+        -- ============================================================
+        local function PaneItems(pane, kind, key, query)
+            local isPreset = (kind == "preset")
+            local groups = {}
+            local function put(token, item)
+                token = token or "ALL"
+                if not RAID_CLASS_COLORS or not RAID_CLASS_COLORS[token] then
+                    if token ~= "ALL" then token = "ALL" end
+                end
+                local g = groups[token]
+                if not g then
+                    g = {}
+                    groups[token] = g
+                end
+                g[#g + 1] = item
+            end
+            -- "+1" while whole, "1 of 2" once narrowed, so a record that no longer
+            -- tracks everything says so in every list it appears in.
+            local function RecordChip(rec)
+                if not (rec and rec.alts and #rec.alts > 0) then return nil end
+                if R:IsRecordNarrowed(rec) then
+                    return format(L["%d of %d IDs"], #R:LiveRecordIDs(rec), R:RecordIDCount(rec))
+                end
+                return format("+%d", #rec.alts)
+            end
+            -- One child row per spell ID the record carries, emitted straight into
+            -- the class bucket so they ride the same pooled rows as everything else.
+            local function putRecordChildren(token, rec, parentName)
+                if not (expandedRecords[rec.id] and rec.alts and #rec.alts > 0) then return end
+                local ids = { rec.id }
+                for _, alt in ipairs(rec.alts) do ids[#ids + 1] = alt end
+                local live = #R:LiveRecordIDs(rec)
+                for idx, sid in ipairs(ids) do
+                    local nm, icon
+                    if C_Spell then
+                        if C_Spell.GetSpellName then
+                            local ok, v = pcall(C_Spell.GetSpellName, sid)
+                            if ok and type(v) == "string" and v ~= "" then nm = v end
+                        end
+                        if C_Spell.GetSpellTexture then
+                            local ok, t = pcall(C_Spell.GetSpellTexture, sid)
+                            if ok and type(t) == "number" then icon = t end
+                        end
                     end
-                end)
-                b:HookScript("OnLeave", function() GUI:HideTooltip() end)
-                -- ☠ THE COUNT IS READ BY A VERB, NOT IN THE BUILDER. A pooled panel's
-                -- build runs ONCE, so a number written here is the number that was
-                -- true the first time it opened -- the shape that shipped the Aura
-                -- Designer's filter panel always showing "All". `refreshContent` is
-                -- the kit's own name for it: the group re-asks every child on each
-                -- re-flow, and RefreshAll calls it as well for the writes that happen
-                -- on other pages entirely.
-                b.refreshContent = function(self)
-                    if self.chipDef and self.Text then
-                        self.Text:SetText(format("%s  |cff8a8f9f%s|r",
-                                                 self.chipDef.label,
-                                                 ChipDetail(self.chipDef.key)))
+                    local tracked = not R:IsSpellIDMuted(sid)
+                    put(token, {
+                        child = true, rec = rec, id = sid,
+                        name = nm or rec.n,
+                        icon = icon or FALLBACK_ICON,
+                        chip = R:FormatSpellID(sid),
+                        enabled = tracked,
+                        sortName = parentName, sortID = rec.id, childIndex = idx,
+                        lastLive = tracked and live <= 1,
+                        tooltipID = sid,
+                    })
+                end
+            end
+            local function matches(name)
+                if query == "" then return true end
+                return name:lower():find(query, 1, true) ~= nil
+            end
+            -- Not in the shipped database: resolve name/icon LIVE from the client so
+            -- a valid direct ID reads like a real spell. One load-request and one
+            -- repaint per id, ever -- a genuinely invalid id never resolves, and
+            -- re-requesting from the repaint would loop the timer forever.
+            local function putRaw(id)
+                local name, icon
+                if C_Spell and C_Spell.GetSpellName then
+                    local ok, v = pcall(C_Spell.GetSpellName, id)
+                    if ok and type(v) == "string" and v ~= "" then name = v end
+                    local okT, t = pcall(C_Spell.GetSpellTexture, id)
+                    if okT and type(t) == "number" then icon = t end
+                    if not name and C_Spell.RequestLoadSpellData and not pane.rawTried[id] then
+                        pane.rawTried[id] = true
+                        pcall(C_Spell.RequestLoadSpellData, id)
+                        if not pane.rawPending then
+                            pane.rawPending = true
+                            C_Timer.After(0.8, function()
+                                pane.rawPending = nil
+                                -- ⚠ ONLY IF IT IS STILL ON SCREEN. A closed pane
+                                -- sits in a hidden holder and repainting one costs a
+                                -- full re-gather for something nobody is looking at.
+                                if pane.container:IsVisible() then pane.Paint() end
+                            end)
+                        end
                     end
                 end
-                b:refreshContent()
-                consumerButtons[#consumerButtons + 1] = b
-                group:AddWidget(b, CHIP_H + 6)
+                -- ☠ NOT format("#%d", id). R:FormatSpellID is overflow-safe, and an
+                -- id past 2^31 can still arrive in an imported filter string.
+                local nm = name or ("#" .. R:FormatSpellID(id))
+                if matches(nm) then
+                    put("ALL", {
+                        id = id, name = nm, icon = icon or FALLBACK_ICON,
+                        chip = name and L["not in database"] or L["unknown ID"],
+                        raw = true, tooltipID = id,
+                    })
+                end
             end
 
-            local help = CreateFrame("Button", nil, holder, "BackdropTemplate")
-            -- ☠ ".png" IS PART OF THE PATH -- see the island's glyph for why. The
-            -- icon rides along with the label here rather than standing in for it.
-            GUI:StyleButton(help, {
-                width  = paneW,
-                height = CHIP_H,
-                text   = L["How this works"],
-                icon   = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\question.png", size = 13 },
-            })
-            help:SetScript("OnClick", ShowFilterHelp)
-            consumerButtons[#consumerButtons + 1] = help
-            group:AddWidget(help, CHIP_H + 6)
-        end)
-        local consumerRow = GUI:CreatePopoutRow(parent, {
-            label   = L["Used By"],
-            db      = tools.RowDB,
-            -- WHO, not how many: see ConsumerSummary.
-            summary = function() return ConsumerSummary() end,
-            window  = DF.GUIFrame,
-            clipTo  = pageRef,
-            build   = consumerMount,
-            footerStrip = true,
-        })
-        -- ⚠ NO ClaimKeys AND NO FOOTER, for the reason the master row gives: this
-        -- page owns no per-mode db keys, so there is nothing for a modified tick to
-        -- test and nothing a Reset Group could write.
-
-        -- Both halves of the row, re-asked. The counts come from the buff selection,
-        -- the Defensive Icon's selection and the whole Aura Designer config, every
-        -- one of which is edited on another page -- which is why this rides RefreshAll
-        -- rather than any tick handler here.
-        RefreshConsumers = function()
-            for _, b in ipairs(consumerButtons) do
-                if b.refreshContent then b:refreshContent() end
+            if isPreset then
+                for _, rec in ipairs(R.ByCategory[key] or {}) do
+                    local name, icon = R:GetSpellDisplay(rec)
+                    if matches(name) then
+                        put(rec.class, {
+                            rec = rec, id = rec.id, name = name, icon = icon,
+                            chip = RecordChip(rec),
+                            enabled = R:IsSpellEnabled(key, rec),
+                            tooltipID = rec.id,
+                        })
+                        putRecordChildren(rec.class, rec, name)
+                    end
+                end
+            else
+                local f = R:GetCustomFilter(key)
+                if f then
+                    for sid in pairs(f.spells) do
+                        local rec = R.ByID[sid]
+                        if rec then
+                            local name, icon = R:GetSpellDisplay(rec)
+                            if matches(name) then
+                                put(rec.class, {
+                                    rec = rec, id = sid, name = name, icon = icon,
+                                    chip = RecordChip(rec),
+                                    tooltipID = rec.id,
+                                })
+                                putRecordChildren(rec.class, rec, name)
+                            end
+                        else
+                            -- Known id orphaned by a spell DB update: render as raw
+                            putRaw(sid)
+                        end
+                    end
+                    for rid in pairs(f.rawIDs) do
+                        putRaw(rid)
+                    end
+                end
             end
-            if consumerRow.Refresh then consumerRow:Refresh() end
+
+            -- ☠ CHILD ROWS SORT ON THEIR PARENT'S KEY, NEVER THEIR OWN -- they are
+            -- part of that row, not entries in their own right, and sorting them on
+            -- their own name and id scatters them across the group.
+            for _, g in pairs(groups) do
+                tsort(g, function(a, b)
+                    if (a.raw or false) ~= (b.raw or false) then return not a.raw end
+                    local an, bn = a.sortName or a.name, b.sortName or b.name
+                    if an ~= bn then return an < bn end
+                    local ai, bi = a.sortID or a.id, b.sortID or b.id
+                    if ai ~= bi then return ai < bi end
+                    return (a.childIndex or 0) < (b.childIndex or 0)
+                end)
+            end
+            return groups
         end
-        -- ⚠ NO ClaimKeys AND NO FOOTER, and both are refusals rather than omissions.
-        -- This page owns no per-mode db keys at all -- CreateCopyButton is called with
-        -- an empty list for exactly that reason (see GUI/Pages/Auras.lua) -- and what
-        -- the panel edits is a per-ACCOUNT custom-filter store and a per-PROFILE
-        -- override diff. There is no key for a modified tick to test and nothing a
-        -- Reset Group could write.
+
+        -- ============================================================
+        -- ONE PANE'S SPELL ROWS
+        -- ------------------------------------------------------------
+        -- ☠ CREATED ON THE PANE'S FIRST PAINT, NEVER IN ITS BUILDER. PopoutContent
+        -- runs a row's builder EAGERLY, at page build, for EVERY row -- seventeen
+        -- filters' worth of spell rows up front is a cost the old page never paid,
+        -- because it only ever had one list. The builder puts up an EMPTY scroll
+        -- frame; these arrive when somebody actually opens the panel.
+        -- ============================================================
+        local function AcquirePaneClassHeader(pane, i)
+            local fs = pane.classHeaders[i]
+            if fs then
+                fs:Show()
+                return fs
+            end
+            fs = pane.content:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+            fs:SetJustifyH("LEFT")
+            pane.classHeaders[i] = fs
+            return fs
+        end
+
+        local function AcquirePaneSpellRow(pane, i)
+            local row = pane.spellRows[i]
+            if row then
+                ApplyRowPropagation(row)
+                row:Show()
+                return row
+            end
+            row = CreateFrame("Button", nil, pane.content, "BackdropTemplate")
+            row:SetHeight(SPELL_ROW_H - 2)
+            DF.GUI:CreateElementBackdrop(row, {
+                outline = false,
+                bgColor = { ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A },
+            })
+
+            row.icon = row:CreateTexture(nil, "ARTWORK")
+            row.icon:SetSize(20, 20)
+            row.icon:SetPoint("LEFT", 6, 0)
+            row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+            -- ☑ MEANS ONE THING ON EVERY LIST ON THIS PAGE: this spell appears on
+            -- your frames. EnableMouse(false) -- the ROW owns the click, so there is
+            -- one hit area and no dead pixel beside the box.
+            row.check = GUI:CreateRowToggle(row)
+            row.check:EnableMouse(false)
+            row.check:SetPoint("RIGHT", -6, 0)
+
+            row.remove = GUI:CreateCloseButton(row, {
+                size = 18,
+                tone = "danger",
+                onClick = function()
+                    if row._onRemove then row._onRemove() end
+                end,
+            })
+            row.remove:SetPoint("RIGHT", -6, 0)
+
+            row.chip = row:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+            row.chip:SetJustifyH("RIGHT")
+            row.chip:SetTextColor(0.5, 0.5, 0.5)
+
+            row.name = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+            row.name:SetPoint("RIGHT", row.chip, "LEFT", -6, 0)
+            row.name:SetJustifyH("LEFT")
+
+            -- Tooltip hotspot: the icon and the name only, so the spell tooltip does
+            -- not fire while you are reaching for the control at the row's far end.
+            -- Its WIDTH is set per bind, from the name's STRING width.
+            local hot = CreateFrame("Frame", nil, row)
+            hot:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+            hot:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+            hot:EnableMouse(true)
+            hot:SetScript("OnEnter", function()
+                local lines
+                local ids = row._infoIDs and format(L["Spell IDs: %s"], row._infoIDs)
+                if ids then lines = { ids } end
+                if row._infoNote then
+                    lines = lines or {}
+                    lines[#lines + 1] = row._infoNote
+                end
+                if row._spellID and not row._raw then
+                    ShowSpellTooltip(row, row._spellID, row._infoTitle, SpellRowStillShows, lines)
+                elseif row._infoTitle then
+                    GUI:ShowTooltip(row, { title = row._infoTitle, lines = lines })
+                end
+            end)
+            hot:SetScript("OnLeave", function() GUI:HideTooltip() end)
+            row.hot = hot
+
+            -- ⚠ MOTION propagates, CLICKS do not -- the opposite split to row.hot,
+            -- and both halves matter: without motion the row's hover wash drops out
+            -- under the cursor, without click isolation opening the record would also
+            -- toggle the whole spell. Propagation itself is applied by
+            -- ApplyRowPropagation, which is combat-deferred on 12.1.
+            local chipHot = CreateFrame("Button", nil, row)
+            chipHot:SetPoint("TOP", row, "TOP", 0, 0)
+            chipHot:SetPoint("BOTTOM", row, "BOTTOM", 0, 0)
+            chipHot:EnableMouse(true)
+            chipHot:SetScript("OnClick", function()
+                if row._onChip then row._onChip() end
+            end)
+            chipHot:SetScript("OnEnter", function(self)
+                if not row._chipTip then return end
+                GUI:ShowTooltip(self, { title = row._infoTitle, lines = { row._chipTip } })
+            end)
+            chipHot:SetScript("OnLeave", function() GUI:HideTooltip() end)
+            row.chipHot = chipHot
+            ApplyRowPropagation(row)   -- no-op in combat; healed on the next OOC acquire
+
+            row:SetScript("OnClick", function(self)
+                if self._rowToggles and self._onAction then self._onAction() end
+            end)
+            row:SetScript("OnEnter", function(self)
+                self:SetBackdropColor(ROW_HOVER_R, ROW_HOVER_G, ROW_HOVER_B, ROW_HOVER_A)
+                ShadeRowControls(self, true)
+            end)
+            row:SetScript("OnLeave", function(self)
+                self:SetBackdropColor(ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A)
+                ShadeRowControls(self, false)
+                GUI:HideTooltip()
+            end)
+
+            pane.spellRows[i] = row
+            return row
+        end
+
+        -- `key` is passed rather than read off the pane: a bind is the one moment
+        -- the filter this row belongs to is settled, and the handlers it installs
+        -- outlive the paint that made them.
+        local function BindPaneSpellRow(pane, row, y, item, isPreset, key)
+            local isChild = item.child and true or false
+            local showCheck = isPreset or isChild
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", isChild and 18 or 0, -y)
+            row:SetPoint("TOPRIGHT", 0, -y)
+
+            -- Release any proxied hover left over from the spell this pool slot was
+            -- showing; skipped while the cursor is still on this row, whose own
+            -- OnLeave owns that case.
+            if not row:IsMouseOver() then ShadeRowControls(row, false) end
+
+            row.icon:SetTexture(item.icon or FALLBACK_ICON)
+            row.name:SetText(item.name)
+            row.chip:SetText(item.chip or "")
+
+            -- Chip hugs whichever control the row is showing -- anchored to that
+            -- control's LEFT EDGE, never to the row's right with a magic offset.
+            row.check:SetShown(showCheck)
+            row.chip:ClearAllPoints()
+            row.chip:SetPoint("RIGHT", showCheck and row.check or row.remove, "LEFT", -6, 0)
+
+            -- 32 = 6 left inset + 20 icon + 6 gap.
+            row.hot:SetWidth(32 + (row.name:GetStringWidth() or 0) + 4)
+
+            local chipIsControl = (not isChild) and item.rec
+                and item.rec.alts and #item.rec.alts > 0
+            if chipIsControl then
+                if R:IsRecordNarrowed(item.rec) then
+                    local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+                    row.chip:SetTextColor(tc.r, tc.g, tc.b)
+                else
+                    row.chip:SetTextColor(0.68, 0.68, 0.68)
+                end
+            else
+                row.chip:SetTextColor(0.5, 0.5, 0.5)
+            end
+
+            row.chipHot:SetShown(chipIsControl and true or false)
+            if chipIsControl then
+                row.chipHot:ClearAllPoints()
+                row.chipHot:SetPoint("TOP", row, "TOP", 0, 0)
+                row.chipHot:SetPoint("BOTTOM", row, "BOTTOM", 0, 0)
+                row.chipHot:SetPoint("RIGHT", showCheck and row.check or row.remove, "LEFT", -2, 0)
+                row.chipHot:SetWidth((row.chip:GetStringWidth() or 0) + 8)
+                local chipRec = item.rec
+                row._onChip = function()
+                    -- ☠ RefreshAll, NOT THIS PANE. expandedRecords is keyed by record
+                    -- and is deliberately filter-independent, so opening one here
+                    -- opens it in every other filter that carries the same spell --
+                    -- and a second filter's panel may be pinned open beside this one.
+                    expandedRecords[chipRec.id] = (not expandedRecords[chipRec.id]) or nil
+                    RefreshAll()
+                end
+                row._chipTip = format(L["This spell has %d spell IDs. Click to choose which ones to track."],
+                    R:RecordIDCount(chipRec))
+            else
+                row._onChip = nil
+                row._chipTip = nil
+            end
+
+            row._spellID = item.tooltipID
+            row._raw = item.raw
+            row._rowToggles = showCheck
+
+            row._infoTitle = item.name
+            local rec = item.rec
+            row._infoNote = item.lastLive
+                and L["At least one spell ID must stay ticked. Untick the spell itself to stop tracking it."]
+                or nil
+            if isChild then
+                row._infoIDs = R:FormatSpellID(item.id)
+            elseif rec and rec.alts and #rec.alts > 0 then
+                row._infoIDs = rec.id .. ", " .. table.concat(rec.alts, ", ")
+            else
+                row._infoIDs = tostring(rec and rec.id or item.id)
+            end
+
+            local dim = showCheck and not item.enabled
+            row.icon:SetAlpha(dim and 0.4 or 1)
+            row.icon:SetDesaturated(dim)
+            row.name:SetAlpha(dim and 0.5 or 1)
+            ApplyNameColor(row.name, rec and rec.class, dim)
+
+            row.remove:SetShown(not showCheck)
+
+            if showCheck then
+                row.check:SetChecked(item.enabled and true or false)
+                if isChild then
+                    local childRec, sid, tracked = item.rec, item.id, item.enabled
+                    row._onAction = function()
+                        -- Refused on the last tracked ID; the row's own tooltip
+                        -- already carries the reason, so a refusal is a no-op.
+                        if not R:SetSpellIDMuted(childRec, sid, tracked) then return end
+                        DirectFilterChangedProxy()
+                        RefreshAll()
+                    end
+                else
+                    local prec = item.rec
+                    row._onAction = function()
+                        R:SetSpellEnabled(key, prec, not R:IsSpellEnabled(key, prec))
+                        DirectFilterChangedProxy()
+                        RefreshAll()
+                    end
+                end
+                row._onRemove = nil
+            else
+                local id = item.id
+                row._onAction = nil
+                row._onRemove = function()
+                    R:RemoveSpellFromCustom(key, id)
+                    DirectFilterChangedProxy()
+                    RefreshAll()
+                end
+            end
+        end
+
+        -- ============================================================
+        -- ONE FILTER'S PANEL
+        -- ------------------------------------------------------------
+        -- ☠ ONE CONTAINER FRAME, AND EVERYTHING GOES INSIDE IT. PopoutContent builds
+        -- into a HIDDEN holder and moves FRAMES into the group -- a REGION made on
+        -- that holder (a FontString) stays behind and is never drawn, in silence.
+        -- Six of the parts below are FontStrings, which is exactly the trap this
+        -- rework has already paid for on five captions elsewhere.
+        --
+        -- ☠ AND NOTHING THAT VARIES BY FILTER IS CAPTURED HERE. A pane is built ONCE
+        -- per (instance, row) and never rebuilt, while the ROW is re-bound to a
+        -- different filter whenever one is created or deleted -- so every fact about
+        -- a filter is read by Paint(), through the SLOT, at paint time. The slot is
+        -- what the row and its panes share; capturing the row itself is impossible
+        -- anyway, since this builder runs inside CreatePopoutRow's own arguments.
+        --
+        -- ☠ ALL SIX HEADER PARTS, IN EVERY PANEL. (5) and (6) are DISABLED on a
+        -- built-in filter rather than absent -- you cannot add or remove a spell from
+        -- a preset, only tick what is in it, and a header that changes SHAPE between
+        -- the two kinds makes the reader re-learn it on every row.
+        -- ============================================================
+        local function BuildFilterPane(group, holder, slot)
+            local pane = {
+                slot = slot, query = "", boundIdent = nil,
+                spellRows = {}, classHeaders = {}, rawTried = {},
+            }
+
+            local c = CreateFrame("Frame", nil, holder)
+            c:SetSize(paneW, PANE.paneH)
+            pane.container = c
+
+            -- (1) WHICH KIND OF FILTER THIS IS. Built-in and custom differ in what
+            -- you may do to them and in SCOPE -- preset overrides are per PROFILE,
+            -- custom filters are per ACCOUNT -- so the caption is not decoration.
+            local eyebrow = c:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+            eyebrow:SetPoint("TOPLEFT", 0, -PANE.yEyebrow)
+            eyebrow:SetJustifyH("LEFT")
+            eyebrow:SetTextColor(0.48, 0.48, 0.52)
+
+            -- (2) THE NAME, AND WHAT IT TRACKS.
+            local title = c:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+            title:SetPoint("TOPLEFT", 0, -PANE.yTitle)
+            title:SetJustifyH("LEFT")
+            title:SetWordWrap(false)
+
+            local countText = c:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+            countText:SetPoint("TOPRIGHT", 0, -(PANE.yTitle + 3))
+            countText:SetJustifyH("RIGHT")
+            countText:SetWordWrap(false)
+            countText:SetTextColor(0.5, 0.5, 0.5)
+
+            -- Custom filter names are free text, so the name needs a stop: the count
+            -- sits at the pane's right edge and a long name would run straight under
+            -- it. Re-taken per paint, because the count's own width changes with the
+            -- filter. Width 0 = auto-size, and it has to go back to auto before
+            -- measuring or a short name would keep the cap's width.
+            local function ClampPaneTitle()
+                title:SetWidth(0)
+                local avail = paneW - 6 - mceil(countText:GetStringWidth())
+                if title:GetStringWidth() > avail then
+                    title:SetWidth(mmax(40, avail))
+                end
+            end
+
+            -- (3) WHO IS USING IT. The dot carries the state so the text can stay
+            -- plain, exactly as the island's status line does.
+            -- ⚠ BOTH POINTS AT THE SAME y. The island anchors its status text LEFT
+            -- off the dot and RIGHT off a SHORT panel, which is only harmless because
+            -- that panel is a header's height; this container is 414 tall, so a RIGHT
+            -- anchor taken from its vertical middle would drop the line 180px.
+            local usedDot = c:CreateTexture(nil, "OVERLAY")
+            usedDot:SetSize(8, 8)
+            usedDot:SetPoint("TOPLEFT", 1, -(PANE.yStatus + 4))
+            usedDot:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\dot")
+
+            local usedText = c:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+            usedText:SetPoint("TOPLEFT", 15, -PANE.yStatus)
+            usedText:SetPoint("TOPRIGHT", 0, -PANE.yStatus)
+            usedText:SetJustifyH("LEFT")
+            usedText:SetWordWrap(false)
+            -- ⚠ Set the colour explicitly: DFFontNormalSmall inherits WoW's GOLD font
+            -- object, so a line with no SetTextColor is not neutral.
+            usedText:SetTextColor(GUI.Colors.text.r, GUI.Colors.text.g, GUI.Colors.text.b)
+
+            -- A FontString takes no mouse input, so the tooltip needs a frame over
+            -- its rect -- the same reason GUI:AttachTooltip builds one per label.
+            local usedHit = CreateFrame("Frame", nil, c)
+            usedHit:SetPoint("TOPLEFT", usedText, "TOPLEFT", 0, 2)
+            usedHit:SetPoint("BOTTOMRIGHT", usedText, "BOTTOMRIGHT", 0, -2)
+            usedHit:EnableMouse(true)
+            usedHit:SetScript("OnEnter", function(s)
+                if s.tooltipText then
+                    GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipLines })
+                end
+            end)
+            usedHit:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
+            -- (4) SEARCH, per filter. Cleared when the row starts showing a
+            -- different one -- see Paint.
+            local searchBoxP = GUI:CreateEditBox(c, "", nil, nil, nil, paneW, L["Search..."])
+            searchBoxP:SetPoint("TOPLEFT", 0, -(PANE.ySearch - PANE.ebDrop))
+            searchBoxP:SetPoint("TOPRIGHT", 0, -(PANE.ySearch - PANE.ebDrop))
+            GUI:AddEditBoxIcon(searchBoxP.EditBox, "Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+
+            -- The add-by-ID echo. It is the ONLY feedback typing an id gives, which
+            -- is why it takes a line of its own rather than sharing row (5) and being
+            -- squeezed to nothing at this width.
+            local echoText = c:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+            echoText:SetPoint("TOPLEFT", 0, -PANE.yEcho)
+            echoText:SetPoint("TOPRIGHT", 0, -PANE.yEcho)
+            echoText:SetJustifyH("LEFT")
+            echoText:SetWordWrap(false)
+            echoText:SetTextColor(0.6, 0.6, 0.6)
+            echoText:Hide()
+
+            -- Generation counter so a re-add while a message is visible restarts the
+            -- 4s window instead of the old timer hiding the new message early.
+            local echoGen = 0
+            local function HidePaneEcho()
+                echoGen = echoGen + 1
+                echoText:Hide()
+            end
+            local function PaneEcho(msg)
+                echoGen = echoGen + 1
+                local gen = echoGen
+                echoText:SetText(msg)
+                echoText:Show()
+                C_Timer.After(4, function()
+                    if echoGen == gen then echoText:Hide() end
+                end)
+            end
+
+            -- (5) ADD BY SPELL ID.
+            local addBoxP = GUI:CreateEditBox(c, "", nil, nil, nil, 90, L["Spell ID"])
+            addBoxP:SetPoint("TOPLEFT", 0, -(PANE.yAdd - PANE.ebDrop))
+
+            local function DoPaneAdd()
+                local kind, key = slot.kind, slot.key
+                if kind ~= "custom" or not R:GetCustomFilter(key) then return end
+                local text = Trim(addBoxP.EditBox:GetText())
+                if text == "" then return end
+                -- Integers only: tonumber() also accepts floats/hex, which are never
+                -- valid spell ids.
+                if not text:match("^%d+$") then
+                    PaneEcho(L["Enter a valid spell ID."])
+                    return
+                end
+                text = text:match("^0*(%d+)$") or text
+                if #text > 10 then
+                    PaneEcho(L["Enter a valid spell ID."])
+                    return
+                end
+                local idNum = tonumber(text)
+                -- ☠ CAP ON VALUE, NOT DIGIT COUNT -- 2147483647 is itself ten digits,
+                -- so the length check above is not the guard it looks like.
+                if not idNum or idNum < 1 or idNum > R.MAX_SPELL_ID then
+                    PaneEcho(L["Enter a valid spell ID."])
+                    return
+                end
+                local result = R:AddSpellToCustom(key, idNum)
+                if result == "spell" then
+                    local rec = R.ByID[idNum]
+                    PaneEcho(format(L["Added %s."], (R:GetSpellDisplay(rec))))
+                elseif result == "raw" then
+                    PaneEcho(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
+                elseif result == "exists" then
+                    PaneEcho(L["Already in this filter."])
+                    return
+                else
+                    return
+                end
+                addBoxP.EditBox:SetText("")
+                DirectFilterChangedProxy()
+                RefreshAll()
+            end
+
+            local addBtnP = GUI:CreateButton(c, L["Add"], 50, 22, function(self)
+                if self.dfDisabled then return end
+                DoPaneAdd()
+            end)
+            addBtnP:SetPoint("LEFT", addBoxP.EditBox, "RIGHT", 6, 0)
+            -- Enter in the box adds too (the helper's own OnEnterPressed only saves
+            -- db-backed values -- this box has no db binding).
+            addBoxP.EditBox:HookScript("OnEnterPressed", DoPaneAdd)
+
+            -- (6) ADD FROM THE DATABASE. A row of its own at this width -- the three
+            -- fixed children of a single add row need 304px against a 260px pane.
+            local dbBtnP = GUI:CreateButton(c, L["Add from Database"], paneW, 22, function(self)
+                if self.dfDisabled then return end
+                if slot.kind ~= "custom" or not R:GetCustomFilter(slot.key) then return end
+                OpenPicker(slot.key)
+            end)
+            -- One anchor and the width it was built with, the way the consumer
+            -- panel sized its own full-width buttons: StyleButton lays a button
+            -- out from the size it was GIVEN, so a second anchor would be a
+            -- width written twice and only one of them re-read.
+            dbBtnP:SetPoint("TOPLEFT", 0, -PANE.yDB)
+
+            HookDisabledTooltip(addBtnP, L["Built-in filters are curated"], L["You can enable or disable the spells shown, but not add new ones. Create a custom filter to add your own."])
+            HookDisabledTooltip(dbBtnP, L["Built-in filters are curated"], L["You can enable or disable the spells shown, but not add new ones. Create a custom filter to add your own."])
+
+            -- ---- THE SPELL LIST ----
+            local listBg = CreateFrame("Frame", nil, c, "BackdropTemplate")
+            listBg:SetPoint("TOPLEFT", 0, -(PANE.headH + PANE.gap))
+            listBg:SetPoint("TOPRIGHT", 0, -(PANE.headH + PANE.gap))
+            listBg:SetHeight(PANE.listH)
+            GUI:CreatePanelBackdrop(listBg, { borderColor = { r = 0.20, g = 0.20, b = 0.20, a = 1 } })
+
+            local listScroll = CreateFrame("ScrollFrame", nil, listBg, "ScrollFrameTemplate")
+            listScroll:SetPoint("TOPLEFT", 4, -4)
+            listScroll:SetPoint("BOTTOMRIGHT", -24, 4)
+            DF.GUI.StyleScrollBar(listScroll)
+
+            local listContent = CreateFrame("Frame", nil, listScroll)
+            listContent:SetSize(paneW - 28, 1)
+            listScroll:SetScrollChild(listContent)
+            listScroll:SetScript("OnSizeChanged", function(_, w)
+                if w and w > 0 then listContent:SetWidth(w) end
+            end)
+            pane.content = listContent
+            pane.scroll = listScroll
+
+            local emptyTextP = listBg:CreateFontString(nil, "OVERLAY", "DFFontDisableSmall")
+            emptyTextP:SetPoint("CENTER", listBg, "CENTER", 0, 0)
+
+            -- ---- THE PER-FILTER ACTIONS ----
+            -- ☠ PER FILTER, NOT PER SELECTION. The island's strip acts on "the
+            -- selection"; with a row per filter there is no selection, so Duplicate /
+            -- Rename / Export / Delete and Reset belong to the filter whose panel
+            -- they are in. Each takes its own corner rather than chaining off a
+            -- neighbour, so Reset hiding leaves the other four exactly where they are.
+            local actRuleP = c:CreateTexture(nil, "ARTWORK")
+            actRuleP:SetHeight(1)
+            actRuleP:SetColorTexture(0.22, 0.22, 0.22, 1)
+            actRuleP:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, PANE.actH)
+            actRuleP:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, PANE.actH)
+
+            local actW = mfloor((paneW - 4) / 2)
+
+            -- The display name of whatever this pane is currently showing. A preset's
+            -- `name` is a LOCALE KEY and a custom's is user text, which is the one
+            -- difference every caller of this has to get right.
+            local function PaneDisplayName()
+                if slot.kind == "preset" then
+                    for _, cat in ipairs(R.Categories) do
+                        if cat.key == slot.key then return L[cat.name] end
+                    end
+                    return tostring(slot.key or "")
+                end
+                local f = R:GetCustomFilter(slot.key)
+                return f and (f.name or tostring(slot.key)) or ""
+            end
+
+            local dupBtnP = GUI:CreateButton(c, L["Duplicate"], actW, 20, function(self)
+                if self.dfDisabled or not slot.key then return end
+                local src = slot.key   -- capture: the list may re-bind before the prompt closes
+                PromptFilterName(L["Name the duplicated filter:"], PaneDisplayName() .. " copy", L["Duplicate"], function(text)
+                    text = Trim(text)
+                    if text == "" then return end
+                    local newId = R:DuplicateFilter(src, text)
+                    SelectFilter("custom", newId)
+                    if FocusFilterPanel then FocusFilterPanel("custom", newId) end
+                end)
+            end)
+
+            local renameBtnP = GUI:CreateButton(c, L["Rename"], actW, 20, function(self)
+                if self.dfDisabled then return end
+                local id = slot.key
+                local f = R:GetCustomFilter(id)
+                if not f then return end
+                PromptFilterName(L["Rename filter:"], f.name or "", L["Rename"], function(text)
+                    text = Trim(text)
+                    if text == "" then return end
+                    R:RenameCustomFilter(id, text)
+                    RefreshAll()
+                end)
+            end)
+
+            -- Export flattens a preset to its currently-enabled spells, so it works on
+            -- presets as well as customs -- unlike Rename and Delete, which need a
+            -- store entry.
+            local exportBtnP = GUI:CreateButton(c, L["Export"], actW, 20, function(self)
+                if self.dfDisabled or not slot.key then return end
+                local str, err = R:ExportFilter(slot.key, PaneDisplayName())
+                if not str then
+                    ShowFilterStringError(L["Export Failed"], err)
+                    return
+                end
+                DF:ShowPopupInput({
+                    title       = L["Export Filter"],
+                    message     = (slot.kind == "preset")
+                        and L["Copy this string to share this filter. It will import as a custom filter."]
+                        or L["Copy this string to share this filter:"],
+                    text        = str,
+                    multiline   = true,
+                    readOnly    = true,
+                    cancelLabel = L["Done"],
+                })
+            end)
+
+            local delBtnP = GUI:CreateButton(c, L["Delete"], actW, 20, function(self)
+                if self.dfDisabled then return end
+                local id = slot.key
+                local f = R:GetCustomFilter(id)
+                if not f then return end
+                ConfirmDeleteFilter(f.name or tostring(id), function()
+                    -- ☠ THE PANEL GOES WITH THE FILTER. Rows are POOLED and re-bound
+                    -- on every list change, so a panel left standing over a deleted
+                    -- filter silently becomes the NEXT filter's -- you delete one
+                    -- thing and are left editing another, wearing the same panel.
+                    local r = slot.row
+                    if r and r.ClosePopout then r:ClosePopout("deleted") end
+                    R:DeleteCustomFilter(id)
+                    ScrubDeletedFilter(id)
+                    if selKind == "custom" and selKey == id then
+                        selKind = "preset"
+                        selKey = R.Categories[1] and R.Categories[1].key
+                    end
+                    DirectFilterChangedProxy()
+                    RefreshAll()
+                end)
+            end)
+
+            -- Red danger tone, matching the Reset Page button. Only shown while the
+            -- preset differs from its shipped defaults.
+            local resetBtnP = CreateFrame("Button", nil, c, "BackdropTemplate")
+            GUI:StyleButton(resetBtnP, {
+                tone = "danger",
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\refresh", size = 14 },
+                text = L["Reset"],
+            })
+            resetBtnP:SetSize(actW, 20)
+            resetBtnP:SetScript("OnClick", function()
+                if slot.kind ~= "preset" or not slot.key then return end
+                R:ResetPreset(slot.key)
+                DirectFilterChangedProxy()
+                RefreshAll()
+            end)
+            resetBtnP:HookScript("OnEnter", function(self)
+                GUI:ShowTooltip(self, {
+                    title = format(L["Reset: %s"], PaneDisplayName()),
+                    lines = {
+                        L["Restore this filter's spell list to its defaults. Other filters are not affected."],
+                    },
+                })
+            end)
+            resetBtnP:HookScript("OnLeave", function() GUI:HideTooltip() end)
+            resetBtnP:Hide()
+
+            HookDisabledTooltip(renameBtnP, L["Built-in filters are curated"], L["Built-in filters can't be renamed or deleted."])
+            HookDisabledTooltip(delBtnP, L["Built-in filters are curated"], L["Built-in filters can't be renamed or deleted."])
+
+            dupBtnP:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 48)
+            renameBtnP:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, 48)
+            exportBtnP:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 24)
+            delBtnP:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, 24)
+            resetBtnP:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 0)
+
+            -- ☠ RE-THEMED BY THE PANE, NOT BY THE PAGE. StyleButton registers its
+            -- theme listener on the button's PARENT, and the page's theme walk only
+            -- visits pageRef.child -- a pane's parent is a popout holder, which is on
+            -- no walk at all. Painted here, so a theme change (which runs RefreshAll,
+            -- which repaints every pane the user can see) reaches them.
+            local paneButtons = { addBtnP, dbBtnP, dupBtnP, renameBtnP, exportBtnP, delBtnP, resetBtnP }
+
+            -- ☠ THE REPAINT VERB. A pane is built once and the row it belongs to is
+            -- re-bound whenever the filter list changes, so everything below is read
+            -- HERE rather than captured above. This is the `refreshContent` pattern
+            -- the consumer chips already used, one container larger.
+            local function Paint()
+                local kind, key = slot.kind, slot.key
+                if not (kind and key) then
+                    c:Hide()
+                    return
+                end
+                c:Show()
+
+                -- (4) is per filter and clears when a different one arrives in this
+                -- slot -- a search typed against Healing has no meaning over Defensives.
+                local ident = kind .. "|" .. tostring(key)
+                if pane.boundIdent ~= ident then
+                    pane.boundIdent = ident
+                    pane.query = ""
+                    if searchBoxP.EditBox:GetText() ~= "" then
+                        searchBoxP.EditBox:SetText("")
+                    end
+                    HidePaneEcho()
+                end
+
+                local isPreset = (kind == "preset")
+                local tc = GUI.GetThemeColor()
+                title:SetTextColor(tc.r, tc.g, tc.b)
+
+                if isPreset then
+                    local catName
+                    for _, cat in ipairs(R.Categories) do
+                        if cat.key == key then
+                            catName = L[cat.name]
+                            break
+                        end
+                    end
+                    eyebrow:SetText(L["Editing built-in filter"])
+                    title:SetText(catName or tostring(key))
+                    local enabled, total = R:PresetCounts(key)
+                    countText:SetText(format(L["%d of %d tracked"], enabled, total))
+                else
+                    local f = R:GetCustomFilter(key)
+                    eyebrow:SetText(L["Editing custom filter"])
+                    title:SetText(f and (f.name or tostring(key)) or "")
+                    countText:SetText(format(L["%d spells"], f and CustomSpellCount(f) or 0))
+                end
+                ClampPaneTitle()
+
+                -- (3) WHO IS USING IT, live from the db. Editing a filter changes it
+                -- everywhere it is used, and that is exactly what someone about to
+                -- edit a shared filter needs to know before they touch anything.
+                local places = {}
+                for _, consumer in ipairs(FilterConsumers(kind, key)) do
+                    places[#places + 1] = UsageLabel(consumer)
+                end
+                if #places > 0 then
+                    usedDot:SetVertexColor(0.3, 0.8, 0.45)
+                    usedText:SetText(format(L["Used by: %s"], table.concat(places, ", ")))
+                else
+                    -- "Not used yet" rather than "off": nothing on THIS page turned it
+                    -- off, so an off-state would describe a switch the reader cannot see.
+                    local w = GUI.Colors.warning
+                    usedDot:SetVertexColor(w.r, w.g, w.b)
+                    usedText:SetText(L["Not used yet — pick it on a page that shows auras"])
+                end
+                usedHit.tooltipText = L["Where this applies"]
+                usedHit.tooltipLines = {
+                    L["Each display picks its own filters on its own page — the Buff Bar, the Defensive Icon, and Aura Designer groups. This line lists the ones using it now, across both Party and Raid."],
+                    isPreset
+                        and L["Which filters a display uses is per mode, so Party and Raid keep separate choices. What a filter CONTAINS is not per mode: editing its spells changes both."]
+                        or  L["Which filters a display uses is per mode, so Party and Raid keep separate choices. A custom filter's spells are shared by every profile on the account."],
+                }
+
+                -- (5) and (6) GREYED, NEVER ABSENT, on a built-in filter.
+                local isCustom = (not isPreset) and R:GetCustomFilter(key) ~= nil
+                addBoxP:SetEnabled(isCustom)
+                addBtnP:SetDisabled(not isCustom)
+                dbBtnP:SetDisabled(not isCustom)
+
+                dupBtnP:SetDisabled(false)
+                exportBtnP:SetDisabled(false)
+                renameBtnP:SetDisabled(not isCustom)
+                delBtnP:SetDisabled(not isCustom)
+                resetBtnP:SetShown((isPreset and R:IsPresetModified(key)) or false)
+
+                -- ---- the list ----
+                local groups = PaneItems(pane, kind, key, pane.query)
+                local y = 4
+                local usedHeaders, usedRows, shown = 0, 0, 0
+                local function RenderGroup(token)
+                    local g = groups[token]
+                    if not g or #g == 0 then return end
+                    usedHeaders = usedHeaders + 1
+                    local hdr = AcquirePaneClassHeader(pane, usedHeaders)
+                    hdr:ClearAllPoints()
+                    hdr:SetPoint("TOPLEFT", 6, -(y + 6))
+                    hdr:SetText(ClassDisplayName(token))
+                    local cc = token ~= "ALL" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
+                    if cc then
+                        hdr:SetTextColor(cc.r, cc.g, cc.b)
+                    else
+                        hdr:SetTextColor(0.65, 0.65, 0.65)
+                    end
+                    y = y + CLASS_HEADER_H
+                    for _, item in ipairs(g) do
+                        usedRows = usedRows + 1
+                        shown = shown + 1
+                        local srow = AcquirePaneSpellRow(pane, usedRows)
+                        BindPaneSpellRow(pane, srow, y, item, isPreset, key)
+                        y = y + SPELL_ROW_H
+                    end
+                    y = y + 4
+                end
+                for _, token in ipairs(CLASS_ORDER) do
+                    RenderGroup(token)
+                end
+                RenderGroup("ALL")
+
+                for j = usedHeaders + 1, #pane.classHeaders do
+                    pane.classHeaders[j]:Hide()
+                end
+                for j = usedRows + 1, #pane.spellRows do
+                    pane.spellRows[j]:Hide()
+                end
+
+                emptyTextP:SetShown(shown == 0)
+                emptyTextP:SetText(pane.query ~= "" and L["No results found"] or L["This filter is empty."])
+                listContent:SetHeight(mmax(1, y + 4))
+
+                for _, b in ipairs(paneButtons) do
+                    if b and b.UpdateTheme then b.UpdateTheme() end
+                end
+            end
+            pane.Paint = Paint
+
+            searchBoxP.EditBox:HookScript("OnTextChanged", function(eb)
+                local q = (eb:GetText() or ""):lower()
+                if q == pane.query then return end
+                pane.query = q
+                Paint()
+            end)
+
+            -- ☠ THE GROUP RE-ASKS THIS ON EVERY RE-FLOW, which is what paints the
+            -- pane the first time its panel opens -- the mount ends in ReflowPane,
+            -- and RefreshChildStates calls `refreshContent` on every child it holds.
+            -- The spell rows for this pane are created by that first call.
+            c.refreshContent = function() Paint() end
+
+            group:AddWidget(c, PANE.paneH)
+            return pane
+        end
+
+        -- ============================================================
+        -- THE ROW POOL
+        -- ------------------------------------------------------------
+        -- ☠ CREATED ON DEMAND AND NEVER DESTROYED, exactly as the island's list rows
+        -- are: WoW frees no frame, and a filter can be created at any point in the
+        -- session. Row i is a SLOT, not a filter -- the list re-sorts when a custom
+        -- filter is added or renamed, so slot 4 is a different filter afterwards and
+        -- everything behind it has to read its binding rather than remember one.
+        -- ============================================================
+        local filterRows = {}
+        local filterBand = GUI:CreateSettingsGroup(parent, tools.BandWidth(), { chromeless = true })
+
+        local function AcquireFilterRow(i)
+            local row = filterRows[i]
+            if row then return row end
+
+            -- ⚠ THE SLOT EXISTS BEFORE THE ROW DOES, and it has to. PopoutContent
+            -- runs its builder EAGERLY, inside this very call, so at the moment the
+            -- pane is built there is no row to hand it -- CreatePopoutRow has not
+            -- been called yet. The slot is the shared cell both ends read.
+            local slot = {}
+            local panes = {}
+            local mount = tools.PopoutContent(function(group, holder)
+                panes[#panes + 1] = BuildFilterPane(group, holder, slot)
+            end)
+
+            row = GUI:CreatePopoutRow(parent, {
+                label   = "",
+                db      = tools.RowDB,
+                -- ⚠ THE SUMMARY IS DECLARED AND, ON A STRIP ROW, NEVER PAINTED --
+                -- the kit blanks a strip row's corner while it is on (PopoutRow's
+                -- paintSummary). It is kept because the two facts it names are the
+                -- ones the row would report if that ever changes, and because every
+                -- one of them is also in the panel's own header, where the user's
+                -- own requirement put them.
+                summary = function()
+                    if not (slot.kind and slot.key) then return "" end
+                    local places = {}
+                    for _, consumer in ipairs(FilterConsumers(slot.kind, slot.key)) do
+                        places[#places + 1] = UsageLabel(consumer)
+                    end
+                    if #places == 0 then return L["Not in use"] end
+                    return table.concat(places, ", ")
+                end,
+                window  = DF.GUIFrame,
+                clipTo  = pageRef,
+                build   = mount,
+                footerStrip = true,
+            })
+            -- ⚠ NO ClaimKeys, NO WireModifiedTick AND NO WireFooter. This page owns
+            -- no per-mode db keys at all -- CreateCopyButton is called with an empty
+            -- list for exactly that reason -- and what a pane edits is a per-ACCOUNT
+            -- custom-filter store and a per-PROFILE override diff. There is no key
+            -- for a modified tick to test and nothing a Reset Group could write.
+            slot.row = row
+            row.dfSlot = slot
+
+            -- Every pane this row has ever been given content for, not just the
+            -- eager one: pinning a panel and clicking the row again asks the factory
+            -- for a SECOND instance, and both are bound to this same slot.
+            -- ⚠ ONLY THE ONES ON SCREEN. A closed pane lives in a hidden holder, and
+            -- repainting seventeen of those on every write would be the cost the
+            -- lazy build exists to avoid; it paints on the way in instead, through
+            -- refreshContent.
+            row.dfRepaintPanes = function()
+                for _, p in ipairs(panes) do
+                    if p.container:IsVisible() then p.Paint() end
+                end
+            end
+
+            filterRows[i] = row
+            filterBand:AddWidget(row)
+            return row
+        end
+
+        -- Find the row now showing (kind, key) and open its panel.
+        -- ⚠ READ AFTER THE LIST HAS BEEN RE-BOUND, never before: the rows are
+        -- POOLED, so the row holding a filter moves the moment one is created,
+        -- renamed or deleted.
+        FocusFilterPanel = function(kind, key)
+            if not (kind and key) then return false end
+            for _, row in ipairs(filterRows) do
+                local slot = row.dfSlot
+                if slot and not row.dfSurplus and slot.kind == kind and slot.key == key then
+                    if row.OpenPopout then row:OpenPopout() end
+                    if DF.HighlightWidget then DF:HighlightWidget(row) end
+                    return true
+                end
+            end
+            -- A filter that is referenced but has no row is a deleted one whose
+            -- reference outlived it. Say so rather than pulsing nothing.
+            DF:DebugWarn("GUI", "Filter Designer: no row for %s filter '%s'", tostring(kind), tostring(key))
+            return false
+        end
+
+        -- ☠ NO Add() HERE, AND THAT IS THE WHOLE REASON THE BAND IS A GROUP. Add
+        -- only ever arrives inside a build; this runs from RefreshAll, which has
+        -- none. A settings group re-lays its own children on every RefreshStates and
+        -- reports calculatedHeight, so a row acquired on the fortieth filter is
+        -- picked up by the page's ordinary layout pass.
+        RefreshFilterRows = function()
+            local list = R:ListFilters()
+            for i, entry in ipairs(list) do
+                local row = AcquireFilterRow(i)
+                local slot = row.dfSlot
+                slot.kind, slot.key = entry.kind, entry.key
+                -- ☠ A PRESET'S `name` IS A LOCALE KEY AND A CUSTOM'S IS USER TEXT.
+                -- R:ListFilters hands both back in the same field and marks which is
+                -- which; running a user-typed name through L[] returns it unchanged
+                -- today and would start answering a translator's string the day one
+                -- collides.
+                local name = entry.custom and entry.name or L[entry.name]
+                row._label = name
+                row._title = name
+                -- The kit writes the plate's label once, at build, from row._label --
+                -- so a row that changes which filter it is showing has to repaint it.
+                if row.label then row.label:SetText(name) end
+                row.dfSurplus = nil
+                filterBand:SetChildHidden(row, false)
+                if row.Refresh then row.Refresh() end
+                row.dfRepaintPanes()
+            end
+            -- Surplus rows are HIDDEN through the group rather than by hand: the
+            -- group's own layout pass is what announces the hide, and a popout row
+            -- answers that announcement by closing any loose panel docked to it.
+            for i = #list + 1, #filterRows do
+                local row = filterRows[i]
+                row.dfSurplus = true
+                filterBand:SetChildHidden(row, true)
+            end
+            if pageRef.RefreshStates then pageRef:RefreshStates() end
+        end
+
+        -- ============================================================
+        -- THE ACTION BAND
+        -- ------------------------------------------------------------
+        -- ☠ NEW AND IMPORT HAVE NO FILTER TO BELONG TO. Every other verb on this
+        -- page acts on ONE filter and now lives in that filter's own panel; these two
+        -- CREATE one, so they sit above the list they create into -- the same
+        -- argument that kept them out of the island's bottom strip, where they would
+        -- have read as "import into the selected filter".
+        --
+        -- ⚠ AND "HOW THIS WORKS" COMES WITH THEM. In the island it is a glyph on the
+        -- chip row, and the chip row is taken down at the foot of this arm -- without
+        -- a home here the band layout would simply lose the popup.
+        -- ============================================================
+        local ACTION_BAND_H = PANE.actionLabelH + PANE.actionBtnH
+        local actionBand = CreateFrame("Frame", nil, parent)
+        actionBand:SetSize(tools.BandWidth(), ACTION_BAND_H)
+
+        -- In a do-block for the local-slot reason PANE gives: the label is set once
+        -- and never read again, so the name it would hold is the name something else
+        -- cannot have.
+        do
+            local filtersLabel = actionBand:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+            filtersLabel:SetPoint("TOPLEFT", 0, 0)
+            filtersLabel:SetJustifyH("LEFT")
+            filtersLabel:SetText(L["Filters"])
+        end
+
+        -- ☠ ONE VERB, TWO CALLERS, AND IT ENDS BY OPENING THE PANEL. The band's own
+        -- button and the Aura Designer's "Create Filter" entry point both land here,
+        -- and a filter created and then left shut is a page that did half of what was
+        -- asked -- which is what the island's pulse-the-add-row cue was working
+        -- around when the master was a list rather than a row each.
+        NewFilterFlow = function()
+            PromptFilterName(L["Name the new filter:"], "", L["Create"], function(text)
+                text = Trim(text)
+                if text == "" then return end
+                local id = R:CreateCustomFilter(text)
+                -- SelectFilter runs RefreshAll, which re-binds the rows -- so the row
+                -- for this filter only exists after it.
+                SelectFilter("custom", id)
+                if FocusFilterPanel then FocusFilterPanel("custom", id) end
+            end)
+        end
+
+        local newBtn = GUI:CreateButton(actionBand, L["+ New Buff Filter"], 140, PANE.actionBtnH, function()
+            NewFilterFlow()
+        end)
+        newBtn:SetPoint("TOPLEFT", 0, -PANE.actionLabelH)
+
+        -- ☠ THE ISLAND'S IMPORT ROW OWNS THIS FLOW, AND THIS DRIVES IT RATHER THAN
+        -- CARRYING A SECOND COPY. Import is a five-branch popup chain -- decode,
+        -- name-clash, content-match, import-as-copy, use-existing -- and two copies of
+        -- it is two places for the clash rules to drift apart. The island's row is
+        -- built and wired whatever the layout; only its ANCHOR is the island's.
+        local importBtn = GUI:CreateButton(actionBand, L["+ Import Filter"], 140, PANE.actionBtnH, function()
+            local fn = importRow:GetScript("OnClick")
+            if fn then fn(importRow) end
+        end)
+
+        local helpBandBtn = CreateFrame("Button", nil, actionBand, "BackdropTemplate")
+        -- ☠ ".png" IS PART OF THE PATH -- see the island's glyph for why.
+        GUI:StyleButton(helpBandBtn, {
+            width  = CHIP_H,
+            height = PANE.actionBtnH,
+            icon   = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\question.png", size = 13 },
+        })
+        helpBandBtn:SetPoint("TOPRIGHT", 0, -PANE.actionLabelH)
+        helpBandBtn:SetScript("OnClick", ShowFilterHelp)
+        helpBandBtn:HookScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, {
+                title = L["How this works"],
+                lines = { L["A short guide to filters and the displays that use them."] },
+            })
+        end)
+        helpBandBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        importBtn:SetPoint("TOPRIGHT", helpBandBtn, "TOPLEFT", -6, 0)
+
+        -- ⚠ SIZED FROM THE BAND, NOT GIVEN A NUMBER. Two fixed-width buttons anchored
+        -- from opposite ends do not shrink, they overlap -- the Class-2 failure this
+        -- page has already paid for twice (the action strip, header row 3).
+        local function LayoutActionBand()
+            local w = actionBand:GetWidth() or 0
+            if w < 60 then return end
+            local avail = w - CHIP_H - 6 - 6
+            local bw = mmax(80, mfloor(avail / 2))
+            newBtn:SetWidth(bw)
+            importBtn:SetWidth(bw)
+        end
+        actionBand:SetScript("OnSizeChanged", LayoutActionBand)
+        LayoutActionBand()
+
+        -- Their parent is the action band rather than the page child, so the page's
+        -- theme walk never reaches them -- the same rule the island states for its own
+        -- standing buttons, which is why RefreshLeft re-themes this list.
+        wipe(bandButtons)
+        bandButtons[#bandButtons + 1] = newBtn
+        bandButtons[#bandButtons + 1] = importBtn
+        bandButtons[#bandButtons + 1] = helpBandBtn
+
+        -- ============================================================
+        -- THE PICKER HAS NOWHERE TO ANCHOR ANY MORE
+        -- ------------------------------------------------------------
+        -- ☠ The island points the spell-database overlay at the two panels' corners
+        -- and both of them are taken down here. It covers the VIEWPORT instead --
+        -- OpenSpellPicker spans its parent's whole rect when given no points, so
+        -- naming contentFrame as the parent is the entire change. Instances are keyed
+        -- by parent inside the picker, so this is a second one rather than the
+        -- island's re-anchored.
+        --
+        -- ⚠ AND THE SELECTION MOVES WITH IT. RefreshAll closes the picker whenever the
+        -- page's selection is not its target (see the guard there), and nothing in the
+        -- band arm moves that selection -- so without this the picker shut itself the
+        -- moment the first spell was added through it.
+        -- ============================================================
+        OpenPicker = function(cfId)
+            pickerTarget = cfId
+            selKind, selKey = "custom", cfId
+            pickerHandle = R:OpenSpellPicker({
+                parent = GUI.contentFrame or parent,
+                title = L["Add from Database"],
+                -- Re-evaluated per refresh, so a rename while the picker is up keeps
+                -- the header current.
+                subtitle = function()
+                    local f = R:GetCustomFilter(pickerTarget)
+                    return f and (f.name or tostring(pickerTarget)) or ""
+                end,
+                isValid = function()
+                    return R:GetCustomFilter(pickerTarget) ~= nil
+                end,
+                isBlocked = function(rec)
+                    local f = R:GetCustomFilter(pickerTarget)
+                    return (f and f.spells[rec.id] ~= nil) and true or nil
+                end,
+                rowActions = {
+                    {
+                        handler = function(rec)
+                            if R:AddSpellToCustom(pickerTarget, rec.id) then
+                                DirectFilterChangedProxy()
+                                RefreshAll()
+                            end
+                        end,
+                    },
+                },
+            })
+        end
 
         -- The freshness note needs a host of its own: it is a FontString, and the
         -- layout pass hands out SetPoint and SetWidth to FRAMES.
@@ -3580,17 +4729,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             dbFreshLabel:SetPoint("TOPLEFT", freshHost, "TOPLEFT", 0, 0)
             dbFreshLabel:SetPoint("TOPRIGHT", freshHost, "TOPRIGHT", 0, 0)
             -- ⚠ AND ITS BAND IS MEASURED. BELOW_PANELS_H is the island's allowance
-            -- for one line of this note under a fixed 270px panel; on a ~280px band
-            -- the same sentence runs to three, and a band that kept the one-line
-            -- number would let the See Also footer draw over it -- which is the exact
-            -- bug BELOW_PANELS_H was introduced to fix, back when the note hung
-            -- outside the height arithmetic entirely.
+            -- for one line of this note under a fixed 270px panel; on a wider band the
+            -- same sentence runs to three.
             -- ☠ THE FONTSTRING, NOT THE FRAME. GUI:CreateLabel returns a frame
             -- WRAPPING a string, so GetStringHeight on it is nil -- which is what
-            -- opening this page threw. The frame's own height is no use either:
-            -- it converges only inside a settings group and this label is anchored
-            -- to leftPanel, which is the trap already written up at the top of this
-            -- file. The STRING wraps correctly at any width; measure that.
+            -- opening this page threw. The frame's own height is no use either: it
+            -- converges only inside a settings group and this label is anchored to
+            -- leftPanel. The STRING wraps correctly at any width; measure that.
             freshHost:SetScript("OnSizeChanged", function(self)
                 local fs = dbFreshLabel.fontString
                 local h = mmax(((fs and fs:GetStringHeight()) or 0) + 6, BELOW_PANELS_H)
@@ -3605,16 +4750,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         end
 
         -- Re-report a band's height in place: set layoutHeight, set the height,
-        -- re-run the page's layout pass. The same verb the designer shell's canvas
-        -- and its legacy-tab host carry, and for the same reason -- a height that
-        -- changes after the layout pass has spent it mispositions everything below.
+        -- re-run the page's layout pass.
         --
         -- ☠ TWO NUMBERS, NOT ONE, AND THE SECOND IS WHY. The SLOT carries the gap to
         -- the next band; the FRAME is only as tall as what it draws. Collapsing them
-        -- -- letting the frame grow to the slot -- makes AdoptBands' `GetHeight() +
-        -- BAND_GAP` read a height that already contains a gap, so every rebuild adds
-        -- another one. It self-corrects on the next re-flow, which is exactly the
-        -- kind of transient nobody reports and nobody can reproduce.
+        -- makes AdoptBands' `GetHeight() + BAND_GAP` read a height that already
+        -- contains a gap, so every rebuild adds another one.
         local function BandHeight(host)
             return function(slotH, frameH)
                 slotH  = mmax(tonumber(slotH) or 1, 1)
@@ -3627,74 +4768,76 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 if pageRef.RefreshStates then pageRef:RefreshStates() end
             end
         end
-        -- ⚠ NO dfSetHeight ON THE CHIP ROW. It is not a band in this arm -- the
-        -- consumers are behind a popout row -- and a re-report verb on a frame the
-        -- layout pass never places would call the page's whole state pass for a
-        -- height nothing reads.
-        rightArea.dfSetHeight = BandHeight(rightArea)
+        -- ⚠ NO dfSetHeight ON THE CHIP ROW OR THE DETAIL. Neither is a band in this
+        -- arm, and a re-report verb on a frame the layout pass never places would call
+        -- the page's whole state pass for a height nothing reads.
         if freshHost then freshHost.dfSetHeight = BandHeight(freshHost) end
+
+        -- ☠ THE ONE FLUSH SEAM IN THIS COLUMN, AND IT NEEDS A BAND OF ITS OWN. The
+        -- other seams breathe because each band carries BAND_GAP in its SLOT, but the
+        -- banner's slot is `banner.layoutHeight`, and that number is written by
+        -- CreateInfoBanner's own deferred re-measure (RelayoutHost). Anything added to
+        -- it there is discarded on the next re-wrap, so the gap goes in a band the
+        -- banner does not own.
+        --
+        -- ⚠ BUILT ONCE, OUTSIDE AdoptBands. That function runs on EVERY build --
+        -- DoBuild retires every Add()ed child and the rebuild guard calls it again --
+        -- and frames cannot be garbage-collected in this client, so a frame created in
+        -- there is one frame leaked per rebuild.
+        local bannerGap = CreateFrame("Frame", nil, parent)
+        bannerGap:SetSize(tools.BandWidth(), BAND_GAP)
 
         -- ☠ RUN ON EVERY BUILD, NOT ONCE. DoBuild retires every Add()ed child -- it
         -- hides them, clears their points and reparents them to the trash -- so the
         -- rebuild guard at the top of this function calls this again with the fresh
         -- Add it was handed. Add() is what puts them back.
-        --
-        -- ⚠ THE GAP IS IN THE SLOT, NOT IN THE FRAME. The layout pass positions a
-        -- widget at the top of its slot and only forces the widget's own height when
-        -- it carries a `text` field, so a slot one BAND_GAP taller than its frame is
-        -- how a band gets air under it without a spacer per band.
-        -- ☠ THE ONE FLUSH SEAM IN THIS COLUMN, AND IT NEEDS A BAND OF ITS OWN. Four
-        -- of the five seams already breathe -- the chip row and the detail carry
-        -- BAND_GAP in their slots, the master row carries the kit's own 6 -- but the
-        -- banner's slot is `banner.layoutHeight`, and that number is written by
-        -- CreateInfoBanner's own deferred re-measure (RelayoutHost). Anything added
-        -- to it there is discarded on the next re-wrap, so the gap goes in a band the
-        -- banner does not own.
-        --
-        -- ⚠ BUILT ONCE, OUTSIDE AdoptBands. That function runs on EVERY build --
-        -- DoBuild retires every Add()ed child and the rebuild guard calls it again --
-        -- and frames cannot be garbage-collected in this client, so a frame created
-        -- in there is one frame leaked per rebuild.
-        --
-        -- ⚠ AND THE PANEL SIZER NEEDS NO EDIT. In the band arm it computes its own
-        -- chrome (`(chipRow:GetHeight() or CHIP_H) + FILTERROW_H + BAND_GAP * 3`),
-        -- which already reserves three gaps above the detail where only two stood;
-        -- this is the third. PANEL_CHROME_H is the ISLAND's sum and must not move --
-        -- the island anchors its pieces directly and has no band gaps at all.
-        local bannerGap = CreateFrame("Frame", nil, parent)
-        bannerGap:SetSize(tools.BandWidth(), BAND_GAP)
-
         local function AdoptBands(addFn)
             addFn(banner, banner.layoutHeight, "both")
             addFn(bannerGap, BAND_GAP, "both")
-            -- nil for the same reason the master's row takes nil: a popout row is
-            -- fixedRowHeight, so ResolveRowHeight uses the kit's own plate + gap.
-            addFn(consumerRow, nil, "both")
-            -- nil: a popout row is fixedRowHeight, so ResolveRowHeight takes the
-            -- kit's own plate + gap rather than a number copied out of it.
-            addFn(filterRow, nil, "both")
-            addFn(rightArea, (rightArea:GetHeight() or PANEL_H_MIN) + BAND_GAP, "both")
+            addFn(actionBand, ACTION_BAND_H + BAND_GAP, "both")
+            -- nil: a settings group carries its OWN height (calculatedHeight), which
+            -- is the whole reason this list can grow and shrink without a rebuild --
+            -- the layout pass re-reads it on every RefreshStates.
+            addFn(filterBand, nil, "both")
             if freshHost then addFn(freshHost, BELOW_PANELS_H, "both") end
         end
         pageRef._fdAdoptBands = AdoptBands
         AdoptBands(Add)
 
-        -- The banner is an Add()ed child here rather than a frame anchored to the
-        -- page, so its own deferred re-measure (CreateInfoBanner -> RelayoutHost)
-        -- finally reaches the layout it is in. In the island it reached nothing,
-        -- which is what the deferred pass at the foot of this function exists for.
-        -- ⚠ POINTS ONLY CLEARED, NEVER RE-SET. The layout pass ClearAllPoints()es
-        -- every child it places and issues its own TOPLEFT and SetWidth, so a point
-        -- written here is discarded on the next RefreshStates -- and a leftover
-        -- island anchor (banner -> parent, chip row -> banner) would be a lie in the
-        -- meantime about who owns this frame's geometry.
+        -- ============================================================
+        -- THE ISLAND'S ROOTS COME DOWN
+        -- ------------------------------------------------------------
+        -- ☠ TAKEN DOWN, NOT MERELY UN-ANCHORED, AND ALL THREE OF THEM. The chip row is
+        -- anchored to the banner, the master panel to the chip row and the detail to
+        -- the master -- and the banner IS a band here, so a chain left standing would
+        -- redraw the whole island over the column that replaced it. An anchor is
+        -- geometry, not visibility: hiding a frame does not stop its neighbours being
+        -- positioned from it.
+        --
+        -- ⚠ POINTS ONLY CLEARED ON THE BANNER, NEVER RE-SET. The layout pass
+        -- ClearAllPoints()es every child it places and issues its own TOPLEFT and
+        -- SetWidth, so a point written here is discarded on the next RefreshStates.
+        -- ============================================================
         banner:ClearAllPoints()
-        -- ☠ AND IT IS TAKEN DOWN, not merely un-anchored. Its island anchors point
-        -- at the banner, which IS a band here, so leaving it visible would draw the
-        -- old truncating row on top of the one that replaced it.
         chipRow:ClearAllPoints()
         chipRow:Hide()
+        leftPanel:ClearAllPoints()
+        leftPanel:Hide()
         rightArea:ClearAllPoints()
+        rightArea:Hide()
+
+        -- ---- THE CROSS-PAGE ENTRY POINTS ----
+        -- Published rather than captured, and read at CALL time by the three verbs
+        -- ~1,400 lines above: they are created long before this arm runs, so an
+        -- upvalue taken up there would freeze nil.
+        pageRef._fdOpenFilterPanel = FocusFilterPanel
+        pageRef._fdNewFilter = NewFilterFlow
+        -- "Scroll to the filter band" is what OpenFilterList means here. The band is
+        -- the third thing on the page, so what it actually needs is the cue rather
+        -- than the scroll.
+        pageRef._fdScrollToFilters = function()
+            if DF.HighlightWidget then DF:HighlightWidget(actionBand) end
+        end
     end
 
     -- ========== PAGE HEIGHT SPACER ==========
@@ -3718,6 +4861,21 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- spacer (which is what tells the page layout how tall this page is) in step.
     -- Called on build, on every refresh, and when the window is resized.
     local function ResolvePanelHeight()
+        -- ☠ THE BAND ARM HAS NOTHING FOR THIS TO SIZE, and that is a consequence of
+        -- the rework rather than an omission. Everything it draws carries its own
+        -- height: the banner re-measures itself into the layout it is in, the action
+        -- band is a fixed two rows, the filter band reports the settings group's
+        -- calculatedHeight, the freshness note measures its own string -- and every
+        -- filter's pane is a FIXED height under DandersUI's 60%-of-screen ceiling
+        -- (see PANE.paneH for why a viewport-sized pane would be a list scrolling
+        -- inside a list). The island's two panels are the only things on this page
+        -- that ever grew with the window.
+        --
+        -- ⚠ STILL CALLED IN BOTH ARMS, by the resize hook and the deferred pass
+        -- below. What those want in the band layout is the RefreshStates that follows
+        -- this call, not this call.
+        if rowsMode then return end
+
         local bannerH = (banner:GetHeight() > 0) and banner:GetHeight()
                         or (banner.layoutHeight or 34)
         local viewport = GUI.contentFrame and GUI.contentFrame:GetHeight() or 0
@@ -3728,25 +4886,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
 
         local h = PANEL_H_MIN
         if viewport > 0 then
-            -- What stands above the detail. In the band layout that is the chip band
-            -- -- ASKED, not assumed, because it wraps -- the filter row and the gaps
-            -- between the four bands; in the island it is the fixed chrome sum.
-            local chromeH = PANEL_CHROME_H
-            if rowsMode then
-                -- TWO popout rows above the detail now -- the consumers and the
-                -- master -- where a wrapping chip band and the master used to stand.
-                chromeH = FILTERROW_H * 2 + BAND_GAP * 3
-            end
-            local available = viewport - chromeH - belowH - bannerH
+            local available = viewport - PANEL_CHROME_H - belowH - bannerH
             h = mmax(PANEL_H_MIN, mfloor(available * PANEL_H_FRACTION))
         end
         if h ~= PANEL_H then
             PANEL_H = h
-            -- ☠ THE MASTER DOES NOT FOLLOW IT IN THE BAND LAYOUT. It sits in a popout
-            -- pane at PANE_MASTER_H; growing it with the viewport would push the pane
-            -- past the kit's 60%-of-screen ceiling and wrap the master's own scroll
-            -- frame in a second one.
-            if not rowsMode then leftPanel:SetHeight(PANEL_H) end
+            leftPanel:SetHeight(PANEL_H)
             rightArea:SetHeight(PANEL_H)
         end
         -- Always re-assert: the banner can change height independently of the
@@ -3756,13 +4901,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- ⚠ belowH is part of the total. Leaving it out is what let the See Also
         -- footer -- which flows AFTER this spacer -- draw on top of the freshness
         -- note: the page claimed to end where the panels end.
-        if rowsMode then
-            -- Bands carry their own heights; the detail re-reports through the same
-            -- layoutHeight + RefreshStates idiom the chip band uses.
-            if rightArea.dfSetHeight then rightArea.dfSetHeight(PANEL_H + BAND_GAP, PANEL_H) end
-        else
-            spacer.layoutHeight = PANEL_CHROME_H + bannerH + PANEL_H + belowH
-        end
+        spacer.layoutHeight = PANEL_CHROME_H + bannerH + PANEL_H + belowH
     end
     pageRef._fdResolvePanelHeight = ResolvePanelHeight
 
