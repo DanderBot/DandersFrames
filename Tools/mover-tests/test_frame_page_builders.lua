@@ -1520,25 +1520,37 @@ do
     eq(sawInline, 4, "inline: ...all four of the named rows were found on the page")
 
     -- ---- and NOTHING ELSE ANYWHERE ----------------------------------
-    -- The same claim the footer strip carries: this page is the one that moved,
-    -- and Danders judges it before 124 more rows follow.
+    -- The same claim the footer strip carries, one page at a time.
     local total = 0
     for _ in SRC:gmatch("inline = true") do total = total + 1 end
     eq(total, 4, "inline: ...and only the Frame page's rows inside this file")
 
+    -- ☠ A ROLL WITH NUMBERS ON IT, NOT A ZERO. This read "no other page has
+    -- moved yet" while the Frame page was the only one swept -- Danders judged
+    -- it in game before the rest followed. Two pages have followed, and the
+    -- honest shape of that claim is a NAMED list with exact counts rather than a
+    -- gate deleted the moment it fires: a page opting a row in without a census
+    -- of its own still fails here, and a swept page that silently gains or loses
+    -- one fails on the number rather than passing an "at least one" test. The
+    -- per-row half of each page's claim lives in that page's own census file.
+    local SWEPT = {
+        ["GUI/Pages/Options.lua"] = 4,   -- the Frame page, named row by row above
+        ["GUI/Pages/Modules.lua"] = 7,   -- Icon Text 1, Highlights 3, Dispel 3
+        ["GUI/Pages/Frames.lua"]  = 3,   -- Global Fonts 1, Group Labels 2
+    }
     local TOC = options_file_source("DandersFrames_Options.toc")
-    local elsewhere = {}
+    local wrong = {}
     for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
         local path = "GUI/" .. name:gsub("\\", "/")
         local src = options_file_source(path)
-        local n = 0
+        local n, want = 0, SWEPT[path] or 0
         for _ in src:gmatch("inline = true") do n = n + 1 end
-        if path ~= "GUI/Pages/Options.lua" and n > 0 then
-            elsewhere[#elsewhere + 1] = path .. " (" .. n .. ")"
+        if n ~= want then
+            wrong[#wrong + 1] = path .. " (" .. n .. ", want " .. want .. ")"
         end
     end
-    eq(#elsewhere, 0,
-       "inline: no other page has moved yet -- " .. table.concat(elsewhere, ", "))
+    eq(#wrong, 0,
+       "inline: every page opts in exactly what the roll says -- " .. table.concat(wrong, ", "))
 
     -- ---- the threshold is the helper's, and it is stated -------------
     local controls = options_file_source("GUI/Controls.lua")

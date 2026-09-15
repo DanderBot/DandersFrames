@@ -579,3 +579,77 @@ do
     check(PAGE:find('Add(CreateCopyButton(self.child, {"fontShadow"}, L["Global Fonts"], "general_fonts"), 25, 2)', 1, true) ~= nil,
           "page: the copy button is still the first thing on the page, on the same prefix")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNTS ITS PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ROW BY ROW. A row whose whole group is small mounts THAT
+-- GROUP under its title line rather than charging a click for it, and the strip
+-- then offers to pin a second copy instead of promising settings already on
+-- screen. The page opts a row in; the threshold in Controls.lua refuses one
+-- whose pane turns out to be big, and that half is measured against a real group
+-- in test_popout_page_tools.lua.
+--
+-- ☠ THIS PAGE IS WHERE THE TWO NUMBERS COME APART, which is why the split is
+-- worth a section of its own. The badge counts SETTINGS; the threshold counts
+-- CHILDREN, and a blurb is a child. Font Selection's badge says five and its
+-- group holds seven, one over the ceiling -- so it is the one row on either of
+-- this file's pages that looks small and is not.
+-- ============================================================
+print("-- Global Fonts page: which rows mount their pane on the plate")
+do
+    -- Every `= tools.PopoutContent(` on the page and whether its call ends with
+    -- the opt-in, read as "this declaration up to the next one" -- a
+    -- balanced-brace match would be defeated by the builder closure inside.
+    local calls = {}
+    local pos = 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+)[^=\n]*= tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+    eq(#calls, 2, "inline: the page's two PopoutContent calls are readable")
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 1, "inline: one of the page's two rows mounts its pane on the plate")
+
+    local WANT = {
+        -- Four children: the blurb and the three settings.
+        ["Shadow Settings"]     = { mount = "shadowMount", inline = true },
+        -- Seven: five settings and two blurbs. The opt-in is not made rather
+        -- than made and silently refused, so the comment beside it stays true.
+        ["Global Font Settings"] = { mount = "fontMount",  inline = false },
+    }
+    local seen = 0
+    for label, want in pairs(WANT) do
+        local mount = rowOpts(label):match("build%s*=%s*([%w_]+)")
+        eq(mount, want.mount, "inline: " .. label .. " is built from the mount it declares")
+        eq(inlineMounts[mount] == true, want.inline,
+           "inline: ..." .. label .. (want.inline and " asked for the plate"
+                                                   or " keeps its pane behind the strip"))
+        seen = seen + 1
+    end
+    eq(seen, 2, "inline: ...both of the page's rows were found")
+
+    -- The counted reason Font Selection is refused, taken off the builder rather
+    -- than from a number typed here: a blurb dropped from that group would move
+    -- it under the ceiling, and this is what would notice.
+    local sel = builderBody("BuildFontSelectionGroup")
+    local children = 0
+    for _ in sel:gmatch("group:AddWidget%(") do children = children + 1 end
+    eq(children, 7, "inline: Font Selection's group holds seven children, one over the ceiling")
+
+    -- Nothing on this page hoists anything, before or after the move -- neither
+    -- row has a boolean in it meaning "am I doing anything".
+    local hoists = 0
+    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
+    eq(hoists, 0, "inline: no row on the page hoists a control, so none can twin one on a plate")
+end

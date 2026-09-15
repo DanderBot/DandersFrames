@@ -485,3 +485,77 @@ do
     check(PAGE:find('if mode ~= "HEALTH_COLOR" then', 1, true) ~= nil,
           "summary: ...and the aggro health-bar tint has no thickness to report either")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNTS ITS PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ROW BY ROW. A row whose whole group is small mounts THAT
+-- GROUP under its title line rather than charging a click for it, and the strip
+-- then offers to pin a second copy instead of promising settings already on
+-- screen. The page opts a row in; the threshold in Controls.lua refuses one
+-- whose pane turns out to be big, and that half is measured against a real group
+-- in test_popout_page_tools.lua.
+--
+-- ☠ THREE OF FOUR, AND THE FOURTH MISSES BY ONE. Selection and Hover hold six
+-- -- the ceiling exactly, which the helper refuses ABOVE rather than at -- and
+-- Threat Colors five. Aggro Settings holds seven, because it carries the two
+-- tanking questions the other two have no equivalent of. So the band keeps a way
+-- in on it, which is the threshold doing its job rather than an oversight.
+-- ============================================================
+print("-- Highlights page: which rows mount their pane on the plate")
+do
+    local calls = {}
+    local pos = 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+)[^=\n]*= tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+    eq(#calls, 4, "inline: the page's four PopoutContent calls are readable")
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 3, "inline: three of the page's four rows mount their pane on the plate")
+
+    -- Which ROW each belongs to, read off the row's own `build` rather than from
+    -- a second list -- so a mount opted in and wired to a different row fails
+    -- here instead of shipping.
+    local WANT = {
+        ["Selection Settings"] = { mount = "selectionMount", inline = true  },  -- 6
+        ["Hover Settings"]     = { mount = "hoverMount",     inline = true  },  -- 6
+        ["Threat Colors"]      = { mount = "threatMount",    inline = true  },  -- 5
+        ["Aggro Settings"]     = { mount = "aggroMount",     inline = false },  -- 7
+    }
+    local seen = 0
+    for label, want in pairs(WANT) do
+        local mount = rowOpts(label):match("build%s*=%s*([%w_]+)")
+        eq(mount, want.mount, "inline: " .. label .. " is built from the mount it declares")
+        eq(inlineMounts[mount] == true, want.inline,
+           "inline: ..." .. label .. (want.inline and " asked for the plate"
+                                                   or " keeps its pane behind the strip"))
+        seen = seen + 1
+    end
+    eq(seen, 4, "inline: ...all four of the page's rows were found")
+
+    -- The counted reason Aggro is refused, taken off its builder rather than
+    -- from a number typed here: a control dropped from that group would move it
+    -- under the ceiling, and this is what would notice.
+    local aggro = builderBody("BuildAggroHighlightGroup")
+    local children = 0
+    for _ in aggro:gmatch("group:AddWidget%(") do children = children + 1 end
+    eq(children, 7, "inline: the Aggro group holds seven children, one over the ceiling")
+
+    -- Nothing on this page hoists a control: a highlight's "am I doing anything"
+    -- is its MODE dropdown, which is a setting rather than a tick, so there has
+    -- never been a twin here for a mounted pane to duplicate.
+    local hoists = 0
+    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
+    eq(hoists, 0, "inline: no row on the page hoists a control, so none can twin one on a plate")
+end
