@@ -1489,6 +1489,29 @@ function UI:CreatePopoutRow(parent, opts)
         modTick:SetPoint("LEFT", chevron, "RIGHT", M.modTickGap, 0)
     end
 
+    -- ☠ AND A COMPACT ROW HAS NO PILL EITHER, for a plainer reason than the
+    -- strip's. The pill is 22px of backdrop anchored between the cog and the
+    -- chevron, and it is built whether or not the row was given a count -- on a
+    -- settings page that is right, because the pills line up down the column even
+    -- where one row has nothing to say. A LIST of rows that none of them carry a
+    -- count is the other case: every row shows an empty pill, and what it reads
+    -- as is a gap holding the cog away from the arrow it belongs next to.
+    --
+    -- So the cog closes up against the chevron and the summary right-aligns to
+    -- the cog, which puts the whole right-hand cluster together at the edge. A
+    -- compact row that DOES want a number puts it in its summary, where this page
+    -- already puts "17 of 26 tracked".
+    if row._compact then
+        badgePill:Hide()
+        gear:ClearAllPoints()
+        gear:SetPoint("RIGHT", chevron, "LEFT", -M.colGap, 0)
+        -- The dot follows the chevron for the strip's own reason: it needs
+        -- something bigger than itself to notch onto, and with the pill gone the
+        -- only thing at this end is the glyph it must not sit on top of.
+        modTick:ClearAllPoints()
+        modTick:SetPoint("LEFT", chevron, "RIGHT", M.modTickGap, 0)
+    end
+
     -- ---- the control lines ----------------------------------------
     -- One CELL per hoisted control, in two tiers: the name across the cell's
     -- full width, the control across the cell's full width beneath it. Cells on

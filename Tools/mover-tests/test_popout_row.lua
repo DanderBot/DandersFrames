@@ -3107,6 +3107,22 @@ do
     -- ...and an unconverted row is untouched at the full LABEL_X.
     eq(plain.label._points[1][4], M.padX + M.check + M.labelGap,
         "compact: a row that did not ask keeps the checkbox column either way")
+
+    -- ☠ THE RIGHT-HAND CLUSTER CLOSES UP. The count pill is 22px of backdrop
+    -- built between the cog and the chevron whether or not the row was given a
+    -- count. Down a settings page that is right -- the pills line up even where
+    -- one row has nothing in it. Down a LIST where no row has a count it is an
+    -- empty box holding the cog away from the arrow it belongs beside.
+    check(small.badgePill:IsShown() == false,
+        "compact: a compact row shows no count pill")
+    check(small.gear._points[1][2] == small.chevron,
+        "compact: ...so the cog sits against the chevron, not against the pill")
+    eq(small.gear._points[1][4], -M.colGap,
+        "compact: ...one column gap from it")
+    -- ...and the pill is still there on a row that did not ask, so no settings
+    -- page lost the alignment this is trading away.
+    check(plain.badgePill:IsShown() == true,
+        "compact: a row that did not ask still has its pill")
 end
 
 -- ---- 24.12 the hoisted control's tooltip, and where its rect lands ----
