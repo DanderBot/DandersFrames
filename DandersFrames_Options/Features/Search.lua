@@ -1244,6 +1244,16 @@ function Search:OpenOwningPopoutRow(tabName, settingKey)
         local row  = map and map[settingKey]
         -- IsShown, because a row hidden by its own hideOn is not a place to
         -- dock a panel; OpenPopout, because an older embedded kit may not have it.
+        --
+        -- ☠ ...AND NOT AT ALL FOR A ROW THAT IS ALREADY SHOWING THE SETTING. A
+        -- small group is now mounted ON its row's plate rather than behind it, so
+        -- the section jump above has already put the control on screen -- and the
+        -- panel this would open is one with nothing left to draw, which the row
+        -- answers by PINNING it (the strip's "Pin settings in popout" path). A
+        -- pinned panel floating beside the page is a strange reward for clicking
+        -- a search result. Guarded on the verb, because an older embedded copy of
+        -- the kit does not publish it.
+        if row and row.IsShowingInlineContent and row:IsShowingInlineContent() then return end
         if row and row.OpenPopout and row:IsShown() then row:OpenPopout() end
     end)
 end

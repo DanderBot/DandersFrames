@@ -4473,9 +4473,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- is no boolean here meaning "am I doing anything".
             local FRAME_SIZE_COUNT = 5
 
+            -- ☠ FIVE SETTINGS, SO THE GROUP GOES ON THE PLATE. A row holding
+            -- five was charging the same click as a row holding thirty-one, and
+            -- the click bought nothing: `inline` mounts the pane's own group
+            -- under the title line instead, and the strip then offers to PIN a
+            -- second instance beside another page rather than promising settings
+            -- that are already on screen. See CreatePopoutPageTools' INLINE_MAX
+            -- for what would refuse it.
             local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFrameSizeGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local sizeRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Frame Size"],
                 db      = tools.RowDB,
@@ -4489,21 +4496,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(sizeRow, sizeContent)
             tools.WireModifiedTick(sizeRow)
             tools.WireFooter(sizeRow, ApplyFrameSize)
-            -- ☠ THE SAME TWO SLIDERS THE PANE MOUNTS, SHOWN A SECOND TIME. Not a
-            -- copy of the values: the same db table, the same keys, the same
-            -- apply -- so the pane's twin, the row's amber tick, Reset Group,
-            -- Hold: Defaults and the undo stack all move them, and ClaimKeys
-            -- counts each key once because it walks the PANE and these are not
-            -- in it. Width and height are what a Frame Size row is opened for;
-            -- scale, padding and spacing stay behind the click.
-            tools.RegisterHoistedToggle(sizeRow, {
-                { name = L["Frame Width"],  kind = "slider", key = "frameWidth",
-                  min = 60, max = 300, step = 1, onChanged = UpdateFrames,
-                  lightweight = function() DF:LightweightUpdateFrameSize() end },
-                { name = L["Frame Height"], kind = "slider", key = "frameHeight",
-                  min = 20, max = 300, step = 1, onChanged = UpdateFrames,
-                  lightweight = function() DF:LightweightUpdateFrameSize() end },
-            })
+            -- ⚠ AND NOTHING IS HOISTED HERE ANY MORE. Width and Height were
+            -- declared a second time as hoisted sliders so the two settings a
+            -- Frame Size row is opened for were visible without a click; with the
+            -- whole group on the plate all five are, and a second declaration of
+            -- two of them would be two widgets on one key for no gain -- the very
+            -- duplication the inline arm exists to avoid.
         end
 
         -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
@@ -4735,6 +4733,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                   visible = BorderHoistOn, onChanged = OnBorderStyleHoisted },
             })
 
+            -- Four settings behind the row's own tick, so the group goes on the
+            -- plate -- and folds away entirely when the tick is off, which is the
+            -- one state where greyed controls occupying the row would be the
+            -- worst use of the space. The tick stays hoisted: it is the row's
+            -- toggle, not one of the four.
             local shadowMount, shadowContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBorderShadowGroup({
                     group = group, parent = holder,
@@ -4746,7 +4749,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     shadowDisableWhen = BorderOff,
                     hoistToggles = true,
                 })
-            end)
+            end, nil, { inline = true })
             local shadowRow = appearanceGroup:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Border Shadow"],
                 db       = tools.RowDB,
@@ -5024,10 +5027,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             return { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
         end
-        -- ...and its explanation, lifted for the SAME reason and to the same
-        -- scope. The row hoists this dropdown onto its plate, and §3 of the
-        -- rework says a hoisted control and its panel twin are ONE setting -- so
-        -- they say one thing about themselves, from one place, in whichever
+        -- ...and its explanation, from the same scope and for the same reason:
+        -- one setting says one thing about itself, from one place, in whichever
         -- dialect the build is speaking.
         local function GrowDirectionTooltip(grouped)
             if grouped then
@@ -5035,22 +5036,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             return L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
         end
-        -- Which dialect this build is speaking. The two dropdowns below decide it
-        -- with hideOn (both are mounted, one is shown); the hoisted twin is ONE
-        -- control on a fixed line, so it asks here instead -- and the page is
-        -- rebuilt on both of the things this reads (a mode switch, and the Raid
-        -- Layout Mode row's own deferred rebuild).
-        local function GrowDirectionGrouped()
-            return GUI.SelectedMode == "raid" and db.raidUseGroups and true or false
-        end
-        -- Where the run of frames STARTS FROM, party only. Lifted to page scope
-        -- for the reason GrowDirectionOptions was: the row hoists this dropdown
-        -- onto its plate as well, and one map asked for twice cannot drift the
-        -- way two typed copies of it would.
+        -- Where the run of frames STARTS FROM, party only. A function rather
+        -- than a literal for the reason GrowDirectionOptions is one: a map whose
+        -- hazard is that it has an inverse is written out once, so a fourth
+        -- option cannot reach one reader and miss another.
         -- ⚠ MAIN_START / MAIN_END are baked from db.growDirection at page build,
-        -- so both copies name the previous orientation's edge until the next
-        -- rebuild -- which the pane's own copy has always done. Sharing the map
-        -- does not make that worse, and any rebuild puts both right.
+        -- so the words name the previous orientation's edge until the next
+        -- rebuild. Long-standing, and any rebuild puts them right.
         local function GrowthAnchorOptions()
             return { _order = { "START", "CENTER", "END" }, START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
         end
@@ -5179,9 +5171,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 UpdateFrames()
             end
 
+            -- ☠ THE WHOLE GROUP, ON THE PLATE. This row is the reason the
+            -- inline arm exists: the pane draws ONE dropdown in party and none at
+            -- all in raid once its mode gates have run, and a click that opens a
+            -- panel holding one control is a click that buys nothing. Mounted
+            -- here, both settings are visible in party and the one that applies
+            -- is visible in raid, and the strip offers to pin rather than to
+            -- promise.
             local dirMount, dirContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildLayoutDirectionGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local dirRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Layout Direction"],
                 db      = tools.RowDB,
@@ -5196,40 +5195,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(dirRow, dirContent)
             tools.WireModifiedTick(dirRow)
             tools.WireFooter(dirRow, ApplyLayoutDirection)
-            -- BOTH of them, which is a reversal. This hoisted ONE control and
-            -- refused the anchor because its words (MAIN_START / MAIN_END) are
-            -- baked at page build and go stale after a direction change -- the
-            -- staleness this row's summary carries a ☠ about. But the pane's
-            -- OWN copy of that dropdown has always been baked from the same two
-            -- locals, so the refusal bought nothing and cost the row its second
-            -- setting: with one control hoisted the party pane held exactly one
-            -- dropdown and the raid pane none, and a strip cannot honestly
-            -- promise a click that opens an empty panel (Danders, 2026-09-05:
-            -- "for the sake of 1 setting we just hoist both settings").
-            --
-            -- ⚠ THE ANCHOR IS PARTY ONLY, like the pane control it doubles: a
-            -- raid row that drew a dropdown the mode does not use would be an
-            -- inert track for a setting that changes nothing.
-            --
-            -- ⚠ ITS OWN CALLBACK, NOT ApplyLayoutDirection. The pane's dropdowns
-            -- run OnGrowthDirectionChanged, which defers a page rebuild because
-            -- the direction decides the WORDS the anchor dropdown offers; the
-            -- hoisted twin has to do the same or those words go stale from the
-            -- plate but not from the panel. The anchor's own twin runs
-            -- UpdateFrames, exactly as the pane's does.
-            tools.RegisterHoistedToggle(dirRow, {
-                { name = L["Growth Direction"], kind = "dropdown", key = "growDirection",
-                  options = GrowDirectionOptions(GrowDirectionGrouped()),
-                  -- The panel twin's own words, in the same dialect as the
-                  -- options map above it -- one setting, one explanation. Its
-                  -- hover rides the cell's NAME, never the opener.
-                  tooltip = GrowDirectionTooltip(GrowDirectionGrouped()),
-                  onChanged = OnGrowthDirectionChanged },
-                { name = L["Frames Grow From"], kind = "dropdown", key = "growthAnchor",
-                  options = GrowthAnchorOptions(),
-                  visible = function() return GUI.SelectedMode ~= "raid" end,
-                  onChanged = UpdateFrames },
-            })
+            -- ⚠ AND NOTHING IS HOISTED HERE ANY MORE. Both dropdowns were
+            -- declared a second time as hoisted cells, each with its own copy of
+            -- the pane's options map, its tooltip, its mode gate and its
+            -- callback. The pane's own copies do all of that already and the
+            -- pane is now on the plate, so the second declaration is gone and
+            -- the mode gates are the hideOn rules the builder has always
+            -- carried -- one dropdown per mode, decided by the same predicate
+            -- that decides which dialect its labels are in.
         end
 
         -- ===== RAID LAYOUT MODE (a 280 box in classic, a row in the band) ==
@@ -5870,9 +5843,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Two: the tick and the list. The blurb above them is prose.
             local GROUP_ORDER_COUNT = 2
 
+            -- A tick and a drag list, so the group goes on the plate. This is
+            -- the tallest of the four inline rows by a distance -- the list alone
+            -- is 230px -- and it is still the right trade: the ORDER is the
+            -- setting, and an order nobody can see is an order nobody can check.
             local groupOrderMount, groupOrderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildGroupOrderGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local groupOrderRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Group Display Order"],
                 db      = tools.RowDB,

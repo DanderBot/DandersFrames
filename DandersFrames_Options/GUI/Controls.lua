@@ -3907,7 +3907,9 @@ end
 -- its holders, its row map -- so two pages built in one session cannot reflow
 -- each other's panels):
 --
---   PopoutContent(buildInto, innerColumns) -> mount, eagerGroup
+--   PopoutContent(buildInto, innerColumns, opts) -> mount, eagerGroup
+--                                       opts.inline -- mount the eager group ON
+--                                       the row's plate instead of behind it
 --   ClaimKeys(row, group, extra)
 --   WireModifiedTick(row)
 --   WireFooter(row, apply)
@@ -3971,6 +3973,16 @@ function GUI:CreatePopoutPageTools(page)
 
     local POPOUT_W = GUI.PopoutContentWidth or 260
 
+    -- ☠ HOW SMALL IS SMALL ENOUGH TO PUT ON THE PLATE, and it is a REFUSAL
+    -- rather than a choice. A page opts a row in (`opts.inline`); this number is
+    -- what stops an opted-in row whose pane turns out to hold thirty controls
+    -- from making a plate nobody can read. Six because two thirds of the rows in
+    -- the addon hide six settings or fewer, and a row holding four was charging
+    -- the same click as a row holding thirty-one -- the whole argument for the
+    -- hybrid page. Measured off the pane rather than off the declared count, so
+    -- a row cannot lie its way onto the plate.
+    local INLINE_MAX = 6
+
     -- Every pane currently mounted in a panel, so a toggle can re-flow the group
     -- the user is looking at as well as the rows on the page. One list per PAGE
     -- rather than per group: a reset behind one row can change what another
@@ -4000,6 +4012,21 @@ function GUI:CreatePopoutPageTools(page)
         -- build, and a hideOn inside this group moves it afterwards.
         local po = st.po
         if po and not po.closed and po.SyncRowPaneHeight then po:SyncRowPaneHeight() end
+        -- ☠ ...OR THE PLATE AROUND IT, for an instance mounted ON a row rather
+        -- than in a panel. Same fact one host earlier: the group has just been
+        -- re-flowed and knows its new height, and the thing holding a slot for it
+        -- -- here the row's plate, there the panel -- does not until it is told.
+        --
+        -- ⚠ NOT WHILE THE ROW IS MEASURING. The row asks for the height from the
+        -- middle of its own layout pass, and that ask re-flows this group; coming
+        -- back to the row from here would be the layout calling itself.
+        if st.inlineRow and not st.measuring then
+            -- rawget, the convention every private-field read in this pack
+            -- follows: the kit's own layout verb, absent on an older embedded
+            -- copy of the pack.
+            local relayout = rawget(st.inlineRow, "_LayoutPlate")
+            if type(relayout) == "function" then relayout() end
+        end
     end
 
     -- `values` rides through to ReflowPane: see its header for why a value
@@ -4032,7 +4059,11 @@ function GUI:CreatePopoutPageTools(page)
     -- width is two stubby bars with their labels stranded, while a pane of
     -- one-word checkboxes is exactly the list the second track was written for.
     -- Omitted = absent = one track.
-    local function PopoutContent(buildInto, innerColumns)
+    -- `opts.inline` asks for the EAGER instance to be mounted on the ROW's plate
+    -- rather than parked in a hidden holder waiting for a panel. See INLINE_MAX
+    -- above for what refuses it, and ClaimKeys for where the row and this factory
+    -- meet.
+    local function PopoutContent(buildInto, innerColumns, opts)
         -- ☠ EVERY INSTANCE THIS FACTORY EVER BUILT, not only the eager one. A
         -- hoisted control is the pane's own setting shown a second time on the
         -- row's plate, and the pane's copy has to be HIDDEN while that is true --
@@ -4043,9 +4074,13 @@ function GUI:CreatePopoutPageTools(page)
         -- on every group built from it, which is how ClaimKeys -- handed exactly
         -- one group -- reaches all of them.
         local instances = {}
+        -- Set below, once the eager group exists and its size is known. Read from
+        -- inside `fresh`'s reflow closure, which runs long afterwards.
+        local inlineArm = false
         local function fresh()
             local st = {}
             local holder = CreateFrame("Frame", nil, page.child)
+            st.holder = holder
             holder:SetSize(POPOUT_W, 1)
             holder:Hide()
             page._popoutHolders[#page._popoutHolders + 1] = holder
@@ -4064,6 +4099,32 @@ function GUI:CreatePopoutPageTools(page)
             -- is clicking through.
             local reflow = function()
                 ReflowPane(st)
+                -- ☠ TWO LIVE COPIES OF ONE SETTING, AND A WRITE IN EITHER. An
+                -- inline row draws its group on the plate AND can have a second
+                -- instance of the same group pinned in a panel beside the page --
+                -- both bound to the same keys, both on screen at once. A
+                -- committed write in one has to repaint the other or the two sit
+                -- there disagreeing about what the setting is.
+                --
+                -- ⚠ NEVER THE INSTANCE THAT WROTE. This is the commit seam
+                -- (SettingsWidgets' RefreshOwnerStates), and a slider fires it
+                -- once per step it crosses -- so a value repaint of the widget
+                -- under the mouse snaps the thumb back to the last committed
+                -- step, which is exactly what ReflowPane's own `values` opt-in
+                -- exists to avoid.
+                --
+                -- ⚠ INLINE FACTORIES ONLY. Two instances of any other row's pane
+                -- can only both exist while one of them is PINNED, and putting
+                -- those in step is a change to every converted page rather than
+                -- to this one.
+                if inlineArm then
+                    for _, other in ipairs(instances) do
+                        if other ~= st and other.group
+                           and not (other.po and other.po.closed) then
+                            ReflowPane(other, true)
+                        end
+                    end
+                end
                 page:RefreshStates()
             end
 
@@ -4088,6 +4149,50 @@ function GUI:CreatePopoutPageTools(page)
         end
 
         local pending = fresh()
+        -- Held by name as well: the INLINE arm below hands this instance to the
+        -- row and clears `pending`, so the group that comes back beside the mount
+        -- has to be remembered before that happens.
+        local eager = pending
+
+        -- ☠ THE INLINE ARM: THE EAGER INSTANCE GOES ON THE PLATE, NOT BEHIND IT.
+        -- Everything it needs already exists -- it is built at page-build time,
+        -- its controls are registered with search, and ClaimKeys walks it. All
+        -- that changes is where it is mounted, and that the first click on the
+        -- strip therefore builds a SECOND instance through the same builder
+        -- rather than adopting this one.
+        --
+        -- ☠ THE COUNT IS ASKED OF THE PANE, NOT OF THE PAGE. A page opts a row
+        -- in; a pane that turns out to hold more than INLINE_MAX controls is
+        -- refused and keeps today's behaviour, so an opt-in cannot make a plate
+        -- nobody can read. CountVisibleChildren answers honestly BEFORE a layout
+        -- has run, which is the state this group is in right now.
+        if opts and opts.inline and eager.group.CountVisibleChildren
+           and eager.group:CountVisibleChildren() <= INLINE_MAX then
+            inlineArm = true
+            -- How ClaimKeys -- handed exactly one group -- finds the instance
+            -- that belongs on the plate, the same way dfPaneInstances is how it
+            -- finds all of them.
+            eager.group.dfInline = eager
+            -- ⚠ AND IT JOINS THE MOUNTED LIST HERE, because the mount that would
+            -- normally add it will never come. Reset Group, Hold: Defaults and
+            -- every page-wide reflow walk that list; an instance the user can
+            -- SEE and that list does not know about is one that would sit at the
+            -- old values after a reset.
+            mounted[#mounted + 1] = eager
+            pending = nil
+            -- ⚠ ...AND THE SELF-MEASURING WIDGET'S WALK ENDS HERE. A widget that
+            -- only learns its height after it is drawn calls GUI:RelayoutHost,
+            -- which walks up for something that can re-anchor the group's
+            -- neighbours; above a plate that is the settings WINDOW, which knows
+            -- nothing about this group. Same repair as the pane's dfReflowPane,
+            -- one host along -- and skipped while the row is measuring, for the
+            -- reason ReflowPane's own guard gives.
+            eager.holder.dfReflowPane = function()
+                if eager.measuring then return end
+                ReflowPane(eager)
+            end
+        end
+
         -- The eagerly built group comes back ALONGSIDE the mount function: it is
         -- the one instance that exists at page-build time, so it is the one whose
         -- children ClaimKeys can walk. Later instances build the same controls
@@ -4129,7 +4234,7 @@ function GUI:CreatePopoutPageTools(page)
             if instances.applyShown then instances.applyShown(st) end
             st.group:Show()
             ReflowPane(st)
-        end, pending.group
+        end, eager.group
     end
 
     -- db as a FUNCTION, which is what the kit contract asks for: the row
@@ -4399,6 +4504,59 @@ function GUI:CreatePopoutPageTools(page)
                         return (k and shown and shown[k]) and true or false
                     end,
                 })
+            end)
+        end
+
+        -- ☠ AND A SMALL GROUP IS MOUNTED ON THE PLATE RATHER THAN BEHIND IT.
+        -- This is the other half of PopoutContent's inline arm: the factory knows
+        -- which instance belongs on the row and the row knows how to draw one,
+        -- and neither knows the other until here -- the same meeting place the
+        -- shown-keys hide and the count provider above use, and for the same
+        -- reason.
+        --
+        -- ⚠ WIRED LAST, after the provider. SetInlineContent lays the plate out
+        -- on the spot, and that pass repaints the strip -- which reads the
+        -- provider to decide between "N more settings" and the offer to pin.
+        --
+        -- ⚠ THE MEASUREMENT IS THIS SIDE'S JOB. The kit hands a width and wants a
+        -- height; only a consumer knows that the answer involves re-sizing a
+        -- SettingsGroup and re-flowing it. Re-flowed ONLY when the width actually
+        -- moved, because the row asks on every layout pass and a plain window
+        -- drag is a great many of those.
+        -- rawget, the convention every private-field read in this pack follows:
+        -- a group that is not the one on a plate simply has not got the field,
+        -- and a headless frame answers an unset key with a truthy no-op FUNCTION.
+        local inline = rawget(group, "dfInline")
+        if inline and row.SetInlineContent then
+            inline.inlineRow = row
+            row:SetInlineContent(inline.holder, function(width)
+                local g = inline.group
+                if not g then return 0 end
+                width = math.max(math.floor(width or 0), 1)
+                if inline.width ~= width then
+                    inline.width = width
+                    -- ⚠ THE FLAG IS THE RE-ENTRANCY GUARD, not bookkeeping.
+                    -- LayoutChildren can reach a widget that converges its own
+                    -- height and calls GUI:RelayoutHost, whose walk comes
+                    -- straight back through the holder's dfReflowPane -- and
+                    -- that would ask the row to lay out the plate it is in the
+                    -- middle of laying out.
+                    inline.measuring = true
+                    inline.holder:SetWidth(width)
+                    g:SetWidth(width)
+                    g:LayoutChildren()
+                    g:RefreshChildStates()
+                    inline.measuring = false
+                end
+                -- ☠ AN EMPTY GROUP MEASURES NOTHING, NOT ONE PIXEL.
+                -- LayoutChildren floors its own height at 1 (a zero-height frame
+                -- is a frame the client will not draw children into), so a pane
+                -- whose gates hid every control would hand back a 1px stripe --
+                -- and the row would wrap it in the 10px of air above and below
+                -- that a real group earns. Zero is what "there is nothing to
+                -- show" means to the row, and it folds on it.
+                if g:CountVisibleChildren() <= 0 then return 0 end
+                return math.max(g:GetHeight() or 1, 1)
             end)
         end
     end

@@ -4051,3 +4051,184 @@ do
     check(not first.closed, "toggle: (it is still open)")
     plain:ClosePopout()
 end
+
+-- ---- 24.21 THE ROW'S OWN GROUP, MOUNTED ON THE PLATE -----------------
+-- ☠ THE OTHER ANSWER TO "MOST SETTINGS SHOULD STILL BE VISIBLE". A hoisted cell
+-- knows two control kinds; two thirds of the rows in the addon hide six settings
+-- or fewer and most of those are ticks, colour pickers and edit boxes -- so
+-- covering them by hoisting would mean teaching the cell every kind AND
+-- declaring ~500 controls a second time beside the builders that already make
+-- them. A row whose group is small mounts THAT GROUP on its plate instead.
+--
+-- WHAT THIS SUITE OWNS: the kit's half -- where the frame is parented, how the
+-- plate's height is made of it, that the height is re-asked rather than
+-- remembered, the fold when the row is switched off, and what the strip then
+-- says. That a real SettingsGroup is what gets mounted, and that a second
+-- instance opens behind the strip, is driven against the real helper in
+-- test_popout_page_tools.lua.
+do
+    local win = window()
+    local db = { on = true }
+
+    -- The consumer's content, modelled at the contract and nothing more: a frame
+    -- the kit anchors, and a closure that answers a height for a width. The kit
+    -- never learns what is in it, which is the whole point of the split.
+    local content = FakeUIFrame()
+    -- ⚠ A SPY, because the shim's SetParent is a no-op and its GetParent reads a
+    -- field only SetFakeParent writes -- so "the kit re-parents it" is not a
+    -- claim GetParent could ever fail. Recorded at the call instead.
+    content.SetParent = function(self, p) self._reparentedTo = p end
+    local asked = {}
+    local H = 120
+    local function measure(w) asked[#asked + 1] = w; return H end
+
+    local row = stripRow({ label = "Inline", db = db, count = 5, window = win,
+                           popoutKey = "inline.row",
+                           footerStrip = true, toggle = { key = "on" } })
+    row:SetCountProvider(function() return 5 end)
+    eq(row.plate:GetHeight(), HEAD_H + FOOTER_H,
+       "inline: (a bare strip row, before anything is mounted on it)")
+    eq(row.stripCount:GetText(), "5 more settings",
+       "inline: ...promising the five settings behind the click")
+    check(not row:IsShowingInlineContent(), "inline: ...and showing none of them")
+
+    -- ---- mounting it ------------------------------------------------
+    local ret = row:SetInlineContent(content, measure)
+    eq(ret, row, "inline: the setter is chainable, like every other one on this row")
+    eq(rawget(content, "_reparentedTo"), row.plate,
+       "inline: the content is parented to the PLATE")
+    eq(content._flags.mouseClick, false,
+       "inline: ...and takes no mouse of its own -- its children take their own clicks")
+    eq(content:GetFrameLevel(), row.plate:GetFrameLevel() + 1,
+       "inline: ...at a level STATED above the plate's own fill, not inherited")
+    check(content:IsShown(), "inline: ...and it is drawn")
+    check(row:IsShowingInlineContent(), "inline: ...which the row says out loud")
+
+    local lineW = 260 - LABEL_X - M.padX
+    eq(asked[#asked], lineW,
+       "inline: measured at the CONTROL LINE's width -- the plate less the name indent")
+    eq(content:GetWidth(), lineW, "inline: ...and sized to it")
+    eq(content:GetHeight(), H, "inline: ...at the height its own measure answered")
+
+    -- ☠ THE PLATE IS MADE OF THE PARTS, NOT PADDED TO A ROUND NUMBER: the title
+    -- line, air, the group, air, the strip. The air above is the air a full-width
+    -- control does not get from the title line's own height.
+    eq(row.plate:GetHeight(), HEAD_H + LINE_PAD + H + LINE_PAD + FOOTER_H,
+       "inline: the plate is its title line, the group, and the strip")
+    eq(row:GetHeight(), row.plate:GetHeight() + M.gap,
+       "inline: ...and the slot is the plate plus the gap to the next row")
+
+    -- ---- what the strip says once there is nothing behind it ---------
+    -- ☠ THE PROVIDER IS STILL COUNTING THE PANE HONESTLY -- it is the same group
+    -- -- so the row has to be the one that knows the user is already looking at
+    -- it. A strip promising five over five on the plate is the click that buys
+    -- nothing this whole change exists to refuse.
+    eq(row.stripCount:GetText(), "Pin settings in popout",
+       "inline: the strip stops promising and offers to pin")
+    eq(row.summary:GetText(), "",
+       "inline: ...and a strip row that is ON still paints no summary")
+
+    -- ---- the height is RE-ASKED, never remembered --------------------
+    -- A group re-flows on its own: a hideOn inside it flips, or a widget that
+    -- cannot know its height until it is drawn converges a frame later. Nothing
+    -- tells the row a number; it asks for one on every pass.
+    local before = #asked
+    H = 180
+    row._LayoutPlate()
+    check(#asked > before, "inline: the height is asked again on the next layout pass")
+    eq(row.plate:GetHeight(), HEAD_H + LINE_PAD + 180 + LINE_PAD + FOOTER_H,
+       "inline: ...so a gate inside the group moves the plate with it")
+    eq(content:GetHeight(), 180, "inline: ...and the frame with the plate")
+
+    -- ---- and the measure answers to the perf report ------------------
+    -- ⚠ THE PANE WAS ALWAYS BUILT AT PAGE BUILD; laying it out where it can be
+    -- SEEN is the new work, and it runs once per row per width rather than once
+    -- per click. So it is booked under its own name in the same report the open
+    -- path already feeds, and a slow page says in one breath whether this is why.
+    host._perfActive = true
+    host.perf = { counts = {}, ms = {}, dragCount = 0 }
+    H = 121
+    row._LayoutPlate()
+    check((host.perf.counts["popoutrow:inline"] or 0) >= 1,
+          "inline: the measure is booked under its own perf name")
+    check(type(host.perf.ms["popoutrow:inline"]) == "number",
+          "inline: ...with a duration, like every other mark")
+    host._perfActive, host.perf = nil, nil
+    H = 180
+    row._LayoutPlate()
+
+    -- ---- the width, which the fold and the group both depend on ------
+    widen(row, 401)
+    eq(asked[#asked], 401 - LABEL_X - M.padX,
+       "inline: a wider window re-measures at the wider line")
+    eq(content:GetWidth(), 401 - LABEL_X - M.padX, "inline: ...and re-sizes the frame")
+
+    -- ---- OFF folds it away -------------------------------------------
+    -- ☠ GREYED CONTROLS THAT STILL OCCUPY THE PLATE ARE THE WORST USE OF THE
+    -- SPACE. The title, the word "Off" and a strip naming the full count say the
+    -- same thing in a tenth of the room -- and nothing is lost, because one click
+    -- reads them.
+    db.on = false
+    row.Refresh()
+    check(not content:IsShown(), "fold: switching the row off hides its group")
+    check(not row:IsShowingInlineContent(), "fold: ...and the row stops claiming it")
+    eq(row.plate:GetHeight(), HEAD_H + FOOTER_H,
+       "fold: ...leaving the title line and the strip, and nothing between them")
+    eq(row.summary:GetText(), "Off", "fold: ...with the one word that earns the corner")
+    eq(row.stripCount:GetText(), "5 more settings",
+       "fold: ...and the strip names the FULL count again, because they are behind it now")
+
+    db.on = true
+    row.Refresh()
+    check(content:IsShown(), "fold: switching it back on brings the group back")
+    eq(row.stripCount:GetText(), "Pin settings in popout",
+       "fold: ...and the strip goes back to offering")
+    eq(row.plate:GetHeight(), HEAD_H + LINE_PAD + 180 + LINE_PAD + FOOTER_H,
+       "fold: ...at the height the group reports now, not the one it had before")
+
+    -- ---- the click, which is the empty-pane path one step earlier ----
+    -- Every setting is on the plate, so a LOOSE panel beside the row would be a
+    -- blank box; the strip's own words offered to pin, and the click does it.
+    local strip = row.footerStrip
+    strip:GetScript("OnClick")(strip)
+    local po = row.popout
+    check(po ~= nil and po.pinned,
+          "inline: the strip's click opens the row's panel PINNED, as its words said")
+    strip:GetScript("OnClick")(strip)
+    check(po.closed, "inline: ...and the same strip closes it again")
+end
+
+-- ---- 24.22 an INLINE row that was built without a strip --------------
+-- The fold and the group's width are both functions of the row's width, so a row
+-- that never asked for a strip still has to be told when that moves -- the one
+-- thing SetInlineContent installs that the strip would otherwise have.
+do
+    local db = { on = true }
+    local content = FakeUIFrame()
+    local asked = {}
+    local row = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "No strip", db = db, count = 3, build = counting("inlinebare", 50),
+    })
+    row:SetWidth(260)
+    eq(row:GetScript("OnSizeChanged"), nil,
+       "inline: a row with neither strip nor group runs no width script")
+    eq(row.plate:GetHeight(), PLATE_H, "inline: ...and its plate is the plate it always was")
+
+    row:SetInlineContent(content, function(w) asked[#asked + 1] = w; return 60 end)
+    check(row:GetScript("OnSizeChanged") ~= nil,
+          "inline: mounting a group installs the width script")
+    eq(row.plate:GetHeight(), PLATE_H + LINE_PAD + 60 + LINE_PAD,
+       "inline: ...and a strip-less plate is its own title line, air, group, air")
+    eq(row.badgePill:IsShown(), true,
+       "inline: (its count is still the title line's pill -- no strip was asked for)")
+
+    -- ⚠ AND A ROW THAT WAS NEVER GIVEN ONE IS UNTOUCHED, which is the claim every
+    -- other page's census rests on: SetInlineContent is opt-in per row.
+    local plain = place(host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Plain", db = { on = true }, count = 4,
+        build = counting("inlineplain", 50),
+    }))
+    eq(plain.plate:GetHeight(), PLATE_H, "inline: a row that was given none keeps its 44")
+    eq(plain:GetHeight(), ROW_H, "inline: ...in the slot it always took")
+    check(not plain:IsShowingInlineContent(), "inline: ...and says it is showing nothing")
+end
