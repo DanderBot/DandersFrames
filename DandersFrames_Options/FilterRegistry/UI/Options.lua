@@ -4499,8 +4499,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                         local f = R:GetCustomFilter(slot.key)
                         counted = format(L["%d spells"], f and CustomSpellCount(f) or 0)
                     end
-                    return counted .. "  
-8r  " .. used
+                    return format("%s \226\128\148 %s", counted, used)
                 end,
                 window  = DF.GUIFrame,
                 clipTo  = pageRef,

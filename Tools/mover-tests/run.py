@@ -218,6 +218,41 @@ if _viol:
         print("  " + _v)
     sys.exit(1)
 
+# ============================================================
+# STATIC GATE: every shipped Lua file must PARSE.
+# The worst failure in this addon is not a wrong value, it is a file that does
+# not load: Lua reports a parse error against the FILE, so one bad line takes
+# out every feature that file carries, and the error names a line that can be
+# thousands of lines from the edit. Nothing else in this suite catches it --
+# the Lua tests load the handful of files they drive and the rest of the addon
+# is only ever read as TEXT, so a whole page can be unparseable while every
+# assertion here passes. That shipped on 2026-09-15: a mangled string escape in
+# FilterRegistry/UI/Options.lua left 18429 assertions green and the Filter
+# Designer, the spell picker and everything else in that file gone in game.
+#
+# This also catches Lua 5.1's 200-active-locals-per-function ceiling, which is
+# likewise a PARSE error and which DF.BuildFilterDesignerPage sits close to.
+# ============================================================
+_parse = lua.eval("function(s) local f, e = loadstring(s); return (f ~= nil), e end")
+_badparse = []
+for _dir in ("DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"):
+    _root = HERE.parents[1] / _dir
+    if not _root.is_dir():
+        continue
+    for _f in sorted(_root.rglob("*.lua")):
+        # Libs/ is third-party and Libs/DandersUI is a junction back to the
+        # canonical folder already walked above.
+        if "Libs" in _f.parts:
+            continue
+        _ok, _err = _parse(_f.read_text(encoding="utf-8"))
+        if not _ok:
+            _badparse.append("%s: %s" % (_f.relative_to(HERE.parents[1]), _err))
+if _badparse:
+    print("PARSE GATE: a shipped file does not load -- the whole file is dead in game:")
+    for _v in _badparse:
+        print("  " + _v)
+    raise SystemExit(1)
+
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
 for test in sorted(HERE.glob("test_*.lua")):
     if flt and flt not in test.name:
