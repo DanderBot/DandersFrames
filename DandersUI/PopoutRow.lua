@@ -985,7 +985,18 @@ function UI:CreatePopoutRow(parent, opts)
     -- (Popout.lua's insetOf), so the source outline is drawn round the PLATE
     -- rather than round the slot, and the beam aims at the plate's centre. Left
     -- flush with the frame, because the plate is.
-    row.popoutInset = { 0, 0, 0, M.gap }
+    -- ☠ AND THE BOTTOM TERM IS THE ROW'S OWN GAP, NOT THE CONSTANT. This read
+    -- M.gap, which is right for every row whose slot ends in M.gap and wrong for
+    -- a compact one, whose slot ends in M.gapCompact. Inset by 10 where only 4 is
+    -- unpainted and the shell lays its outline 6px INSIDE the plate's bottom
+    -- edge -- so an open row drew THREE lines across its foot: the plate's own
+    -- border, the outline that should have sat on it, and the plate's edge below
+    -- both. Reported as "the bottom bar is still there only when selected".
+    --
+    -- ⚠ Read from `opts`, not from row._compact, because that field is set some
+    -- 150 lines below this one. A term read above the line that assigns it is
+    -- nil, and this file has already shipped that mistake once.
+    row.popoutInset = { 0, 0, 0, opts.compact and M.gapCompact or M.gap }
 
     row._label   = opts.label or ""
     row._title   = opts.title or row._label

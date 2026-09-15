@@ -3123,6 +3123,20 @@ do
     -- page lost the alignment this is trading away.
     check(plain.badgePill:IsShown() == true,
         "compact: a row that did not ask still has its pill")
+
+    -- ☠ THE TETHER INSET IS THE UNPAINTED GAP, and it is asserted as that rather
+    -- than as a number. The shell outlines the region a row tethers to, and a row
+    -- tethers its whole SLOT -- so it declares how much of the slot's foot is not
+    -- ink. Declared as a constant it was 10 on a row whose gap is 4, and the shell
+    -- drew its outline 6px inside the plate: an open row wore THREE lines across
+    -- its foot instead of two.
+    --
+    -- Derived on both sides here, so a retune of either gap cannot put the two
+    -- out of step again without failing.
+    eq(small.popoutInset[4], small:GetHeight() - small.plate:GetHeight(),
+        "compact: the tether inset is exactly the compact row's unpainted gap")
+    eq(plain.popoutInset[4], plain:GetHeight() - plain.plate:GetHeight(),
+        "compact: ...and the plain row's, byte for byte, as it always was")
 end
 
 -- ---- 24.12 the hoisted control's tooltip, and where its rect lands ----
