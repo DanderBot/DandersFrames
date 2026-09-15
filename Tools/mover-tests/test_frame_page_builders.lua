@@ -1552,6 +1552,7 @@ do
         ["GUI/Pages/Indicators.lua"] = 26,  -- the six aura pages
         ["GUI/Pages/Modules.lua"]    = 7,   -- Icon Text 1, Highlights 3, Dispel 3
         ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
+        ["GUI/Pages/Auras.lua"]      = 15,  -- Sorting 1, Colors 2, Health Bar 5, Resource Bar 5, Heal Prediction 2
     }
     local TOC = options_file_source("DandersFrames_Options.toc")
     local wrong = {}
