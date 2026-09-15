@@ -3521,6 +3521,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         PANE.yDB      = PANE.yAdd + PANE.ebH + PANE.gap                -- (6) add from database
         PANE.yEcho    = PANE.yDB + PANE.btnH + 2
         PANE.headH    = PANE.yEcho + PANE.echoH
+        -- Three 20px rows, two 4px gutters, and the rule that marks them as chrome
+        -- rather than more list. The island's own strip, one column narrower.
+        PANE.actH     = 80
         -- ☠ THE LIST TAKES WHAT THE SCREEN WILL GIVE IT, rather than a literal.
         -- 170 showed six spells at a time on a page whose whole job is picking
         -- spells ("can we have the popout a bit taller so the scroll box shows
@@ -3534,12 +3537,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         --
         -- The floor keeps the old behaviour on a short screen; the ceiling stops a
         -- very tall monitor handing back a panel taller than anything in it.
+        --
+        -- ☠ AND IT COMES AFTER EVERY TERM IT SPENDS. This block is a straight run
+        -- of assignments with no function around it, so a term read before its own
+        -- line is simply nil and the arithmetic throws -- at BUILD time, which
+        -- takes the whole page down with it. It shipped that way once, reading
+        -- PANE.actH from above the line that sets it.
         local capH = ((UIParent and UIParent.GetHeight and UIParent:GetHeight()) or 768) * 0.6
         PANE.listH    = math.max(170, math.min(560,
                             math.floor(capH - 24 - PANE.headH - PANE.gap * 2 - PANE.actH)))
-        -- Three 20px rows, two 4px gutters, and the rule that marks them as chrome
-        -- rather than more list. The island's own strip, one column narrower.
-        PANE.actH     = 80
         PANE.paneH    = PANE.headH + PANE.gap + PANE.listH + PANE.gap + PANE.actH
 
         -- Assigned below, once the row pool exists. Forward-declared because the

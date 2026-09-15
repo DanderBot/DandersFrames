@@ -594,6 +594,49 @@ do
     -- against the wrong thing.
     check(SRC:find("UIParent:GetHeight()", 1, true) ~= nil,
           "paneh: ...and the budget is measured off the screen the cap is a fraction of")
+
+    -- ============================================================
+    -- ☠ AND THE BLOCK IS RUN, NOT JUST READ.
+    -- ------------------------------------------------------------
+    -- Everything above this line reads the page as TEXT, and text cannot tell you
+    -- that a term is read one line above where it is assigned. That shipped: the
+    -- list height spent PANE.actH from above `PANE.actH = 80`, so the arithmetic
+    -- met a nil, threw inside the builder, and took the whole page down -- the
+    -- FOURTH runtime fault in one day that a green suite had nothing to say about.
+    --
+    -- This block is pure arithmetic with no frame in it, so the test can simply
+    -- EXECUTE it against stubs and find out. Anything the page adds here that
+    -- reads a term before its line now fails as a nil-arithmetic error, named.
+    -- ============================================================
+    do
+        local block = SRC:match("(local PANE = %{.-PANE%.paneH%s*=%C*)")
+        check(block ~= nil, "paneh: the PANE block can be lifted out whole")
+        if block then
+            for _, screenH in ipairs({ 768, 1080, 1440 }) do
+                local env = {
+                    math = math,
+                    EYEBROW_H = eyebrowH, STATUS_ROW_H = statusH,
+                    UIParent = { GetHeight = function() return screenH end },
+                }
+                local fn, err = loadstring(block .. " return PANE")
+                check(fn ~= nil, "paneh: ...and it compiles on its own: " .. tostring(err))
+                if fn then
+                    setfenv(fn, env)
+                    local ok, pane = pcall(fn)
+                    check(ok, "paneh: ...and RUNS at " .. screenH .. "px: " .. tostring(pane))
+                    if ok then
+                        -- The numbers it produces are the ones asserted above, so a
+                        -- formula that compiles and runs but computes nonsense still
+                        -- has to answer for itself.
+                        eq(pane.paneH, pane.headH + pane.gap + pane.listH + pane.gap + pane.actH,
+                           "paneh: ...and its own sum holds at " .. screenH .. "px")
+                        check(pane.paneH < capFrac * screenH,
+                           "paneh: ...and it clears the kit's ceiling at " .. screenH .. "px")
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- ============================================================
