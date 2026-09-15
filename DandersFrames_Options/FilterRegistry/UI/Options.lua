@@ -4613,11 +4613,33 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 -- today and would start answering a translator's string the day one
                 -- collides.
                 local name = entry.custom and entry.name or L[entry.name]
-                row._label = name
+                -- ☠ AND A CUSTOM FILTER SAYS SO ON ITS ROW. Fifteen built-ins and
+                -- your own sit in one list with nothing telling them apart -- the
+                -- kind is in the PANEL's eyebrow, which is behind a click, and the
+                -- count pill that could have carried a marker is gone from a compact
+                -- row by design. The name is the only thing on the plate that is
+                -- ours to write, so the tag goes after it.
+                --
+                -- The accent, not the dim grey this file uses for a count: these are
+                -- the filters the user MADE, and in a list that is otherwise
+                -- shipped-with-the-addon that is the one distinction worth seeing
+                -- from across the page. Built from GUI.Colors so it follows the
+                -- theme rather than pinning a second copy of the accent.
+                --
+                -- ⚠ THE TAG IS ON THE LABEL ONLY, never on `_title`. The title is
+                -- what the open panel puts at its head, and a colour escape in it
+                -- would be read as text by anything that measures or compares it.
+                local display = name
+                if entry.custom then
+                    local a = GUI.Colors.accent
+                    display = format("%s  |cff%02x%02x%02x%s|r", name,
+                                     a.r * 255, a.g * 255, a.b * 255, L["Custom"])
+                end
+                row._label = display
                 row._title = name
                 -- The kit writes the plate's label once, at build, from row._label --
                 -- so a row that changes which filter it is showing has to repaint it.
-                if row.label then row.label:SetText(name) end
+                if row.label then row.label:SetText(display) end
                 row.dfSurplus = nil
                 filterBand:SetChildHidden(row, false)
                 if row.Refresh then row.Refresh() end

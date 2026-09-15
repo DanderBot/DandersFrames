@@ -328,8 +328,23 @@ do
           "rows: ...a preset's name goes through L[], a custom's does not")
     -- The kit writes the plate's label ONCE, at build, from row._label -- so a row
     -- that changes which filter it shows has to repaint it.
-    check(refresh:find("row.label:SetText(name)", 1, true) ~= nil,
+    check(refresh:find("row.label:SetText(display)", 1, true) ~= nil,
           "rows: ...and the plate's label is repainted, not merely re-declared")
+    -- ☠ A CUSTOM FILTER IS MARKED ON ITS ROW. Fifteen built-ins and the user's own
+    -- share one list, and the kind was only stated in the panel's eyebrow -- behind
+    -- a click. The tag goes on the label because on a compact row the label is the
+    -- only thing on the plate this page writes.
+    check(refresh:find("if entry.custom then", 1, true) ~= nil,
+          "rows: ...and a custom filter is tagged as one on its plate")
+    check(refresh:find("GUI.Colors.accent", 1, true) ~= nil,
+          "rows: ...in the theme's accent, not a second copy of it")
+    -- ⚠ ...AND THE TAG NEVER REACHES THE TITLE. The title is what the open panel
+    -- puts at its head; a colour escape in it would be read as text by anything
+    -- that measures or compares it.
+    check(refresh:find("row._title = name", 1, true) ~= nil,
+          "rows: ...while the panel's title stays the plain name")
+    check(refresh:find("row._title = display", 1, true) == nil,
+          "rows: ...never the tagged one")
     -- HIDDEN THROUGH THE GROUP, not by hand: the group's layout pass is what
     -- ANNOUNCES the hide, and a popout row answers that by closing any loose panel
     -- docked to it. A bare Hide() would leave the panel standing over whatever moved up.
