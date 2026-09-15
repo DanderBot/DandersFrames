@@ -858,3 +858,94 @@ do
     end
     eq(missing, 0, "locale: the page adds no new string")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ TWO THIRDS OF THE ADDON'S POPOUT ROWS HIDE SIX SETTINGS OR FEWER, and a
+-- row holding four was charging the same click as a row holding thirty-one. So a
+-- row whose whole group is small mounts THAT GROUP under its own title line, and
+-- its strip stops promising settings that are already on screen and offers to
+-- pin a second copy instead.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS AND THIS IS THE FIRST. The page ASKS, with
+-- `{ inline = true }` at its PopoutContent call; INLINE_MAX in Controls.lua
+-- REFUSES a pane that turns out to be big, measured off the group rather than
+-- read off the badge. Only the second can be exercised against a real group, and
+-- that is test_popout_page_tools.lua's job -- what is pinned here is which of
+-- this page's rows asked, and which deliberately did not.
+--
+-- ⚠ KEYED ON THE BUILDER, NOT ON THE MOUNT VARIABLE. Auras.lua holds seven
+-- pages and several of them name a mount the same thing (roleMount, classMount,
+-- bgMount and sizeMount each appear twice), so a census that took the first
+-- match in the file would cheerfully describe another page's row.
+-- ============================================================
+print("-- Resource Bar page: which rows mount their pane on the plate")
+do
+    local WANT = {
+        { "BuildResourceSettingsGroup",      true }, -- 4 ticks, behind the page's own gate
+        { "BuildResourceSizeGroup",          true }, -- 4
+        { "BuildResourcePositionGroup",      true }, -- 3
+        { "BuildResourceAppearanceGroup",    true }, -- 4
+        { "BuildResourceBackgroundGroup",    true }, -- 2 -- the smallest pane on the page
+        { "BuildResourceClassFilterGroup",   false }, -- 13 class ticks
+        { "BuildResourceBorderGroup",        false }, -- 16
+        { "BuildResourceColorsGroup",        false }, -- 13
+    }
+
+    -- Every PopoutContent call in the file, filed under the builder it feeds.
+    local CALLS = {}
+    do
+        local pos = 1
+        while true do
+            local a = SRC:find("= tools.PopoutContent(function(group, holder, reflow)", pos, true)
+            if not a then break end
+            -- The `end` closing the call sits at the page builder's own twelve
+            -- spaces; everything inside the closure is indented further, so this
+            -- is the first one that can be it. The tail read past it is long
+            -- enough to carry an opt-in and nothing else.
+            local b = SRC:find("\n            end", a, true)
+            local body = SRC:sub(a, (b or a) + 48)
+            local builder = body:match("(Build[%w_]+Group)%(")
+            if builder then CALLS[builder] = body end
+            pos = a + 1
+        end
+    end
+
+    for _, spec in ipairs(WANT) do
+        local builder, wantInline = spec[1], spec[2]
+        local body = CALLS[builder]
+        check(body ~= nil, "inline: " .. builder .. " is fed by a PopoutContent call")
+        local gotInline = body ~= nil
+            and body:find("end, nil, { inline = true })", 1, true) ~= nil
+        if wantInline then
+            check(gotInline, "inline: " .. builder .. " asks for the plate")
+        else
+            check(not gotInline, "inline: " .. builder .. " keeps its pane behind the strip")
+        end
+    end
+    -- How many times one hoist is declared, IN THIS PAGE'S SLICE. `settingsRow`
+    -- is a Resource Bar row and a Heal Prediction row both, so a count taken over
+    -- the whole file would answer two for either of them.
+    local function hoistCount(needle)
+        local n, pos = 0, 1
+        while true do
+            local a = PAGE:find(needle, pos, true)
+            if not a then break end
+            n, pos = n + 1, a + 1
+        end
+        return n
+    end
+
+    -- ⚠ FIVE MOVED AND THREE DID NOT, which is the hybrid page in one list: what
+    -- a user changes often is small and is now on screen, and the three long panes
+    -- -- a class list, a border's sixteen and a palette's thirteen -- are exactly
+    -- what a strip was for.
+
+    -- ...and the page gate's tick is still hoisted, once. It is the ROW's own
+    -- on/off rather than one of the four ticks now on its plate, and it is the
+    -- only control that can switch the bar back on -- so putting it on the plate
+    -- with the rest would grey away the way out.
+    eq(hoistCount("tools.RegisterHoistedToggle(settingsRow"), 1,
+       "inline: ...and the page gate's tick is still hoisted, exactly once")
+end

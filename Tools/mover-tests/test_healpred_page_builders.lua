@@ -491,3 +491,85 @@ do
     end
     eq(missing, 0, "locale: the page adds no new string")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ TWO THIRDS OF THE ADDON'S POPOUT ROWS HIDE SIX SETTINGS OR FEWER, and a
+-- row holding four was charging the same click as a row holding thirty-one. So a
+-- row whose whole group is small mounts THAT GROUP under its own title line, and
+-- its strip stops promising settings that are already on screen and offers to
+-- pin a second copy instead.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS AND THIS IS THE FIRST. The page ASKS, with
+-- `{ inline = true }` at its PopoutContent call; INLINE_MAX in Controls.lua
+-- REFUSES a pane that turns out to be big, measured off the group rather than
+-- read off the badge. Only the second can be exercised against a real group, and
+-- that is test_popout_page_tools.lua's job -- what is pinned here is which of
+-- this page's rows asked, and which deliberately did not.
+--
+-- ⚠ KEYED ON THE BUILDER, NOT ON THE MOUNT VARIABLE. Auras.lua holds seven
+-- pages and several of them name a mount the same thing (roleMount, classMount,
+-- bgMount and sizeMount each appear twice), so a census that took the first
+-- match in the file would cheerfully describe another page's row.
+-- ============================================================
+print("-- Heal Prediction page: which rows mount their pane on the plate")
+do
+    local WANT = {
+        { "BuildHealPredictionSettingsGroup", false }, -- 8, over the line by two
+        { "BuildHealPredictionFloatingGroup", true }, -- 4, hidden unless the bar floats
+        { "BuildHealPredictionAnchorGroup",  true }, -- 5, hidden with it
+    }
+
+    -- Every PopoutContent call in the file, filed under the builder it feeds.
+    local CALLS = {}
+    do
+        local pos = 1
+        while true do
+            local a = SRC:find("= tools.PopoutContent(function(group, holder, reflow)", pos, true)
+            if not a then break end
+            -- The `end` closing the call sits at the page builder's own twelve
+            -- spaces; everything inside the closure is indented further, so this
+            -- is the first one that can be it. The tail read past it is long
+            -- enough to carry an opt-in and nothing else.
+            local b = SRC:find("\n            end", a, true)
+            local body = SRC:sub(a, (b or a) + 48)
+            local builder = body:match("(Build[%w_]+Group)%(")
+            if builder then CALLS[builder] = body end
+            pos = a + 1
+        end
+    end
+
+    for _, spec in ipairs(WANT) do
+        local builder, wantInline = spec[1], spec[2]
+        local body = CALLS[builder]
+        check(body ~= nil, "inline: " .. builder .. " is fed by a PopoutContent call")
+        local gotInline = body ~= nil
+            and body:find("end, nil, { inline = true })", 1, true) ~= nil
+        if wantInline then
+            check(gotInline, "inline: " .. builder .. " asks for the plate")
+        else
+            check(not gotInline, "inline: " .. builder .. " keeps its pane behind the strip")
+        end
+    end
+    -- How many times one hoist is declared, IN THIS PAGE'S SLICE. `settingsRow`
+    -- is a Resource Bar row and a Heal Prediction row both, so a count taken over
+    -- the whole file would answer two for either of them.
+    local function hoistCount(needle)
+        local n, pos = 0, 1
+        while true do
+            local a = PAGE:find(needle, pos, true)
+            if not a then break end
+            n, pos = n + 1, a + 1
+        end
+        return n
+    end
+
+    -- ⚠ THE SETTINGS ROW STAYS BEHIND ITS STRIP AT EIGHT, two over the line --
+    -- and its hoisted enable tick is untouched by that, because a row that keeps
+    -- its pane keeps every reason it ever had to hoist. The two that moved are
+    -- hidden together unless the bar is floating, so the height they add is only
+    -- ever on screen in the mode they describe.
+    eq(hoistCount("tools.RegisterHoistedToggle(settingsRow"), 1,
+       "inline: ...and the Settings row's own tick is still hoisted, exactly once")
+end

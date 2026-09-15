@@ -565,3 +565,80 @@ do
     check(SRC:find("combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end", 1, true) ~= nil,
           "banner: ...and its own two-condition gate")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ TWO THIRDS OF THE ADDON'S POPOUT ROWS HIDE SIX SETTINGS OR FEWER, and a
+-- row holding four was charging the same click as a row holding thirty-one. So a
+-- row whose whole group is small mounts THAT GROUP under its own title line, and
+-- its strip stops promising settings that are already on screen and offers to
+-- pin a second copy instead.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS AND THIS IS THE FIRST. The page ASKS, with
+-- `{ inline = true }` at its PopoutContent call; INLINE_MAX in Controls.lua
+-- REFUSES a pane that turns out to be big, measured off the group rather than
+-- read off the badge. Only the second can be exercised against a real group, and
+-- that is test_popout_page_tools.lua's job -- what is pinned here is which of
+-- this page's rows asked, and which deliberately did not.
+--
+-- ⚠ KEYED ON THE BUILDER, NOT ON THE MOUNT VARIABLE. Auras.lua holds seven
+-- pages and several of them name a mount the same thing (roleMount, classMount,
+-- bgMount and sizeMount each appear twice), so a census that took the first
+-- match in the file would cheerfully describe another page's row.
+-- ============================================================
+print("-- Sorting page: which rows mount their pane on the plate")
+do
+    local WANT = {
+        { "BuildSortOptionsGroup",           true }, -- 3, with the enable tick hoisted beside them
+        { "BuildRolePriorityGroup",          false }, -- 1 -- but it is a 135px drag list
+        { "BuildClassPriorityGroup",         false }, -- 1 -- and this one is 320px of it
+    }
+
+    -- Every PopoutContent call in the file, filed under the builder it feeds.
+    local CALLS = {}
+    do
+        local pos = 1
+        while true do
+            local a = SRC:find("= tools.PopoutContent(function(group, holder, reflow)", pos, true)
+            if not a then break end
+            -- The `end` closing the call sits at the page builder's own twelve
+            -- spaces; everything inside the closure is indented further, so this
+            -- is the first one that can be it. The tail read past it is long
+            -- enough to carry an opt-in and nothing else.
+            local b = SRC:find("\n            end", a, true)
+            local body = SRC:sub(a, (b or a) + 48)
+            local builder = body:match("(Build[%w_]+Group)%(")
+            if builder then CALLS[builder] = body end
+            pos = a + 1
+        end
+    end
+
+    for _, spec in ipairs(WANT) do
+        local builder, wantInline = spec[1], spec[2]
+        local body = CALLS[builder]
+        check(body ~= nil, "inline: " .. builder .. " is fed by a PopoutContent call")
+        local gotInline = body ~= nil
+            and body:find("end, nil, { inline = true })", 1, true) ~= nil
+        if wantInline then
+            check(gotInline, "inline: " .. builder .. " asks for the plate")
+        else
+            check(not gotInline, "inline: " .. builder .. " keeps its pane behind the strip")
+        end
+    end
+
+    -- ⚠ THE TWO PRIORITY ROWS ARE THE EXCEPTION A COUNT CANNOT CATCH, and they
+    -- are left behind their strips on purpose. Each declares ONE setting, which is
+    -- as small as a row gets -- but the setting is a DRAG LIST, 135px of it for the
+    -- roles and 320px for the classes, so the pair mounted inline would put most
+    -- of a screen of reorderable rows into a band that holds three lines today. A
+    -- count is a proxy for how much room a group needs, and a list is where the
+    -- proxy stops being true.
+
+    -- ...and the hoisted tick SURVIVES the move. It is the ROW's own on/off rather
+    -- than one of the three settings now on the plate -- which is why the builder
+    -- skips its own copy (hoistToggle) and why a plate showing all three is still
+    -- showing each of them exactly once.
+    check(SRC:find('tools.RegisterHoistedToggle(sortRow, L["Enable Custom Sorting"]', 1, true) ~= nil,
+          "inline: ...and the row's own tick is still hoisted beside the plate")
+end
