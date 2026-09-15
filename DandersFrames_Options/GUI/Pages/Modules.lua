@@ -211,6 +211,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local ICON_TEXT_COUNT = 6
 
             local textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            -- ☠ SIX EXACTLY, WHICH IS THE CEILING, SO THE GROUP GOES ON THE
+            -- PLATE. The badge and the helper's measure agree here for once --
+            -- the explanation is a child like the rest of them -- and six is what
+            -- `inline` refuses ABOVE, not at. The row is this page's only shared
+            -- typography, sitting over thirteen icon sections that each carry
+            -- three more rows: the one block that is read while configuring any
+            -- of them is the one that should not cost a click.
             local textMount, textContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildIconTextGroup({
                     parent = holder,
@@ -218,7 +225,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     refreshStates = reflow,
                 })
-            end)
+            end, nil, { inline = true })
             local textRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Icon Text Settings"],
                 db      = tools.RowDB,
@@ -688,6 +695,20 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.WireFooter(extraRow, ApplyIconGroup)
             end
 
+            -- ☠ NONE OF THIS ICON'S FOUR ROWS MOUNTS ITS PANE ON THE PLATE, and
+            -- the two that are small enough are the reason. Appearance holds
+            -- three or four and Position always three -- well inside the inline
+            -- ceiling -- but both carry `disableOn = spec.gate` and NO toggle of
+            -- their own, and the fold that folds an inline group away reads the
+            -- row's TOGGLE, not its disable. Most of the thirteen icons ship off,
+            -- so opting these in would leave six or seven permanently greyed
+            -- controls sitting on the plate of every section on the page: the
+            -- exact state the kit calls the worst use of the room, thirteen times
+            -- over. Settings and the AFK extra are refused for the plainer reason
+            -- -- both are per-spec (`spec.settingsCount`, `spec.extraGroup.count`,
+            -- and some icons swap the builder entirely), so no number a comment
+            -- here could state would be true of all thirteen, and Timer Text's
+            -- eight is over the ceiling regardless.
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildIconAppearanceGroup({ group = group, parent = holder, refreshStates = reflow,
                                            popout = true }, spec)
@@ -1264,13 +1285,20 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Six: the mode, thickness, inset, frame level, alpha and the colour.
             local SELECTION_COUNT = 6
 
+            -- ☠ SIX, THE CEILING EXACTLY, SO THE GROUP GOES ON THE PLATE -- and
+            -- five of the six answer to the mode dropdown's hideOn, so the plate
+            -- is one dropdown wide until someone picks a mode and the full set
+            -- only afterwards. That is the whole argument for mounting it: the
+            -- settings a highlight actually has depend on the mode chosen, and
+            -- behind a strip the user had to open a panel to find out that
+            -- picking None empties it.
             local selectionMount, selectionContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildSelectionHighlightGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local selectionRow = selectionBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Selection Settings"],
                 db      = tools.RowDB,
@@ -1326,13 +1354,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Six: the same set the Selection row carries.
             local HOVER_COUNT = 6
 
+            -- Six, the same set and the same mode gate, so the same answer: on
+            -- the plate. Two rows that are the same shape reading differently
+            -- would be the page saying the highlights differ where they do not.
             local hoverMount, hoverContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHoverHighlightGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local hoverRow = hoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Hover Settings"],
                 db      = tools.RowDB,
@@ -1464,13 +1495,20 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.WireModifiedTick(aggroRow)
             tools.WireFooter(aggroRow, ApplyAggroHighlight)
 
+            -- ☠ FOUR SETTINGS AND A LEGEND, SO THE GROUP GOES ON THE PLATE --
+            -- and the legend is why this row wants it more than its neighbours.
+            -- "Yellow=high, Orange=highest, Red=tanking" is what makes three
+            -- unlabelled swatches mean anything, and a summary has no room for
+            -- it; behind a strip the key to the palette was itself behind a
+            -- click. Aggro Settings above stays put at seven, one over the
+            -- ceiling, so the band still has a way in on it.
             local threatMount, threatContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildThreatColorsGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local threatRow = aggroBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Threat Colors"],
                 db      = tools.RowDB,
@@ -1742,6 +1780,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- ☠ TWO BEHIND THE ROW'S OWN TICK, SO THE GROUP GOES ON THE PLATE --
+            -- and folds away whole when the tick is off, which is the one state
+            -- where a dropdown and a link greyed out on the row would be the
+            -- worst use of the space. The tick STAYS HOISTED: it is the row's
+            -- toggle rather than one of the two, so it is not a second widget on
+            -- a key the plate already draws. Border Shadow on the Frame page is
+            -- the same pairing for the same reason.
             local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDispelSettingsGroup({
                     group = group, parent = holder,
@@ -1749,7 +1794,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Settings"],
                 db       = tools.RowDB,
@@ -1908,6 +1953,12 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- Five behind the row's own tick, so the group goes on the plate and
+            -- folds with the tick -- the Settings row's pairing one band down.
+            -- The tick stays hoisted for the same reason it does there. Size and
+            -- position are what a symbol row is opened for and the summary can
+            -- carry them, but the pair of offsets cannot be nudged from a
+            -- sentence.
             local iconMount, iconContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDispelIconGroup({
                     group = group, parent = holder,
@@ -1915,7 +1966,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local iconRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Dispel Symbol"],
                 db       = tools.RowDB,
@@ -2001,6 +2052,11 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- Three behind the row's own tick, so the group goes on the plate and
+            -- folds with the tick, as the two rows above it do. Its tick stays
+            -- hoisted for the reason theirs do. The Gradient row beside it keeps
+            -- its strip at eight, which is what the ceiling is for: the band
+            -- holds both shapes and the difference between them is real.
             local borderMount, borderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDispelBorderGroup({
                     group = group, parent = holder,
@@ -2008,7 +2064,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local borderRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Border"],
                 db       = tools.RowDB,

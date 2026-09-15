@@ -1533,32 +1533,39 @@ do
     for _ in page:gmatch("inline = true") do total = total + 1 end
     eq(total, 4, "inline: ...and only those four rows inside the Frame page")
 
-    -- ☠ AND A SECOND PAGE HAS MOVED SINCE, WHICH IS WHY THIS IS A TABLE RATHER
-    -- THAN ONE NAME. The Frame page was judged first and the six aura pages went
-    -- next, all of them inside GUI/Pages/Indicators.lua -- so the claim is no
-    -- longer "one page" but "these pages, and the count each of them asked for".
-    -- Every other page still holds none, which is the part that has to keep
-    -- failing loudly: an opt-in that arrives without the argument being made for
-    -- it is exactly what this census exists to catch.
-    local MOVED = {
-        ["GUI/Pages/Options.lua"]    = 4,
-        ["GUI/Pages/Indicators.lua"] = 26,
+    -- ☠ A ROLL WITH NUMBERS ON IT, NOT A ZERO. This read "no other page has
+    -- moved yet" while the Frame page was the only one swept -- phase 1 shipped
+    -- alone so Danders could judge the shape before the rest followed. They have
+    -- all followed now, and the honest form of that claim is a NAMED list with
+    -- exact counts rather than a gate deleted the moment it fires: a page that
+    -- opts a row in without an argument having been made for it still fails
+    -- here, and a swept page that silently gains or loses one fails on the
+    -- NUMBER rather than passing an "at least one" test. The per-row half of
+    -- each page's claim lives in that page's own census file.
+    --
+    -- ⚠ Options.lua is 21, not 4: it holds seventeen pages besides the Frame
+    -- page, and they were swept in the same pass. The four above are the Frame
+    -- page's share of that number, which is why the count just above this one
+    -- is scoped to the page slice and this one is not.
+    local SWEPT = {
+        ["GUI/Pages/Options.lua"]    = 21,  -- Frame 4 + Tooltips/Pet/Settings/Fading/Visibility 17
+        ["GUI/Pages/Indicators.lua"] = 26,  -- the six aura pages
+        ["GUI/Pages/Modules.lua"]    = 7,   -- Icon Text 1, Highlights 3, Dispel 3
+        ["GUI/Pages/Frames.lua"]     = 3,   -- Global Fonts 1, Group Labels 2
     }
     local TOC = options_file_source("DandersFrames_Options.toc")
-    local elsewhere = {}
+    local wrong = {}
     for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
         local path = "GUI/" .. name:gsub("\\", "/")
         local src = options_file_source(path)
-        local n = 0
+        local n, want = 0, SWEPT[path] or 0
         for _ in src:gmatch("inline = true") do n = n + 1 end
-        if MOVED[path] then
-            eq(n, MOVED[path], "inline: " .. path .. " opts in the rows it was judged on")
-        elseif n > 0 then
-            elsewhere[#elsewhere + 1] = path .. " (" .. n .. ")"
+        if n ~= want then
+            wrong[#wrong + 1] = path .. " (" .. n .. ", want " .. want .. ")"
         end
     end
-    eq(#elsewhere, 0,
-       "inline: no page outside that list has moved -- " .. table.concat(elsewhere, ", "))
+    eq(#wrong, 0,
+       "inline: every page opts in exactly what the roll says -- " .. table.concat(wrong, ", "))
 
     -- ---- the threshold is the helper's, and it is stated -------------
     local controls = options_file_source("GUI/Controls.lua")

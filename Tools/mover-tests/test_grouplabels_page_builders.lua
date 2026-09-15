@@ -498,3 +498,80 @@ do
     check(PAGE:find("flatMsg.hideOn = function() return GUI.SelectedMode ~= \"raid\" or db.raidUseGroups end", 1, true) ~= nil,
           "page: ...and the flat-layout message keeps its own")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNTS ITS PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ROW BY ROW. Two thirds of the rows in the addon hide six
+-- settings or fewer, and a row holding four was charging the same click as a row
+-- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
+-- under its title line, and the strip stops promising settings that are already
+-- on screen and offers to pin a second copy instead.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
+-- (`{ inline = true }` at its PopoutContent call); the threshold in Controls.lua
+-- refuses one whose pane turns out to be big. Only the second can be measured
+-- headlessly against a real group, so it is driven in test_popout_page_tools.lua
+-- -- what is stated here is which of this page's rows asked, and that nothing
+-- else did.
+-- ============================================================
+print("-- Group Labels page: which rows mount their pane on the plate")
+do
+    -- Every `= tools.PopoutContent(` on the page and whether its call ends with
+    -- the opt-in, read as "this declaration up to the next one" -- a
+    -- balanced-brace match would be defeated by the builder closure inside the
+    -- call. The name pattern takes the one-return form as well as the pair,
+    -- because the enable row keeps no content handle.
+    local calls = {}
+    local pos = 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+)[^=\n]*= tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+    eq(#calls, 3, "inline: the page's three PopoutContent calls are readable")
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 2, "inline: two of the page's three rows mount their pane on the plate")
+
+    -- Which ROW each belongs to, read off the row's own `build` rather than from
+    -- a second list -- so a mount opted in and wired to a different row fails
+    -- here instead of shipping.
+    local WANT = {
+        ["Font Settings"] = { mount = "fontMount", inline = true },   -- 5 children
+        ["Position"]      = { mount = "posMount",  inline = true },   -- 4 children
+        -- ⚠ AND THE ENABLE ROW IS THE ONE THAT DOES NOT, which is not a size
+        -- answer. Its pane holds one sentence and no control at all -- the tick
+        -- is hoisted onto the row -- so mounting it would spend a plate on prose
+        -- under a label that already says the same thing.
+        ["Raid Group Labels"] = { mount = "labelsMount", inline = false },
+    }
+    local seen = 0
+    for label, want in pairs(WANT) do
+        local mount = rowOpts(label):match("build%s*=%s*([%w_]+)")
+        eq(mount, want.mount, "inline: " .. label .. " is built from the mount it declares")
+        eq(inlineMounts[mount] == true, want.inline,
+           "inline: ..." .. label .. (want.inline and " asked for the plate"
+                                                   or " keeps its pane behind the strip"))
+        seen = seen + 1
+    end
+    eq(seen, 3, "inline: ...all three of the page's rows were found")
+
+    -- ☠ AND THE TWO THAT MOVED HOIST NOTHING. A hoisted control is one of the
+    -- pane's own settings declared a second time on the plate, and the pane is
+    -- now ON the plate -- two widgets on one key for no gain. The enable row's
+    -- hoist stays, because a row's own toggle is not one of the pane's settings.
+    local hoists = 0
+    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
+    eq(hoists, 1, "inline: the page hoists exactly one thing, and it is a row's own tick")
+    check(PAGE:find('tools.RegisterHoistedToggle(labelsRow, L["Enable Group Labels"], "groupLabelEnabled", OnGroupLabelsToggle)', 1, true) ~= nil,
+          "inline: ...the enable tick on the row that carries no pane settings at all")
+end

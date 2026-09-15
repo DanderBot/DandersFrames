@@ -691,3 +691,100 @@ do
     check(editbox ~= nil and editbox:find('frame:SetScript("OnShow", RefreshDisplay)', 1, true) ~= nil,
           "editbox: ...through the same body OnShow already used, rather than a second copy")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNTS ITS PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ROW BY ROW. A row whose whole group is small mounts THAT
+-- GROUP under its title line rather than charging a click for it, and the strip
+-- then offers to pin a second copy instead of promising settings already on
+-- screen. The page opts a row in; the threshold in Controls.lua refuses one
+-- whose pane turns out to be big, and that half is measured against a real group
+-- in test_popout_page_tools.lua.
+--
+-- ☠ ONE ROW MOVES AND THE THIRTEEN ICONS' FORTY DO NOT, which is a decision
+-- rather than an omission and is the reason this section exists. Icon Text is
+-- the page's shared typography, read while configuring any icon, and it holds
+-- six -- the ceiling exactly, which the helper refuses ABOVE rather than at.
+--
+-- The four rows MountIcon builds are refused for two different reasons, and both
+-- survive a spec being added:
+--   * Appearance (3 or 4) and Position (3) are small enough and still stay put.
+--     They carry `disableOn = spec.gate` and NO toggle of their own, and the fold
+--     that folds a mounted group away reads the row's TOGGLE, not its disable --
+--     so on an icon that ships off, six or seven permanently greyed controls
+--     would sit on the plate of every section on the page, thirteen times over.
+--   * Settings and the AFK extra are per-spec (`spec.settingsCount`,
+--     `spec.extraGroup.count`, and some icons swap the builder outright), so no
+--     one number is true of all thirteen -- and Timer Text's eight is over the
+--     ceiling regardless.
+-- ============================================================
+print("-- Icons page: which rows mount their pane on the plate")
+do
+    local calls = {}
+    local pos = 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+)[^=\n]*= tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+    eq(#calls, 5, "inline: the page's five PopoutContent calls are readable")
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 1, "inline: one of the page's five mounts puts its pane on the plate")
+
+    -- ⚠ NAMED, NOT COUNTED. Four of the five belong to MountIcon and are built
+    -- once for each of the thirteen icons, so "one mount opted in" is a claim
+    -- about ~40 rows -- and which one it is has to be stated or a mount moved
+    -- from the shared path to the page would pass on the number alone.
+    local WANT = {
+        textMount       = true,   -- Icon Text Settings, 6 children
+        settingsMount   = false,  -- per-spec
+        extraMount      = false,  -- per-spec; AFK's Timer Text holds 8
+        appearanceMount = false,  -- 3 or 4, but greyed rather than folded when off
+        positionMount   = false,  -- 3, same
+    }
+    local seen = 0
+    for _, rec in ipairs(calls) do
+        local want = WANT[rec.name]
+        check(want ~= nil, "inline: " .. rec.name .. " is a mount this census knows about")
+        if want ~= nil then
+            eq(inlineMounts[rec.name] == true, want,
+               "inline: " .. rec.name .. (want and " asked for the plate"
+                                               or " keeps its pane behind the strip"))
+            seen = seen + 1
+        end
+    end
+    eq(seen, 5, "inline: ...all five of the page's mounts were accounted for")
+
+    -- The row the one opted-in mount belongs to, read off its own `build`.
+    local textRow = PAGE:match('label%s*=%s*L%["Icon Text Settings"%].-build%s*=%s*([%w_]+)')
+    eq(textRow, "textMount", "inline: Icon Text Settings is built from the mount that asked")
+
+    -- The counted reason it fits, taken off the builder rather than from a number
+    -- typed here -- a seventh control added to the shared typography would move
+    -- it over the ceiling, and this is what would notice before the helper
+    -- silently refused it.
+    local text = builderBody("BuildIconTextGroup")
+    local children = 0
+    for _ in text:gmatch("\n%s+add%(") do children = children + 1 end
+    eq(children, 6, "inline: the Icon Text group holds six children, the ceiling exactly")
+
+    -- ☠ AND THE ONE HOIST ON THE SHARED PATH IS STILL A TICK. MountIcon hoists
+    -- an icon's enable checkbox onto its Settings row, which is that row's own
+    -- toggle rather than one of the pane's settings -- so it is not the twin a
+    -- mounted pane would duplicate, and it survives whatever moves later.
+    local hoists = 0
+    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
+    eq(hoists, 1, "inline: the page hoists exactly one thing, on the shared icon path")
+    check(PAGE:find("tools.RegisterHoistedToggle(settingsRow, spec.enableLabel, spec.enableKey, OnEnableToggle)", 1, true) ~= nil,
+          "inline: ...and it is the icon's own enable tick, in the four-argument form")
+end

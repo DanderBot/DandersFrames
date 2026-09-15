@@ -577,3 +577,78 @@ do
     check(PAGE:find("gradientStyles[d.dispelGradientStyle]", 1, true) ~= nil,
           "summary: Gradient names the wash from the dropdown's own table")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNTS ITS PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ROW BY ROW. A row whose whole group is small mounts THAT
+-- GROUP under its title line rather than charging a click for it, and the strip
+-- then offers to pin a second copy instead of promising settings already on
+-- screen. The page opts a row in; the threshold in Controls.lua refuses one
+-- whose pane turns out to be big, and that half is measured against a real group
+-- in test_popout_page_tools.lua.
+--
+-- ☠ EVERY ROW HERE CARRIES ITS OWN TICK, WHICH IS WHAT MAKES THE MOVE CHEAP ON
+-- THIS PAGE. The fold that folds a mounted group away reads the row's TOGGLE, so
+-- an overlay switched off costs the plate nothing at all -- it is the one state
+-- where greyed controls sitting on a row would be the worst use of the room. The
+-- ticks STAY HOISTED through the move: a row's own toggle is not one of the
+-- pane's settings, so it is not the twin the mounted pane would duplicate.
+-- ============================================================
+print("-- Dispel Overlay page: which rows mount their pane on the plate")
+do
+    local calls = {}
+    local pos = 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+)[^=\n]*= tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+    eq(#calls, 4, "inline: the page's four PopoutContent calls are readable")
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 3, "inline: three of the page's four rows mount their pane on the plate")
+
+    -- Which ROW each belongs to, read off the row's own `build` rather than from
+    -- a second list -- so a mount opted in and wired to a different row fails
+    -- here instead of shipping. The counts are the panes with the tick already
+    -- suppressed, which is the shape the popout arm actually builds.
+    local WANT = {
+        ["Settings"]      = { mount = "settingsMount", inline = true  },  -- 2
+        ["Dispel Symbol"] = { mount = "iconMount",     inline = true  },  -- 5
+        ["Border"]        = { mount = "borderMount",   inline = true  },  -- 3
+        ["Gradient"]      = { mount = "gradientMount", inline = false },  -- 8
+    }
+    local seen = 0
+    for label, want in pairs(WANT) do
+        local mount = rowOpts(label):match("build%s*=%s*([%w_]+)")
+        eq(mount, want.mount, "inline: " .. label .. " is built from the mount it declares")
+        eq(inlineMounts[mount] == true, want.inline,
+           "inline: ..." .. label .. (want.inline and " asked for the plate"
+                                                   or " keeps its pane behind the strip"))
+        seen = seen + 1
+    end
+    eq(seen, 4, "inline: ...all four of the page's rows were found")
+
+    -- ☠ AND THE FOUR HOISTS ARE STILL FOUR. Every one is a row's own enable
+    -- tick, suppressed inside the builder by `hoistToggle` -- so not one of them
+    -- is a second widget on a key the mounted pane draws. A hoisted CONTROL
+    -- appearing on this page after the move would be exactly that duplication,
+    -- and the count is what would catch it.
+    local hoists = 0
+    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
+    eq(hoists, 4, "inline: four hoists, one per row, and every one a tick rather than a control")
+    for _, g in ipairs(ROWS) do
+        check(PAGE:find("tools.RegisterHoistedToggle(" .. g.row .. ', L["' .. g.toggleLabel
+                        .. '"], "' .. g.toggleKey .. '", ' .. g.commit .. ")", 1, true) ~= nil,
+              "inline: " .. g.label .. " keeps its tick on the row, in the four-argument form")
+    end
+end
