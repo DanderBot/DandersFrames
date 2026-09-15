@@ -971,8 +971,13 @@ function UI:CreatePopoutRow(parent, opts)
     -- see CreateGlyphButton's own note: a labelled row that merely CONTAINS an
     -- icon has one hit box, not three.
     local row = CreateFrame("Button", nil, parent)
-    row:SetSize(260, ROW_H)
-    row.preferredHeight = ROW_H
+    -- ⚠ The opening guess only. plateLayout re-asserts both from the plate it
+    -- actually built, which is where a compact row gets its real slot -- but a
+    -- row added to a group before its first layout is held at whatever it says
+    -- here, so a compact row that opened at 54 would visibly settle to 30.
+    local START_H = (opts.compact and (M.plateCompact + M.gapCompact)) or ROW_H
+    row:SetSize(260, START_H)
+    row.preferredHeight = START_H
     row.fixedRowHeight = true
     -- WHICH PART OF THIS FRAME IS INK. The row's frame is its whole layout SLOT,
     -- and the bottom M.gap of that slot is the gap to the next row -- nothing is
@@ -1007,8 +1012,27 @@ function UI:CreatePopoutRow(parent, opts)
     -- "very chonky". So a strip row's title line is M.plateStrip and a plain
     -- row's is M.plate -- one number each, resolved once here, and nothing on an
     -- unconverted page moves by a pixel.
-    row._strip = opts.footerStrip and true or false
-    local HEAD_H = row._strip and M.plateStrip or PLATE_H
+    --
+    -- ☠ AND `compact` IS THE THIRD ANSWER, for a row that is only ever a name
+    -- and a summary. It takes M.plateCompact and, deliberately, NO STRIP.
+    --
+    -- The strip is not dropped to save its 18 points -- it is dropped because
+    -- the reason it exists does not apply here. It was asked for after living
+    -- with the Frame page ("the popout should only be triggered from the bottom
+    -- bar, same with the on hover highlight instead of the whole row being
+    -- clickable") and that is right about a plate covered in sliders: a plate
+    -- whose every square inch opens a panel is a plate the cursor cannot rest
+    -- on. A compact row has NOTHING on it to rest on, so the whole-row click and
+    -- the whole-row hover are safe again -- and they are already written, on the
+    -- path every page used before the strip existed.
+    --
+    -- ⚠ `compact` WINS OVER `footerStrip` rather than erroring on the pair. The
+    -- two are contradictory (a strip under a single title line is the shape this
+    -- exists to avoid) and a page that passes both means the newer of them.
+    row._compact = opts.compact and true or false
+    row._strip = (not row._compact) and (opts.footerStrip and true or false) or false
+    local HEAD_H = row._compact and M.plateCompact
+                   or (row._strip and M.plateStrip or PLATE_H)
 
     -- ---- chrome ---------------------------------------------------
     -- A FRAME, not the texture this used to be, and everything the row draws is
@@ -1579,18 +1603,15 @@ function UI:CreatePopoutRow(parent, opts)
             -- the row the feedback named. Rows without a strip -- every other page
             -- -- keep their summary, byte for byte.
             --
-            -- ☠ AND `keepSummary` IS THE ONE EXCEPTION, because the rule above is
-            -- about VALUE READOUTS and not about summaries as such. "Alpha 0.30 ·
-            -- Combat 1.00" is orphaned in the corner because the controls beneath
-            -- already say it better. A summary that describes the row's SUBJECT
-            -- rather than its settings -- the Filter Designer's "12 of 49 tracked ·
-            -- Buff Bar" -- is the opposite case: there is nothing beneath it saying
-            -- that, and on a page that is a LIST of things it is the only way to
-            -- read the list without opening every row on it.
-            --
-            -- Opt-IN rather than opt-out, so every row that prompted the original
-            -- feedback keeps today's behaviour without being touched.
-            if strip and not opts.keepSummary then
+            -- ⚠ A COMPACT ROW IS NOT AN EXCEPTION HERE, it simply has no strip:
+            -- the Filter Designer needs its corner ("12 of 49 tracked -- Buff Bar")
+            -- because that page is a LIST and the corner is what makes the list
+            -- readable, and it gets it through this same branch rather than through
+            -- a flag. An earlier pass DID add a `keepSummary` opt-in for it and
+            -- removed it again when the compact row landed with no caller left --
+            -- the rule below is about VALUE READOUTS, and a row with no controls
+            -- has none to read out.
+            if strip then
                 text = ""
             else
                 text = opts.summary and opts.summary(resolveDB(opts.db)) or ""
@@ -1869,7 +1890,7 @@ function UI:CreatePopoutRow(parent, opts)
             end
         end
 
-        local slotH = plateH + M.gap
+        local slotH = plateH + (row._compact and M.gapCompact or M.gap)
         -- ☠ THE FRAME'S HEIGHT IS RE-ASSERTED WHENEVER IT DISAGREES, and that is
         -- NOT the same test as the one below it. A layout pass may have set the
         -- row to whatever slot it was holding at the time; the row is the

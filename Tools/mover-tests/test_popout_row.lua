@@ -130,6 +130,7 @@ UI.PopoutRow = UI.PopoutRow or {
     footer = 18, footerFill = 0.85, footerHover = 1.0,
     footerBorder = 0.6, footerOn = 0.22, footerOnHover = 0.30,
     plateStrip = 30, stripArc = 8, modTickGap = 2,
+    plateCompact = 26, gapCompact = 4,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
@@ -3023,34 +3024,64 @@ do
     plain._Write(false)
     eq(plain.summary:GetText(), "Off", "summary: ...and its off word, as it always did")
 
-    -- ☠ ...AND `keepSummary` BUYS THE CORNER BACK, for the one case the rule above
-    -- is wrong about. The rule is about VALUE READOUTS -- "100x50 Spacing 2" is
-    -- orphaned because the controls beneath say it better. A summary describing the
-    -- row's SUBJECT has nothing beneath it saying that, and on a page that is a LIST
-    -- of things (the Filter Designer: one row per filter) the corner is the only way
-    -- to read the list without opening every row on it.
-    --
-    -- Asserted against the SAME consumer and the SAME strip helper as the quiet row
-    -- above, so the only difference between them is the flag.
-    --
-    -- ⚠ `db` is shared with the rows above and the last thing done to it was a
-    -- _Write(false), so the toggle is restored first. Without this the row builds
-    -- switched OFF and paints its off word, which looks exactly like the flag
-    -- being ignored.
+    -- ☠ ...AND A COMPACT ROW KEEPS ITS CORNER, because it has no strip to blank
+    -- it. This is how the Filter Designer's list reads without opening every row
+    -- on it, and it goes through the SAME branch as the plain row above rather
+    -- than through a flag of its own.
     db.on = true
-    local kept = stripRow({ label = "Loud strip", db = db, count = 5, window = win,
-                            footerStrip = true, summary = summary,
-                            keepSummary = true, toggle = { key = "on" } })
-    check(type(kept.footerStrip) == "table" and kept.footerStrip.SetSize ~= nil,
-        "summary: the keepSummary row really does have a strip")
-    eq(kept.summary:GetText(), "100x50 Spacing 2",
-        "summary: ...and a strip row that asks for its summary keeps it")
-    kept._Write(false)
-    eq(kept.summary:GetText(), "Off",
-        "summary: ...with the off word still winning over it")
-    kept._Write(true)
-    eq(kept.summary:GetText(), "100x50 Spacing 2",
-        "summary: ...and back again, so the flag is read on every paint")
+    local small = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Slim", db = db, count = 5, window = win, compact = true,
+        build = counting("hoistSlim", 50), summary = summary, toggle = { key = "on" } })
+    small:SetWidth(260); small:SetFakeCenter(CX - 100, CY); small:Show()
+    check(not (type(small.footerStrip) == "table" and small.footerStrip.SetSize),
+        "summary: a compact row has no strip frame at all")
+    eq(small.summary:GetText(), "100x50 Spacing 2",
+        "summary: ...so it paints its summary by the ordinary path")
+
+    -- ☠ AND THE HEIGHT IS THE WHOLE POINT, so it is asserted in NUMBERS rather
+    -- than left to the summary above to imply. A filter list is one row per
+    -- filter, and seventeen of them at the strip row's 48 + 10 is 986px of
+    -- scrolling; this is what buys that back.
+    --
+    -- ⚠ LAID OUT FIRST, and that is not ceremony. A row that is merely built
+    -- carries its OPENING GUESS, and the guess is compact-aware -- so every
+    -- number below would pass with plateLayout's own arithmetic broken. widen()
+    -- is what makes these assertions about the layout rather than about the
+    -- constructor.
+    widen(small, 401)
+    eq(small.plate:GetHeight(), M.plateCompact,
+        "compact: the plate is one title line and nothing else")
+    eq(small:GetHeight(), M.plateCompact + M.gapCompact,
+        "compact: ...and the slot is that plus the tighter gap")
+    eq(small.preferredHeight, M.plateCompact + M.gapCompact,
+        "compact: ...which is what it tells the layout it needs")
+    -- ⚠ The number that matters to the page, stated once so a retune of either
+    -- token has to come past this line: 17 filters must fit in under 600px.
+    check(17 * small:GetHeight() < 600,
+        "compact: seventeen filters fit in under 600px of page")
+
+    -- ...and NOTHING ELSE MOVED. The plain row above is every unconverted page in
+    -- the addon, and the whole point of an opt-in is that it did not shift.
+    eq(plain.plate:GetHeight(), M.plate,
+        "compact: a row that did not ask keeps the 44 its census pins")
+    eq(plain:GetHeight(), M.plate + M.gap,
+        "compact: ...and its slot, byte for byte")
+
+    -- ⚠ BOTH FLAGS AT ONCE: `compact` wins and there is NO strip. The pair is
+    -- contradictory -- a strip under a single title line is the shape compact
+    -- exists to avoid -- and the kit resolves it rather than erroring, so the
+    -- resolution is pinned here instead of living only in a comment.
+    db.on = true
+    local both = host:CreatePopoutRow(FakeUIFrame(), {
+        label = "Both", db = db, count = 5, window = win,
+        compact = true, footerStrip = true,
+        build = counting("hoistBoth", 50), summary = summary, toggle = { key = "on" } })
+    both:SetWidth(260); both:SetFakeCenter(CX - 100, CY); both:Show()
+    widen(both, 401)
+    check(not (type(both.footerStrip) == "table" and both.footerStrip.SetSize),
+        "compact: compact wins over footerStrip -- no strip is built")
+    eq(both.plate:GetHeight(), M.plateCompact,
+        "compact: ...and the plate is the compact one, not the strip row's")
 end
 
 -- ---- 24.12 the hoisted control's tooltip, and where its rect lands ----

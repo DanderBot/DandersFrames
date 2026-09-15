@@ -4504,8 +4504,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 window  = DF.GUIFrame,
                 clipTo  = pageRef,
                 build   = mount,
-                footerStrip = true,
-                keepSummary = true,
+                -- ☠ COMPACT, NOT A STRIP ROW. Seventeen filters at the strip row's
+                -- 48+10 is 986px of scrolling for a list whose every row is one line
+                -- of text -- "miles long of scrolling to get through the filters".
+                -- A compact row is that one line, and the whole row opens it: the
+                -- strip exists because a plate carrying sliders cannot be clicked
+                -- anywhere, and this plate carries nothing.
+                compact = true,
             })
             -- ⚠ NO ClaimKeys, NO WireModifiedTick AND NO WireFooter. This page owns
             -- no per-mode db keys at all -- CreateCopyButton is called with an empty

@@ -284,8 +284,22 @@ do
           "rows: a row claims no db keys, because the page owns none")
     check(SRC:find("tools.WireFooter", 1, true) == nil,
           "rows: ...and takes no reset footer it could not honour")
-    check(SRC:find("footerStrip = true", 1, true) ~= nil,
-          "rows: ...but it does carry the footer strip, like every row in the addon")
+    -- ☠ AND IT IS COMPACT, WHICH MEANS NO STRIP -- the one page in the addon
+    -- whose rows do not carry one. Seventeen filters at a strip row's 48+10 is
+    -- 986px of scrolling for a list whose every row is a single line of text.
+    -- The strip is not dropped for its 18 points: it exists so a plate covered
+    -- in sliders has one place that opens the panel, and this plate carries
+    -- nothing, so the whole-row click it was protecting against is safe again.
+    check(SRC:find("compact = true", 1, true) ~= nil,
+          "rows: ...and is COMPACT, one text line per filter")
+    check(SRC:find("footerStrip = true", 1, true) == nil,
+          "rows: ...so it carries no footer strip, the only page in the addon that does not")
+    -- ⚠ AND THE CORNER STILL PAINTS. A strip row's summary is blanked while it is
+    -- on; this row has no strip, so the count and the consumers -- the two facts
+    -- that make a LIST of filters readable without opening all seventeen -- reach
+    -- the plate through the ordinary path.
+    check(SRC:find("summary = function()", 1, true) ~= nil,
+          "rows: ...and still declares the summary its corner paints")
 
     -- ---- THE REFRESH: NO REBUILD, AND NO Add ----
     -- ☠ REJECTED: clearing _filterDesignerBuilt to force a rebuild when a filter is
