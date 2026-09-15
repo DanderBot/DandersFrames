@@ -1519,12 +1519,19 @@ do
     end
     eq(sawInline, 4, "inline: ...all four of the named rows were found on the page")
 
-    -- ---- and NOTHING ELSE ANYWHERE ----------------------------------
-    -- The same claim the footer strip carries: this page is the one that moved,
-    -- and Danders judges it before 124 more rows follow.
+    -- ---- and NOTHING ELSE ON THIS PAGE ------------------------------
+    -- ⚠ THE FRAME PAGE'S SLICE, NOT THE WHOLE FILE. This read `SRC` while the
+    -- Frame page was the only one that had moved -- phase 1 shipped alone so
+    -- Danders could judge the shape before the rest followed, and a file-wide
+    -- count was the cheapest way to say "and nothing else yet". It followed,
+    -- and Options.lua holds seventeen more pages' worth of opt-ins now, so a
+    -- file-wide number says nothing about THIS page. Scoped to `page`, the
+    -- claim is the one this section was always making: four rows on the Frame
+    -- page mount their pane, and the four are the ones named above. The
+    -- per-page censuses in the other pages' own test files carry their halves.
     local total = 0
-    for _ in SRC:gmatch("inline = true") do total = total + 1 end
-    eq(total, 4, "inline: ...and only the Frame page's rows inside this file")
+    for _ in page:gmatch("inline = true") do total = total + 1 end
+    eq(total, 4, "inline: ...and only those four rows inside the Frame page")
 
     local TOC = options_file_source("DandersFrames_Options.toc")
     local elsewhere = {}
