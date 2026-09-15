@@ -347,6 +347,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = fontMount,
+                footerStrip = true,
             }))
             -- ☠ NO SUMMARY, AND THAT IS THE HONEST ANSWER RATHER THAN A GAP.
             -- Nothing behind this row is applied state. The font and outline the
@@ -436,6 +437,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = shadowMount,
+                footerStrip = true,
             }))
             -- ☠ THIS ROW CARRIES A SECTION ANCHOR, and it is the only one on the
             -- page that is jumped to from somewhere else. Every per-element
@@ -748,6 +750,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = labelsMount,
+                footerStrip = true,
             }))
             tools.RegisterHoistedToggle(labelsRow, L["Enable Group Labels"], "groupLabelEnabled", OnGroupLabelsToggle)
             -- The box's own gate, on the row: raid mode and the group-based
@@ -820,6 +823,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = fontMount,
+                footerStrip = true,
             }))
             -- ⚠ THE OUTLINE KEY IS CLAIMED TWICE, and that is the walk working as
             -- designed: the outline dropdown and the shadow tick are two views of
@@ -875,6 +879,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = posMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(positionRow, posContent)
             tools.WireModifiedTick(positionRow)

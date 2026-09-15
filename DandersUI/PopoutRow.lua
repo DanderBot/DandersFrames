@@ -1210,9 +1210,20 @@ function UI:CreatePopoutRow(parent, opts)
     -- ☠ OPT-IN, ROW BY ROW, AND EVERY LINE BELOW IS DEAD ON A ROW THAT DID NOT
     -- ASK. `opts.footerStrip` is what a page passes; a row without it never
     -- builds a strip, never re-anchors one of the six title-line regions above,
-    -- and draws exactly what it drew before this block existed. That is not
-    -- politeness -- a dozen pages' census suites pin those rows' anatomy, and the
-    -- Frame page is the only one converted in this pass.
+    -- and draws exactly what it drew before this block existed.
+    --
+    -- ⚠ EVERY SETTINGS ROW IN THE ADDON NOW ASKS. This said "the Frame page is
+    -- the only one converted in this pass" through two releases, and it stayed
+    -- there one sweep too long: the pane-on-the-plate change went out across
+    -- every page reading only the OTHER opt-in (`inline`), so for one commit
+    -- rows mounted their settings inline while still wearing the old top-right
+    -- chevron and count. THE STRIP AND THE INLINE PANE ARE SEPARATE SWITCHES
+    -- and a page needs both -- test_frame_page_builders.lua fails now if any
+    -- popout row on any page is missing this one.
+    --
+    -- The opt-in itself stays, because GUI/PopoutDemo.lua still exercises the
+    -- no-strip tether (a rounded source RING instead of this band), and so may
+    -- any other host embedding the kit.
     --
     -- WHAT THE STRIP IS FOR. Every setting went behind a row in the popout sweep,
     -- so every setting is invisible until a panel opens; the answer is to put a

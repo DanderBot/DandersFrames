@@ -299,6 +299,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = sortMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(sortRow, sortContent)
             tools.WireModifiedTick(sortRow)
@@ -558,6 +559,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = roleMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(roleRow, roleContent)
             tools.WireModifiedTick(roleRow)
@@ -580,6 +582,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = classMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(classRow, classContent)
             tools.WireModifiedTick(classRow)
@@ -724,6 +727,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = pickerMount,
+                footerStrip = true,
             }))
             -- ☠ CLAIM THE KEYS, BUT NO MODIFIED TICK AND NO FOOTER -- and that is
             -- not an oversight to be tidied up by the next sweep.
@@ -1050,6 +1054,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = classMount,
+                footerStrip = true,
             }))
             -- ☠ CLAIM THE KEYS, BUT NO TICK AND NO FOOTER -- the page note above
             -- says why, and it is the Integrations row's rule verbatim. The claim
@@ -1129,6 +1134,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = roleMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(roleRow, roleContent)
         end
@@ -1198,6 +1204,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = dispelMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(dispelRow, dispelContent)
 
@@ -2412,6 +2419,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = colorMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(colorRow, colorContent)
             tools.WireModifiedTick(colorRow)
@@ -2433,6 +2441,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = textureMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(textureRow, textureContent)
             tools.WireModifiedTick(textureRow)
@@ -2456,6 +2465,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = bgMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(bgRow, bgContent)
             tools.WireModifiedTick(bgRow)
@@ -2596,6 +2606,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = missingMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(missingRow, missingContent)
             tools.WireModifiedTick(missingRow)
@@ -2711,6 +2722,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = reducedMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(reducedRow, reducedContent)
             tools.WireModifiedTick(reducedRow)
@@ -3462,6 +3474,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -3503,6 +3516,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = classFilterMount,
+                footerStrip = true,
             }))
             -- ☠ THE THIRTEEN TICKS ARE BOUND TO A SUB-TABLE, so the key walk sees
             -- thirteen bare class TOKENS -- "WARRIOR", "PALADIN" -- which is right
@@ -3572,6 +3586,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = sizeMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(sizeRow, sizeContent)
             tools.WireModifiedTick(sizeRow)
@@ -3610,6 +3625,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(positionRow, positionContent)
             tools.WireModifiedTick(positionRow)
@@ -3650,6 +3666,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -3690,6 +3707,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = bgMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(bgRow, bgContent)
             tools.WireModifiedTick(bgRow)
@@ -3742,6 +3760,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             -- ⚠ THE PANE'S GROUP HAS NO disableChildrenOn OF ITS OWN, unlike every
             -- other builder on this page: CreateBorderControls owns the whole group
@@ -3856,6 +3875,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = colorsMount,
+                footerStrip = true,
             }))
             -- The claim covers all twelve keys the walk can see -- the two per-mode
             -- ones and the ten power tokens -- because the map is what lets a search
@@ -4176,6 +4196,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = absorbMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(absorbRow, absorbContent)
             tools.WireModifiedTick(absorbRow)
@@ -4313,6 +4334,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = healMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(healAbsorbRow, healContent)
             tools.WireModifiedTick(healAbsorbRow)
@@ -4601,6 +4623,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             -- ⚠ ALL THREE COLOUR KEYS ARE CLAIMED, including the two the current
             -- source does not use. Every one of them is a real per-mode profile key
@@ -4684,6 +4707,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = floatingMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(floatingRow, floatingContent)
             tools.WireModifiedTick(floatingRow)
@@ -4770,6 +4794,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = anchorMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(anchorRow, anchorContent)
             tools.WireModifiedTick(anchorRow)

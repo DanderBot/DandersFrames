@@ -591,6 +591,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = soloMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(soloRow, soloContent)
             tools.WireModifiedTick(soloRow)
@@ -974,6 +975,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = frameMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(frameRow, frameContent)
             tools.WireModifiedTick(frameRow)
@@ -1059,6 +1061,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = bindMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(bindRow, bindContent)
             tools.WireModifiedTick(bindRow)
@@ -1136,6 +1139,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = buffMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(buffRow, buffContent)
             tools.WireModifiedTick(buffRow)
@@ -1227,6 +1231,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = debuffMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(debuffRow, debuffContent)
             tools.WireModifiedTick(debuffRow)
@@ -1298,6 +1303,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = defMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(defRow, defContent)
             tools.WireModifiedTick(defRow)
@@ -1387,6 +1393,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = adMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(adRow, adContent)
             tools.WireModifiedTick(adRow)
@@ -1844,6 +1851,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = oorMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(oorRow, oorContent)
             tools.WireModifiedTick(oorRow)
@@ -1965,6 +1973,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = deadMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(deadRow, deadContent)
             tools.WireModifiedTick(deadRow)
@@ -2090,6 +2099,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = hfMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(hfRow, hfContent)
             tools.WireModifiedTick(hfRow)
@@ -2524,6 +2534,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = groupMount,
+                    footerStrip = true,
                 }))
                 -- ⚠ A CONDITIONAL CLAIM, and it is the honest one. In party mode
                 -- the pane never mounts petGroupShowLabel, so the walk never sees
@@ -2644,6 +2655,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = sizeMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(petSizeRow, sizeContent)
             tools.WireModifiedTick(petSizeRow)
@@ -2721,6 +2733,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(petAppearanceRow, appearContent)
             tools.WireModifiedTick(petAppearanceRow)
@@ -2841,6 +2854,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             -- ⚠ THE PANE'S GROUP HAS NO disableChildrenOn OF ITS OWN, unlike every
             -- other builder on this page: CreateBorderControls owns the whole group
@@ -2961,6 +2975,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = healthBarMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(petHealthBarRow, healthBarContent)
             tools.WireModifiedTick(petHealthBarRow)
@@ -3072,6 +3087,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = nameMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(petNameTextRow, nameContent)
             tools.WireModifiedTick(petNameTextRow)
@@ -3164,6 +3180,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = positionMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(petPositionRow, positionContent)
                 tools.WireModifiedTick(petPositionRow)
@@ -3238,6 +3255,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = healthTextMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(petHealthTextRow, healthTextContent)
             tools.WireModifiedTick(petHealthTextRow)
@@ -3515,6 +3533,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = modesMount,
+                footerStrip = true,
             }))
             -- Claimed for the SEARCH row map only -- no tick, no footer. See the
             -- page-wide rule at the top of this builder.
@@ -3646,6 +3665,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = blizMount,
+                footerStrip = true,
             }))
             -- Claimed for the SEARCH row map only -- no tick, no footer. Here the
             -- footer would be worse than inert: Reset Group writes ONE mode's
@@ -3878,6 +3898,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = renderMount,
+                footerStrip = true,
             }))
             -- Claimed for the SEARCH row map only -- no tick, no footer: one key
             -- is written to both mode tables at once, the other is account-wide,
@@ -4015,6 +4036,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             -- Claimed for the SEARCH row map only -- no tick, no footer: two root
             -- keys and one account-level flag, none of which the per-mode defaults
@@ -4154,6 +4176,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = notifyMount,
+                footerStrip = true,
             }))
             -- Claimed for the SEARCH row map only -- no tick, no footer: the
             -- per-mode defaults engine has never held either key.

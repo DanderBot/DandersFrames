@@ -357,6 +357,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = visMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(visRow, visContent)
             tools.WireModifiedTick(visRow)
@@ -617,6 +618,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = filterMount,
+                footerStrip = true,
             }))
             -- ⚠ THE SELECTION TABLE IS NAMED, because the walk cannot see it. Every
             -- filter tick is a CUSTOM get/set checkbox -- it has no db binding at all,
@@ -760,6 +762,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = orderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(orderRow, orderContent)
             tools.WireModifiedTick(orderRow)
@@ -883,6 +886,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -966,6 +970,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = layoutMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(layoutRow, layoutContent)
             tools.WireModifiedTick(layoutRow)
@@ -1030,6 +1035,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             -- ⚠ buffGrowth IS NAMED, because the walk cannot see it. The growth control
             -- is three hand-built mini dropdowns in a container -- it registers nothing
@@ -1165,6 +1171,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -1303,6 +1310,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -1383,6 +1391,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = stackMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(stackRow, stackContent)
             tools.WireModifiedTick(stackRow)
@@ -1487,6 +1496,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durBarMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a bar the client cannot draw would be.
@@ -1611,6 +1621,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = pandemicMount,
+                footerStrip = true,
             }))
             pandemicRow.hideOn = HideDurationBar
             tools.ClaimKeys(pandemicRow, pandemicContent)
@@ -1966,6 +1977,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = visMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(visRow, visContent)
             tools.WireModifiedTick(visRow)
@@ -2142,6 +2154,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = filterMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(filterRow, filterContent)
             tools.WireModifiedTick(filterRow)
@@ -2286,6 +2299,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = blMount,
+                    footerStrip = true,
                 }))
                 -- ⚠ THE STORED SET IS NAMED, because the walk cannot see it. Every
                 -- tick here is a CUSTOM get/set checkbox -- no db binding at all -- so
@@ -2423,6 +2437,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = orderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(orderRow, orderContent)
             tools.WireModifiedTick(orderRow)
@@ -2537,6 +2552,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -2612,6 +2628,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = layoutMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(layoutRow, layoutContent)
             tools.WireModifiedTick(layoutRow)
@@ -2674,6 +2691,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             -- ⚠ debuffGrowth IS NAMED, because the walk cannot see it. The growth
             -- control is three hand-built mini dropdowns in a container -- it registers
@@ -2827,6 +2845,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -3039,6 +3058,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = impMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(importantRow, impContent)
             tools.WireModifiedTick(importantRow)
@@ -3176,6 +3196,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -3252,6 +3273,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = stackMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(stackRow, stackContent)
             tools.WireModifiedTick(stackRow)
@@ -3360,6 +3382,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = dispelMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where letters the client cannot write would be.
@@ -3462,6 +3485,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durBarMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a bar the client cannot draw would be.
@@ -3724,6 +3748,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -3818,6 +3843,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = buffsMount,
+                footerStrip = true,
             }))
             -- The box's own variant gate becomes the ROW's, so the band collapses
             -- the slot instead of drawing a plate for a list auto-detect has taken
@@ -3896,6 +3922,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -3961,6 +3988,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(positionRow, positionContent)
             tools.WireModifiedTick(positionRow)
@@ -4061,6 +4089,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -4338,6 +4367,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -4853,6 +4883,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = layoutMount,
+                footerStrip = true,
             }))
             -- ⚠ defensiveBarGrowth IS NAMED, because the walk cannot see it. The
             -- growth control is three hand-built mini dropdowns in a container -- it
@@ -4896,6 +4927,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -4933,6 +4965,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(positionRow, positionContent)
             tools.WireModifiedTick(positionRow)
@@ -4983,6 +5016,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -5016,6 +5050,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = filterMount,
+                footerStrip = true,
             }))
             -- ⚠ THE SELECTION TABLE IS NAMED, because the walk cannot see it. Every
             -- filter tick is a CUSTOM get/set checkbox -- it has no db binding at all,
@@ -5094,6 +5129,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -5133,6 +5169,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = stackMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a count the client cannot style would be.
@@ -5183,6 +5220,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durBarMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a bar the client cannot draw would be.
@@ -5472,6 +5510,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window   = DF.GUIFrame,
                     clipTo   = self,
                     build    = settingsMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(settingsRow, settingsContent)
                 tools.WireModifiedTick(settingsRow)
@@ -5547,6 +5586,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = layoutMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(layoutRow, layoutContent)
                 tools.WireModifiedTick(layoutRow)
@@ -5651,6 +5691,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = presetMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(presetRow, presetContent)
                 tools.WireModifiedTick(presetRow)
@@ -5745,6 +5786,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = colorMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(colorRow, colorContent)
                 tools.WireModifiedTick(colorRow)
@@ -5850,6 +5892,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window   = DF.GUIFrame,
                     clipTo   = self,
                     build    = borderMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(borderRow, borderContent)
                 tools.WireModifiedTick(borderRow)
@@ -5929,6 +5972,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window   = DF.GUIFrame,
                     clipTo   = self,
                     build    = iconMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(iconRow, iconContent)
                 tools.WireModifiedTick(iconRow)
@@ -6001,6 +6045,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = showTextMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(showTextRow, showTextContent)
                 tools.WireModifiedTick(showTextRow)
@@ -6066,6 +6111,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = fontMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(fontRow, fontContent)
                 tools.WireModifiedTick(fontRow)
@@ -6145,6 +6191,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = spellNameMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(spellNameRow, spellNameContent)
                 tools.WireModifiedTick(spellNameRow)
@@ -6199,6 +6246,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = targetNameMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(targetNameRow, targetNameContent)
                 tools.WireModifiedTick(targetNameRow)
@@ -6256,6 +6304,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = durationPosMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(durationPosRow, durationPosContent)
                 tools.WireModifiedTick(durationPosRow)
@@ -6310,6 +6359,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = interruptPosMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(interruptPosRow, interruptPosContent)
                 tools.WireModifiedTick(interruptPosRow)
@@ -6380,6 +6430,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = timingMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(timingRow, timingContent)
                 tools.WireModifiedTick(timingRow)
@@ -6609,6 +6660,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -6694,6 +6746,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = contentMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(contentRow, contentContent)
             tools.WireModifiedTick(contentRow)
@@ -6765,6 +6818,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = sizeMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(sizeRow, sizeContent)
             tools.WireModifiedTick(sizeRow)
@@ -6894,6 +6948,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -6983,6 +7038,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -7080,6 +7136,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = highlightMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(highlightRow, highlightContent)
             tools.WireModifiedTick(highlightRow)
@@ -7160,6 +7217,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = interruptMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(interruptRow, interruptContent)
             tools.WireModifiedTick(interruptRow)
@@ -7238,6 +7296,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = xMarkMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(xMarkRow, xMarkContent)
             tools.WireModifiedTick(xMarkRow)

@@ -3455,6 +3455,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             window  = DF.GUIFrame,
             clipTo  = pageRef,
             build   = filterMount,
+            footerStrip = true,
         })
         pageRef._fdFilterRow = filterRow
 
@@ -3545,6 +3546,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             window  = DF.GUIFrame,
             clipTo  = pageRef,
             build   = consumerMount,
+            footerStrip = true,
         })
         -- ⚠ NO ClaimKeys AND NO FOOTER, for the reason the master row gives: this
         -- page owns no per-mode db keys, so there is nothing for a modified tick to

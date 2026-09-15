@@ -1234,27 +1234,45 @@ do
               "strip: " .. var .. " declares the footer strip")
     end
 
-    -- ---- and NOTHING ELSE ON ANY OTHER PAGE DOES --------------------
-    -- Stated here rather than in the all-rows rule because it is this page's
-    -- claim: the sweep reaches the others once this one has been seen in game.
+    -- ---- ...AND SO DOES EVERY OTHER ROW IN THE ADDON ----------------
+    -- ☠ THIS USED TO READ "no other page has moved yet", AND THAT WAS THE BUG.
+    -- The strip and the inline pane are SEPARATE opt-ins. The sweep that put
+    -- panes on plates across every page passed only the second one, so for one
+    -- commit the addon shipped rows that mounted their settings inline while
+    -- still wearing the old top-right chevron and count. Half-converted read
+    -- WORSE than unconverted, because the pages then disagreed with each other.
+    --
+    -- So the claim here is now the opposite one, and it is total: every popout
+    -- row on every page carries the strip. A row without one is either a new row
+    -- that forgot it or a page a later sweep missed, and both should fail here
+    -- rather than ship a second mixed state.
+    --
+    -- ⚠ GUI/PopoutDemo.lua is deliberately NOT in this walk. It is the kit's
+    -- own fixture for the no-strip tether, whose source outline is a rounded
+    -- RING rather than a strip (test_round_demo.lua's R4 block), and that path
+    -- stays live for any host that never opts in.
     local TOC = options_file_source("DandersFrames_Options.toc")
-    local elsewhere = {}
-    for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
+    local naked = {}
+    for name in TOC:gmatch("GUI\(Pages\[%w_]+%.lua)") do
         local path = "GUI/" .. name:gsub("\\", "/")
         local src = options_file_source(path)
-        local n = 0
-        for _ in src:gmatch("footerStrip = true") do n = n + 1 end
-        if path ~= "GUI/Pages/Options.lua" and n > 0 then
-            elsewhere[#elsewhere + 1] = path .. " (" .. n .. ")"
+        local rows, strips = 0, 0
+        for _ in src:gmatch("CreatePopoutRow") do rows = rows + 1 end
+        for _ in src:gmatch("footerStrip = true") do strips = strips + 1 end
+        if rows ~= strips then
+            naked[#naked + 1] = path .. " (" .. strips .. "/" .. rows .. ")"
         end
     end
-    eq(#elsewhere, 0,
-       "strip: no other page has moved yet -- " .. table.concat(elsewhere, ", "))
-    -- ...and inside THIS file, only the Frame page: Options.lua carries a dozen
-    -- other pages, and eleven is exactly the roster above.
+    eq(#naked, 0,
+       "strip: every popout row on every page carries it -- " .. table.concat(naked, ", "))
+    -- ...and inside THIS file, the Frame page's own slice. This counted the
+    -- WHOLE of Options.lua against eleven while the Frame page was the only one
+    -- swept; that file holds seventeen other pages and they all carry the strip
+    -- now, so a file-wide number stopped describing this page. Same repair, and
+    -- the same reason, as the inline count further down.
     local total = 0
-    for _ in SRC:gmatch("footerStrip = true") do total = total + 1 end
-    eq(total, #rows, "strip: ...and only the Frame page's rows inside this file")
+    for _ in page:gmatch("footerStrip = true") do total = total + 1 end
+    eq(total, #rows, "strip: ...and every row named above declares it, and only those")
 
     -- ---- which rows hoist, and what --------------------------------
     -- ☠ EVERY NAME IS THE PANEL'S OWN L KEY AND EVERY KEY IS ONE THE PANE STILL

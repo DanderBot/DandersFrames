@@ -234,6 +234,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = textMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(textRow, textContent)
             tools.WireModifiedTick(textRow)
@@ -659,6 +660,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window   = DF.GUIFrame,
                     clipTo   = self,
                     build    = settingsMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(settingsRow, settingsContent)
                 tools.WireModifiedTick(settingsRow)
@@ -685,6 +687,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = extraMount,
+                    footerStrip = true,
                 }))
                 -- The box's own gate becomes the ROW's, so the band collapses the slot
                 -- instead of drawing a plate for a timer that is not being drawn.
@@ -723,6 +726,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             -- ☠ THE ICON'S GATE REACHES THE ROW ITSELF, not only the pane. In
             -- classic the whole section visibly dims while the icon is off; two
@@ -749,6 +753,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             positionRow.disableOn = spec.gate
             tools.ClaimKeys(positionRow, positionContent)
@@ -1307,6 +1312,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = selectionMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(selectionRow, selectionContent)
             tools.WireModifiedTick(selectionRow)
@@ -1372,6 +1378,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = hoverMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(hoverRow, hoverContent)
             tools.WireModifiedTick(hoverRow)
@@ -1490,6 +1497,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = aggroMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(aggroRow, aggroContent)
             tools.WireModifiedTick(aggroRow)
@@ -1517,6 +1525,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = threatMount,
+                footerStrip = true,
             }))
             -- The box's own gate becomes the ROW's, so the band collapses the slot
             -- instead of drawing a plate for a palette no highlight will use.
@@ -1805,6 +1814,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -1977,6 +1987,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = iconMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(iconRow, iconContent)
             tools.WireModifiedTick(iconRow)
@@ -2075,6 +2086,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -2220,6 +2232,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = gradientMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(gradientRow, gradientContent)
             tools.WireModifiedTick(gradientRow)
