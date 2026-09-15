@@ -1578,7 +1578,19 @@ function UI:CreatePopoutRow(parent, opts)
             -- hoisted (Frame Fade) was showing "Alpha 0.30 · Combat 1.00" and is
             -- the row the feedback named. Rows without a strip -- every other page
             -- -- keep their summary, byte for byte.
-            if strip then
+            --
+            -- ☠ AND `keepSummary` IS THE ONE EXCEPTION, because the rule above is
+            -- about VALUE READOUTS and not about summaries as such. "Alpha 0.30 ·
+            -- Combat 1.00" is orphaned in the corner because the controls beneath
+            -- already say it better. A summary that describes the row's SUBJECT
+            -- rather than its settings -- the Filter Designer's "12 of 49 tracked ·
+            -- Buff Bar" -- is the opposite case: there is nothing beneath it saying
+            -- that, and on a page that is a LIST of things it is the only way to
+            -- read the list without opening every row on it.
+            --
+            -- Opt-IN rather than opt-out, so every row that prompted the original
+            -- feedback keeps today's behaviour without being touched.
+            if strip and not opts.keepSummary then
                 text = ""
             else
                 text = opts.summary and opts.summary(resolveDB(opts.db)) or ""

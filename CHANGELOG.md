@@ -16,6 +16,8 @@
 - (Frames) Frame Fade now has an on/off switch on its row, so you can turn fading off without touching the alpha values.
 - (Settings) Every settings row now has a bar along its bottom, in the same place on every row, replacing the small arrow and number in the top corner. Smaller groups of settings are also shown on the page itself instead of behind a click; groups that hold a lot of settings still keep theirs in a popout. The bar opens those, and on a group that is already fully shown it offers to pin the settings in a popout so you can keep them open while working on another page. Switching a row off tucks its settings away again.
 
+- (Filter Designer) The page is now a list of your filters instead of one filter's spells. Every filter is a row, and opening a row shows that filter's own spells with its own search box, so you can see what a filter holds and who uses it without switching away from the list. Pin one open and you can compare two filters side by side.
+
 ### Bug Fixes
 
 - (Aura Designer) Fix the Add Indicator panel opening empty.

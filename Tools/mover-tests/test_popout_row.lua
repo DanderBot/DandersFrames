@@ -3022,6 +3022,35 @@ do
         "summary: a row without a strip still paints its summary, byte for byte")
     plain._Write(false)
     eq(plain.summary:GetText(), "Off", "summary: ...and its off word, as it always did")
+
+    -- ☠ ...AND `keepSummary` BUYS THE CORNER BACK, for the one case the rule above
+    -- is wrong about. The rule is about VALUE READOUTS -- "100x50 Spacing 2" is
+    -- orphaned because the controls beneath say it better. A summary describing the
+    -- row's SUBJECT has nothing beneath it saying that, and on a page that is a LIST
+    -- of things (the Filter Designer: one row per filter) the corner is the only way
+    -- to read the list without opening every row on it.
+    --
+    -- Asserted against the SAME consumer and the SAME strip helper as the quiet row
+    -- above, so the only difference between them is the flag.
+    --
+    -- ⚠ `db` is shared with the rows above and the last thing done to it was a
+    -- _Write(false), so the toggle is restored first. Without this the row builds
+    -- switched OFF and paints its off word, which looks exactly like the flag
+    -- being ignored.
+    db.on = true
+    local kept = stripRow({ label = "Loud strip", db = db, count = 5, window = win,
+                            footerStrip = true, summary = summary,
+                            keepSummary = true, toggle = { key = "on" } })
+    check(type(kept.footerStrip) == "table" and kept.footerStrip.SetSize ~= nil,
+        "summary: the keepSummary row really does have a strip")
+    eq(kept.summary:GetText(), "100x50 Spacing 2",
+        "summary: ...and a strip row that asks for its summary keeps it")
+    kept._Write(false)
+    eq(kept.summary:GetText(), "Off",
+        "summary: ...with the off word still winning over it")
+    kept._Write(true)
+    eq(kept.summary:GetText(), "100x50 Spacing 2",
+        "summary: ...and back again, so the flag is read on every paint")
 end
 
 -- ---- 24.12 the hoisted control's tooltip, and where its rect lands ----

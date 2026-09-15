@@ -4468,25 +4468,45 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             row = GUI:CreatePopoutRow(parent, {
                 label   = "",
                 db      = tools.RowDB,
-                -- ⚠ THE SUMMARY IS DECLARED AND, ON A STRIP ROW, NEVER PAINTED --
-                -- the kit blanks a strip row's corner while it is on (PopoutRow's
-                -- paintSummary). It is kept because the two facts it names are the
-                -- ones the row would report if that ever changes, and because every
-                -- one of them is also in the panel's own header, where the user's
-                -- own requirement put them.
+                -- ☠ AND IT IS PAINTED, WHICH TOOK A KIT OPT-IN. A strip row's corner
+                -- is blanked while the row is on, because on every other page that
+                -- corner held a VALUE READOUT the controls beneath already said
+                -- better. This page is a LIST, and the corner is the only thing that
+                -- makes the list readable without opening all seventeen rows -- so
+                -- `keepSummary` below asks for the exception rather than the rule.
+                --
+                -- Count first, then who uses it: the count is the one fact that
+                -- differs between two rows with the same consumers, and it is what
+                -- the eye is scanning a list of filters FOR.
                 summary = function()
                     if not (slot.kind and slot.key) then return "" end
                     local places = {}
                     for _, consumer in ipairs(FilterConsumers(slot.kind, slot.key)) do
                         places[#places + 1] = UsageLabel(consumer)
                     end
-                    if #places == 0 then return L["Not in use"] end
-                    return table.concat(places, ", ")
+                    local used = (#places == 0) and L["Not in use"]
+                                 or table.concat(places, ", ")
+                    -- The two kinds count differently and always have: a preset
+                    -- tracks a SUBSET of a shipped catalogue, a custom filter holds
+                    -- exactly what was put in it. Both verbs and both strings are the
+                    -- ones the panel header uses, so the corner and the header can
+                    -- never disagree about the same filter.
+                    local counted
+                    if slot.kind == "preset" then
+                        local enabled, total = R:PresetCounts(slot.key)
+                        counted = format(L["%d of %d tracked"], enabled or 0, total or 0)
+                    else
+                        local f = R:GetCustomFilter(slot.key)
+                        counted = format(L["%d spells"], f and CustomSpellCount(f) or 0)
+                    end
+                    return counted .. "  
+8r  " .. used
                 end,
                 window  = DF.GUIFrame,
                 clipTo  = pageRef,
                 build   = mount,
                 footerStrip = true,
+                keepSummary = true,
             })
             -- ⚠ NO ClaimKeys, NO WireModifiedTick AND NO WireFooter. This page owns
             -- no per-mode db keys at all -- CreateCopyButton is called with an empty
