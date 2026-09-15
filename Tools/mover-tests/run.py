@@ -219,6 +219,38 @@ if _viol:
     sys.exit(1)
 
 # ============================================================
+# STATIC BAN: a Colors entry is a KEYED table, so unpack() on one yields nothing.
+# GUI.Colors.text and friends are { r = , g = , b = }. `unpack()` over that
+# returns NO values, so `SetTextColor(unpack(c))` is `SetTextColor()` -- which
+# throws. Inside a page builder that is not one bad label: the builder dies part
+# way, so whatever it does at its FOOT never runs. On the Filter Designer that
+# foot is the take-down of the old island, and the page shipped (2026-09-15)
+# drawing the island, the new bands and the previous page's widgets over one
+# another. Nothing caught it -- the suite's page tests read source TEXT and never
+# build a real frame, so a runtime throw is invisible to them.
+#
+# Cheap to spot and worth a red suite: use c.r, c.g, c.b.
+# ============================================================
+_unpackban = _re.compile(r"unpack\s*\([^)]*Colors\s*\.")
+_colviol = []
+for _dir in ("DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"):
+    _root = HERE.parents[1] / _dir
+    if not _root.is_dir():
+        continue
+    for _f in sorted(_root.rglob("*.lua")):
+        if "Libs" in _f.parts:
+            continue
+        for _n, _line in enumerate(_f.read_text(encoding="utf-8").splitlines(), 1):
+            _c = _line.split("--", 1)[0]
+            if _unpackban.search(_c):
+                _colviol.append("%s:%d: %s" % (_f.relative_to(HERE.parents[1]), _n, _line.strip()))
+if _colviol:
+    print("COLOR UNPACK BAN: Colors entries are keyed tables -- use c.r, c.g, c.b:")
+    for _v in _colviol:
+        print("  " + _v)
+    raise SystemExit(1)
+
+# ============================================================
 # STATIC GATE: every shipped Lua file must PARSE.
 # The worst failure in this addon is not a wrong value, it is a file that does
 # not load: Lua reports a parse error against the FILE, so one bad line takes

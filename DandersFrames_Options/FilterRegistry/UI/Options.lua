@@ -4701,10 +4701,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                         -- "who is using this library", the answer "nobody" should
                         -- not read as loud as a real count.
                         local dim = (detail == L["Not in use"])
-                        b.dfName:SetTextColor(unpack(dim and GUI.Colors.textDim
-                                                         or GUI.Colors.text))
-                        b.dfDetail:SetTextColor(unpack(dim and GUI.Colors.textDim
-                                                           or GUI.Colors.accent))
+                        -- ☠ .r/.g/.b, NEVER unpack(). GUI.Colors entries are KEYED
+                        -- tables, so unpack() on one returns NOTHING and SetTextColor()
+                        -- is called with no arguments -- which throws, inside a build,
+                        -- which is how the island and the bands ended up drawing over
+                        -- each other with the previous page still behind them. The
+                        -- builder died before the take-down at its foot ever ran.
+                        local c = dim and GUI.Colors.textDim or GUI.Colors.text
+                        b.dfName:SetTextColor(c.r, c.g, c.b)
+                        b.dfDetail:SetTextColor(c.r, c.g, c.b)
                     end
                 end
             end
