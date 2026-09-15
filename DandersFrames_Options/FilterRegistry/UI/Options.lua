@@ -1091,6 +1091,18 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- pass below can reach them: the band itself is built ~2,000 lines down,
     -- inside the `rowsMode` arm.
     local bandButtons = {}
+    -- ☠ THE BAND ARM'S "USED BY", AND IT IS ONE TABLE RATHER THAN FOUR LOCALS --
+    -- see PANE's note on this builder's local budget. Holds the band frame, its
+    -- height, its three rows and its refresh verb.
+    --
+    -- ⚠ IT CAME BACK. An earlier pass removed it, reasoning that "used by" is
+    -- per-FILTER and so has no single answer on a page that lists many filters.
+    -- That is true of the per-filter line -- which is why that one lives in each
+    -- panel's header -- and it is NOT true of these three: ChipDetail answers
+    -- "how many filters does the Buff Bar use", which is a fact about the
+    -- CONSUMER and does not vary by selection at all. Two different questions
+    -- that happened to share a name.
+    local USEDBY = {}
     -- Assigned in that same arm. Forward-declared so RefreshAll -- which is
     -- written before it -- can call it without capturing a nil upvalue.
     local RefreshFilterRows
@@ -3377,6 +3389,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- after a create, a rename or a delete, and repaints every panel the user
         -- currently has open. Guarded: it is only assigned in that arm.
         if RefreshFilterRows then RefreshFilterRows() end
+        -- ...and the three consumer rows, whose counts come from the buff
+        -- selection, the Defensive Icon's selection and the whole Aura Designer
+        -- config -- every one of them edited on another page, which is why this
+        -- rides the page's own refresh rather than a callback from any of them.
+        if USEDBY.Refresh then USEDBY.Refresh() end
         UpdateActionStates()
         -- Keep the picker coherent: hide it when the selection moved off its
         -- target custom filter (or the filter was deleted); otherwise
@@ -3504,7 +3521,22 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         PANE.yDB      = PANE.yAdd + PANE.ebH + PANE.gap                -- (6) add from database
         PANE.yEcho    = PANE.yDB + PANE.btnH + 2
         PANE.headH    = PANE.yEcho + PANE.echoH
-        PANE.listH    = 170
+        -- ☠ THE LIST TAKES WHAT THE SCREEN WILL GIVE IT, rather than a literal.
+        -- 170 showed six spells at a time on a page whose whole job is picking
+        -- spells ("can we have the popout a bit taller so the scroll box shows
+        -- more at once"), and it was a literal because the header above it is one.
+        --
+        -- ⚠ 0.6 OF THE SCREEN IS A CLIFF, NOT A GUIDELINE. Past it the kit wraps
+        -- the whole pane in its OWN scroll frame (PopoutRow's capHeight) and the
+        -- user gets a list scrolling inside a list -- the exact fault that pinned
+        -- the old master panel at 320. So the budget is measured, the chrome is
+        -- subtracted, and a margin is left under the cliff rather than touching it.
+        --
+        -- The floor keeps the old behaviour on a short screen; the ceiling stops a
+        -- very tall monitor handing back a panel taller than anything in it.
+        local capH = ((UIParent and UIParent.GetHeight and UIParent:GetHeight()) or 768) * 0.6
+        PANE.listH    = math.max(170, math.min(560,
+                            math.floor(capH - 24 - PANE.headH - PANE.gap * 2 - PANE.actH)))
         -- Three 20px rows, two 4px gutters, and the rule that marks them as chrome
         -- rather than more list. The island's own strip, one column narrower.
         PANE.actH     = 80
@@ -4609,6 +4641,76 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- chip row, and the chip row is taken down at the foot of this arm -- without
         -- a home here the band layout would simply lose the popup.
         -- ============================================================
+        -- ============================================================
+        -- USED BY -- THREE CONSUMERS, ON THE PAGE
+        -- ------------------------------------------------------------
+        -- ☠ ROWS, NOT CHIPS, AND THAT IS THE WHOLE REASON IT CAN BE ON THE PAGE.
+        -- The island puts these three side by side, and at 640 each chip gets
+        -- ~123px against a label like "Defensive Icon  2 filters" that needs half
+        -- as much again -- so they ellipsise at every width this window can be.
+        -- That truncation is what sent them into a popout in the first place; it
+        -- is a fact about three things sharing one line, not about the page. One
+        -- full-width row each, at band width, has room for the longest of them
+        -- and costs the same vertical space the wrapped chips did.
+        do
+            local ROW_H, ROW_GAP = 22, 4
+            USEDBY.h = PANE.actionLabelH + CHIP_POOL_N * ROW_H
+                       + (CHIP_POOL_N - 1) * ROW_GAP
+            USEDBY.band = CreateFrame("Frame", nil, parent)
+            USEDBY.band:SetSize(tools.BandWidth(), USEDBY.h)
+
+            local caption = USEDBY.band:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+            caption:SetPoint("TOPLEFT", 0, 0)
+            caption:SetJustifyH("LEFT")
+            caption:SetText(L["Used By"])
+
+            USEDBY.rows = {}
+            for i, def in ipairs(CHIP_DEFS_BUFF) do
+                local b = CreateFrame("Button", nil, USEDBY.band, "BackdropTemplate")
+                GUI:StyleButton(b, { height = ROW_H, text = " " })
+                b:SetPoint("TOPLEFT", 0, -(PANE.actionLabelH + (i - 1) * (ROW_H + ROW_GAP)))
+                b:SetPoint("TOPRIGHT", 0, -(PANE.actionLabelH + (i - 1) * (ROW_H + ROW_GAP)))
+                b:SetHeight(ROW_H)
+                -- ⚠ The styler's own label is centred, which is the one thing a row
+                -- must not be: the name reads from the left and the count from the
+                -- right, or three rows of different lengths look like three
+                -- different columns. Blanked above and replaced with two.
+                if b.text then b.text:Hide() end
+                b.dfName = b:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+                b.dfName:SetPoint("LEFT", 8, 0)
+                b.dfName:SetJustifyH("LEFT")
+                b.dfName:SetText(def.label)
+                b.dfDetail = b:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+                b.dfDetail:SetPoint("RIGHT", -8, 0)
+                b.dfDetail:SetJustifyH("RIGHT")
+                b.tooltip = { title = def.label, lines = { def.tip } }
+                -- The chips' own destination, read from the same def table, so the
+                -- two layouts cannot send the same button to two different pages.
+                b:SetScript("OnClick", function() fdBannerLinkClick(def.pageId) end)
+                bandButtons[#bandButtons + 1] = b
+                USEDBY.rows[i] = b
+            end
+
+            function USEDBY.Refresh()
+                for i, def in ipairs(CHIP_DEFS_BUFF) do
+                    local b = USEDBY.rows[i]
+                    if b then
+                        local detail = ChipDetail(def.key)
+                        b.dfDetail:SetText(detail)
+                        -- Dimmed when it draws on nothing: on a page whose point is
+                        -- "who is using this library", the answer "nobody" should
+                        -- not read as loud as a real count.
+                        local dim = (detail == L["Not in use"])
+                        b.dfName:SetTextColor(unpack(dim and GUI.Colors.textDim
+                                                         or GUI.Colors.text))
+                        b.dfDetail:SetTextColor(unpack(dim and GUI.Colors.textDim
+                                                           or GUI.Colors.accent))
+                    end
+                end
+            end
+            USEDBY.Refresh()
+        end
+
         local ACTION_BAND_H = PANE.actionLabelH + PANE.actionBtnH
         local actionBand = CreateFrame("Frame", nil, parent)
         actionBand:SetSize(tools.BandWidth(), ACTION_BAND_H)
@@ -4818,6 +4920,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         local function AdoptBands(addFn)
             addFn(banner, banner.layoutHeight, "both")
             addFn(bannerGap, BAND_GAP, "both")
+            addFn(USEDBY.band, USEDBY.h + BAND_GAP, "both")
             addFn(actionBand, ACTION_BAND_H + BAND_GAP, "both")
             -- nil: a settings group carries its OWN height (calculatedHeight), which
             -- is the whole reason this list can grow and shrink without a rebuild --

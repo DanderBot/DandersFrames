@@ -1117,10 +1117,28 @@ function UI:CreatePopoutRow(parent, opts)
     --
     -- LEFT, so it centres on the plate's midline -- which is what every anchor
     -- in this build does, and the whole of "vertically centred" for this row.
+    -- ☠ THE COMPACT ROW'S OWN TWO NUMBERS. A plain row indents its label past a
+    -- CHECKBOX COLUMN whether or not it has a checkbox -- LABEL_X is padX + check
+    -- + labelGap, unconditionally -- because on a settings page the rows must
+    -- align with each other and most of them do have one. A LIST of rows that
+    -- none of them have a toggle is the opposite case: every row pays 26px of
+    -- indent for a control that is never there, and the content reads as pushed
+    -- into the middle of the row.
+    --
+    -- So a compact row indents for the column only when it actually has one, and
+    -- uses the tighter side padding at both ends. A row that did not ask for
+    -- compact is untouched by both, which is what keeps every census pinning
+    -- LABEL_X true.
+    local PAD_X = row._compact and M.padCompact or M.padX
+    local ROW_LABEL_X = row._compact
+        and (PAD_X + (row._hasToggle and (M.check + M.labelGap) or 0))
+        or LABEL_X
+    row._padX, row._labelX = PAD_X, ROW_LABEL_X
+
     local cb
     if row._hasToggle then
         cb = CreateFrame("CheckButton", nil, plate, "BackdropTemplate")
-        cb:SetPoint("LEFT", plate, "LEFT", M.padX, 0)
+        cb:SetPoint("LEFT", plate, "LEFT", PAD_X, 0)
         host:StyleCheckButton(cb, { size = M.check, checkSize = M.checkTick,
                                     accent = row._accent, themeRoot = parent })
         row.checkButton = cb
@@ -1136,7 +1154,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- a parent whatever any of them happens to say.
     local chevron = plate:CreateTexture(nil, "OVERLAY")
     chevron:SetSize(M.chevron, M.chevron)
-    chevron:SetPoint("RIGHT", plate, "RIGHT", -M.padX, 0)
+    chevron:SetPoint("RIGHT", plate, "RIGHT", -PAD_X, 0)
     chevron:SetTexture(ICON_PATH .. "chevron_right")
     chevron:SetVertexColor(1, 1, 1, 0.5)
     row.chevron = chevron
@@ -1210,7 +1228,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- both rows, they sit in the same band, and anchoring the label to `cb or
     -- plate` started their names 26px apart -- which is the ragged list the
     -- right-hand columns were made fixed to avoid. One constant, both kinds.
-    label:SetPoint("LEFT", plate, "LEFT", M.padX + M.check + M.labelGap, 0)
+    label:SetPoint("LEFT", plate, "LEFT", ROW_LABEL_X, 0)
     label:SetJustifyH("LEFT")
     if label.SetWordWrap then label:SetWordWrap(false) end
     row.label = label
@@ -1651,7 +1669,7 @@ function UI:CreatePopoutRow(parent, opts)
         local plateW = plate:GetWidth() or 0
         if not plateW or plateW <= 0 then plateW = row:GetWidth() or 0 end
         if not plateW or plateW <= 0 then plateW = UI.PopoutContentWidth or 260 end
-        local lineW = plateW - LABEL_X - M.padX
+        local lineW = plateW - (row._labelX or LABEL_X) - (row._padX or M.padX)
 
         -- Two cells, one, or none. NEVER three: three minimum controls and two
         -- gaps do not fit the plate at any window size the shell allows.
@@ -1873,20 +1891,20 @@ function UI:CreatePopoutRow(parent, opts)
             row._headDY = headDY
             if cb then
                 cb:ClearAllPoints()
-                cb:SetPoint("LEFT", plate, "LEFT", M.padX, headDY)
+                cb:SetPoint("LEFT", plate, "LEFT", row._padX or M.padX, headDY)
             end
             label:ClearAllPoints()
-            label:SetPoint("LEFT", plate, "LEFT", LABEL_X, headDY)
+            label:SetPoint("LEFT", plate, "LEFT", row._labelX or LABEL_X, headDY)
             summary:ClearAllPoints()
             summary:SetPoint("LEFT", label, "RIGHT", M.colGap, 0)
             if strip then
                 -- The cluster is on the strip, so the summary runs to the
                 -- plate's own padding instead of stopping at the gear.
-                summary:SetPoint("RIGHT", plate, "RIGHT", -M.padX, headDY)
+                summary:SetPoint("RIGHT", plate, "RIGHT", -(row._padX or M.padX), headDY)
             else
                 summary:SetPoint("RIGHT", gear, "LEFT", -M.colGap, 0)
                 chevron:ClearAllPoints()
-                chevron:SetPoint("RIGHT", plate, "RIGHT", -M.padX, headDY)
+                chevron:SetPoint("RIGHT", plate, "RIGHT", -(row._padX or M.padX), headDY)
             end
         end
 

@@ -147,8 +147,15 @@ do
 
     -- Full width, every one. The all-rows rule: the page has one left edge and
     -- one right edge.
-    check(select(2, adopt:gsub('"both"', "")) == 5,
+    check(select(2, adopt:gsub('"both"', "")) == 6,
           "bands: every band spans both columns")
+    -- ☠ SIX, BECAUSE "USED BY" IS BACK ON THE PAGE. It was taken off in the pass
+    -- that made the page a list of filters, on the reasoning that used-by is
+    -- per-FILTER. That holds for the line in each panel's header and NOT for these
+    -- three: they answer "how many filters does the Buff Bar use", which is a fact
+    -- about the consumer and does not move with the selection.
+    check(adopt:find("addFn(USEDBY.band", 1, true) ~= nil,
+          "bands: ...and Used By is one of them, above the filters it describes")
 
     -- A settings group carries its OWN height (calculatedHeight), re-read by the
     -- layout pass on every RefreshStates -- which is the whole reason the filter
@@ -531,10 +538,17 @@ do
     local echoH  = num(SRC, "PANE%.gap, PANE%.titleH, PANE%.ebH, PANE%.btnH, PANE%.echoH = %d+, %d+, %d+, %d+, (%d+)")
     local eyebrowH = num(SRC, "local EYEBROW_H = (%d+)")
     local statusH  = num(SRC, "local STATUS_ROW_H = (%d+)")
-    local listH    = num(SRC, "PANE%.listH    = (%d+)")
+    -- ⚠ NOT A LITERAL ANY MORE. The list takes what the screen will give it, so
+    -- what is pinned here is the BUDGET it is allowed to spend, recomputed below
+    -- on the shortest screen in use. The floor is what a short screen falls back
+    -- to and is still read from the file.
+    local listFloor = num(SRC, "PANE%.listH    = math%.max%((%d+),")
+    local listCeil  = num(SRC, "PANE%.listH    = math%.max%(%d+, math%.min%((%d+),")
+    local margin    = num(SRC, "math%.floor%(capH %- (%d+) %- PANE%.headH")
+    local listH     = listFloor
     local actH     = num(SRC, "PANE%.actH     = (%d+)")
     check(capFrac and gap and titleH and ebH and btnH and echoH and eyebrowH
-          and statusH and listH and actH,
+          and statusH and listH and listCeil and margin and actH,
           "paneh: every term of the pane's height can be read from the file that owns it")
     capFrac = capFrac or 0
     -- The same sum the page writes, recomputed here from its own parts: the six
@@ -551,10 +565,35 @@ do
     -- wraps it in a SECOND scroll frame around the one the spell list already has.
     check(paneH < capFrac * 768,
           "paneh: a filter's panel fits the pane's ceiling on the shortest screen in use")
+    -- ☠ AND SO DOES THE GROWN ONE, WHICH IS THE POINT OF LETTING IT GROW. The page
+    -- spends (cap - margin - chrome) on the list; recomputed here at three real
+    -- screen heights, the resulting pane must still clear the cliff at each. A
+    -- margin that ever went to zero would put the pane exactly ON the ceiling,
+    -- which is the same failure as being over it.
+    for _, screenH in ipairs({ 768, 1080, 1440 }) do
+        local capH = screenH * capFrac
+        local grown = math.max(listH, math.min(listCeil,
+                          math.floor(capH - margin - headH - gap * 2 - actH)))
+        check(headH + gap + grown + gap + actH < capH,
+              "paneh: ...and the grown list still clears the ceiling at " .. screenH .. "px")
+    end
+    -- ...and it really does grow: six spells at a time was the complaint.
+    do
+        local capH = 1080 * capFrac
+        local grown = math.max(listH, math.min(listCeil,
+                          math.floor(capH - margin - headH - gap * 2 - actH)))
+        check(grown >= listH * 1.8,
+              "paneh: ...and a 1080p screen buys a materially longer list")
+    end
     -- ...and it is DECLARED, not measured: the cap decision is made at build time,
     -- so a pane that grows afterwards is past the ceiling with nothing to catch it.
     check(SRC:find("PANE.paneH    = PANE.headH + PANE.gap + PANE.listH + PANE.gap + PANE.actH", 1, true) ~= nil,
           "paneh: ...and the page writes it as the same sum, not as a literal")
+    -- ⚠ The budget is measured off the SCREEN, not off the window: the cap the kit
+    -- applies is a fraction of UIParent, so sizing against anything else is sizing
+    -- against the wrong thing.
+    check(SRC:find("UIParent:GetHeight()", 1, true) ~= nil,
+          "paneh: ...and the budget is measured off the screen the cap is a fraction of")
 end
 
 -- ============================================================

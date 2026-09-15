@@ -677,6 +677,10 @@ UI.PopoutRow = {
     -- as a list that has come apart. Four keeps them a list.
     plateCompact = 26,
     gapCompact   = 4,
+    -- ⚠ AND A TIGHTER SIDE PADDING WITH THEM. 10 is right for a plate whose
+    -- widgets need air around them; on a single line of text it reads as the
+    -- content having been pushed into the middle of the row.
+    padCompact   = 6,
 
     -- ---- the embedded control's own metrics --------------------------
     -- Shared with ControlRow.lua, which embeds the same two factories into the

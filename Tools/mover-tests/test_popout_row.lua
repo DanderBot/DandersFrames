@@ -130,7 +130,7 @@ UI.PopoutRow = UI.PopoutRow or {
     footer = 18, footerFill = 0.85, footerHover = 1.0,
     footerBorder = 0.6, footerOn = 0.22, footerOnHover = 0.30,
     plateStrip = 30, stripArc = 8, modTickGap = 2,
-    plateCompact = 26, gapCompact = 4,
+    plateCompact = 26, gapCompact = 4, padCompact = 6,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap
@@ -3028,10 +3028,15 @@ do
     -- it. This is how the Filter Designer's list reads without opening every row
     -- on it, and it goes through the SAME branch as the plain row above rather
     -- than through a flag of its own.
+    -- ⚠ NO `toggle`, DELIBERATELY, because the row this stands in for has none:
+    -- a filter is not a thing you switch off from the list. That also makes this
+    -- the row that proves a toggle-less row still paints its summary at all --
+    -- paintSummary returns early while `_toggledOn` is nil, and every filter row
+    -- on the page depends on that not being the nil case.
     db.on = true
     local small = host:CreatePopoutRow(FakeUIFrame(), {
         label = "Slim", db = db, count = 5, window = win, compact = true,
-        build = counting("hoistSlim", 50), summary = summary, toggle = { key = "on" } })
+        build = counting("hoistSlim", 50), summary = summary })
     small:SetWidth(260); small:SetFakeCenter(CX - 100, CY); small:Show()
     check(not (type(small.footerStrip) == "table" and small.footerStrip.SetSize),
         "summary: a compact row has no strip frame at all")
@@ -3082,6 +3087,26 @@ do
         "compact: compact wins over footerStrip -- no strip is built")
     eq(both.plate:GetHeight(), M.plateCompact,
         "compact: ...and the plate is the compact one, not the strip row's")
+
+    -- ☠ AND THE CONTENT SITS AT THE EDGES, not in the middle of the row. A plain
+    -- row indents its label past a CHECKBOX COLUMN whether or not it has a
+    -- checkbox, because a settings page needs its rows to align with each other.
+    -- A list where NO row has a toggle pays 26px per row for a control that is
+    -- never there -- "everything is cramped into the middle".
+    eq(small.label._points[1][4], M.padCompact,
+        "compact: a toggle-less compact row starts its label at the padding")
+    eq(small.summary._points[2][4], -M.padCompact,
+        "compact: ...and its right cluster ends there too")
+
+    -- ⚠ ...BUT THE COLUMN COMES BACK WHEN THERE IS SOMETHING IN IT. `both` has a
+    -- toggle, so its label must clear the checkbox -- otherwise the tick and the
+    -- name would overlap, which is a worse fault than the indent this removes.
+    eq(both.label._points[1][4], M.padCompact + M.check + M.labelGap,
+        "compact: ...and a compact row WITH a toggle still clears its checkbox")
+
+    -- ...and an unconverted row is untouched at the full LABEL_X.
+    eq(plain.label._points[1][4], M.padX + M.check + M.labelGap,
+        "compact: a row that did not ask keeps the checkbox column either way")
 end
 
 -- ---- 24.12 the hoisted control's tooltip, and where its rect lands ----
