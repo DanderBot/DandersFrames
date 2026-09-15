@@ -551,3 +551,87 @@ do
     check(PAGE:find('{pageId = "auras_buffs", label = L["Buff Bar"]}', 1, true) ~= nil,
           "page: ...and the See Also block is unchanged")
 end
+
+-- ============================================================
+-- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ TWO THIRDS OF THE ADDON'S ROWS HIDE SIX SETTINGS OR FEWER, and a row
+-- holding four was charging the same click as a row holding thirty-one. So a row
+-- whose whole group is small mounts THAT GROUP under its title line, and its
+-- strip stops promising what is already on screen and offers to pin a second
+-- copy instead.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
+-- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
+-- refuses one whose pane turns out to be big, measured off the pane itself and
+-- counting prose. Only the refusal can be exercised against a real group, which
+-- is test_popout_page_tools.lua's job -- what is stated here is which of THIS
+-- page's rows asked, and that none of the others did.
+--
+-- Three of the five. Buffs to Check keeps its strip: six ticks under a caption is seven children, which is past the measured threshold.
+-- ============================================================
+print("-- Missing Buff Icon page: the rows that mount their pane on the plate")
+do
+    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on the page, and
+    -- whether its call ends with the opt-in. Read as "this declaration up to the
+    -- next one", the reader shape the Frame page's census uses and for the same
+    -- reason: a balanced-brace match would be defeated by the builder closure
+    -- sitting inside the call.
+    local calls, pos = {}, 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+
+    -- The mounts that asked, each with the pane count that earned it -- the
+    -- number the comment beside the call states, so a comment that drifted from
+    -- what the row actually holds has one place left to be caught.
+    local INLINE = {
+        { "settingsMount", 2 },
+        { "appearanceMount", 3 },
+        { "positionMount", 3 },
+    }
+    -- ...and the rows that keep the strip they have, named rather than inferred:
+    -- a row that quietly joined the first list fails here as well as there.
+    local BEHIND = { "buffsMount", "borderMount" }
+
+    for _, spec in ipairs(INLINE) do
+        check(inlineMounts[spec[1]] == true,
+              "inline: " .. spec[1] .. " mounts its group on the plate (" .. spec[2] .. " settings)")
+        -- The mount reaches a ROW, and exactly one. An opt-in wired to nothing
+        -- is a pane built eagerly and then never shown.
+        local wired = 0
+        for _ in PAGE:gmatch("build%s*=%s*" .. spec[1] .. "[,%s]") do wired = wired + 1 end
+        eq(wired, 1, "inline: ..." .. spec[1] .. " is the build of exactly one row")
+    end
+    for _, name in ipairs(BEHIND) do
+        check(inlineMounts[name] ~= true,
+              "inline: " .. name .. " keeps its pane behind the strip")
+    end
+    eq(inlineCount, #INLINE, "inline: ...and no row on this page opted in unannounced")
+    eq(#calls, #INLINE + #BEHIND, "inline: every popout mount on the page is accounted for")
+
+    -- ⚠ AND NO INLINE ROW HOISTS A TWIN OF WHAT IS NOW ON ITS PLATE. Every
+    -- hoist on this page is the four-argument TICK form -- the row's own
+    -- on/off, which the builder is told to skip (`hoistToggle`) precisely
+    -- because the row owns it. The LIST form, which declares pane settings a
+    -- second time as cells, is what would be two widgets on one key over a
+    -- mounted group; there is none here, and a row going inline must not grow
+    -- one.
+    local hoists = 0
+    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%(") do hoists = hoists + 1 end
+    local ticks = 0
+    for _ in PAGE:gmatch("tools%.RegisterHoistedToggle%([%w_]+, L%[") do ticks = ticks + 1 end
+    eq(ticks, hoists, "inline: every hoist on the page is the row's own tick, not a pane setting declared twice")
+end

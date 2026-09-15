@@ -1526,6 +1526,17 @@ do
     for _ in SRC:gmatch("inline = true") do total = total + 1 end
     eq(total, 4, "inline: ...and only the Frame page's rows inside this file")
 
+    -- ☠ AND A SECOND PAGE HAS MOVED SINCE, WHICH IS WHY THIS IS A TABLE RATHER
+    -- THAN ONE NAME. The Frame page was judged first and the six aura pages went
+    -- next, all of them inside GUI/Pages/Indicators.lua -- so the claim is no
+    -- longer "one page" but "these pages, and the count each of them asked for".
+    -- Every other page still holds none, which is the part that has to keep
+    -- failing loudly: an opt-in that arrives without the argument being made for
+    -- it is exactly what this census exists to catch.
+    local MOVED = {
+        ["GUI/Pages/Options.lua"]    = 4,
+        ["GUI/Pages/Indicators.lua"] = 26,
+    }
     local TOC = options_file_source("DandersFrames_Options.toc")
     local elsewhere = {}
     for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
@@ -1533,12 +1544,14 @@ do
         local src = options_file_source(path)
         local n = 0
         for _ in src:gmatch("inline = true") do n = n + 1 end
-        if path ~= "GUI/Pages/Options.lua" and n > 0 then
+        if MOVED[path] then
+            eq(n, MOVED[path], "inline: " .. path .. " opts in the rows it was judged on")
+        elseif n > 0 then
             elsewhere[#elsewhere + 1] = path .. " (" .. n .. ")"
         end
     end
     eq(#elsewhere, 0,
-       "inline: no other page has moved yet -- " .. table.concat(elsewhere, ", "))
+       "inline: no page outside that list has moved -- " .. table.concat(elsewhere, ", "))
 
     -- ---- the threshold is the helper's, and it is stated -------------
     local controls = options_file_source("GUI/Controls.lua")
