@@ -266,6 +266,21 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- ☠ THREE SETTINGS, SO THE GROUP GOES ON THE PLATE. A row holding
+            -- three was charging the same click as a row holding thirty-one, and
+            -- the click bought nothing: `inline` mounts the pane's own group under
+            -- the title line instead, and the strip then offers to PIN a second
+            -- instance beside another page rather than promising settings that are
+            -- already on screen. See CreatePopoutPageTools' INLINE_MAX for what
+            -- would refuse it -- that number is measured off the PANE, where the
+            -- two blurbs are children like any other even though the badge above
+            -- does not count them as settings.
+            --
+            -- ⚠ AND THE TICK BELOW STAYS HOISTED. It is not one of the three: it
+            -- is the ROW's own on/off, which is why the builder skips its copy and
+            -- why the count never included it. It is also what folds the plate away
+            -- when sorting is off -- the one state where three greyed controls
+            -- sitting in the band would be the worst use of the space.
             local sortMount, sortContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildSortOptionsGroup({
                     group = group, parent = holder,
@@ -273,7 +288,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     reflowValues = function() tools.ReflowMounted(true) end,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local sortRow = sortBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Unit Frame Sorting"],
                 db       = tools.RowDB,
@@ -686,9 +701,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Two: the two ticks. The blurb under each is prose, not a setting.
             local COLOR_PICKER_COUNT = 2
 
+            -- ☠ TWO TICKS, SO THE GROUP GOES ON THE PLATE. A click that opens a
+            -- panel holding two checkboxes is a click that buys nothing, which is
+            -- the whole argument for the hybrid page; the strip stops promising
+            -- what is already on screen and offers to pin a second copy instead.
+            -- The blurb under each tick rides along -- four children to the measure
+            -- in CreatePopoutPageTools, two settings to the badge, and INLINE_MAX
+            -- reads the first of those.
             local pickerMount, pickerContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildColorPickerGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local pickerRow = colorPickerBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Color Picker"],
                 -- ⚠ THE GLOBAL TABLE, NOT tools.RowDB. Every other row on the
@@ -1088,13 +1110,18 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- No summary, for the reason the row above has none.
             local ROLE_COLORS_COUNT = 4
 
+            -- Three swatches and a Reset, on the plate: a palette is the one kind
+            -- of group where the SETTING is what it looks like, so a colour behind
+            -- a click is a colour nobody checks. Five children to the measure with
+            -- the blurb above them, which is what INLINE_MAX in
+            -- CreatePopoutPageTools counts.
             local roleMount, roleContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildRoleColorsGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local roleRow = paletteBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Role Colors"],
                 db      = function() return DF.db end,
@@ -1149,6 +1176,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- No summary, for the reason the two rows above have none.
             local DISPEL_COLORS_COUNT = 6
 
+            -- ☠ AND THIS ONE STAYS BEHIND ITS STRIP, which looks wrong beside the
+            -- palette above it and is not. The badge says six, one clear of
+            -- INLINE_MAX -- but the badge counts SETTINGS and the threshold is
+            -- measured off what a LAYOUT WOULD PLACE, which is the blurb and the
+            -- Reset All button as well: seven. Opting it in would not break
+            -- anything, it would simply be refused, leaving a comment here
+            -- promising a plate the row never gets. Five dispel types is what makes
+            -- the difference -- the Role palette's three fit inside the same shape.
             local dispelMount, dispelContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDispelColorsGroup({
                     group = group, parent = holder,
@@ -2348,13 +2383,27 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Four: the colour source, the texture, the swatch and the alpha.
             local HEALTH_BACKGROUND_COUNT = 4
 
+            -- ☠ ALL THREE OF THESE ROWS MOUNT THEIR GROUP ON THE PLATE, at 3, 3
+            -- and 4 with no prose between them to pad the measure. They are the
+            -- three smallest panes on the page and the three opened most, because
+            -- between them they are what the bar is drawn IN and what it is drawn
+            -- ON -- and each was charging the same click as a row holding thirty.
+            -- The strip on each now offers to pin a second instance instead of
+            -- promising settings that are already on screen; INLINE_MAX in
+            -- CreatePopoutPageTools is the size that would refuse one.
+            --
+            -- ⚠ TWO OF COLOR'S THREE ARE ALWAYS HIDDEN AT ONCE -- the swatch and
+            -- the alpha belong to different modes -- so this plate usually draws
+            -- two lines. That is the group's own hideOn doing its job rather than a
+            -- count that was wrong, and the measure reads it the same way, which is
+            -- what stops a gated group being refused for controls nobody can see.
             local colorMount, colorContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHealthColorGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local colorRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Color"],
                 db      = tools.RowDB,
@@ -2368,13 +2417,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.WireModifiedTick(colorRow)
             tools.WireFooter(colorRow, ApplyHealthColor)
 
+            -- Three, and on the plate for the reason the Color row above gives.
             local textureMount, textureContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHealthTextureGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local textureRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Texture"],
                 db      = tools.RowDB,
@@ -2388,13 +2438,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.WireModifiedTick(textureRow)
             tools.WireFooter(textureRow, ApplyHealthTexture)
 
+            -- Four, the last of the three, and the widest of them by a line. Same
+            -- reason: two of its four are mode-gated, so the plate is rarely even
+            -- that tall.
             local bgMount, bgContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHealthBackgroundGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local bgRow = healthBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Background"],
                 db      = tools.RowDB,
@@ -2516,13 +2569,25 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- doing anything at all".
             local MISSING_HEALTH_COUNT = 6
 
+            -- ☠ SIX, WHICH IS EXACTLY THE THRESHOLD, so the group goes on the
+            -- plate with nothing to spare. What leaves room for all six is that
+            -- there is no blurb above them and no Reset beside them -- INLINE_MAX
+            -- in CreatePopoutPageTools counts what a layout would PLACE, not what
+            -- the badge calls a setting. A seventh control added to this builder
+            -- would break nothing: the measure would refuse the mount and the row
+            -- would go back to the strip it had. Worth knowing before adding one.
+            --
+            -- ⚠ AND FIVE OF THE SIX FOLD AWAY UNDER Background Only, where the
+            -- plate is a single dropdown -- which is the honest shape for that
+            -- mode, because the fill pick is the only setting that does anything
+            -- in it.
             local missingMount, missingContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildMissingHealthGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local missingRow = missingBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Missing Health"],
                 db      = tools.RowDB,
@@ -2622,6 +2687,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- Four behind the row's own tick, so the group goes on the plate --
+            -- and folds away with the tick, which is the one state where four
+            -- greyed controls occupying the band would be the worst use of the
+            -- space. The tick stays hoisted below: it is the row's toggle rather
+            -- than one of the four, which is exactly why the builder suppresses its
+            -- own copy instead of the plate drawing two of it.
             local reducedMount, reducedContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildReducedMaxHealthGroup({
                     group = group, parent = holder,
@@ -2629,7 +2700,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local reducedRow = reducedBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Reduced Max Health"],
                 db       = tools.RowDB,
@@ -3367,6 +3438,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- Four ticks, so the group goes on the plate: a pane of one-word
+            -- checkboxes is precisely the click that was buying nothing. The enable
+            -- tick stays hoisted below -- it is the ROW's own on/off rather than one
+            -- of the four, and it is the PAGE gate besides, so folding it away with
+            -- the rest would leave no way to switch the bar back on.
             local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildResourceSettingsGroup({
                     group = group, parent = holder,
@@ -3375,7 +3451,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     hoistToggle = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local settingsRow = generalBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Resource Bar Settings"],
                 db       = tools.RowDB,
@@ -3472,6 +3548,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- HOLDS.
             local RESOURCE_SIZE_COUNT = 4
 
+            -- ☠ FOUR OF THIS PAGE'S ROWS MOUNT THEIR GROUP ON THE PLATE -- Size,
+            -- Position, Appearance and Background, at 4, 3, 4 and 2. Between them
+            -- they are most of what a resource bar IS, and every one of them was a
+            -- click that opened a panel holding a handful of lines. The three that
+            -- keep their strip (Class Filter 13, Border 16, Colors 13) are the ones
+            -- a plate could not hold; INLINE_MAX in CreatePopoutPageTools is where
+            -- that line is drawn, and it is measured off the pane rather than taken
+            -- from the badge.
             local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildResourceSizeGroup({
                     group = group, parent = holder,
@@ -3479,7 +3563,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local sizeRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Size"],
                 db      = tools.RowDB,
@@ -3508,6 +3592,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: the anchor and the two offsets.
             local RESOURCE_POSITION_COUNT = 3
 
+            -- Three -- the anchor and the two offsets -- on the plate beside the
+            -- Size row it shares a band with.
             local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildResourcePositionGroup({
                     group = group, parent = holder,
@@ -3515,7 +3601,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local positionRow = layoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Position"],
                 db      = tools.RowDB,
@@ -3547,6 +3633,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- smoothing tick.
             local RESOURCE_APPEARANCE_COUNT = 4
 
+            -- Four, on the plate for the reason the Size row gives.
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildResourceAppearanceGroup({
                     group = group, parent = holder,
@@ -3554,7 +3641,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local appearanceRow = styleBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Appearance"],
                 db      = tools.RowDB,
@@ -3584,6 +3671,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- the tick is not hoisted.
             local RESOURCE_BACKGROUND_COUNT = 2
 
+            -- Two, the smallest pane on the page and the one a click bought least
+            -- for -- a tick and the colour it gates, which is a plate two lines
+            -- tall. The tick is NOT hoisted (see the builder's note on why), so
+            -- both of them are the pane's own and both are on the plate.
             local bgMount, bgContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildResourceBackgroundGroup({
                     group = group, parent = holder,
@@ -3591,7 +3682,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local bgRow = styleBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Background"],
                 db      = tools.RowDB,
@@ -4574,13 +4665,17 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Four: the orientation, the reverse-fill tick and the two sizes.
             local HEAL_PREDICTION_FLOATING_COUNT = 4
 
+            -- Four, on the plate. This row and the Anchor row under it are both
+            -- HIDDEN unless the bar is floating, so the height costs the page
+            -- nothing in any other mode -- and in the mode where they do appear,
+            -- the two of them are the whole of what "floating" means.
             local floatingMount, floatingContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHealPredictionFloatingGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local floatingRow = healPredBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Floating Bar Position"],
                 db      = tools.RowDB,
@@ -4657,13 +4752,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- frame level.
             local HEAL_PREDICTION_ANCHOR_COUNT = 5
 
+            -- Five, the tallest plate this page mounts, and on it with the
+            -- Floating row it sits under: same gate, same bar, and no reason for
+            -- one of the pair to be a click while the other is not.
             local anchorMount, anchorContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHealPredictionAnchorGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local anchorRow = healPredBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Floating Bar Anchor"],
                 db      = tools.RowDB,

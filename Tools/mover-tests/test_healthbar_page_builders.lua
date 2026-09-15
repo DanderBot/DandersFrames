@@ -602,3 +602,80 @@ do
     end
     eq(missing, 0, "locale: the page adds no new string")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ TWO THIRDS OF THE ADDON'S POPOUT ROWS HIDE SIX SETTINGS OR FEWER, and a
+-- row holding four was charging the same click as a row holding thirty-one. So a
+-- row whose whole group is small mounts THAT GROUP under its own title line, and
+-- its strip stops promising settings that are already on screen and offers to
+-- pin a second copy instead.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS AND THIS IS THE FIRST. The page ASKS, with
+-- `{ inline = true }` at its PopoutContent call; INLINE_MAX in Controls.lua
+-- REFUSES a pane that turns out to be big, measured off the group rather than
+-- read off the badge. Only the second can be exercised against a real group, and
+-- that is test_popout_page_tools.lua's job -- what is pinned here is which of
+-- this page's rows asked, and which deliberately did not.
+--
+-- ⚠ KEYED ON THE BUILDER, NOT ON THE MOUNT VARIABLE. Auras.lua holds seven
+-- pages and several of them name a mount the same thing (roleMount, classMount,
+-- bgMount and sizeMount each appear twice), so a census that took the first
+-- match in the file would cheerfully describe another page's row.
+-- ============================================================
+print("-- Health Bar page: which rows mount their pane on the plate")
+do
+    local WANT = {
+        { "BuildHealthColorGroup",           true }, -- 3, two of them mode-gated
+        { "BuildHealthTextureGroup",         true }, -- 3
+        { "BuildHealthBackgroundGroup",      true }, -- 4, two of them mode-gated
+        { "BuildMissingHealthGroup",         true }, -- 6 -- exactly the threshold
+        { "BuildReducedMaxHealthGroup",      true }, -- 4, behind the row's own tick
+    }
+
+    -- Every PopoutContent call in the file, filed under the builder it feeds.
+    local CALLS = {}
+    do
+        local pos = 1
+        while true do
+            local a = SRC:find("= tools.PopoutContent(function(group, holder, reflow)", pos, true)
+            if not a then break end
+            -- The `end` closing the call sits at the page builder's own twelve
+            -- spaces; everything inside the closure is indented further, so this
+            -- is the first one that can be it. The tail read past it is long
+            -- enough to carry an opt-in and nothing else.
+            local b = SRC:find("\n            end", a, true)
+            local body = SRC:sub(a, (b or a) + 48)
+            local builder = body:match("(Build[%w_]+Group)%(")
+            if builder then CALLS[builder] = body end
+            pos = a + 1
+        end
+    end
+
+    for _, spec in ipairs(WANT) do
+        local builder, wantInline = spec[1], spec[2]
+        local body = CALLS[builder]
+        check(body ~= nil, "inline: " .. builder .. " is fed by a PopoutContent call")
+        local gotInline = body ~= nil
+            and body:find("end, nil, { inline = true })", 1, true) ~= nil
+        if wantInline then
+            check(gotInline, "inline: " .. builder .. " asks for the plate")
+        else
+            check(not gotInline, "inline: " .. builder .. " keeps its pane behind the strip")
+        end
+    end
+
+    -- ⚠ EVERY ROW ON THIS PAGE MOVED, which is what a page made of small groups
+    -- looks like -- and Missing Health sits ON the threshold at six, with no blurb
+    -- above it and no Reset beside it spending the room. A seventh control in that
+    -- builder would fail nothing here or anywhere else: the measure would refuse
+    -- the mount and the row would go quietly back to its strip.
+
+    -- ...and the one hoisted tick SURVIVES. It is the Reduced Max Health ROW's own
+    -- on/off rather than one of the four settings now on its plate, so it is not
+    -- the duplicate the inline arm exists to end -- it is what folds the plate
+    -- away when the overlay is off.
+    check(PAGE:find('tools.RegisterHoistedToggle(reducedRow, L["Enable"]', 1, true) ~= nil,
+          "inline: ...and the row's own tick is still hoisted beside the plate")
+end
