@@ -567,13 +567,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 tools.ReflowMounted()
             end
 
+            -- Three ticks behind the row's own tick, so the group goes on the
+            -- plate -- and folds away with it, which is the state a default
+            -- profile spends most of its life in. The two sub-ticks mean nothing
+            -- until the Rested Indicator above them is on, so the summary has to
+            -- name the parent before it can report the children; a pane that says
+            -- that by its own shape says it better. The tick stays HOISTED: it is
+            -- the row's toggle, not one of the three.
             local soloMount, soloContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildSoloModeGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local soloRow = soloBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Solo Mode"],
                 db       = tools.RowDB,
@@ -942,6 +949,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 tools.ReflowMounted()
             end
 
+            -- Six, which is INLINE_MAX exactly -- and still the right side of the
+            -- line, because not one of them means anything alone. Anchor is inert
+            -- until Anchor To leaves DEFAULT and the two offsets until it reaches
+            -- FRAME, so the pane greys itself into a chain the reader has to see
+            -- whole; behind a click, the click is the only way to find out which
+            -- half of it is live. The enable tick stays HOISTED as the row's
+            -- toggle, and folds all six away when frame tooltips are off.
             local frameMount, frameContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFrameTooltipGroup({
                     group = group, parent = holder,
@@ -949,7 +963,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local frameRow = frameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Frame Tooltips"],
                 db       = tools.RowDB,
@@ -1025,6 +1039,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 tools.ReflowMounted()
             end
 
+            -- Six again, and the row above's reasoning verbatim: the same gated
+            -- chain of picks over the same hover. The tick stays HOISTED.
             local bindMount, bindContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBindTooltipGroup({
                     group = group, parent = holder,
@@ -1032,7 +1048,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local bindRow = frameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Binding Tooltips"],
                 db       = tools.RowDB,
@@ -1098,6 +1114,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 tools.ReflowMounted()
             end
 
+            -- Five, the hover rows' argument one control shorter -- the combat
+            -- half is a tick here rather than a five-way pick. The anchor chain
+            -- below it still greys from the inside, so it is the same case for
+            -- seeing the whole group at once. The tick stays HOISTED.
             local buffMount, buffContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBuffTooltipGroup({
                     group = group, parent = holder,
@@ -1105,7 +1125,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local buffRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Buff Tooltips"],
                 db       = tools.RowDB,
@@ -1187,6 +1207,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 tools.ReflowMounted()
             end
 
+            -- Five, and the Buff Tooltips row's reasoning verbatim: one group,
+            -- two auras. The tick stays HOISTED.
             local debuffMount, debuffContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDebuffTooltipGroup({
                     group = group, parent = holder,
@@ -1194,7 +1216,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local debuffRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Debuff Tooltips"],
                 db       = tools.RowDB,
@@ -1256,6 +1278,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 tools.ReflowMounted()
             end
 
+            -- Five, the third of the aura trio and the same case as the two above
+            -- it. The tick stays HOISTED.
             local defMount, defContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDefTooltipGroup({
                     group = group, parent = holder,
@@ -1263,7 +1287,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local defRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Defensive Icon Tooltips"],
                 db       = tools.RowDB,
@@ -1343,13 +1367,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- because there is no single tick to hoist.
             local AD_TOOLTIP_COUNT = 3
 
+            -- Three ticks and nothing else -- and NOTHING is hoisted here, because
+            -- there is no boolean meaning "am I doing anything". So this row was a
+            -- click that opened a panel holding three checkboxes, which is exactly
+            -- the click the hybrid page refuses: the three go on the plate and the
+            -- strip offers to pin a second copy beside another page.
             local adMount, adContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildADTooltipGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local adRow = auraBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Aura Designer Tooltips"],
                 db      = tools.RowDB,
@@ -2039,13 +2068,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 tools.ReflowMounted()
             end
 
+            -- Three behind the row's own tick, so the group goes on the plate --
+            -- and folds away while the tick is off, which is where a default
+            -- profile sits. The two numbers the feature IS are then readable
+            -- without a click, instead of only through the summary that reports
+            -- them. The tick stays HOISTED: it is the row's toggle.
             local hfMount, hfContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildHealthFadeGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local hfRow = fadeBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Health Threshold Fading"],
                 db       = tools.RowDB,
@@ -2469,6 +2503,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- does rather than naming the larger of the two.
                 local PET_GROUP_COUNT = isRaidMode and 6 or 5
 
+                -- Five in party, six in raid, and the opt-in is a claim about the
+                -- LARGER branch -- the group label tick exists only where there are
+                -- groups to label. Six is INLINE_MAX exactly, so the raid build is the
+                -- one that has to fit, and it does. Nothing is hoisted here, so
+                -- nothing on the plate is drawn twice.
                 local groupMount, groupContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildPetGroupSettingsGroup({
                         group = group, parent = holder,
@@ -2476,7 +2515,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         popout = true,
                     })
                     GatePaneFirstChild(group)
-                end)
+                end, nil, { inline = true })
                 local petGroupRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Group Settings"],
                     db      = tools.RowDB,
@@ -2584,6 +2623,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- speak for the height beside it.
             local PET_SIZE_COUNT = isGroupedMode and 2 or 4
 
+            -- Four attached, two grouped -- computed, and small on both branches.
+            -- The two Match Owner ticks are why seeing it matters: each one greys
+            -- the slider beneath it, so a reader who opens this for a width finds
+            -- a dead track and no word for why. On the plate the tick above it
+            -- answers that before the click that is no longer needed.
             local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPetSizeGroup({
                     group = group, parent = holder,
@@ -2591,7 +2635,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local petSizeRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Size"],
                 db      = tools.RowDB,
@@ -2657,6 +2701,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Two: the texture and the background colour. Nothing to hoist.
             local PET_APPEARANCE_COUNT = 2
 
+            -- A texture and a colour. Two controls behind a click is the click the
+            -- hybrid page exists to refuse -- and half of what is back there cannot
+            -- be said in words at all: the summary names the texture and has
+            -- nothing for the swatch, so the swatch goes where it can be seen.
             local appearMount, appearContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPetAppearanceGroup({
                     group = group, parent = holder,
@@ -2664,7 +2712,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local petAppearanceRow = petFrameBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Appearance"],
                 db      = tools.RowDB,
@@ -3096,6 +3144,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- Three: the anchor and its two offsets.
                 local PET_POSITION_COUNT = 3
 
+                -- An anchor and its two offsets, so the group goes on the plate. The
+                -- three are ONE act -- pick a side, then nudge -- and a summary can
+                -- only report where they landed, never be the place the user lands
+                -- them.
                 local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildPetPositionGroup({
                         group = group, parent = holder,
@@ -3103,7 +3155,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         popout = true,
                     })
                     GatePaneFirstChild(group)
-                end)
+                end, nil, { inline = true })
                 local petPositionRow = petLayoutBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Position"],
                     db      = tools.RowDB,
@@ -3442,9 +3494,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- setting. Nothing is hoisted, per the note above the builder.
             local FRAME_MODES_COUNT = 2
 
+            -- Two ticks, and the explainer under them makes three children -- which
+            -- is what INLINE_MAX measures, the badge counting settings and the
+            -- blurb being prose. Three is well inside it, and the blurb is the half
+            -- of this row that earns the height: both ticks need a UI reload, and
+            -- nothing else on the page says so.
             local modesMount, modesContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFrameModesGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local modesRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Frame Modes"],
                 -- ⚠ THE PROFILE ROOT, NOT tools.RowDB. These two keys are stored
@@ -3569,9 +3626,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- badge is a promise about settings, so it is not counted.
             local BLIZZARD_FRAMES_COUNT = 4
 
+            -- Four ticks and the separator between them -- five children, inside
+            -- INLINE_MAX. This row has NO summary (see the note above for why none
+            -- could be honest), so a click was the only way to learn what it was
+            -- set to. On the plate the four answer for themselves and the missing
+            -- summary stops mattering.
             local blizMount, blizContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBlizzardFramesGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local blizRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Blizzard Frames"],
                 -- ⚠ PARTY-CANONICAL, which is what the getters above read. These
@@ -3796,9 +3858,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- not the group's on/off.
             local RENDERING_COUNT = 2
 
+            -- Two settings and three blurbs -- five children, which is the number
+            -- the arm measures. Worth the height for the tick: the summary cannot
+            -- see Pixel-Perfect Scaling at all, because it lives in the other table
+            -- (see the summary's note), so from the row that setting was invisible
+            -- in both directions.
             local renderMount, renderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildRenderingGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local renderRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Rendering"],
                 -- ⚠ THE ACCOUNT-WIDE TABLE, because that is where the one key the
@@ -3931,9 +3998,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- between them is prose, not a setting.
             local PANEL_APPEARANCE_COUNT = 3
 
+            -- Two dropdowns, the classic-layout tick and the blurb between them --
+            -- four children, inside INLINE_MAX. This row describes the window being
+            -- looked at while it is read, so the controls belong where the result
+            -- of moving them is in the same glance.
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPanelAppearanceGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local appearanceRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Settings Panel Appearance"],
                 -- The profile ROOT again: settingsFont and settingsFontOutline are
@@ -4068,9 +4139,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- naming the setting it is about. The count badge carries the row.
             local NOTIFICATIONS_COUNT = 2
 
+            -- Two ticks, and this row has no summary because neither has a word
+            -- worth printing (see the note above). A click was therefore the only
+            -- way to read either one -- so they go on the plate, where a yes/no
+            -- says itself and the badge has nothing left to promise.
             local notifyMount, notifyContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildNotificationsGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local notifyRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Notifications"],
                 -- The account-wide table, which is where both ticks are stored.
