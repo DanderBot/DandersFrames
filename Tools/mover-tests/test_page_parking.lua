@@ -546,3 +546,102 @@ end
 -- Everything this file swapped, put back -- one runtime serves every suite.
 LibStub, CreateFrame, DandersFrames = savedLibStub, savedCreateFrame, savedDF
 GetPhysicalScreenSize, UIParent = savedScreenSize, savedUIParent
+
+-- ============================================================
+-- 5. THE RESULTS PANEL IS PARKED TOO -- real Search.lua
+-- ============================================================
+-- ☠ MEASURED, NOT ARGUED. Every result the user has ever seen keeps its card in
+-- `panel.cardCache` -- a live inline widget each -- and cards are only ever
+-- HIDDEN, never released. Hidden is not enough: the engine's Show/Hide walk
+-- costs by PARENTAGE, so a session of cards inside the window made opening and
+-- closing the settings window cost 1201ms / 3201ms in game (2026-09-15). With
+-- the panel reparented to the dock: 4.4ms / 24.5ms. Same lesson as section 1 --
+-- never leave a mass-built hidden tree under a frame that shows and hides.
+do
+    -- Same prelude section 2 uses to load the real Search.lua.
+    local DF = {}
+    DF.L = setmetatable({}, { __index = function(_, k) return k end })
+    DF.PartyDefaults = {}
+    DF.RaidDefaults = {}
+    function DF:Debug() end
+    function DF:DebugWarn() end
+
+    local dock, home = { name = "dock" }, { name = "content" }
+    local GUI = {
+        SelectedMode = "party",
+        Pages = {},
+        SettingsBox = UILIB.SettingsBox,
+        _pageDock = dock,
+    }
+    DF.GUI = GUI
+
+    -- The panel the real CreateResultsPanel would have built, reduced to the
+    -- surface the park/adopt pair touches.
+    --
+    -- ⚠ KNOWN GAP, stated rather than papered over: `_home` is set here by hand,
+    -- so nothing below proves CreateResultsPanel actually STORES it. Dropping
+    -- `panel._home = parent` from Search.lua survives this whole block. Covering
+    -- it means driving the real builder, which needs the entire widget kit stood
+    -- up; if that ever becomes cheap, this is the assertion to add.
+    -- ⚠ TWO KINDS OF COUNTER, and the distinction is the whole reason the
+    -- idempotence assertions below can fail. `_points` is what the frame holds
+    -- RIGHT NOW, so ClearAllPoints resets it -- re-anchoring an already-anchored
+    -- panel leaves it back at 2 and looks identical to not having touched it.
+    -- `_parents`/`_anchors` only ever go up, so a needless round trip shows.
+    local panel = {
+        _home = home, _parent = home, _points = 0, _parents = 0, _anchors = 0,
+        SetParent = function(self, f) self._parent = f; self._parents = self._parents + 1 end,
+        GetParent = function(self) return self._parent end,
+        ClearAllPoints = function(self) self._points = 0 end,
+        SetPoint = function(self) self._points = self._points + 1; self._anchors = self._anchors + 1 end,
+    }
+
+    local NS = { DF = DF }
+    -- ⚠ Search.lua reads the GLOBAL (`local DF = DandersFrames`), not the
+    -- namespace it is loaded into -- see its own file header. Saved and put
+    -- back so this block cannot leak a DF into anything that runs after it.
+    local prevGlobal = DandersFrames
+    DandersFrames = DF
+    load_options_file_into("Features/Search.lua", NS)
+    local Search = DF.Search
+    Search.ResultsPanel = panel
+
+    -- ---- park ------------------------------------------------------
+    Search:_ParkResultsPanel()
+    eq(panel:GetParent(), dock, "results: hiding parks the panel in the dock")
+    eq(panel._parked, true,     "results: ...and marks it parked")
+
+    -- Idempotent: a second hide must not re-park or disturb anything. HideResults
+    -- runs on every close, and ShowResults on every keystroke, so a park/adopt
+    -- that does work when there is nothing to do is work done thousands of times.
+    local parentsAfterPark = panel._parents
+    Search:_ParkResultsPanel()
+    eq(panel:GetParent(), dock,           "results: parking twice is a no-op")
+    eq(panel._parents, parentsAfterPark,  "results: ...and never re-parents")
+
+    -- ---- adopt -----------------------------------------------------
+    Search:_AdoptResultsPanel()
+    eq(panel:GetParent(), home, "results: showing brings it back to its home frame")
+    eq(panel._parked, nil,      "results: ...and clears the mark")
+    -- ⚠ RE-ASSERTED, not trusted to survive the round trip -- the same rule
+    -- GUI:AdoptPage follows for a page. Two corners, so two SetPoints.
+    eq(panel._points, 2,        "results: ...re-anchoring both corners")
+
+    -- Adopting an unparked panel is free and must not re-anchor again. ⚠ Asserted
+    -- on the CUMULATIVE count, not on _points -- ClearAllPoints + two SetPoints
+    -- lands back on 2 and would hide a redundant round trip completely.
+    Search:_AdoptResultsPanel()
+    eq(panel._anchors, 2,  "results: adopting twice re-anchors nothing")
+    eq(panel._parents, parentsAfterPark + 1, "results: ...and never re-parents")
+
+    -- ---- an older Panel.lua with no dock ---------------------------
+    -- ⚠ The companion can load against a kit that predates the dock. Parking
+    -- then has nowhere to go, and the panel must be LEFT ALONE rather than
+    -- reparented to nil, which would orphan it and every card in it.
+    GUI._pageDock = nil
+    Search:_ParkResultsPanel()
+    eq(panel:GetParent(), home, "results: with no dock it stays where it is")
+    eq(panel._parked, nil,      "results: ...and is never marked parked")
+    GUI._pageDock = dock
+    DandersFrames = prevGlobal
+end
