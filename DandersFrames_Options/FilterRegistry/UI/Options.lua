@@ -4603,7 +4603,28 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- picked up by the page's ordinary layout pass.
         RefreshFilterRows = function()
             local list = R:ListFilters()
-            for i, entry in ipairs(list) do
+            -- ☠ TWO SEGMENTS, NOT ONE RUN. The band holds a header, the built-in
+            -- rows, a second header and then the custom rows -- and the headers are
+            -- children at FIXED positions, so a row's index decides which side of
+            -- the second header it is drawn on. Binding straight down `list` would
+            -- work only for as long as it hands back every preset every time; the
+            -- day it hands back fewer, a custom would take a low index and appear
+            -- above the "Custom" header describing it.
+            --
+            -- So presets fill 1..nPreset in the order they arrive and customs start
+            -- at nPreset + 1 regardless, which is true by construction rather than
+            -- by trusting the order of somebody else's list.
+            local nPreset = #R.Categories
+            local pi, ci = 0, 0
+            for _, entry in ipairs(list) do
+                local i
+                if entry.custom then
+                    ci = ci + 1
+                    i = nPreset + ci
+                else
+                    pi = pi + 1
+                    i = pi
+                end
                 local row = AcquireFilterRow(i)
                 local slot = row.dfSlot
                 slot.kind, slot.key = entry.kind, entry.key
@@ -4648,12 +4669,59 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             -- Surplus rows are HIDDEN through the group rather than by hand: the
             -- group's own layout pass is what announces the hide, and a popout row
             -- answers that announcement by closing any loose panel docked to it.
-            for i = #list + 1, #filterRows do
+            -- ⚠ AND THE GAP BETWEEN THE SEGMENTS IS SURPLUS TOO. With two segments
+            -- the unused rows are not one tail: they are whatever is left of the
+            -- preset block plus whatever is left of the custom block.
+            for i = pi + 1, nPreset do
                 local row = filterRows[i]
-                row.dfSurplus = true
-                filterBand:SetChildHidden(row, true)
+                if row then
+                    row.dfSurplus = true
+                    filterBand:SetChildHidden(row, true)
+                end
+            end
+            for i = nPreset + ci + 1, #filterRows do
+                local row = filterRows[i]
+                if row then
+                    row.dfSurplus = true
+                    filterBand:SetChildHidden(row, true)
+                end
+            end
+            -- A heading over nothing is worse than no heading: with no custom
+            -- filters yet, the word "Custom" sitting alone at the foot of the list
+            -- reads as something failing to load.
+            if filterBand.dfCustomHeader then
+                filterBand:SetChildHidden(filterBand.dfCustomHeader, ci == 0)
             end
             if pageRef.RefreshStates then pageRef:RefreshStates() end
+        end
+
+        -- ============================================================
+        -- THE TWO HEADINGS
+        -- ------------------------------------------------------------
+        -- ☠ THE SPLIT IS STRUCTURAL, NOT PER-ROW. Every filter carries a tag saying
+        -- which kind it is, and seventeen tags down a list is seventeen things to
+        -- read. The user's own filters already sort to the bottom, so a heading over
+        -- each block says the same thing once.
+        --
+        -- ⚠ BUILT HERE, IN ORDER, AND THE PRESET ROWS WITH THEM. A settings group
+        -- lays its children out in the order they were ADDED, and AcquireFilterRow
+        -- appends on first use -- so the second heading only lands between the two
+        -- blocks if every preset row already exists when it is added. They are a
+        -- fixed set (R.Categories), so this is a loop and not a guess, and it costs
+        -- nothing extra: all of them are bound on the first refresh anyway.
+        --
+        -- The two labels are the island's own, so the two layouts name the same
+        -- thing the same way and no new string reaches a translator.
+        do
+            -- ⚠ 40, STATED, because CreateHeader declares no height of its own --
+            -- ResolveRowHeight would fall back to its 55 and the two headings would
+            -- tower over a list of 30px rows. Every other page in the addon passes
+            -- this same 40.
+            local HEADER_H = 40
+            filterBand:AddWidget(GUI:CreateHeader(parent, L["Built-In Filters"]), HEADER_H)
+            for i = 1, #R.Categories do AcquireFilterRow(i) end
+            filterBand.dfCustomHeader = GUI:CreateHeader(parent, L["Custom Buff Filters"])
+            filterBand:AddWidget(filterBand.dfCustomHeader, HEADER_H)
         end
 
         -- ============================================================

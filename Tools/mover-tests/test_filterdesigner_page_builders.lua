@@ -345,6 +345,33 @@ do
           "rows: ...while the panel's title stays the plain name")
     check(refresh:find("row._title = display", 1, true) == nil,
           "rows: ...never the tagged one")
+
+    -- ☠ THE LIST IS SPLIT UNDER TWO HEADINGS, and the split is structural rather
+    -- than seventeen tags to read. Both labels are the island's own, so the two
+    -- layouts name the same thing the same way.
+    check(SRC:find('GUI:CreateHeader(parent, L["Built-In Filters"])', 1, true) ~= nil,
+          "rows: the built-in block carries a heading")
+    check(SRC:find('GUI:CreateHeader(parent, L["Custom Buff Filters"])', 1, true) ~= nil,
+          "rows: ...and the custom block carries its own")
+    -- ⚠ A GROUP LAYS ITS CHILDREN OUT IN THE ORDER THEY WERE ADDED, and
+    -- AcquireFilterRow appends on first use -- so the second heading only lands
+    -- BETWEEN the blocks if every preset row exists before it is added.
+    check(SRC:find("for i = 1, #R.Categories do AcquireFilterRow(i) end", 1, true) ~= nil,
+          "rows: ...with every preset row forced into existence between the two")
+    -- ...and the custom heading goes away when there is nothing under it.
+    check(refresh:find("filterBand:SetChildHidden(filterBand.dfCustomHeader, ci == 0)", 1, true) ~= nil,
+          "rows: ...and the custom heading hides while no custom filter exists")
+    -- ☠ BINDING IS BY SEGMENT. Straight down the list works only while it hands
+    -- back every preset every time; the day it hands back fewer, a custom takes a
+    -- low index and is drawn ABOVE the heading that describes it.
+    check(refresh:find("local nPreset = #R.Categories", 1, true) ~= nil,
+          "rows: ...and customs start after the preset block by construction")
+    -- ⚠ COUNTED, NOT FOUND. "nPreset + ci" appears twice on purpose -- once
+    -- binding a custom row and once as the start of the custom block's surplus
+    -- sweep -- so a plain find() still matched with the BINDING broken. Both have
+    -- to be there.
+    eq(select(2, refresh:gsub("nPreset %+ ci", "")), 2,
+          "rows: ...not by trusting the order of somebody else's list")
     -- HIDDEN THROUGH THE GROUP, not by hand: the group's layout pass is what
     -- ANNOUNCES the hide, and a popout row answers that by closing any loose panel
     -- docked to it. A bare Hide() would leave the panel standing over whatever moved up.
