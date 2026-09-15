@@ -810,6 +810,11 @@ do
     -- number the comment beside the call states, so a comment that drifted from
     -- what the row actually holds has one place left to be caught.
     local INLINE = {
+        -- ⚠ visMount holds ONE -- Max Buffs. Show Buffs is the row's own tick,
+        -- hoisted, and the builder skips it. It is the twin of the Debuff Bar's
+        -- Visibility row and was missed by the first sweep; the two pages
+        -- disagreed for one commit over identical panes.
+        { "visMount", 1 },
         { "orderMount", 6 },
         { "appearanceMount", 3 },
         { "layoutMount", 3 },
@@ -817,7 +822,7 @@ do
     }
     -- ...and the rows that keep the strip they have, named rather than inferred:
     -- a row that quietly joined the first list fails here as well as there.
-    local BEHIND = { "visMount", "filterMount", "borderMount", "durationMount", "stackMount", "durBarMount", "pandemicMount" }
+    local BEHIND = { "filterMount", "borderMount", "durationMount", "stackMount", "durBarMount", "pandemicMount" }
 
     for _, spec in ipairs(INLINE) do
         check(inlineMounts[spec[1]] == true,

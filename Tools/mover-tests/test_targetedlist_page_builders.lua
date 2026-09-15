@@ -736,10 +736,19 @@ do
         { "fontMount", 4 },
         { "durationPosMount", 5 },
         { "interruptPosMount", 6 },
+        -- ⚠ THREE AT EXACTLY THE CEILING, and that is deliberate rather than
+        -- lucky: INLINE_MAX is 6 and these hold 6, so a seventh control in any of
+        -- them drops it back behind the strip on its own, with no page edit. Spell
+        -- Name and Target Name are the same six settings pointed at different
+        -- text, so a difference in what they cost to reach would be arbitrary.
+        { "showTextMount", 6 },
+        { "spellNameMount", 6 },
+        { "targetNameMount", 6 },
+        { "timingMount", 2 },
     }
     -- ...and the rows that keep the strip they have, named rather than inferred:
     -- a row that quietly joined the first list fails here as well as there.
-    local BEHIND = { "settingsMount", "colorMount", "borderMount", "showTextMount", "spellNameMount", "targetNameMount", "timingMount" }
+    local BEHIND = { "settingsMount", "colorMount", "borderMount" }
 
     for _, spec in ipairs(INLINE) do
         check(inlineMounts[spec[1]] == true,

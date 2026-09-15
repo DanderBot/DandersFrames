@@ -329,6 +329,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- not one of them.
             local VISIBILITY_COUNT = 1
 
+            -- ☠ ONE SETTING BEHIND THE CLICK -- the exact twin of the Debuff Bar's
+            -- Visibility row, and it moves for the same reason. The pane holds Max
+            -- Buffs and nothing else; Show Buffs is the ROW's tick, hoisted, and the
+            -- builder is told to skip it (`hoistToggle`), so there is no twin here to
+            -- delete and the plate folds away with the tick.
+            --
+            -- ⚠ THIS ROW WAS MISSED BY THE FIRST SWEEP and the two pages disagreed for
+            -- one commit -- debuff Visibility inline, buff Visibility behind a click,
+            -- for identical panes. Buff and debuff rows are built from the same shapes
+            -- all the way down this file; when one moves, look for its opposite number.
             local visMount, visContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildVisibilityGroup({
                     group = group, parent = holder,
@@ -336,7 +346,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local visRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Visibility"],
                 db       = tools.RowDB,
@@ -5974,13 +5984,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Six: the three elements and the three target-name extras.
                 local TL_SHOWTEXT_COUNT = 6
 
+                -- Six ticks choosing what a line of the list says. At the ceiling exactly, so a
+                -- seventh drops it back behind the strip on its own -- see INLINE_MAX.
                 local showTextMount, showTextContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListShowTextGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local showTextRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Show Text"],
                     db      = tools.RowDB,
@@ -6116,13 +6128,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Six: the size, the width cap, anchor, alignment and the two offsets.
                 local TL_SPELLNAME_COUNT = 6
 
+                -- Six: size, width, anchor, alignment and the two offsets. At the ceiling
+                -- exactly, and the twin of the Target Name row below it.
                 local spellNameMount, spellNameContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListSpellNamePosGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local spellNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Spell Name Position"],
                     db      = tools.RowDB,
@@ -6168,13 +6182,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Six: the same set the Spell Name row carries.
                 local TL_TARGETNAME_COUNT = 6
 
+                -- Six, the same six as Spell Name above. Two rows that differ only in which
+                -- text they position should not differ in how many clicks they cost.
                 local targetNameMount, targetNameContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListTargetNamePosGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local targetNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Target Name Position"],
                     db      = tools.RowDB,
@@ -6347,13 +6363,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Two: the fade-out and the interrupted flash.
                 local TL_TIMING_COUNT = 2
 
+                -- Two sliders. A click for two sliders is the plainest case the
+                -- hybrid exists to remove.
                 local timingMount, timingContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListTimingGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local timingRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Timing"],
                     db      = tools.RowDB,

@@ -14,7 +14,7 @@
 - (DandersMover) The element panel now reads as part of the mover it is editing — matching outlines on both and a short glowing line joining them — and slides across when you pick a different mover. Pin it and it detaches: it stops following your selection and carries on editing its own mover, which wears a marker so you can see which one the panel belongs to. Editing in a panel pins it automatically (there is a toggle for that under the mover's Editor settings), and its cross closes it. Clicking empty space no longer deselects, so the camera and the rest of your UI stay usable while movers are unlocked; Esc backs out a step at a time.
 - (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
 - (Frames) Frame Fade now has an on/off switch on its row, so you can turn fading off without touching the alpha values.
-- (Settings) On the Frame page, the smaller groups of settings are now shown on the page itself instead of behind a click. Frame Size, Layout Direction, Border Shadow and Group Display Order show everything they hold, and the bar at the bottom of each row now offers to pin those settings in a popout so you can keep them open while you work on another page. Switching a row off tucks its settings away again.
+- (Settings) Smaller groups of settings are now shown on the page itself instead of behind a click, across every settings page. Groups that hold a lot of settings still keep theirs in a popout. The bar at the bottom of each row now offers to pin a group's settings in a popout, so you can keep them open while working on another page, and switching a row off tucks its settings away again.
 
 ### Bug Fixes
 
