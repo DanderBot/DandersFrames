@@ -66,7 +66,7 @@
 
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
-- (Settings) Prefer the old settings look? A "Classic Layout" switch in the settings window's title bar (also under Options) swaps between the new popout-panel layout and the classic inline one, for the whole account.
+- (Settings) Prefer the old settings look? A layout picker sits in the settings window's title bar, next to the profile picker (and there is still a switch under Options). Choose Compact or Classic; it applies to the whole account.
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
 - (Settings) On the Frame page, a row's bottom strip is now the only thing that opens its panel and the only part that lights on hover; the rest of the row stays put. Clicking the strip again closes the panel.
 
