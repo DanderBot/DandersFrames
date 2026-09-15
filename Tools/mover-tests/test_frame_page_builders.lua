@@ -781,16 +781,21 @@ do
       and body:find("GrowDirectionOptions(true)", 1, true) ~= nil,
           "layout direction: the builder asks for both dialects by name")
 
-    -- ☠ AND SO IS THE ANCHOR MAP, for the same reason one control along.
-    -- The row now hoists Frames Grow From as well, so its START/CENTER/END map
-    -- is read by TWO dropdowns -- and a second typed copy of it is exactly the
-    -- drift the two growth-direction dialects carry a ☠☠ about.
+    -- ☠ AND SO IS THE ANCHOR MAP, for the same reason one control along: a
+    -- START/CENTER/END map written out twice is exactly the drift the two
+    -- growth-direction dialects carry a ☠☠ about.
+    --
+    -- ⚠ IT HAS ONE READER AGAIN. The row hoisted Frames Grow From onto its plate
+    -- for a release, which is why the map was lifted out; the whole pane is on
+    -- the plate now (see the inline census below) and the hoisted twin is gone,
+    -- so the pane's dropdown is the only caller. The function stays, because one
+    -- home for a map with an inverse is right whatever the caller count is.
     check(SRC:find("local function GrowthAnchorOptions()", 1, true) ~= nil,
           "layout direction: the anchor map is a page-scope function")
     check(body:find("local anchorOptions = GrowthAnchorOptions()", 1, true) ~= nil,
           "layout direction: ...which the pane's own dropdown asks for")
-    check(SRC:find("options = GrowthAnchorOptions()", 1, true) ~= nil,
-          "layout direction: ...and so does the hoisted one, rather than a copy")
+    check(SRC:find("options = GrowthAnchorOptions()", 1, true) == nil,
+          "layout direction: ...and no hoisted twin declares it a second time")
     -- ...and the map itself lives in exactly one place. Two literals would be
     -- two chances for a fourth option to reach only one of the dropdowns.
     local anchorLiterals = 0
@@ -1133,7 +1138,7 @@ do
     -- where the argument now lives, and the page's own half (exactly one blurb
     -- opting out of a track) stays below.
     local controls = options_file_source("GUI/Controls.lua")
-    check(controls:find("local function PopoutContent(buildInto, innerColumns)", 1, true) ~= nil,
+    check(controls:find("local function PopoutContent(buildInto, innerColumns, opts)", 1, true) ~= nil,
           "grid: the pane's track count is a per-row argument")
     check(controls:find("innerColumns = innerColumns }", 1, true) ~= nil,
           "grid: ...handed to the group rather than restated")
@@ -1256,19 +1261,14 @@ do
     -- MOUNTS, checked against the census tables at the top of this file rather
     -- than against a second list -- so a hoist that drifted from the control it
     -- is meant to be a second view of fails here.
+    -- ☠ TWO ROWS, NOT FOUR. Frame Size and Layout Direction hoisted their
+    -- controls -- each one the pane's own setting declared a SECOND time, with
+    -- its own options map, gate and callback -- until their whole panes went ON
+    -- the plate (see the inline census below). A row drawing its group inline has
+    -- nothing to hoist: a hoisted twin there would be two widgets on one key for
+    -- no gain, which is the duplication the inline arm exists to end. What is
+    -- left is the two rows whose panes are too big to mount.
     local HOISTS = {
-        { row = "sizeRow", census = FRAME_SIZE, want = {
-            { "Frame Width",  "slider",   "frameWidth",          false },
-            { "Frame Height", "slider",   "frameHeight",         false },
-        } },
-        -- BOTH of this row's settings, and the anchor gated to party. With
-        -- only one hoisted, the strip promised two more settings over a pane
-        -- holding ONE dropdown in party and none at all in raid -- which is
-        -- the empty panel that started section 18.
-        { row = "dirRow", census = LAYOUT_DIR, want = {
-            { "Growth Direction", "dropdown", "growDirection",   false },
-            { "Frames Grow From", "dropdown", "growthAnchor",    true  },
-        } },
         { row = "moverRow", census = PERM_MOVER, want = {
             { "Handle Width",  "slider", "permanentMoverWidth",  true },
             { "Handle Height", "slider", "permanentMoverHeight", true },
@@ -1279,9 +1279,14 @@ do
     for _, var in ipairs(rows) do
         if hoistBlock(var) then hoistedRows = hoistedRows + 1 end
     end
-    -- Three from the table above plus the Border row, whose two controls come
-    -- from the shared border helper rather than from a builder census here.
-    eq(hoistedRows, 4, "hoist: four of the eleven rows hoist anything at all")
+    -- The Permanent Mover row from the table above plus the Border row, whose two
+    -- controls come from the shared border helper rather than from a builder
+    -- census here.
+    eq(hoistedRows, 2, "hoist: two of the eleven rows hoist anything at all")
+    for _, gone in ipairs({ "sizeRow", "dirRow" }) do
+        check(hoistBlock(gone) == nil,
+              "hoist: " .. gone .. " hoists nothing -- its pane is on the plate")
+    end
 
     for _, spec in ipairs(HOISTS) do
         local got = hoistEntries(hoistBlock(spec.row))
@@ -1436,6 +1441,120 @@ do
           "verb: ...and reached by overloading RegisterHoistedToggle's second argument")
     check(controls:find("RegisterHoistedControls = ", 1, true) == nil,
           "verb: ...with no second name exported beside it")
+end
+
+-- ============================================================
+-- 6b. WHICH ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ROW BY ROW. Two thirds of the rows in the addon hide six
+-- settings or fewer, and a row holding four charges the same click as a row
+-- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
+-- under its title line and the strip offers to pin a second copy instead of
+-- promising settings that are already on screen.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
+-- (`{ inline = true }` at its PopoutContent call); the threshold in Controls.lua
+-- refuses one whose pane turns out to be big. Only the second can be measured
+-- headlessly against a real group, so it is driven in test_popout_page_tools.lua
+-- -- what is stated here is which rows asked, and that nothing else did.
+--
+-- The four are the rows whose real pane counts are 5, 3 (2 after the mode gates),
+-- 4 and 2. The other seven hold 7, 7, 7, 9, 13, 15 and 7, and keep the strip they
+-- have.
+-- ============================================================
+do
+    local page = framePage()
+
+    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on the page, and
+    -- whether its call ends with the inline opt-in. Read as "this declaration up
+    -- to the next one", the same reader shape the hoist census uses and for the
+    -- same reason: a balanced-brace match would be defeated by the builder
+    -- closure inside the call.
+    local calls = {}
+    local pos = 1
+    while true do
+        local s, e, name = page:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+    check(#calls >= 10, "inline: the page's PopoutContent calls are readable (" .. #calls .. ")")
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #page
+        if page:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 4, "inline: four of the page's rows mount their pane on the plate")
+
+    -- Which ROW each of them belongs to, read off the row's own `build` rather
+    -- than from a second list -- so a mount opted in and wired to a different row
+    -- fails here instead of shipping.
+    local WANT = {
+        sizeRow       = "sizeMount",         -- Frame Size, 5
+        dirRow        = "dirMount",          -- Layout Direction, 3
+        shadowRow     = "shadowMount",       -- Border Shadow, 4
+        groupOrderRow = "groupOrderMount",   -- Group Display Order, 2
+    }
+    local rows = pageRows()
+    local sawInline = 0
+    for _, var in ipairs(rows) do
+        local a = page:find("local " .. var .. " = ", 1, true)
+        local b = page:find("}))", a or 1, true)
+        local opts = (a and b) and page:sub(a, b + 2) or ""
+        local mount = opts:match("build%s*=%s*([%w_]+)")
+        check(mount ~= nil, "inline: " .. var .. " names the mount it was built with")
+        if WANT[var] then
+            eq(mount, WANT[var], "inline: " .. var .. " is built from the mount it declares")
+            check(inlineMounts[mount] == true,
+                  "inline: ...and that mount asked for the plate")
+            sawInline = sawInline + 1
+        else
+            check(mount == nil or not inlineMounts[mount],
+                  "inline: " .. var .. " keeps its pane behind the strip")
+        end
+    end
+    eq(sawInline, 4, "inline: ...all four of the named rows were found on the page")
+
+    -- ---- and NOTHING ELSE ANYWHERE ----------------------------------
+    -- The same claim the footer strip carries: this page is the one that moved,
+    -- and Danders judges it before 124 more rows follow.
+    local total = 0
+    for _ in SRC:gmatch("inline = true") do total = total + 1 end
+    eq(total, 4, "inline: ...and only the Frame page's rows inside this file")
+
+    local TOC = options_file_source("DandersFrames_Options.toc")
+    local elsewhere = {}
+    for name in TOC:gmatch("GUI\\(Pages\\[%w_]+%.lua)") do
+        local path = "GUI/" .. name:gsub("\\", "/")
+        local src = options_file_source(path)
+        local n = 0
+        for _ in src:gmatch("inline = true") do n = n + 1 end
+        if path ~= "GUI/Pages/Options.lua" and n > 0 then
+            elsewhere[#elsewhere + 1] = path .. " (" .. n .. ")"
+        end
+    end
+    eq(#elsewhere, 0,
+       "inline: no other page has moved yet -- " .. table.concat(elsewhere, ", "))
+
+    -- ---- the threshold is the helper's, and it is stated -------------
+    local controls = options_file_source("GUI/Controls.lua")
+    check(controls:find("local INLINE_MAX = 6", 1, true) ~= nil,
+          "inline: the helper carries the threshold, not the page")
+    check(controls:find("eager.group:CountVisibleChildren() <= INLINE_MAX", 1, true) ~= nil,
+          "inline: ...measured off the PANE, so a row cannot declare its way onto the plate")
+
+    -- ---- the settings search does not open a panel over them ---------
+    -- ☠ A PANEL FOR A SETTING ALREADY ON SCREEN IS A WORSE ANSWER THAN NONE --
+    -- and for an inline row it is worse still, because a row with nothing behind
+    -- it PINS the panel it opens, so a search result would leave one floating
+    -- beside the page.
+    local search = options_file_source("Features/Search.lua")
+    check(search:find("row:IsShowingInlineContent() then return end", 1, true) ~= nil,
+          "inline: the search jump stops at the row when the row is showing the setting")
 end
 
 -- ============================================================

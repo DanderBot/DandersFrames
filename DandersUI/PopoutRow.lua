@@ -1446,6 +1446,25 @@ function UI:CreatePopoutRow(parent, opts)
     local hoistCells = nil         -- the cell frames, one per declaration
     local shownHoists = 0          -- how many are drawn RIGHT NOW (the gate, the fold)
 
+    -- ---- ...AND THE ROW'S WHOLE GROUP, MOUNTED ON THE PLATE -------------
+    -- ☠ THE OTHER ANSWER TO "MOST SETTINGS SHOULD STILL BE VISIBLE", and the
+    -- one that does NOT declare every control twice. A hoisted cell knows two
+    -- control kinds -- slider and dropdown -- while most small groups are ticks,
+    -- colour pickers and edit boxes, so covering them by hoisting would mean
+    -- teaching the cell every kind AND writing ~500 declarations beside the
+    -- builders that already make those widgets: two sources of truth per
+    -- setting, for ever. A row whose group is small enough mounts THAT GROUP
+    -- here instead, and the strip opens a SECOND instance of the same builder.
+    -- One widget family, one set of callbacks -- so the gate, the reflow, the
+    -- modified dots, Reset Group, Hold: Defaults and undo all keep working
+    -- because it is the same group they already act on.
+    --
+    -- The kit stays ignorant of what a settings group is: it anchors ONE frame,
+    -- shows and hides it, and asks a consumer's closure for a height.
+    local inlineFrame = nil        -- the consumer's content frame, nil unless given
+    local inlineMeasure = nil      -- fn(width) -> height, asked on EVERY layout pass
+    local inlineShown = false      -- is it drawn RIGHT NOW (the fold, the toggle)
+
     -- What is left BEHIND the click: the pane's count, less whatever this row is
     -- currently showing on its own plate. Written from the LAYOUT rather than
     -- only from the refresh, because the fold and the split move it and a window
@@ -1475,8 +1494,15 @@ function UI:CreatePopoutRow(parent, opts)
         -- and a plain read would call it on every row.
         local provider = rawget(row, "_countProvider")
         if provider then
-            local left = max(provider() or 0, 0)
-            if left == 0 and shownHoists > 0 then
+            -- ☠ NOTHING IS BEHIND THE CLICK WHILE THE PANE IS ON THE PLATE. The
+            -- provider counts the pane honestly, and for an inline row that pane
+            -- is what the user is already looking at -- so promising it again
+            -- would be the strip charging a click for what is on screen. Folded
+            -- away (the row switched off) it IS behind the click again, and the
+            -- number comes straight back: the fold must always leave the settings
+            -- reachable somewhere.
+            local left = inlineShown and 0 or max(provider() or 0, 0)
+            if left == 0 and (shownHoists > 0 or inlineShown) then
                 stripCount:SetText((L and L["Pin settings in popout"])
                                    or "Pin settings in popout")
             else
@@ -1497,6 +1523,11 @@ function UI:CreatePopoutRow(parent, opts)
     -- its own pane, and guessing from a declared constant is the very thing the
     -- provider exists to stop.
     local function paneIsEmpty()
+        -- A plate holding the WHOLE group is the same state a plate holding the
+        -- last hoisted control reaches: there is nothing left for a loose panel
+        -- to draw, so the click pins instead. Asked before the provider, because
+        -- an inline row's provider is counting the very controls on the plate.
+        if inlineShown then return true end
         local provider = rawget(row, "_countProvider")
         if not provider then return false end
         if shownHoists <= 0 then return false end
@@ -1565,7 +1596,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- after the row has already been added to its band. Each of those has to
     -- re-report the row's height to the layout that is holding a slot for it.
     local function plateLayout()
-        if not (strip or hoists) then return end
+        if not (strip or hoists or inlineFrame) then return end
 
         local db = resolveDB(opts.db)
 
@@ -1725,13 +1756,64 @@ function UI:CreatePopoutRow(parent, opts)
             end
         end
 
+        -- ---- the row's own group, ON the plate -----------------------
+        -- ⚠ MEASURED ON EVERY PASS, NEVER CACHED. A group re-flows on its own --
+        -- a hideOn inside it flips, or a widget that cannot know its height until
+        -- it has been drawn converges a frame later and calls the consumer's
+        -- reflow (see GUI:RelayoutHost) -- and reports a new number without
+        -- anything here having asked. The consumer owns the measurement because
+        -- it is the one that knows what a group is; it re-flows only when the
+        -- width it is handed actually moved, so a plain window drag costs one
+        -- comparison per row rather than a layout.
+        --
+        -- ☠ AND IT FOLDS WHEN THE ROW IS OFF. Greyed controls that still occupy
+        -- the plate are the worst use of the space: the title, the word "Off" and
+        -- a strip naming the full count say the same thing in a tenth of the
+        -- room. Nothing is lost -- one click on the strip reads them.
+        --
+        -- ⚠ `_toggledOn` IS nil UNTIL THE FIRST REFRESH, which construction runs
+        -- immediately after this pass. nil is not OFF, so the group draws; the
+        -- refresh that follows folds it if the toggle says so.
+        local inlineH, inlineTop = 0, 0
+        inlineShown = false
+        if inlineFrame then
+            if row._toggledOn ~= false and lineW > 0 then
+                inlineTop = HEAD_H + lines * LINE_H + LINE_PAD
+                -- ⚠ BOOKED UNDER ITS OWN NAME. The pane was always BUILT at page
+                -- build; laying it out where it can be seen is the new work, and
+                -- it runs once per row per width rather than once per click -- so
+                -- a report that shows a slow page says in the same breath whether
+                -- this is why. One rawget when nothing is recording.
+                local t0 = perfStart(host)
+                inlineH = max(inlineMeasure and inlineMeasure(lineW) or 0, 0)
+                perfStop(host, "popoutrow:inline", t0)
+                inlineShown = inlineH > 0
+            end
+            if inlineShown then
+                -- The same left indent and the same right margin the control
+                -- lines take, so a pane's controls and a hoisted cell start and
+                -- end at the same x down a column of rows.
+                inlineFrame:ClearAllPoints()
+                inlineFrame:SetPoint("TOPLEFT", plate, "TOPLEFT", LABEL_X, -inlineTop)
+                inlineFrame:SetSize(lineW, inlineH)
+                inlineFrame:Show()
+            else
+                inlineFrame:Hide()
+            end
+        end
+
         -- ---- the plate, and the row's slot ---------------------------
-        -- LINE_PAD is air under the LAST control line only -- a row showing none
-        -- is its title line and its strip and nothing between them, which is what
-        -- makes a bare strip row visibly shorter than a hoisted one rather than
-        -- carrying a hoisted row's slack for nothing.
-        local plateH = HEAD_H + lines * LINE_H
-                     + ((lines > 0) and LINE_PAD or 0)
+        -- LINE_PAD is air under the LAST thing drawn on the plate -- a row
+        -- showing nothing is its title line and its strip and nothing between
+        -- them, which is what makes a bare strip row visibly shorter than a
+        -- hoisted one rather than carrying a hoisted row's slack for nothing.
+        -- A second LINE_PAD sits ABOVE the inline group, which is the air the
+        -- control lines get from the title line's own height and a full-width
+        -- control does not.
+        local bodyH = lines * LINE_H
+        if inlineShown then bodyH = (inlineTop - HEAD_H) + inlineH end
+        local plateH = HEAD_H + bodyH
+                     + ((bodyH > 0) and LINE_PAD or 0)
                      + (strip and FOOTER_H or 0)
         local headDY = (plateH - HEAD_H) / 2
         if plate:GetHeight() ~= plateH then plate:SetHeight(plateH) end
@@ -1788,6 +1870,26 @@ function UI:CreatePopoutRow(parent, opts)
         paintSummary()
     end
     row._LayoutPlate = plateLayout
+
+    -- ☠ THE SPLIT, THE FOLD AND AN INLINE GROUP'S WIDTH ARE ALL FUNCTIONS OF THE
+    -- ROW'S WIDTH, so the row has to be told when that changes. Installed only on
+    -- a row that draws something under its title line -- a plain row's geometry
+    -- does not depend on its width, and an OnSizeChanged it never had is a script
+    -- every other page's rows would start running for nothing.
+    --
+    -- ⚠ RE-ENTRANT BY CONSTRUCTION: plateLayout sets the row's HEIGHT, which
+    -- fires this again. Guarded on the width actually having moved, which the
+    -- height change cannot do.
+    --
+    -- ⚠ NAMED rather than written at its call site: SetInlineContent installs the
+    -- SAME handler on a row that was built without a strip, and a closure written
+    -- down there would reach for this file's locals as globals.
+    local function onRowSizeChanged(self, w)
+        w = w or self:GetWidth()
+        if w == row._laidOutAt then return end
+        row._laidOutAt = w
+        plateLayout()
+    end
 
     -- ---- the plate's paint ----------------------------------------
     -- Everything whose colour depends on the row's STATE rather than on its
@@ -2303,6 +2405,45 @@ function UI:CreatePopoutRow(parent, opts)
         return row
     end
 
+    -- THE ROW'S OWN GROUP, MOUNTED ON THE PLATE. `frame` is whatever the
+    -- consumer built its controls into; `measure(width) -> height` sizes that
+    -- frame's contents to the width it is handed and answers how tall they came
+    -- out. Both are the consumer's -- see the declarations at the head of this
+    -- row for why the kit refuses to learn what a settings group is.
+    --
+    -- Laid out at once, like SetCountProvider's repaint: a consumer wires this
+    -- after the row has been built and added to its band, so the slot being held
+    -- for it is a bare row's until this runs.
+    function row:SetInlineContent(frame, measure)
+        inlineFrame = frame or nil
+        inlineMeasure = (type(measure) == "function") and measure or nil
+        if inlineFrame then
+            inlineFrame:SetParent(plate)
+            -- ⚠ NO MOUSE OF ITS OWN, said out loud rather than left to a
+            -- default. It is a container: its children take their own clicks,
+            -- and a mouse-enabled frame lying over the plate is the "anything
+            -- drawn over a control eats that control's clicks" bug this rework
+            -- has shipped twice.
+            inlineFrame:EnableMouse(false)
+            -- ...and ABOVE the plate's own fill, for the reason the strip's own
+            -- level is stated: the relationship the layout depends on belongs in
+            -- the code rather than in a client default the headless shim does
+            -- not model at all.
+            inlineFrame:SetFrameLevel(plate:GetFrameLevel() + 1)
+            -- The fold and the group's own width are both functions of the
+            -- row's width, so a row that was built without a strip still has to
+            -- be told when that moves.
+            row:SetScript("OnSizeChanged", onRowSizeChanged)
+        end
+        plateLayout()
+        return row
+    end
+
+    -- Is the row drawing its whole group on the plate right now? Asked by a
+    -- consumer that would otherwise open a panel for a setting the user is
+    -- already looking at -- the settings search's jump is the one that does.
+    function row:IsShowingInlineContent() return inlineShown end
+
     -- WHO WANTS TELLING WHEN THE PLATE'S SET OF KEYS MOVES. `fn(row, keysSet)`,
     -- called from the layout -- not from the refresh -- because the fold, the
     -- split and the gate are all width, and a window drag runs the layout alone.
@@ -2589,22 +2730,10 @@ function UI:CreatePopoutRow(parent, opts)
     function row:GetSurface() return row._surface end
 
     -- ---- interaction ----------------------------------------------
-    -- ☠ THE SPLIT AND THE FOLD ARE FUNCTIONS OF THE ROW'S WIDTH, so the row has
-    -- to be told when that changes. Installed ONLY on a row that draws something
-    -- under its title line -- a plain row's geometry does not depend on its
-    -- width, and an OnSizeChanged it never had is a script every other page's
-    -- rows would start running for nothing.
-    --
-    -- ⚠ RE-ENTRANT BY CONSTRUCTION: plateLayout sets the row's HEIGHT, which
-    -- fires this again. Guarded on the width actually having moved, which the
-    -- height change cannot do.
+    -- The width handler is declared beside plateLayout (see onRowSizeChanged
+    -- there, and why it is named rather than written here).
     if opts.footerStrip then
-        row:SetScript("OnSizeChanged", function(self, w)
-            w = w or self:GetWidth()
-            if w == row._laidOutAt then return end
-            row._laidOutAt = w
-            plateLayout()
-        end)
+        row:SetScript("OnSizeChanged", onRowSizeChanged)
     end
 
     row:SetScript("OnEnter", function() row._hovered = true;  paintState() end)
