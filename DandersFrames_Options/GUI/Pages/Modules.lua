@@ -1634,6 +1634,20 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
             GateHide(tools2, iconSize)
             iconSize.disableOn = DisableIfNoIcon
+            -- ★ MAX SYMBOLS (2026-09-16). One symbol per dispellable aura, this many deep;
+            -- the row grows into the frame from the corner the position picks. At 1 -- the
+            -- default -- it is exactly the single badge it always was. Krathe: "by default
+            -- it should show the same as the overlay, so just 1, but if people want to show
+            -- extra they can increase the slider."
+            -- ⚠ COMMIT ONLY, no drag callback: the count is tuning state on the row's
+            -- container and re-tunes on commit; a per-tick re-tune while dragging is work
+            -- for nothing on a five-step slider.
+            local iconMax = group:AddWidget(GUI:CreateSlider(parent, L["Max Symbols"], 1, 5, 1, db, "dispelIconMax", function()
+                ApplyDispelSettings()
+            end), 55)
+            GateHide(tools2, iconMax)
+            iconMax.disableOn = DisableIfNoIcon
+            iconMax.tooltip = L["How many dispellable debuffs get their own symbol. 1 shows the one the overlay is showing."]
             local iconAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Symbol Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
                 InvalidateCurves()
             end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
@@ -1665,6 +1679,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local parts = {}
             local size = tonumber(d.dispelIconSize)
             if size then parts[#parts + 1] = format("%dpx", math.floor(size)) end
+            -- Only worth naming when it is doing something -- the offsets' rule.
+            local max = tonumber(d.dispelIconMax) or 1
+            if max > 1 then parts[#parts + 1] = format("x%d", max) end
             local pos = iconPositions[d.dispelIconPosition]
             if pos then parts[#parts + 1] = pos end
             local x, y = tonumber(d.dispelIconOffsetX) or 0, tonumber(d.dispelIconOffsetY) or 0

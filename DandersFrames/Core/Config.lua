@@ -1861,6 +1861,7 @@ DF.PartyDefaults = {
     dispelIconOffsetY = 0,
     dispelIconPosition = "TOPRIGHT",
     dispelIconSize = 20,
+    dispelIconMax = 1,        -- symbols per frame (the dispel icon row); 1 = the badge as it always was
     dispelShowBorder = true,
     dispelShowGradient = true,
     dispelShowIcon = true,

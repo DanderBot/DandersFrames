@@ -1671,6 +1671,10 @@ L["Show Debuffs"] = true
 L["Dispel Symbol"] = true
 L["Show Dispel Symbol"] = true
 L["Symbol Size"] = true
+-- ★ MAX SYMBOLS (2026-09-16): the dispel symbol is a row now, one per dispellable aura,
+-- this many deep. 1 -- the default -- is the single badge it always was.
+L["Max Symbols"] = true
+L["How many dispellable debuffs get their own symbol. 1 shows the one the overlay is showing."] = true
 L["Symbol Opacity"] = true
 L["Symbol Position"] = true
 L["Show Dispel Text"] = true

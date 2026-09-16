@@ -55,6 +55,7 @@ local LANES = {
     { field = "debuffFactory",    label = "debuff",    hidden = "dfDebuffFactoryHidden" },
     { field = "defensiveFactory", label = "defensive", hidden = "dfDefFactoryHidden" },
     { field = "dispelFactory",    label = "dispel",    hidden = nil },
+    { field = "dispelIconRow",    label = "dispelicons", hidden = nil },
 }
 
 local currentEncounter
