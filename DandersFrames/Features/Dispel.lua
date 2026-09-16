@@ -1525,7 +1525,10 @@ local function dispelSlotPlan(db, selfOnly)
         -- always shows the type of the aura the overlay is showing. It used to be its
         -- own set of five per-type slots; see the note in DispelSlotSecureInit for why
         -- that could not be made to show only one.
-        badge    = db.dispelShowIcon ~= false or nil,
+        -- Dispel badges are rendered by the separate multi-icon row below. Keeping
+        -- them out of the full-frame slot prevents one badge from competing with the
+        -- row when several dispellable auras are present.
+        badge    = nil,
     }
     local slots = {}
     -- Mode marker for the tuning signature. Explicit, because the old derivation
@@ -2149,6 +2152,49 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     end
 end
 
+-- The full-frame overlay and the multi-dispel row deliberately have different
+-- carriers. The row only needs Blizzard's per-aura dispel atlas, so each group
+-- button gets one icon-sized carrier and remains click-through to the unit frame.
+local function DispelIconSecureInit(btn)
+    if not btn then return end
+    if btn.SetMouseClickEnabled then btn:SetMouseClickEnabled(false) end
+    if not (btn.CreateTexture and (btn.AddDispelTypeTexture or btn.SetAuraBorder)) then return end
+
+    local iconTex = btn.dfDispelIconTexture
+    if not iconTex then
+        iconTex = btn:CreateTexture(nil, "ARTWORK")
+        iconTex:SetAllPoints(btn)
+        btn.dfDispelIconTexture = iconTex
+    end
+
+    local opts = {
+        style = DF:ResolveDispelTextureStyle("Icon"),
+        showWhenHarmful = true,
+        showWhenHelpful = false,
+    }
+    if btn.ClearDispelTypeTextures then btn:ClearDispelTypeTextures() end
+    if btn.AddDispelTypeTexture then
+        btn:AddDispelTypeTexture(iconTex, opts)
+    else
+        btn:SetAuraBorder(iconTex, opts)
+    end
+end
+
+local function dispelIconFilterRecords(slots)
+    local records = {}
+    for i = 1, #slots do
+        local slot = slots[i]
+        records[i] = {
+            key = slot.key,
+            filter = slot.filter,
+            candidateFilters = slot.candidateFilters,
+            onInit = DispelIconSecureInit,
+            style = { button = { icon = { show = false }, cooldown = { show = false } } },
+        }
+    end
+    return records
+end
+
 local function StyleGameMainSlot(btn, frame, db)
     local w = EnsureSlotWidget(btn, frame)   -- created in DispelSlotSecureInit (secure)
 
@@ -2702,6 +2748,11 @@ function DF:DriveDispelOverlayFactory(frame, db)
             frame.dispelFactorySig = nil
             frame.dispelFactoryTuneSig = nil
         end
+        if frame.dispelIconFactory then
+            frame.dispelIconFactory:Destroy()
+            frame.dispelIconFactory = nil
+            frame.dispelIconFactorySig = nil
+        end
         return
     end
 
@@ -2797,6 +2848,49 @@ function DF:DriveDispelOverlayFactory(frame, db)
         -- pointless ApplyTuning per container — 40 needless UpdateAllAuras on a raid login.
         frame.dispelFactoryTuneSig = h and tuneSig or nil
         frame.dfDispelFactoryVersion = nil   -- force a style pass on the new buttons
+    end
+
+    -- The full-frame slot owns washes and the ring. A separate row owns one
+    -- Blizzard dispel atlas per matching aura, so multiple debuffs remain visible.
+    local showDispelIcons = db.dispelShowIcon ~= false
+    local iconSig = sig .. "|" .. tostring(tuneSig)
+        .. "|icons=" .. (showDispelIcons and "1" or "0")
+        .. ":" .. tostring(db.dispelIconSize or 20)
+        .. ":" .. tostring(db.dispelIconPosition or "TOPRIGHT")
+        .. ":" .. tostring(db.dispelIconOffsetX or 0)
+        .. ":" .. tostring(db.dispelIconOffsetY or 0)
+    local iconHandle = frame.dispelIconFactory
+    if not showDispelIcons then
+        if iconHandle then
+            iconHandle:Destroy()
+            frame.dispelIconFactory = nil
+            frame.dispelIconFactorySig = nil
+        end
+    elseif not iconHandle or frame.dispelIconFactorySig ~= iconSig then
+        if iconHandle then iconHandle:Destroy() end
+        local iconLayout = {
+            size = db.dispelIconSize or 20,
+            spacingX = 2,
+            spacingY = 2,
+            anchor = db.dispelIconPosition or "TOPRIGHT",
+            growth = "LEFT_DOWN",
+            wrap = 4,
+            offsetX = db.dispelIconOffsetX or 0,
+            offsetY = db.dispelIconOffsetY or 0,
+        }
+        iconHandle = DF.AuraContainer:Create(frame, {
+            unit = frame.unit,
+            mode = "row",
+            max = 5,
+            filter = dispelIconFilterRecords(slots),
+            layout = iconLayout,
+            enabled = true,
+        })
+        frame.dispelIconFactory = iconHandle
+        frame.dispelIconFactorySig = iconHandle and iconSig or nil
+    end
+    if iconHandle and iconHandle:GetUnit() ~= frame.unit then
+        iconHandle:SetUnit(frame.unit)
     end
     if not h then return end
 
