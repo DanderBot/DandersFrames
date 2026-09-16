@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [5.3.3]
+
+### Bug Fixes
+
+* (Aura Designer) Fix every Aura Designer indicator on a player vanishing for the rest of the fight after they die and take a battle res. (by Krathe)
+
 ## [5.3.2]
 
 ### Bug Fixes
