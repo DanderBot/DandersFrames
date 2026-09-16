@@ -2952,39 +2952,13 @@ function DF:CreateGUI()
     end
     GUI.SelectTab = SelectTab
 
-    -- ★ LIGHT A NAV ROW THAT IS NOT THE ROW OWNING THE PAGE ON SCREEN.
-    -- ☠ ONE CALLER, AND IT IS NOT A HACK FOR IT. The Power Infusion Helper's row opens the
-    -- Aura Designer's page on the helper's pool -- one page owns that island, and two pages
-    -- sharing it is what blanked both (AuraDesigner/UI/PIHelperPage.lua has the diagnosis).
-    -- So the page is the designer's and the ROW the user clicked is the helper's, and the rail
-    -- has to say which row they clicked. Krathe, 2026-09-09: "clicking power infusion helper
-    -- on the menu should highlight it."
-    -- ⚠ THE SAME THREE WRITES SelectTab'S OWN TAIL MAKES -- clear every row, then light one --
-    -- lifted into a verb rather than reproduced at the call site, because `navMarker` and
-    -- `C_TEXT` are panel locals and a caller reaching for them would be reaching into this
-    -- file's private state.
-    -- ⚠ SAFE TO BE OVERRIDDEN BY THE NEXT CLICK: SelectTab has no same-name early-out, so
-    -- clicking any row -- including the designer's own -- re-runs the clear and re-lights the
-    -- right one. This changes no page state, only what the nav looks like.
-    GUI.SetNavHighlight = function(name)
-        local btn = GUI.Tabs[name]
-        if not btn then return false end
-        for _, other in pairs(GUI.Tabs) do
-            if other ~= btn then
-                other.isActive = false
-                other.Text:SetTextColor(other.disabled and 0.4 or C_TEXT.r,
-                                        other.disabled and 0.4 or C_TEXT.g,
-                                        other.disabled and 0.4 or C_TEXT.b)
-                other:SetBackdropColor(0, 0, 0, 0)
-            end
-        end
-        local nc = GetThemeColor()
-        navMarker:SetTo(btn, nc, not frame:IsShown())
-        btn.Text:SetTextColor(nc.r, nc.g, nc.b)
-        btn.isActive = true
-        return true
-    end
-
+    -- (Removed) GUI.SetNavHighlight -- lighting a nav row that is NOT the row owning the page
+    -- on screen. Its one caller was the Power Infusion Helper's nav row, which built no page
+    -- of its own: it jumped into the Aura Designer and then called this to keep the sidebar
+    -- lighting the row the user had left. That row is gone (see GUI/Pages/Auras.lua) and the
+    -- helper is reached as a pool tab of the designer, so nothing needs the rail to disagree
+    -- with the page any more. Grepped across all four addon folders plus *.xml and *.toc
+    -- before removing: no callers.
 
     GUI.RefreshCurrentPage = function()
         -- ☠ THE SEARCH RESULTS RE-FLOW HERE TOO, and this is the only place they can.

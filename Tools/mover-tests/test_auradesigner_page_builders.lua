@@ -1461,7 +1461,11 @@ do
     check(tabs:find("tab = true", 1, true) == nil,
           "pool: ...not the underline tabs the sub-tab strip below them wears")
     -- THE TOOLTIPS ARE BACK, one per tab, which is the whole reason for the move.
-    check(tabs:find("tooltip  = { title = def.label, lines = def.tooltip }", 1, true) ~= nil,
+    -- ⚠ `def.tooltipTitle or def.label` -- a tab whose label is an ABBREVIATION titles its
+    -- tooltip with the full name instead. Only the PI Helper sets it ("PI Helper" on the
+    -- strip, "Power Infusion Helper" on hover), because a fourth tab takes every tab down to
+    -- a quarter of the band and the long name does not fit at the 640px default.
+    check(tabs:find("tooltip  = { title = def.tooltipTitle or def.label, lines = def.tooltip }", 1, true) ~= nil,
           "pool: each tab explains itself on hover again")
     -- No new state: the tabs read and write exactly what the strip did.
     check(tabs:find("btn:SetActive(S.activeBuffTab == def.key)", 1, true) ~= nil,

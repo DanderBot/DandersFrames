@@ -3180,7 +3180,6 @@ L["Switch this on under Triggers first — the helper is not watching it."] = tr
 L["Every indicator is already in use. Remove one below to add it again."] = true
 -- The stub page behind the nav row, reached by the settings SEARCH rather than by clicking
 -- the row -- which links straight to the designer's Power Infusion Helper tab.
-L["The Power Infusion Helper is a tab inside the Aura Designer."] = true
 -- Shown under a signal that has no colour and no icons -- a state the panel can reach and
 -- could not previously explain. Names both remedies; the second form is for a signal with no
 -- icons row of its own, where the menu is the only door.

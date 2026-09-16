@@ -145,7 +145,14 @@ local function PoolDefs()
     -- order and positions -- the strip divides its width by #defs, so a conditional entry
     -- anywhere but the end would move tabs people already know the position of.
     if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() then
-        defs[#defs + 1] = { key = "pihelper", label = L["Power Infusion Helper"], tooltip = {
+        -- ⚠ SHORT LABEL, FULL NAME IN THE TOOLTIP. The strip divides its width EQUALLY
+        -- between the tabs (see S.BuildPoolTabs), so a fourth tab takes every tab from a
+        -- third of the band to a quarter -- and the note there already says the original
+        -- three do not fit at the 640px default any other way. "Power Infusion Helper" is
+        -- 22 characters against "My Buffs" and "Any Buff" at 8; "PI Helper" sits with its
+        -- neighbours and needs no truncation machinery to get there.
+        defs[#defs + 1] = { key = "pihelper", label = L["PI Helper"],
+            tooltipTitle = L["Power Infusion Helper"], tooltip = {
             L["Who is worth casting Power Infusion on, and how that shows on the frame."],
             L["Set up its Triggers, then add effects the same way as any other pool."],
             L["Shared across all your specializations."],
@@ -244,7 +251,9 @@ S.BuildPoolTabs = function(host)
             setBack  = POOLTAB_SETBACK,
             -- The three explanations, one per tab, exactly as they were before the
             -- dropdown pass stacked all three on one opener.
-            tooltip  = { title = def.label, lines = def.tooltip },
+            -- ⚠ tooltipTitle OVERRIDES label, for a tab whose label is an abbreviation.
+            -- Only the PI Helper sets it; every other tab titles on its own label.
+            tooltip  = { title = def.tooltipTitle or def.label, lines = def.tooltip },
             onClick  = function() SetMainTab(capturedKey) end,
         })
         btn:SetActive(S.activeBuffTab == def.key)
