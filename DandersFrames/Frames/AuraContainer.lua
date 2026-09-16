@@ -8184,9 +8184,17 @@ function SlotHandle:_pushFilter()
     -- returns the stash (already caster-locked at write) or the helper dead map.
     local cfWant = dark and SLOT_PARK_CF or self:_cf()
     if self._cfWant ~= cfWant then
-        self._cfWant = cfWant
         local okCF = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfWant)
-        if okCF and not InCombatLockdown() then self._cfPushed = cfWant end
+        -- ⚠ RECORD THE ASK ONLY IF THE CALL ITSELF SURVIVED. A QUIET combat refusal
+        -- must still record (pcall returns true) -- that is the whole point of _cfWant,
+        -- and the regen replay clears it. A LOUD failure must NOT: ApplyTuning and
+        -- _replayTuning both call _pushFilter and discard its return, so nothing would
+        -- re-queue the regen, and a memo written for a push that never reached the
+        -- engine makes the next pass skip the very push that would heal it.
+        if okCF then
+            self._cfWant = cfWant
+            if not InCombatLockdown() then self._cfPushed = cfWant end
+        end
         ok = ok and okCF
     end
     return ok
