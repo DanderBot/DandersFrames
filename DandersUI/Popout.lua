@@ -888,6 +888,15 @@ end
 -- bumps to +10, so neither can reach the next slot's beam whatever the stack does.
 local BAR_LIFT, HEADER_LIFT = 1, 2
 
+-- One header widget to one frame level, skipping the set when it is already there.
+-- File-scope so _SyncHeaderLevel can call it four times per frame without building a
+-- closure each pass; see the note in there.
+local function liftTo(w, want)
+    if w and w.SetFrameLevel and (w:GetFrameLevel() or 0) ~= want then
+        w:SetFrameLevel(want)
+    end
+end
+
 function Popout:_SyncHeaderLevel()
     local f = self.frame
     if not f.GetFrameLevel then return end
@@ -900,14 +909,27 @@ function Popout:_SyncHeaderLevel()
     -- unpinnable popout, no header controls on most), and a nil in an ipairs
     -- list stops the walk at index 1 and silently skips everything after it --
     -- which is the same class of bug this function exists to fix.
+    -- ☠☠ UNROLLED, AND THE TABLE IT REPLACES WAS THE REST OF THE POPOUT MEMORY CHURN.
+    -- This built `{ closeBtn, pinBtn, headerLeft, headerRight }` to loop over four fixed
+    -- fields -- a fresh table on every call, and the call is every frame: _Tick ->
+    -- _SyncWindowLevel -> _ApplyStackLevel -> here, for every popout with a window to sit
+    -- outside of. A pinned popout ticks forever by design, so four pinned ones threw away
+    -- four tables a frame purely to iterate a list that never changes shape.
+    -- ⚠ IT SURVIVED THE FIRST PASS AT THIS BUG (the rectOf fix in the same file) because
+    -- the rect allocations were the obvious two and this one is three calls deep. The
+    -- symptom only halved; field test, 2026-09-16: stopping every popout's OnUpdate
+    -- stopped the climb dead, which is what sent the search back down this chain.
+    -- ⚠ A file-scope scratch table would also have worked. Four lines of nothing is
+    -- better: no buffer to reason about, no aliasing question, and the compiler-visible
+    -- shape says these are four named widgets rather than a collection.
+    -- ⚠ A FILE-SCOPE HELPER, NOT A LOCAL ONE. `local function lift(w)` closing over `want`
+    -- would be built fresh on every call -- a closure is a heavier allocation than the
+    -- table this replaced, so it would have made the very thing it is fixing worse.
     local want = base + HEADER_LIFT
-    local parts = { self.closeBtn, self.pinBtn, self.headerLeft, self.headerRight }
-    for i = 1, 4 do
-        local w = parts[i]
-        if w and w.SetFrameLevel and (w:GetFrameLevel() or 0) ~= want then
-            w:SetFrameLevel(want)
-        end
-    end
+    liftTo(self.closeBtn, want)
+    liftTo(self.pinBtn, want)
+    liftTo(self.headerLeft, want)
+    liftTo(self.headerRight, want)
 end
 
 function Popout:_ApplyStackLevel()
