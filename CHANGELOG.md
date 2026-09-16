@@ -72,6 +72,12 @@
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
 - (Settings) On the Frame page, a row's bottom strip is now the only thing that opens its panel and the only part that lights on hover; the rest of the row stays put. Clicking the strip again closes the panel.
 
+## [5.3.3]
+
+### Bug Fixes
+
+* (Aura Designer) Fix every Aura Designer indicator on a player vanishing for the rest of the fight after they die and take a battle res. (by Krathe)
+
 ## [5.3.2]
 
 ### Bug Fixes
