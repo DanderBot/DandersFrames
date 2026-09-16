@@ -703,7 +703,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     -- rather than hidden: hiding it would make the two cards disagree about
                     -- how many sources this feature has.
                     for _, d in ipairs({
-                        { key = "cooldowns", label = L["Class cooldowns"] },
+                        { key = "cooldowns", label = L["Class Cooldowns"] },
                         { key = "trinkets",  label = L["Trinkets"] },
                         { key = "potions",   label = L["Potions"] },
                         { key = "racials",   label = L["Racials"] },

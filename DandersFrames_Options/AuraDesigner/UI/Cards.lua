@@ -895,7 +895,7 @@ PIH_K.ALL_AMPLIFIERS  = { potions = true, trinkets = true, racials = true }
 -- itself -- the new ids are not muted, and the icon really can show them. Storing a boolean
 -- would leave the box claiming "ignored" while racials appeared. Same doctrine as the class
 -- ticks: the tick reads the list, the click edits the list, nothing in between can disagree.
-P.PIH_K.PI_SPELL_ID = PIH_K.PI_SPELL_ID
+P.PIH_PI_SPELL_ID = PIH_K.PI_SPELL_ID
 
 function P.PIH_AmplifierIDs()
     return pihAmplifierIDs(P.PIH_Settings())
@@ -1682,7 +1682,7 @@ function P.PIH_GroupSourceSection(group)
         build   = function(env)
             local place, host = env.place, env.host
             local defs = {
-                { key = "cooldowns", label = L["Class cooldowns"] },
+                { key = "cooldowns", label = L["Class Cooldowns"] },
                 { key = "trinkets",  label = L["Trinkets"] },
                 { key = "potions",   label = L["Potions"] },
                 { key = "racials",   label = L["Racials"] },
@@ -7207,14 +7207,25 @@ local function pihSweep()
     -- ⚠ ONLY IF IT STILL HOLDS THE EXACT OLD STRING. The card has an editable Group Name
     -- field, so anything else is a name the USER typed -- renaming that would be this addon
     -- overwriting their words to satisfy its own tidiness.
-    -- ☠ THE OLD NAME IS A LITERAL, NOT A CONSTANT, and only because this file is at Lua's
-    -- 200-local ceiling -- see the note on PIH_ICON_GROUP_NAME. It is written once, here, in
-    -- the one place that needs to recognise it.
+    -- ☠☠ EVERY OLD NAME, AND THE SHIPPED ONE IS THE ONE THAT MATTERS. This tested only
+    -- "PI Helper — Cooldowns", which never reached a build -- it existed inside this branch
+    -- alone, between two unreleased commits. The name real profiles carry is the one the
+    -- live alpha writes, "PI Helper — Cooldown icons", so the rename matched nothing outside
+    -- the two developers' own saved variables and the list kept reading the old name forever
+    -- -- which is the complaint (2026-09-10) this step exists to answer.
+    -- ⚠ A SET, SO THE NEXT RENAME ADDS A LINE RATHER THAN REPLACING THE TEST.
     -- ⚠ THE NAME IS STORED DATA, never L[]: a translated string in the profile is a name that
     -- changes when the client's language does. Same rule the three filter names follow.
+    -- ⚠ STILL ONLY AN EXACT OLD STRING. The card has an editable Group Name field, so
+    -- anything not in this set is a name the USER typed, and renaming that would be the addon
+    -- overwriting their words to satisfy its own tidiness.
     do
         local g = P.PIH_IconGroup and P.PIH_IconGroup()
-        if g and g.name == "PI Helper — Cooldowns" then
+        local RENAMED_FROM = {
+            ["PI Helper — Cooldown icons"] = true,   -- shipped, v5.4.0 alphas
+            ["PI Helper — Cooldowns"]      = true,   -- this branch only, never built
+        }
+        if g and g.name and RENAMED_FROM[g.name] then
             g.name = PIH_K.ICON_GROUP_NAME
         end
     end
@@ -7646,7 +7657,7 @@ local function pihAddGateAndNotes(g, t)
     -- a titled box around a single tick is more chrome than either setting is worth.
     -- ⚠ THE TWO ARE INDEPENDENT, and the tooltip says so rather than leaving the reader to
     -- work out how two conditions on one feature combine. Both must pass.
-    local combatCb = t.check(g, L["Show in combat only"],
+    local combatCb = t.check(g, L["In Combat Only"],
         function() return P.PIH_Settings().combatOnly == true end,
         function(v) P.PIH_SetCombatOnly(v) end)
     if combatCb then

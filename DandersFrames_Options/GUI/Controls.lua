@@ -3075,6 +3075,17 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
             local name, realm = UnitName(unit)
             
             if name then
+                -- ☠ EMPTY STRING AS WELL AS NIL -- the same normalisation RosterSnapshot does,
+                -- and the two readers MUST agree because they key the same player into two
+                -- different stores. UnitName returns the realm only when it differs from yours,
+                -- and which of nil / "" it hands back for a same-realm unit is not something to
+                -- bet a key on: `realm or GetRealmName()` keeps an empty string, so this wrote
+                -- "Bob-" into the pinned list while the helper's list wrote "Bob-YourRealm" for
+                -- the same person -- and "Bob-" matches nothing, so the pinned entry could
+                -- never be un-pinned. (RosterSnapshot's comment states the same hazard; that
+                -- block says it is "ONE READER FOR BOTH WIDGETS", which is the intent rather
+                -- than the state -- only the icon and colour tables were actually shared.)
+                if realm == "" then realm = nil end
                 realm = realm or GetRealmName()
                 local fullName = name .. "-" .. realm
                 local _, class = UnitClass(unit)

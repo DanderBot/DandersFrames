@@ -12,6 +12,7 @@ local P = DF.AuraDesigner._priv
 local ipairs, pairs, type = ipairs, pairs, type
 local format = string.format
 local max = math.max
+local tremove = table.remove
 local wipe = wipe
 
 local C_TEXT_DIM = GUI.Colors.textDim

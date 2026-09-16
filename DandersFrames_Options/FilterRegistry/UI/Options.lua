@@ -2776,6 +2776,23 @@ end
         -- there, membership IS the truth and removing what they added is exactly right.
         local isCurated = (not isPreset) and selKind == "custom" and selKey
             and R.IsCuratedFilter and R:IsCuratedFilter(selKey) or false
+        -- ☠☠ ...ONLY FOR THE ROWS WE ACTUALLY SEEDED. `IsCuratedFilter` is a property of the
+        -- FILTER, not of the row, so testing it alone gave the tick to every row in the list --
+        -- including a spell the USER typed into the Add field afterwards. That row has no
+        -- default to go back to: ResetCuratedFilter restores our seed and, by its own
+        -- statement, deliberately does NOT prune their additions. So the tick is reversible in
+        -- name only and the ✕ it replaced was the sole way to take the spell out again --
+        -- add one by mistake and it is in that list forever, on every frame it feeds.
+        -- ⇒ A row is curated when its id is in the seed. Anything else keeps the ✕, which is
+        -- the same rule a hand-built list follows, applied per row instead of per filter.
+        -- ⚠ dfDefaults is keyed by NUMERIC spell id (SetCuratedDefaults tonumber()s them), so
+        -- the lookup coerces rather than trusting the row's field to already be a number.
+        if isCurated and not isChild then
+            local cf = R.GetCustomFilter and R:GetCustomFilter(selKey)
+            local seeded = cf and cf.dfDefaults
+            local sid = tonumber(item.id)
+            if not (type(seeded) == "table" and sid and seeded[sid]) then isCurated = false end
+        end
         local showCheck = isPreset or isChild or isCurated
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", isChild and 18 or 0, -y)

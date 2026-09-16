@@ -3072,7 +3072,13 @@ S.RefreshPreviewLightweight = function()
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         if type(auraCfg) == "table" and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
-              if indicator.enabled ~= false then
+              -- ⚠ THE MARK GATE BELONGS HERE TOO, and leaving it off the lightweight pass undid the
+              -- full pass's fix on the very next slider drag. RenderPreviewIndicator CREATES a pooled
+              -- slot on a miss and this route never calls ClearPlacedIndicators, so an unfiltered walk
+              -- paints the helper's records onto the designer canvas that RefreshPlacedIndicators
+              -- deliberately keeps them off -- the Any Buff pool physically holds them. The
+              -- frame-level half of this same function already filters through PIHVisibleRecord.
+              if indicator.enabled ~= false and PIHShowsMark(indicator.pihSignal) then
                 local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
 
                 -- Apply layout group position override if applicable

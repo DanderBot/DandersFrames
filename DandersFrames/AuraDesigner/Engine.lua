@@ -235,6 +235,58 @@ end
 -- which is a choice the preset system offers and the user has to make. What it fixes is
 -- the engine agreeing with the screen: no helper there means silent, ungated, and a
 -- readout that SAYS so.
+-- ☠☠ STRAY-MARK DETECTION LIVES HERE, IN THE RESIDENT ADDON, AND THAT IS THE WHOLE POINT.
+-- The repair itself (pihSweep / pihPurgeStrayMarks) is in the companion, which is
+-- LoadOnDemand -- so before this, every path that could run it began with "the user opens
+-- the Aura Designer". The symptom does not wait for that: a stray marked layout group sits
+-- in adDB.layoutGroups[spec] and Factory.lua renders spec groups with no mark filter at all,
+-- while VisibleLayoutGroups -- the thing that hides marked groups -- exists ONLY on the
+-- options side. The panel hides them; the renderer draws them. A player who never opens the
+-- designer therefore kept eight "PI Helper" groups painting on every frame with no control
+-- anywhere able to turn them off, which is the complaint the sweep was written for.
+--
+-- ⇒ Detect here, repair there. This walk is the cheapest half and needs no editor state;
+-- finding something pulls the companion in ONCE and calls the sweep that already exists,
+-- rather than reimplementing a destructive migration in a second place where the two copies
+-- could drift. Nothing is deleted by this file.
+--
+-- ⚠ THE SPEC STORE IS THE TELL, not the mark. A marked group in otherLayoutGroups is the
+-- helper's REAL group and must render. One in layoutGroups[spec] cannot work at all -- the
+-- pool decides the caster filter, so a spec-pool helper record asks for other people's
+-- cooldowns cast by you -- so a mark there is by definition stray.
+-- ⚠ NO CLASS GATE, deliberately, matching the rest of this file: the profile may have been
+-- built by a priest and be in use by someone else, and the groups render either way.
+-- ⚠ ONCE PER SESSION. The sweep stamps its own schema and early-outs, but loading the
+-- companion is not free, so the flag stops a zone change paying for it again.
+local function pihHasStrayMarks(adDB)
+    if type(adDB) ~= "table" or type(adDB.layoutGroups) ~= "table" then return false end
+    for _, specGroups in pairs(adDB.layoutGroups) do
+        if type(specGroups) == "table" then
+            for _, g in pairs(specGroups) do
+                if type(g) == "table" and g.pihSignal then return true end
+            end
+        end
+    end
+    return false
+end
+
+local pihStrayChecked = false
+local function pihRepairStrayMarks()
+    if pihStrayChecked then return end
+    pihStrayChecked = true
+    if not DF.GetModeAuraDesigner then return end
+    local found = false
+    for _, mode in ipairs(PIH_MODES) do
+        if pihHasStrayMarks(DF:GetModeAuraDesigner(mode)) then found = true break end
+    end
+    if not found then return end
+    DF:DebugWarn("AURADESIGNER",
+        "PIH: stray marked layout group(s) in the spec store -- loading the options addon to sweep")
+    if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
+    local sweep = DF.AuraDesigner and DF.AuraDesigner._priv and DF.AuraDesigner._priv.PIH_Sweep
+    if type(sweep) == "function" then pcall(sweep) end
+end
+
 local function pihSettings()
     if not DF.GetModeAuraDesigner then return nil end
     for _, mode in ipairs(PIH_MODES) do
@@ -851,6 +903,9 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
     end
 
     if event == "PLAYER_ENTERING_WORLD" then
+        -- Before anything reads the pool: a stray group renders whether or not the helper
+        -- is switched on, so this is NOT behind the pihEnabled early-outs below.
+        pihRepairStrayMarks()
         Engine:PIH_ApplySaved()   -- saved settings, before any gate decision
         -- ☠ RE-CHECK THE SWITCH AFTER APPLYING, because at login the file-locals
         -- still hold their initialisers until ApplySaved loads the saved values. Without

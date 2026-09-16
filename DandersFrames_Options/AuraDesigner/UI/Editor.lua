@@ -9,6 +9,7 @@
 local DF = DandersFrames
 local L = DF.L
 local GUI = DF.GUI
+local tremove = table.remove
 local Adapter = DF.AuraDesigner.Adapter
 local S = DF.AuraDesigner._uiState
 local P = DF.AuraDesigner._priv

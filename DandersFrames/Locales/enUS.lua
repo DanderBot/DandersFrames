@@ -462,13 +462,13 @@ L["%d more settings"] = true
 L["Pin settings in popout"] = true
 L["%d of %d IDs"] = true
 L["%d of %d tracked"] = true
+-- The header on a CURATED custom filter once some of its spells are ticked off. The plain
+-- form below still serves every other case, so an ordinary filter's header never changes.
+L["%d of %d spells"] = true
 L["%d override"] = true
 L["%d overrides"] = true
 L["%d players"] = true
 L["%d spells"] = true
--- The header on a CURATED custom filter once some of its spells are ticked off. The plain
--- form above still serves every other case, so an ordinary filter's header never changes.
-L["%d of %d spells"] = true
 L["%d-%d players"] = true
 L["%d-%d%%"] = true
 L["%d-%ds"] = true
@@ -2070,6 +2070,7 @@ L["Animation Inset"] = true
 L["Animation Offset X"] = true
 L["Animation Offset Y"] = true
 L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."] = true
+L["Animation Blend Mode"] = true
 L["Animation Length"] = true
 L["Animation Particles"] = true
 L["Animation Scale"] = true
@@ -2083,7 +2084,6 @@ L["Animation Thickness"] = true
 -- ⚠ "Default" IS A REAL OPTION, not a placeholder: each effect had its own hardcoded mode
 -- (DF Chase and DF Proc additive, the rest not), and Default is how a profile keeps it.
 -- The value labels reuse L["Blend"] / L["Add"] / L["Modulate"] / L["Disable"] / L["Default"].
-L["Animation Blend Mode"] = true
 L["How the effect's colour mixes with what is behind it. Add brightens whatever it crosses, so a red effect reads orange over a yellow border — it is what makes a glow glow. Blend draws the colour exactly as picked. Default keeps this effect's original look."] = true
 L["Border Animation"] = true
 L["Blink"] = true
@@ -2989,8 +2989,6 @@ L["Triggers"] = true
 -- descriptions, its empty-state line, and the surface dropdown's swap label. The Effects
 -- tab is the DESIGNER'S now -- same heading, same tiles, same effect cards -- and there is
 -- no signal to choose: everything added is "worth infusing".
-L["Add an effect"] = true
-L["Remove %s"] = true
 -- Clash warnings. Shown only on the three surfaces that take a single winner, and each names
 -- the remedy that already exists rather than describing the problem.
 -- The offender is NAMED: "something else colours the border" sends someone hunting through
@@ -3028,9 +3026,9 @@ L["Players"] = true
 -- identical whether they are INHERITING it or were set by hand to the same thing, and the
 -- difference is whether a later change over there still reaches this group. So one line says
 -- which, and the button is the way back to following.
--- L["Show"], L["Trinkets"], L["Potions"], L["Racials"] and L["Class cooldowns"] are reused.
+-- L["Show"], L["Trinkets"], L["Potions"], L["Racials"] and L["Class Cooldowns"] are reused.
 L["SHOW"] = true
-L["Class cooldowns"] = true
+L["Class Cooldowns"] = true
 L["Following the Triggers tab. Changing one of these stops that."] = true
 L["Follow Triggers"] = true
 -- ★★ THE ALLOWLIST'S OWN SWITCH (2026-09-11), and the note shrank to make room for it.
@@ -3076,7 +3074,6 @@ L["On: they appear even while it is on cooldown."] = true
 -- ★ SHOW IN COMBAT ONLY, beside the cooldown gate and independent of it: both conditions
 -- have to pass, and the tooltip says so rather than leaving the reader to work out how two
 -- conditions on one feature combine. Off first, as above, because off is the default.
-L["Show in combat only"] = true
 L["Off: the helper works wherever you are."] = true
 L["On: nothing shows until you are in combat. Independent of the cooldown setting above -- both have to pass."] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
@@ -3163,7 +3160,6 @@ L["%d spells, from your Triggers"] = true
 -- ⚠ AND THE PLAIN COUNT, for a group that has been given its own SHOW set. Saying "from your
 -- Triggers" on a group that no longer follows them would be the header contradicting the block
 -- directly beneath it, which says it has stopped following.
-L["%d spells"] = true
 -- ★ THE ICON'S TWO CHOICES on the Power Infusion Helper's pool. The picture is pinned to
 -- Power Infusion by default -- "infuse this player" -- and can be swapped for the buff they
 -- actually used. The caveat in the first tooltip is real and not a hedge: a placed icon
@@ -3178,7 +3174,7 @@ L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they a
 -- so it can show less than Triggers watches and never more -- showing more needs a filter of
 -- its own, which is what the group is for. A source Triggers has off is GREYED rather than
 -- hidden, with its own reason, or the two cards would disagree about how many sources exist.
--- L["Class cooldowns"], L["Trinkets"], L["Potions"] and L["Racials"] are reused.
+-- L["Class Cooldowns"], L["Trinkets"], L["Potions"] and L["Racials"] are reused.
 L["This icon only. It can show less than the Triggers tab watches, never more."] = true
 L["Switch this on under Triggers first — the helper is not watching it."] = true
 L["Every indicator is already in use. Remove one below to add it again."] = true
