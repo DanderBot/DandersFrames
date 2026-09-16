@@ -475,7 +475,23 @@ end
 
 -- Rect of a region in UIParent-centre units, inset to its ink; nil while it has
 -- no geometry yet.
-local function rectOf(region)
+-- ☠☠ FILLS A TABLE THE CALLER OWNS, and that exists because the old shape of this
+-- returned a FRESH TABLE and two of its callers are on an OnUpdate. A pinned popout
+-- ticks forever by design, and each tick read two rects -- so every pinned popout was
+-- allocating two tables a frame, about 120 a second, and four of them about 480. The
+-- symptom is memory that climbs fast, gets collected, and immediately climbs again
+-- (field report, 2026-09-16: "pin about three or four and it makes the memory rapidly
+-- increase"). It reads as a leak and is really pure garbage churn.
+-- ⚠ IT SHOWED UP UNDER WHICHEVER ADDON LOADED THE KIT. Popout.lua is in DandersUI's
+-- base half, which DandersFrames and DandersMover both load at startup; LibStub keeps
+-- the first copy, and WoW bills the allocation to the addon that owns the file the
+-- running function came from. So the addon named in the report is bookkeeping, not the
+-- culprit -- nothing about the mover was involved.
+-- ⚠ THE FIFTEEN COLD CALLERS ARE UNTOUCHED: rectOf still allocates, because they run on
+-- a click or a drop and a shared scratch table across them would be a real hazard for no
+-- gain. Only the per-frame path opts in, and only because its rects are read straight
+-- into scalars and never kept (see _Tick).
+local function rectInto(region, out)
     if not region or not region.GetCenter then return nil end
     local cx, cy = region:GetCenter()
     if not cx then return nil end
@@ -495,7 +511,13 @@ local function rectOf(region)
     -- ...and into UIParent-centre units, which is what every caller believes it
     -- has been handed. Exactly a no-op at scale 1, which is most of them.
     local k = scaleRatio(region)
-    return { x = cx * k - ux, y = cy * k - uy, w = w * k, h = h * k }
+    out.x, out.y, out.w, out.h = cx * k - ux, cy * k - uy, w * k, h * k
+    return out
+end
+
+-- The allocating form every click-path caller already expects.
+local function rectOf(region)
+    return rectInto(region, {})
 end
 
 -- A frame's own size in UIParent units -- rectOf's pair, for the callers that
@@ -2039,6 +2061,12 @@ end
 -- It early-outs the moment nothing has moved, which is the overwhelmingly
 -- common case, and it is a plain script so a headless test can drive one tick
 -- by hand: popout.frame:GetScript("OnUpdate")(popout.frame, elapsed).
+-- The tick's two rect buffers. File-scope on purpose: every popout's tick borrows the
+-- same pair, because each one is filled, compared and finished with inside a single
+-- synchronous call. See the note in _Tick for why that is safe, and rectInto for what
+-- it cost before.
+local tickSrcRect, tickWinRect = {}, {}
+
 local function onUpdate(frame, elapsed)
     local po = frame._popout
     if po then po:_Tick(elapsed) end
@@ -2072,7 +2100,17 @@ function Popout:_Tick(elapsed)
         return
     end
 
-    local sr = rectOf(self.source)
+    -- ⚠ SCRATCH TABLES, NOT FRESH ONES. This runs every frame for every open popout and
+    -- forever for a pinned one, and both rects below are read straight into scalars and
+    -- never kept past the compare -- so there is nothing to own and nothing to alias.
+    -- Two buffers rather than one because the window rect is still being read while the
+    -- source rect's `moved` is live; sharing them would be correct today and a trap for
+    -- whoever adds a third read. They are file-scope, so this is two tables for the
+    -- session rather than two per frame per popout. See rectInto.
+    -- ☠ SAFE ONLY BECAUSE THIS TICK CANNOT NEST. OnUpdate handlers do not re-enter, and
+    -- the _Dock at the tail runs after both compares are done and calls the ALLOCATING
+    -- rectOf, so it can never be handed one of these mid-read.
+    local sr = rectInto(self.source, tickSrcRect)
     local moved = sr and (sr.x ~= self._srcX or sr.y ~= self._srcY
                           or sr.w ~= self._srcW or sr.h ~= self._srcH)
     if moved then self._srcX, self._srcY, self._srcW, self._srcH = sr.x, sr.y, sr.w, sr.h end
@@ -2083,7 +2121,7 @@ function Popout:_Tick(elapsed)
     -- all. So the window carries its own baseline. Guarded on the mode, so the
     -- ordinary follow still pays for exactly one rect compare per tick.
     if self.outsideOf then
-        local wr = rectOf(self.outsideOf)
+        local wr = rectInto(self.outsideOf, tickWinRect)
         if wr and (wr.x ~= self._winX or wr.y ~= self._winY
                    or wr.w ~= self._winW or wr.h ~= self._winH) then
             self._winX, self._winY, self._winW, self._winH = wr.x, wr.y, wr.w, wr.h
