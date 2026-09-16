@@ -16,7 +16,12 @@ base="${1:-$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD)}"; head="${2
 minor_at() { git show "$1:DandersUI/Core.lua" | grep -oE 'MINOR = "DandersUI-1.0", [0-9]+' | grep -oE '[0-9]+$'; }
 expected_at() { git show "$1:DandersUI/OptionsCore.lua" | grep -oE 'EXPECTED_MINOR = [0-9]+' | grep -oE '[0-9]+$'; }
 old=$(minor_at "$base"); new=$(minor_at "$head"); exp=$(expected_at "$head")
-changed=$(git diff --name-only "$base" "$head" -- DandersUI | grep -v '^DandersUI/README.md$' | wc -l | tr -d ' ')
+# NOTE: `|| true` on the grep. With no kit change at all git diff prints nothing, grep
+# matches nothing and exits 1, and `set -euo pipefail` then killed this script before its
+# first echo -- a silent exit 1 that reads as "the gate failed" and blocks the release.
+# Every release that does not touch DandersUI hit it; alpha.7 only passed because it
+# happened to change five kit files.
+changed=$(git diff --name-only "$base" "$head" -- DandersUI | { grep -v '^DandersUI/README.md$' || true; } | wc -l | tr -d ' ')
 echo "kit-minor: base=$base head=$head minor@base=$old minor@head=$new EXPECTED_MINOR@head=$exp changed-kit-files=$changed"
 if [ "$new" != "$exp" ]; then
   echo "ERROR: DandersUI MINOR ($new) and OptionsCore EXPECTED_MINOR ($exp) differ -- the options half goes inert at login." >&2; exit 1
