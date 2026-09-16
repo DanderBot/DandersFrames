@@ -183,6 +183,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end
     end
 
+    -- ☠ A HELPER EFFECT HAS NOTHING TO COUNT. Krathe, 2026-09-09: "the PI 'icon' has stacks
+    -- but PI does not have stacks, you only get 1 charge so that setting should at least be
+    -- off by default if not hidden."
+    -- ⚠ AND IT IS WORSE THAN A DEAD SETTING ON THE ICON: that icon's art is PINNED to Power
+    -- Infusion while the aura it matched is somebody's cooldown, so a stack count there would
+    -- be a number describing a spell the picture is not of.
+    -- ⚠ THE WHOLE GROUP GOES, not just the tick. Stack Font, Scale, Outline, Anchor and Offset
+    -- are six controls for a number that is never drawn -- leaving them and unticking one is
+    -- how a panel fills up with settings that do nothing.
+    -- ⚠ HIDDEN, NOT GREYED, and that is the opposite call from GateSWM above -- deliberately.
+    -- Show When Missing is greyed WITH A REASON because ticking it would silently break the
+    -- cooldown gate, and the user needs to know why they cannot. Stacks are not broken, they
+    -- are irrelevant, and a greyed control invites a "why?" that has no interesting answer.
+    -- ⚠ The stored value is forced false as well (pihCreateSignal stamps it, pihSweep step 7
+    -- backfills), so what renders and what is stored agree rather than relying on this.
+    local pihNoStacks = (proxy and proxy.pihSignal) and true or false
+
     local function AddWidget(widget, height)
         -- Collect mode: the card has no stack, so a loose widget belongs to
         -- whichever pane's body is running. Sized by the group, not by hand.
@@ -641,6 +658,73 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         --
         -- ★ Frame Level and Alpha are the canaries: they belong to Appearance on every type,
         -- without exception. If a review finds either anywhere else, the card has drifted.
+        -- ★★★ THE HELPER'S OWN TWO QUESTIONS, AND THEY LEAD FOR THE REASON SHOW WHEN MISSING
+        -- USUALLY DOES: they are prior to everything below. "Which picture is this" and "what
+        -- is it allowed to show" decide what the indicator IS; the rest decide how it looks.
+        -- ⚠ ONE GROUP, HELPER ONLY. They are meaningless on an ordinary icon (whose picture is
+        -- its spell's by definition) and would be two dead rows on every other card.
+        -- ⚠ THE ICON ONLY, of all the helper's surfaces. A border or a square looks the same
+        -- whichever trigger fired, so "which one is this" has no answer to give there -- the
+        -- icon is the only surface that carries the information, and therefore the only one
+        -- where choosing between several matters. If it ever generalises, both verbs already
+        -- take a record rather than assuming one.
+        if pihNoStacks then   -- the same "this is a helper effect" test; see its note
+            local pihRec
+            do
+                local pool = CurrentAuraPool()
+                local auraCfg = pool and pool[auraName]
+                for _, x in ipairs((type(auraCfg) == "table" and auraCfg.indicators) or {}) do
+                    if x.id == indicatorID then pihRec = x; break end
+                end
+            end
+            if pihRec then
+                AddGroup(L["Power Infusion Helper"], function(g)
+                    -- ⚠ customGet/customSet, not a db key: the stored value is a SPELL ID or
+                    -- nil rather than a boolean, and the field that does the work is the field
+                    -- the control reads. Same shape as the border card's "own border" tick.
+                    local artCb = GUI:CreateCheckbox(parent,
+                        L["Show the triggering cooldown's icon"], nil, nil,
+                        function() if RPL then RPL() end end,
+                        function() return pihRec.staticSpellID == nil end,
+                        function(v) P.PIH_SetIconShowsAura(pihRec, v) end)
+                    artCb.tooltip = L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."]
+                    g:AddWidget(artCb, 28)
+
+                    -- ★★ THE SAME FOUR SOURCES THE COOLDOWN ICONS GROUP HAS (2026-09-10).
+                    -- Krathe: "yes build the icon block the same". This was ONE tick --
+                    -- "Ignore trinkets, potions and racials" -- over all three amplifiers at
+                    -- once, which is the same mechanism (per-record mutes) at a coarser
+                    -- grain. Nothing to migrate: a record saved by that tick carries exactly
+                    -- the mutes these read, so "all three ignored" reads back as three off.
+                    -- ⚠ SUBTRACTIVE, and the footer says so. A placed effect is keyed by one
+                    -- filter reference and can only narrow what that resolves to -- showing
+                    -- something Triggers is NOT watching needs a filter of its own, which is
+                    -- what the group is for. So a source Triggers has off is GREYED here
+                    -- rather than hidden: hiding it would make the two cards disagree about
+                    -- how many sources this feature has.
+                    for _, d in ipairs({
+                        { key = "cooldowns", label = L["Class Cooldowns"] },
+                        { key = "trinkets",  label = L["Trinkets"] },
+                        { key = "potions",   label = L["Potions"] },
+                        { key = "racials",   label = L["Racials"] },
+                    }) do
+                        local key = d.key
+                        local cb = GUI:CreateCheckbox(parent, d.label, nil, nil,
+                            function() if RPL then RPL() end end,
+                            function() return P.PIH_IconSourceOn(pihRec, key) end,
+                            function(v) P.PIH_SetIconSourceOn(pihRec, key, v) end)
+                        if not P.PIH_IconSourceAvailable(key) then
+                            if cb.SetEnabled then cb:SetEnabled(false) end
+                            cb.tooltip = L["Switch this on under Triggers first — the helper is not watching it."]
+                        end
+                        g:AddWidget(cb, 28)
+                    end
+                    g:AddWidget(GUI:CreateNote(parent,
+                        L["This icon only. It can show less than the Triggers tab watches, never more."]), 34)
+                end)
+            end
+        end
+
         AddGroup(L["Show When Missing"], function(g)
             local desatCb
             local function UpdateDesatState()
@@ -814,6 +898,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Stack Count sits with Duration Text: they are the two TEXT elements on an icon,
         -- and tuning either means reading them as a pair.
+        -- ⚠ ...and neither exists on a helper effect. See pihNoStacks.
+        if not pihNoStacks then
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -825,6 +911,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        end   -- pihNoStacks
         -- Duration Bar (native SetDurationBar strip — shared with the square card). Closes
         -- the run of things drawn ON the icon, and keeps all three duration/count elements
         -- together rather than stranding the bar below the conditional reveals.
@@ -955,6 +1042,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             UpdateHideAboveState()
         end)
         -- Stack Count sits with Duration Text — see the icon card for why.
+        -- ⚠ ...and is skipped on a helper effect. See pihNoStacks.
+        if not pihNoStacks then
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -966,6 +1055,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
+        end   -- pihNoStacks
         -- Duration Bar (native SetDurationBar strip — shared with the icon card)
         AddDurationBarGroup()
         -- The two conditional reveals, adjacent, in the same order and last, as on every

@@ -1885,7 +1885,8 @@ function DF:DebugADAlphaHosts(unit)
                         tostring(entryKey), kind,
                         okW and "OK" or "REFUSED", okR and "OK" or "refused",
                         tostring(rawequal(f, h.frame)), latched),
-                        okW and nil or "BAD")
+                        -- `okW and nil or "BAD"` toned every line BAD, successes included.
+                        (not okW) and "BAD" or nil)
                 end
             end
         end

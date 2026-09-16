@@ -3103,6 +3103,10 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     local hasScale     = { DF_ORBIT=1, DF_PROC=1, DF_FLASH=1 }
     -- Length slider = bar length (DF Pixel's chasing bars).
     local hasLength    = { DF_PIXEL=1 }
+    -- Blend mode = how the effect's own textures mix with what is behind them. Every effect
+    -- that draws textures of its own; DF_PULSATE is absent because it has none -- it modulates
+    -- the BORDER's edges, whose blend mode is the border's own control.
+    local hasBlendMode = { DF_DASH=1, BLINK=1, DF_ORBIT=1, DF_PROC=1, DF_FLASH=1, DF_PIXEL=1 }
     local cornersOnly  = { CORNERS_ONLY=1 }
     local function hideUnless(set)
         return function()
@@ -3234,6 +3238,33 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         -50, 50, 1, dbTable, aKey("OffsetY"),
         fullUpdate, lightUpdate, true), 55)
     w.animationOffsetY.hideOn = hideUnless(hasPositioning)
+
+    -- ★★ ANIMATION BLEND MODE (2026-09-10). Krathe: "if I've set it to red it will show orange
+    -- when over a yellow border... I'm sure we used to offer up a blend mode for animation?"
+    -- We never did -- what exists is Border Blend Mode, which governs the border's own EDGES
+    -- and not the effect drawn over them. The effects had a mode each, chosen by hand when
+    -- c4b4e5eb replaced LibCustomGlow: DF Chase and DF Proc additive, the rest not. Same colour
+    -- picker, two different meanings, and nothing anywhere saying which you had.
+    -- ⚠ NO DEFAULT VALUE IN THE DB. An unset key means "this effect's own default", so every
+    -- existing profile keeps exactly the look it has -- see ANIM_BLEND_DEFAULT in Border.lua.
+    -- That is why this dropdown is not seeded and why its first entry is not Blend.
+    -- ⚠ EVERY EFFECT BUT DF PULSATE, which owns no textures: it modulates the border's own
+    -- edges, so Border Blend Mode already IS its blend mode. Two controls over one texture
+    -- would leave the user watching whichever ran last.
+    w.animationBlendMode = group:AddWidget(GUI:CreateDropdown(parent, L["Animation Blend Mode"],
+        -- _order, because pairs() order is not an order -- Default leads (it is the state
+        -- everyone is in), then the two anyone will actually pick, then the two nobody will.
+        { DEFAULT = L["Default"], BLEND = L["Blend"], ADD = L["Add"],
+          MOD = L["Modulate"], DISABLE = L["Disable"],
+          _order = { "DEFAULT", "BLEND", "ADD", "MOD", "DISABLE" } },
+        dbTable, aKey("BlendMode"), fullUpdate,
+        -- ⚠ nil <-> "DEFAULT" IN THE VIEW ONLY. The stored shape stays "absent means the
+        -- effect decides", so nothing has to migrate and a profile exported before today
+        -- imports unchanged; the dropdown just needs a row to show for that state.
+        function() return dbTable[aKey("BlendMode")] or "DEFAULT" end,
+        function(v) dbTable[aKey("BlendMode")] = (v ~= "DEFAULT") and v or nil end), 55)
+    w.animationBlendMode.hideOn = hideUnless(hasBlendMode)
+    w.animationBlendMode.tooltip = L["How the effect's colour mixes with what is behind it. Add brightens whatever it crosses, so a red effect reads orange over a yellow border — it is what makes a glow glow. Blend draws the colour exactly as picked. Default keeps this effect's original look."]
 
     -- DF Flash / DF Proc: skip the one-shot intro burst (glow-only).
     -- ☠ introInert SHOWS THE FORCED VALUE, NOT THE STORED ONE. The runtime pins

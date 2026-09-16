@@ -2893,6 +2893,84 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
 end
 
 -- ============================================================
+-- ROSTER WIDGETS -- SHARED LOOK
+-- ------------------------------------------------------------
+-- ⚠ FILE SCOPE, BECAUSE THERE ARE TWO WIDGETS NOW. These were locals inside the dual-column
+-- widget; the compact one below has to look identical to it, and the fastest way for two
+-- lists to stop looking alike is two copies of the paths their icons come from.
+-- ============================================================
+local ROSTER_ROLE_ICONS = {
+    TANK = "Interface\\AddOns\\DandersFrames\\Media\\DF_Tank",
+    HEALER = "Interface\\AddOns\\DandersFrames\\Media\\DF_Healer",
+    DAMAGER = "Interface\\AddOns\\DandersFrames\\Media\\DF_DPS",
+}
+local ROSTER_ROLE_COLORS = {
+    TANK = {0.35, 0.56, 0.82},
+    HEALER = {0.29, 0.62, 0.29},
+    DAMAGER = {0.70, 0.35, 0.35},
+}
+-- ☠ DOUBLE BACKSLASHES. Lua passes an unrecognised escape through as the bare character, so
+-- the single-backslash form is a path to nothing and the client draws an empty square.
+local ROSTER_ICON_ARROW = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
+local ROSTER_ICON_CHECK = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check"
+local ROSTER_ICON_CLOSE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close"
+
+-- ★ THE GROUP, AS A SORTED LIST OF { name, fullName, class, role, group }.
+-- ⚠ ONE READER FOR BOTH WIDGETS. It was a local inside the dual-column one, and the compact
+-- one needs exactly the same answer -- including the `-Realm` suffix, which is what makes a
+-- name written by one list mean the same thing to the other.
+-- ☠ NO `+ 1` ON UnitInRaid. It already returns an index GetRaidRosterInfo takes directly --
+-- Blizzard passes it straight through in both CompactUnitFrame and CompactRaidFrameManager.
+-- The +1 read the NEXT member's subgroup, so every unit reported its neighbour's group and
+-- the last member in the raid got nil and silently fell back to group 1.
+local function RosterSnapshot()
+    local roster = {}
+    local numMembers = GetNumGroupMembers()
+    if numMembers == 0 then
+        local name = UnitName("player")
+        local _, class = UnitClass("player")
+        roster[1] = { name = name, fullName = name .. "-" .. GetRealmName(),
+                      class = class or "WARRIOR", role = "DAMAGER", group = 1 }
+        return roster
+    end
+    local isRaid = IsInRaid()
+    for i = 1, numMembers do
+        local unit = isRaid and ("raid" .. i) or (i == 1 and "player" or "party" .. (i - 1))
+        local name, realm = UnitName(unit)
+        if name then
+            -- ☠ EMPTY STRING AS WELL AS NIL. UnitName returns the realm only when it differs
+            -- from yours, and which of nil / "" it returns for a same-realm unit is not
+            -- something to bet a key on: `realm or GetRealmName()` keeps an empty string, and
+            -- "Bob-" would then be a name that matches nothing and can never be removed.
+            if realm == "" then realm = nil end
+            realm = realm or GetRealmName()
+            local _, class = UnitClass(unit)
+            local role = UnitGroupRolesAssigned(unit)
+            if role == "NONE" then role = "DAMAGER" end
+            local group = 1
+            if isRaid then
+                local raidIndex = UnitInRaid(unit)
+                if raidIndex then
+                    local _, _, subgroup = GetRaidRosterInfo(raidIndex)
+                    group = subgroup or 1
+                end
+            end
+            roster[#roster + 1] = { name = name, fullName = name .. "-" .. realm,
+                                    class = class or "WARRIOR", role = role, group = group }
+        end
+    end
+    table.sort(roster, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
+        local order = { TANK = 1, HEALER = 2, DAMAGER = 3 }
+        local ar, br = order[a.role] or 3, order[b.role] or 3
+        if ar ~= br then return ar < br end
+        return a.name < b.name
+    end)
+    return roster
+end
+GUI.RosterSnapshot = RosterSnapshot
+
+-- ============================================================
 -- HIGHLIGHT FRAMES ROSTER WIDGET
 -- ============================================================
 -- Dual-column widget for selecting players to highlight
@@ -2916,23 +2994,11 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     local draggingItem = nil
     local dragOffsetY = 0
     
-    -- Custom role icons
-    local ROLE_ICONS = {
-        TANK = "Interface\\AddOns\\DandersFrames\\Media\\DF_Tank",
-        HEALER = "Interface\\AddOns\\DandersFrames\\Media\\DF_Healer",
-        DAMAGER = "Interface\\AddOns\\DandersFrames\\Media\\DF_DPS",
-    }
-    local ROLE_COLORS = {
-        TANK = {0.35, 0.56, 0.82},
-        HEALER = {0.29, 0.62, 0.29},
-        DAMAGER = {0.70, 0.35, 0.35},
-    }
-    
-    -- Icon paths
-    local ICON_ARROW = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
-    local ICON_CHECK = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\check"
-    local ICON_CLOSE = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close"
-    
+    -- Custom role icons (see the file-scope tables above: one copy, two widgets)
+    local ROLE_ICONS, ROLE_COLORS = ROSTER_ROLE_ICONS, ROSTER_ROLE_COLORS
+    local ICON_ARROW, ICON_CHECK, ICON_CLOSE =
+        ROSTER_ICON_ARROW, ROSTER_ICON_CHECK, ROSTER_ICON_CLOSE
+
     -- ========== LEFT COLUMN: Group Roster ==========
     local leftHeader = container:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     leftHeader:SetPoint("TOPLEFT", 0, 0)
@@ -3009,6 +3075,17 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
             local name, realm = UnitName(unit)
             
             if name then
+                -- ☠ EMPTY STRING AS WELL AS NIL -- the same normalisation RosterSnapshot does,
+                -- and the two readers MUST agree because they key the same player into two
+                -- different stores. UnitName returns the realm only when it differs from yours,
+                -- and which of nil / "" it hands back for a same-realm unit is not something to
+                -- bet a key on: `realm or GetRealmName()` keeps an empty string, so this wrote
+                -- "Bob-" into the pinned list while the helper's list wrote "Bob-YourRealm" for
+                -- the same person -- and "Bob-" matches nothing, so the pinned entry could
+                -- never be un-pinned. (RosterSnapshot's comment states the same hazard; that
+                -- block says it is "ONE READER FOR BOTH WIDGETS", which is the intent rather
+                -- than the state -- only the icon and colour tables were actually shared.)
+                if realm == "" then realm = nil end
                 realm = realm or GetRealmName()
                 local fullName = name .. "-" .. realm
                 local _, class = UnitClass(unit)
@@ -3629,7 +3706,234 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     
     -- Initial refresh
     container:Refresh()
-    
+
+    return container
+end
+
+-- ============================================================
+-- COMPACT ROSTER WIDGET -- ONE COLUMN, THE SAME LANGUAGE
+-- ------------------------------------------------------------
+-- ★ THE DUAL-COLUMN WIDGET AT HALF THE WIDTH. Krathe wants the Power Infusion Helper to fire
+-- for named players only -- "in guild groups... only have the PI alert for the DPS you know
+-- who should be getting PI instead of every DPS in the raid who uses a CD" -- built "around"
+-- the pinned-frames list rather than reusing it outright: "as long as it looks and functions
+-- in the same way, but is adjusted for the more narrow width".
+--
+-- ☠ TWO COLUMNS DO NOT FIT AND CANNOT BE MADE TO. The helper lives in the Aura Designer's
+-- right panel: pihMakeTools derives a group width of roughly 254 and its inner content
+-- roughly 230. The dual widget is 460 wide with two 224px panes -- one of its columns alone
+-- is the whole surface. So the two panes become ONE list, and the right-hand button becomes a
+-- TOGGLE rather than an add: click to include, click again to drop.
+--
+-- ⚠ WHAT IS DELIBERATELY NOT HERE:
+--   · The role bulk-add buttons. "No need for an auto add function as you can pick class/role
+--     etc anyway" -- the helper already narrows by role and by class on the same tab, so a
+--     button that adds every DPS would be a third control saying the same thing.
+--   · Drag to reorder. Pinned frames needs an order because the order is the LAYOUT; an
+--     allowlist is a set, and a set with a hand-sorted order invites the reader to think the
+--     order means something.
+--   · The group number. It is the first thing that stops fitting, and the list is sorted by
+--     group anyway, so the grouping is still visible -- just not labelled.
+--
+-- ⚠ CHOSEN-BUT-ABSENT PLAYERS LEAD THE LIST. They are the whole point of typing a name in
+-- (someone not in the group yet), and a list that only ever shows who is present would give
+-- you no way to see -- or remove -- what you had typed. They keep the toggle, and are drawn
+-- dim with no role icon because neither their role nor their class is knowable from here.
+--
+-- opts:
+--   width       the list's width. Defaults to the parent's, less nothing -- the caller knows
+--               its own insets and this widget should not guess them.
+--   rows        visible rows before it scrolls (default 6)
+--   getPlayers  -> array of "Name-Realm"      setPlayers(array)
+--   onChange    called after any edit, for the consumer's own apply
+-- ============================================================
+function GUI:CreateCompactRosterWidget(parent, opts)
+    opts = opts or {}
+    local getPlayers = opts.getPlayers or function() return {} end
+    local setPlayers = opts.setPlayers or function() end
+    local onChange   = opts.onChange
+
+    local W = opts.width or (parent:GetWidth() or 230)
+    local ROW_H = SnapLen(parent, 22) or 22
+    local ROWS = opts.rows or 6
+    local LIST_H = ROW_H * ROWS + 8
+
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetSize(W, LIST_H + 30)
+
+    local listBg = CreateFrame("Frame", nil, container, "BackdropTemplate")
+    listBg:SetPoint("TOPLEFT", 0, 0)
+    listBg:SetPoint("TOPRIGHT", 0, 0)
+    listBg:SetHeight(LIST_H)
+    GUI:CreateElementBackdrop(listBg, { bgColor = GUI.Colors.background })
+
+    local scroll = CreateFrame("ScrollFrame", nil, listBg, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 4, -4)
+    scroll:SetPoint("BOTTOMRIGHT", -22, 4)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(W - 30, 1)
+    scroll:SetScrollChild(content)
+    StyleScrollBar(scroll)
+
+    local rows = {}
+
+    local function IsChosen(fullName)
+        for _, p in ipairs(getPlayers()) do
+            if p == fullName then return true end
+        end
+        return false
+    end
+
+    -- ⚠ A NEW ARRAY EVERY TIME, never a mutation of what the getter returned. That table is
+    -- the consumer's stored list; editing it in place would write the profile behind the
+    -- setter's back and skip whatever the setter does about override tracking.
+    local function Toggle(fullName)
+        local out, found = {}, false
+        for _, p in ipairs(getPlayers()) do
+            if p == fullName then found = true else out[#out + 1] = p end
+        end
+        if not found then out[#out + 1] = fullName end
+        setPlayers(out)
+        if onChange then onChange() end
+        container:Refresh()
+    end
+
+    -- One row. `data` is a roster entry, or { fullName = ..., absent = true }.
+    local function BuildRow(data, index)
+        local row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        row:SetHeight(ROW_H - 2)
+        row:SetPoint("TOPLEFT", 0, -((index - 1) * ROW_H))
+        row:SetPoint("TOPRIGHT", 0, -((index - 1) * ROW_H))
+        GUI:CreateElementBackdrop(row, { outline = false, bgColor = { 0, 0, 0, 0 } })
+
+        local x = 4
+        if not data.absent then
+            local icon = row:CreateTexture(nil, "OVERLAY")
+            icon:SetSize(14, 14)
+            icon:SetPoint("LEFT", 4, 0)
+            icon:SetTexture(ROSTER_ROLE_ICONS[data.role] or ROSTER_ROLE_ICONS.DAMAGER)
+            local rc = ROSTER_ROLE_COLORS[data.role]
+            if rc then icon:SetVertexColor(rc[1], rc[2], rc[3]) end
+            row.icon = icon
+            x = 22
+        end
+
+        local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        nameText:SetPoint("LEFT", x, 0)
+        nameText:SetPoint("RIGHT", -26, 0)
+        nameText:SetJustifyH("LEFT")
+        nameText:SetMaxLines(1)
+        -- ⚠ THE STORED NAME IS "Name-Realm" AND THE ROW SHOWS ONLY THE NAME. The realm is what
+        -- makes the entry unambiguous and it is what a cross-realm raid needs; it is also
+        -- twenty characters this column does not have. An absent entry keeps whatever was
+        -- typed, since there is no roster row to take a short name from.
+        nameText:SetText(data.name or data.fullName)
+        local cc = (not data.absent) and DF:GetClassColor(data.class) or nil
+        if cc then nameText:SetTextColor(cc.r, cc.g, cc.b)
+        else nameText:SetTextColor(0.62, 0.62, 0.62) end
+
+        local chosen = IsChosen(data.fullName)
+        local btn = CreateFrame("Button", nil, row, "BackdropTemplate")
+        btn:SetSize(20, 18)
+        btn:SetPoint("RIGHT", -2, 0)
+        GUI:CreateElementBackdrop(btn)
+        btn.icon = btn:CreateTexture(nil, "OVERLAY")
+        btn.icon:SetSize(11, 11)
+        btn.icon:SetPoint("CENTER", 0, 0)
+
+        local tc = GetThemeColor()
+        local function Paint()
+            chosen = IsChosen(data.fullName)
+            if chosen then
+                btn:SetBackdropColor(tc.r * 0.25, tc.g * 0.25, tc.b * 0.25, 0.9)
+                btn:SetBackdropBorderColor(tc.r * 0.6, tc.g * 0.6, tc.b * 0.6, 0.9)
+                btn.icon:SetTexture(ROSTER_ICON_CHECK)
+                btn.icon:SetVertexColor(tc.r, tc.g, tc.b)
+                row:SetBackdropColor(tc.r * 0.12, tc.g * 0.12, tc.b * 0.12, 0.5)
+                nameText:SetAlpha(1)
+                if row.icon then row.icon:SetAlpha(1) end
+            else
+                btn:SetBackdropColor(0.15, 0.15, 0.15, 0.8)
+                btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.6)
+                btn.icon:SetTexture(ROSTER_ICON_ARROW)
+                btn.icon:SetVertexColor(0.5, 0.5, 0.5)
+                row:SetBackdropColor(0, 0, 0, 0)
+                nameText:SetAlpha(data.absent and 0.55 or 0.85)
+                if row.icon then row.icon:SetAlpha(0.85) end
+            end
+        end
+        Paint()
+
+        btn:SetScript("OnClick", function() Toggle(data.fullName) end)
+        btn:SetScript("OnEnter", function(self)
+            self:SetBackdropBorderColor(tc.r, tc.g, tc.b, 1)
+            -- The full stored name, realm included -- the row could only show half of it.
+            GUI:ShowTooltip(self, {
+                title = data.fullName,
+                lines = { chosen and L["Click to stop watching this player."]
+                                 or L["Click to watch this player."] },
+            })
+        end)
+        btn:SetScript("OnLeave", function() Paint(); GUI:HideTooltip() end)
+
+        row.Paint = Paint
+        return row
+    end
+
+    -- ── ADD BY NAME ──
+    -- ⚠ ONE ROW, because two would cost a line this panel has not got: the field stretches and
+    -- the button is fixed. Enter and the button do the same thing, and the same thing the
+    -- dual-column widget's does -- including appending the player's own realm when none is
+    -- typed, so "Bob" and "Bob-YourRealm" cannot become two entries for one person.
+    local input = CreateFrame("EditBox", nil, container, "BackdropTemplate")
+    input:SetPoint("TOPLEFT", listBg, "BOTTOMLEFT", 0, -6)
+    input:SetPoint("RIGHT", container, "RIGHT", -48, 0)
+    input:SetHeight(22)
+    GUI:StyleEditBox(input, { skipFont = true })
+    input:SetFontObject(DFFontHighlight)
+    input:SetTextInsets(6, 6, 0, 0)
+    input:SetAutoFocus(false)
+    input:SetMaxLetters(50)
+
+    local function Commit()
+        local text = input:GetText()
+        text = text and text:trim() or ""
+        if text ~= "" then
+            if not text:find("-") then text = text .. "-" .. GetRealmName() end
+            if not IsChosen(text) then Toggle(text) else container:Refresh() end
+            input:SetText("")
+        end
+        input:ClearFocus()
+    end
+    input:SetScript("OnEnterPressed", Commit)
+    input:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+
+    local addBtn = CreateFrame("Button", nil, container, "BackdropTemplate")
+    addBtn:SetPoint("LEFT", input, "RIGHT", 4, 0)
+    GUI:StyleButton(addBtn, { width = 42, height = 22, tinted = true, text = L["Add"] })
+    addBtn:SetScript("OnClick", Commit)
+
+    function container:Refresh()
+        for _, r in ipairs(rows) do r:Hide(); r:SetParent(nil) end
+        wipe(rows)
+
+        local roster = RosterSnapshot()
+        local inGroup = {}
+        for _, e in ipairs(roster) do inGroup[e.fullName] = true end
+
+        local list = {}
+        -- Chosen but not here, first -- see the note at the top for why they are shown at all.
+        for _, p in ipairs(getPlayers()) do
+            if not inGroup[p] then list[#list + 1] = { fullName = p, absent = true } end
+        end
+        for _, e in ipairs(roster) do list[#list + 1] = e end
+
+        for i, data in ipairs(list) do rows[i] = BuildRow(data, i) end
+        content:SetHeight(math.max(#list * ROW_H, 1))
+    end
+
+    container:SetScript("OnShow", function(self) self:Refresh() end)
+    container:Refresh()
     return container
 end
 

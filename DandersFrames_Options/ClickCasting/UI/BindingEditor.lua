@@ -215,7 +215,10 @@ function CC:CreateBindingRow(parent, binding, index)
     local actionType = binding.actionType or ""
     local isMacro = (actionType == "macro") or (binding.macroId ~= nil)
     local fallback = binding.fallback or {}
-    local fallbackText = isMacro and nil or GetFallbackDisplayText(fallback)
+    -- Explicit if: `isMacro and nil or ...` always evaluated the text, so macros showed
+    -- the fallback line the comment above says to hide.
+    local fallbackText
+    if not isMacro then fallbackText = GetFallbackDisplayText(fallback) end
     -- Fall back to the legacy loadCombat field for freshly-added bindings (the
     -- loadCombat -> combat migration only runs at profile load); map its vocabulary.
     local combatSetting = binding.combat

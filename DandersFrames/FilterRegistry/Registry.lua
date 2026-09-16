@@ -161,6 +161,113 @@ function R:DuplicateFilter(srcRef, name)
     return id
 end
 
+-- ============================================================
+-- ★★ A CURATED CUSTOM FILTER — a list WE seeded, not one the user built
+-- ============================================================
+-- ☠ THE TWO KINDS OF CUSTOM FILTER BEHAVE DIFFERENTLY, AND THE DIFFERENCE IS WHOSE LIST IT
+-- IS. One the user built by adding spells: membership IS the truth, so removing a spell with
+-- the ✕ is exactly right -- they put it there. One WE seeded from a curated set (the Power
+-- Infusion Helper's cooldown list): removing a spell is destructive and unrecoverable, and
+-- there was no way back. Krathe, 2026-09-09: "it's a pre created list by us that should
+-- toggle on off and be able to reset to default if someone ticks something off."
+--
+-- ⭐ SO A CURATED FILTER GETS WHAT A PRESET HAS: a per-spell ENABLED layer over a membership
+-- nobody edits, plus a reset. Deliberately the same shape as R:IsSpellEnabled /
+-- R:SetSpellEnabled / R:ResetPreset -- the two kinds of list now answer the same questions,
+-- so the UI can offer the same controls.
+--
+-- ⚠ THE STATE LIVES ON THE FILTER, not in the preset overrides table. It is per-filter data
+-- with the filter's own lifetime: it travels with a profile export and it dies with a
+-- DeleteCustomFilter, neither of which would be true of a side table keyed by filter id.
+-- ⚠ ABSENT MEANS ENABLED, so every existing custom filter behaves byte-for-byte as before
+-- and only one that has actually been ticked off carries anything.
+-- ⚠ `dfDefaults` IS THE MARK *AND* THE ANSWER. Its presence says "we seeded this"; its
+-- contents say what back-to-default means. One field, so the two cannot disagree.
+function R:IsCustomSpellEnabled(cfId, spellID)
+    local f = self:GetCustomFilter(cfId)
+    return not (f and f.disabled and f.disabled[spellID])
+end
+
+function R:SetCustomSpellEnabled(cfId, spellID, enabled)
+    local f = self:GetCustomFilter(cfId)
+    if not f then return end
+    if enabled then
+        if f.disabled then
+            f.disabled[spellID] = nil
+            if not next(f.disabled) then f.disabled = nil end
+        end
+    else
+        f.disabled = f.disabled or {}
+        f.disabled[spellID] = true
+    end
+end
+
+-- How many of a custom filter's spells are ON, and how many there are.
+-- ⚠ ONE COUNTER, THREE CONSUMERS: the Filter Designer's left list, its right-hand header, and
+-- R:ListFilters (which the Buff Bar's picker reads). They showed a plain total each, computed
+-- three ways, and none of them moved when a curated list's spell was ticked off -- Krathe,
+-- 2026-09-09: "the number does not change as I tick them on/off". A count that ignores the
+-- control next to it is worse than no count.
+-- ⚠ A HAND-BUILT FILTER ANSWERS enabled == total, because IsCustomSpellEnabled is true when
+-- there is no disabled set -- so those rows keep the single number they have always shown and
+-- no caller needs to branch on which kind it is.
+function R:CustomFilterCounts(cfId)
+    local f = self:GetCustomFilter(cfId)
+    if not f then return 0, 0 end
+    local on, total = 0, 0
+    for sid in pairs(f.spells) do
+        total = total + 1
+        if self:IsCustomSpellEnabled(cfId, sid) then on = on + 1 end
+    end
+    for rid in pairs(f.rawIDs) do
+        total = total + 1
+        if self:IsCustomSpellEnabled(cfId, rid) then on = on + 1 end
+    end
+    return on, total
+end
+
+-- Has a curated list been altered from its default? The same question IsPresetModified asks
+-- of a preset, and the same answer shape, so a row can carry the same "modified" dot.
+function R:IsCuratedFilterModified(cfId)
+    local f = self:GetCustomFilter(cfId)
+    return (f and f.disabled and next(f.disabled)) and true or false
+end
+
+-- Is this a list we seeded, i.e. one with a default to go back to?
+function R:IsCuratedFilter(cfId)
+    local f = self:GetCustomFilter(cfId)
+    return (f and type(f.dfDefaults) == "table") and true or false
+end
+
+-- Record what this filter's default membership is. Called by whoever seeds it, right after
+-- it is created and filled.
+function R:SetCuratedDefaults(cfId, spellIDs)
+    local f = self:GetCustomFilter(cfId)
+    if not f then return end
+    local d = {}
+    for _, sid in ipairs(spellIDs or {}) do
+        sid = tonumber(sid)
+        if sid then d[sid] = true end
+    end
+    f.dfDefaults = next(d) and d or nil
+end
+
+-- ⚠ RESTORES, IT DOES NOT PRUNE. Everything we seeded comes back and every tick comes back
+-- on; a spell the USER added to our list afterwards is theirs and stays. "Reset to default"
+-- here means "undo what I turned off", which is what it is reached for -- a reset that also
+-- silently threw away someone's own additions would be the destructive act this replaces.
+function R:ResetCuratedFilter(cfId)
+    local f = self:GetCustomFilter(cfId)
+    if not (f and type(f.dfDefaults) == "table") then return false end
+    f.disabled = nil
+    for sid in pairs(f.dfDefaults) do
+        -- Through AddSpellToCustom so an id still snaps to its canonical record, exactly as
+        -- it did when the list was seeded. "exists" is the ordinary case, not an error.
+        self:AddSpellToCustom(cfId, sid)
+    end
+    return true
+end
+
 -- Returns "spell" (known — snapped to canonical), "raw" (unknown id), or "exists"
 function R:AddSpellToCustom(id, spellID)
     local f = self:GetCustomFilter(id)
@@ -759,13 +866,12 @@ function R:ListFilters(isLinked)
     end)
     for _, cfId in ipairs(customs) do
         local cf = self:GetCustomFilter(cfId)
-        local n = 0
-        if cf then
-            for _ in pairs(cf.spells) do n = n + 1 end
-            for _ in pairs(cf.rawIDs) do n = n + 1 end
-        end
+        -- ⚠ THROUGH THE SHARED COUNTER, which honours a curated list's per-spell ticks. This
+        -- counted membership twice over and reported enabled == total unconditionally, so a
+        -- ticked-off spell still counted as on everywhere this list is read.
+        local on, total = self:CustomFilterCounts(cfId)
         out[#out + 1] = { kind = "custom", key = cfId, custom = true,
-                          name = (cf and cf.name) or cfId, enabled = n, total = n }
+                          name = (cf and cf.name) or cfId, enabled = on, total = total }
     end
     return out
 end
@@ -997,8 +1103,86 @@ end
 -- See the fail-open branch inside ResolveSelection.
 local failOpenLogged = setmetatable({}, { __mode = "k" })
 
+-- ★★★ A CUSTOM FILTER MAY NAME OTHER FILTERS (`f.includes`), AND THIS IS WHERE THAT IS READ.
+--
+-- ☠ WHAT IT REPLACES: COPYING. The Power Infusion Helper's three amplifier ticks used to copy
+-- 51 spell IDs out of the Trinkets, Potions and Racials lists INTO its own, so its list read
+-- 91 and the same spells existed in two places. Krathe, 2026-09-10: "despite the fact those
+-- additional filters link to our actual filters, ticking them on actually just adds those to
+-- the PI helper filter, so they are now twice on? this is very confusing." He is right: each
+-- row has a pencil that opens the real list, which promises a REFERENCE, and the tick made a
+-- COPY. The pencil was a promise the tick did not keep.
+--
+-- ⚠ HERE AND NOT IN THE AURA DESIGNER, and the reason is that a filter must mean ONE thing.
+-- The AD resolves a filter ref through DF:ResolveADFilterRef, the layout groups resolve a
+-- selection of their own, and the helper's SOUND registrations resolve a third way
+-- (Engine.lua's pihResolvedMap) -- and the user can also pick that same list in the Buff Bar's
+-- own picker. Folding in any one of those would make one list mean different things in
+-- different places, which is a worse fault than the copy it replaces.
+--
+-- ⚠ INERT FOR EVERY FILTER WITHOUT `includes`, which today is every filter but ours: no
+-- allocation, the caller's own table is handed straight back, and nothing else in this file
+-- learns a new shape.
+--
+-- ☠ ONE LEVEL, DELIBERATELY, AND SO NO RECURSION GUARD IS NEEDED. An included filter's own
+-- includes are NOT folded. Nothing writes a chain today (the helper includes two presets and
+-- one flat list of ours), and "resolve until it stops changing" on the render path is a cycle
+-- waiting to be created by hand-editing a profile. If a chain is ever wanted, it needs a seen
+-- set and a depth cap, not the removal of this sentence.
+-- ⚠ `selection.noIncludes` OPTS OUT, for a consumer that names its sources itself. The Power
+-- Infusion Helper's Cooldown Icons group can be set to show, say, class cooldowns only while
+-- the Triggers tab still fires on trinkets -- and it says so by listing the sources it wants.
+-- Without this flag it could not: selecting our cooldown list would drag that list's own
+-- includes in behind it, and "cooldowns only" would be unsayable.
+local function foldIncludes(self, selection)
+    if selection and selection.noIncludes then return selection end
+    if not (selection and selection.customs) then return selection end
+    local addP, addC
+    for cfId in pairs(selection.customs) do
+        local f = self:GetCustomFilter(cfId)
+        local inc = f and f.includes
+        if type(inc) == "table" then
+            for k in pairs(inc.presets or {}) do
+                if not (selection.presets and selection.presets[k]) then
+                    addP = addP or {}; addP[k] = true
+                end
+            end
+            for k in pairs(inc.customs or {}) do
+                -- ⚠ Skip one already selected, or a filter that included itself would be
+                -- merely redundant rather than a problem. (It cannot loop: see above.)
+                if not selection.customs[k] then addC = addC or {}; addC[k] = true end
+            end
+        end
+    end
+    if not (addP or addC) then return selection end
+    -- ☠ A COPY, NEVER A MUTATION. Callers pass PROFILE tables here (db.buffFilterSelection, an
+    -- Aura Designer group's filterSelection) -- the same fact the fail-open latch below had to
+    -- learn the hard way. Writing the expansion into one would put it in SavedVariables and in
+    -- every profile export, where it would look like a selection the user made.
+    local out = { uncategorised = selection.uncategorised, presets = {}, customs = {} }
+    for k, v in pairs(selection.presets or {}) do out.presets[k] = v end
+    for k, v in pairs(selection.customs or {}) do out.customs[k] = v end
+    for k in pairs(addP or {}) do out.presets[k] = true end
+    for k in pairs(addC or {}) do out.customs[k] = true end
+    return out
+end
+
+-- Everything an `includes` filter pulls in, as one flat selection -- for a caller that needs to
+-- COUNT or LIST what a filter really covers rather than resolve it to a spell map.
+function R:ExpandSelection(selection)
+    return foldIncludes(self, selection)
+end
+
 function R:ResolveSelection(selection, showAll)
     if showAll or not selection then return { kind = "all" } end
+    -- ⚠ BEFORE THE FAIL-OPEN TEST BELOW, not after. A filter whose only content is its
+    -- includes has no presets and no customs of its own, and the empty-selection branch
+    -- resolves to SHOW EVERYTHING -- so folding afterwards would turn "watch the trinket
+    -- list" into "watch every buff in the game".
+    -- ⚠ A FOLD ALWAYS ADDS, so the table that comes back is never emptier than the one that
+    -- went in -- which is also why the fail-open latch below still dedupes: a folded selection
+    -- (a fresh table, and so a fresh latch key) can never reach that branch.
+    selection = foldIncludes(self, selection)
     local anySel = (selection.presets and next(selection.presets))
         or (selection.customs and next(selection.customs))
     if not anySel and not selection.uncategorised then
@@ -1083,9 +1267,15 @@ function R:ResolveSelection(selection, showAll)
         for cfId in pairs(selection.customs) do
             local f = self:GetCustomFilter(cfId)
             if f then
+                -- ⚠ THE PER-SPELL TICK ON A CURATED LIST, and it is the exact mirror of the
+                -- preset arm above (IsSpellEnabled). Absent state means enabled, so a
+                -- hand-built custom filter -- which has no ticks and never will -- resolves
+                -- byte-for-byte as it always did.
                 for sid in pairs(f.spells) do
-                    local rec = R.ByID[sid]
-                    if rec then addLiveRecordIDs(self, map, rec) else map[sid] = true end
+                    if self:IsCustomSpellEnabled(cfId, sid) then
+                        local rec = R.ByID[sid]
+                        if rec then addLiveRecordIDs(self, map, rec) else map[sid] = true end
+                    end
                 end
                 -- What is left in rawIDs is genuinely unknown to the database, so
                 -- there is no record to narrow. A direct mute is still honoured:
@@ -1093,7 +1283,9 @@ function R:ResolveSelection(selection, showAll)
                 -- "muting never reveals" has to hold on every path, not just the
                 -- ones with a record behind them.
                 for rid in pairs(f.rawIDs) do
-                    if not self:IsSpellIDMuted(rid) then map[rid] = true end
+                    if self:IsCustomSpellEnabled(cfId, rid) and not self:IsSpellIDMuted(rid) then
+                        map[rid] = true
+                    end
                 end
             end
         end

@@ -226,7 +226,6 @@ L["Are you sure?"] = true
 L["Aura Designer Template"] = true
 L["Auto-Create Profiles"] = true
 L["Auto-create profiles for loadouts"] = true
-L["Back"] = true
 L["Binding:"] = true
 L["Bindings only cast their assigned spell"] = true
 L["cast a resurrection spell instead."] = true
@@ -463,6 +462,9 @@ L["%d more settings"] = true
 L["Pin settings in popout"] = true
 L["%d of %d IDs"] = true
 L["%d of %d tracked"] = true
+-- The header on a CURATED custom filter once some of its spells are ticked off. The plain
+-- form below still serves every other case, so an ordinary filter's header never changes.
+L["%d of %d spells"] = true
 L["%d override"] = true
 L["%d overrides"] = true
 L["%d players"] = true
@@ -2068,10 +2070,21 @@ L["Animation Inset"] = true
 L["Animation Offset X"] = true
 L["Animation Offset Y"] = true
 L["Animations run per-border and may impact FPS in larger raids. Use sparingly on high-priority alerts."] = true
+L["Animation Blend Mode"] = true
 L["Animation Length"] = true
 L["Animation Particles"] = true
 L["Animation Scale"] = true
 L["Animation Thickness"] = true
+-- ★★ HOW THE EFFECT'S COLOUR MIXES WITH WHAT IS BEHIND IT. Krathe, 2026-09-10: "if I've set
+-- it to red it will show orange when over a yellow border... I'm sure we used to offer up a
+-- blend mode for animation?" We never did -- L["Border Blend Mode"] governs the border's own
+-- EDGES, not the effect over them, which is an easy pair to read as one control.
+-- ⚠ THE TOOLTIP NAMES HIS EXACT SYMPTOM, because that is the sentence that tells someone
+-- looking at an orange effect they picked red for which control they are looking for.
+-- ⚠ "Default" IS A REAL OPTION, not a placeholder: each effect had its own hardcoded mode
+-- (DF Chase and DF Proc additive, the rest not), and Default is how a profile keeps it.
+-- The value labels reuse L["Blend"] / L["Add"] / L["Modulate"] / L["Disable"] / L["Default"].
+L["How the effect's colour mixes with what is behind it. Add brightens whatever it crosses, so a red effect reads orange over a yellow border — it is what makes a glow glow. Blend draws the colour exactly as picked. Default keeps this effect's original look."] = true
 L["Border Animation"] = true
 L["Blink"] = true
 L["Corner Length"] = true
@@ -2933,24 +2946,49 @@ L["Interrupted: %s"] = true
 L["Left-Click:"] = true
 L["Right-Click:"] = true
 
--- Power Infusion Helper (Aura Designer, priest only). One block, one card, and the card
--- flips between adding and removing -- so the two titles are a pair and must stay one
--- verb apart in every locale.
-L["POWER INFUSION HELPER"] = true
-L["Add the helper"] = true
-L["Remove the helper"] = true
+-- Power Infusion Helper — its OWN page as of 2026-09-08 (Auras > Power Infusion Helper,
+-- priest only). It used to be a block inside the Aura Designer whose card flipped between
+-- "Add the helper" and "Remove the helper"; it is an enable tick now, so those two strings
+-- and the removal caption that went with them are gone rather than left for translators to
+-- work on text nobody will ever see.
+--
+-- The page's NAV ENTRY. Title case, because nav labels are title case everywhere in this
+-- addon — and a separate string rather than a case transform of anything, since in a locale
+-- where case is not a presentation choice a transform is wrong in both places.
+L["Power Infusion Helper"] = true
+-- ⚠ ONE VERB APART FROM THE DESIGNER'S OWN "Enable Aura Designer", on purpose: two features
+-- that turn on the same way should read the same way.
+L["Enable Power Infusion Helper"] = true
+-- The pool tab's tooltip, beside My Buffs / Debuffs / Any Buff. Three lines like its
+-- neighbours: what the pool is for, how you work it, and the spec-scope fact they all state.
+L["Who is worth casting Power Infusion on, and how that shows on the frame."] = true
+L["Set up its Triggers, then add effects the same way as any other pool."] = true
+-- The sentence under the tick — the only place the feature explains itself, and it stays on
+-- screen while the tick is OFF, which is exactly when someone needs to read it.
 L["Shows who is worth infusing, and goes dark while your Power Infusion is on cooldown."] = true
-L["Deletes its indicators and its spell lists. Nothing else is touched."] = true
--- The three signals. Adding the helper turns on the first one only; the other two are ticked
--- on afterwards, so each label has to stand alone with just the line beneath it for context.
-L["What to Show"] = true
-L["Big cooldown"] = true
--- How the surface pickers behave. What the controls cannot show on their own: which
--- surfaces stack, and which pick one winner.
--- Surface picker. Every surface is listed; one already held by a signal on the same spell list
--- says what picking it does, because the two trade places rather than one being refused.
-L["%s (swap with %s)"] = true
-L["Already has active Power Infusion"] = true
+-- ⚠ The helper's surface menu reuses the addon's existing L["Square"] and the frame-level
+-- labels; it needs no names of its own. It briefly had a "Power Infusion icon" string when
+-- Icon was the surviving placed surface -- that was reversed the same afternoon (the helper
+-- highlights that someone popped a cooldown; it does not track WHICH one, so a per-buff
+-- icon promised detail the feature never delivers) and the string went with it.
+-- ★★ THE PANEL'S TWO HALVES, in the order the feature is reasoned about: decide what COUNTS
+-- as worth infusing, then decide how it gets SHOWN. "What to Show" was the old heading for
+-- the second half and led the panel -- the answer before the question -- which is why it read
+-- as a pile of settings. Retired 2026-09-08 along with "Never Show On", whose two role ticks
+-- are inside Triggers now.
+-- ⚠ "Triggers" is this panel's own heading and needs no qualifier: the page it lives on is
+-- already named Power Infusion Helper. L["Indicators"] is the addon's existing key, reused.
+L["Triggers"] = true
+-- ★ The Effects tab's add row, and the per-effect remove beside each one. A signal can hold
+-- several surfaces now (border AND health bar AND a square), so both of these repeat.
+-- ⚠ "Remove %s" TAKES THE SURFACE'S OWN NAME -- "Remove Border", "Remove Health Bar" -- and
+-- that is not decoration: with several effects listed, a bare "Remove" would sit beside three
+-- rows looking identical and the user could not tell which one it acted on.
+-- ☠ THE HELPER'S PRIVATE EFFECTS TAB IS GONE (2026-09-09) AND SEVEN KEYS WENT WITH IT:
+-- its own "ADD AN EFFECT" heading, the two route cards that asked WHICH SIGNAL, their
+-- descriptions, its empty-state line, and the surface dropdown's swap label. The Effects
+-- tab is the DESIGNER'S now -- same heading, same tiles, same effect cards -- and there is
+-- no signal to choose: everything added is "worth infusing".
 -- Clash warnings. Shown only on the three surfaces that take a single winner, and each names
 -- the remedy that already exists rather than describing the problem.
 -- The offender is NAMED: "something else colours the border" sends someone hunting through
@@ -2964,31 +3002,185 @@ L["%s already colours this text. Only one can show — raise this signal's prior
 L["%s and %d more"] = true
 L["Another effect"] = true
 -- Shared settings. These live on the helper, not on each effect: they are statements about
--- who you would infuse, and there is only one answer per player.
-L["Never Show On"] = true
+-- who you would infuse, and there is only one answer per player. They sit on the Triggers TAB
+-- -- excluding a role is a statement about what counts, not about how it is drawn -- so the
+-- old "Never Show On" heading went with the regroup.
+-- ⚠ THE BOX IS "Roles" AND THE TAB IS "Triggers" (Krathe, 2026-09-09). It was Triggers for
+-- both, so the tab opened with a box repeating its own name -- which says nothing, while the
+-- thing it could have said (this box is the ROLE filter) went unsaid.
+L["Roles"] = true
 L["Groups without assigned roles show everyone."] = true
-L["Hide the helper while your Power Infusion is on cooldown"] = true
+-- ★★ THE NAMED-PLAYER ALLOWLIST. "In guild groups it would be useful to only have the PI
+-- alert for the DPS you know who should be getting PI instead of every DPS in the raid who
+-- uses a CD" (Krathe, 2026-09-10).
+-- ☠ THE NOTE IS LOAD-BEARING, NOT DECORATION. Every other control on this tab narrows by being
+-- ticked ON; this one narrows by having anything in it AT ALL -- so an empty picker looks like
+-- a filter that has been switched off when it means the exact opposite. One sentence is the
+-- difference between a default and an apparent fault.
+L["Players"] = true
+-- ★★ THE COOLDOWN-ICON GROUP'S OWN SOURCES. Krathe, 2026-09-10: "we should let people
+-- toggle cooldowns and the sub filters on/off so they can pick from any of the 4... it might
+-- be the case they want to trigger from a trinket but only show a CD etc." Triggers answers
+-- WHEN the helper fires; this answers WHAT the row of icons then shows.
+-- ⚠ THE FOOTER IS A STATE READOUT, NOT A CAPTION. Four ticks matching the Triggers tab look
+-- identical whether they are INHERITING it or were set by hand to the same thing, and the
+-- difference is whether a later change over there still reaches this group. So one line says
+-- which, and the button is the way back to following.
+-- L["Show"], L["Trinkets"], L["Potions"], L["Racials"] and L["Class Cooldowns"] are reused.
+L["SHOW"] = true
+L["Class Cooldowns"] = true
+L["Following the Triggers tab. Changing one of these stops that."] = true
+L["Follow Triggers"] = true
+-- ★★ THE ALLOWLIST'S OWN SWITCH (2026-09-11), and the note shrank to make room for it.
+-- ⚠ RETIRED: L["Empty means everyone. Add players here to watch only them."]. Its first
+-- sentence described a rule that has moved into the tick's tooltip, where it belongs now that
+-- emptiness is no longer what decides anything.
+-- ⚠ "ONLY WATCH THESE PLAYERS" reads correctly in both positions -- ticked it is the rule,
+-- unticked it is the rule you are not using -- which a label like "Use player list" does not:
+-- that one names a mechanism and leaves the reader to work out its effect.
+L["Add players here to watch only them."] = true
+L["Only watch these players"] = true
+-- ⚠ OFF FIRST, because off is the state this switch was asked for: Krathe, 2026-09-11, wants
+-- to keep a raid team written down and stop applying it on a pug night. The promise that the
+-- list survives is the whole point, so it is the sentence that leads.
+-- ⚠ THE EMPTY-LIST RULE SITS ON THE ON LINE, which is the only state it can apply in.
+L["Off: the helper watches everyone. Your list is kept for next time."] = true
+L["On: only the players listed below. An empty list still means everyone."] = true
+-- The compact picker's row button, which toggles. Both states are spelled out because the
+-- glyph alone (a chevron, or a tick) says which state you are IN and not what a click does.
+L["Click to watch this player."] = true
+L["Click to stop watching this player."] = true
+-- ⚠ ASKED POSITIVELY, like every other tick on the panel. It was "Hide the helper while your
+-- Power Infusion is on cooldown" -- the one control in a box of enables that turned a
+-- SUPPRESSION on, which made the box read inconsistently. The stored value is unchanged and
+-- still defaults to gating, so this ships UNTICKED and nobody's saved choice changed meaning.
+-- ⚠ ...AND THEN SHORTENED. It spelled the whole rule out on the row and wrapped doing it;
+-- the rule moved to the tooltip below. What the LABEL has to carry is WHICH cooldown is meant
+-- -- this box is otherwise full of other people's -- so it names the spell outright, where
+-- "Show while on cooldown" would have read as the tracked one. Krathe's wording, verbatim,
+-- capital C included: a label he typed is a label he can find again.
+L["Show when Power Infusion is on Cooldown"] = true
+-- ⚠ "EFFECTS", NOT "MARKERS". This panel's own word is the one the Effects tab and ACTIVE
+-- INDICATORS use; "marker" belongs to the raid target icon and the dispel corner mark, which
+-- are other features. Krathe, 2026-09-10: "markers? it should be effects and the wording
+-- itself is not very clear on the tooltip rethink it."
+-- ⚠ ONE LINE PER STATE, each a plain sentence, off first because off is the default. What
+-- these replace stated a consequence of the rule ("so you are never pointed at someone you
+-- cannot infuse") before finishing the rule itself.
+-- ⚠ The label says "on Cooldown", so these say "off cooldown" / "on cooldown" back rather
+-- than reaching for "ready" -- one idea, one word for it.
+L["Off: the helper's effects only appear while your Power Infusion is off cooldown."] = true
+L["On: they appear even while it is on cooldown."] = true
+-- ★ SHOW IN COMBAT ONLY, beside the cooldown gate and independent of it: both conditions
+-- have to pass, and the tooltip says so rather than leaving the reader to work out how two
+-- conditions on one feature combine. Off first, as above, because off is the default.
+L["Off: the helper works wherever you are."] = true
+L["On: nothing shows until you are in combat. Independent of the cooldown setting above -- both have to pass."] = true
 -- Only watch. Classes rather than specs because the spell data records a class and nothing
--- finer; the pointer names the editor that does go spell by spell, so the limit is not a
--- dead end.
+-- finer; the row links out to the editor that does go spell by spell, so the limit is not
+-- a dead end.
+-- ★ THE BASELINE BOX: the class ticks, the note, and the button that edits the list they
+-- narrow. Its count rides the header because the source has no row of its own.
 L["Classes and Cooldowns"] = true
+-- ⚠ A BUTTON, NOT A PENCIL. The pencils sit on the Additional Filters ROWS, beside the
+-- tick that includes each source; this box has no source row -- the class ticks are the
+-- control -- so a full-width button reads as belonging to the box rather than to whichever
+-- row it happened to be nearest. Krathe, 2026-09-10.
+L["Edit Cooldowns"] = true
 L["Classes"] = true
-L["To add or remove single cooldowns, edit the list in the Filter Designer."] = true
 L["Untick a class to stop watching its cooldowns."] = true
 -- Sound. The helper owns this entry outright: the generic effects list refuses to show sound
 -- on a filter-owned record, so it offers no row and no delete button for it either.
-L["Play a sound when someone becomes worth infusing"] = true
+-- ⚠ THE TICK IS LABELLED "Enable" AND EXPLAINS ITSELF IN A TOOLTIP. Its label was the whole
+-- sentence below, under a box already captioned Sound Alert -- the feature stated twice, and
+-- wrapping to two lines to do it. Krathe: "too verbose, make it Enable with a tooltip
+-- explaining what it does in better english." L["Enable"] and L["Sound Alert"] already exist.
+L["Plays your chosen sound when a group member's cooldown makes them worth infusing."] = true
 L["Only plays while the helper is showing."] = true
 -- Show When Missing's greyed-out reason on a helper effect (Indicators.lua GateSWM): the
 -- missing-mode render path is the one place the helper's cooldown gate cannot reach.
 L["Not available on a Power Infusion Helper signal."] = true
--- The icons row on the cooldown signal, and the three amplifier ticks nested under it.
--- Amplifiers are one category with three sources: what makes a burst BIGGER, as against the
--- cooldown list, which says a burst is happening at all. They are icons only -- a border
--- lighting for a trinket on its own would be noise.
-L["Cooldowns"] = true
+-- ★ THE FOUR TRIGGER SOURCES, one row each with its count and a link to its own list.
+-- ⚠ THE ROWS REPLACED A SINGLE BUTTON AND A NOTE explaining that three of the four were
+-- not really editable -- Krathe: "the note below the link to edit the cooldown list is
+-- silly, the additional filters can also be edited, this really is an unclear mess." They
+-- ARE editable now (pihAmplifierIDs honours each preset's ticks and the copy is re-taken
+-- on every visit), so each row simply offers the way in and the panel says nothing.
+-- ⚠ THE FOURTH SOURCE IS NOT HERE. Class cooldowns live in the "Classes and Cooldowns"
+-- box with the ticks that narrow them and the button that edits them -- that box is the
+-- baseline, and these three are what you add to it.
+-- ⚠ The counts are appended to these labels at render time and need no translating.
+L["Additional Filters"] = true
+L["Edit this list"] = true
+L["Open it in the Filter Designer."] = true
+-- The three sources in Additional Filters. Each tick puts that source's spells into the ONE
+-- list the helper matches on, so ticking Trinkets makes a trinket proc fire whatever effects
+-- have been added on the Effects tab.
+-- ⚠ L["Cooldowns"] WENT WITH ITS ROW. The fourth source has no tick of its own any more --
+-- the class ticks are its control, so it is named by the "Classes and Cooldowns" header
+-- instead. See P.PIH_CooldownCounts for why a tick there was redundant AND harmful.
 L["Trinkets"] = true
 L["Potions"] = true
+-- The helper's add block, which stands where the designer's three scope cards stand on every
+-- other pool: there is no spell to choose here (the cooldown list IS the spell), so the tile
+-- grid is the whole flow.
+-- ⚠ THE ICON TILE NEEDS ITS OWN DESCRIPTION. The shared one reads "The spell's own artwork",
+-- which is true in the designer and false here. Its key is gone: the answer stopped being
+-- "pinned to Power Infusion" the moment the tile grew a second step, and it is now the
+-- three-way description a few lines down.
+-- ★ THE HELPER'S ADD GRID. Two steps for the icon -- which KIND of indicator, then which
+-- ICON -- because the three icon answers are as different from each other as an icon is from
+-- a square, and every other choice on that grid is made by looking at a thumbnail.
+-- ★★ THREE ANSWERS BEHIND ONE TILE, on two axes: HOW MANY (one effect, or one per
+-- cooldown they have up) and WHAT PICTURE (always Power Infusion, or the buff they used).
+-- "Cooldown Icons" is the GROUP and used to stand on the main grid beside Border and Square,
+-- which put a container among a row of effects -- see pihBuildAddTiles for why that mismatch
+-- is what made it confusing rather than merely untidy.
+L["Which icon?"] = true
+L["Power Infusion"] = true
+L["The same picture on everyone worth infusing."] = true
+L["Their cooldown"] = true
+L["The buff they actually used — one of them, if several are up at once."] = true
+L["Power Infusion, their cooldown, or one per cooldown they have up."] = true
+L["Cooldown Icons"] = true
+L["One icon per cooldown they have up, each showing its own."] = true
+-- ⚠ THE SECOND LINE OF A GREYED TILE'S TOOLTIP, and it has to say where the thing WENT --
+-- these tiles are greyed rather than removed precisely because a tile that vanished when you
+-- clicked it told nobody anything.
+-- ⚠ ONE MESSAGE FOR ALL THREE. The two single-icon tiles briefly shared a different one
+-- ("the card below switches which picture it shows") because adding either spent both; they
+-- are two independent effects now -- Krathe asked for the pair -- so each greys on its own and
+-- the honest instruction is the same as the group's: remove it from the list below.
+L["Already added. Remove it from the list below to change it."] = true
+-- The cooldown-icon group's collapsed summary, in place of the filter count every other group
+-- shows. Its list is the cooldown list, which the Triggers tab owns -- so trinkets, potions
+-- and racials reach it automatically as they are ticked there, with no second control here
+-- that could disagree. The number is the list's own enabled total, so it moves when they do.
+L["%d spells, from your Triggers"] = true
+-- ⚠ AND THE PLAIN COUNT, for a group that has been given its own SHOW set. Saying "from your
+-- Triggers" on a group that no longer follows them would be the header contradicting the block
+-- directly beneath it, which says it has stopped following.
+-- ★ THE ICON'S TWO CHOICES on the Power Infusion Helper's pool. The picture is pinned to
+-- Power Infusion by default -- "infuse this player" -- and can be swapped for the buff they
+-- actually used. The caveat in the first tooltip is real and not a hedge: a placed icon
+-- renders ONE slot, so with a cooldown and a trinket up together the engine's pick is not
+-- ours to make. The second tick is the answer to that, and names the case it is for.
+L["Show the triggering cooldown's icon"] = true
+L["Off: the Power Infusion icon, on everyone worth infusing. On: the buff they actually used — one of them, if several are up at once."] = true
+-- ★★ THE ICON'S FOUR SOURCES, matching the Cooldown Icons group's SHOW block. These replace
+-- one tick ("Ignore trinkets, potions and racials") that muted all three amplifiers at once:
+-- same mechanism, per source. Krathe, 2026-09-10: "yes build the icon block the same".
+-- ⚠ SUBTRACTIVE, AND THE FOOTER SAYS SO. A placed effect is keyed by ONE filter reference,
+-- so it can show less than Triggers watches and never more -- showing more needs a filter of
+-- its own, which is what the group is for. A source Triggers has off is GREYED rather than
+-- hidden, with its own reason, or the two cards would disagree about how many sources exist.
+-- L["Class Cooldowns"], L["Trinkets"], L["Potions"] and L["Racials"] are reused.
+L["This icon only. It can show less than the Triggers tab watches, never more."] = true
+L["Switch this on under Triggers first — the helper is not watching it."] = true
+L["Every indicator is already in use. Remove one below to add it again."] = true
+-- The stub page behind the nav row, reached by the settings SEARCH rather than by clicking
+-- the row -- which links straight to the designer's Power Infusion Helper tab.
+L["The Power Infusion Helper is a tab inside the Aura Designer."] = true
 -- Shown under a signal that has no colour and no icons -- a state the panel can reach and
 -- could not previously explain. Names both remedies; the second form is for a signal with no
 -- icons row of its own, where the menu is the only door.
@@ -2996,6 +3188,18 @@ L["Cooldowns are not showing. Add a display from the dropdown, or tick '%s'."] =
 L["Move and size the icons under Layout Groups."] = true
 -- Row labels, so a signal names itself in the effects list rather than reading as its
 -- spell list. Resolved at render from the mark; never stored.
-L["PI Helper — Big cooldown"] = true
+-- ⚠ THE FIRST ONE NAMES THE FEATURE, NOT THE TRIGGER. It was "PI Helper — Big cooldown",
+-- which is what fires the effect rather than what the effect IS -- the same words on every
+-- row, where the row's own identity should be. The effect's TYPE is already on the row as a
+-- coloured badge (Icon, Border, Square), so the text does not repeat it.
+L["PI Helper"] = true
+-- ⚠ THE TWO ICONS ARE NAMED; NOTHING ELSE IS. Every other helper effect is unique on the
+-- signal, so its type BADGE distinguishes it and a suffix would print the same word twice on
+-- one row. The two icons differ only in their artwork and the badge says "Icon" for both --
+-- so since the pair became addable at once, two rows in ACTIVE INDICATORS read identically.
+-- Krathe, 2026-09-10: "a placed PI icon should show as PI Helper - PI Icon / Icon / Icons,
+-- right now only the last actually shows." ("Icons" is the GROUP, whose name is stored data.)
+L["PI Helper — PI Icon"] = true
+L["PI Helper — Icon"] = true
 L["PI Helper — Already has active Power Infusion"] = true
 --@end-do-not-package@

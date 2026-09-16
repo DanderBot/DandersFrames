@@ -1409,7 +1409,33 @@ end
 --
 -- The dead map is a populated set matching nothing, never an empty table: an empty include
 -- set reads as "no selection", which the engine is free to treat as "everything passes".
-local HELPER_GATE_DEAD_CF = { includeSpellIDs = { [1] = true } }
+-- ☠☠☠ THE DEAD FILTER IS THE VERIFIED PARK LEVER, NOT AN INCLUDE MAP (2026-09-11).
+--
+-- This was { includeSpellIDs = { [1] = true } } -- "match only spell 1", i.e. nothing.
+-- Krathe's raid logs proved the broadcast reaching it: 30 group handles and 30 slots on
+-- every edge, pushed=60, deferred=0, skipped=0, in combat -- and the helper icons and
+-- borders carried on showing on his allowed players while Power Infusion was on cooldown.
+-- The gate flipped, the push landed, the filter did not blank the slot.
+--
+-- ☠ BECAUSE includeSpellIDs CAN FAIL OPEN. It is evaluated INSIDE
+-- CanApplyIdentityCandidateFilters, and when the identity gate declines -- range,
+-- visibility, a cinematic, any of the reasons the latch work exists -- the include map is
+-- skipped entirely and EVERY helpful aura passes (see the IDENTITY-GATE EXPOSURE note
+-- below, and memory §15: "gate decline => include AND exclude maps SKIPPED"). A "dead"
+-- filter built on it is dead only while the gate happens to be applied, which in a raid
+-- is intermittently -- and every report of this bug was intermittent.
+--
+-- ✅ maxDuration = 0 IS EVALUATED OUTSIDE THAT GATE, in readable Lua
+-- (DoesAuraPassCandidateFilters), and excludes every aura unconditionally: a timed one
+-- fails `duration > 0`, a permanent one fails `duration == 0`. Verified in game
+-- 2026-08-30 against a unit carrying eight live buffs -- see SLOT_PARK_CF, which is this
+-- same lever and is why parking works when this did not.
+--
+-- ⚠ A SEPARATE CONSTANT FROM SLOT_PARK_CF, DELIBERATELY. _cf() returns this by identity
+-- and the value-tracked push compares against it; sharing the park's table would make a
+-- gated slot indistinguishable from a parked one to every reader that asks "which lock
+-- is this", and the two are cleared by different things.
+local HELPER_GATE_DEAD_CF = { maxDuration = 0 }
 local helperGateDark = false
 
 -- ☠ OWNERSHIP: `config.dfGate`. The gate must only ever darken our own effects. The first cut
@@ -1477,6 +1503,18 @@ local function helperUnitRole(unit)
     return DF.GetUnitRole and DF:GetUnitRole(unit)
 end
 
+-- ★★ THE NAMED-PLAYER ALLOWLIST (2026-09-10). Krathe: "in guild groups it would be useful to
+-- only have the PI alert for the DPS you know who should be getting PI instead of every DPS in
+-- the raid who uses a CD."
+--
+-- ⚠ AN ALLOWLIST, AND THEREFORE nil MEANS EVERYONE. The roles table above is an EXCLUDE list,
+-- so an empty one excludes nobody and the two read in opposite directions -- which is right
+-- for what each says, and exactly why the nil case is spelled out at both ends. A profile that
+-- has never used this has no list, and nothing changes for it.
+-- ⚠ KEYED "Name-Realm", the same key the picker writes (GUI.RosterSnapshot). Realm-qualified
+-- because a guild group can be cross-realm and because two Bobs is not a hypothetical.
+local helperAllowedPlayers = nil   -- e.g. { ["Bob-Draenor"] = true }; nil = everyone
+
 local function helperRoleExcluded(unit)
     if not (helperExcludedRoles and unit) then return false end
     local role = helperUnitRole(unit)
@@ -1484,10 +1522,34 @@ local function helperRoleExcluded(unit)
     return helperExcludedRoles[role] == true
 end
 
+-- ⚠ THE NAME TEST FAILS OPEN TWICE OVER, and both are deliberate: no list means everyone (an
+-- allowlist nobody has written is not a filter), and a unit whose name we cannot read is
+-- shown rather than hidden. The failure this feature can afford is marking one person too
+-- many; the one it cannot is going silent for the raid because a name lookup blinked.
+-- ☠ "" AS WELL AS nil FOR THE REALM -- see GUI.RosterSnapshot, which writes these keys. Which
+-- of the two UnitName returns for a same-realm unit is not something to bet a key on, and
+-- "Bob-" would match nothing while looking exactly like a name that should.
+local function helperPlayerExcluded(unit)
+    if not (helperAllowedPlayers and unit) then return false end
+    local name, realm = UnitName(unit)
+    if not name or name == "" then return false end        -- fail open
+    if realm == "" then realm = nil end
+    return not helperAllowedPlayers[name .. "-" .. (realm or GetRealmName())]
+end
+
+-- Both narrowings, one verb. Every consumer asks this rather than picking a test, so the
+-- container funnel and the sound path cannot come to different answers about one unit.
+local function helperUnitExcluded(unit)
+    return helperRoleExcluded(unit) or helperPlayerExcluded(unit)
+end
+
 -- Shared with the SOUND path (Factory): sound registers per unit and never passes the
--- container funnel, so role exclusion must be answerable from outside it -- or a cue plays
+-- container funnel, so exclusion must be answerable from outside it -- or a cue plays
 -- for a unit nothing marks.
-function AuraContainer.IsHelperRoleExcluded(unit) return helperRoleExcluded(unit) end
+-- ⚠ THE NAME KEPT ITS "Role", so the one caller in Factory.lua did not have to change while
+-- the ANSWER widened. That is the wrong trade -- a name that describes half of what it does
+-- is how the next reader gets it wrong -- so the verb is renamed and the caller with it.
+function AuraContainer.IsHelperUnitExcluded(unit) return helperUnitExcluded(unit) end
 
 -- A record's candidateFilters REPLACES the config-wide set for that group/slot
 -- (the dispel overlay's per-type slots) — see normalizeFilters.
@@ -1656,7 +1718,7 @@ local function recordCandidateFilters(rec, config)
     -- Ownership is read off the CONFIG, never off the map -- see `config.dfGate` above.
     -- ORDER: helper gate FIRST, caster lock second. A gated-dark map is the dead map and
     -- needs no lock; everything live gets the PLAYER-token caster lock (see applyCasterLock).
-    if config.dfGate and (helperGateDark or helperRoleExcluded(config.unit)) then
+    if config.dfGate and (helperGateDark or helperUnitExcluded(config.unit)) then
         return HELPER_GATE_DEAD_CF
     end
     return applyCasterLock(rec.f, rec.candidateFilters or config.candidateFilters)
@@ -2930,7 +2992,21 @@ local EMPTY_DUR_SPEC = {}
 local function bindNative(slot, config)
     local style = config.style or {}
 
-    if slot.dfIcon and slot.SetIcon and not slot._boundIcon then
+    -- ☠ A PINNED ICON IS NEVER BOUND, AND NOT BINDING IT IS THE WHOLE MECHANISM.
+    -- SetIcon hands our texture to Blizzard, which then repaints it from the MATCHED AURA on
+    -- every display update -- so a slot that pins its own art (style.icon.staticSpellID, set
+    -- once by styleButton) must stay unbound or the art it was given is overwritten by the
+    -- first aura that matches. Unbound, the texture is an ordinary DF-owned region: nothing
+    -- else writes it, and the ENGINE still owns whether the button is SHOWN at all, which is
+    -- exactly the division we want -- Blizzard decides "does this unit match", we decide what
+    -- the marker looks like.
+    -- ⚠ Only reachable through the Power Infusion Helper's Icon surface today. Its trigger is
+    -- a list of other people's cooldowns and its message is "infuse this player", so the
+    -- picture is Power Infusion rather than whichever cooldown matched.
+    -- ⚠ _boundIcon IS BIND-ONCE PER SLOT, so a slot must not be pooled between the two kinds
+    -- -- placedStructSig carries the pinned-vs-dynamic flag for exactly that reason.
+    local pinnedArt = style.icon and style.icon.staticSpellID
+    if slot.dfIcon and slot.SetIcon and not slot._boundIcon and not pinnedArt then
         slot._boundIcon = true
         slot:SetIcon(slot.dfIcon)
     end
@@ -6404,6 +6480,14 @@ function Handle:SetUnit(unit)
     -- Same re-seed for visibility: the new unit may already be outside your world, and
     -- that edge will not fire again just because a handle changed hands.
     self:_setVisLatch(AuraContainer._invisibleUnits[unit] or nil)
+    -- ☠ THE HELPER GATE FOLLOWS THE UNIT HERE TOO. config.unit is updated above, so
+    -- recordCandidateFilters would DERIVE the right answer -- but nothing re-pushes it,
+    -- and the bounce below re-parses against whatever map the container is still holding.
+    -- Same fault as the slot lane (see SetSlotOwnerUnit), same narrowing to our own
+    -- configs so a retarget does not re-tune every group in the addon.
+    if self.config.dfGate and self.backend and self.backend.applyGroupTuning then
+        pcall(self.backend.applyGroupTuning, self.backend)
+    end
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
     if InCombatLockdown() then self:_queueOp("retarget"); return end
@@ -6638,9 +6722,14 @@ end
 -- ☠ ONLY OUR CONTAINERS. applyGroupTuning runs an immediate UpdateAllAuras per group key and
 -- has no equality guard of its own, so broadcasting to every handle in the addon would cost a
 -- full aura re-parse on each one for a gate flip that concerns a handful.
+-- ⚠ THE COUNTS COME BACK SPLIT: handles pushed, handles SKIPPED, slots pushed, slots
+-- queued. One combined number could not say which LANE ignored a gate edge, and the two
+-- lanes fail for completely different reasons -- a handle is skipped when it is destroyed
+-- or has no backend, a slot when it is parked or the push is refused. Krathe's log showed
+-- 72 pushed and icons still on screen, and no way to tell which 72.
 function AuraContainer.SetHelperGate(dark)
     helperGateDark = dark and true or false
-    local n = 0
+    local n, hSkip = 0, 0
     for h in pairs(AuraContainer._handles or {}) do
         local b = h and h.backend
         if b and b.applyGroupTuning and not h._destroyed and helperGateHandleIsOurs(h) then
@@ -6649,7 +6738,12 @@ function AuraContainer.SetHelperGate(dark)
             -- and protection is identical. A gate edge walks every owned handle twice a Power
             -- Infusion cycle, in combat, so this is exactly the path that rule was written for.
             local ok = pcall(b.applyGroupTuning, b)
-            if ok then n = n + 1 end
+            if ok then n = n + 1 else hSkip = hSkip + 1 end
+        elseif h and h.config and h.config.dfGate then
+            -- OURS, and not reachable: destroyed, or its backend is gone (a build
+            -- deferred to combat end). It renders whatever it last had, and nothing
+            -- here can correct it -- so it is COUNTED rather than passed over in silence.
+            hSkip = hSkip + 1
         end
     end
     -- ☠ SLOTS TOO, NARROWED TO OURS. SetAuraSlotCandidateFilters has no engine-side
@@ -6658,16 +6752,75 @@ function AuraContainer.SetHelperGate(dark)
     -- not a local: the registry is declared thousands of lines below this function, and a
     -- later-declared local here would silently read as a nil global (this file has been
     -- bitten by exactly that; see the note above GateAppliesTo).
+    local deferred = 0
     for h in pairs(AuraContainer._slotHandles or {}) do
         if h.config and h.config.dfGate and h._applyHelperGate then
-            local ok, applied = pcall(h._applyHelperGate, h)
-            if ok and applied then n = n + 1 end
+            local ok, applied, queued = pcall(h._applyHelperGate, h)
+            if ok and applied then
+                n = n + 1
+                if queued then deferred = deferred + 1 end
+            end
         end
     end
-    return n
+    -- ⚠ REPORTED SEPARATELY. A queued slot is not a pushed one, and counting them
+    -- together is what made a log full of healthy-looking edges hide a raid's worth of
+    -- icons that never went dark.
+    return n, deferred, hSkip
 end
 
 function AuraContainer.GetHelperGate() return helperGateDark end
+
+-- ★★★ WHAT THE HELPER'S SLOTS ARE ACTUALLY CARRYING (2026-09-10).
+--
+-- ☠ THE READOUT COULD SEE EVERY SETTING AND NONE OF THE WIRING. "/df debug pi" already
+-- prints what the gate INTENDS against what the chokepoint SAYS -- deliberately as two lines,
+-- because they are allowed to differ -- and the sound registrations per frame. It could not
+-- see the third state, which is what Krathe kept hitting: a slot whose LAST PUSH was the dead
+-- filter while the gate has since re-opened, so the border and the group render and one placed
+-- icon does not. Four reports, four different theories, no measurement.
+--
+-- ⚠ `pending` IS THE ONE THAT NAMES THE CAUSE. SlotHandle:_applyHelperGate cannot call a
+-- native tuning setter in combat, so it defers to PLAYER_REGEN_ENABLED -- and Power Infusion
+-- is pressed in combat by definition. A slot sitting at pending>0 with the gate OPEN is that
+-- deferral, visible for the first time.
+-- ⚠ DERIVED, NEVER STORED. Each answer is re-asked off the live handle, so this cannot drift
+-- from what the slots are doing -- the fault every "same config, different outcome" hunt in
+-- this addon has come down to.
+-- Returns: total helper slots, how many would be handed the DEAD filter right now, how many
+-- are waiting on a deferred push, and how many are parked.
+-- The HANDLE lane's equivalent -- how many group containers carry our mark, and how many of
+-- those are currently reachable (a live backend that can be tuned). The Cooldown Icons
+-- group is a handle, not a slot, so nothing in GetHelperSlotStatus can see it.
+function AuraContainer.GetHelperHandleStatus()
+    local total, live, dark = 0, 0, 0
+    for h in pairs(AuraContainer._handles or {}) do
+        if h and h.config and h.config.dfGate then
+            total = total + 1
+            if h.backend and h.backend.applyGroupTuning and not h._destroyed then
+                live = live + 1
+            end
+            if helperGateDark or helperUnitExcluded(h.config.unit) then dark = dark + 1 end
+        end
+    end
+    return total, live, dark
+end
+
+function AuraContainer.GetHelperSlotStatus()
+    local total, dark, pending, parked = 0, 0, 0, 0
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        if h and h.config and h.config.dfGate then
+            total = total + 1
+            if h.parked then parked = parked + 1 end
+            if h._pendingTuning then pending = pending + 1 end
+            -- The verdict the slot would be handed on its next push, asked the same way
+            -- SlotHandle:_cf asks it.
+            if helperGateDark or helperUnitExcluded(h.owner and h.owner.unit) then
+                dark = dark + 1
+            end
+        end
+    end
+    return total, dark, pending, parked
+end
 
 function AuraContainer.SetHelperExcludedRoles(roles)
     helperExcludedRoles = roles
@@ -6675,6 +6828,19 @@ function AuraContainer.SetHelperExcludedRoles(roles)
 end
 
 function AuraContainer.GetHelperExcludedRoles() return helperExcludedRoles end
+
+-- The named-player allowlist. `map` is { ["Name-Realm"] = true } or nil for everyone.
+-- ⚠ THE SAME RE-PUSH THE ROLES GET, for the same reason: the container is carrying an answer
+-- derived from the old list until something makes it ask again.
+-- ⚠ AND THE SAME EVENT SET COVERS IT. PIH_REGEN_EVENTS already re-pushes on GROUP_ROSTER_UPDATE,
+-- which is what fires when the named player actually joins -- so a list written before the raid
+-- forms takes effect the moment they walk in, with no work of its own.
+function AuraContainer.SetHelperAllowedPlayers(map)
+    helperAllowedPlayers = map
+    return AuraContainer.SetHelperGate(helperGateDark)
+end
+
+function AuraContainer.GetHelperAllowedPlayers() return helperAllowedPlayers end
 
 -- Backstop for pushes swallowed during lockdown by the pcall'd native setters. Idempotent,
 -- out of combat, and the same shape the identity gate already uses for its combat-exit
@@ -8406,7 +8572,7 @@ end
 function SlotHandle:_cf()
     local cf = self._lastCandidateFilters
     if cf ~= nil and self.config and self.config.dfGate
-        and (helperGateDark or helperRoleExcluded(self.owner and self.owner.unit)) then
+        and (helperGateDark or helperUnitExcluded(self.owner and self.owner.unit)) then
         return HELPER_GATE_DEAD_CF
     end
     return cf
@@ -8422,18 +8588,85 @@ function SlotHandle:_applyHelperGate()
     -- find it again (unlike a Handle, which nils itself out on destroy). Restore re-pushes
     -- through the accessor, so a gate edge that happened while parked is picked up there
     -- rather than lost. Caught in Danders' PR review.
-    if self.parked then return false end
+    -- ☠☠ EVERY DARK TERM, NOT JUST `parked` -- and widening this was forced by the combat
+    -- push below. While this path deferred in combat it could not reach a death-latched slot
+    -- (a death is nearly always in combat), so guarding `parked` alone was survivable. Pushing
+    -- in combat makes an ungated gate edge land live candidates straight over the CF park
+    -- lock of a slot that is meant to be dark -- a dead player's helper indicators light up
+    -- mid-fight -- and _pushFilter cannot heal it, because the record written below then
+    -- matches the park it wants and the transition compares equal. Same dark test as
+    -- ApplyTuning's and _pushFilter's; any new latch goes in all three.
+    if self.parked or self._deathLatched or slotVisDark(self) then return false end
     local c = self.owner and self.owner.container
     if not c then return false end
-    if InCombatLockdown() then
+    -- ★★★ ATTEMPT, THEN DEFER -- and it used to be defer-always (2026-09-10).
+    --
+    -- ☠ WHAT DEFER-ALWAYS COST, from Krathe's raid log: 33 clean gate edges, "DARK on cast"
+    -- and "OPEN, cooldown cleared" alternating across 72-98 containers -- the watcher, the
+    -- gate and the broadcast all working perfectly, and the placed icons still showing on
+    -- people while his Power Infusion was on cooldown. In a raid you are in combat for the
+    -- whole pull, so EVERY edge on a placed slot queued for PLAYER_REGEN_ENABLED and none
+    -- of them landed during the fight. "The border DID go away but the PI icon did not" was
+    -- this, from the first report onwards.
+    --
+    -- ⚠ AND THE COUNT IN THAT LOG WAS OVER-REPORTING, which is why it read as healthy: the
+    -- deferred branch returned TRUE, so SetHelperGate counted a queued slot as a pushed
+    -- one. It returns a second value now and the caller counts them apart.
+    --
+    -- ⚠ THE PRECEDENT IS IN THE SAME WALK. SetHelperGate's other half, applyGroupTuning,
+    -- has always called native tuning setters on this edge with NO combat guard at all --
+    -- in combat, twice per Power Infusion cycle, and its own note says so. Two lanes of one
+    -- broadcast cannot both be right about whether that is allowed; the guard was the
+    -- inconsistency, not the unguarded call.
+    -- ⚠ STILL DEFERS IF THE CALL ACTUALLY FAILS, which is the point of trying: a refusal is
+    -- now MEASURED rather than assumed, and the regen replay is still there to catch it.
+    local cfOut = self:_cf()
+    local ok = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfOut)
+    if not ok then
         self._pendingTuning = true
         registerSlotRegen(self)
-        return true
+        return true, true    -- queued, not pushed
     end
-    local cfOut = self:_cf()
-    pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfOut)
-    -- Record the ask, so _pushFilter's value-tracked half (which every tuning pass
-    -- ends in) does not immediately re-push -- and reparse -- the same map.
+
+    -- ★★★ ...AND ARM THE PROCESSOR, or the push is a note nobody reads until later.
+    --
+    -- ☠ SetAuraSlotCandidateFilters IS A DIRTY-MARK, NOT A REPAINT. The container re-reads
+    -- on its next processor pass -- the unit's next UNIT_AURA, or the next OnUpdate while
+    -- visible (68569; see the note at the top of this file). So "stop matching" is a
+    -- request the engine honours WHEN IT NEXT LOOKS, and how long that takes depends
+    -- entirely on what is happening to that unit.
+    -- ⇒ Krathe, 2026-09-10: "the PI icon does clear when I use PI on them but it seems to
+    -- take longer than the border/icons and other indicators." It is not stuck, it is
+    -- QUEUED -- and the intermittency is the queue: the frame-level border is painted by
+    -- DF on the same frame, while the slot waits for traffic that may be a moment or a
+    -- couple of seconds away.
+    -- ⚠ UpdateAllAuras IS ITSELF ONLY A MARK -- it arms the processor rather than parsing
+    -- inline -- so this collapses the wait to the next frame rather than making it
+    -- instant. That is the whole of what is available; there is no synchronous re-parse.
+    -- ⚠ ON THE GATE EDGE ONLY. This function runs twice per Power Infusion cycle, not per
+    -- frame and not per aura event, so arming here costs nothing measurable.
+    -- ⚠ pcall(fn, self), NOT pcall(function() ... end) -- this file's own rule, recorded at
+    -- applyGroupTuning's tail: the closure form allocates one per call for no gain and the
+    -- protection is identical. SetHelperGate's own note names THIS path as the reason the
+    -- rule exists.
+    -- ⚠ NOT IN THE COMBAT BRANCH ABOVE: nothing was pushed there, so there is no new filter
+    -- to re-read and arming would be pure work.
+    -- ☠ AND THE COMBAT DEFERRAL DOES NOT COME BACK THROUGH HERE -- checked, not assumed.
+    -- _replayTuning clears _cfPushed and calls _pushFilter, which re-derives park vs live
+    -- at drain time and pushes candidates ITSELF; it never re-enters this function. So a
+    -- gate edge that happened in combat still drains without an arm of its own, and picks
+    -- up whatever the combat-exit kick does (reparseContainer / the chunked bounce).
+    -- ⚠ _pushFilter IS DELIBERATELY LEFT ALONE. Arming there would cover the drain -- and
+    -- also park, restore and the death latch, which is a far wider blast radius than the
+    -- symptom this line answers. If the lag is ever seen on THOSE paths it should be its
+    -- own change, with its own testing.
+    if type(c.UpdateAllAuras) == "function" then
+        pcall(c.UpdateAllAuras, c)
+    end
+    -- ⚠ RECORD THE ASK (v5.3.3's split). _pushFilter's value-tracked half -- which every
+    -- tuning pass ends in -- tests _cfWant, so without this line it re-pushes and reparses
+    -- the same map moments after this one. _cfPushed stays unwritten on purpose: it is the
+    -- OOC-confirmed memo the slot audit reads, and this push may well be a combat one.
     self._cfWant = cfOut
     return true
 end
@@ -8670,6 +8903,23 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     for _, h in pairs(owner.slots) do
         pcall(function() h:_setDeathLatch(latched) end)
         pcall(function() h:_setVisLatch(invis) end)
+        -- ☠☠ AND THE HELPER GATE, WHICH IS UNIT STATE TOO -- the omission Krathe found:
+        -- "it's not working in my raid but I could see it on people before my auto layout
+        -- kicked in." Auto layout is a MASS RETARGET. A slot gated dark for unit A (a tank,
+        -- excluded by role, or someone off a named-player list) migrates to unit B and keeps
+        -- the DEAD candidate filter it was handed for A -- because _cf() re-derives at READ
+        -- time but nothing PUSHES after a retarget, and the next push only comes on a gate
+        -- edge. The verdict travelled with the container.
+        -- ⚠ EXACTLY THE CLASS THE TWO LINES ABOVE EXIST FOR. Death and visibility are
+        -- re-seeded here because "the new unit may already be dead, and that edge will never
+        -- fire again"; role exclusion is the same sentence with a different noun. It was
+        -- missed because it is derived rather than stored, which makes it look like it
+        -- cannot go stale -- the DERIVATION is fresh, the PUSH is not.
+        -- ⚠ NARROWED TO OURS, like SetHelperGate's own walk: SetAuraSlotCandidateFilters
+        -- has no engine-side equality guard, so an unnarrowed call would re-parse every
+        -- placed indicator in the addon on every retarget -- and a raid auto-layout change
+        -- retargets the whole roster at once.
+        if h.config and h.config.dfGate then pcall(h._applyHelperGate, h) end
     end
     -- ☠ SetUnit ALONE DOES NOT RENDER THE RETARGET — it writes the token and marks
     -- FullAuraRebuild, but it cannot ARM the private-side dirty processor, so the
@@ -9417,7 +9667,9 @@ do
         local ok, can = GateAssistProbe(unit)
         if not ok then return true, "assist-err(open)" end
         if issecretvalue and issecretvalue(can) then can = true end
-        return can and true or false, can and nil or "cannot-assist"
+        -- `can and nil or "cannot-assist"` named every trusted unit cannot-assist too.
+        if can then return true, nil end
+        return false, "cannot-assist"
     end
 
     -- created, shownN, hiddenN, unreadableN, widthTxt. Child buttons belong

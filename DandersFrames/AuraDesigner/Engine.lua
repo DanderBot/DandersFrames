@@ -155,6 +155,17 @@ local pihGateOpen = true        -- true = show (gate spell ready), false = dark 
 -- nil = watcher drives; true/false = held by hand until `/df debug pi auto`.
 local pihManual = nil
 
+-- ★★★ SHOW IN COMBAT ONLY (2026-09-10), an option Krathe asked for.
+-- ⚠ FORWARD-DECLARED. pihShouldShow reads pihGateEnabled, declared a couple of hundred lines
+-- below, while pihSet -- which is above it -- has to call it. Same idiom as pihSyncWatcher.
+local pihCombatOnly = false
+local pihShouldShow
+-- ☠ AND pihGateEnabled, HOISTED FOR THE SAME REASON -- caught by the _ENV globals diff,
+-- not by review: pihSet logs it and pihSet is declared ABOVE the original `local`, so the
+-- read compiled to a nil GLOBAL and the log line would have reported "nil" forever while
+-- looking perfectly correct in the source. Its value is still assigned at its own site.
+local pihGateEnabled = true
+
 -- The helper sound choice, written by the settings panel through PIH_SetSound and restored on
 -- login by PIH_ApplySaved. ⚠ SILENT UNTIL CHOSEN -- nil registers nothing, because an
 -- audio cue nobody asked for is the fastest way to have a feature switched off wholesale.
@@ -206,10 +217,80 @@ end
 -- resolve -- taking the first is a choice, not a derivation. Party first because that is where
 -- the feature is used. A preset whose settings table survived a Remove no longer shadows one
 -- that actually has a helper, because the marks decide.
-local function pihSettings()
-    if not DF.GetModeBaseAuraDesigner then return nil end
+-- ☠☠ THE *LIVE* DESIGNER, NOT THE MODE BASE (2026-09-10). This read GetModeBaseAuraDesigner,
+-- which is the EDITOR's variant -- Presets.lua says so directly: "GetMode*Designer ... the
+-- ACTIVE designer a mode resolves to right now ... Used by LIVE consumers (SoundEngine,
+-- migrations) that must match what's on screen. The EDITOR uses the GetModeBase* variants".
+-- The helper is a live consumer and was reading the editor's answer.
+--
+-- ☠ WHAT IT COST, from Krathe's raid: a raid auto-layout can point its own AD PRESET at
+-- something other than the mode base -- his 21-30 layout uses a "Flex 21-30" preset. The
+-- frames render from THAT (DF:ResolveAuraDesigner honours the overlay) and it holds no
+-- helper, so nothing draws; this read carried on finding the helper in the BASE preset and
+-- happily armed the gate, the roles and THE SOUND for a preset that is not on screen.
+-- ⇒ "I could hear the sound trigger but did not see the border or PI icon at all" is this,
+-- and so is a status readout that reports a healthy helper while nothing renders. The
+-- feature could not diagnose itself because its two halves were reading different presets.
+-- ⚠ IT DOES NOT MAKE HIS HELPER APPEAR -- the records genuinely are not in that preset,
+-- which is a choice the preset system offers and the user has to make. What it fixes is
+-- the engine agreeing with the screen: no helper there means silent, ungated, and a
+-- readout that SAYS so.
+-- ☠☠ STRAY-MARK DETECTION LIVES HERE, IN THE RESIDENT ADDON, AND THAT IS THE WHOLE POINT.
+-- The repair itself (pihSweep / pihPurgeStrayMarks) is in the companion, which is
+-- LoadOnDemand -- so before this, every path that could run it began with "the user opens
+-- the Aura Designer". The symptom does not wait for that: a stray marked layout group sits
+-- in adDB.layoutGroups[spec] and Factory.lua renders spec groups with no mark filter at all,
+-- while VisibleLayoutGroups -- the thing that hides marked groups -- exists ONLY on the
+-- options side. The panel hides them; the renderer draws them. A player who never opens the
+-- designer therefore kept eight "PI Helper" groups painting on every frame with no control
+-- anywhere able to turn them off, which is the complaint the sweep was written for.
+--
+-- ⇒ Detect here, repair there. This walk is the cheapest half and needs no editor state;
+-- finding something pulls the companion in ONCE and calls the sweep that already exists,
+-- rather than reimplementing a destructive migration in a second place where the two copies
+-- could drift. Nothing is deleted by this file.
+--
+-- ⚠ THE SPEC STORE IS THE TELL, not the mark. A marked group in otherLayoutGroups is the
+-- helper's REAL group and must render. One in layoutGroups[spec] cannot work at all -- the
+-- pool decides the caster filter, so a spec-pool helper record asks for other people's
+-- cooldowns cast by you -- so a mark there is by definition stray.
+-- ⚠ NO CLASS GATE, deliberately, matching the rest of this file: the profile may have been
+-- built by a priest and be in use by someone else, and the groups render either way.
+-- ⚠ ONCE PER SESSION. The sweep stamps its own schema and early-outs, but loading the
+-- companion is not free, so the flag stops a zone change paying for it again.
+local function pihHasStrayMarks(adDB)
+    if type(adDB) ~= "table" or type(adDB.layoutGroups) ~= "table" then return false end
+    for _, specGroups in pairs(adDB.layoutGroups) do
+        if type(specGroups) == "table" then
+            for _, g in pairs(specGroups) do
+                if type(g) == "table" and g.pihSignal then return true end
+            end
+        end
+    end
+    return false
+end
+
+local pihStrayChecked = false
+local function pihRepairStrayMarks()
+    if pihStrayChecked then return end
+    pihStrayChecked = true
+    if not DF.GetModeAuraDesigner then return end
+    local found = false
     for _, mode in ipairs(PIH_MODES) do
-        local adDB = DF:GetModeBaseAuraDesigner(mode)
+        if pihHasStrayMarks(DF:GetModeAuraDesigner(mode)) then found = true break end
+    end
+    if not found then return end
+    DF:DebugWarn("AURADESIGNER",
+        "PIH: stray marked layout group(s) in the spec store -- loading the options addon to sweep")
+    if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
+    local sweep = DF.AuraDesigner and DF.AuraDesigner._priv and DF.AuraDesigner._priv.PIH_Sweep
+    if type(sweep) == "function" then pcall(sweep) end
+end
+
+local function pihSettings()
+    if not DF.GetModeAuraDesigner then return nil end
+    for _, mode in ipairs(PIH_MODES) do
+        local adDB = DF:GetModeAuraDesigner(mode)
         local s = adDB and adDB.pihelper
         if s and pihHasHelper(adDB) then return s end
     end
@@ -372,11 +453,64 @@ local function pihStopTicker()
     if pihReadyTicker then pihReadyTicker:Cancel(); pihReadyTicker = nil end
 end
 
+-- ★★★ THE FEATURE SWITCH, AS DISTINCT FROM THE COOLDOWN GATE (2026-09-09).
+--
+-- ☠☠ "DISABLE" USED TO MEAN "DELETE THE RECORDS". The helper had no enabled flag of its own
+-- -- its existence WAS its records -- so the panel's tick implemented off as a wholesale
+-- delete with a stash to fake reversibility. Every bug in that area had one root: a switch
+-- pretending to be a switch while actually being a delete. Krathe, 2026-09-09: "when I disable
+-- the PI tracker, it seems to remove my border effect I added", then "it should function like
+-- the rest of AD" -- and the rest of AD writes ONE BOOLEAN (modeDB.auraDesignerEnabled) and
+-- deletes nothing.
+-- ⇒ The records stay exactly where they are. This is what makes them not draw, and it costs
+-- one file-local, because the gate's own machinery already means "dark, and nothing will
+-- open it".
+--
+-- ⚠ TWO SWITCHES, THREE STATES, AND THEY DO NOT COLLAPSE INTO ONE:
+--     enabled = false                -> forced DARK  (the feature is off)
+--     enabled, gateEnabled = false   -> forced OPEN  (never hide, not even on cooldown)
+--     enabled, gateEnabled           -> the watcher drives
+-- Reusing pihGateEnabled for both would make "off" and "always show" the same field.
+local pihEnabled = true
+
 local function pihSet(dark)
     pihGateOpen = not dark
-    local n = 0
+    local n, deferred, hSkip = 0, 0, 0
     if DF.AuraContainer and DF.AuraContainer.SetHelperGate then
-        n = DF.AuraContainer.SetHelperGate(dark)
+        n, deferred, hSkip = DF.AuraContainer.SetHelperGate(dark)
+        deferred, hSkip = deferred or 0, hSkip or 0
+    end
+
+    -- ★★★ ONE LINE PER EDGE, IN THE LOG, CARRYING EVERYTHING (2026-09-10).
+    -- ☠ KRATHE CANNOT RUN A SLASH COMMAND MID-RAID, and said so twice before I listened.
+    -- A readout behind "/df debug pi" is useless for a fault that only happens with twenty
+    -- people in combat: by the time it can be typed, the state has moved. This goes in the
+    -- persisted log, so a reload is the whole reporting procedure.
+    -- ⚠ THE COUNTS WERE THE THING THAT LIED. "98 containers" looked healthy while every
+    -- placed slot among them had merely QUEUED -- so pushed and deferred are separate, and
+    -- a non-zero deferred is the fault named outright.
+    -- ⚠ CONTEXT ON EVERY LINE, because the question is never only "did it flip": which
+    -- conditions were in force decides whether the flip was even right.
+    -- ⚠ ONE LINE PER EDGE -- twice a Power Infusion cycle, not per frame -- and guarded by
+    -- DebugActive so the slot walk that builds it is not paid for with logging off.
+    if DF.DebugActive and DF:DebugActive("AURADESIGNER") then
+        local AC = DF.AuraContainer
+        local tot, dk, pend, parked = 0, 0, 0, 0
+        if AC and AC.GetHelperSlotStatus then tot, dk, pend, parked = AC.GetHelperSlotStatus() end
+        local hTot, hLive, hDark = 0, 0, 0
+        if AC and AC.GetHelperHandleStatus then hTot, hLive, hDark = AC.GetHelperHandleStatus() end
+        local allow = AC and AC.GetHelperAllowedPlayers and AC.GetHelperAllowedPlayers()
+        local nAllow = 0
+        if allow then for _ in pairs(allow) do nAllow = nAllow + 1 end end
+        DF:Debug("AURADESIGNER",
+            "PIH gate -> %s | pushed=%d deferred=%d handlesSkipped=%d"
+            .. " | groups %d tot/%d live/%d dark | slots %d tot/%d dark/%d pending/%d parked"
+            .. " | enabled=%s gateEnabled=%s combatOnly=%s inCombat=%s manual=%s | players=%s",
+            dark and "DARK" or "OPEN", n, deferred, hSkip,
+            hTot, hLive, hDark, tot, dk, pend, parked,
+            tostring(pihEnabled), tostring(pihGateEnabled), tostring(pihCombatOnly),
+            tostring(DF.playerInCombat), tostring(pihManual),
+            allow and tostring(nAllow) or "everyone")
     end
     -- Sound rides the SAME edge as the visuals. It is not a container, so the gate cannot
     -- reach it -- without this it would keep announcing while we are silent.
@@ -386,11 +520,19 @@ local function pihSet(dark)
         -- ⚠ Never under a manual hold: the tick body refuses to act while held (below),
         -- so a ticker started here would idle at 2 Hz for the rest of the session. Handing
         -- control back re-enters through pihSet and starts it then, if still dark.
-        if not pihReadyTicker and pihManual == nil and C_Timer and C_Timer.NewTicker then
+        -- ⚠ ...AND NEVER WHILE THE FEATURE IS OFF. This ticker exists to REOPEN the gate when
+        -- the cooldown clears, which for a disabled helper would undo the very thing the
+        -- switch just did -- and poll at 2 Hz forever to do it.
+        if not pihReadyTicker and pihManual == nil and pihEnabled
+            and C_Timer and C_Timer.NewTicker then
             pihReadyTicker = C_Timer.NewTicker(0.5, function()
                 -- Held by hand: never fight a gate the user is holding themselves.
                 if pihManual ~= nil then return end
-                if pihReadReady() then
+                -- Re-asked every tick, not only at start: the switch can move under us.
+                if not pihEnabled then return end
+                -- ⚠ THE COMPOSITE, not the spell alone: with "combat only" on, a cooldown
+                -- clearing out of combat must NOT reopen the gate.
+                if pihShouldShow() then
                     pihStopTicker()
                     if not pihGateOpen then pihSet(false) end
                 end
@@ -409,20 +551,81 @@ end
 -- Off means FORCE OPEN and stay there: the watcher stops driving, so a cooldown starting or
 -- ending changes nothing. Not "ignore the events" -- the gate is genuinely open, which is what
 -- the setting says.
-local pihGateEnabled = true
+-- ⚠ DECLARED ABOVE (with pihCombatOnly): pihSet reads it and is written earlier in the
+-- file. This is the assignment, not the declaration.
+pihGateEnabled = true
+
+-- ★★ EVERY GLOBAL CONDITION, IN ONE ANSWER. As against helperUnitExcluded, which is the
+-- per-UNIT half (role, and the named-player list) -- this is the half that is true of the
+-- whole helper at once.
+--
+-- ☠ THE COMBAT TEST COMES FIRST AND IGNORES THE COOLDOWN GATE. "Show in combat only" and
+-- "show while Power Infusion is on cooldown" are independent: someone who has switched the
+-- cooldown gate OFF still means it when they say combat only, and folding this in after the
+-- `not pihGateEnabled` early-return would have silently ignored them.
+--
+-- ☠☠ `inCombat` IS AN ARGUMENT BECAUSE OF AN EVENT RACE. DF.playerInCombat is the house
+-- source and is written by Core.lua from PLAYER_REGEN_DISABLED / _ENABLED -- the same two
+-- events this file now watches. Handler order between two frames is not defined, so reading
+-- the flag from inside our own handler can see the value from BEFORE the transition and
+-- resolve the gate backwards. The regen branch passes the truth the event itself carries;
+-- every other caller omits it and gets the flag, which by then has settled.
+-- ⚠ NEVER InCombatLockdown() -- that is the addon-restriction state, not the player's
+-- combat state, and this addon has a standing rule about the difference.
+function pihShouldShow(inCombat)
+    if inCombat == nil then inCombat = DF.playerInCombat and true or false end
+    if pihCombatOnly and not inCombat then return false end
+    if not pihGateEnabled then return true end   -- cooldown gate off: never hide for THAT
+    return pihReadReady()
+end
+
+-- Stored on the helper; pushed by PIH_ApplySaved and by the panel through this setter.
+function Engine:PIH_SetCombatOnly(on)
+    pihCombatOnly = on and true or false
+    if not pihEnabled then return pihCombatOnly end   -- the feature switch outranks it
+    pihManual = nil
+    pihSet(not pihShouldShow())
+    return pihCombatOnly
+end
+
+-- The FEATURE switch. Off is a forced dark that nothing reopens; on hands control back to
+-- whichever of the two remaining states applies. See pihEnabled for the three-state table.
+-- ⚠ CALLED AFTER PIH_SetGateEnabled, always: turning the feature back on has to resume from
+-- the gate's own setting, so that setting must already be in place. PIH_ApplySaved orders
+-- them; so does the panel's P.PIH_Apply.
+function Engine:PIH_SetEnabled(on)
+    pihEnabled = on and true or false
+    -- A manual hold is a debugging affordance and must not survive either transition -- the
+    -- same reasoning as the gate switch below.
+    pihManual = nil
+    if not pihEnabled then
+        pihSet(true)                    -- dark, and nothing will open it
+    elseif not pihGateEnabled then
+        pihSet(false)                   -- the gate is switched off: never hide
+    else
+        pihSet(not pihShouldShow())     -- resume from every live condition
+    end
+    return pihEnabled
+end
 
 function Engine:PIH_SetGateEnabled(on)
     pihGateEnabled = on and true or false
+    -- ⚠ THE FEATURE SWITCH OUTRANKS THIS ONE. With the helper off, neither branch below may
+    -- run: "never hide" and "resume from the cooldown" both mean SHOW, and there is nothing
+    -- to show. Without this, ticking the cooldown option while disabled lit the helper up.
+    if not pihEnabled then return pihGateEnabled end
+    -- ⚠ BOTH ARMS GO THROUGH pihShouldShow NOW. Switching the cooldown gate off no longer
+    -- means "open" outright -- "combat only" may still be holding it shut, and forcing it
+    -- open here would have ignored that setting entirely.
     if not pihGateEnabled then
         pihManual = nil
-        pihSet(false)          -- open, and nothing will shut it
+        pihSet(not pihShouldShow())
     else
         -- ⚠ Re-enabling releases a manual hold too. Without this, "gate enabled" and
         -- "held by hand" could both be true at once, with the watcher suspended and nothing
         -- on screen to say so.
         pihManual = nil
-        local ready = pihReadReady()
-        pihSet(not ready)      -- resume from the real cooldown state
+        pihSet(not pihShouldShow())   -- resume from every live condition
     end
     return pihGateEnabled
 end
@@ -456,14 +659,71 @@ end
 -- out: roles, the gate, and above all the sound registrations, which would otherwise keep
 -- playing for a helper that no longer exists anywhere.
 local pihSyncWatcher   -- defined beside the watcher below; registration follows helper existence
+-- ★★★ NOT A PRIEST: THE WHOLE FEATURE IS A NO-OP (2026-09-10).
+--
+-- ☠ REPORTED FROM THE ALPHA: helper borders and icons rendering for NON-PRIESTS. There was
+-- no class gate on this side at all -- only the Options UI checked (DF.IsPIHelperAvailable
+-- hides the page, Rows.lua omits the pool tab), and hiding the controls does nothing about
+-- records that already exist. A profile shared across an account, an imported preset, or a
+-- priest's own profile opened on an alt all carry the marked records, and the factory renders
+-- what the pool holds -- it has never asked whose class it is.
+--
+-- ⚠ DARK, NOT "NO HELPER". The `if not s` branch below opens the gate ("nothing is left to
+-- hide"), which is right when the pool genuinely holds nothing and exactly wrong here: a
+-- non-priest with marked records needs them SUPPRESSED, and an open gate renders them. The
+-- two cases look alike and mean opposite things, which is why this is its own branch rather
+-- than another condition on that one.
+--
+-- ⚠ PIH_SetEnabled(false) IS THE LEVER, not a new one. It is the feature switch: forced dark
+-- that nothing reopens, the readiness ticker refused, the manual hold released, and sound
+-- disarmed through pihSet. Everything a class gate needs, already written and already tested.
+-- ⚠ THE RECORDS ARE NOT TOUCHED. Deleting a priest's work because their alt logged in would
+-- be destroying data over a display question -- and the same profile on the priest must come
+-- back intact. Suppression only.
+--
+-- ⚠ READ AT CALL TIME, NOT AT LOAD. UnitClass("player") is not dependable before login, and
+-- this function runs on login and on every profile switch, which is exactly when it is.
+-- A character's class cannot change, so there is nothing to re-check afterwards.
+local function pihIsPriest()
+    local _, class = UnitClass("player")
+    return class == "PRIEST"
+end
+Engine.PIH_IsPriest = pihIsPriest
+
 function Engine:PIH_ApplySaved()
+    if not pihIsPriest() then
+        if DF.AuraContainer then
+            if DF.AuraContainer.SetHelperExcludedRoles then
+                DF.AuraContainer.SetHelperExcludedRoles(nil)
+            end
+            if DF.AuraContainer.SetHelperAllowedPlayers then
+                DF.AuraContainer.SetHelperAllowedPlayers(nil)
+            end
+        end
+        -- Cleared BEFORE the switch, so nothing can re-arm behind it: PIH_SetEnabled goes
+        -- through pihSet, which disarms against whatever cfg is standing at that moment.
+        Engine:PIH_SetSound(nil)
+        Engine:PIH_SetEnabled(false)
+        if pihSyncWatcher then pihSyncWatcher() end
+        return false
+    end
     local s = pihSettings()
     if not s then
         if DF.AuraContainer and DF.AuraContainer.SetHelperExcludedRoles then
             DF.AuraContainer.SetHelperExcludedRoles(nil)
         end
+        -- ☠ AND THE ALLOWLIST, ON THE RESET PATH AS MUCH AS THE APPLY ONE. A named-player list
+        -- left pushed after a switch to a profile with no helper would go on narrowing a
+        -- feature that is not there -- and would then narrow the NEXT helper the user builds,
+        -- from a list they wrote somewhere else entirely. Same reasoning as the roles above,
+        -- and the same reason this whole branch exists.
+        if DF.AuraContainer and DF.AuraContainer.SetHelperAllowedPlayers then
+            DF.AuraContainer.SetHelperAllowedPlayers(nil)
+        end
         pihManual = nil
         pihGateEnabled = true
+        pihCombatOnly = false      -- a stale hold would outlive the profile that set it
+        pihEnabled = true          -- no helper here; the switch has nothing to suppress
         Engine:PIH_SetSound(nil)   -- tears down every live registration
         pihSet(false)              -- open; nothing is left to hide
         if pihSyncWatcher then pihSyncWatcher() end
@@ -475,7 +735,45 @@ function Engine:PIH_ApplySaved()
         for _ in pairs(s.roles or {}) do any = true break end
         DF.AuraContainer.SetHelperExcludedRoles(any and s.roles or nil)
     end
+    -- ★ THE NAMED-PLAYER ALLOWLIST, stored as an ARRAY (the picker's order of entry) and
+    -- pushed as a MAP (the container asks "is this unit in it", once per unit per push).
+    -- ⚠ AN EMPTY LIST IS nil, NOT AN EMPTY MAP. The container reads a present map as "these
+    -- players and nobody else", so an empty one would silence the helper completely -- for a
+    -- user who had added two names and removed them again, which is exactly the moment they
+    -- would expect it to go back to normal rather than break.
+    -- ⚠ AND `playersOn` DECIDES WHETHER IT IS PUSHED AT ALL (2026-09-11). The list used to be
+    -- its own switch -- names meant narrowing, none meant everyone -- which made "stop
+    -- narrowing tonight" and "throw the names away" the same action. Krathe: "I might want to
+    -- add my raid team to the list but turn off showing only for those players in a pug group
+    -- without having to add/remove them all each time."
+    -- ⚠ ABSENT MEANS ON, so every profile written before today loads exactly as it did.
+    -- ⚠ THE PANEL'S P.PIH_Apply MAKES THE SAME DECISION THE SAME WAY. These are the two halves
+    -- of one push (login and live edit) and they have drifted apart once already -- the live
+    -- half simply did not exist, so an edited list did nothing until the next reload.
+    if DF.AuraContainer and DF.AuraContainer.SetHelperAllowedPlayers then
+        local map
+        if s.playersOn ~= false then
+            for _, fullName in ipairs(s.players or {}) do
+                if type(fullName) == "string" and fullName ~= "" then
+                    map = map or {}
+                    map[fullName] = true
+                end
+            end
+        end
+        DF.AuraContainer.SetHelperAllowedPlayers(map)
+    end
+    -- ⚠ BEFORE THE GATE SETTERS, because both resolve through pihShouldShow, which reads
+    -- this. Loading it afterwards would settle the gate from the OLD value and leave it
+    -- wrong until the next transition -- the same ordering the sound line below records.
+    pihCombatOnly = s.combatOnly == true
     Engine:PIH_SetGateEnabled(s.gateEnabled ~= false)
+    -- ⚠ AFTER THE GATE: turning the feature on resumes from the gate's setting, so the gate
+    -- has to be in place first (PIH_SetEnabled says the same from its side).
+    -- ⚠ DEFAULTS TRUE FOR A PROFILE THAT PREDATES THE FLAG. `enabled` did not exist before
+    -- 2026-09-09, and every such profile that has helper records had a WORKING helper -- so
+    -- absent must read as on, or the fix for a destructive switch would silently switch
+    -- everyone off. A profile with no records shows nothing either way.
+    Engine:PIH_SetEnabled(s.enabled ~= false)
     -- After the gate, never before: SetSound arms against the gate's current state, so calling
     -- it first would arm against the state we are about to leave.
     Engine:PIH_SetSound(s.soundOn and s.soundLSMKey or nil)
@@ -519,11 +817,21 @@ pihWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
 -- GROUP_ROSTER_UPDATE is for SOUND: registrations are per unit and are otherwise only made
 -- on gate edges, so anyone who joined after the last edge got no cue -- and the player's own
 -- no-register guard went stale when sorting moved them to another token.
+-- ⚠ BOTH COMBAT TRANSITIONS, and the EXIT half is the one that goes missing: this addon has
+-- a standing note that a gate keyed on combat needs a refresh on entering AND on leaving,
+-- and that leaving is the half people forget. Registered unconditionally rather than with
+-- the setting -- the watcher only exists for a priest who has a helper at all, and two more
+-- events on that frame is cheaper than a re-registration dance every time the tick moves.
 local PIH_WATCH_EVENTS = { "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES",
-                           "UNIT_SPELLCAST_SUCCEEDED", "GROUP_ROSTER_UPDATE" }
+                           "UNIT_SPELLCAST_SUCCEEDED", "GROUP_ROSTER_UPDATE",
+                           "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED" }
 local pihWatching = false
 pihSyncWatcher = function()
-    local want = pihSettings() ~= nil
+    -- ⚠ AND NOT FOR A NON-PRIEST, whatever the pool holds. PIH_ApplySaved already forces
+    -- the feature off for them, so the watcher's own tick would early-out anyway -- but a
+    -- registration that can only ever decline to act is five events on every alt of every
+    -- priest who shares a profile, for a feature they cannot enable. Same fact, one test.
+    local want = pihIsPriest() and pihSettings() ~= nil
     -- The container's own backstop frame follows the same fact, from the same test -- one
     -- definition of "a helper exists" driving both registrations. Called unconditionally
     -- (it is idempotent) so it self-corrects even when our own state has not moved.
@@ -558,7 +866,29 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
         end
         return
     end
+    -- ★★ COMBAT TRANSITIONS. Ahead of the cooldown guards below, deliberately: those
+    -- return early when the cooldown gate is switched off, and "combat only" is a separate
+    -- setting that still has to act for that user.
+    -- ☠ THE EVENT CARRIES THE TRUTH, and we pass it rather than reading DF.playerInCombat.
+    -- Core.lua writes that flag from these same two events, and handler order between two
+    -- frames is undefined -- so reading it here can see the value from BEFORE the
+    -- transition and resolve the gate backwards. See pihShouldShow.
+    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+        if not pihCombatOnly then return end   -- nothing here concerns anyone else
+        if not pihEnabled or pihManual ~= nil then return end
+        local want = pihShouldShow(event == "PLAYER_REGEN_DISABLED")
+        if want ~= pihGateOpen then
+            local n = pihSet(not want)
+            DF:Debug("AURADESIGNER", "PIH gate -> %s on combat %s (%d container%s)",
+                want and "OPEN" or "DARK",
+                event == "PLAYER_REGEN_DISABLED" and "start" or "end",
+                n, n == 1 and "" or "s")
+        end
+        return
+    end
+
     if event ~= "PLAYER_ENTERING_WORLD" then
+        if not pihEnabled then return end       -- feature off: the gate stays dark
         if not pihGateEnabled then return end   -- switched off: nothing shuts or opens it
         if pihManual ~= nil then return end
     end
@@ -573,19 +903,28 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
     end
 
     if event == "PLAYER_ENTERING_WORLD" then
+        -- Before anything reads the pool: a stray group renders whether or not the helper
+        -- is switched on, so this is NOT behind the pihEnabled early-outs below.
+        pihRepairStrayMarks()
         Engine:PIH_ApplySaved()   -- saved settings, before any gate decision
         -- ☠ RE-CHECK THE SWITCH AFTER APPLYING, because at login the file-locals
         -- still hold their initialisers until ApplySaved loads the saved values. Without
         -- this, a saved "don't hide" was overridden by the cooldown read below: reload
         -- mid-cooldown and the helper hid anyway -- the exact opposite of the setting --
         -- for the rest of that cooldown.
-        if not pihGateEnabled or pihManual ~= nil then return end
+        -- ⚠ pihEnabled joins the same re-check, and for the identical reason: ApplySaved has
+        -- just loaded it, and the cooldown read below would otherwise light up a helper the
+        -- user has switched off.
+        -- ⚠ pihGateEnabled IS NO LONGER AN EARLY-OUT HERE. It used to be, because it was the
+        -- only condition below; pihShouldShow now folds it in alongside "combat only", and
+        -- returning early would skip the combat test for anyone with the cooldown gate off.
+        if not pihEnabled or pihManual ~= nil then return end
         -- ☠ THE ONE PLACE isActive MAY SHUT THE GATE. On load we never saw the cast, so a
         -- reload mid-cooldown would otherwise leave the helper showing for the rest of it.
         -- Safe here specifically because nothing is being cast at this instant, so a true
         -- reading is a real cooldown rather than a GCD.
-        local ready = pihReadReady()
-        if ready ~= pihGateOpen then pihSet(not ready) end
+        local want = pihShouldShow()
+        if want ~= pihGateOpen then pihSet(not want) end
         return
     end
 
@@ -599,8 +938,9 @@ pihWatcher:SetScript("OnEvent", function(_, event, unit, _, spellID)
     -- already open there is nothing to do and no reason to pay for a cooldown read -- and
     -- this event fires on every global cooldown, all fight long.
     if pihGateOpen then return end
-    local ready = pihReadReady()
-    if not ready then return end
+    -- ⚠ THE COMPOSITE. A cleared cooldown is not enough on its own when the helper is set
+    -- to combat only and we are standing in a city.
+    if not pihShouldShow() then return end
     local n = pihSet(false)
     DF:Debug("AURADESIGNER", "PIH gate -> OPEN, cooldown cleared (%d container%s)",
         n, n == 1 and "" or "s")
@@ -697,6 +1037,18 @@ SlashCmdList["DFPI"] = function(msg)
             local t = {}; for k in pairs(r) do t[#t + 1] = k end; table.sort(t)
             return table.concat(t, ", ")
         end)())
+        -- ⚠ READ OFF THE CONTAINER, NOT THE PROFILE, and that is the whole value of the
+        -- line. The panel stores this list and something has to PUSH it; when the push
+        -- was missing (it was, until 2026-09-10) the profile showed names and the engine
+        -- held none, with nothing anywhere able to say so. A field that repeated the
+        -- setting would have agreed with the panel and hidden the fault.
+        :Field("players watched", (function()
+            local AC = DF.AuraContainer
+            local m = AC and AC.GetHelperAllowedPlayers and AC.GetHelperAllowedPlayers()
+            if not m then return "everyone (no list)" end
+            local t = {}; for k in pairs(m) do t[#t + 1] = k end; table.sort(t)
+            return ("%d: %s"):format(#t, table.concat(t, ", "))
+        end)())
         :Field("watching events", pihWatching and "yes" or "no (no helper installed)")
         -- The per-frame wiring, which no setting above can show. Registrations counted at the
         -- LAST arm pass (armed on zero frames = the login-ordering failure); containers
@@ -709,6 +1061,33 @@ SlashCmdList["DFPI"] = function(msg)
             -- would teach the reader to ignore the line that matters.
             (pihSoundCfg and pihGateOpen and pihLastArmCount == 0
              and GetNumGroupMembers and GetNumGroupMembers() > 1) and "bad" or "neutral")
+        -- ★★ THE PLACED SLOTS, WHICH NOTHING ABOVE COULD SEE. Krathe, over four reports:
+        -- the border cleared and the icon did not; the sound played and nothing drew; the
+        -- group and border drew and the icon did not. Every one of those is a slot whose
+        -- LAST PUSH disagrees with the gate, and no field here could show it.
+        -- ⚠ READ THIS AGAINST "gate intends" ABOVE:
+        --   gate OPEN + dark 0 + pending 0   -> the slots agree; look elsewhere.
+        --   gate OPEN + pending > 0          -> a push deferred to PLAYER_REGEN_ENABLED and
+        --                                       not yet drained. Power Infusion is pressed IN
+        --                                       COMBAT, so this is the expected shape of the
+        --                                       "icon lags the border" report.
+        --   gate OPEN + dark > 0             -> a per-UNIT exclusion (role, or the named
+        --                                       player list), not the gate.
+        :Field("helper slots", (function()
+            local AC = DF.AuraContainer
+            if not (AC and AC.GetHelperSlotStatus) then return "n/a" end
+            local total, dark, pending, parked = AC.GetHelperSlotStatus()
+            if total == 0 then return "none (no placed helper effect)" end
+            return ("%d total, %d would go dark, %d push deferred, %d parked")
+                :format(total, dark, pending, parked)
+        end)(), (function()
+            local AC = DF.AuraContainer
+            if not (AC and AC.GetHelperSlotStatus) then return "neutral" end
+            local _, _, pending = AC.GetHelperSlotStatus()
+            -- A deferral outstanding while the gate is open IS the fault, so it is marked as
+            -- one -- that is the whole point of adding this line.
+            return (pending > 0 and pihGateOpen) and "bad" or "neutral"
+        end)())
         :Field("gated containers live", (function()
             local AC = DF.AuraContainer
             local n = 0

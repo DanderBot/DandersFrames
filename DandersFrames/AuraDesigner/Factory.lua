@@ -1643,6 +1643,11 @@ local PLACED_BORDER_KEYS = {
     "BorderAnimationInset", "BorderAnimationOffsetX", "BorderAnimationOffsetY",
     "BorderAnimationMask", "BorderAnimationSidesAxis", "BorderAnimationCornerLength",
     "BorderAnimationProcStart",
+    -- ⚠ ADDED 2026-09-10 WITH THE SETTING ITSELF. Every scalar BuildSpec folds into
+    -- spec.animation belongs here or the border goes stale until /reload -- and this one
+    -- is also STRUCTURAL below, because a container button's animation groups are frozen
+    -- at build and cannot be retuned in place.
+    "BorderAnimationBlendMode",
     -- Colour-source keys: not exposed by the AD border UI today (source is always CUSTOM),
     -- but hashed defensively so an imported profile or a future class/role border option
     -- can't leave the border stale until /reload.
@@ -1698,6 +1703,7 @@ local function rawBorderAnimStructTok(t, borderOn)
         .. "," .. tostring(t.BorderAnimationSidesAxis)
         .. "," .. tostring(t.BorderAnimationCornerLength)
         .. "," .. tostring(t.BorderAnimationProcStart)
+        .. "," .. tostring(t.BorderAnimationBlendMode)
         .. "," .. colSig(t.BorderAnimationColor)
 end
 
@@ -1994,7 +2000,18 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
         -- Every sibling path (square fill above, filter/debuff groups, missing badge)
         -- already used 0.
         local inset = borderSpec and borderArtInset(borderSpec) or 0
-        style.icon = { show = not hideIcon, inset = inset }
+        -- ★ staticSpellID: PIN THE ART TO ONE SPELL, whatever aura matched.
+        -- ☠ IT IS THE CONTAINER'S OWN FIELD, NOT A NEW ONE. AuraContainer's styleButton has
+        -- honoured iconSpec.staticSpellID since the curated-art work -- it was simply never
+        -- reachable from a placed indicator, because nothing wrote it onto one.
+        -- ⚠ WHO WRITES IT: the Power Infusion Helper, on its Icon surface, with Power
+        -- Infusion's own id. Its trigger is a list of other people's cooldowns and its
+        -- MESSAGE is "infuse this player" -- so the picture must not be whichever cooldown
+        -- happened to match, which is the scope objection that got Icon cut once already.
+        -- ⚠ NOT VALIDATED HERE. A number is what the container asks for and an unknown one
+        -- resolves to no texture, which is the same outcome as the field being absent.
+        local staticID = tonumber(indicator.staticSpellID)
+        style.icon = { show = not hideIcon, inset = inset, staticSpellID = staticID }
     end
 
     -- Cooldown swipe: Blizzard drives it from the matched aura's Duration object
@@ -2277,7 +2294,21 @@ end
 -- edit. The tracked spell-ID map used to live here; it is live-tunable via
 -- candidateFilters and now rides placedTuningSig.
 local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs)
+    -- ⚠ DERIVED HERE RATHER THAN PASSED. Both call sites already hand over the indicator, and
+    -- an eighth positional argument on a seven-argument sig is how the wrong value gets passed
+    -- at one of two sites and nobody notices for a month. A square never binds an icon, so the
+    -- question only means anything on the icon branch.
+    local staticArt = (not isSquare) and tonumber(indicator.staticSpellID) and true or false
     return (isSquare and "sq" or "ic")
+        -- ★ PINNED ART IS STRUCTURAL, and it is structural for a BIND-ONCE reason rather than
+        -- a region one. bindNative registers slot.dfIcon with Blizzard's SetIcon exactly once
+        -- per slot (slot._boundIcon) and skips that registration when the spec pins a spell --
+        -- because a bound icon is repainted from the matched aura, which is the one thing a
+        -- pinned picture must not do. A slot pooled from one kind to the other would keep the
+        -- binding decision it was created with, so the two kinds must never share a slot.
+        -- ⚠ THE FLAG, NOT THE ID. Changing WHICH spell is pinned only needs the texture set
+        -- again (ApplyStyle does that); changing WHETHER one is pinned changes the binding.
+        .. "|" .. (staticArt and "sa" or "")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
         .. "|" .. (showDuration and "du" or "")
@@ -2900,7 +2931,9 @@ local function alertCompanionCoSig(frame, indicator, isBar, alpha, defs)
         "sx=" .. tostring(sx), "sy=" .. tostring(sy),
         -- scale is icon/square-only (the bar has no global for it, and buildBarLayout reads
         -- it raw), so this passes `defs` not `gdefs` — on a bar both resolve identically.
-        "sc=" .. tostring(tonumber(defOf(indicator, "scale", isBar and nil or defs, 1)) or 1),
+        -- (Was `isBar and nil or defs`, which always yields defs; written out so the
+        -- expression says what it does. Same result either way, per the note above.)
+        "sc=" .. tostring(tonumber(defOf(indicator, "scale", defs, 1)) or 1),
         "fo=" .. tostring(defOf(indicator, "durationFont", gdefs, nil)),
         "al=" .. tostring(alpha),
     }, "|")
@@ -4428,13 +4461,16 @@ function Factory:SetHelperSoundsArmed(frame, armed, map, cfg)
     -- Power Infusion back onto the priest.
     if UnitIsUnit(frame.unit, "player") then return 0, "own unit (never registered, by design)" end
 
-    -- ☠ ROLE EXCLUSION HOLDS HERE TOO. The visual gate skips excluded roles at the
-    -- container funnel, which sound never passes through -- without this, a tank's cooldown
-    -- played the cue while nothing marked them: a signal with nobody to act on. Checked at
-    -- arm time, the same staleness window as everything else on this path.
-    if DF.AuraContainer and DF.AuraContainer.IsHelperRoleExcluded
-        and DF.AuraContainer.IsHelperRoleExcluded(frame.unit) then
-        return 0, "role excluded"
+    -- ☠ THE PER-UNIT NARROWINGS HOLD HERE TOO -- role, and now the named-player allowlist.
+    -- The visual gate applies them at the container funnel, which sound never passes through:
+    -- without this a tank's cooldown played the cue while nothing marked them, a signal with
+    -- nobody to act on. Checked at arm time, the same staleness window as everything else on
+    -- this path.
+    -- ⚠ ONE VERB (IsHelperUnitExcluded), not a test per narrowing, so a third one added later
+    -- cannot reach the visuals and miss the sound -- which is exactly how this one started.
+    if DF.AuraContainer and DF.AuraContainer.IsHelperUnitExcluded
+        and DF.AuraContainer.IsHelperUnitExcluded(frame.unit) then
+        return 0, "unit excluded (role or player list)"
     end
 
     local argKey, argVal = resolveSoundArg(cfg or {})

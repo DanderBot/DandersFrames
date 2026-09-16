@@ -12,6 +12,7 @@ local P = DF.AuraDesigner._priv
 local ipairs, pairs, type = ipairs, pairs, type
 local format = string.format
 local max = math.max
+local tremove = table.remove
 local wipe = wipe
 
 local C_TEXT_DIM = GUI.Colors.textDim
@@ -21,6 +22,8 @@ local C_TEXT_DIM = GUI.Colors.textDim
 local OPTS                     = P.OPTS
 local ResolveSpec              = P.ResolveSpec
 local IsOtherTab               = P.IsOtherTab
+local IsPIHelperTab            = P.IsPIHelperTab
+local ShowsOthersOnly          = P.ShowsOthersOnly
 local IsDebuffTab              = P.IsDebuffTab
 local CurrentAuraPool          = P.CurrentAuraPool
 local CollectAllEffects        = P.CollectAllEffects
@@ -46,6 +49,9 @@ local expandedCards            = P.expandedCards
 local mainTabButtons           = P.mainTabButtons
 -- ...and the Layout Groups / Global halves, which phase 3 brought over.
 local CurrentLayoutGroups        = P.CurrentLayoutGroups
+-- The DISPLAY half -- helper-owned groups filtered out, same as the classic layout's list.
+-- Its note in AuraDesigner/UI/Options.lua says why the filter is not in the store accessor.
+local VisibleLayoutGroups        = P.VisibleLayoutGroups
 local DebuffGroupsRead           = P.DebuffGroupsRead
 local GroupExpandKey             = P.GroupExpandKey
 local expandedGroups             = P.expandedGroups
@@ -62,6 +68,14 @@ local BuildGlobalView            = P.BuildGlobalView
 -- above comes from Options.lua / Groups.lua / Cards.lua, all of which load first.
 --   P.CollectLayoutGroupSections   P.CollectDebuffGroupSections
 --   P.EnsureDebuffSelection
+
+-- ⚠ FORWARD-DECLARED, not moved. The Effects tab mounts the helper's cooldown-icon group
+-- (see BuildEffectsTabRows) and is written above the group builder; hoisting a 300-line
+-- function to satisfy the reading order would be a diff nobody can check. The upvalue is
+-- filled at load and every call happens long after.
+-- ☠ AND THEY MUST STAY DECLARED. `function MountGroup(...)` below assigns the LOCAL only
+-- while this line exists; delete it and both become globals that happen to work.
+local MountGroup, MountLayoutGroup
 
 -- The SPLIT PANEL's pool tab strip. The band layout has its own strip now (see
 -- S.BuildPoolTabs) and it is the same height, so the two layouts spend the same
@@ -106,8 +120,11 @@ local function PopoutWidth() return GUI.PopoutContentWidth or 260 end
 -- L[...] lookup, and a table built at load freezes whatever locale was live then
 -- -- the trap DF:RegisterLocaleRefresh exists for. Two callers now read it: the
 -- split panel's strip below and the scope row's picker.
+-- ⚠ A VERB, NOT A TABLE, and the fourth entry is why that matters twice over: every label is
+-- an L[...] lookup that must resolve at the live locale, AND the helper's tab is class-gated,
+-- so the list genuinely differs between characters. Built at load, it would freeze both.
 local function PoolDefs()
-    return {
+    local defs = {
         { key = "my",      label = L["My Buffs"], tooltip = {
             L["Buffs from your own class, and only when you cast them."],
             L["Set up separately for each specialization."],
@@ -122,6 +139,19 @@ local function PoolDefs()
             L["Shared across all your specializations."],
         } },
     }
+    -- ⚠ PRIEST ONLY, AND APPENDED RATHER THAN DECLARED ABOVE. Power Infusion is a priest
+    -- ability, so on anyone else this tab would be a fourth of the strip's width spent on a
+    -- pool that can never hold anything. Appending keeps the other three in their existing
+    -- order and positions -- the strip divides its width by #defs, so a conditional entry
+    -- anywhere but the end would move tabs people already know the position of.
+    if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() then
+        defs[#defs + 1] = { key = "pihelper", label = L["Power Infusion Helper"], tooltip = {
+            L["Who is worth casting Power Infusion on, and how that shows on the frame."],
+            L["Set up its Triggers, then add effects the same way as any other pool."],
+            L["Shared across all your specializations."],
+        } }
+    end
+    return defs
 end
 
 S.BuildPoolStrip = function(buffTabBar)
@@ -359,7 +389,9 @@ local function EffectTag(effect, indicatorGroup)
             parts[#parts + 1] = format(L["+%d triggers"], #triggers - 1)
         end
     end
-    if IsOtherTab() and effect.config and effect.config.othersOnly then
+    -- ⚠ NOT ON THE HELPER'S POOL, where it is a constant rather than a state -- see
+    -- P.ShowsOthersOnly.
+    if ShowsOthersOnly() and effect.config and effect.config.othersOnly then
         parts[#parts + 1] = L["Others Only"]
     end
     return table.concat(parts, " \194\183 ")
@@ -427,10 +459,14 @@ local function MountEffect(ctx, effect, shell)
 
     -- The aura's own tracking warning, where the card put it: after the identity,
     -- before the actions.
+    -- ...and the helper's clash warning on the same badge, exactly as the card mounts it.
+    -- See P.PIH_ClashText.
     AttachWarningBadge(section, GetAuraWarningKey(
         (not IsOtherTab()) and ResolveSpec() or nil, effect.auraName), {
         point = "RIGHT", relativeTo = section, relativePoint = "RIGHT",
         offsetX = -76, offsetY = 0, size = 16,
+        text = (effect.config and effect.config.pihSignal and P.PIH_ClashText)
+            and P.PIH_ClashText(effect.config, effect.typeKey) or nil,
     })
 
     -- ── THE HEADER'S TWO ACTIONS ──
@@ -441,6 +477,8 @@ local function MountEffect(ctx, effect, shell)
         delBtn = GUI:CreateCloseButton(section, {
             size = 22,
             onClick = function()
+                -- Asked BEFORE the removal; see P.PIH_ReDerive and the card layout's twin.
+                local wasPIH = effect.config and effect.config.pihSignal
                 if isPlaced then
                     RemoveIndicatorInstance(effect.auraName, effect.indicatorID)
                 else
@@ -448,6 +486,7 @@ local function MountEffect(ctx, effect, shell)
                     if auraCfg then auraCfg[effect.typeKey] = nil end
                     S.CleanupAdHocAura(effect.auraName)
                 end
+                if wasPIH and P.PIH_ReDerive then P.PIH_ReDerive() end
                 expandedCards[cardKey] = nil
                 S.SwitchTab("effects")
                 RefreshPlacedIndicators()
@@ -619,7 +658,9 @@ local function MountEffect(ctx, effect, shell)
     -- column already IS that checkbox -- the Modules page's rule for a group with
     -- nothing in it but the switch. The trade is the group's two footer verbs,
     -- which for one boolean the modified dot on the control itself covers.
-    if IsOtherTab() and effect.typeKey ~= "sound" then
+    -- ⚠ ...AND NOT ON THE HELPER'S POOL: there the caster rule is stamped by the recipe and
+    -- is not the user's to change. P.ShowsOthersOnly carries the reasoning.
+    if ShowsOthersOnly() and effect.typeKey ~= "sound" then
         -- The page's STATE pass, never a rebuild: a rebuild here would retire the
         -- row the click landed on. Named once so the row and the search entry it
         -- registers run the same thing.
@@ -679,6 +720,21 @@ local function BuildEffectsTabRows(ctx, shell)
     -- where (Cards.lua's S.BuildAddIndicatorPane). It holds no settings, so it
     -- takes neither a modified tick nor a footer -- the same rule the Members and
     -- Linked Filters rows follow.
+    --
+    -- ☠☠ ...AND THE HELPER'S POOL HAS NO SPELL TO PICK, SO IT HAS NO ROW. That panel is the
+    -- three-step spell-first flow, and the helper's aura is the cooldown list its Triggers tab
+    -- owns -- so the only step left is the tile grid, which is small enough to sit on the page
+    -- rather than behind a door.
+    -- ⚠ THE SAME BUILDER THE SPLIT PANEL USES (S.BuildPIHelperAddArea), mounted as one band.
+    -- Two layouts, one add flow: a second copy of it is what produced every Power Infusion
+    -- Helper bug of the last two days.
+    if IsPIHelperTab() then
+        GUI:AddDesignerLegacyTab(shell, function(host)
+            host:SetWidth(tools.BandWidth())
+            local y = S.BuildPIHelperAddArea(host, -4, function() S.SwitchTab("effects") end)
+            host:SetHeight(max(-(y or 0) + 4, 1))
+        end)
+    else
     local addBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(), { chromeless = true })
     local addRow
     -- ⚠ A LIST, NOT ONE HANDLE. PopoutContent is a FACTORY: pin a panel and click
@@ -745,225 +801,22 @@ local function BuildEffectsTabRows(ctx, shell)
     end
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
+    end   -- the helper's tile band / the designer's Add Indicator row
 
-    -- ── POWER INFUSION HELPER (priest only, Any Buff pool only) ──
-    -- The classic layout draws this block inline in its Effects head area; here
-    -- it is a BAND OF POPOUT ROWS mounting the same shared parts (Cards.lua's
-    -- S.BuildPIHelperCard and S.PIHelperSections): the card row is always
-    -- present and is the family's collapsible HEADER, and while a helper
-    -- exists (and the header is unfolded) each section stands behind an
-    -- INDENTED sibling row of its own -- one pane per section, because the
-    -- whole panel in one pane outgrew the page ("extends off the page"). The pool gate is the
-    -- classic one's: the helper watches OTHER people's cooldowns, so Any Buff
-    -- is the only pool where its records can match anything (the head area's
-    -- gate comment says why at length). The panes hold whole-feature verbs and
-    -- per-signal state the builders redraw themselves, so like the add rows
-    -- they take neither a modified tick nor a footer.
-    if select(2, UnitClass("player")) == "PRIEST" and IsOtherTab() then
-        local pihBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth(),
-                                                { chromeless = true })
-        -- ☠ A TICK IN A PANE MUST NOT REBUILD THE PAGE. The first cut routed
-        -- the builder's Refresh to page:Refresh(), and a page rebuild retires
-        -- the row the panel is docked to -- so every checkbox slammed the panel
-        -- shut ("it should stay until ur done editing"). A pane redraws ITSELF
-        -- in place, and the page -- whose Active Indicators list the helper's
-        -- signals feed, and whose sibling panes read state this one just moved
-        -- -- refreshes ONCE, from the row's onClose, and only when something in
-        -- here actually changed. ONE dirty flag across the whole band: a change
-        -- made in any pane is caught up on whichever helper panel closes.
-        local pihDirty = false
-        -- ⭐ ...AND ONE OPEN-PANEL COUNT beside it. The catch-up refresh
-        -- rebuilds the page, which retires every row -- including one whose
-        -- panel the user JUST opened. Edit in pane A, open pane B: A's close
-        -- fired the refresh and B died in the user's hand. So the deferred
-        -- refresh yields while ANY helper panel is still open (re-arming the
-        -- dirty flag), and the LAST close is the one that pays it.
-        local pihOpenPanes = 0
-        -- ☠ ...EXCEPT A CHANGE THAT DECIDES WHICH ROWS EXIST. Adding or
-        -- removing the helper gates every section row. An in-place rebuild
-        -- cannot add or retire a ROW, so that goes straight to the deferred
-        -- page:Refresh -- the panel closing at that moment is correct: the
-        -- surface being edited is being restructured.
-        -- ⚠ The amplifier ticks used to belong here too, when they gated a
-        -- Trinkets and Potions row of their own. They are nested inside the
-        -- cooldown row now and add no row, so they rebuild the pane in place.
-        -- ⚠ THE FAMILY FOLDS, AND THE FOLD IS ACCOUNT STATE UNDER A LITERAL KEY.
-        -- Four section rows under one card is still a lot of column; the card row is
-        -- the family's header and carries an expander, and the section rows are
-        -- only BUILT while it is open -- the same "a collapsed thing builds no
-        -- rows" rule the effect sections above follow. The store is the shared
-        -- collapsed-groups map (DandersFramesDB_v2.collapsedGroups -- account
-        -- level, not the profile, like every other remembered fold), and the key
-        -- is a LITERAL: no spell name or user-typed text may reach that store
-        -- (see MountEffect's expandedCards note). Absent key = expanded, which
-        -- is the default a fresh helper gets.
-        local pihSaved = GUI:GetCollapsedGroups()
-        local PIH_FOLD_KEY = "ad_pihelper"
-        local function PIHCollapsed() return pihSaved[PIH_FOLD_KEY] and true or false end
-        local function PIHRowSet()
-            return tostring(P.PIH_Exists()) .. "|" .. tostring(PIHCollapsed())
-        end
-        local function PIHDeferredPageRefresh()
-            -- The page rebuild is the catch-up, so the close that follows it
-            -- must not schedule a second one.
-            pihDirty = false
-            if C_Timer and C_Timer.After then
-                C_Timer.After(0, function()
-                    if page:IsShown() and page.Refresh then page:Refresh() end
-                end)
-            end
-        end
-        -- The shared mount: every helper row's pane goes through here --
-        -- buildPane(pane, Refresh) -> height. Generalised from the single-pane
-        -- version so the rebuild machinery exists ONCE, not once per row.
-        local function PIHMount(buildPane)
-            return tools.PopoutContent(function(g, holder)
-                local pane = CreateFrame("Frame", nil, holder)
-                pane:SetWidth(PopoutWidth())
-                -- ⚠ NO ready/wantH DANCE, unlike the add panes above: the
-                -- shared builders are synchronous and RETURN their y cursor
-                -- rather than reporting through a SetHeight callback, so the
-                -- height exists before AddWidget needs it.
-                local builtRowSet
-                local BuildContent
-                local function RebuildPane()
-                    -- Retire the previous build the way the classic arm's
-                    -- ClearTabContent does: hide and unanchor. The retired
-                    -- frames stay PARKED on the pane -- WoW never releases
-                    -- frames -- which is the same cost profile as the classic
-                    -- arm's SwitchTab rebuild (that arm re-runs its builder on
-                    -- every tick).
-                    for _, child in ipairs({ pane:GetChildren() }) do
-                        child:Hide()
-                        child:ClearAllPoints()
-                    end
-                    for _, region in ipairs({ pane:GetRegions() }) do
-                        region:Hide()
-                    end
-                    local h = BuildContent()
-                    -- The panel re-measures the pane's slot -- the same verb
-                    -- the Add Indicator pane's SetHeight reports through above.
-                    GUI:RelayoutHost(pane, h)
-                end
-                local function Refresh()
-                    if PIHRowSet() ~= builtRowSet then
-                        PIHDeferredPageRefresh()
-                        return
-                    end
-                    pihDirty = true
-                    RebuildPane()
-                end
-                BuildContent = function()
-                    builtRowSet = PIHRowSet()
-                    local h = buildPane(pane, Refresh)
-                    pane:SetHeight(h)
-                    return h
-                end
-                pihOpenPanes = pihOpenPanes + 1
-                g:AddWidget(pane, BuildContent())
-            end)
-        end
-        local function AddPIHRow(band, label, mount)
-            local row = band:AddWidget(GUI:CreatePopoutRow(page.child, {
-                label  = label,
-                title  = label,
-                window = DF.GUIFrame,
-                clipTo = page,
-                build  = mount,
-                -- See the effect rows' note: the dependent grey is a real gate.
-                gateWhenDisabled = true,
-                -- "Done editing" is the panel closing, and that is when the
-                -- page catches up on what the pane changed. Deferred a frame:
-                -- this fires inside the popout's own close path (a teardown's
-                -- CloseAllPopoutRows included), and a synchronous rebuild would
-                -- retire frames mid-close. Skipped when nothing changed, and
-                -- when the page has left the screen (a window close or layout
-                -- flip runs its own rebuild).
-                onClose = function()
-                    if pihOpenPanes > 0 then pihOpenPanes = pihOpenPanes - 1 end
-                    if not pihDirty then return end
-                    pihDirty = false
-                    if C_Timer and C_Timer.After then
-                        C_Timer.After(0, function()
-                            -- A sibling helper panel is open (or opened in this
-                            -- same click): stand down and re-arm -- its own
-                            -- close will pay the catch-up. Checked in the
-                            -- deferred frame so both click orders (close-then-
-                            -- open, open-then-close) resolve the same way.
-                            if pihOpenPanes > 0 then pihDirty = true return end
-                            if page:IsShown() and page.Refresh then page:Refresh() end
-                        end)
-                    end
-                end,
-                footerStrip = true,
-            }))
-            if not ctx.adEnabled then row.disableOn = function() return true end end
-            return row
-        end
-        -- The card row -- ONLY the add/remove card, and the family's HEADER.
-        -- Its Refresh always crosses a row-set boundary (the card's one verb
-        -- creates or deletes the helper), so it lands in PIHDeferredPageRefresh;
-        -- the card's own fold/unfold arrives with an unchanged row set and
-        -- redraws in place.
-        local cardRow = AddPIHRow(pihBand, L["POWER INFUSION HELPER"],
-                                  PIHMount(function(pane, Refresh)
-            local yEnd = S.BuildPIHelperCard(pane, { startY = -4, Refresh = Refresh })
-            return max(-(yEnd or 0) + 4, 1)
-        end))
-        Add(pihBand, nil, "both")
-        -- The expander, only while there are section rows to fold. A glyph
-        -- BUTTON rather than the section factory's surface-click toggle,
-        -- because this row's surface already has a verb -- it opens the card
-        -- pane -- and the two gestures must stay separate (CreateRowToggle's
-        -- rule). Same glyph pair as every fold in the kit. The toggle is
-        -- structural -- it decides which rows exist -- so it goes through
-        -- PIHDeferredPageRefresh like every other row-set change.
-        if P.PIH_Exists() then
-            local foldBtn = GUI:CreateGlyphButton(cardRow.plate or cardRow, {
-                size = 18, iconSize = 12,
-                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-                    .. (PIHCollapsed() and "chevron_right" or "expand_more"),
-            })
-            foldBtn:SetPoint("RIGHT", cardRow.gear, "LEFT", -8, 0)
-            foldBtn:SetScript("OnClick", function()
-                -- Only-store-true, the collapsed-groups convention: expanded
-                -- rows leave no key behind.
-                pihSaved[PIH_FOLD_KEY] = not PIHCollapsed() or nil
-                PIHDeferredPageRefresh()
-            end)
-            if not ctx.adEnabled then foldBtn:SetGlyphEnabled(false) end
-        end
-        -- ...and one row per section while the helper exists AND the family is
-        -- unfolded -- a collapsed family builds no section rows at all, exactly
-        -- as a collapsed effect section builds none. Titles are the sections'
-        -- own locale keys; `gated` is each row's existence test, re-run on
-        -- every page build. indent 8 (the pane's content inset) and no in-pane
-        -- header -- the row already says the name.
-        --
-        -- ⚠ A BAND OF THEIR OWN, INDENTED. `indent` is the page engine's flag
-        -- (Panel.lua's layout pass: x + 20 per level, width narrowed to match)
-        -- -- the addon's one indent mechanism, the same step the classic tab's
-        -- PIH_INDENT borrows -- so the sub-rows read as belonging to the header
-        -- row above them.
-        if P.PIH_Exists() and not PIHCollapsed() then
-            local pihSecBand = GUI:CreateSettingsGroup(page.child, tools.BandWidth() - 20,
-                                                       { chromeless = true })
-            pihSecBand.indent = true
-            for _, sec in ipairs(S.PIHelperSections) do
-                if not sec.gated or sec.gated() then
-                    local build = sec.build
-                    AddPIHRow(pihSecBand, L[sec.title], PIHMount(function(pane, Refresh)
-                        local yEnd = build(pane, {
-                            startY = -4, Refresh = Refresh,
-                            indent = 8, header = false,
-                        })
-                        return max(-(yEnd or 0) + 4, 1)
-                    end))
-                end
-            end
-            Add(pihSecBand, nil, "both")
-        end
-    end
+    -- ── POWER INFUSION HELPER: MOVED OUT, 2026-09-08 ──
+    -- ☠ DO NOT MOUNT IT HERE AGAIN. This layout used to carry the helper as a band of
+    -- popout rows -- a card row acting as the family header, then one indented row per
+    -- section. It now has its own page beside the designer (Auras > Power Infusion
+    -- Helper -- AuraDesigner/UI/PIHelperPage.lua), which composes the same shared parts
+    -- from Cards.lua and needs no band here.
+    --
+    -- ⚠ WHAT WENT WITH IT: the fold key "ad_pihelper", the per-band dirty flag and the
+    -- deferred page refresh all existed to keep a panel open while its own page rebuilt
+    -- underneath it. On a page whose only subject IS the helper that problem does not
+    -- arise, so none of it was carried across rather than being lost.
+    -- ⚠ WHAT DID NOT CHANGE: the records still live in the Any Buff pool, because the
+    -- pool decides a record's caster filter and the helper watches OTHER people's
+    -- cooldowns. That is plumbing now; the user is never asked to know it.
 
     -- ── THE ACTIVE INDICATORS HEADING, AND THE FILTER ON IT ──
     -- The same furniture the card layout puts above its list, mounted as one
@@ -998,7 +851,10 @@ local function BuildEffectsTabRows(ctx, shell)
     end)
     if pickerOpen then return end
 
-    local effects = CollectAllEffects()
+    -- includePIH on the helper's pool -- see the note on the split panel's own list
+    -- (S.BuildEffectsTab): the collector hides helper rows from the designer by default, and
+    -- on the helper's pool they are the only rows there are.
+    local effects = CollectAllEffects({ includePIH = IsPIHelperTab() })
     local filtered = {}
     for _, effect in ipairs(effects) do
         if S.activeFilter == "all" or effect.typeKey == S.activeFilter then
@@ -1006,7 +862,17 @@ local function BuildEffectsTabRows(ctx, shell)
         end
     end
 
-    if #filtered == 0 then
+    -- The helper's cooldown-icon group is one of this tab's rows -- see the note on the split
+    -- panel's own list (S.BuildEffectsTab) for why it is here and not behind a tab, and
+    -- MountLayoutGroup for what it is mounted with. It draws icons, so it obeys the type
+    -- filter the same way an icon effect does.
+    local pihGroup = nil
+    if IsPIHelperTab() and P.PIH_IconGroup then
+        local af = S.activeFilter or "all"
+        if af == "all" or af == "icon" then pihGroup = P.PIH_IconGroup() end
+    end
+
+    if #filtered == 0 and not pihGroup then
         -- ⚠ THE EMPTY STATE IS A BANNER, NOT A CENTRED FONTSTRING. A column of
         -- bands has no half-panel to centre anything in, and CreateInfoBanner is
         -- the shared shape for "nothing here yet, and here is why".
@@ -1035,6 +901,12 @@ local function BuildEffectsTabRows(ctx, shell)
 
     for _, effect in ipairs(filtered) do
         MountEffect(ctx, effect, shell)
+    end
+
+    if pihGroup then
+        MountLayoutGroup(ctx, pihGroup, { refreshTab = "effects",
+                                          filtersSection = P.PIH_GroupSourceSection(pihGroup),
+                                          Summary = P.PIH_IconGroupSummary })
     end
 end
 
@@ -1075,7 +947,7 @@ end
 -- Everything a group's rows are built from, for both group stores. The two
 -- differ in which sections they collect, which record their rows measure against
 -- and what their headers say; the machinery below is one copy.
-local function MountGroup(ctx, group, spec)
+function MountGroup(ctx, group, spec)
     local page, tools, Add = ctx.page, ctx.tools, ctx.Add
     local bandW = tools.BandWidth()
     local cardKey = spec.cardKey
@@ -1216,7 +1088,9 @@ local function MountGroup(ctx, group, spec)
     local verbs = {
         -- A LIST moved. Both layouts redraw the page; the panel goes with it,
         -- which is honest -- what was being edited is gone.
-        Rebuild = function() S.SwitchTab("layout") end,
+        -- ⚠ WHICH TAB IS THE CALLER'S. A group is not always on Layout Groups any more: the
+        -- helper's cooldown-icon group is a row on its Effects tab (MountLayoutGroup).
+        Rebuild = function() S.SwitchTab(spec.refreshTab or "layout") end,
         -- A VALUE moved and the widgets around it must re-read their greying. A
         -- rebuild here would retire the tick the user just clicked, so the page's
         -- STATE pass runs instead and the panes re-flow themselves.
@@ -1278,6 +1152,73 @@ local function MountGroup(ctx, group, spec)
     end
 
     Add(band, nil, "both")
+end
+
+-- ── ONE LAYOUT GROUP, MOUNTED ──
+-- ★★ EXTRACTED SO TWO TABS CAN MOUNT ONE (2026-09-10), the band layout's half of the split
+-- panel's S.CreateLayoutGroupCard. The helper's cooldown-icon group is added from the Effects
+-- tab and now lives there -- Krathe: "It's confusing when you add Cooldown Icons from effects
+-- and it appears as a layout group, it should just show as a normal effect for PI helper" --
+-- and everything that made this block Layout-Groups-only was the tab key it typed out twice.
+--
+-- opts (all optional):
+--   refreshTab   the sub-tab a delete or an eye rebuilds. Defaults to "layout".
+--   omitFilters  drop the LINKED FILTERS row -- the helper's group watches OUR cooldown list,
+--                which its Triggers tab owns. See S.CreateLayoutGroupCard for the argument.
+--   Summary      what the collapsed header says after the name, replacing the filter count.
+--                Paired with omitFilters, which would otherwise leave the group silent about
+--                its own contents.
+function MountLayoutGroup(ctx, group, opts)
+    opts = opts or {}
+    local refreshTab = opts.refreshTab or "layout"
+    local isFilterGroup = (group.kind == "filter")
+
+    -- `true`: the row layout draws Others Only itself, as a control
+    -- row, so the Growth section must not draw it as well.
+    local sections = P.CollectLayoutGroupSections(group, true)
+    -- Index 1 is "what fills this group" for both kinds -- Linked Filters on a filter group,
+    -- Members on the other. Substituted rather than removed when the caller has something
+    -- better to put there; see the same handling in S.CreateLayoutGroupCard.
+    if isFilterGroup and (opts.omitFilters or opts.filtersSection) then
+        if opts.filtersSection then sections[1] = opts.filtersSection
+        else tremove(sections, 1) end
+    end
+
+    local function Structural()
+        S.SwitchTab(refreshTab)
+        RefreshPlacedIndicators()
+        DF:InvalidateAuraLayout()
+        DF:UpdateAllFrames()
+        local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+        if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+    end
+
+    MountGroup(ctx, group, {
+        cardKey    = GroupExpandKey(group.id),
+        record     = GroupRecordView(group),
+        refreshTab = refreshTab,
+        sections   = sections,
+        appearance = isFilterGroup,
+        showEye    = isFilterGroup,
+        -- ⚠ ShowsOthersOnly, NOT IsOtherTab: the helper's pool answers yes to the second and
+        -- its groups are othersOnly by construction. P.ShowsOthersOnly carries the argument.
+        othersOnly = isFilterGroup and ShowsOthersOnly(),
+        Summary    = function()
+            return (opts.Summary and opts.Summary(group)) or S.LayoutGroupSummary(group)
+        end,
+        Apply      = function()
+            RefreshPlacedIndicators()
+            local E = DF.AuraDesigner and DF.AuraDesigner.Engine
+            if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
+        end,
+        onDelete = function()
+            DeleteLayoutGroup(group.id)
+            -- Deleting a group deletes its member indicators -- the same
+            -- structural refresh as the effect row's delete.
+            Structural()
+        end,
+        onEye = Structural,
+    })
 end
 
 -- ── THE LAYOUT GROUPS TAB ──
@@ -1364,7 +1305,7 @@ local function BuildLayoutTabRows(ctx, shell)
         host:SetHeight(max(-(yPos or 0) + 4, 1))
     end)
 
-    local groups = isDebuffs and DebuffGroupsRead() or CurrentLayoutGroups()
+    local groups = isDebuffs and DebuffGroupsRead() or VisibleLayoutGroups()
 
     -- ⚠ NO SEPARATE EMPTY STATE. The head area above already IS one when the
     -- list is empty: it swaps in the teaching sentence that says what this tab
@@ -1411,42 +1352,7 @@ local function BuildLayoutTabRows(ctx, shell)
                 onEye = StructuralDebuffGroupRefresh,
             })
         else
-            local isFilterGroup = (group.kind == "filter")
-            MountGroup(ctx, group, {
-                cardKey    = GroupExpandKey(group.id),
-                record     = GroupRecordView(group),
-                -- `true`: the row layout draws Others Only itself, as a control
-                -- row, so the Growth section must not draw it as well.
-                sections   = P.CollectLayoutGroupSections(group, true),
-                appearance = isFilterGroup,
-                showEye    = isFilterGroup,
-                othersOnly = isFilterGroup and IsOtherTab(),
-                Summary    = function() return S.LayoutGroupSummary(group) end,
-                Apply      = function()
-                    RefreshPlacedIndicators()
-                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
-                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
-                end,
-                onDelete = function()
-                    DeleteLayoutGroup(group.id)
-                    S.SwitchTab("layout")
-                    RefreshPlacedIndicators()
-                    -- Deleting a group deletes its member indicators -- the same
-                    -- structural refresh as the effect row's delete.
-                    DF:InvalidateAuraLayout()
-                    DF:UpdateAllFrames()
-                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
-                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
-                end,
-                onEye = function()
-                    S.SwitchTab("layout")
-                    RefreshPlacedIndicators()
-                    DF:InvalidateAuraLayout()
-                    DF:UpdateAllFrames()
-                    local E = DF.AuraDesigner and DF.AuraDesigner.Engine
-                    if E and E.ForceRefreshAllFrames then E:ForceRefreshAllFrames() end
-                end,
-            })
+            MountLayoutGroup(ctx, group)
         end
     end
 end
@@ -1457,6 +1363,30 @@ end
 -- import, a link out, a copy and a reset -- and deliberately take neither.
 local function BuildGlobalTabRows(ctx, shell)
     local page, tools, Add = ctx.page, ctx.tools, ctx.Add
+
+    -- ★★ ON THE HELPER'S POOL, "GLOBAL" IS ITS TRIGGERS -- the same branch the split panel's
+    -- S.BuildGlobalTab makes, and it has to be made here too or the popout layout would draw
+    -- the DESIGNER's global settings under a tab labelled Triggers. Every other pool's Global
+    -- tab holds what applies to the whole POOL rather than to one effect, which is exactly
+    -- what the helper's roles, class list and cooldown gate are.
+    -- ⚠ THE ENABLE TICK LEADS IT, because on this pool it governs everything below -- and it
+    -- has to be reachable when the helper is OFF, which is the state a new priest arrives in.
+    -- ⚠ ONE BAND, NOT POPOUT ROWS. The helper's sections are the card builder's own column
+    -- layout (S.BuildPIHelperCard / S.BuildPIHelperBody run a y cursor and anchor into their
+    -- parent); re-expressing them as rows is the second copy that this feature has already
+    -- paid for twice.
+    if IsPIHelperTab() and S.BuildPIHelperCard then
+        GUI:AddDesignerLegacyTab(shell, function(host)
+            host:SetWidth(tools.BandWidth())
+            local Refresh = function() S.SwitchTab("global") end
+            local y, open = S.BuildPIHelperCard(host, { startY = -4, Refresh = Refresh })
+            if open and S.BuildPIHelperBody then
+                y = S.BuildPIHelperBody(host, { startY = y, Refresh = Refresh, indent = 8 })
+            end
+            host:SetHeight(max(-(y or 0) + 4, 1))
+        end)
+        return
+    end
 
     -- ☠ page.child AS THE HOST, AND IT IS NEVER TOUCHED. Collect mode builds
     -- nothing, sizes nothing and stamps nothing onto the host it is handed; the
@@ -1532,12 +1462,24 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
     S.leftPanel, S.rightPanel = nil, nil
     S.tabBar, S.tabScrollFrame, S.tabContentFrame = nil, nil, nil
     S.activeTab      = S.activeTab or "effects"
-    S.activeBuffTab  = S.activeBuffTab or "my"
+    -- ☠ THE ONE-SHOT THE NAV ENTRY LEAVES BEHIND, CONSUMED HERE TOO. The Power Infusion
+    -- Helper's nav row asks for its pool and then opens this page; the split panel's builder
+    -- consumes the request in its own full-build path, and this arm has to do the same or the
+    -- popout layout would open that entry on whatever pool was last used.
+    S.activeBuffTab  = S.pendingBuffTab or S.activeBuffTab or "my"
+    S.pendingBuffTab = nil
     S.activeFilter   = S.activeFilter or "all"
-    if S.activeTab == "effects" and IsDebuffTab() then S.activeTab = "layout" end
+    -- Every pool's coercion in one call -- Effects frosts on Debuffs, Layout Groups does not
+    -- exist on the helper's pool. See P.CoerceTabForPool.
+    S.activeTab = (P.CoerceTabForPool and P.CoerceTabForPool(S.activeTab)) or S.activeTab
 
     local tools = GUI:CreatePopoutPageTools(page)
     if not tools then return end   -- classic; the caller took the island arm
+
+    -- Retire whatever an older Power Infusion Helper schema left running -- above all the
+    -- cooldown-icon group, which draws with no control left that can reach it. Priests only,
+    -- schema-stamped, so this is one comparison on every build after the first.
+    if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable() and P.PIH_Sweep then P.PIH_Sweep() end
 
     -- ☠ FROM THE MODE, NOT THE PRESET. The enable switch writes the MODE's own
     -- key; reading it off the preset is what made the tick un-stick once already.
@@ -1655,16 +1597,30 @@ P.BuildAuraDesignerRowsPage = function(page, db, Add, AddSpace)
             { height = SCOPEROW_H, build = function(host) S.BuildScopeRow(host) end },
         },
 
-        tabs = {
-            { key = "effects", label = L["Effects"], accent = nil,
-              -- Effects is buff-pool-only: category groups have no per-spell
-              -- placed indicators, so it frosts on the Debuffs pool.
-              disabled = function() return IsDebuffTab() end,
-              tooltip  = { title = L["Effects"], onlyWhenDisabled = true,
-                           lines = { L["Not available for Debuffs. Use Layout Groups instead."] } } },
-            { key = "layout",  label = L["Layout Groups"], accent = { r = 0.91, g = 0.66, b = 0.25 } },
-            { key = "global",  label = L["Global"],        accent = { r = 0.51, g = 0.86, b = 0.51 } },
-        },
+        -- ⚠ ONE DEFINITION, SHARED WITH THE SPLIT PANEL. P.SubTabDefs decides which sub-tabs
+        -- a pool has, in what order and under what label -- Triggers then Effects on the
+        -- Power Infusion Helper's pool, the usual three everywhere else. This layout rebuilds
+        -- the whole page on a pool switch, so simply reading it here is enough; the split
+        -- panel keeps its strip standing and re-lays it (P.ApplySubTabStrip).
+        -- ⚠ THE FROSTED-EFFECTS ARM IS STAMPED ON HERE rather than carried in the shared
+        -- defs, because `disabled` and `tooltip` are this shell's vocabulary and the split
+        -- panel expresses the same fact through SetDisabled and a HookScript.
+        tabs = (function()
+            local out = {}
+            for _, def in ipairs(P.SubTabDefs()) do
+                if def.key == "effects" then
+                    -- Effects is buff-pool-only: category groups have no per-spell
+                    -- placed indicators, so it frosts on the Debuffs pool.
+                    out[#out + 1] = { key = "effects", label = def.label, accent = def.accent,
+                        disabled = function() return IsDebuffTab() end,
+                        tooltip  = { title = L["Effects"], onlyWhenDisabled = true,
+                                     lines = { L["Not available for Debuffs. Use Layout Groups instead."] } } }
+                else
+                    out[#out + 1] = { key = def.key, label = def.label, accent = def.accent }
+                end
+            end
+            return out
+        end)(),
         activeTab = S.activeTab,
         onTab     = function(key) S.SwitchTab(key) end,
 

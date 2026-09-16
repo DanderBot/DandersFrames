@@ -22,6 +22,7 @@ local GetOtherAuras = P.GetOtherAuras
 local NextGroupName = P.NextGroupName
 local GetSpecLayoutGroups = P.GetSpecLayoutGroups
 local IsOtherTab = P.IsOtherTab
+local IsPIHelperTab = P.IsPIHelperTab
 local IsDebuffTab = P.IsDebuffTab
 local EMPTY_POOL = P.EMPTY_POOL
 local CurrentAuraPool = P.CurrentAuraPool
@@ -29,6 +30,10 @@ local PoolKeyPrefix = P.PoolKeyPrefix
 local DebuffGroupsRead = P.DebuffGroupsRead
 local GetOtherLayoutGroups = P.GetOtherLayoutGroups
 local CurrentLayoutGroups = P.CurrentLayoutGroups
+-- ☠ THE DISPLAY HALF OF THAT PAIR. CurrentLayoutGroups is the STORE and is what logic reads;
+-- this is what a surface SHOWS. The preview canvas used the store and painted the helper's
+-- group on every pool -- see PIHShowsMark for the whole account.
+local VisibleLayoutGroups = P.VisibleLayoutGroups
 local OtherPoolDisplayName = P.OtherPoolDisplayName
 local EnsureAuraConfig = P.EnsureAuraConfig
 local EnsureTypeConfig = P.EnsureTypeConfig
@@ -536,14 +541,22 @@ P.GetAuraWarningKey = GetAuraWarningKey
 --             offsetX/Y     -- default 3, 3
 --             size          -- default 16
 --             color         -- { r, g, b } default red { 1.0, 0.25, 0.25 }
+-- ⚠ opts.text: THE SAME BADGE, WITH THE TEXT SUPPLIED RATHER THAN LOOKED UP. Every caller
+-- until now had a config warning KEY, so the text came from GetWarningText. The Power Infusion
+-- Helper's clash warning is composed at render time -- it names the offending effect and how
+-- many others contend -- so there is no key it could be filed under.
+-- ⚠ A key still wins when both are given: a tracking limitation is a fact about the SPELL and
+-- outranks a fact about this configuration. In practice they never collide (a helper record is
+-- filter-owned, so it has no spec entry and no warning key).
 local function AttachWarningBadge(host, warnKey, opts)
     if not host then return end
     local badge = host.dfWarningBadge
-    if not warnKey then
+    local supplied = opts and opts.text
+    if not warnKey and not supplied then
         if badge then badge:Hide() end
         return
     end
-    local tooltipText = GetWarningText(warnKey)
+    local tooltipText = warnKey and GetWarningText(warnKey) or supplied
     if not tooltipText then
         if badge then badge:Hide() end
         return
@@ -1111,30 +1124,28 @@ P.GetIndicatorLayoutGroup = GetIndicatorLayoutGroup
 -- (GetUngroupedIndicators removed — uncalled since the group picker moved to
 -- the full spell-picker "group" mode; reclaimed for the 200-locals ceiling.)
 
--- Create a new layout group. kind: nil/"members" = classic member arranger
--- (legacy records carry no kind); "filter" = a container-backed group linked to
--- registry filters (stable preset keys / custom ids in filterSelection) with
--- uniform per-group styling (iconSize / maxIcons on top of the shared layout).
-local function CreateLayoutGroup(name, kind)
-    local adDB = GetAuraDesignerDB()
-    if not adDB then return nil end
-    -- Pool-routed: the Other Buffs tab creates into the flat spec-independent
-    -- store (born lazily HERE — the first add) with its own id counter.
-    local groups, id
-    if IsOtherTab() then
-        groups = GetOtherLayoutGroups(true)  -- the first add creates the store
-        if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
-        id = adDB.nextOtherLayoutGroupID
-        adDB.nextOtherLayoutGroupID = id + 1
-    else
-        groups = GetSpecLayoutGroups()
-        if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
-        id = adDB.nextLayoutGroupID
-        adDB.nextLayoutGroupID = id + 1
-    end
+-- ★★ WHAT A NEW LAYOUT GROUP *IS*, IN ONE PLACE (2026-09-10).
+--
+-- ☠ EXTRACTED BECAUSE A SECOND CREATOR DRIFTED FROM IT AND SHIPPED. The Power Infusion
+-- Helper's cooldown-icon group is built directly into adDB.otherLayoutGroups rather than
+-- through CreateLayoutGroup below -- deliberately, and for a good reason: that function picks
+-- its store from the OPEN TAB, which is the one line that put eight stray groups in Krathe's
+-- spec store and took three attempts to clean up. What it also did was hand-write the record,
+-- and a hand-written record omitted `iconSize` and `maxIcons`. Krathe: "Max icons should
+-- default to 4 it's showing blank but seems to look like 8? Icon size is also showing blank on
+-- the slider." Both sliders bind the field directly, so nil draws blank -- and the factory
+-- falls back to 8 for a filter group's max, which is exactly what he was seeing.
+-- ⇒ The two callers now share the RECORD and differ only in the STORE. Copying a field list
+-- is how they drifted; there is no longer a field list to copy.
+--
+-- kind: nil/"members" = classic member arranger (legacy records carry no kind); "filter" = a
+-- container-backed group linked to registry filters (stable preset keys / custom ids in
+-- filterSelection) with uniform per-group styling (iconSize / maxIcons on top of the shared
+-- layout). The caller owns `id` and `name` -- both come from the store it is inserting into.
+local function NewLayoutGroupRecord(id, name, kind)
     local group = {
         id = id,
-        name = name or NextGroupName(groups, (kind == "filter") and "Filter Group" or "Group"),
+        name = name,
         anchor = "TOPLEFT",
         offsetX = 0,
         offsetY = 0,
@@ -1153,6 +1164,31 @@ local function CreateLayoutGroup(name, kind)
     else
         group.members = {}
     end
+    return group
+end
+P.NewLayoutGroupRecord = NewLayoutGroupRecord
+
+-- Create a new layout group in the ACTIVE TAB's store. See NewLayoutGroupRecord for the
+-- record itself, and for why a second creator exists that does not come through here.
+local function CreateLayoutGroup(name, kind)
+    local adDB = GetAuraDesignerDB()
+    if not adDB then return nil end
+    -- Pool-routed: the Other Buffs tab creates into the flat spec-independent
+    -- store (born lazily HERE — the first add) with its own id counter.
+    local groups, id
+    if IsOtherTab() then
+        groups = GetOtherLayoutGroups(true)  -- the first add creates the store
+        if not adDB.nextOtherLayoutGroupID then adDB.nextOtherLayoutGroupID = 1 end
+        id = adDB.nextOtherLayoutGroupID
+        adDB.nextOtherLayoutGroupID = id + 1
+    else
+        groups = GetSpecLayoutGroups()
+        if not adDB.nextLayoutGroupID then adDB.nextLayoutGroupID = 1 end
+        id = adDB.nextLayoutGroupID
+        adDB.nextLayoutGroupID = id + 1
+    end
+    local group = NewLayoutGroupRecord(id,
+        name or NextGroupName(groups, (kind == "filter") and "Filter Group" or "Group"), kind)
     tinsert(groups, group)
     return group
 end
@@ -1267,6 +1303,15 @@ local function DebuffSelectionView(sel)
     return CreateRecordView(sel, DEBUFF_SELECTION_DEFAULTS)
 end
 P.DebuffSelectionView = DebuffSelectionView
+
+-- Drop a group's remembered fold state. Exported for the one kind of caller that removes a
+-- group WITHOUT going through DeleteLayoutGroup: a store-wide sweep, which walks the raw
+-- arrays because the group it is hunting may be in any of them (see pihPurgeStrayMarks in
+-- Cards.lua). The expand table is a file local, so the removal cannot clear it itself.
+local function ForgetGroupExpandState(groupID)
+    expandedGroups[GroupExpandKey(groupID)] = nil
+end
+P.ForgetGroupExpandState = ForgetGroupExpandState
 
 -- Delete a layout group by ID (from the ACTIVE tab's store; the member-
 -- indicator cascade removes from the active pool via RemoveIndicatorInstance's
@@ -1483,8 +1528,69 @@ P.BADGE_COLORS = BADGE_COLORS
 
 -- Collect all configured effects into a flat, sorted list
 -- Returns: { { source="placed"|"frame", auraName, typeKey, ... }, ... }
-local function CollectAllEffects()
+-- ☠ HELPER-OWNED RECORDS ARE EXCLUDED BY DEFAULT (2026-09-08). A record carrying a
+-- `pihSignal` mark belongs to the Power Infusion Helper, which now has its own page
+-- (Auras > Power Infusion Helper). Krathe's requirement when it moved: "Anything added
+-- should show just on the PI helper page and not in AD itself." Left in this list they
+-- read as stray indicators the user does not remember making, and deleting one there
+-- silently half-dismantles a feature configured somewhere else.
+--
+-- ⚠ AN OPTION, NOT A HARD SKIP, and the difference matters. The helper's own page wants
+-- exactly these rows -- it is the one surface where they ARE the subject -- so the filter
+-- is a caller's choice and the display-name derivation below stays live rather than
+-- becoming unreachable code that looks maintained.
+-- ⚠ Callers that want the designer's behaviour pass nothing: every existing call site
+-- (Cards.lua's Active Indicators list, Rows.lua's) is a designer list and wants them gone.
+-- ☠☠ THE SAME RULE, FOR THE SURFACE THAT NEVER LEARNED IT (2026-09-10).
+-- CollectAllEffects hides helper-owned records from every pool but the helper's; the PREVIEW
+-- CANVAS was written before that rule existed and kept painting them. Krathe: "any buff tab on
+-- AD is showing our PI helper indicators, it should not."
+-- ⚠ THREE LEAKS, ONE CAUSE, and all three are display sites reading a STORE accessor:
+--   · the filter-group placeholder loop read CurrentLayoutGroups (the store) instead of
+--     VisibleLayoutGroups (the display filter) -- the exact split that accessor's own note
+--     describes, applied everywhere except here;
+--   · the placed-instance loop iterated CurrentAuraPool without testing the mark;
+--   · RefreshPreviewEffects did the same for frame-level effects, so a helper BORDER painted
+--     itself over the Any Buff preview.
+-- ⚠ READ IN BOTH DIRECTIONS, exactly like VisibleLayoutGroups: on the helper's own tab the
+-- marked records are the ONLY ones that belong, and the user's unrelated Any Buff work is
+-- what does not. One rule -- "show what this tab is about" -- not two lists of exceptions.
+local function PIHShowsMark(marked)
+    return ((marked and true or false) == IsPIHelperTab())
+end
+P.PIHShowsMark = PIHShowsMark
+
+-- The record this tab may paint, with the frame-level effects it may not removed.
+-- ⚠ PER TYPE KEY, NOT PER RECORD. A helper record is keyed by its filter reference, and
+-- nothing stops the user adding an effect of their own to that same filter from the Any Buff
+-- tab -- so "this record is the helper's" would hide their work along with ours. Same
+-- granularity CollectAllEffects uses.
+-- ⚠ NO COPY IN THE COMMON CASE: a record with nothing to hide is handed straight back, which
+-- is every record in every profile that has never opened the helper.
+-- ☠ A REAL COPY, NOT AN __index PROXY. The painters read auraCfg.border, auraCfg.healthbar and
+-- so on directly, and a metatable would answer every one of those from the original -- hiding
+-- nothing while looking like it did.
+local function PIHVisibleRecord(auraCfg)
+    local hide
+    for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
+        local cfg = auraCfg[typeKey]
+        if type(cfg) == "table" and not PIHShowsMark(cfg.pihSignal) then
+            hide = hide or {}
+            hide[typeKey] = true
+        end
+    end
+    if not hide then return auraCfg end
+    local out = {}
+    for k, v in pairs(auraCfg) do
+        if not hide[k] then out[k] = v end
+    end
+    return out
+end
+P.PIHVisibleRecord = PIHVisibleRecord
+
+local function CollectAllEffects(opts)
     local effects = {}
+    local includePIH = opts and opts.includePIH and true or false
 
     local spec = ResolveSpec()
     local trackable = spec and Adapter and Adapter:GetTrackableAuras(spec)
@@ -1542,18 +1648,22 @@ local function CollectAllEffects()
             -- Placed indicators
             if auraCfg.indicators then
                 for _, indicator in ipairs(auraCfg.indicators) do
+                    if includePIH or not indicator.pihSignal then
                     tinsert(effects, {
                         source      = "placed",
                         auraName    = auraName,
                         -- Same derivation as the frame-level rows below: a marked indicator
                         -- (a helper Icon or Square) names itself, from the mark.
+                        -- ⚠ THE RECORD GOES IN TOO, not just the signal: the two helper ICONS
+                        -- differ only in their art, and the type badge says "Icon" for both.
                         displayName = (indicator.pihSignal and P.PIH_SignalLabel
-                            and P.PIH_SignalLabel(indicator.pihSignal)) or displayName,
+                            and P.PIH_SignalLabel(indicator.pihSignal, indicator)) or displayName,
                         indicatorID = indicator.id,
                         typeKey     = indicator.type,
                         config      = indicator,
                         anchor      = indicator.anchor or "CENTER",
                     })
+                    end
                 end
             end
 
@@ -1562,7 +1672,8 @@ local function CollectAllEffects()
             -- 600-spell filter would mean 600 registrations.
             local isFilterOwned = DF.ParseADFilterRef and DF:ParseADFilterRef(auraName) ~= nil
             for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
-                if auraCfg[typeKey] and not (isFilterOwned and typeKey == "sound") then
+                if auraCfg[typeKey] and not (isFilterOwned and typeKey == "sound")
+                    and (includePIH or not auraCfg[typeKey].pihSignal) then
                     tinsert(effects, {
                         source      = "frame",
                         auraName    = auraName,
@@ -1573,7 +1684,7 @@ local function CollectAllEffects()
                         -- is a translated string frozen into the profile, so it would keep the
                         -- locale it was created in while every other name followed the client.
                         displayName = (auraCfg[typeKey].pihSignal and P.PIH_SignalLabel
-                            and P.PIH_SignalLabel(auraCfg[typeKey].pihSignal)) or displayName,
+                            and P.PIH_SignalLabel(auraCfg[typeKey].pihSignal, auraCfg[typeKey])) or displayName,
                         typeKey     = typeKey,
                         config      = auraCfg[typeKey],
                     })
@@ -2666,7 +2777,11 @@ local function RefreshPlacedIndicators()
         local fgPoolKey = isOther and "dfADOtherFilterGroupSlots" or "dfADFilterGroupSlots"
         local fgPool = mockFrame[fgPoolKey]
         if not fgPool then fgPool = {}; mockFrame[fgPoolKey] = fgPool end
-        for _, group in ipairs(specGroups) do
+        -- ⚠ VisibleLayoutGroups, NOT `specGroups`. This is a DISPLAY loop and specGroups is the
+        -- STORE -- it is kept raw above because the placement pass before it is LOGIC (it
+        -- resolves an indicator's owning group and must find one wherever it lives). Reading
+        -- the store here drew the helper's Cooldown Icons group on the Any Buff preview.
+        for _, group in ipairs(VisibleLayoutGroups()) do
             if group.kind == "filter" and group.enabled ~= false then
                 tinsert(placedIndicators,
                     DrawGroupPlaceholderSlot(mockFrame, fgPool, group, 8, 8,
@@ -2701,12 +2816,18 @@ local function RefreshPlacedIndicators()
     -- "other:" prefix so the two pools' slots can't collide in the store.
     -- Hidden indicators (eye toggle, enabled == false) don't render — same as live.
     -- (keyPrefix hoisted above the group-position pass — same value.)
-    local idSpec = isOther and nil or spec
+    -- ☠ NOT `isOther and nil or spec` -- that always yields spec (nil never wins an
+    -- and/or), so the Other pool was previewing with the spec it must not use.
+    local idSpec
+    if not isOther then idSpec = spec end
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         local info = infoLookup[auraName]
         if type(auraCfg) == "table" and (isOther or info or AdHocSpellID(auraName)) and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
-              if indicator.enabled ~= false then
+              -- ⚠ AND THE MARK, which this loop never tested: the Any Buff pool holds the
+              -- helper's records too, so every helper icon and square painted itself on the
+              -- designer's own canvas. See PIHShowsMark.
+              if indicator.enabled ~= false and PIHShowsMark(indicator.pihSignal) then
                 local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
                 local capturedAura = auraName
                 local capturedID = indicator.id
@@ -2756,7 +2877,7 @@ local function GetOrCreatePreviewCustomBorder(mockFrame, key)
     return pool[key]
 end
 
-local function RefreshPreviewEffects()
+local function RefreshPreviewEffects(opts)
     if not S.framePreview then return end
     local mockFrame = S.framePreview.mockFrame
     if not mockFrame then return end
@@ -2800,10 +2921,23 @@ local function RefreshPreviewEffects()
     -- Indicators:Apply's `if state.X then return end`). Mirror that here so the
     -- preview is deterministic instead of pairs()-order-dependent: iterate auras
     -- in descending-priority order (tiebreak by name) and apply first-wins per type.
+    -- ⚠ THE POOL IS AN ARGUMENT NOW (2026-09-08), defaulting to exactly what it always was.
+    -- The Power Infusion Helper's page shows this same canvas but must paint ONLY the
+    -- helper's own records -- the Any Buff pool it shares holds the user's unrelated work
+    -- too, and a preview on a page about one feature that quietly renders another feature's
+    -- effects is worse than no preview. It passes a table holding the SAME cfg tables, so
+    -- every painter below is unchanged and cannot drift from the designer's rendering.
     local sortedAuras = {}
-    for auraName, auraCfg in pairs(CurrentAuraPool()) do
+    for auraName, auraCfg in pairs((opts and opts.pool) or CurrentAuraPool()) do
         if type(auraCfg) == "table" then  -- skip corrupted entries
-            sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = auraCfg, priority = auraCfg.priority or 5 }
+            -- ⚠ THE HELPER'S FRAME-LEVEL EFFECTS ARE STRIPPED FOR THE DESIGNER, and ONLY the
+            -- helper's -- PIHVisibleRecord hides per type key, so a user's own effect on the
+            -- same filter record still paints. Without it a helper BORDER drew itself over the
+            -- Any Buff preview, which is the half of Krathe's report that had no card to
+            -- explain it: the effects list already hid the row, so the colour on the mock frame
+            -- came from nowhere the panel would admit to.
+            local cfg = PIHVisibleRecord(auraCfg)
+            sortedAuras[#sortedAuras + 1] = { name = auraName, cfg = cfg, priority = cfg.priority or 5 }
         end
     end
     sort(sortedAuras, function(a, b)
@@ -2931,11 +3065,20 @@ S.RefreshPreviewLightweight = function()
     -- Re-apply placed indicator instances using current settings
     -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their
     -- slot; keyPrefix hoisted above the group-position pass — same value)
-    local idSpec = isOther and nil or spec
+    -- ☠ NOT `isOther and nil or spec` -- that always yields spec (nil never wins an
+    -- and/or), so the Other pool was previewing with the spec it must not use.
+    local idSpec
+    if not isOther then idSpec = spec end
     for auraName, auraCfg in pairs(CurrentAuraPool(spec)) do
         if type(auraCfg) == "table" and auraCfg.indicators then
             for _, indicator in ipairs(auraCfg.indicators) do
-              if indicator.enabled ~= false then
+              -- ⚠ THE MARK GATE BELONGS HERE TOO, and leaving it off the lightweight pass undid the
+              -- full pass's fix on the very next slider drag. RenderPreviewIndicator CREATES a pooled
+              -- slot on a miss and this route never calls ClearPlacedIndicators, so an unfiltered walk
+              -- paints the helper's records onto the designer canvas that RefreshPlacedIndicators
+              -- deliberately keeps them off -- the Any Buff pool physically holds them. The
+              -- frame-level half of this same function already filters through PIHVisibleRecord.
+              if indicator.enabled ~= false and PIHShowsMark(indicator.pihSignal) then
                 local instanceKey = keyPrefix .. auraName .. "#" .. indicator.id
 
                 -- Apply layout group position override if applicable

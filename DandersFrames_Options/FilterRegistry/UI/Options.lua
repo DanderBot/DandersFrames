@@ -702,12 +702,29 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         return ids
     end
 
-    local function CustomSpellCount(f)
-        local n = 0
-        for _ in pairs(f.spells) do n = n + 1 end
-        for _ in pairs(f.rawIDs) do n = n + 1 end
-        return n
-    end
+-- ★ ONE COUNT STRING FOR A CUSTOM FILTER, so the pane header and the slot corner can
+-- never disagree (the note at the corner site says exactly that). Mirrors the left-hand
+-- list's rule at BindLeftRow: a curated list reads "34 of 39 spells" once something is
+-- ticked off, a hand-built one can have nothing off, answers enabled == total, and keeps
+-- the single number it has always shown.
+-- ⚠ THIS REPLACED A LOCAL `CustomSpellCount`, which moved to the registry as
+-- R:CustomFilterCounts. Two call sites for it arrived on main AFTER this branch forked
+-- (the Filter Designer list rework) and merged in CLEANLY, leaving calls to a function
+-- this branch had deleted -- a nil-call with no conflict to warn anyone. Keep both
+-- readers pointed here.
+local function CustomCountText(cfId)
+    local R = DF.FilterRegistry
+    if not (R and R.CustomFilterCounts and cfId) then return format(L["%d spells"], 0) end
+    local onN, totalN = R:CustomFilterCounts(cfId)
+    onN, totalN = onN or 0, totalN or 0
+    if onN == totalN then return format(L["%d spells"], totalN) end
+    return format(L["%d of %d spells"], onN, totalN)
+end
+
+    -- ⚠ CustomSpellCount WENT TO THE REGISTRY as R:CustomFilterCounts, because it was one
+    -- of THREE places counting the same thing and none of them honoured a curated list's
+    -- per-spell ticks. One counter, three consumers -- this file's left list and header,
+    -- and R:ListFilters, which the Buff Bar's picker reads.
 
     -- Display name of the current selection (duplicate-prompt prefill)
     local function CurrentDisplayName()
@@ -1712,11 +1729,22 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     end)
     resetBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     resetBtn:Hide()
-    -- Presets only. It used to branch for the Optional Debuffs list; that list and
-    -- its reset moved to the Debuff Bar page together.
+    -- Presets, and CURATED CUSTOM LISTS -- the ones we seeded, which have a default to go
+    -- back to (R:IsCuratedFilter). It used to branch for the Optional Debuffs list; that
+    -- list and its reset moved to the Debuff Bar page together.
+    -- ⚠ THE TWO RESETS DIFFER IN WHAT THEY UNDO, and both match what the button says.
+    -- A preset's is an overrides layer, so clearing it restores every tick. A curated
+    -- list's ALSO restores any seeded spell that went missing -- but never prunes what
+    -- the user added to it themselves, which is theirs (R:ResetCuratedFilter).
     resetBtn:SetScript("OnClick", function()
-        if selKind ~= "preset" or not selKey then return end
-        R:ResetPreset(selKey)
+        if not selKey then return end
+        if selKind == "preset" then
+            R:ResetPreset(selKey)
+        elseif selKind == "custom" and R.ResetCuratedFilter then
+            if not R:ResetCuratedFilter(selKey) then return end
+        else
+            return
+        end
         DirectFilterChangedProxy()
         RefreshAll()
     end)
@@ -2327,7 +2355,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         addBtn:Show()
         -- Reset (header row 1, red danger tone): shown when a preset differs from its
         -- shipped defaults.
-        resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey)) or false)
+        -- ⚠ SHOWN ONLY WHEN THERE IS SOMETHING TO UNDO, for both kinds. A curated list
+        -- counts as modified once anything is ticked off -- `disabled` is exactly the
+        -- overrides table's role, so the two tests are the same question.
+        local curatedModified = false
+        if selKind == "custom" and selKey and R.IsCuratedFilter and R:IsCuratedFilter(selKey) then
+            local cf = R:GetCustomFilter(selKey)
+            curatedModified = (cf and cf.disabled and next(cf.disabled)) and true or false
+        end
+        resetBtn:SetShown((selKind == "preset" and selKey ~= nil and R:IsPresetModified(selKey))
+            or curatedModified or false)
     end
 
     -- ========== LEFT ROW POOL ==========
@@ -2733,7 +2770,30 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         -- a preset and a custom filter. Indented from the left so the nesting is
         -- structural rather than a colour cue.
         local isChild = item.child and true or false
-        local showCheck = isPreset or isChild
+        -- ★ ...AND A CURATED CUSTOM LIST TICKS TOO. A filter WE seeded has a default to
+        -- go back to (R:IsCuratedFilter), so unticking a spell is reversible and the
+        -- destructive ✕ is the wrong verb for it. A list the USER built keeps the ✕ --
+        -- there, membership IS the truth and removing what they added is exactly right.
+        local isCurated = (not isPreset) and selKind == "custom" and selKey
+            and R.IsCuratedFilter and R:IsCuratedFilter(selKey) or false
+        -- ☠☠ ...ONLY FOR THE ROWS WE ACTUALLY SEEDED. `IsCuratedFilter` is a property of the
+        -- FILTER, not of the row, so testing it alone gave the tick to every row in the list --
+        -- including a spell the USER typed into the Add field afterwards. That row has no
+        -- default to go back to: ResetCuratedFilter restores our seed and, by its own
+        -- statement, deliberately does NOT prune their additions. So the tick is reversible in
+        -- name only and the ✕ it replaced was the sole way to take the spell out again --
+        -- add one by mistake and it is in that list forever, on every frame it feeds.
+        -- ⇒ A row is curated when its id is in the seed. Anything else keeps the ✕, which is
+        -- the same rule a hand-built list follows, applied per row instead of per filter.
+        -- ⚠ dfDefaults is keyed by NUMERIC spell id (SetCuratedDefaults tonumber()s them), so
+        -- the lookup coerces rather than trusting the row's field to already be a number.
+        if isCurated and not isChild then
+            local cf = R.GetCustomFilter and R:GetCustomFilter(selKey)
+            local seeded = cf and cf.dfDefaults
+            local sid = tonumber(item.id)
+            if not (type(seeded) == "table" and sid and seeded[sid]) then isCurated = false end
+        end
+        local showCheck = isPreset or isChild or isCurated
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", isChild and 18 or 0, -y)
         row:SetPoint("TOPRIGHT", 0, -y)
@@ -2851,6 +2911,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                     -- The row's own tooltip already carries the reason, so a refusal is
                     -- a no-op rather than a tick that bounces back unexplained.
                     if not R:SetSpellIDMuted(childRec, sid, tracked) then return end
+                    DirectFilterChangedProxy()
+                    RefreshAll()
+                end
+            elseif isCurated then
+                -- Our own seeded list: the tick writes the filter's own disabled set,
+                -- which ResolveSelection honours. Reset to Default clears it wholesale.
+                local cfKey, sid = selKey, item.id
+                row._onAction = function()
+                    R:SetCustomSpellEnabled(cfKey, sid,
+                        not R:IsCustomSpellEnabled(cfKey, sid))
                     DirectFilterChangedProxy()
                     RefreshAll()
                 end
@@ -2995,8 +3065,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             used = used + 1
             local row = AcquireLeftRow(used)
             local id = cfId
+            -- ★ A CURATED LIST READS LIKE A PRESET: "34/39" once something is ticked off,
+            -- and the modified dot beside it. A hand-built one answers enabled == total
+            -- (nothing can be off), so it keeps the single number it always had -- no
+            -- branch on the kind, just the shared counter.
+            local onN, totalN = R:CustomFilterCounts(id)
             BindLeftRow(row, y, "custom", id, f.name or id,
-                tostring(CustomSpellCount(f)), false,
+                (onN == totalN) and tostring(totalN) or (onN .. "/" .. totalN),
+                R.IsCuratedFilterModified and R:IsCuratedFilterModified(id) or false,
                 selKind == "custom" and selKey == id)
             y = y + LEFT_ROW_H
         end
@@ -3090,7 +3166,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
             eyebrowText:SetText(L["Editing custom filter"])
             local f = R:GetCustomFilter(selKey)
             titleText:SetText(f and (f.name or selKey) or "")
-            countText:SetText(format(L["%d spells"], f and CustomSpellCount(f) or 0))
+            -- Same shape as the left row: the fraction only appears once something is
+            -- actually off, so an ordinary custom filter's header is unchanged.
+            local onN, totalN = R:CustomFilterCounts(selKey)
+            countText:SetText((onN == totalN) and format(L["%d spells"], totalN)
+                or format(L["%d of %d spells"], onN, totalN))
         end
         -- Both texts are now set, so the name can be capped against what the count
         -- actually takes up on this pass.
@@ -3258,6 +3338,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                 put("ALL", {
                     id = id, name = nm, icon = icon or FALLBACK_ICON,
                     chip = name and L["not in database"] or L["unknown ID"],
+                    -- Curated lists tick their raw ids too; see the spells arm.
+                    enabled = (selKind == "custom" and selKey)
+                        and R:IsCustomSpellEnabled(selKey, id) or nil,
                     raw = true, tooltipID = id,
                 })
             end
@@ -3290,6 +3373,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                             put(rec.class, {
                                 rec = rec, id = sid, name = name, icon = icon,
                                 chip = RecordChip(rec),
+                                -- On a curated list the row shows a tick, so it needs
+                                -- the state to draw. Absent on a hand-built filter,
+                                -- whose rows show the ✕ and never read this.
+                                enabled = R:IsCustomSpellEnabled(selKey, sid),
                                 tooltipID = rec.id,
                             })
                             putRecordChildren(rec.class, rec, name)
@@ -4369,7 +4456,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                     local f = R:GetCustomFilter(key)
                     eyebrow:SetText(L["Editing custom filter"])
                     title:SetText(f and (f.name or tostring(key)) or "")
-                    countText:SetText(format(L["%d spells"], f and CustomSpellCount(f) or 0))
+                    countText:SetText(f and CustomCountText(key) or format(L["%d spells"], 0))
                 end
                 ClampPaneTitle()
 
@@ -4535,7 +4622,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
                         counted = format(L["%d of %d tracked"], enabled or 0, total or 0)
                     else
                         local f = R:GetCustomFilter(slot.key)
-                        counted = format(L["%d spells"], f and CustomSpellCount(f) or 0)
+                        counted = f and CustomCountText(slot.key) or format(L["%d spells"], 0)
                     end
                     return format("%s \226\128\148 %s", counted, used)
                 end,

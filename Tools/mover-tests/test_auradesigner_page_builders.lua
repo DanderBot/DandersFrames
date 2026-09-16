@@ -330,7 +330,11 @@ do
     check(PRO:find('AddGroup(L["Tracked IDs"], function(g)', 1, true) ~= nil,
           "rows: ...and Tracked IDs is the section it always was")
 
+    -- ⚠ POWER INFUSION HELPER LEADS THE ICON BRANCH. The helper's own section is
+    -- declared ahead of the generic ones so its Triggers/Effects tabs sit at the top of
+    -- the card; everything below it keeps the order it always had.
     eqList(sectionOrder(typeBranch("icon", "square")), {
+        "Power Infusion Helper",
         "Show When Missing", "Position", "Appearance", "Border",
         "Duration Text", "Stack Count", "Duration Bar", "Expiration", "Pandemic",
     }, "icon")
@@ -580,16 +584,18 @@ do
           "expand: the fold state is read from the card layout's own table")
     check(ROWS:find("section.Toggle = function(self)", 1, true) ~= nil,
           "expand: ...and Toggle is REPLACED, so the factory's own write never runs")
-    -- ⚠ The store IS reached on this page now -- ONCE, by the PI Helper family
-    -- fold, under the literal "ad_pihelper" key. So the assertion is the TD
-    -- page's shape: every touch of the store is through that stable literal,
-    -- which is how "no spell name reaches it" stays guaranteed.
-    check(ROWS:find('local PIH_FOLD_KEY = "ad_pihelper"', 1, true) ~= nil,
-          "expand: the one persisted fold key on this page is a literal")
+    -- ⚠ AND NOW IT IS REACHED ZERO TIMES, which is stronger than the single reach this
+    -- used to allow. The PI Helper family fold was the only toucher, under its
+    -- "ad_pihelper" literal; the helper moved to a page of its own, where the problem
+    -- that fold solved -- keeping a panel open while its own page rebuilt underneath it
+    -- -- does not arise, so none of it was carried across. Nothing on this page writes a
+    -- permanent profile key any more, so the guarantee now holds by construction.
+    check(ROWS:find("PIH_FOLD_KEY", 1, true) == nil,
+          "expand: the fold key went with the band it belonged to")
     do
         local gcg = 0
         for _ in ROWS:gmatch("GetCollapsedGroups") do gcg = gcg + 1 end
-        eq(gcg, 1, "expand: the collapsed-groups store is reached in exactly one place (the literal-key fold)")
+        eq(gcg, 0, "expand: the collapsed-groups store is not reached at all")
     end
 
     -- The row page never opens a panel on the effect itself.
@@ -626,8 +632,15 @@ do
           "head: ...and the add block is what the first argument turns off")
     check(CARDS:find("local skipChips = opts and opts.skipChips or false", 1, true) ~= nil,
           "head: ...the chips what the second one does")
+    -- ☠ CODE LINES ONLY. This counted raw file text, so a comment that merely NAMES
+    -- the builder read as another mount -- three such mentions took the count to 5 while
+    -- the declaration and the single mount were both exactly where they should be. The
+    -- invariant is about call sites, so comment text is stripped before counting.
     local heads = 0
-    for _ in CARDS:gmatch("S%.BuildEffectsHeadArea") do heads = heads + 1 end
+    for line in (CARDS .. "\n"):gmatch("([^\n]*)\n") do
+        local code = line:match("^(.-)%-%-") or line
+        if code:find("S%.BuildEffectsHeadArea") then heads = heads + 1 end
+    end
     eq(heads, 2, "head: ...declared once and mounted once by the card")
 
     -- Phase 3's two: the Layout Groups and Debuffs choice-card blocks, lifted out
@@ -818,11 +831,16 @@ do
     -- (counted there). What this section still asserts is that every index into
     -- that store's handle is through the literal key -- so no user-typed group
     -- name (nor any other dynamic key) can reach the persisted store.
+    -- ⚠ ZERO IS A PASSING ANSWER NOW. This required idx > 0 because the PI Helper band
+    -- indexed the store under its literal; the band is gone, so there is no index at all.
+    -- The shape being policed is "every index is the literal, never a user-typed name",
+    -- and none-at-all satisfies it. What must never appear is an index that is not the
+    -- literal, which is exactly what the equality still catches.
     do
         local idx, lit = 0, 0
         for _ in ROWS:gmatch("pihSaved%[") do idx = idx + 1 end
         for _ in ROWS:gmatch("pihSaved%[PIH_FOLD_KEY%]") do lit = lit + 1 end
-        check(idx > 0 and idx == lit,
+        check(idx == lit,
               "group: ...no user-typed group name reaches the persisted collapsed-groups store")
     end
     -- ☠ REPLACED, NOT HOOKED, AND THE DIFFERENCE IS INVISIBLE FROM THE OUTSIDE.
@@ -847,16 +865,23 @@ do
     check(ROWS:find('tools.RegisterControlRow(ooRow, "checkbox", "othersOnly", true, OnOthersOnly)', 1, true) ~= nil,
           "group: Others Only is a control row too")
     -- ...and because the row layout draws it, the shared Growth block must not.
-    check(ROWS:find("sections   = P.CollectLayoutGroupSections(group, true),", 1, true) ~= nil,
+    -- ⚠ HOISTED, NOT REMOVED. The call moved out of the table literal into its own
+    -- local so the helper's group can substitute section 1; the omit flag still rides it.
+    check(ROWS:find("local sections = P.CollectLayoutGroupSections(group, true)", 1, true) ~= nil,
           "group: ...so the collector is told to leave it out of Growth")
-    check(EDIT:find("if kind == \"filter\" and IsOtherTab() and not omitOthersOnly then", 1, true) ~= nil,
+    -- ⚠ IsOtherTab -> ShowsOthersOnly. The question was always "does this pool show the
+    -- Others Only control", and the helper's pool answers yes without being the Other tab.
+    check(EDIT:find("if kind == \"filter\" and ShowsOthersOnly() and not omitOthersOnly then", 1, true) ~= nil,
           "group: ...which is the flag Growth reads")
 
     -- The row list is NOT declared by the row page: it is whatever the collector
     -- returns, which is the same list the card runs down its own cursor.
     check(ROWS:find("for _, sec in ipairs(spec.sections) do", 1, true) ~= nil,
           "group: the rows come from the collector, never from a literal list")
-    check(EDIT:find("by = RunCardSections(body, bodyWidth, by, CollectLayoutGroupSections(group))", 1, true) ~= nil,
+    -- ⚠ STILL THE COLLECTOR'S LIST, just bound to a local first so section 1 can be
+    -- substituted for the helper's group before the cursor runs down it.
+    check(EDIT:find("local sections = CollectLayoutGroupSections(group)", 1, true) ~= nil
+          and EDIT:find("by = RunCardSections(body, bodyWidth, by, sections, refreshTab)", 1, true) ~= nil,
           "group: ...and the card runs the SAME list")
     check(EDIT:find("by = RunCardSections(body, bodyWidth, by, CollectDebuffGroupSections(group))", 1, true) ~= nil,
           "group: ...on the Debuffs tab too")
@@ -1454,7 +1479,9 @@ do
     -- with the call deleted -- which is exactly how it first passed.
     local setMain = CARDS:match("local function SetMainTab%(tabKey%)(.-)\nend\nP%.SetMainTab")
     check(setMain ~= nil, "pool: SetMainTab's body can be read")
-    check((setMain or ""):find("btn:SetActive(key == tabKey)", 1, true) ~= nil,
+    -- ⚠ EXTRACTED, NOT DROPPED. The per-button paint moved into SyncPoolTabs so the
+    -- split panel can repaint the same strip without going through a pool switch.
+    check((setMain or ""):find("SyncPoolTabs()", 1, true) ~= nil,
           "pool: SetMainTab paints the map these tabs fill")
     check((setMain or ""):find("UpdateSpecDropdownState()", 1, true) ~= nil,
           "pool: a pool change greys Spec on the spot")
@@ -1476,7 +1503,9 @@ do
     local poolAt   = ROWS:find("canvasTabs = { height = POOLTABS_H,", 1, true)
     local canvasAt = ROWS:find("canvas = function(host, shell)", 1, true)
     local stripAt  = ROWS:find("strips = {", 1, true)
-    local tabsAt   = ROWS:find("tabs = {", 1, true)
+    -- ⚠ `tabs = (function()` -- the strip is BUILT from P.SubTabDefs now rather than
+    -- written out as a literal, because the split panel reads the same definition.
+    local tabsAt   = ROWS:find("tabs = (function()", 1, true)
     check(poolAt and canvasAt and poolAt < canvasAt,
           "pool: the pool tabs are declared above the canvas")
     check(canvasAt and stripAt and canvasAt < stripAt,
@@ -1497,7 +1526,7 @@ do
     -- ...and there is still exactly ONE strip of the OTHER kind on the page.
     check(select(2, ROWS:gsub("strips = {", "")) == 1,
           "pool: the page declares one strip band")
-    check(select(2, ROWS:gsub("tabs = {", "")) == 1,
+    check(select(2, ROWS:gsub("tabs = %(function%(%)", "")) == 1,
           "pool: ...and one sub-tab strip")
 end
 
@@ -1793,8 +1822,12 @@ do
           "showing: the flow falls back only when it was told nothing at all")
 
     -- The order the approved sketch draws: add, then the list under its caption.
+    -- ⚠ ANCHORED PAST THE HELPER'S ARM. The helper's pool mounts its own add area
+    -- through the same shared builder in the if-arm above this one, so the FIRST
+    -- AddDesignerLegacyTab in the file is now that one rather than the caption band this
+    -- ordering is about. Both anchors are taken from the else-arm.
     local addAt  = ROWS:find("local addBand = GUI:CreateSettingsGroup", 1, true)
-    local headAt = ROWS:find("GUI:AddDesignerLegacyTab(shell, function(host)", 1, true)
+    local headAt = addAt and ROWS:find("GUI:AddDesignerLegacyTab(shell, function(host)", addAt, true)
     check(addAt and headAt and addAt < headAt,
           "showing: + Add Indicator, then ACTIVE INDICATORS and its filter")
 

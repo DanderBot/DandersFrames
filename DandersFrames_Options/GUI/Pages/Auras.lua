@@ -4891,6 +4891,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Filters" implied it covered debuffs too.
     local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Filter Designer"])
     BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
+        -- ☠ THE HELPER'S SWEEP RUNS HERE TOO, AND THIS PAGE IS WHY IT HAD TO. The sweep marks
+        -- the Power Infusion Helper's seeded lists as CURATED (dfDefaults), which is what gives
+        -- their rows the on/off tick instead of the destructive ✕ and puts Reset on screen. It
+        -- ran only on the Aura Designer's page build -- so opening the Filter Designer FIRST,
+        -- which is exactly what someone inspecting that list does, showed the unmarked version.
+        -- Krathe, 2026-09-09, one round after the mark shipped.
+        -- ⚠ A MIGRATION HOOK, not a dependency: schema-stamped, so it is one comparison after
+        -- the first run, and priest-gated so it costs nothing for anyone else.
+        if DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()
+            and DF.AuraDesigner and DF.AuraDesigner._priv
+            and DF.AuraDesigner._priv.PIH_Sweep then
+            DF.AuraDesigner._priv.PIH_Sweep()
+        end
         -- ⚠ MIRRORED IN DF.SECTION_PREFIXES.auras_filterdesigner (GUI.lua) — change both.
         -- ☠ THIS PAGE OWNS NO PER-MODE KEYS ANY MORE, and its Copy/Sync/Reset list is
         -- deliberately EMPTY. It used to carry buffFilterSelection, debuffFilter*,
@@ -4959,6 +4972,50 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             DF.BuildAuraDesignerPage(GUI, self, db, Add, AddSpace)
         end
     end)
+
+    -- Auras > Power Infusion Helper (priest only)
+    -- ☠☠ A NAV ROW THAT LINKS, NOT A PAGE THAT BUILDS. The helper's records must live in the
+    -- Any Buff pool -- the pool decides a record's caster filter and the helper watches OTHER
+    -- people's cooldowns -- and it is now a POOL TAB of the designer, beside My Buffs /
+    -- Debuffs / Any Buff. This entry exists because that tab is four levels deep and a priest
+    -- should not have to know the helper lives inside the designer, which was the original
+    -- complaint ("it's not very clear how to use it or even how to find it").
+    -- ⚠ IT WAS A REAL PAGE FOR A DAY AND IT WENT BLANK. Two pages calling the designer's
+    -- builder both wanted the one island it builds into, and the page-cache path does not
+    -- re-run a builder -- so whichever page did not build last showed nothing. The whole
+    -- diagnosis is in AuraDesigner/UI/PIHelperPage.lua; the fix is that only ONE page owns
+    -- the island now, and it is this row that goes there rather than a page of its own.
+    -- ⚠ `hidden` is CreateSubTab's own fourth argument (GUI/Panel.lua:3077), so a
+    -- non-priest never has the entry built rather than seeing a greyed one for an ability
+    -- they cannot cast.
+    local pagePIHelper = CreateSubTab("auras", "auras_pihelper", L["Power Infusion Helper"],
+        not (DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()))
+    -- The stub the settings SEARCH can still land on -- a banner and a button to the real
+    -- thing. The nav row below never reaches it; see the file for why it exists anyway.
+    BuildPage(pagePIHelper, function(self, db, Add, AddSpace, AddSyncPoint)
+        if DF.BuildPIHelperPage then
+            DF.BuildPIHelperPage(GUI, self, db, Add, AddSpace)
+        end
+    end)
+    -- ☠ THE ROW'S OWN CLICK, REPLACED. CreateSubTab wires OnClick to SelectTab(its own name);
+    -- there is no "link" kind of nav row, and inventing one for a single caller is a change to
+    -- the shared factory for a case only this feature has. Replacing the script keeps the row
+    -- identical in every other way -- hover plate, New badge, hidden gating, the lot.
+    -- ⚠ GUI.Tabs IS THE REGISTRY (Panel.lua stamps GUI.Tabs[name] = btn), so the button is
+    -- reachable without CreateSubTab having to return it.
+    -- ⚠ FALLS BACK TO THE PAGE. If the designer's page is missing for any reason,
+    -- OpenPIHelperInDesigner answers false and the row does what it always did rather than
+    -- doing nothing -- a nav row that swallows its own click is the worst of both.
+    local piBtn = GUI.Tabs and GUI.Tabs["auras_pihelper"]
+    if piBtn then
+        piBtn:SetScript("OnClick", function(self)
+            if self.disabled then return end
+            if not (DF.OpenPIHelperInDesigner and DF.OpenPIHelperInDesigner()) then
+                GUI.SelectTab("auras_pihelper")
+            end
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        end)
+    end
 
     -- Auras > Aura Blacklist: RETIRED as a standalone page. The debuff blacklist
     -- now lives inside the Filter Designer (Debuffs > Blacklist) — one home for
