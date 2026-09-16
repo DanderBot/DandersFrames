@@ -329,6 +329,14 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- two blurbs are prose, and the badge counts settings.
             local FONT_SELECTION_COUNT = 5
 
+            -- ⚠ AND IT KEEPS ITS STRIP, WHICH THE FIVE ABOVE DOES NOT SAY. The
+            -- badge counts SETTINGS; the inline threshold counts CHILDREN, and
+            -- the two blurbs this group carries are children -- seven against a
+            -- ceiling of six. Opting it in would be refused by the helper and
+            -- change nothing, so the ask is not made rather than made and
+            -- silently dropped. Losing a blurb to buy the plate is not a trade
+            -- worth making: the first one is the only place the Apply button's
+            -- "then click Apply" contract is written down.
             local fontMount, fontContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFontSelectionGroup({ group = group, parent = holder, refreshStates = reflow })
             end)
@@ -339,6 +347,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = fontMount,
+                footerStrip = true,
             }))
             -- ☠ NO SUMMARY, AND THAT IS THE HONEST ANSWER RATHER THAN A GAP.
             -- Nothing behind this row is applied state. The font and outline the
@@ -410,9 +419,16 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- dropdown in the row above, and on a dozen other pages besides).
             local SHADOW_SETTINGS_COUNT = 3
 
+            -- ☠ THREE SETTINGS AND A SENTENCE, SO THE GROUP GOES ON THE PLATE.
+            -- Four children against the helper's ceiling of six, and the click
+            -- they were behind bought nothing: `inline` mounts the pane's own
+            -- group under the title line, and the strip stops promising settings
+            -- that are already on screen and offers to pin a second copy beside
+            -- another page instead. The row above it stays behind its strip --
+            -- see the note there for why it does not fit.
             local shadowMount, shadowContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildShadowSettingsGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local shadowRow = fontBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Shadow Settings"],
                 db      = tools.RowDB,
@@ -421,6 +437,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = shadowMount,
+                footerStrip = true,
             }))
             -- ☠ THIS ROW CARRIES A SECTION ANCHOR, and it is the only one on the
             -- page that is jumped to from somewhere else. Every per-element
@@ -711,6 +728,13 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- ⚠ AND NO INLINE OPT-IN EITHER, WHICH IS THE SAME ANSWER ONE STEP
+            -- ON. The other three rows on this page mount their group on the
+            -- plate because the plate then holds SETTINGS; with the tick hoisted
+            -- this pane holds one sentence and nothing else, so mounting it would
+            -- spend a plate on prose under a label that already says the same
+            -- thing. An empty pane already pins rather than promising a click,
+            -- which is the behaviour the opt-in would have bought.
             local labelsMount = tools.PopoutContent(function(group, holder, reflow)
                 BuildLabelSettingsGroup({
                     group = group, parent = holder,
@@ -726,6 +750,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = labelsMount,
+                footerStrip = true,
             }))
             tools.RegisterHoistedToggle(labelsRow, L["Enable Group Labels"], "groupLabelEnabled", OnGroupLabelsToggle)
             -- The box's own gate, on the row: raid mode and the group-based
@@ -781,9 +806,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- is no boolean in here meaning "am I doing anything".
             local FONT_SETTINGS_COUNT = 5
 
+            -- ☠ FIVE, AND ALL FIVE GO ON THE PLATE. Nothing in this group is
+            -- prose, so the helper measures the same five the badge names -- one
+            -- under the ceiling of six. A font block is read far more often than
+            -- it is edited, and the summary can only carry the name, the size and
+            -- the outline word; mounted here the colour and the shadow tick stop
+            -- being facts you have to open a panel to learn.
             local fontMount, fontContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildFontGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local fontRow = labelBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Font Settings"],
                 db      = tools.RowDB,
@@ -792,6 +823,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = fontMount,
+                footerStrip = true,
             }))
             -- ⚠ THE OUTLINE KEY IS CLAIMED TWICE, and that is the walk working as
             -- designed: the outline dropdown and the shadow tick are two views of
@@ -830,9 +862,15 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Four: the dropdown, the two offsets and the explainer under them.
             local POSITION_COUNT = 4
 
+            -- Four children, so the group goes on the plate as the font row
+            -- above it does. The explainer under the sliders is the reason this
+            -- one gains most from the move: three of the four things this row
+            -- holds are a placement and its nudge, and the sentence that says
+            -- what Start, Center and End actually mean was the one thing a
+            -- summary could never carry.
             local posMount, posContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPositionGroup({ group = group, parent = holder, refreshStates = reflow })
-            end)
+            end, nil, { inline = true })
             local positionRow = labelBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Position"],
                 db      = tools.RowDB,
@@ -841,6 +879,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = posMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(positionRow, posContent)
             tools.WireModifiedTick(positionRow)

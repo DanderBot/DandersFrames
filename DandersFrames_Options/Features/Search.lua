@@ -1244,6 +1244,16 @@ function Search:OpenOwningPopoutRow(tabName, settingKey)
         local row  = map and map[settingKey]
         -- IsShown, because a row hidden by its own hideOn is not a place to
         -- dock a panel; OpenPopout, because an older embedded kit may not have it.
+        --
+        -- ☠ ...AND NOT AT ALL FOR A ROW THAT IS ALREADY SHOWING THE SETTING. A
+        -- small group is now mounted ON its row's plate rather than behind it, so
+        -- the section jump above has already put the control on screen -- and the
+        -- panel this would open is one with nothing left to draw, which the row
+        -- answers by PINNING it (the strip's "Pin settings in popout" path). A
+        -- pinned panel floating beside the page is a strange reward for clicking
+        -- a search result. Guarded on the verb, because an older embedded copy of
+        -- the kit does not publish it.
+        if row and row.IsShowingInlineContent and row:IsShowingInlineContent() then return end
         if row and row.OpenPopout and row:IsShown() then row:OpenPopout() end
     end)
 end
@@ -1508,8 +1518,52 @@ function Search:CreateResultsPanel(parent)
     panel.scrollChild = scrollChild
     panel.resultWidgets = {}
     
+
+    -- ☠ WHERE IT GOES BACK TO. The panel is PARKED out of the window while it is
+    -- hidden (see _ParkResultsPanel), so the adopt has to know the frame it was
+    -- built against -- the same `content` every page anchors to. Stored rather
+    -- than re-derived, because GetParent() answers the DOCK once it is parked.
+    panel._home = parent
     self.ResultsPanel = panel
     return panel
+end
+
+-- ☠☠ THE RESULTS PANEL IS PARKED WHEN IT IS HIDDEN, and this is the whole of a
+-- 1.2s open / 3.2s close. Every result the user has ever seen keeps its card in
+-- `panel.cardCache` -- each one a live inline widget -- and cards are only ever
+-- HIDDEN, never released (see the note at AcquireResultWidget). Hidden is not
+-- enough: the engine's Show/Hide walk costs by PARENTAGE, not by visibility, so
+-- a session's worth of cards sitting inside the window made every open and close
+-- of the settings window drag the whole cache with it.
+--
+-- Measured in game on 2026-09-15: open 1201ms / close 3201ms with the panel in
+-- the window; 4.4ms / 24.5ms with it reparented to the dock. Same trick, and the
+-- same reason, as the page dock itself -- "never leave a mass-built hidden tree
+-- parented under a frame that shows and hides".
+--
+-- ⚠ NOT a fix for the cache growing. The cards still accumulate for the life of
+-- the session; parking only takes them out of the window's walk, which is what
+-- the user feels. Capping the cache is a separate change and a behaviour one
+-- (a cap that evicts is a cap that can drop a result the user is looking at).
+function Search:_ParkResultsPanel()
+    local panel = self.ResultsPanel
+    if not panel or panel._parked then return end
+    local dock = DF.GUI and DF.GUI._pageDock
+    if not dock then return end          -- older Panel.lua: behave as before
+    panel:SetParent(dock)
+    panel._parked = true
+end
+
+-- ...and back, re-asserting the anchors rather than trusting them to survive the
+-- round trip, exactly as GUI:AdoptPage does for a page.
+function Search:_AdoptResultsPanel()
+    local panel = self.ResultsPanel
+    if not (panel and panel._parked) then return end
+    panel:SetParent(panel._home)
+    panel._parked = nil
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", panel._home, "TOPLEFT", 0, 0)
+    panel:SetPoint("BOTTOMRIGHT", panel._home, "BOTTOMRIGHT", 0, 0)
 end
 
 -- ============================================================
@@ -1618,6 +1672,8 @@ end
 
 function Search:ShowResults(query)
     if not self.ResultsPanel then return end
+    -- Back into the window before anything measures or lays out against it.
+    self:_AdoptResultsPanel()
 
     -- ☠ THE FIRST SEARCH OF A SESSION IS A FULL INDEX BUILD, and it used to run
     -- inside this call -- one frame, ~34 page builders, the same hitch the
@@ -1710,6 +1766,8 @@ function Search:HideResults()
         if self.ResultsPanel.noResults then
             self.ResultsPanel.noResults:SetText(EmptyMessage())
         end
+        -- ...and out of the window, with the whole card cache riding along.
+        self:_ParkResultsPanel()
     end
     
     if DF.GUI and DF.GUI.CurrentPageName and DF.GUI.Pages then
@@ -1750,6 +1808,7 @@ function Search:ShowPanelMessage(text)
     panel.noResults:Show()
     panel.countText:SetText("")
     panel.scroll:Hide()
+    self:_AdoptResultsPanel()
     
     -- Hide current page and show results panel
     if DF.GUI and DF.GUI.CurrentPageName and DF.GUI.Pages then

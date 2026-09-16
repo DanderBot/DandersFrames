@@ -663,6 +663,25 @@ UI.PopoutRow = {
     stripArc     = 8,
     modTickGap   = 2,
 
+    -- ---- the COMPACT row: a title line and nothing else ---------------
+    -- ☠ A THIRD PLATE HEIGHT, for a row that will never hold a control. The
+    -- 44 is sized so hoisted sliders and dropdowns have somewhere to sit, and
+    -- the 30 above is the title line of a row that stacks control lines and a
+    -- strip beneath it. A row that is only ever a NAME and a SUMMARY pays for
+    -- neither, and on a page that is a LIST of such rows it pays for them once
+    -- per item: the Filter Designer's seventeen filters cost 986px of scrolling
+    -- at 48+10, against 510 at these numbers.
+    --
+    -- ⚠ AND THE GAP SHRINKS WITH IT. M.gap is 10 because "the strip needs the
+    -- rows further apart"; ten points of air under a twenty-six point row reads
+    -- as a list that has come apart. Four keeps them a list.
+    plateCompact = 26,
+    gapCompact   = 4,
+    -- ⚠ AND A TIGHTER SIDE PADDING WITH THEM. 10 is right for a plate whose
+    -- widgets need air around them; on a single line of text it reads as the
+    -- content having been pushed into the middle of the row.
+    padCompact   = 6,
+
     -- ---- the embedded control's own metrics --------------------------
     -- Shared with ControlRow.lua, which embeds the same two factories into the
     -- same plate and had these as file-locals. One home, because a retune of the

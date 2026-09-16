@@ -303,6 +303,7 @@ local function MountElement(ctx, elem)
             -- greyed row's contents live. The classic layout draws a full-cover
             -- scrim over the same settings; this is that, said to the kit.
             gateWhenDisabled = true,
+            footerStrip = true,
         }))
         if not ctx.tdEnabled then row.disableOn = AlwaysOff end
         tools.ClaimKeys(row, content)
@@ -441,6 +442,7 @@ local function BuildGlobalTabRows(ctx)
         build   = mount,
         -- See the element rows' note: the dependent grey is a real gate here.
         gateWhenDisabled = true,
+        footerStrip = true,
     }))
     if not ctx.tdEnabled then row.disableOn = function() return true end end
     tools.ClaimKeys(row, content)

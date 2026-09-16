@@ -8105,7 +8105,9 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     -- value-tracked push in _pushFilter must not redundantly re-push (and reparse)
     -- them on the first live pass. Seeded with the DECLARED value (through _cf()), so a
     -- slot born helper-gated tracks the dead map it actually declared. See SLOT_PARK_CF.
+    -- Both memos: the guard tests _cfWant, the audits read _cfPushed (see _pushFilter).
     handle._cfPushed = declaredCF
+    handle._cfWant = declaredCF
     -- ☠ SEED THE DEATH LATCH — it is edge-driven, and a slot born AFTER the edge hears
     -- nothing. SetUnitDeathLatched loops the registries at the transition; a slot
     -- created later (indicator re-enabled beside a ghost) starts unlatched and renders
@@ -8321,19 +8323,44 @@ function SlotHandle:_pushFilter()
     -- stored live candidates (nil clears — a slot with no live CFs must not keep the
     -- park). Value-tracked because SetAuraSlotCandidateFilters has NO engine-side
     -- equality guard — every call clears the slot's candidates and reparses — so this
-    -- pushes only on a real transition. _cfPushed is recorded only out of lockdown: a
-    -- secure setter can refuse QUIETLY in combat, and the regen replay (which clears
-    -- _cfPushed) must re-push then. The dark->live push doubles as the unlatch BOUNCE
-    -- the death-latch clear wants (the standing parse predates the death): dark always
-    -- records the non-nil park constant, so the transition can never compare equal and
-    -- skip.
+    -- pushes only on a real transition. The dark->live push doubles as the unlatch
+    -- BOUNCE the death-latch clear wants (the standing parse predates the death).
+    --
+    -- ☠☠ TRACKED AGAINST WHAT WAS LAST ASKED FOR (_cfWant), NOT WHAT WAS CONFIRMED
+    -- (_cfPushed) — and the difference was the 5.3.2 battle-res bug (2026-09-13,
+    -- two reports: "if somebody dies and gets a BR their auras vanish till the fight
+    -- is over"). _cfPushed is recorded only out of lockdown, on purpose: a secure
+    -- setter can refuse QUIETLY in combat, so the audits must not believe a combat
+    -- push. But this guard USED to compare against it, and a death is nearly always
+    -- in combat -- so the park push landed (SetAuraSlotCandidateFilters works in
+    -- combat; the helper gate proved it, deferred=0 across a raid) and went
+    -- UNRECORDED, and the rez's dark->live pass then compared the live stash against
+    -- the pre-combat live stash, found them identical by table identity, and SKIPPED.
+    -- The engine kept the maxDuration=0 park on every AD indicator until the regen
+    -- replay cleared the memo. The comment here claimed "dark always records the park
+    -- constant, so the transition can never compare equal" -- true out of combat and
+    -- false exactly when a death latch fires. A fix whose comment asserts a false
+    -- mechanism: this is the class.
+    -- ⇒ _cfWant records every ATTEMPT, in or out of lockdown, so the transition test
+    -- is about intent and always sees the park it just asked for. _cfPushed keeps its
+    -- meaning for the slot audit and the AD dump, and the regen replay clears BOTH so
+    -- a quietly-refused combat push is still re-pushed fresh.
     -- Through _cf(), never the raw stash: the wake push after a park/latch clears must
     -- not un-gate a helper-owned slot whose Power Infusion gate is still dark. _cf()
     -- returns the stash (already caster-locked at write) or the helper dead map.
     local cfWant = dark and SLOT_PARK_CF or self:_cf()
-    if self._cfPushed ~= cfWant then
+    if self._cfWant ~= cfWant then
         local okCF = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfWant)
-        if okCF and not InCombatLockdown() then self._cfPushed = cfWant end
+        -- ⚠ RECORD THE ASK ONLY IF THE CALL ITSELF SURVIVED. A QUIET combat refusal
+        -- must still record (pcall returns true) -- that is the whole point of _cfWant,
+        -- and the regen replay clears it. A LOUD failure must NOT: ApplyTuning and
+        -- _replayTuning both call _pushFilter and discard its return, so nothing would
+        -- re-queue the regen, and a memo written for a push that never reached the
+        -- engine makes the next pass skip the very push that would heal it.
+        if okCF then
+            self._cfWant = cfWant
+            if not InCombatLockdown() then self._cfPushed = cfWant end
+        end
         ok = ok and okCF
     end
     return ok
@@ -8478,6 +8505,7 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     if candidatesChanged and not (self.parked or self._deathLatched or slotVisDark(self)) then
         local cfOut = self:_cf()
         pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfOut)
+        self._cfWant = cfOut
         if not InCombatLockdown() then self._cfPushed = cfOut end
     end
     -- ☠ UNCONDITIONAL. What must reach the engine is the park/latch state, and a pass
@@ -8510,7 +8538,11 @@ function SlotHandle:_replayTuning()
     -- _cfPushed makes _pushFilter's value-tracked CF half push FRESH, choosing
     -- park or live from the state at drain time (the same collapse-to-one-push
     -- rule the filter string already follows).
+    -- ⚠ BOTH MEMOS. _cfWant is the one the guard actually tests (see _pushFilter);
+    -- clearing only the confirmed record would leave a combat-refused push looking
+    -- already-asked-for, and the drain would skip the very push it exists to make.
     self._cfPushed = nil
+    self._cfWant = nil
     self:_pushFilter()
     if self._lastSortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, self._lastSortMethod,
@@ -8556,7 +8588,15 @@ function SlotHandle:_applyHelperGate()
     -- find it again (unlike a Handle, which nils itself out on destroy). Restore re-pushes
     -- through the accessor, so a gate edge that happened while parked is picked up there
     -- rather than lost. Caught in Danders' PR review.
-    if self.parked then return false end
+    -- ☠☠ EVERY DARK TERM, NOT JUST `parked` -- and widening this was forced by the combat
+    -- push below. While this path deferred in combat it could not reach a death-latched slot
+    -- (a death is nearly always in combat), so guarding `parked` alone was survivable. Pushing
+    -- in combat makes an ungated gate edge land live candidates straight over the CF park
+    -- lock of a slot that is meant to be dark -- a dead player's helper indicators light up
+    -- mid-fight -- and _pushFilter cannot heal it, because the record written below then
+    -- matches the park it wants and the transition compares equal. Same dark test as
+    -- ApplyTuning's and _pushFilter's; any new latch goes in all three.
+    if self.parked or self._deathLatched or slotVisDark(self) then return false end
     local c = self.owner and self.owner.container
     if not c then return false end
     -- ★★★ ATTEMPT, THEN DEFER -- and it used to be defer-always (2026-09-10).
@@ -8580,7 +8620,8 @@ function SlotHandle:_applyHelperGate()
     -- inconsistency, not the unguarded call.
     -- ⚠ STILL DEFERS IF THE CALL ACTUALLY FAILS, which is the point of trying: a refusal is
     -- now MEASURED rather than assumed, and the regen replay is still there to catch it.
-    local ok = pcall(c.SetAuraSlotCandidateFilters, c, self.key, self:_cf())
+    local cfOut = self:_cf()
+    local ok = pcall(c.SetAuraSlotCandidateFilters, c, self.key, cfOut)
     if not ok then
         self._pendingTuning = true
         registerSlotRegen(self)
@@ -8622,6 +8663,11 @@ function SlotHandle:_applyHelperGate()
     if type(c.UpdateAllAuras) == "function" then
         pcall(c.UpdateAllAuras, c)
     end
+    -- ⚠ RECORD THE ASK (v5.3.3's split). _pushFilter's value-tracked half -- which every
+    -- tuning pass ends in -- tests _cfWant, so without this line it re-pushes and reparses
+    -- the same map moments after this one. _cfPushed stays unwritten on purpose: it is the
+    -- OOC-confirmed memo the slot audit reads, and this push may well be a combat one.
+    self._cfWant = cfOut
     return true
 end
 

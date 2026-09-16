@@ -971,8 +971,13 @@ function UI:CreatePopoutRow(parent, opts)
     -- see CreateGlyphButton's own note: a labelled row that merely CONTAINS an
     -- icon has one hit box, not three.
     local row = CreateFrame("Button", nil, parent)
-    row:SetSize(260, ROW_H)
-    row.preferredHeight = ROW_H
+    -- ⚠ The opening guess only. plateLayout re-asserts both from the plate it
+    -- actually built, which is where a compact row gets its real slot -- but a
+    -- row added to a group before its first layout is held at whatever it says
+    -- here, so a compact row that opened at 54 would visibly settle to 30.
+    local START_H = (opts.compact and (M.plateCompact + M.gapCompact)) or ROW_H
+    row:SetSize(260, START_H)
+    row.preferredHeight = START_H
     row.fixedRowHeight = true
     -- WHICH PART OF THIS FRAME IS INK. The row's frame is its whole layout SLOT,
     -- and the bottom M.gap of that slot is the gap to the next row -- nothing is
@@ -980,7 +985,18 @@ function UI:CreatePopoutRow(parent, opts)
     -- (Popout.lua's insetOf), so the source outline is drawn round the PLATE
     -- rather than round the slot, and the beam aims at the plate's centre. Left
     -- flush with the frame, because the plate is.
-    row.popoutInset = { 0, 0, 0, M.gap }
+    -- ☠ AND THE BOTTOM TERM IS THE ROW'S OWN GAP, NOT THE CONSTANT. This read
+    -- M.gap, which is right for every row whose slot ends in M.gap and wrong for
+    -- a compact one, whose slot ends in M.gapCompact. Inset by 10 where only 4 is
+    -- unpainted and the shell lays its outline 6px INSIDE the plate's bottom
+    -- edge -- so an open row drew THREE lines across its foot: the plate's own
+    -- border, the outline that should have sat on it, and the plate's edge below
+    -- both. Reported as "the bottom bar is still there only when selected".
+    --
+    -- ⚠ Read from `opts`, not from row._compact, because that field is set some
+    -- 150 lines below this one. A term read above the line that assigns it is
+    -- nil, and this file has already shipped that mistake once.
+    row.popoutInset = { 0, 0, 0, opts.compact and M.gapCompact or M.gap }
 
     row._label   = opts.label or ""
     row._title   = opts.title or row._label
@@ -1007,8 +1023,27 @@ function UI:CreatePopoutRow(parent, opts)
     -- "very chonky". So a strip row's title line is M.plateStrip and a plain
     -- row's is M.plate -- one number each, resolved once here, and nothing on an
     -- unconverted page moves by a pixel.
-    row._strip = opts.footerStrip and true or false
-    local HEAD_H = row._strip and M.plateStrip or PLATE_H
+    --
+    -- ☠ AND `compact` IS THE THIRD ANSWER, for a row that is only ever a name
+    -- and a summary. It takes M.plateCompact and, deliberately, NO STRIP.
+    --
+    -- The strip is not dropped to save its 18 points -- it is dropped because
+    -- the reason it exists does not apply here. It was asked for after living
+    -- with the Frame page ("the popout should only be triggered from the bottom
+    -- bar, same with the on hover highlight instead of the whole row being
+    -- clickable") and that is right about a plate covered in sliders: a plate
+    -- whose every square inch opens a panel is a plate the cursor cannot rest
+    -- on. A compact row has NOTHING on it to rest on, so the whole-row click and
+    -- the whole-row hover are safe again -- and they are already written, on the
+    -- path every page used before the strip existed.
+    --
+    -- ⚠ `compact` WINS OVER `footerStrip` rather than erroring on the pair. The
+    -- two are contradictory (a strip under a single title line is the shape this
+    -- exists to avoid) and a page that passes both means the newer of them.
+    row._compact = opts.compact and true or false
+    row._strip = (not row._compact) and (opts.footerStrip and true or false) or false
+    local HEAD_H = row._compact and M.plateCompact
+                   or (row._strip and M.plateStrip or PLATE_H)
 
     -- ---- chrome ---------------------------------------------------
     -- A FRAME, not the texture this used to be, and everything the row draws is
@@ -1093,10 +1128,28 @@ function UI:CreatePopoutRow(parent, opts)
     --
     -- LEFT, so it centres on the plate's midline -- which is what every anchor
     -- in this build does, and the whole of "vertically centred" for this row.
+    -- ☠ THE COMPACT ROW'S OWN TWO NUMBERS. A plain row indents its label past a
+    -- CHECKBOX COLUMN whether or not it has a checkbox -- LABEL_X is padX + check
+    -- + labelGap, unconditionally -- because on a settings page the rows must
+    -- align with each other and most of them do have one. A LIST of rows that
+    -- none of them have a toggle is the opposite case: every row pays 26px of
+    -- indent for a control that is never there, and the content reads as pushed
+    -- into the middle of the row.
+    --
+    -- So a compact row indents for the column only when it actually has one, and
+    -- uses the tighter side padding at both ends. A row that did not ask for
+    -- compact is untouched by both, which is what keeps every census pinning
+    -- LABEL_X true.
+    local PAD_X = row._compact and M.padCompact or M.padX
+    local ROW_LABEL_X = row._compact
+        and (PAD_X + (row._hasToggle and (M.check + M.labelGap) or 0))
+        or LABEL_X
+    row._padX, row._labelX = PAD_X, ROW_LABEL_X
+
     local cb
     if row._hasToggle then
         cb = CreateFrame("CheckButton", nil, plate, "BackdropTemplate")
-        cb:SetPoint("LEFT", plate, "LEFT", M.padX, 0)
+        cb:SetPoint("LEFT", plate, "LEFT", PAD_X, 0)
         host:StyleCheckButton(cb, { size = M.check, checkSize = M.checkTick,
                                     accent = row._accent, themeRoot = parent })
         row.checkButton = cb
@@ -1112,7 +1165,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- a parent whatever any of them happens to say.
     local chevron = plate:CreateTexture(nil, "OVERLAY")
     chevron:SetSize(M.chevron, M.chevron)
-    chevron:SetPoint("RIGHT", plate, "RIGHT", -M.padX, 0)
+    chevron:SetPoint("RIGHT", plate, "RIGHT", -PAD_X, 0)
     chevron:SetTexture(ICON_PATH .. "chevron_right")
     chevron:SetVertexColor(1, 1, 1, 0.5)
     row.chevron = chevron
@@ -1186,7 +1239,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- both rows, they sit in the same band, and anchoring the label to `cb or
     -- plate` started their names 26px apart -- which is the ragged list the
     -- right-hand columns were made fixed to avoid. One constant, both kinds.
-    label:SetPoint("LEFT", plate, "LEFT", M.padX + M.check + M.labelGap, 0)
+    label:SetPoint("LEFT", plate, "LEFT", ROW_LABEL_X, 0)
     label:SetJustifyH("LEFT")
     if label.SetWordWrap then label:SetWordWrap(false) end
     row.label = label
@@ -1210,9 +1263,20 @@ function UI:CreatePopoutRow(parent, opts)
     -- ☠ OPT-IN, ROW BY ROW, AND EVERY LINE BELOW IS DEAD ON A ROW THAT DID NOT
     -- ASK. `opts.footerStrip` is what a page passes; a row without it never
     -- builds a strip, never re-anchors one of the six title-line regions above,
-    -- and draws exactly what it drew before this block existed. That is not
-    -- politeness -- a dozen pages' census suites pin those rows' anatomy, and the
-    -- Frame page is the only one converted in this pass.
+    -- and draws exactly what it drew before this block existed.
+    --
+    -- ⚠ EVERY SETTINGS ROW IN THE ADDON NOW ASKS. This said "the Frame page is
+    -- the only one converted in this pass" through two releases, and it stayed
+    -- there one sweep too long: the pane-on-the-plate change went out across
+    -- every page reading only the OTHER opt-in (`inline`), so for one commit
+    -- rows mounted their settings inline while still wearing the old top-right
+    -- chevron and count. THE STRIP AND THE INLINE PANE ARE SEPARATE SWITCHES
+    -- and a page needs both -- test_frame_page_builders.lua fails now if any
+    -- popout row on any page is missing this one.
+    --
+    -- The opt-in itself stays, because GUI/PopoutDemo.lua still exercises the
+    -- no-strip tether (a rounded source RING instead of this band), and so may
+    -- any other host embedding the kit.
     --
     -- WHAT THE STRIP IS FOR. Every setting went behind a row in the popout sweep,
     -- so every setting is invisible until a panel opens; the answer is to put a
@@ -1436,6 +1500,29 @@ function UI:CreatePopoutRow(parent, opts)
         modTick:SetPoint("LEFT", chevron, "RIGHT", M.modTickGap, 0)
     end
 
+    -- ☠ AND A COMPACT ROW HAS NO PILL EITHER, for a plainer reason than the
+    -- strip's. The pill is 22px of backdrop anchored between the cog and the
+    -- chevron, and it is built whether or not the row was given a count -- on a
+    -- settings page that is right, because the pills line up down the column even
+    -- where one row has nothing to say. A LIST of rows that none of them carry a
+    -- count is the other case: every row shows an empty pill, and what it reads
+    -- as is a gap holding the cog away from the arrow it belongs next to.
+    --
+    -- So the cog closes up against the chevron and the summary right-aligns to
+    -- the cog, which puts the whole right-hand cluster together at the edge. A
+    -- compact row that DOES want a number puts it in its summary, where this page
+    -- already puts "17 of 26 tracked".
+    if row._compact then
+        badgePill:Hide()
+        gear:ClearAllPoints()
+        gear:SetPoint("RIGHT", chevron, "LEFT", -M.colGap, 0)
+        -- The dot follows the chevron for the strip's own reason: it needs
+        -- something bigger than itself to notch onto, and with the pill gone the
+        -- only thing at this end is the glyph it must not sit on top of.
+        modTick:ClearAllPoints()
+        modTick:SetPoint("LEFT", chevron, "RIGHT", M.modTickGap, 0)
+    end
+
     -- ---- the control lines ----------------------------------------
     -- One CELL per hoisted control, in two tiers: the name across the cell's
     -- full width, the control across the cell's full width beneath it. Cells on
@@ -1445,6 +1532,25 @@ function UI:CreatePopoutRow(parent, opts)
     local hoists = nil             -- the declarations, in the order they were given
     local hoistCells = nil         -- the cell frames, one per declaration
     local shownHoists = 0          -- how many are drawn RIGHT NOW (the gate, the fold)
+
+    -- ---- ...AND THE ROW'S WHOLE GROUP, MOUNTED ON THE PLATE -------------
+    -- ☠ THE OTHER ANSWER TO "MOST SETTINGS SHOULD STILL BE VISIBLE", and the
+    -- one that does NOT declare every control twice. A hoisted cell knows two
+    -- control kinds -- slider and dropdown -- while most small groups are ticks,
+    -- colour pickers and edit boxes, so covering them by hoisting would mean
+    -- teaching the cell every kind AND writing ~500 declarations beside the
+    -- builders that already make those widgets: two sources of truth per
+    -- setting, for ever. A row whose group is small enough mounts THAT GROUP
+    -- here instead, and the strip opens a SECOND instance of the same builder.
+    -- One widget family, one set of callbacks -- so the gate, the reflow, the
+    -- modified dots, Reset Group, Hold: Defaults and undo all keep working
+    -- because it is the same group they already act on.
+    --
+    -- The kit stays ignorant of what a settings group is: it anchors ONE frame,
+    -- shows and hides it, and asks a consumer's closure for a height.
+    local inlineFrame = nil        -- the consumer's content frame, nil unless given
+    local inlineMeasure = nil      -- fn(width) -> height, asked on EVERY layout pass
+    local inlineShown = false      -- is it drawn RIGHT NOW (the fold, the toggle)
 
     -- What is left BEHIND the click: the pane's count, less whatever this row is
     -- currently showing on its own plate. Written from the LAYOUT rather than
@@ -1475,8 +1581,15 @@ function UI:CreatePopoutRow(parent, opts)
         -- and a plain read would call it on every row.
         local provider = rawget(row, "_countProvider")
         if provider then
-            local left = max(provider() or 0, 0)
-            if left == 0 and shownHoists > 0 then
+            -- ☠ NOTHING IS BEHIND THE CLICK WHILE THE PANE IS ON THE PLATE. The
+            -- provider counts the pane honestly, and for an inline row that pane
+            -- is what the user is already looking at -- so promising it again
+            -- would be the strip charging a click for what is on screen. Folded
+            -- away (the row switched off) it IS behind the click again, and the
+            -- number comes straight back: the fold must always leave the settings
+            -- reachable somewhere.
+            local left = inlineShown and 0 or max(provider() or 0, 0)
+            if left == 0 and (shownHoists > 0 or inlineShown) then
                 stripCount:SetText((L and L["Pin settings in popout"])
                                    or "Pin settings in popout")
             else
@@ -1497,6 +1610,11 @@ function UI:CreatePopoutRow(parent, opts)
     -- its own pane, and guessing from a declared constant is the very thing the
     -- provider exists to stop.
     local function paneIsEmpty()
+        -- A plate holding the WHOLE group is the same state a plate holding the
+        -- last hoisted control reaches: there is nothing left for a loose panel
+        -- to draw, so the click pins instead. Asked before the provider, because
+        -- an inline row's provider is counting the very controls on the plate.
+        if inlineShown then return true end
         local provider = rawget(row, "_countProvider")
         if not provider then return false end
         if shownHoists <= 0 then return false end
@@ -1536,6 +1654,15 @@ function UI:CreatePopoutRow(parent, opts)
             -- hoisted (Frame Fade) was showing "Alpha 0.30 · Combat 1.00" and is
             -- the row the feedback named. Rows without a strip -- every other page
             -- -- keep their summary, byte for byte.
+            --
+            -- ⚠ A COMPACT ROW IS NOT AN EXCEPTION HERE, it simply has no strip:
+            -- the Filter Designer needs its corner ("12 of 49 tracked -- Buff Bar")
+            -- because that page is a LIST and the corner is what makes the list
+            -- readable, and it gets it through this same branch rather than through
+            -- a flag. An earlier pass DID add a `keepSummary` opt-in for it and
+            -- removed it again when the compact row landed with no caller left --
+            -- the rule below is about VALUE READOUTS, and a row with no controls
+            -- has none to read out.
             if strip then
                 text = ""
             else
@@ -1565,7 +1692,7 @@ function UI:CreatePopoutRow(parent, opts)
     -- after the row has already been added to its band. Each of those has to
     -- re-report the row's height to the layout that is holding a slot for it.
     local function plateLayout()
-        if not (strip or hoists) then return end
+        if not (strip or hoists or inlineFrame) then return end
 
         local db = resolveDB(opts.db)
 
@@ -1576,7 +1703,7 @@ function UI:CreatePopoutRow(parent, opts)
         local plateW = plate:GetWidth() or 0
         if not plateW or plateW <= 0 then plateW = row:GetWidth() or 0 end
         if not plateW or plateW <= 0 then plateW = UI.PopoutContentWidth or 260 end
-        local lineW = plateW - LABEL_X - M.padX
+        local lineW = plateW - (row._labelX or LABEL_X) - (row._padX or M.padX)
 
         -- Two cells, one, or none. NEVER three: three minimum controls and two
         -- gaps do not fit the plate at any window size the shell allows.
@@ -1725,13 +1852,64 @@ function UI:CreatePopoutRow(parent, opts)
             end
         end
 
+        -- ---- the row's own group, ON the plate -----------------------
+        -- ⚠ MEASURED ON EVERY PASS, NEVER CACHED. A group re-flows on its own --
+        -- a hideOn inside it flips, or a widget that cannot know its height until
+        -- it has been drawn converges a frame later and calls the consumer's
+        -- reflow (see GUI:RelayoutHost) -- and reports a new number without
+        -- anything here having asked. The consumer owns the measurement because
+        -- it is the one that knows what a group is; it re-flows only when the
+        -- width it is handed actually moved, so a plain window drag costs one
+        -- comparison per row rather than a layout.
+        --
+        -- ☠ AND IT FOLDS WHEN THE ROW IS OFF. Greyed controls that still occupy
+        -- the plate are the worst use of the space: the title, the word "Off" and
+        -- a strip naming the full count say the same thing in a tenth of the
+        -- room. Nothing is lost -- one click on the strip reads them.
+        --
+        -- ⚠ `_toggledOn` IS nil UNTIL THE FIRST REFRESH, which construction runs
+        -- immediately after this pass. nil is not OFF, so the group draws; the
+        -- refresh that follows folds it if the toggle says so.
+        local inlineH, inlineTop = 0, 0
+        inlineShown = false
+        if inlineFrame then
+            if row._toggledOn ~= false and lineW > 0 then
+                inlineTop = HEAD_H + lines * LINE_H + LINE_PAD
+                -- ⚠ BOOKED UNDER ITS OWN NAME. The pane was always BUILT at page
+                -- build; laying it out where it can be seen is the new work, and
+                -- it runs once per row per width rather than once per click -- so
+                -- a report that shows a slow page says in the same breath whether
+                -- this is why. One rawget when nothing is recording.
+                local t0 = perfStart(host)
+                inlineH = max(inlineMeasure and inlineMeasure(lineW) or 0, 0)
+                perfStop(host, "popoutrow:inline", t0)
+                inlineShown = inlineH > 0
+            end
+            if inlineShown then
+                -- The same left indent and the same right margin the control
+                -- lines take, so a pane's controls and a hoisted cell start and
+                -- end at the same x down a column of rows.
+                inlineFrame:ClearAllPoints()
+                inlineFrame:SetPoint("TOPLEFT", plate, "TOPLEFT", LABEL_X, -inlineTop)
+                inlineFrame:SetSize(lineW, inlineH)
+                inlineFrame:Show()
+            else
+                inlineFrame:Hide()
+            end
+        end
+
         -- ---- the plate, and the row's slot ---------------------------
-        -- LINE_PAD is air under the LAST control line only -- a row showing none
-        -- is its title line and its strip and nothing between them, which is what
-        -- makes a bare strip row visibly shorter than a hoisted one rather than
-        -- carrying a hoisted row's slack for nothing.
-        local plateH = HEAD_H + lines * LINE_H
-                     + ((lines > 0) and LINE_PAD or 0)
+        -- LINE_PAD is air under the LAST thing drawn on the plate -- a row
+        -- showing nothing is its title line and its strip and nothing between
+        -- them, which is what makes a bare strip row visibly shorter than a
+        -- hoisted one rather than carrying a hoisted row's slack for nothing.
+        -- A second LINE_PAD sits ABOVE the inline group, which is the air the
+        -- control lines get from the title line's own height and a full-width
+        -- control does not.
+        local bodyH = lines * LINE_H
+        if inlineShown then bodyH = (inlineTop - HEAD_H) + inlineH end
+        local plateH = HEAD_H + bodyH
+                     + ((bodyH > 0) and LINE_PAD or 0)
                      + (strip and FOOTER_H or 0)
         local headDY = (plateH - HEAD_H) / 2
         if plate:GetHeight() ~= plateH then plate:SetHeight(plateH) end
@@ -1747,24 +1925,24 @@ function UI:CreatePopoutRow(parent, opts)
             row._headDY = headDY
             if cb then
                 cb:ClearAllPoints()
-                cb:SetPoint("LEFT", plate, "LEFT", M.padX, headDY)
+                cb:SetPoint("LEFT", plate, "LEFT", row._padX or M.padX, headDY)
             end
             label:ClearAllPoints()
-            label:SetPoint("LEFT", plate, "LEFT", LABEL_X, headDY)
+            label:SetPoint("LEFT", plate, "LEFT", row._labelX or LABEL_X, headDY)
             summary:ClearAllPoints()
             summary:SetPoint("LEFT", label, "RIGHT", M.colGap, 0)
             if strip then
                 -- The cluster is on the strip, so the summary runs to the
                 -- plate's own padding instead of stopping at the gear.
-                summary:SetPoint("RIGHT", plate, "RIGHT", -M.padX, headDY)
+                summary:SetPoint("RIGHT", plate, "RIGHT", -(row._padX or M.padX), headDY)
             else
                 summary:SetPoint("RIGHT", gear, "LEFT", -M.colGap, 0)
                 chevron:ClearAllPoints()
-                chevron:SetPoint("RIGHT", plate, "RIGHT", -M.padX, headDY)
+                chevron:SetPoint("RIGHT", plate, "RIGHT", -(row._padX or M.padX), headDY)
             end
         end
 
-        local slotH = plateH + M.gap
+        local slotH = plateH + (row._compact and M.gapCompact or M.gap)
         -- ☠ THE FRAME'S HEIGHT IS RE-ASSERTED WHENEVER IT DISAGREES, and that is
         -- NOT the same test as the one below it. A layout pass may have set the
         -- row to whatever slot it was holding at the time; the row is the
@@ -1788,6 +1966,26 @@ function UI:CreatePopoutRow(parent, opts)
         paintSummary()
     end
     row._LayoutPlate = plateLayout
+
+    -- ☠ THE SPLIT, THE FOLD AND AN INLINE GROUP'S WIDTH ARE ALL FUNCTIONS OF THE
+    -- ROW'S WIDTH, so the row has to be told when that changes. Installed only on
+    -- a row that draws something under its title line -- a plain row's geometry
+    -- does not depend on its width, and an OnSizeChanged it never had is a script
+    -- every other page's rows would start running for nothing.
+    --
+    -- ⚠ RE-ENTRANT BY CONSTRUCTION: plateLayout sets the row's HEIGHT, which
+    -- fires this again. Guarded on the width actually having moved, which the
+    -- height change cannot do.
+    --
+    -- ⚠ NAMED rather than written at its call site: SetInlineContent installs the
+    -- SAME handler on a row that was built without a strip, and a closure written
+    -- down there would reach for this file's locals as globals.
+    local function onRowSizeChanged(self, w)
+        w = w or self:GetWidth()
+        if w == row._laidOutAt then return end
+        row._laidOutAt = w
+        plateLayout()
+    end
 
     -- ---- the plate's paint ----------------------------------------
     -- Everything whose colour depends on the row's STATE rather than on its
@@ -2303,6 +2501,45 @@ function UI:CreatePopoutRow(parent, opts)
         return row
     end
 
+    -- THE ROW'S OWN GROUP, MOUNTED ON THE PLATE. `frame` is whatever the
+    -- consumer built its controls into; `measure(width) -> height` sizes that
+    -- frame's contents to the width it is handed and answers how tall they came
+    -- out. Both are the consumer's -- see the declarations at the head of this
+    -- row for why the kit refuses to learn what a settings group is.
+    --
+    -- Laid out at once, like SetCountProvider's repaint: a consumer wires this
+    -- after the row has been built and added to its band, so the slot being held
+    -- for it is a bare row's until this runs.
+    function row:SetInlineContent(frame, measure)
+        inlineFrame = frame or nil
+        inlineMeasure = (type(measure) == "function") and measure or nil
+        if inlineFrame then
+            inlineFrame:SetParent(plate)
+            -- ⚠ NO MOUSE OF ITS OWN, said out loud rather than left to a
+            -- default. It is a container: its children take their own clicks,
+            -- and a mouse-enabled frame lying over the plate is the "anything
+            -- drawn over a control eats that control's clicks" bug this rework
+            -- has shipped twice.
+            inlineFrame:EnableMouse(false)
+            -- ...and ABOVE the plate's own fill, for the reason the strip's own
+            -- level is stated: the relationship the layout depends on belongs in
+            -- the code rather than in a client default the headless shim does
+            -- not model at all.
+            inlineFrame:SetFrameLevel(plate:GetFrameLevel() + 1)
+            -- The fold and the group's own width are both functions of the
+            -- row's width, so a row that was built without a strip still has to
+            -- be told when that moves.
+            row:SetScript("OnSizeChanged", onRowSizeChanged)
+        end
+        plateLayout()
+        return row
+    end
+
+    -- Is the row drawing its whole group on the plate right now? Asked by a
+    -- consumer that would otherwise open a panel for a setting the user is
+    -- already looking at -- the settings search's jump is the one that does.
+    function row:IsShowingInlineContent() return inlineShown end
+
     -- WHO WANTS TELLING WHEN THE PLATE'S SET OF KEYS MOVES. `fn(row, keysSet)`,
     -- called from the layout -- not from the refresh -- because the fold, the
     -- split and the gate are all width, and a window drag runs the layout alone.
@@ -2589,22 +2826,10 @@ function UI:CreatePopoutRow(parent, opts)
     function row:GetSurface() return row._surface end
 
     -- ---- interaction ----------------------------------------------
-    -- ☠ THE SPLIT AND THE FOLD ARE FUNCTIONS OF THE ROW'S WIDTH, so the row has
-    -- to be told when that changes. Installed ONLY on a row that draws something
-    -- under its title line -- a plain row's geometry does not depend on its
-    -- width, and an OnSizeChanged it never had is a script every other page's
-    -- rows would start running for nothing.
-    --
-    -- ⚠ RE-ENTRANT BY CONSTRUCTION: plateLayout sets the row's HEIGHT, which
-    -- fires this again. Guarded on the width actually having moved, which the
-    -- height change cannot do.
+    -- The width handler is declared beside plateLayout (see onRowSizeChanged
+    -- there, and why it is named rather than written here).
     if opts.footerStrip then
-        row:SetScript("OnSizeChanged", function(self, w)
-            w = w or self:GetWidth()
-            if w == row._laidOutAt then return end
-            row._laidOutAt = w
-            plateLayout()
-        end)
+        row:SetScript("OnSizeChanged", onRowSizeChanged)
     end
 
     row:SetScript("OnEnter", function() row._hovered = true;  paintState() end)

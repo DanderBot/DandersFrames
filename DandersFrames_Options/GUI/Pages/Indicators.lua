@@ -329,6 +329,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- not one of them.
             local VISIBILITY_COUNT = 1
 
+            -- ☠ ONE SETTING BEHIND THE CLICK -- the exact twin of the Debuff Bar's
+            -- Visibility row, and it moves for the same reason. The pane holds Max
+            -- Buffs and nothing else; Show Buffs is the ROW's tick, hoisted, and the
+            -- builder is told to skip it (`hoistToggle`), so there is no twin here to
+            -- delete and the plate folds away with the tick.
+            --
+            -- ⚠ THIS ROW WAS MISSED BY THE FIRST SWEEP and the two pages disagreed for
+            -- one commit -- debuff Visibility inline, buff Visibility behind a click,
+            -- for identical panes. Buff and debuff rows are built from the same shapes
+            -- all the way down this file; when one moves, look for its opposite number.
             local visMount, visContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildVisibilityGroup({
                     group = group, parent = holder,
@@ -336,7 +346,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local visRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Visibility"],
                 db       = tools.RowDB,
@@ -347,6 +357,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = visMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(visRow, visContent)
             tools.WireModifiedTick(visRow)
@@ -607,6 +618,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = filterMount,
+                footerStrip = true,
             }))
             -- ⚠ THE SELECTION TABLE IS NAMED, because the walk cannot see it. Every
             -- filter tick is a CUSTOM get/set checkbox -- it has no db binding at all,
@@ -722,6 +734,18 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- permanent-aura tick.
             local BUFF_ORDER_COUNT = 6
 
+            -- ☠ SIX SETTINGS, SO THE GROUP GOES ON THE PLATE. This row was charging the
+            -- same click as the Pandemic row's twenty-three, and the click bought nothing:
+            -- `inline` mounts the pane's own group under the title line instead, and the
+            -- strip then offers to PIN a second instance beside another page rather than
+            -- promising settings that are already on screen. Nothing else moves -- it is
+            -- the same group the page gate, the reflow, the amber tick, Reset Group, Hold:
+            -- Defaults and undo already act on, from the same builder at the same time.
+            --
+            -- ⚠ THE NUMBER BELOW IS NOT WHAT DECIDES IT. CreatePopoutPageTools measures
+            -- the pane itself against INLINE_MAX and counts PROSE as well as settings, so a
+            -- group that grows past six keeps the panel it has without anybody editing this
+            -- line. The opt-in is a request; the refusal is the guarantee.
             local orderMount, orderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBuffOrderGroup({
                     group = group, parent = holder,
@@ -729,7 +753,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local orderRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Order & Limits"],
                 db      = tools.RowDB,
@@ -738,6 +762,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = orderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(orderRow, orderContent)
             tools.WireModifiedTick(orderRow)
@@ -844,13 +869,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: size, scale, alpha.
             local BUFF_APPEARANCE_COUNT = 3
 
+            -- Three sliders, so the group goes on the plate. A panel that opens on size,
+            -- scale and alpha is a panel holding what the row's own title already promised.
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBuffAppearanceGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Appearance"],
                 db      = tools.RowDB,
@@ -859,6 +886,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -925,13 +953,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: icons per row and the two spacings.
             local BUFF_LAYOUT_COUNT = 3
 
+            -- Three sliders -- the wrap and the two spacings -- so the group goes on the
+            -- plate. Icons Per Row is the one people come back for, and it reads straight.
             local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBuffLayoutGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local layoutRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Layout"],
                 db      = tools.RowDB,
@@ -940,6 +970,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = layoutMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(layoutRow, layoutContent)
             tools.WireModifiedTick(layoutRow)
@@ -986,13 +1017,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- dropdowns inside it) and the two offsets.
             local BUFF_POSITION_COUNT = 4
 
+            -- Four, and the tallest of them is the growth control at 155px. Still the right
+            -- trade: an anchor and an offset that nobody can see without a click are an
+            -- anchor and an offset nobody checks against the frame they are aiming at.
             local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildBuffPositionGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Position"],
                 db      = tools.RowDB,
@@ -1001,6 +1035,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             -- ⚠ buffGrowth IS NAMED, because the walk cannot see it. The growth control
             -- is three hand-built mini dropdowns in a container -- it registers nothing
@@ -1136,6 +1171,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -1274,6 +1310,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -1354,6 +1391,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = stackMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(stackRow, stackContent)
             tools.WireModifiedTick(stackRow)
@@ -1458,6 +1496,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durBarMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a bar the client cannot draw would be.
@@ -1582,6 +1621,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = pandemicMount,
+                footerStrip = true,
             }))
             pandemicRow.hideOn = HideDurationBar
             tools.ClaimKeys(pandemicRow, pandemicContent)
@@ -1911,6 +1951,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- is not one of them.
             local DEBUFF_VISIBILITY_COUNT = 1
 
+            -- ☠ ONE SETTING BEHIND THE CLICK, which is the plainest case on the page: the
+            -- pane holds Max Debuffs and a caution note that only appears while the limit
+            -- is doing something per-category. On the plate it is a slider under the title
+            -- line, and the strip offers to pin rather than to promise.
+            --
+            -- ⚠ THE TICK STAYS HOISTED. Show Debuffs is not one of the pane's settings --
+            -- the builder is told to skip it (`hoistToggle`) precisely because the ROW owns
+            -- it -- so there is no twin here to delete, and the plate folds away with it.
             local visMount, visContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDebuffVisibilityGroup({
                     group = group, parent = holder,
@@ -1918,7 +1966,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local visRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Visibility"],
                 db       = tools.RowDB,
@@ -1929,6 +1977,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = visMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(visRow, visContent)
             tools.WireModifiedTick(visRow)
@@ -2105,6 +2154,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = filterMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(filterRow, filterContent)
             tools.WireModifiedTick(filterRow)
@@ -2249,6 +2299,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = blMount,
+                    footerStrip = true,
                 }))
                 -- ⚠ THE STORED SET IS NAMED, because the walk cannot see it. Every
                 -- tick here is a CUSTOM get/set checkbox -- no db binding at all -- so
@@ -2366,6 +2417,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- keep-important tick.
             local DEBUFF_ORDER_COUNT = 6
 
+            -- ☠ SIX SETTINGS, SO THE GROUP GOES ON THE PLATE, for the reason the Buff
+            -- Bar's own Order & Limits row carries at length: a row holding six was charging
+            -- the same click as this page's twenty-item Border row. The count below is the
+            -- opt-in; INLINE_MAX measured off the pane is what would refuse it.
             local orderMount, orderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDebuffOrderGroup({
                     group = group, parent = holder,
@@ -2373,7 +2428,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local orderRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Order & Limits"],
                 db      = tools.RowDB,
@@ -2382,6 +2437,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = orderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(orderRow, orderContent)
             tools.WireModifiedTick(orderRow)
@@ -2479,13 +2535,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: size, scale, alpha.
             local DEBUFF_APPEARANCE_COUNT = 3
 
+            -- Three sliders, so the group goes on the plate -- the same three the Buff Bar
+            -- mounts, and mounted the same way so the two pages still read as one.
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDebuffAppearanceGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Appearance"],
                 db      = tools.RowDB,
@@ -2494,6 +2552,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -2552,13 +2611,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: icons per row and the two spacings.
             local DEBUFF_LAYOUT_COUNT = 3
 
+            -- Three sliders -- the wrap and the two spacings -- so the group goes on the
+            -- plate, matching the Buff Bar's row of the same name.
             local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDebuffLayoutGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local layoutRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Layout"],
                 db      = tools.RowDB,
@@ -2567,6 +2628,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = layoutMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(layoutRow, layoutContent)
             tools.WireModifiedTick(layoutRow)
@@ -2612,13 +2674,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- dropdowns inside it) and the two offsets.
             local DEBUFF_POSITION_COUNT = 4
 
+            -- Four, the growth control among them, so the group goes on the plate. Same
+            -- shape and same trade as the Buff Bar's Position row.
             local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDebuffPositionGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Position"],
                 db      = tools.RowDB,
@@ -2627,6 +2691,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             -- ⚠ debuffGrowth IS NAMED, because the walk cannot see it. The growth
             -- control is three hand-built mini dropdowns in a container -- it registers
@@ -2780,6 +2845,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -2992,6 +3058,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = impMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(importantRow, impContent)
             tools.WireModifiedTick(importantRow)
@@ -3129,6 +3196,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -3205,6 +3273,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = stackMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(stackRow, stackContent)
             tools.WireModifiedTick(stackRow)
@@ -3313,6 +3382,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = dispelMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where letters the client cannot write would be.
@@ -3415,6 +3485,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durBarMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a bar the client cannot draw would be.
@@ -3650,6 +3721,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- ☠ TWO SETTINGS AND TWO LINES OF PROSE BEHIND THE ROW'S OWN TICK, so the
+            -- group goes on the plate -- and folds away entirely when the tick is off, which
+            -- is the one state where greyed controls holding the row open would be the worst
+            -- use of the space. This is the page's gate, so the plate is also the first
+            -- thing a reader meets on it.
+            --
+            -- ⚠ THE ENABLE TICK STAYS HOISTED. It is the ROW's toggle, not one of the two
+            -- -- the builder skips it under `hoistToggle` -- so nothing here is declared
+            -- twice and there is no twin to delete.
             local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildMissingSettingsGroup({
                     group = group, parent = holder,
@@ -3657,7 +3737,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Settings"],
                 db       = tools.RowDB,
@@ -3668,6 +3748,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -3762,6 +3843,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = buffsMount,
+                footerStrip = true,
             }))
             -- The box's own variant gate becomes the ROW's, so the band collapses
             -- the slot instead of drawing a plate for a list auto-detect has taken
@@ -3822,6 +3904,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: size, scale and the frame level.
             local MISSING_APPEARANCE_COUNT = 3
 
+            -- Three sliders, so the group goes on the plate. Size and scale are what an icon
+            -- row is opened for; the frame level rides along rather than costing a click.
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildMissingAppearanceGroup({
                     group = group, parent = holder,
@@ -3829,7 +3913,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Appearance"],
                 db      = tools.RowDB,
@@ -3838,6 +3922,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -3885,6 +3970,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: the anchor and the two offsets.
             local MISSING_POSITION_COUNT = 3
 
+            -- Three -- the anchor and the two offsets -- so the group goes on the plate,
+            -- where the anchor can be read against the frame it is aiming at.
             local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildMissingPositionGroup({
                     group = group, parent = holder,
@@ -3892,7 +3979,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Position"],
                 db      = tools.RowDB,
@@ -3901,6 +3988,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(positionRow, positionContent)
             tools.WireModifiedTick(positionRow)
@@ -4001,6 +4089,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -4254,6 +4343,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- ☠ ONE SETTING AND A BLURB BEHIND THE ROW'S OWN TICK, so the group goes on
+            -- the plate and folds away with the tick. A click that opens a panel holding one
+            -- checkbox is the clearest thing the inline arm exists to end.
+            --
+            -- ⚠ THE ENABLE TICK STAYS HOISTED -- it is the row's toggle, not the pane's
+            -- setting (the builder skips it under `hoistToggle`), so there is no twin here.
             local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDefensiveSettingsGroup({
                     group = group, parent = holder,
@@ -4261,7 +4356,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Settings"],
                 db       = tools.RowDB,
@@ -4272,6 +4367,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -4769,13 +4865,16 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- The blurb is prose, not a setting.
             local DEFENSIVE_LAYOUT_COUNT = 5
 
+            -- Five settings and the blurb above them: six children exactly, which is the
+            -- whole of INLINE_MAX's budget and still inside it. The growth control is what
+            -- this row is opened for, so it is the one that most repays being visible.
             local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDefensiveLayoutGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local layoutRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Layout"],
                 db      = tools.RowDB,
@@ -4784,6 +4883,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = layoutMount,
+                footerStrip = true,
             }))
             -- ⚠ defensiveBarGrowth IS NAMED, because the walk cannot see it. The
             -- growth control is three hand-built mini dropdowns in a container -- it
@@ -4809,6 +4909,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: size, scale and the frame level.
             local DEFENSIVE_APPEARANCE_COUNT = 3
 
+            -- Three sliders, so the group goes on the plate -- the same trio, and the same
+            -- trade, as the Missing Buff Icon page's Appearance row.
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDefensiveAppearanceGroup({
                     group = group, parent = holder,
@@ -4816,7 +4918,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local appearanceRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Appearance"],
                 db      = tools.RowDB,
@@ -4825,6 +4927,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = appearanceMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(appearanceRow, appearanceContent)
             tools.WireModifiedTick(appearanceRow)
@@ -4845,6 +4948,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Three: the anchor and the two offsets.
             local DEFENSIVE_POSITION_COUNT = 3
 
+            -- Three -- the anchor and the two offsets -- so the group goes on the plate.
             local positionMount, positionContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildDefensivePositionGroup({
                     group = group, parent = holder,
@@ -4852,7 +4956,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                 })
                 GatePaneFirstChild(group)
-            end)
+            end, nil, { inline = true })
             local positionRow = iconBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Position"],
                 db      = tools.RowDB,
@@ -4861,6 +4965,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = positionMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(positionRow, positionContent)
             tools.WireModifiedTick(positionRow)
@@ -4911,6 +5016,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -4944,6 +5050,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = filterMount,
+                footerStrip = true,
             }))
             -- ⚠ THE SELECTION TABLE IS NAMED, because the walk cannot see it. Every
             -- filter tick is a CUSTOM get/set checkbox -- it has no db binding at all,
@@ -5022,6 +5129,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -5061,6 +5169,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = stackMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a count the client cannot style would be.
@@ -5111,6 +5220,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = durBarMount,
+                footerStrip = true,
             }))
             -- The box's own hideOn becomes the ROW's, so the band collapses the slot
             -- rather than leaving a gap where a bar the client cannot draw would be.
@@ -5400,6 +5510,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window   = DF.GUIFrame,
                     clipTo   = self,
                     build    = settingsMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(settingsRow, settingsContent)
                 tools.WireModifiedTick(settingsRow)
@@ -5454,13 +5565,19 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Five: width, height, spacing, growth and sort order.
                 local TL_LAYOUT_COUNT = 5
 
+                -- ☠ FIVE SETTINGS, SO THE GROUP GOES ON THE PLATE. Width, height and spacing
+                -- are the numbers people open this page to change, and a click that opens a
+                -- panel holding five sliders is a click that bought nothing. The strip stops
+                -- promising them and offers to pin a second copy instead. As everywhere else
+                -- here, the count below is the opt-in and INLINE_MAX -- measured off the pane,
+                -- prose included -- is what would refuse it.
                 local layoutMount, layoutContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListLayoutGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local layoutRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Size & Spacing"],
                     db      = tools.RowDB,
@@ -5469,6 +5586,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = layoutMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(layoutRow, layoutContent)
                 tools.WireModifiedTick(layoutRow)
@@ -5556,13 +5674,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Three: the preset, the texture and the background alpha.
                 local TL_PRESET_COUNT = 3
 
+                -- Three, so the group goes on the plate. The preset drives the other two, which
+                -- is an argument for seeing all three at once rather than one click away.
                 local presetMount, presetContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListPresetGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local presetRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Bar Style"],
                     db      = tools.RowDB,
@@ -5571,6 +5691,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = presetMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(presetRow, presetContent)
                 tools.WireModifiedTick(presetRow)
@@ -5665,6 +5786,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = colorMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(colorRow, colorContent)
                 tools.WireModifiedTick(colorRow)
@@ -5770,6 +5892,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window   = DF.GUIFrame,
                     clipTo   = self,
                     build    = borderMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(borderRow, borderContent)
                 tools.WireModifiedTick(borderRow)
@@ -5828,6 +5951,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     tools.ReflowMounted()
                 end
 
+                -- Two settings behind the row's own tick, so the group goes on the plate and
+                -- folds away when the tick is off. The Show Icon tick stays hoisted: it is the
+                -- row's toggle, not one of the two (the builder skips it under `hoistToggle`).
                 local iconMount, iconContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListIconGroup({
                         group = group, parent = holder,
@@ -5835,7 +5961,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         popout = true,
                         hoistToggle = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local iconRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label    = L["Icon"],
                     db       = tools.RowDB,
@@ -5846,6 +5972,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window   = DF.GUIFrame,
                     clipTo   = self,
                     build    = iconMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(iconRow, iconContent)
                 tools.WireModifiedTick(iconRow)
@@ -5901,13 +6028,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Six: the three elements and the three target-name extras.
                 local TL_SHOWTEXT_COUNT = 6
 
+                -- Six ticks choosing what a line of the list says. At the ceiling exactly, so a
+                -- seventh drops it back behind the strip on its own -- see INLINE_MAX.
                 local showTextMount, showTextContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListShowTextGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local showTextRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Show Text"],
                     db      = tools.RowDB,
@@ -5916,6 +6045,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = showTextMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(showTextRow, showTextContent)
                 tools.WireModifiedTick(showTextRow)
@@ -5964,13 +6094,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Four: the font, the size, the outline and its shadow.
                 local TL_FONT_COUNT = 4
 
+                -- Four, so the group goes on the plate. Font, size, outline and shadow are read
+                -- together or not at all -- picking one of them behind a click is guesswork.
                 local fontMount, fontContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListFontGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local fontRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Text Font"],
                     db      = tools.RowDB,
@@ -5979,6 +6111,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = fontMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(fontRow, fontContent)
                 tools.WireModifiedTick(fontRow)
@@ -6041,13 +6174,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Six: the size, the width cap, anchor, alignment and the two offsets.
                 local TL_SPELLNAME_COUNT = 6
 
+                -- Six: size, width, anchor, alignment and the two offsets. At the ceiling
+                -- exactly, and the twin of the Target Name row below it.
                 local spellNameMount, spellNameContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListSpellNamePosGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local spellNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Spell Name Position"],
                     db      = tools.RowDB,
@@ -6056,6 +6191,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = spellNameMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(spellNameRow, spellNameContent)
                 tools.WireModifiedTick(spellNameRow)
@@ -6093,13 +6229,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Six: the same set the Spell Name row carries.
                 local TL_TARGETNAME_COUNT = 6
 
+                -- Six, the same six as Spell Name above. Two rows that differ only in which
+                -- text they position should not differ in how many clicks they cost.
                 local targetNameMount, targetNameContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListTargetNamePosGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local targetNameRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Target Name Position"],
                     db      = tools.RowDB,
@@ -6108,6 +6246,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = targetNameMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(targetNameRow, targetNameContent)
                 tools.WireModifiedTick(targetNameRow)
@@ -6148,13 +6287,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- never had.
                 local TL_DURATIONPOS_COUNT = 5
 
+                -- Five, so the group goes on the plate. Anchor, alignment and two offsets only
+                -- mean anything against each other, which is an argument for one screen.
                 local durationPosMount, durationPosContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListDurationPosGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local durationPosRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Duration Position"],
                     db      = tools.RowDB,
@@ -6163,6 +6304,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = durationPosMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(durationPosRow, durationPosContent)
                 tools.WireModifiedTick(durationPosRow)
@@ -6200,13 +6342,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Six: the same set the Spell Name row carries.
                 local TL_INTERRUPTPOS_COUNT = 6
 
+                -- Six -- the Spell Name row's set -- so the group goes on the plate. Exactly at
+                -- INLINE_MAX's budget, and there is no prose in this pane to spend it on.
                 local interruptPosMount, interruptPosContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListInterruptPosGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local interruptPosRow = textBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Interrupt Text Position"],
                     db      = tools.RowDB,
@@ -6215,6 +6359,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = interruptPosMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(interruptPosRow, interruptPosContent)
                 tools.WireModifiedTick(interruptPosRow)
@@ -6268,13 +6413,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Two: the fade-out and the interrupted flash.
                 local TL_TIMING_COUNT = 2
 
+                -- Two sliders. A click for two sliders is the plainest case the
+                -- hybrid exists to remove.
                 local timingMount, timingContent = tools.PopoutContent(function(group, holder, reflow)
                     BuildTargetedListTimingGroup({
                         group = group, parent = holder,
                         refreshStates = reflow,
                         popout = true,
                     })
-                end)
+                end, nil, { inline = true })
                 local timingRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                     label   = L["Timing"],
                     db      = tools.RowDB,
@@ -6283,6 +6430,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     window  = DF.GUIFrame,
                     clipTo  = self,
                     build   = timingMount,
+                    footerStrip = true,
                 }))
                 tools.ClaimKeys(timingRow, timingContent)
                 tools.WireModifiedTick(timingRow)
@@ -6486,6 +6634,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- ☠ TWO SETTINGS AND TWO BLURBS BEHIND THE ROW'S OWN TICK, so the group goes
+            -- on the plate and folds away with the tick. This is the feature's gate, so the
+            -- plate is the first thing a reader of the page meets -- and when the feature is
+            -- off there is nothing held open behind a strip that greyed out with it.
+            --
+            -- ⚠ THE ENABLE TICK STAYS HOISTED. It is the ROW's toggle rather than one of
+            -- the two settings -- the builder skips it under `hoistToggle` -- so nothing on
+            -- this row is declared twice.
             local settingsMount, settingsContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPersonalSettingsGroup({
                     group = group, parent = holder,
@@ -6493,7 +6649,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local settingsRow = contentBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Settings"],
                 db       = tools.RowDB,
@@ -6504,6 +6660,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = settingsMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(settingsRow, settingsContent)
             tools.WireModifiedTick(settingsRow)
@@ -6589,6 +6746,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = contentMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(contentRow, contentContent)
             tools.WireModifiedTick(contentRow)
@@ -6643,13 +6801,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- Five: size, scale, alpha, spacing and the icon cap.
             local PT_SIZE_COUNT = 5
 
+            -- Five sliders, so the group goes on the plate. Size, scale and alpha against
+            -- each other are the whole reason this row is opened.
             local sizeMount, sizeContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPersonalSizeGroup({
                     group = group, parent = holder,
                     refreshStates = reflow,
                     popout = true,
                 })
-            end)
+            end, nil, { inline = true })
             local sizeRow = appearanceBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Size"],
                 db      = tools.RowDB,
@@ -6658,6 +6818,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = sizeMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(sizeRow, sizeContent)
             tools.WireModifiedTick(sizeRow)
@@ -6787,6 +6948,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = borderMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(borderRow, borderContent)
             tools.WireModifiedTick(borderRow)
@@ -6876,6 +7038,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window  = DF.GUIFrame,
                 clipTo  = self,
                 build   = durationMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(durationRow, durationContent)
             tools.WireModifiedTick(durationRow)
@@ -6973,6 +7136,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = highlightMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(highlightRow, highlightContent)
             tools.WireModifiedTick(highlightRow)
@@ -7032,6 +7196,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- Three settings behind the row's own tick, so the group goes on the plate and
+            -- folds away when the tick is off. The tick stays hoisted -- it is the row's
+            -- toggle, not one of the three (the builder skips it under `hoistToggle`).
             local interruptMount, interruptContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPersonalInterruptGroup({
                     group = group, parent = holder,
@@ -7039,7 +7206,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local interruptRow = effectsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Interrupt Settings"],
                 db       = tools.RowDB,
@@ -7050,6 +7217,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = interruptMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(interruptRow, interruptContent)
             tools.WireModifiedTick(interruptRow)
@@ -7107,6 +7275,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 tools.ReflowMounted()
             end
 
+            -- Two settings behind the row's own tick, so the group goes on the plate and
+            -- folds away with it. The Show X Mark tick stays hoisted for the reason the
+            -- Interrupted Visual row above gives.
             local xMarkMount, xMarkContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPersonalXMarkGroup({
                     group = group, parent = holder,
@@ -7114,7 +7285,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     popout = true,
                     hoistToggle = true,
                 })
-            end)
+            end, nil, { inline = true })
             local xMarkRow = effectsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["X Mark"],
                 db       = tools.RowDB,
@@ -7125,6 +7296,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 window   = DF.GUIFrame,
                 clipTo   = self,
                 build    = xMarkMount,
+                footerStrip = true,
             }))
             tools.ClaimKeys(xMarkRow, xMarkContent)
             tools.WireModifiedTick(xMarkRow)

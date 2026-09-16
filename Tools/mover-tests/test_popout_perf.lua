@@ -121,6 +121,7 @@ UI.PopoutRow = UI.PopoutRow or {
     footer = 18, footerFill = 0.85, footerHover = 1.0,
     footerBorder = 0.6, footerOn = 0.22, footerOnHover = 0.30,
     plateStrip = 30, stripArc = 8, modTickGap = 2,
+    plateCompact = 26, gapCompact = 4, padCompact = 6,
     dropdownH = 24, sliderH = 50, sliderBarMid = 22,
 }
 UI.PopoutRow.slot = UI.PopoutRow.plate + UI.PopoutRow.gap

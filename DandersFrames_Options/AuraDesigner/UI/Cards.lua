@@ -107,7 +107,15 @@ local BuildTypeContent = P.BuildTypeContent
 -- pihEnsureFilter for why that was replaced.)
 -- ============================================================
 
-local PIH_FILTERS = {
+-- ☠ ONE HOLDER FOR THE HELPER'S CONSTANTS, AND THE REASON IS THE 200-LOCAL CEILING.
+-- Lua 5.1 allows 200 locals per scope, and this file's main chunk sat at exactly
+-- 200/200 -- measured by compiling it with probe locals, not estimated -- so the next
+-- file-scope `local` added here by anyone, for any reason, would have been a PARSE
+-- error taking the whole Aura Designer down at load. These fifteen cost one slot
+-- each; as fields of one table they cost one.
+-- ⚠ Still built once at load: nothing here is re-allocated per call.
+local PIH_K = {}
+PIH_K.FILTERS  = {
     cooldowns  = "Power Infusion Helper",
     amplifiers = "Power Infusion Helper (amplifiers)",
     infused    = "Power Infusion Helper (infused)",
@@ -119,7 +127,7 @@ local PIH_FILTERS = {
     racials    = "Power Infusion Helper (racials)",
 }
 
-local PIH_PI_SPELL_ID = 10060   -- Power Infusion, for the "already infused" mark
+PIH_K.PI_SPELL_ID  = 10060   -- Power Infusion, for the "already infused" mark
 
 -- Seeded from the curated sets, confirmed present in SpellDB:
 --   offensiveCooldowns (45)  racials (13)  consumables (6, the potions)  trinketsItems (41)
@@ -136,14 +144,14 @@ local PIH_PI_SPELL_ID = 10060   -- Power Infusion, for the "already infused" mar
 -- patch will not appear here on its own. Accepted, because the failure mode of the alternative
 -- is a helper that fires on Shadowmeld and the failure mode of this one is a helper that misses
 -- a racial nobody has had time to notice yet.
-local PIH_RACIAL_IDS = {
+PIH_K.RACIAL_IDS  = {
     273104,  -- Fireblood       (Dark Iron Dwarf) -- primary stat
     274739,  -- Ancestral Call  (Mag'har Orc)     -- secondary stat
     20572,   -- Blood Fury      (Orc)             -- attack / spell power
     26297,   -- Berserking      (Troll)           -- haste
 }
 
-local PIH_SEED = {
+PIH_K.SEED  = {
     cooldowns  = { "offensiveCooldowns" },
     amplifiers = { potions = "consumables", trinkets = "trinketsItems" },
 }
@@ -153,7 +161,7 @@ local PIH_SEED = {
 -- there. Anything in this list is a judgement about the Power Infusion helper only.
 -- ⚠ Two of these are arguably miscategorised at source as well. That is a separate, low-priority
 -- report to him and NOT a reason to edit shared data.
-local PIH_EXCLUDE = {
+PIH_K.EXCLUDE  = {
     -- Augmentation's raid cooldown. It buffs ALLIES rather than the Evoker, so it is not a
     -- "this player is bursting" signal at all -- the Evoker casting it is enabling everyone
     -- else. Belongs with the power externals. (User's call, 2026-08-24.)
@@ -180,7 +188,7 @@ local PIH_EXCLUDE = {
 -- ⚠ SPELLS THE CATEGORY MISSES. Avenging Wrath is filed under raidDefensives, which is fair for
 -- Protection and wrong for Retribution -- it is that spec's burst window and the paladin entry
 -- the helper actually wants. Added by id so the shared categorisation stays untouched.
-local PIH_EXTRA_IDS = {
+PIH_K.EXTRA_IDS  = {
     31884,   -- Avenging Wrath (alts 454351 ride along with the record)
 }
 
@@ -192,15 +200,15 @@ local PIH_EXTRA_IDS = {
 local function pihSeedRecords()
     local R = DF.FilterRegistry
     local out, seen = {}, {}
-    for _, catKey in ipairs(PIH_SEED.cooldowns) do
+    for _, catKey in ipairs(PIH_K.SEED.cooldowns) do
         for _, rec in ipairs((R and R.ByCategory and R.ByCategory[catKey]) or {}) do
-            if rec.id and not PIH_EXCLUDE[rec.id] and not seen[rec.id] then
+            if rec.id and not PIH_K.EXCLUDE[rec.id] and not seen[rec.id] then
                 seen[rec.id] = true
                 out[#out + 1] = rec
             end
         end
     end
-    for _, id in ipairs(PIH_EXTRA_IDS) do
+    for _, id in ipairs(PIH_K.EXTRA_IDS) do
         local rec = R and R.ByID and R.ByID[id]
         if rec and rec.id and not seen[rec.id] then
             seen[rec.id] = true
@@ -244,7 +252,7 @@ end
 -- INFUSED DEFAULTS TO AN ICON. It used to default to a background tint and separately offer its
 -- own one-icon layout group -- two mechanisms for one job. The Icon surface does it with the
 -- aura's own artwork, positioned where the user drags it, so the group went and the default moved.
-local PIH_SIGNALS = {
+PIH_K.SIGNALS  = {
     burst   = { surface = "border", color = { 1.00, 0.82, 0.25 }, list = "cooldowns" },
     infused = { surface = "icon",   color = { 0.55, 0.35, 0.95 }, list = "infused"   },
 }
@@ -382,7 +390,7 @@ end
 -- ⚠ AND NEVER FROM A TICK. pihSyncTriggerExtras must not call this, for the reason its own
 -- note gives: a tick must not conjure the helper into existence.
 local function pihEnsureRacialFilter()
-    return pihEnsureFilter(PIH_FILTERS.racials, nil, PIH_RACIAL_IDS)
+    return pihEnsureFilter(PIH_K.FILTERS.racials, nil, PIH_K.RACIAL_IDS)
 end
 
 -- Every id in a curated list of ours, in ONE place because three callers need it and each
@@ -455,11 +463,11 @@ end
 -- "declared below its first caller" trap UnitExemptFromHelpfulGate documents in this file.
 -- Kept in the same order as the menu, and it only has to be self-consistent: this decides
 -- which hit is called primary, not what anything renders.
-local PIH_RANK = {
+PIH_K.RANK  = {
     border = 1, healthbar = 2, background = 3, nametext = 4, healthtext = 5,
     icon = 6, square = 7, bar = 8,
 }
-local function pihSurfaceRank(typeKey) return PIH_RANK[typeKey] or 99 end
+local function pihSurfaceRank(typeKey) return PIH_K.RANK[typeKey] or 99 end
 
 local function pihFoundAll()
     local out = {}
@@ -848,21 +856,21 @@ local function pihAmplifierIDs(s, everything)
             end
         end
     end
-    if s.potions  then addCat(PIH_SEED.amplifiers.potions)  end
-    if s.trinkets then addCat(PIH_SEED.amplifiers.trinkets) end
+    if s.potions  then addCat(PIH_K.SEED.amplifiers.potions)  end
+    if s.trinkets then addCat(PIH_K.SEED.amplifiers.trinkets) end
     if s.racials  then
         -- ★ THE LIST IF THERE IS ONE, THE SEED IF THERE IS NOT. Racials is a curated list of
         -- ours now, so its ticks are honoured exactly as a preset's are -- but the list only
         -- exists once the helper does, and pihSyncTriggerExtras may reach this before then.
         -- The literal is what the list will be seeded WITH, so the fallback is not a
         -- different answer, only an earlier one.
-        local rids = pihCustomFilterIDs(pihFilterIdByName(PIH_FILTERS.racials), everything)
-        for _, id in ipairs(rids or PIH_RACIAL_IDS) do out[#out + 1] = id end
+        local rids = pihCustomFilterIDs(pihFilterIdByName(PIH_K.FILTERS.racials), everything)
+        for _, id in ipairs(rids or PIH_K.RACIAL_IDS) do out[#out + 1] = id end
     end
     return out
 end
 
-local PIH_ALL_AMPLIFIERS = { potions = true, trinkets = true, racials = true }
+PIH_K.ALL_AMPLIFIERS  = { potions = true, trinkets = true, racials = true }
 
 -- ★★★ THE ICON'S TWO CHOICES (2026-09-09) -- what picture, and what it is allowed to show.
 --
@@ -887,7 +895,7 @@ local PIH_ALL_AMPLIFIERS = { potions = true, trinkets = true, racials = true }
 -- itself -- the new ids are not muted, and the icon really can show them. Storing a boolean
 -- would leave the box claiming "ignored" while racials appeared. Same doctrine as the class
 -- ticks: the tick reads the list, the click edits the list, nothing in between can disagree.
-P.PIH_PI_SPELL_ID = PIH_PI_SPELL_ID
+P.PIH_K.PI_SPELL_ID = PIH_K.PI_SPELL_ID
 
 function P.PIH_AmplifierIDs()
     return pihAmplifierIDs(P.PIH_Settings())
@@ -979,7 +987,7 @@ function P.PIH_SetIconShowsAura(rec, on)
     if on then
         rec.staticSpellID = nil
     else
-        rec.staticSpellID = PIH_PI_SPELL_ID
+        rec.staticSpellID = PIH_K.PI_SPELL_ID
     end
     pihRefresh()
 end
@@ -1019,14 +1027,14 @@ end
 local function pihSyncTriggerExtras(s)
     local R = DF.FilterRegistry
     if not R then return end
-    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local id = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
     local f = id and R.GetCustomFilter and R:GetCustomFilter(id)
     if not f then return end
     local presets, customs = {}, {}
-    if s.trinkets then presets[PIH_SEED.amplifiers.trinkets] = true end
-    if s.potions  then presets[PIH_SEED.amplifiers.potions]  = true end
+    if s.trinkets then presets[PIH_K.SEED.amplifiers.trinkets] = true end
+    if s.potions  then presets[PIH_K.SEED.amplifiers.potions]  = true end
     if s.racials  then
-        local rid = pihFilterIdByName(PIH_FILTERS.racials)
+        local rid = pihFilterIdByName(PIH_K.FILTERS.racials)
         -- ⚠ NO FALLBACK TO THE SEED IDs HERE. Without the list there is nothing to point at,
         -- and quietly copying the four in would be the exact behaviour this change removes.
         -- The list is seeded wherever the cooldown list is, so this is a first-run ordering
@@ -1066,7 +1074,7 @@ local function pihSyncTriggerExtras(s)
 end
 
 local function pihCreateSignal(key, surfaceOverride, showsAura)
-    local def = PIH_SIGNALS[key]
+    local def = PIH_K.SIGNALS[key]
     if not def then return false, "no such signal" end
     -- ☠ THE GATE IS PER SURFACE NOW, NOT PER SIGNAL (2026-09-08). It used to refuse any
     -- second add outright -- "already on" -- which is what made a signal one-surface-only.
@@ -1118,7 +1126,7 @@ local function pihCreateSignal(key, surfaceOverride, showsAura)
     -- memory -- a bare create is only ever a FIRST create, and its home is the default.
     local tgt = surfaceOverride or def.surface
 
-    local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
+    local cdId = pihEnsureFilter(PIH_K.FILTERS.cooldowns, nil, pihSeedIDs())
     if not cdId then return false, "could not build the cooldown list" end
     -- Seeded alongside, so the Racials row has a list to count and to open from the moment
     -- the helper exists -- see pihEnsureRacialFilter. Not fatal if it fails: pihAmplifierIDs
@@ -1142,7 +1150,7 @@ local function pihCreateSignal(key, surfaceOverride, showsAura)
 
     local ref = cdRef
     if def.list == "infused" then
-        local infId = pihEnsureFilter(PIH_FILTERS.infused, nil, { PIH_PI_SPELL_ID })
+        local infId = pihEnsureFilter(PIH_K.FILTERS.infused, nil, { PIH_K.PI_SPELL_ID })
         if not infId then return false, "could not build the infused list" end
         ref = DF:MakeADFilterRef("custom", infId)
         if not ref then return false, "could not name the infused list" end
@@ -1200,7 +1208,7 @@ local function pihCreateSignal(key, surfaceOverride, showsAura)
         -- could hold only one icon, and a bug the moment it can hold two: adding "Their
         -- cooldown" would have stripped the Power Infusion pin off the icon already there.
         if tgt == "icon" then
-            inst.staticSpellID = (not showsAura) and PIH_PI_SPELL_ID or nil
+            inst.staticSpellID = (not showsAura) and PIH_K.PI_SPELL_ID or nil
         end
         -- ★ A SECOND ICON DOES NOT LAND ON TOP OF THE FIRST. Both take the type's default
         -- corner, so without this the pair arrives perfectly stacked and reads as one icon
@@ -1383,7 +1391,7 @@ end
 -- because a static pick cannot ask what is actually on a unit when presence is secret.
 -- So a clash warning on those two would be a lie, and a warning that cannot be true is worse
 -- than no warning at all.
-local PIH_CONTENDED = { border = true, nametext = true, healthtext = true }
+PIH_K.CONTENDED  = { border = true, nametext = true, healthtext = true }
 
 -- The exact candidacy test each contended surface applies, copied from the call sites rather
 -- than approximated -- a warning that fires when the user has ALREADY applied the fix is worse
@@ -1433,7 +1441,7 @@ end
 -- through their own effects list; naming it turns the warning into an instruction. When several
 -- contend, the count says so rather than pretending the named one is the only problem.
 function P.PIH_ClashOn(surface)
-    if not PIH_CONTENDED[surface] then return 0, nil end
+    if not PIH_K.CONTENDED[surface] then return 0, nil end
     local n, name = 0, nil
     for _, pool in ipairs(pihPools()) do
         for auraName, auraCfg in pairs(pool) do
@@ -1482,7 +1490,7 @@ end
 -- warning that survives its own fix teaches people to ignore warnings.
 -- ⚠ `cfg` IS THE ROW'S OWN CONFIG, not a lookup. See the note above for why that matters.
 function P.PIH_ClashText(cfg, surface)
-    if not PIH_CONTENDED[surface] then return nil end
+    if not PIH_K.CONTENDED[surface] then return nil end
     if not pihContends(surface, cfg) then return nil end
     local n, name = P.PIH_ClashOn(surface)
     if n == 0 then return nil end
@@ -1520,13 +1528,13 @@ local function pihPlace(key, auraName, surface, carried)
         -- Same corner a fresh infused icon gets; see pihCreateSignal for why it is assigned
         -- rather than defaulted.
         if key == "infused" then inst.anchor = "TOPRIGHT" end
-        if surface == "icon" then inst.staticSpellID = PIH_PI_SPELL_ID end
+        if surface == "icon" then inst.staticSpellID = PIH_K.PI_SPELL_ID end
         if surface == "square" or surface == "bar" then
             -- Colourless carry falls back to the signal's default, same as the frame branch
             -- below -- the store's default square is white.
             local c = carried and carried.colour
             if not c then
-                local d = PIH_SIGNALS[key] and PIH_SIGNALS[key].color
+                local d = PIH_K.SIGNALS[key] and PIH_K.SIGNALS[key].color
                 c = d and { r = d[1], g = d[2], b = d[3], a = 1 } or nil
             end
             if c then inst.color = { r = c.r, g = c.g, b = c.b, a = c.a or 1 } end
@@ -1545,7 +1553,7 @@ local function pihPlace(key, auraName, surface, carried)
     -- every border had been gold is a border nobody can see.
     local c = carried and carried.colour
     if not c then
-        local d = PIH_SIGNALS[key] and PIH_SIGNALS[key].color
+        local d = PIH_K.SIGNALS[key] and PIH_K.SIGNALS[key].color
         c = d and { r = d[1], g = d[2], b = d[3], a = 1 } or nil
     end
     if c then cfg[pihColorKey(surface)] = { r = c.r, g = c.g, b = c.b, a = c.a or 1 } end
@@ -1577,7 +1585,7 @@ end
 -- with a tile rather than leaving it to a tick on the card afterwards, so the create has to
 -- be able to carry the answer. nil / false keeps the recipe's pin (Power Infusion).
 function P.PIH_AddSurface(key, surface, showsAura)
-    if not PIH_SIGNALS[key] then return false, "no such signal" end
+    if not PIH_K.SIGNALS[key] then return false, "no such signal" end
     if not surface or surface == "none" then return false, "no surface" end
     -- ☠ showsAura GOES IN, IT IS NOT APPLIED AFTERWARDS. This used to call the create and then
     -- walk every icon the signal held clearing staticSpellID -- correct while one icon was the
@@ -1652,7 +1660,7 @@ end
 -- ☠ ONE LOCAL, NOT TWO. This file is at Lua's 200-local ceiling in its main chunk, so the
 -- old name a migration has to recognise lives inline in sweep step 12 rather than beside
 -- this one -- which is also where it is explained. luac refuses the second local outright.
-local PIH_ICON_GROUP_NAME = "PI Helper — Icons"
+PIH_K.ICON_GROUP_NAME  = "PI Helper — Icons"
 
 function P.PIH_IconGroup()
     for _, g in ipairs((P.GetOtherLayoutGroups and P.GetOtherLayoutGroups(false)) or {}) do
@@ -1786,7 +1794,7 @@ end
 -- written, so "what does this group watch" has a single answer.
 local function pihApplyGroupSelection(g)
     if type(g) ~= "table" then return end
-    local cdId = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local cdId = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
     if P.PIH_GroupFollowsTriggers(g) then
         -- Inherit: link the cooldown list and let its includes do the rest.
         g.filterSelection = { presets = {}, customs = cdId and { [cdId] = true } or {} }
@@ -1795,10 +1803,10 @@ local function pihApplyGroupSelection(g)
     local s = P.PIH_GroupSources(g)
     local presets, customs = {}, {}
     if s.cooldowns and cdId then customs[cdId] = true end
-    if s.trinkets then presets[PIH_SEED.amplifiers.trinkets] = true end
-    if s.potions  then presets[PIH_SEED.amplifiers.potions]  = true end
+    if s.trinkets then presets[PIH_K.SEED.amplifiers.trinkets] = true end
+    if s.potions  then presets[PIH_K.SEED.amplifiers.potions]  = true end
     if s.racials then
-        local rid = pihFilterIdByName(PIH_FILTERS.racials)
+        local rid = pihFilterIdByName(PIH_K.FILTERS.racials)
         if rid then customs[rid] = true end
     end
     -- ☠ noIncludes, or "cooldowns only" is unsayable: the cooldown list NAMES the other three
@@ -1831,7 +1839,7 @@ function P.PIH_AddIconGroup()
     if P.PIH_IconGroup() then return true end
     local adDB = GetAuraDesignerDB()
     if not adDB then return false, "no config" end
-    local cdId = pihEnsureFilter(PIH_FILTERS.cooldowns, nil, pihSeedIDs())
+    local cdId = pihEnsureFilter(PIH_K.FILTERS.cooldowns, nil, pihSeedIDs())
     if not cdId then return false, "could not build the cooldown list" end
     -- Seeded alongside, so the Racials row has a list to count and to open from the moment
     -- the helper exists -- see pihEnsureRacialFilter. Not fatal if it fails: pihAmplifierIDs
@@ -1853,7 +1861,7 @@ function P.PIH_AddIconGroup()
     -- ⇒ P.NewLayoutGroupRecord is that list now, and this function overrides only what it
     -- genuinely means differently. What stays hand-rolled is the STORE, which is the whole
     -- reason this does not call CreateLayoutGroup -- see the note above.
-    local g = P.NewLayoutGroupRecord(id, PIH_ICON_GROUP_NAME, "filter")
+    local g = P.NewLayoutGroupRecord(id, PIH_K.ICON_GROUP_NAME, "filter")
     -- ☠ THE MARK. buildFilterGroupConfig stamps dfGate from it, which is what puts these
     -- icons under the cooldown gate and the role exclusions with everything else.
     g.pihSignal = "burst"
@@ -1960,7 +1968,7 @@ P.PIH_ClassList = pihClassList
 -- themselves are read off the effects: a second copy of the truth only ever drifts.
 function P.PIH_ClassOn(classFile)
     local R = DF.FilterRegistry
-    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local id = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
     local f = id and R and R.GetCustomFilter and R:GetCustomFilter(id)
     -- No list yet means nothing has been taken away yet.
     if not f then return true end
@@ -1977,7 +1985,7 @@ end
 -- is the finer control this one deliberately does not try to replace.
 local function pihApplyClass(classFile, on)
     local R = DF.FilterRegistry
-    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local id = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
     if not (id and R) then return end
     for _, rec in ipairs(pihSeedRecords()) do
         if rec.class == classFile then
@@ -2088,7 +2096,7 @@ end
 -- list and not firing, so it is not live.
 function P.PIH_CooldownCounts()
     local R = DF.FilterRegistry
-    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local id = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
     local f = id and R and R.GetCustomFilter and R:GetCustomFilter(id)
     local ids = pihSeedIDs()
     if not f then return 0, #ids end
@@ -2184,13 +2192,13 @@ end
 -- The cooldown list's registry id, for deep-linking straight to it in the Filter Designer.
 -- nil before the helper exists, which is also when the button that uses it must be dead.
 function P.PIH_CooldownFilterID()
-    return pihFilterIdByName(PIH_FILTERS.cooldowns)
+    return pihFilterIdByName(PIH_K.FILTERS.cooldowns)
 end
 
 -- ...and the racials list's, for the pencil on its row. Same contract: nil until the helper
 -- exists, which is when that pencil must not be drawn.
 function P.PIH_RacialFilterID()
-    return pihFilterIdByName(PIH_FILTERS.racials)
+    return pihFilterIdByName(PIH_K.FILTERS.racials)
 end
 
 -- How many of a preset category are ON, and how many it holds.
@@ -2230,12 +2238,12 @@ function P.PIH_WatchedCount(sources)
               potions = st.potions == true, racials = st.racials == true }
     end
     local total = 0
-    local id = pihFilterIdByName(PIH_FILTERS.cooldowns)
+    local id = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
     if s.cooldowns and id and R and R.CustomFilterCounts then
         total = R:CustomFilterCounts(id)
     end
-    if s.trinkets then total = total + P.PIH_PresetCounts(PIH_SEED.amplifiers.trinkets) end
-    if s.potions  then total = total + P.PIH_PresetCounts(PIH_SEED.amplifiers.potions)  end
+    if s.trinkets then total = total + P.PIH_PresetCounts(PIH_K.SEED.amplifiers.trinkets) end
+    if s.potions  then total = total + P.PIH_PresetCounts(PIH_K.SEED.amplifiers.potions)  end
     if s.racials  then total = total + P.PIH_RacialCounts() end
     return total
 end
@@ -2245,12 +2253,12 @@ end
 -- which is the number that will be true the moment it is.
 function P.PIH_RacialCounts()
     local R = DF.FilterRegistry
-    local id = pihFilterIdByName(PIH_FILTERS.racials)
+    local id = pihFilterIdByName(PIH_K.FILTERS.racials)
     if id and R and R.CustomFilterCounts then
         local on, total = R:CustomFilterCounts(id)
         if total > 0 then return on, total end
     end
-    return #PIH_RACIAL_IDS, #PIH_RACIAL_IDS
+    return #PIH_K.RACIAL_IDS, #PIH_K.RACIAL_IDS
 end
 
 -- ============================================================
@@ -6899,7 +6907,7 @@ P.OpenFilterPopout = OpenFilterPopout
 --    ⚠ THE LESSON: a mark written by a CREATE path reaches nobody who already has the
 --    thing. Stamping in the sweep is what reaches them, and the sweep is the one place
 --    that runs for a helper nobody is touching.
-local PIH_SCHEMA = 12
+PIH_K.SCHEMA  = 12
 
 local function pihSweep()
     local s = P.PIH_Settings()
@@ -6915,7 +6923,7 @@ local function pihSweep()
     -- ⇒ `from` is the version the profile is actually on, and each step names the version it
     -- was written for. [[feedback-migration-before-defaults-backfill]] is the sibling trap.
     local from = tonumber(s.schema) or 0
-    if from == PIH_SCHEMA then return end
+    if from == PIH_K.SCHEMA then return end
 
     -- ☠☠ THE POOL IS PINNED FOR THE WHOLE SWEEP, AND SKIPPING THIS SHIPPED A BROKEN SWEEP.
     -- Several editor helpers this function reaches resolve their STORE from S.activeBuffTab:
@@ -6969,11 +6977,11 @@ local function pihSweep()
     -- not a burst window on their own any more -- and put into the amplifier list only if
     -- the user still had them, so an explicit untick is not silently reversed.
     if R then
-        local cdId = pihFilterIdByName(PIH_FILTERS.cooldowns)
+        local cdId = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
         local f = cdId and R.GetCustomFilter and R:GetCustomFilter(cdId)
         local had = false
         if f then
-            for _, sid in ipairs(PIH_RACIAL_IDS) do
+            for _, sid in ipairs(PIH_K.RACIAL_IDS) do
                 if f.spells[sid] or f.rawIDs[sid] then had = true end
                 if R.RemoveSpellFromCustom then R:RemoveSpellFromCustom(cdId, sid) end
             end
@@ -7075,7 +7083,7 @@ local function pihSweep()
     -- deleted is not a preference anyone can be held to.
     pihSyncTriggerExtras(s)
     if R then
-        local ampId = pihFilterIdByName(PIH_FILTERS.amplifiers)
+        local ampId = pihFilterIdByName(PIH_K.FILTERS.amplifiers)
         if ampId and R.DeleteCustomFilter then R:DeleteCustomFilter(ampId) end
     end
 
@@ -7107,13 +7115,13 @@ local function pihSweep()
     -- ⚠ Only when the mark is missing: re-stamping would be harmless but re-deriving the
     -- seed set on every sweep is work for nothing.
     if R and R.SetCuratedDefaults and R.IsCuratedFilter then
-        local cdId = pihFilterIdByName(PIH_FILTERS.cooldowns)
+        local cdId = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
         if cdId and not R:IsCuratedFilter(cdId) then
             R:SetCuratedDefaults(cdId, pihSeedIDs())
         end
-        local infId = pihFilterIdByName(PIH_FILTERS.infused)
+        local infId = pihFilterIdByName(PIH_K.FILTERS.infused)
         if infId and not R:IsCuratedFilter(infId) then
-            R:SetCuratedDefaults(infId, { PIH_PI_SPELL_ID })
+            R:SetCuratedDefaults(infId, { PIH_K.PI_SPELL_ID })
         end
     end
 
@@ -7127,7 +7135,7 @@ local function pihSweep()
     -- ⚠ NO RE-SYNC NEEDED AFTER IT. Step 6 above ran pihSyncTriggerExtras while the list did
     -- not exist yet, and pihAmplifierIDs falls back to the same four ids the list is seeded
     -- with -- so the set it wrote is the set it would write now, not an earlier guess at it.
-    if pihFilterIdByName(PIH_FILTERS.cooldowns) then pihEnsureRacialFilter() end
+    if pihFilterIdByName(PIH_K.FILTERS.cooldowns) then pihEnsureRacialFilter() end
 
     -- 10. ☠☠ THE COPIED AMPLIFIER SPELLS COME BACK OUT OF THE COOLDOWN LIST.
     -- Until now the three amplifier ticks COPIED their lists in, so a helper with all three on
@@ -7145,12 +7153,12 @@ local function pihSweep()
     -- ⚠ THE PER-SPELL TICK GOES WITH THE SPELL. A `disabled` entry for an id that is no longer
     -- a member is invisible dead weight that would spring back if the id ever returned.
     do
-        local cdId = pihFilterIdByName(PIH_FILTERS.cooldowns)
+        local cdId = pihFilterIdByName(PIH_K.FILTERS.cooldowns)
         local f = cdId and R and R.GetCustomFilter and R:GetCustomFilter(cdId)
         if f and R.RemoveSpellFromCustom then
             local seeded = f.dfDefaults or {}
             local n = 0
-            for _, sid in ipairs(pihAmplifierIDs(PIH_ALL_AMPLIFIERS, true)) do
+            for _, sid in ipairs(pihAmplifierIDs(PIH_K.ALL_AMPLIFIERS, true)) do
                 if not seeded[sid] and (f.spells[sid] or f.rawIDs[sid]) then
                     R:RemoveSpellFromCustom(cdId, sid)
                     if f.disabled then f.disabled[sid] = nil end
@@ -7207,11 +7215,11 @@ local function pihSweep()
     do
         local g = P.PIH_IconGroup and P.PIH_IconGroup()
         if g and g.name == "PI Helper — Cooldowns" then
-            g.name = PIH_ICON_GROUP_NAME
+            g.name = PIH_K.ICON_GROUP_NAME
         end
     end
 
-    s.schema = PIH_SCHEMA
+    s.schema = PIH_K.SCHEMA
     S.activeBuffTab = prevPool
     if P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
 end
@@ -7339,11 +7347,11 @@ end
 -- ⚠ The ROW PAGE passes opts.indent = 8 instead: inside a popout pane each section
 -- IS the surface, there is no owning header to indent under, and 8 is the pane's
 -- own content inset.
-local PIH_INDENT = 20
+PIH_K.INDENT  = 20
 -- ...and the note metrics the estimator below leans on. Their full story is on
 -- pihMakeTools; they sit at file scope so both layouts read the same numbers.
-local PIH_NOTE_LINE = 13
-local PIH_CB_TEXT = 24   -- the 16px box plus the 8px label gap
+PIH_K.NOTE_LINE  = 13
+PIH_K.CB_TEXT  = 24   -- the 16px box plus the 8px label gap
 
 -- One toolkit per BUILD, not per file: everything in here derives from the parent's
 -- width and the caller's Refresh, which differ per layout and per open. The bodies
@@ -7352,7 +7360,7 @@ local function pihMakeTools(parent, opts)
     opts = opts or {}
     local t = {}
     t.Refresh = opts.Refresh or function() end
-    t.indent  = opts.indent or PIH_INDENT
+    t.indent  = opts.indent or PIH_K.INDENT
     t.groupW  = (parent:GetWidth() or 320) - (t.indent + 18)
     t.parent  = parent
 
@@ -7448,7 +7456,7 @@ local function pihMakeTools(parent, opts)
         -- of ours.
         local w = GUI:CreateNote(parent, text, { tone = tone })
         w.fullRow = true
-        g:AddWidget(w, t.lines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
+        g:AddWidget(w, t.lines(text) * PIH_K.NOTE_LINE + (GUI.RowHeight.labelPad or 19))
         return w
     end
 
@@ -7471,11 +7479,11 @@ local function pihMakeTools(parent, opts)
         w.label:SetPoint("RIGHT", w, "RIGHT", 0, 0)
         w.label:SetJustifyH("LEFT")
         w.label:SetWordWrap(true)
-        local lines = t.linesAt(label, (wrapW or t.noteW) - PIH_CB_TEXT)
+        local lines = t.linesAt(label, (wrapW or t.noteW) - PIH_K.CB_TEXT)
         if lines > 1 then
-            w:SetHeight(24 + (lines - 1) * PIH_NOTE_LINE)
+            w:SetHeight(24 + (lines - 1) * PIH_K.NOTE_LINE)
             w.preferredHeight = (GUI.RowHeight.checkbox or 35)
-                + (lines - 1) * PIH_NOTE_LINE
+                + (lines - 1) * PIH_K.NOTE_LINE
         end
         g:AddWidget(w)
         return w
@@ -7500,12 +7508,12 @@ local function pihMakeTools(parent, opts)
     function t.settingLabel(g, text)
         local w = GUI:CreateLabel(parent, text, nil, C_TEXT)
         w.fullRow = true
-        g:AddWidget(w, t.lines(text) * PIH_NOTE_LINE + (GUI.RowHeight.labelPad or 19))
+        g:AddWidget(w, t.lines(text) * PIH_K.NOTE_LINE + (GUI.RowHeight.labelPad or 19))
         return w
     end
 
     function t.subCheck(g, label, get, set)
-        local w = t.check(g, label, get, set, (t.noteW or 0) - PIH_INDENT)
+        local w = t.check(g, label, get, set, (t.noteW or 0) - PIH_K.INDENT)
         w.indent = true
         return w
     end
@@ -7969,7 +7977,7 @@ end
         -- ⚠ ENABLED / TOTAL, NOT THE CATEGORY'S SIZE, and shared with the count on the
         -- Cooldown Icons card (P.PIH_WatchedCount) so the two screens cannot report the same
         -- feature differently. See P.PIH_PresetCounts for why the raw size was wrong.
-        local trink, potion = PIH_SEED.amplifiers.trinkets, PIH_SEED.amplifiers.potions
+        local trink, potion = PIH_K.SEED.amplifiers.trinkets, PIH_K.SEED.amplifiers.potions
         local trinkOn, trinkAll = P.PIH_PresetCounts(trink)
         pihSourceRow(g, t, L["Trinkets"], trinkOn, trinkAll,
             function() return st.trinkets == true end,
@@ -8244,7 +8252,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
             { label = L["Power Infusion"], accent = accent,
               taken = pinnedHeld and alreadyAdded or nil,
               desc  = L["The same picture on everyone worth infusing."],
-              Paint = function(pv) PaintEffectOnThumb(pv, "icon", PIH_PI_SPELL_ID) end,
+              Paint = function(pv) PaintEffectOnThumb(pv, "icon", PIH_K.PI_SPELL_ID) end,
               onClick = function() add(false) end },
             -- ⚠ AN EXAMPLE COOLDOWN, NOT A PINNED ONE. It goes through the same staticSpellID
             -- parameter the tile above uses, and means something different: there the art IS
@@ -8301,7 +8309,7 @@ local function pihBuildAddTiles(parent, yPos, Refresh)
                 -- The Icon tile opens a choice now rather than describing one behaviour.
                 desc   = isIcon and L["Power Infusion, their cooldown, or one per cooldown they have up."] or eff.desc,
                 Paint  = function(pv)
-                    PaintEffectOnThumb(pv, capturedType, isIcon and PIH_PI_SPELL_ID or nil)
+                    PaintEffectOnThumb(pv, capturedType, isIcon and PIH_K.PI_SPELL_ID or nil)
                 end,
                 onClick = function()
                     if isIcon then

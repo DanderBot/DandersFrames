@@ -129,13 +129,28 @@ do
           "semantics: the content is built EAGERLY at page-build time")
     check(BODY:find("local st = pending or fresh()", 1, true) ~= nil,
           "semantics: ...and a SECOND instance builds a fresh one through the same builder")
-    check(BODY:find("end, pending.group", 1, true) ~= nil,
+    -- ⚠ `eager`, NOT `pending`. The INLINE arm hands the eagerly built instance
+    -- to the row's plate and clears `pending` so the first click builds a second
+    -- one -- so the group that comes back beside the mount has to be held by a
+    -- name that survives that.
+    check(BODY:find("end, eager.group", 1, true) ~= nil,
           "semantics: the eager group comes back beside the mount, for the key walk")
+    check(BODY:find("local eager = pending", 1, true) ~= nil,
+          "semantics: ...held by name, because the inline arm clears pending")
     -- The buildInto contract's exact shape: reflow THIS pane, then the page.
     check(BODY:find("buildInto(st.group, holder, reflow)", 1, true) ~= nil,
           "semantics: buildInto is handed the group, the holder and a refresh")
-    check(BODY:find("ReflowPane(st)\n                page:RefreshStates()", 1, true) ~= nil,
-          "semantics: ...whose refresh reflows this instance and then the page")
+    -- This instance first, the page last. (The inline arm puts the OTHER live
+    -- instances of the same factory between them -- see the cross-repaint claims
+    -- further down -- so the two ends are pinned rather than the literal.)
+    local rBody = BODY:match("local reflow = function%(%)(.-)\n            end")
+    check(rBody ~= nil, "semantics: the pane refresh's body is readable")
+    if rBody then
+        local paneAt = rBody:find("ReflowPane(st)", 1, true)
+        local pageAt = rBody:find("page:RefreshStates()", 1, true)
+        check(paneAt ~= nil and pageAt ~= nil and paneAt < pageAt,
+              "semantics: ...whose refresh reflows this instance and then the page")
+    end
 
     -- ☠ AND THE HOLDER ANSWERS TO THE SAME CLOSURE. Every widget factory ends
     -- a write with `if parent.RefreshStates then parent:RefreshStates() end`;
@@ -1284,6 +1299,243 @@ do
     local dirPo, dirPane = fakePanel()
     dirMount(dirPo, dirPane)
     eq(shownIn(dirBuilt[1]), 1, "dir: the panel opens with the one control behind the row")
+
+    -- ---- THE ROW'S OWN PANE, MOUNTED ON THE PLATE ---------------------
+    -- ☠ THE HYBRID PAGE. Two thirds of the rows in the addon hide six settings
+    -- or fewer, and a row holding four was charging the same click as a row
+    -- holding thirty-one. Hoisting cannot answer that -- a hoisted cell knows
+    -- slider and dropdown, and most small groups are ticks, colour pickers and
+    -- edit boxes -- so a small row mounts the pane's OWN GROUP on its plate and
+    -- the strip opens a SECOND instance through the same builder. One builder,
+    -- one set of widgets, so the gate, the reflow, the modified dots, Reset
+    -- Group, Hold: Defaults and undo are untouched.
+    --
+    -- What this drives is the half Controls.lua owns: which instance goes where,
+    -- what refuses the arm, and that two live copies of one group stay in step.
+    -- The plate arithmetic and the fold are driven in test_popout_row.lua 24.21.
+    local inlineBuilt = {}
+    local holdersBefore = #page._popoutHolders
+    paneDB.on = true
+    local INLINE_KEYS = { "frameScale", "framePadding", "frameSpacing" }
+    local inlineMount, inlineGroup = tools.PopoutContent(function(g)
+        local mine = {}
+        for _, key in ipairs(INLINE_KEYS) do
+            local w = paneControl(key)
+            g:AddWidget(w, 30)
+            mine[#mine + 1] = w
+        end
+        inlineBuilt[#inlineBuilt + 1] = mine
+    end, nil, { inline = true })
+    local inlineHolder = page._popoutHolders[holdersBefore + 1]
+    check(rawget(inlineGroup, "dfInline") ~= nil,
+          "inline: the eager instance is stamped as the one that belongs on a plate")
+    eq(#inlineBuilt, 1, "inline: ...and exactly one instance exists so far")
+
+    local inlineRow = kitHost:CreatePopoutRow(page.child, {
+        label = "Frame Size Inline", db = tools.RowDB, count = #INLINE_KEYS,
+        toggle = { key = "on" }, footerStrip = true, build = inlineMount,
+    })
+    inlineRow:SetWidth(401)
+    eq(inlineRow.plate:GetHeight(), M0.plateStrip + M0.footer,
+       "inline: (a bare strip row, before the claim wires anything)")
+
+    tools.ClaimKeys(inlineRow, inlineGroup)
+    check(inlineRow:IsShowingInlineContent(),
+          "inline: the claim hands the eager group to the row's plate")
+    eq(visible(inlineGroup), #INLINE_KEYS,
+       "inline: ...laid out, all three of them, rather than parked in a hidden holder")
+    local lineW = 401 - (M0.padX + M0.check + M0.labelGap) - M0.padX
+    eq(inlineHolder:GetWidth(), lineW,
+       "inline: ...at the plate's own control-line width, not the popout's")
+    eq(inlineGroup:GetWidth(), lineW, "inline: ...and the group inside it with it")
+    eq(inlineRow.plate:GetHeight(),
+       M0.plateStrip + M0.linePad + inlineGroup:GetHeight() + M0.linePad + M0.footer,
+       "inline: ...and the plate is made of the group's own measured height")
+    eq(inlineRow.stripCount:GetText(), "Pin settings in popout",
+       "inline: the strip stops promising what is already on the plate")
+
+    -- ---- the strip opens a SECOND instance ---------------------------
+    -- ☠ THE FIRST CLICK MUST NOT ADOPT THE PLATE'S GROUP. It would take the
+    -- controls off the row and put them in a panel, which is the opposite of
+    -- what the row just did with them.
+    local inPo, inPane = fakePanel()
+    inlineMount(inPo, inPane)
+    eq(#inlineBuilt, 2, "inline: the first click builds a SECOND instance, not an adoption")
+    eq(shownIn(inlineBuilt[2]), #INLINE_KEYS,
+       "inline: ...which draws every setting, because nothing here is hoisted")
+    eq(visible(inlineGroup), #INLINE_KEYS,
+       "inline: ...and the plate's own copy is still drawing all of them")
+
+    -- ---- two live copies of one group, and a write in either ---------
+    -- ☠ THE INLINE GROUP AND A PINNED PANEL ARE BOTH ON SCREEN AND BOTH BOUND
+    -- TO THE SAME KEYS. A committed write in one has to repaint the other or the
+    -- two sit there disagreeing about what the setting is.
+    --
+    -- ⚠ AND NEVER THE ONE THAT WROTE. This is the commit seam, which a slider
+    -- fires once per step it crosses; repainting the widget under the mouse
+    -- snaps the thumb back to the last committed step.
+    -- The panel instance's own holder -- the one the mount above just built, so
+    -- its RefreshStates is the very closure a widget inside that panel calls.
+    local panelHolder = page._popoutHolders[#page._popoutHolders]
+    check(panelHolder ~= inlineHolder,
+          "inline: the panel instance has a holder of its own")
+    local inlineValues, panelValues = 0, 0
+    inlineGroup.RefreshChildValues = function() inlineValues = inlineValues + 1 end
+    local secondGroup
+    for _, w in ipairs(inlineBuilt[2]) do secondGroup = w.settingsGroup end
+    check(secondGroup ~= nil and secondGroup ~= inlineGroup,
+          "inline: the second instance is a different group from the plate's")
+    secondGroup.RefreshChildValues = function() panelValues = panelValues + 1 end
+
+    panelHolder:RefreshStates()
+    eq(inlineValues, 1, "inline: a write in the panel repaints the plate's copy")
+    eq(panelValues, 0, "inline: ...and NOT the copy that wrote, which is under the mouse")
+
+    inlineValues, panelValues = 0, 0
+    inlineHolder:RefreshStates()
+    eq(panelValues, 1, "inline: a write on the plate repaints the panel's copy")
+    eq(inlineValues, 0, "inline: ...and again not the one that wrote")
+
+    -- ---- and the page-wide reflow reaches the plate's copy ------------
+    -- Reset Group and Hold: Defaults walk the MOUNTED list, and the plate's
+    -- instance is never mounted into a panel -- so it joins that list when it is
+    -- claimed, or a reset would leave it showing the values it had before.
+    inlineValues, panelValues = 0, 0
+    tools.ReflowMounted(true)
+    eq(inlineValues, 1, "inline: a group reset repaints the plate's copy too")
+    eq(panelValues, 1, "inline: ...and the open panel's, as it always did")
+    inlineGroup.RefreshChildValues = nil
+    secondGroup.RefreshChildValues = nil
+
+    -- ---- OFF folds it, and the strip names the whole group again -----
+    paneDB.on = false
+    inlineRow.Refresh()
+    check(not inlineRow:IsShowingInlineContent(), "inline: switching the row off folds it away")
+    eq(inlineRow.plate:GetHeight(), M0.plateStrip + M0.footer,
+       "inline: ...leaving the title line and the strip")
+    eq(inlineRow.stripCount:GetText(), "3 more settings",
+       "inline: ...and the strip names all three, because they are behind the click now")
+    paneDB.on = true
+    inlineRow.Refresh()
+    eq(inlineRow.stripCount:GetText(), "Pin settings in popout",
+       "inline: switching it back on puts the offer back")
+
+    -- ---- a gate INSIDE the group moves the plate, unasked ------------
+    -- ☠ THE ROW IS NOT WATCHING THE GROUP. A hideOn inside the pane flips on a
+    -- write, the group re-flows itself and comes out a control shorter -- and the
+    -- plate holding it keeps the height it had unless the re-flow says so. Exactly
+    -- the fact the panel's own SyncRowPaneHeight exists for, one host earlier, and
+    -- the reason ReflowPane ends by asking the row to lay out again.
+    --
+    -- Driven through the holder's RefreshStates, which is the closure every widget
+    -- factory calls after a committed write -- so this is the real path, not a
+    -- direct poke at the row's layout.
+    local tallPlate = inlineRow.plate:GetHeight()
+    local tallGroup = inlineGroup:GetHeight()
+    local gated = inlineBuilt[1][3]
+    local gateShut = false
+    gated.hideOn = function() return gateShut end
+
+    gateShut = true
+    inlineHolder:RefreshStates()
+    eq(visible(inlineGroup), #INLINE_KEYS - 1,
+       "inline: a gate inside the group takes a control out of it")
+    check(inlineGroup:GetHeight() < tallGroup, "inline: ...so the group is shorter")
+    eq(inlineRow.plate:GetHeight(),
+       M0.plateStrip + M0.linePad + inlineGroup:GetHeight() + M0.linePad + M0.footer,
+       "inline: ...and the plate came down with it, with nothing asking the row to")
+    check(inlineRow.plate:GetHeight() < tallPlate, "inline: ...which is a real shrink")
+    eq(inlineRow.stripCount:GetText(), "Pin settings in popout",
+       "inline: ...and a gated-away control is still not behind the click")
+
+    gateShut = false
+    inlineHolder:RefreshStates()
+    eq(inlineRow.plate:GetHeight(), tallPlate,
+       "inline: ...and the plate goes back up when the gate opens again")
+    gated.hideOn = nil
+
+    -- ---- the re-entrancy guard on the way back in ---------------------
+    -- ☠ THE MEASURE RE-FLOWS THE GROUP, AND A RE-FLOW CAN COME BACK. A widget
+    -- that only learns its height once it has been drawn calls GUI:RelayoutHost
+    -- from inside LayoutChildren, and that walk ends at this holder's
+    -- dfReflowPane -- which would ask the row to lay out the plate it is halfway
+    -- through laying out. No control in this fixture converges its own height, so
+    -- the flag is set by hand and the door is tried: a test that waited for a
+    -- widget that does it would be a test of the widget.
+    do
+        local st = rawget(inlineGroup, "dfInline")
+        check(st ~= nil, "inline: the factory's instance is reachable from its group")
+        local relayouts = 0
+        local realLayout = inlineRow._LayoutPlate
+        inlineRow._LayoutPlate = function() relayouts = relayouts + 1 return realLayout() end
+        st.measuring = true
+        inlineHolder.dfReflowPane()
+        eq(relayouts, 0,
+           "inline: a reflow arriving mid-measure does NOT re-enter the row's layout")
+        -- ⚠ AND THE OTHER DOOR INTO THE SAME PLACE. The holder's dfReflowPane is
+        -- the walk's end; a widget committing a write goes through RefreshStates
+        -- instead, and reaches ReflowPane without passing that guard at all. Both
+        -- are checked, because one guard covering both would be an accident of
+        -- which door the test happened to try.
+        inlineHolder:RefreshStates()
+        eq(relayouts, 0,
+           "inline: ...and neither does a widget's own refresh arriving mid-measure")
+        st.measuring = false
+        inlineHolder.dfReflowPane()
+        eq(relayouts, 1, "inline: ...and one arriving outside a measure does")
+        inlineRow._LayoutPlate = realLayout
+    end
+
+    -- ---- ...and a group whose gates hid EVERYTHING folds --------------
+    -- ☠ NOT A ONE-PIXEL STRIPE. LayoutChildren floors its own height at 1, so a
+    -- fully gated pane would hand the row a 1px frame -- which the row would then
+    -- wrap in the 10px of air above and below that a real group earns. Zero is
+    -- what "nothing to show" has to mean here.
+    local allShut = false
+    for _, w in ipairs(inlineBuilt[1]) do w.hideOn = function() return allShut end end
+    allShut = true
+    inlineHolder:RefreshStates()
+    eq(visible(inlineGroup), 0, "inline: every control in the group is gated away")
+    check(not inlineRow:IsShowingInlineContent(), "inline: ...so the row draws nothing")
+    eq(inlineRow.plate:GetHeight(), M0.plateStrip + M0.footer,
+       "inline: ...and the plate is its title line and its strip, with no air between")
+    allShut = false
+    inlineHolder:RefreshStates()
+    eq(inlineRow.plate:GetHeight(), tallPlate, "inline: ...and comes back whole")
+    for _, w in ipairs(inlineBuilt[1]) do w.hideOn = nil end
+
+    -- ---- the threshold, which is a refusal rather than a choice -------
+    -- ☠ A PAGE OPTS A ROW IN; THE PANE DECIDES WHETHER IT MAY. An opted-in row
+    -- whose group turns out to hold more than INLINE_MAX controls keeps today's
+    -- behaviour, so an opt-in cannot make a plate nobody can read.
+    local bigBuilt = {}
+    local BIG_KEYS = { "k1", "k2", "k3", "k4", "k5", "k6", "k7" }
+    local bigMount, bigGroup = tools.PopoutContent(function(g)
+        local mine = {}
+        for _, key in ipairs(BIG_KEYS) do
+            local w = paneControl(key)
+            g:AddWidget(w, 30)
+            mine[#mine + 1] = w
+        end
+        bigBuilt[#bigBuilt + 1] = mine
+    end, nil, { inline = true })
+    eq(rawget(bigGroup, "dfInline"), nil,
+       "inline: a pane over the threshold is refused the plate")
+    local bigRow = kitHost:CreatePopoutRow(page.child, {
+        label = "Too big", db = tools.RowDB, count = #BIG_KEYS,
+        footerStrip = true, build = bigMount,
+    })
+    bigRow:SetWidth(401)
+    tools.ClaimKeys(bigRow, bigGroup)
+    check(not bigRow:IsShowingInlineContent(),
+          "inline: ...so the row draws nothing on its plate")
+    eq(bigRow.plate:GetHeight(), M0.plateStrip + M0.footer,
+       "inline: ...and keeps the plate a strip row has always had")
+    eq(bigRow.stripCount:GetText(), "7 more settings",
+       "inline: ...with the strip promising all seven, as before")
+    local bigPo, bigPane = fakePanel()
+    bigMount(bigPo, bigPane)
+    eq(#bigBuilt, 1, "inline: ...and its first click ADOPTS the eager group, as it always did")
 
     -- ---- the seam every widget factory reaches for ------------------
     -- ☠ DRIVEN, because the shim makes the source read misleadingly honest: a

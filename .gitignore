@@ -60,3 +60,6 @@ DandersFrames/Libs/DandersUI/
 DandersFrames_Options/Libs/DandersUI/
 DandersMover/Libs/DandersUI/
 Translations/
+
+# Design canvas scratch (Claude Design artboards)
+.design-frame-page/

@@ -784,3 +784,79 @@ do
     check(PAGE:find("CreateCopyButton", 1, true) == nil,
           "page: still no copy button, because nothing here is per-mode")
 end
+
+-- ============================================================
+-- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
+-- six settings or fewer, and a row holding four charges the same click as a row
+-- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
+-- under its title line, and its strip offers to pin a second copy rather than
+-- promising settings that are already on screen.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
+-- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
+-- refuses one whose pane turns out to be big, measured off the PANE rather than
+-- off the declared count, so a row cannot claim its way onto the plate. Only the
+-- refusal can be exercised against a real group, and that lives in
+-- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
+-- asked, and that nothing else did.
+--
+-- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
+-- about SETTINGS; CountVisibleChildren answers for every entry a layout would
+-- place, blurbs and separators included. Where the two differ below, the larger
+-- is the one that has to fit.
+--
+-- EVERY popout row on this page, which is the whole of it -- two, four, two,
+-- three and two settings, and three, five, five, four and two children once
+-- the blurbs and the Blizzard separator are counted. So this page has no
+-- click left that buys nothing, which matters more here than anywhere: not
+-- one row carries a modified tick or a reset strip (section 7), so the pane
+-- was the only thing behind the click, and two of these rows have no summary
+-- at all because no honest one could be written.
+-- ============================================================
+do
+    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
+    -- whether its call carries the opt-in. Read as "this declaration up to the
+    -- next one": a balanced-brace match would be defeated by the builder closure
+    -- inside the call.
+    local calls, pos = {}, 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 5, "inline: 5 of this page's rows mount their pane on the plate")
+
+    -- Which ROW each of them belongs to, read off the row's own `build` rather
+    -- than from a second list -- so a mount opted in and then wired to a
+    -- different row fails here instead of shipping.
+    local function buildOf(var)
+        local a = PAGE:find("local " .. var .. " = ", 1, true)
+        local b = a and PAGE:find("}))", a, true)
+        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
+    end
+
+    for _, spec in ipairs({
+        { "modesRow", "modesMount" },                -- Frame Modes, 2 settings / 3 children
+        { "blizRow", "blizMount" },                  -- Blizzard Frames, 4 / 5
+        { "renderRow", "renderMount" },              -- Rendering, 2 / 5
+        { "appearanceRow", "appearanceMount" },      -- Settings Panel Appearance, 3 / 4
+        { "notifyRow", "notifyMount" },              -- Notifications, 2 / 2
+    }) do
+        local mount = buildOf(spec[1])
+        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
+        check(mount ~= nil and inlineMounts[mount] == true,
+              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
+    end
+end

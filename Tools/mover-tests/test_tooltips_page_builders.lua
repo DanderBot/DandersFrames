@@ -581,3 +581,79 @@ do
     check(PAGE:find('{pageId = "auras_buffs", label = L["Buff Bar"]}', 1, true) ~= nil,
           "page: ...and the See Also block is unchanged")
 end
+
+-- ============================================================
+-- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
+-- six settings or fewer, and a row holding four charges the same click as a row
+-- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
+-- under its title line, and its strip offers to pin a second copy rather than
+-- promising settings that are already on screen.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
+-- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
+-- refuses one whose pane turns out to be big, measured off the PANE rather than
+-- off the declared count, so a row cannot claim its way onto the plate. Only the
+-- refusal can be exercised against a real group, and that lives in
+-- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
+-- asked, and that nothing else did.
+--
+-- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
+-- about SETTINGS; CountVisibleChildren answers for every entry a layout would
+-- place, blurbs and separators included. Where the two differ below, the larger
+-- is the one that has to fit.
+--
+-- All six popout rows on this page. Their panes hold 6, 6, 5, 5, 5 and 3 --
+-- the two hover rows are INLINE_MAX exactly, and they earn it: not one of
+-- those six means anything alone, because Anchor is inert until Anchor To
+-- leaves DEFAULT and the offsets until it reaches FRAME. Five of the six keep
+-- a hoisted tick, which is the ROW'S TOGGLE rather than one of its settings --
+-- it is what folds the pane away -- so nothing on a plate is drawn twice.
+-- ============================================================
+do
+    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
+    -- whether its call carries the opt-in. Read as "this declaration up to the
+    -- next one": a balanced-brace match would be defeated by the builder closure
+    -- inside the call.
+    local calls, pos = {}, 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 6, "inline: 6 of this page's rows mount their pane on the plate")
+
+    -- Which ROW each of them belongs to, read off the row's own `build` rather
+    -- than from a second list -- so a mount opted in and then wired to a
+    -- different row fails here instead of shipping.
+    local function buildOf(var)
+        local a = PAGE:find("local " .. var .. " = ", 1, true)
+        local b = a and PAGE:find("}))", a, true)
+        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
+    end
+
+    for _, spec in ipairs({
+        { "frameRow", "frameMount" },                -- Frame Tooltips, 6
+        { "bindRow", "bindMount" },                  -- Binding Tooltips, 6
+        { "buffRow", "buffMount" },                  -- Buff Tooltips, 5
+        { "debuffRow", "debuffMount" },              -- Debuff Tooltips, 5
+        { "defRow", "defMount" },                    -- Defensive Icon Tooltips, 5
+        { "adRow", "adMount" },                      -- Aura Designer Tooltips, 3
+    }) do
+        local mount = buildOf(spec[1])
+        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
+        check(mount ~= nil and inlineMounts[mount] == true,
+              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
+    end
+end

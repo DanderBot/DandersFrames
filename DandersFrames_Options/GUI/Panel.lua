@@ -834,58 +834,65 @@ function DF:CreateGUI()
     scaleBtn:SetFrameLevel(210)
     GUI.ScaleButton = scaleBtn
 
-    -- ⇄ SETTINGS LAYOUT TOGGLE. Which layout the panel draws in is account
-    -- identity, like the profile chip beside it — it shapes every page, so it is
-    -- reachable from every page rather than buried on the Options page (whose
-    -- checkbox stays; both read the same SV root field, so they cannot drift).
+    -- ⇄ SETTINGS LAYOUT. Which layout the panel draws in is account identity,
+    -- like the profile chip beside it — it shapes every page, so it is reachable
+    -- from every page rather than buried on the Options page (whose checkbox
+    -- stays; both read the same SV root field, so they cannot drift).
     --
-    -- ⚠ A LABELLED CHECKBOX, NOT A GLYPH. The glyph read as a sibling of the
-    -- changelog icon and said nothing about what it did; a ticked "Classic
-    -- Layout" box is the state AND the verb in one control. The shared factory
-    -- is used with noSearch (see CreateCheckbox: the title bar is on no page,
-    -- so a search hit here would have nowhere to navigate). The tooltip table
-    -- is mutated in place — the attach reads it at hover, so the lines stay
-    -- current without re-attaching anything.
-    local layoutTooltip = { title = L["Settings Layout"], lines = { "", "" } }
-    local layoutCheck = GUI:CreateCheckbox(
-        frame, L["Classic Layout"],
-        nil, nil,
-        function()
-            -- The one shared flip -- see GUI:FlipSettingsLayout above. The
-            -- factory's customSet has already written the field, so the value
-            -- passed restates it and the SEQUENCE is the point (same contract
-            -- as the Options page's checkbox). It ends by calling
-            -- GUI.PaintLayoutButton, this checkbox's own repaint.
-            GUI:FlipSettingsLayout(DF:IsClassicSettingsLayout())
+    -- ⚠ A DROPDOWN, NOT A CHECKBOX. A lone ticked box among a row of glyphs read
+    -- as clutter and made the bar feel crowded, and a checkbox can only say "the
+    -- other one" about whatever it is not. The two layouts are two NAMED things,
+    -- so the control that names them is a menu. Deliberately the same shape,
+    -- height, opener and menu alignment as the profile chip beside it: both
+    -- answer "which <thing> is this window in", and a bar that asks that question
+    -- twice should not ask it in two different languages.
+    --
+    -- ⚠ RAW KEYS IN THE MENU, LOCALISED TEXT ON IT. The stored field is a BOOLEAN
+    -- (DandersFramesDB_v2.classicSettings), so the option VALUES are the stable
+    -- keys "classic"/"compact" and the boolean is derived at the seam below --
+    -- never the display text, which changes with the client's language.
+    local LAYOUT_OPTIONS = {
+        _order  = { "compact", "classic" },
+        compact = { value = "compact", text = L["Compact"] },
+        classic = { value = "classic", text = L["Classic"] },
+    }
+    local layoutChip = GUI:CreateDropdown(
+        titleBar, "", LAYOUT_OPTIONS,
+        nil, nil, nil,
+        function()                                              -- customGet
+            return DF:IsClassicSettingsLayout() and "classic" or "compact"
         end,
-        function() return DF:IsClassicSettingsLayout() end,
-        function(val) DF:SetClassicSettingsLayout(val) end,
-        nil,
-        { noSearch = true }
+        function(value)                                         -- customSet
+            local classic = (value == "classic")
+            -- Same guard as the profile chip: re-picking what is already active
+            -- must not pay for a full rebuild of every page.
+            if classic == DF:IsClassicSettingsLayout() then return end
+            -- The one shared flip -- see GUI:FlipSettingsLayout above. It writes
+            -- the field, closes the panels belonging to the layout being left,
+            -- invalidates every page's build cache, rebuilds the page on screen
+            -- and repaints this chip, IN THAT ORDER. The order is the point.
+            GUI:FlipSettingsLayout(classic)
+        end,
+        { inline = true, menuAlign = "RIGHT" }
     )
-    -- Sized for the title bar, not the 220x24 settings-row slot the factory
-    -- builds: the box plus the measured label, capped so a long translation
-    -- clips against the profile chip instead of pushing it off the bar.
-    local labelW = layoutCheck.label and layoutCheck.label:GetStringWidth() or 76
-    layoutCheck:SetSize(math.min(140, math.max(90, 24 + math.ceil(labelW))), 20)
-    layoutCheck:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
-    layoutCheck:SetFrameStrata("FULLSCREEN_DIALOG")
-    layoutCheck:SetFrameLevel(210)
-    layoutCheck.tooltip = layoutTooltip
+    -- Narrower than the profile chip (126): a profile is a user-typed name of
+    -- any length, a layout is one of two words we ship and translate ourselves.
+    layoutChip:SetSize(104, 20)
+    layoutChip:SetPoint("TOPRIGHT", scaleBtn, "TOPLEFT", -8, 0)
+    layoutChip.openerTooltip = {
+        title = L["Settings Layout"],
+        lines = { L["Applies to the whole account."] },
+    }
+    GUI.LayoutButton = layoutChip
     local function PaintLayoutButton()
-        local classic = DF:IsClassicSettingsLayout()
-        layoutTooltip.lines[1] = classic
-            and L["Classic inline layout is active. Click to switch to popout rows."]
-            or  L["Popout rows layout is active. Click to switch to classic inline."]
-        layoutTooltip.lines[2] = L["Applies to the whole account."]
-        -- Refresh re-reads customGet and repaints the box -- the checkbox's
-        -- own refresh mechanism, so the Options-page flip lands here too.
-        layoutCheck:Refresh()
+        -- UpdateText, NOT RebuildOptions: the two options never change, so the
+        -- caption is the only thing that can have moved. Same reasoning as
+        -- UpdateProfileChip below.
+        if layoutChip.UpdateText then layoutChip:UpdateText() end
     end
-    GUI.LayoutButton = layoutCheck
     -- Exposed so the Options-page checkbox (which flips the same field) can
     -- repaint this one. hooksecurefunc on RefreshCurrentPage was the first
-    -- cut — it is assigned AFTER this runs and reassigned by AutoProfiles, so
+    -- cut -- it is assigned AFTER this runs and reassigned by AutoProfiles, so
     -- the hook would either error or be silently bypassed.
     GUI.PaintLayoutButton = PaintLayoutButton
     PaintLayoutButton()
@@ -922,7 +929,7 @@ function DF:CreateGUI()
         { inline = true, optionsFunc = BuildProfileOptions, menuAlign = "RIGHT" }
     )
     profileChip:SetSize(126, 20)
-    profileChip:SetPoint("TOPRIGHT", layoutCheck, "TOPLEFT", -6, 0)
+    profileChip:SetPoint("TOPRIGHT", layoutChip, "TOPLEFT", -6, 0)
     profileChip.openerTooltip = { title = L["Quick Switch Profile"] }
     GUI.ProfileChip = profileChip
 

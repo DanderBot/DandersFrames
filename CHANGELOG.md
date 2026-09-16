@@ -4,70 +4,36 @@
 
 ### New Features
 
-- (Aura Designer) New **Power Infusion Helper** for priests, added from the Any Buff tab. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Choose where each signal appears — border, health bar, background, text colour, an icon or a square — turn on icons for any of it — their cooldowns, trinkets, potions and racials — to see what they pressed and how hard the burst is landing. Pick which classes count and add a sound; tanks and healers are skipped unless you say otherwise. (by Maelareth)
-- (Aura Designer) If you used the Power Infusion Helper in an earlier 5.4.0 alpha: the "Big cooldown with a trinket or potion" signal has been retired, and trinkets, potions and racials are now shown as icons alongside the cooldowns instead. Your helper updates itself the next time you open its settings. (by Maelareth)
-- (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon. It is the foundation for a shared positioning system across Danders addons — frame-to-frame snapping, anchoring elements to each other, undo/redo and save/discard. This release only includes the addon and its demo (`/mover demo`); DandersFrames' own frames move over to it in a later update.
-- (Frames) Party and raid frames can now be moved with DandersMover, including snapping them to and anchoring them onto other addons' elements.
-- (Frames) Pinned sets, the personal targeted-spells block and the targeted list can now be moved with DandersMover too, including anchoring a pinned set to any other element. Unlocking party frames shows only party movers, unlocking raid frames only raid movers (other addons' movers can be shown from the legend or DandersMover's settings), and a pinned set you had anchored to the frames through the Anchor To dropdown stays anchored.
-- (DandersMover) A full editor polish pass: dark slab movers with role colours (blue free, purple anchored, green anchor-root) and a top strip carrying Save & Exit, Discard, Undo, Redo, Settings and Grid, anchor tether lines that stretch and snap when you drag an anchored element too far, dashed snap slots, distance-based snapping with adjustable snap and highlight ranges, a docked panel with nudge (Shift x10, Ctrl x100), smooth animations throughout, hold Alt to peek at the real frames, click-to-cycle stacked movers, a Configure button that jumps to the element's own settings page, and copy-position between party and raid variants.
-- (DandersMover) Anchor things to individual party or raid frames and to raid groups, choose what to anchor to from a searchable list instead of dragging, set a backup anchor that takes over whenever the main one is hidden, and drag the link handle onto another element to tie the two together without moving anything.
-- (DandersMover) The element panel now reads as part of the mover it is editing — matching outlines on both and a short glowing line joining them — and slides across when you pick a different mover. Pin it and it detaches: it stops following your selection and carries on editing its own mover, which wears a marker so you can see which one the panel belongs to. Editing in a panel pins it automatically (there is a toggle for that under the mover's Editor settings), and its cross closes it. Clicking empty space no longer deselects, so the camera and the rest of your UI stay usable while movers are unlocked; Esc backs out a step at a time.
-- (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
+- (Aura Designer) New **Power Infusion Helper** for priests, added from the Any Buff tab. One click marks the group members worth infusing: "Big cooldown" for anyone who has pressed a major damage cooldown, and "Already has active Power Infusion" so you don't double up. Everything it shows goes dark while your own Power Infusion is on cooldown, so it only speaks up when you can act on it, and a switch keeps it always on if you prefer. Choose where each signal appears — border, health bar, background, text colour, an icon or a square — and turn on icons for their cooldowns, trinkets, potions and racials to see what they pressed and how hard the burst is landing. Pick which classes count and add a sound; tanks and healers are skipped unless you say otherwise. (by Maelareth)
+- (DandersMover) DandersFrames now ships with DandersMover, a new standalone mover addon, and your party and raid frames, pinned sets, the personal targeted-spells block and the targeted list all move with it. Snap them to each other or onto other addons' elements, anchor one thing to another (including to individual frames and raid groups) and set a backup anchor that takes over when the main one is hidden. The editor has undo/redo, save/discard, nudge keys, a searchable anchor list, adjustable snap ranges, a grid, and a panel that jumps you to whichever element you are editing. It is the foundation for a shared positioning system across Danders addons.
+- (Settings) The settings pages have been rebuilt. Smaller groups of settings now sit on the page itself instead of behind a click, and every row has a bar along its bottom that opens the rest. The most-changed settings show on the row — Frame Size shows Width and Height, Border shows thickness and style — and hovering a setting's name explains it. Rows that hold a lot still open a popout, and you can pin one open to keep it beside you while you work on another page.
+- (Settings) Prefer the old look? A layout picker sits in the settings window's title bar, next to the profile picker. Choose Compact or Classic; it applies to the whole account.
+- (Aura Designer, Text Designer, Aura Filters) All three designers have been redesigned. They now fit the normal settings window instead of forcing it wider, and each effect's settings open in their own panel. Adding an indicator is one panel showing the whole job at once — pick the aura, pick how it should look, pick where it goes — with every look drawn as a small picture of your own frame, and anything the aura already has greyed out so you cannot add it twice. Starting from a filter sits beside the spell search as an equal choice.
+- (Filter Designer) The page is now a list of your filters instead of one filter's spells. Every filter is a row, and opening a row shows that filter's own spells with its own search box, so you can see what a filter holds and who uses it without switching away from the list. Pin one open and you can compare two filters side by side.
 - (Frames) Frame Fade now has an on/off switch on its row, so you can turn fading off without touching the alpha values.
+- (DandersMover) All Danders addons now group under a "Danders" category in the AddOn list.
 
 ### Bug Fixes
 
-- (Aura Designer) Fix the Add Indicator panel opening empty.
-- (Aura Designer) Fix an open panel's highlight staying on the page behind the spell picker, so it looked like two random spells in the list were selected. It now outlines the spell list while the picker is up.
 - (Settings) Fix the settings window freezing the game for several seconds every time you opened or closed it after using the search box.
 - (Settings) Fix a long pause when opening the Changed Settings page, or searching, for the first time.
 - (Settings) Fix arrows showing as empty boxes on the Changed Settings page and in undo messages.
-- (Settings) Fix "Reset Group" leaving the controls inside an open panel showing their old values. Undo of a reset had the same problem.
 - (Settings) Changed Settings now names a changed texture, font or sound the way its dropdown does, instead of printing the whole file path off the edge of the page.
-- (DandersMover) Anything anchored to your frames now follows them live as you change Frame Width, Height, spacing or padding, instead of staying where it was until something else moved.
-- (Settings) Fix an invisible patch swallowing clicks on some settings rows, so a dropdown would not open or a slider would not take a drag on the first try.
-- (Settings) A setting shown on a row is no longer repeated inside that row's settings panel.
-- (Settings) The first setting inside a panel now greys out with the rest when the row's switch is off.
-- (Settings) Fix the new Frame page not appearing (old-style rows, no controls on the row) when another Danders addon loaded an older copy of the shared UI kit first.
 - (Settings) Fix clicking a dropdown menu changing the setting behind it. Clicks landing on the menu's edge or its empty space went straight through to whatever was underneath.
-- (Settings) Fix settings inside an open panel staying greyed out after you turned on the option they depend on — ticking Solo Mode's Rested Indicator left Show ZZZ Icon and Show Frame Glow greyed.
-- (Settings) Fix a row not showing the value you just picked until you changed tab. Fonts, textures, sounds, colours and drag-to-reorder lists now update the row straight away.
 - (Auras) Fix the Pandemic border showing a file path instead of a texture name when you switched its Border Style to Texture, and drawing no border at all.
-- (DandersMover) The top strip, the element panel, the undo toast and the mover's settings window can now be scaled — a new Scale slider under Settings > Editor. Movers themselves always match their frames.
-- (DandersMover) The mover's settings window now closes with Save & Exit or Discard when it was opened during a session, not only with Esc.
-- (DandersMover) Fix the Personal Targeted mover sitting underneath its own preview icons.
-- (DandersMover) Fix holding Alt to peek getting stuck faded out after alt-tabbing or a burst of fast Alt presses.
-- (DandersMover) Unlocking now fades the movers, strip and panel in, matching the fade-out when you lock.
-- (DandersMover) Fix a mover dropped onto a snap zone whose frame vanished mid-drag still anchoring to it. The drop now lands where the preview showed.
-- (DandersMover) A mover anchored to a stale frame can no longer be placed entirely off the screen, its handle always stays reachable on screen, and `/mover reset all` (or `/mover reset <addon>`) puts positions back to their defaults from chat.
 - (Text Designer, Aura Designer) Switching a designer off now really does lock its settings, instead of only dimming them. You can still open a row and read what is in it, but nothing in there can be changed or added until you switch the designer back on.
-- (Frames) Changing Growth Direction no longer closes the settings panel you changed it in. If the panel was pinned it comes back pinned.
-- (Text Designer) The Texts and Text Groups tabs show how many elements they hold again.
-- (Settings) The number on a settings row now counts only the settings behind it. Descriptions, headings and notes were being counted too, so some rows promised more than they held.
 
 ### Changes
 
-- (Frames) Hover a setting's name on the page and its explanation shows, the same one the panel behind the row gives.
-- (Frames) The most-changed settings are back on the page. Frame Size shows Width and Height, Layout Direction shows the growth direction and where frames grow from, Border shows its thickness and style, and the Permanent Mover shows its handle size once it is switched on. Every row now opens from a strip along its bottom edge, so the way in is in the same place whether or not a row shows anything.
-- (Settings) A row whose settings are all shown on the row itself now offers to pin them in a panel you can keep open beside any page, and the "more settings" count follows the mode you are editing.
-- (Aura Designer) Redesigned. The preview, the settings and the indicator list are now one column that fits the normal settings window instead of forcing it wider, and each effect's settings open in their own panel rather than filling the page.
-- (Aura Designer) Adding an indicator is now one panel showing the whole job at once: pick the aura, pick how it should look, pick where it goes. Every look is drawn as a small picture of your own frame with that effect on it, and anything the aura already has is greyed out so you cannot add it twice. Starting from a filter is offered as an equal choice beside the spell search.
-- (Aura Designer) Choosing a filter for a new indicator now opens the full filter list, the same way the spell search does. Open any filter in that list to scroll through the spells inside it — the switched-off ones included — before you pick it.
-- (Aura Designer) The Sound choice now carries a note on its picture. It was the one look that changes nothing about the frame, so its picture was easy to mistake for nothing being chosen.
-- (Aura Designer) The Add Indicator panel now highlights the section it is waiting on, and a section that does not apply to your choice — most looks change the whole frame, so they have no position — stays readable and says so, instead of greying out as if something were broken. Once there is nothing left to answer, an arrow points at Add to my frames.
-- (Aura Designer) The frame preview can be folded away, scales up to fill the space it needs, and its zoom moved to a button in its corner.
-- (Text Designer) Redesigned to match, and it now uses the same frame preview as the Aura Designer.
-- (Aura Filters) Redesigned to match the other two, and it no longer forces the settings window wider.
-- (Aura Designer, Text Designer, Aura Filters) The redesigned pages now have breathing room between their sections instead of everything sitting flush against everything else.
-- (Aura Designer) Layout Groups now has an "Add Layout Group" button that opens its choices in a panel, the same way adding an indicator works, instead of the choices taking up room above the list at all times. The two kinds are drawn as pictures side by side, with Create Filter and Manage Filters at the foot of the panel.
-- (Text Designer) The category filter is now a button on the Text Elements heading that opens the choices in a panel, matching the Aura Designer. It lights up and names the filter whenever you are not showing everything.
-- (Aura Filters) The Buff Bar / Defensive Icon / Aura Designer buttons now open in a panel from a Used By row, so their names and filter counts are readable instead of being cut short. "How this works" moved in with them.
-
 - The old built-in frame movers, drag grid and position panel are retired — frames are now moved with DandersMover, with a basic fallback drag on the frame handle if DandersMover is disabled.
 - (Settings) Dragging sliders and colour pickers no longer stutters — changes preview smoothly while you drag and apply in full when you let go.
-- (Settings) Prefer the old settings look? A "Classic Layout" switch in the settings window's title bar (also under Options) swaps between the new popout-panel layout and the classic inline one, for the whole account.
 - (Settings) The settings window now opens smaller by default (640x600). Your saved window size is untouched, and you can still resize it as before; `/df resetgui` restores the new default.
-- (Settings) On the Frame page, a row's bottom strip is now the only thing that opens its panel and the only part that lights on hover; the rest of the row stays put. Clicking the strip again closes the panel.
+
+## [5.3.3]
+
+### Bug Fixes
+
+* (Aura Designer) Fix every Aura Designer indicator on a player vanishing for the rest of the fight after they die and take a battle res. (by Krathe)
 
 ## [5.3.2]
 

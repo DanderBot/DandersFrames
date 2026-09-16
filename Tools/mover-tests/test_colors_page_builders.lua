@@ -586,3 +586,81 @@ do
     end
     eq(missing, 0, "locale: every string this page asks for already exists -- zero new keys")
 end
+
+-- ============================================================
+-- WHICH OF THIS PAGE'S ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ TWO THIRDS OF THE ADDON'S POPOUT ROWS HIDE SIX SETTINGS OR FEWER, and a
+-- row holding four was charging the same click as a row holding thirty-one. So a
+-- row whose whole group is small mounts THAT GROUP under its own title line, and
+-- its strip stops promising settings that are already on screen and offers to
+-- pin a second copy instead.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS AND THIS IS THE FIRST. The page ASKS, with
+-- `{ inline = true }` at its PopoutContent call; INLINE_MAX in Controls.lua
+-- REFUSES a pane that turns out to be big, measured off the group rather than
+-- read off the badge. Only the second can be exercised against a real group, and
+-- that is test_popout_page_tools.lua's job -- what is pinned here is which of
+-- this page's rows asked, and which deliberately did not.
+--
+-- ⚠ KEYED ON THE BUILDER, NOT ON THE MOUNT VARIABLE. Auras.lua holds seven
+-- pages and several of them name a mount the same thing (roleMount, classMount,
+-- bgMount and sizeMount each appear twice), so a census that took the first
+-- match in the file would cheerfully describe another page's row.
+-- ============================================================
+print("-- Colors page: which rows mount their pane on the plate")
+do
+    local WANT = {
+        { "BuildColorPickerGroup",           true }, -- 2 ticks, 4 children with their blurbs
+        { "BuildRoleColorsGroup",            true }, -- 3 swatches and a Reset -- five children
+        { "BuildDispelColorsGroup",          false }, -- 5 swatches and a Reset -- SEVEN children
+        { "BuildClassColorsGroup",           false }, -- 14, which no plate could hold
+    }
+
+    -- Every PopoutContent call in the file, filed under the builder it feeds.
+    local CALLS = {}
+    do
+        local pos = 1
+        while true do
+            local a = SRC:find("= tools.PopoutContent(function(group, holder, reflow)", pos, true)
+            if not a then break end
+            -- The `end` closing the call sits at the page builder's own twelve
+            -- spaces; everything inside the closure is indented further, so this
+            -- is the first one that can be it. The tail read past it is long
+            -- enough to carry an opt-in and nothing else.
+            local b = SRC:find("\n            end", a, true)
+            local body = SRC:sub(a, (b or a) + 48)
+            local builder = body:match("(Build[%w_]+Group)%(")
+            if builder then CALLS[builder] = body end
+            pos = a + 1
+        end
+    end
+
+    for _, spec in ipairs(WANT) do
+        local builder, wantInline = spec[1], spec[2]
+        local body = CALLS[builder]
+        check(body ~= nil, "inline: " .. builder .. " is fed by a PopoutContent call")
+        local gotInline = body ~= nil
+            and body:find("end, nil, { inline = true })", 1, true) ~= nil
+        if wantInline then
+            check(gotInline, "inline: " .. builder .. " asks for the plate")
+        else
+            check(not gotInline, "inline: " .. builder .. " keeps its pane behind the strip")
+        end
+    end
+
+    -- ☠ DISPEL IS THE ROW THAT LOOKS ELIGIBLE AND IS NOT, and pinning that here
+    -- is half the point of this block. Its badge says six, one clear of INLINE_MAX
+    -- -- but a badge counts SETTINGS, and the threshold is measured off what a
+    -- LAYOUT WOULD PLACE: this group also places a blurb and a Reset All button.
+    -- Seven. An opt-in would be refused rather than honoured, so what would ship is
+    -- a comment promising a plate the row never gets. The Role palette differs by
+    -- exactly two swatches, which is the whole of why one moved and one did not.
+
+    -- A palette has no on/off, so this page has never hoisted anything -- which is
+    -- also why none of the three that moved could have grown a hoisted twin of a
+    -- setting that is now on a plate. Stated here as well as above because that
+    -- duplication is the one thing the inline arm exists to prevent.
+    check(PAGE:find("tools.RegisterHoistedToggle(", 1, true) == nil,
+          "inline: ...and no palette hoists a twin of a setting now on its plate")
+end

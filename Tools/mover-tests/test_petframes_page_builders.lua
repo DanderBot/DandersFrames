@@ -818,3 +818,93 @@ do
     end
     eq(missing, 0, "locale: every string this page asks for already exists -- zero new keys")
 end
+
+-- ============================================================
+-- WHICH ROWS MOUNT THEIR PANE ON THE PLATE
+--
+-- ☠ THE HYBRID PAGE, ON THIS PAGE. Two thirds of the rows in the addon hide
+-- six settings or fewer, and a row holding four charges the same click as a row
+-- holding thirty-one. So a row whose whole group is small mounts THAT GROUP
+-- under its title line, and its strip offers to pin a second copy rather than
+-- promising settings that are already on screen.
+--
+-- ☠ IT IS TWO DELIBERATE ACTS, AND THIS IS THE FIRST. The page opts a row in
+-- (`{ inline = true }` at its PopoutContent call); INLINE_MAX in Controls.lua
+-- refuses one whose pane turns out to be big, measured off the PANE rather than
+-- off the declared count, so a row cannot claim its way onto the plate. Only the
+-- refusal can be exercised against a real group, and that lives in
+-- test_popout_page_tools.lua -- what is stated here is which of THIS page's rows
+-- asked, and that nothing else did.
+--
+-- ⚠ THE NUMBER THE ARM MEASURES IS NOT THE BADGE'S. A count is a promise
+-- about SETTINGS; CountVisibleChildren answers for every entry a layout would
+-- place, blurbs and separators included. Where the two differ below, the larger
+-- is the one that has to fit.
+--
+-- Four of this page's eight. Group Settings holds five in party and SIX in
+-- raid -- the opt-in is a claim about the larger branch, and six is
+-- INLINE_MAX exactly -- Size four attached and two grouped, Position three
+-- and Appearance two. The other four hold fifteen, seven, nine and eight and
+-- keep the strip. Nothing on this page is hoisted, so nothing on a plate is
+-- drawn twice.
+-- ============================================================
+do
+    -- Every `local <a>Mount, <b>Content = tools.PopoutContent(` on this page, and
+    -- whether its call carries the opt-in. Read as "this declaration up to the
+    -- next one": a balanced-brace match would be defeated by the builder closure
+    -- inside the call.
+    local calls, pos = {}, 1
+    while true do
+        local s, e, name = PAGE:find("local ([%w_]+), [%w_]+ = tools%.PopoutContent%(", pos)
+        if not s then break end
+        calls[#calls + 1] = { name = name, at = e }
+        pos = e + 1
+    end
+
+    local inlineMounts, inlineCount = {}, 0
+    for i, rec in ipairs(calls) do
+        local stop = calls[i + 1] and calls[i + 1].at or #PAGE
+        if PAGE:sub(rec.at, stop):find("end, nil, { inline = true })", 1, true) then
+            inlineMounts[rec.name] = true
+            inlineCount = inlineCount + 1
+        end
+    end
+    eq(inlineCount, 4, "inline: 4 of this page's rows mount their pane on the plate")
+
+    -- Which ROW each of them belongs to, read off the row's own `build` rather
+    -- than from a second list -- so a mount opted in and then wired to a
+    -- different row fails here instead of shipping.
+    local function buildOf(var)
+        local a = PAGE:find("local " .. var .. " = ", 1, true)
+        local b = a and PAGE:find("}))", a, true)
+        return (a and b) and PAGE:sub(a, b + 2):match("build%s*=%s*([%w_]+)") or nil
+    end
+
+    for _, spec in ipairs({
+        { "petGroupRow", "groupMount" },             -- Group Settings, 5 party / 6 raid
+        { "petSizeRow", "sizeMount" },               -- Size, 4 attached / 2 grouped
+        { "petAppearanceRow", "appearMount" },       -- Appearance, 2
+        { "petPositionRow", "positionMount" },       -- Position, 3
+    }) do
+        local mount = buildOf(spec[1])
+        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
+        check(mount ~= nil and inlineMounts[mount] == true,
+              "inline: ...and " .. spec[1] .. "'s mount asked for the plate")
+    end
+
+    -- ...and the rows whose panes are too big for a plate keep the strip they
+    -- have. Named rather than inferred from the count above: a row that lost its
+    -- opt-in and a row that never had one are the same number, and only one of
+    -- them is a regression.
+    for _, spec in ipairs({
+        { "petBorderRow", "borderMount" },           -- Border, 15
+        { "petHealthBarRow", "healthBarMount" },     -- Health Bar, 7
+        { "petNameTextRow", "nameMount" },           -- Name Text, 9
+        { "petHealthTextRow", "healthTextMount" },   -- Health Text, 8
+    }) do
+        local mount = buildOf(spec[1])
+        eq(mount, spec[2], "inline: " .. spec[1] .. " is built from the mount it declares")
+        check(mount ~= nil and not inlineMounts[mount],
+              "inline: ..." .. spec[1] .. " keeps its pane behind the strip")
+    end
+end

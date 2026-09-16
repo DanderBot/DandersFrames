@@ -617,6 +617,7 @@ local function MountEffect(ctx, effect, shell)
             -- greyed row's contents live. The classic layout draws a full-cover
             -- scrim over the same settings; this is that, said to the kit.
             gateWhenDisabled = true,
+            footerStrip = true,
         }))
         if opts.hideOn then row.hideOn = opts.hideOn end
         if not ctx.adEnabled then row.disableOn = AlwaysOff end
@@ -785,6 +786,7 @@ local function BuildEffectsTabRows(ctx, shell)
         build  = addMount,
         -- See the effect rows' note: the dependent grey is a real gate here.
         gateWhenDisabled = true,
+        footerStrip = true,
     }))
     -- ...and where Sync is called FROM. The kit exposes no per-open hook, so the
     -- row's own OpenPopout is wrapped: it is the one door every open goes through,
@@ -1040,6 +1042,7 @@ function MountGroup(ctx, group, spec)
             build   = mount,
             -- See the effect rows' note: the dependent grey is a real gate here.
             gateWhenDisabled = true,
+            footerStrip = true,
         }))
         if not ctx.adEnabled then row.disableOn = AlwaysOff end
         tools.ClaimKeys(row, content, extra)
@@ -1275,6 +1278,7 @@ local function BuildLayoutTabRows(ctx, shell)
         build  = addMount,
         -- See the effect rows' note: the dependent grey is a real gate here.
         gateWhenDisabled = true,
+        footerStrip = true,
     }))
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
@@ -1417,6 +1421,7 @@ local function BuildGlobalTabRows(ctx, shell)
             build   = mount,
             -- See the effect rows' note: the dependent grey is a real gate here.
             gateWhenDisabled = true,
+            footerStrip = true,
         }))
         if not ctx.adEnabled then row.disableOn = AlwaysOff end
         -- ⚠ `extra` IS NOT A CONVENIENCE HERE. The Sound Alerts pair is bound
