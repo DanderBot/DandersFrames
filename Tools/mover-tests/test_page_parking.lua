@@ -326,8 +326,11 @@ do
 
     -- The child is the viewport, DERIVED, at both sites that size it -- the build
     -- and every relayout. Each used to carry its own `- 30`.
-    eq(countOf("GUI.PageChildWidth("), 4,
-       "panel: one helper defines the child width, and all three consumers call it")
+    -- Six now: the build, the relayout, and the two shared helpers the column work
+    -- added (GUI.UsesTwoColumns and GUI.ColumnWidth), both of which have to derive the
+    -- child the same way or a band would build at a width the pass disagrees with.
+    eq(countOf("GUI.PageChildWidth("), 6,
+       "panel: one helper defines the child width, and every consumer calls it")
     has("self.child:SetWidth(GUI.PageChildWidth(GUI.contentFrame:GetWidth()))",
         "the relayout sizes the child through the helper, not a copy of its arithmetic")
     has("SnapLen(page, GUI.PageChildWidth(content:GetWidth() or 0))",
@@ -348,7 +351,13 @@ do
         "...and the layout loop goes through it rather than keeping a copy")
     -- Rule 2 of the two-column test: column 2 has to fit the rect the ScrollFrame
     -- clips to, or its box loses its right border at the cutover.
-    has("and (math.floor(contentWidth / 2) + SettingsBox.group) <= childWidth",
+    -- ⚠ NOW INSIDE GUI.UsesTwoColumns, lifted out of the layout loop so a band that
+    -- must be BUILT at a column width can ask the same question the loop answers when it
+    -- places that band. Two copies of this condition is how the two would come to
+    -- disagree by a pixel at the cutover.
+    has("function GUI.UsesTwoColumns()",
+        "the two-column test is a shared helper, not a copy per caller")
+    has("and (math.floor(contentWidth / 2) + GUI.SettingsBox.group) <= childWidth",
         "two columns require column 2 to fit the viewport, not just to clear column 1")
     -- The bar is PINNED into the gutter. Left on ScrollFrameTemplate's own
     -- anchors it floats outside the viewport, which is how the corridor came to

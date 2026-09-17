@@ -4455,7 +4455,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- container (the layout pass then stretches it as normal). All
             -- three of this page's bands ask through it, which is what keeps
             -- them one width rather than three copies of one expression.
-            appearanceGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            appearanceGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
         end
 
         -- ===== LAYOUT: THE PAGE'S OTHER BAND ==============================
@@ -4476,7 +4476,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- themselves and Add themselves exactly where they always did.
         local layoutBand
         if not classicLayout then
-            layoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            layoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         end
 
@@ -6270,7 +6270,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- Built at the page's usable width for the same reason the Appearance
             -- band is -- see the long note there -- so the row's right edge lands
             -- on the corridor and its popout's beam is a short hop.
-            permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             permMoverBand:AddWidget(GUI:CreateHeader(self.child, L["Movement"]), 40)
             local moverRow = permMoverBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label    = L["Permanent Mover"],
@@ -6340,9 +6340,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- column order is a thing this pass is not allowed to change, and one
         -- source order serving both layouts is worth more than the adjacency.
         if not classicLayout then
-            Add(layoutBand, nil, "both")
-            Add(appearanceGroup, nil, "both")
-            Add(permMoverBand, nil, "both")
+            -- ★★ TWO COLUMNS WHEN THERE IS ROOM, ONE WHEN THERE IS NOT, and the same
+            -- split the design drew: Layout and Movement down the left, Appearance down
+            -- the right. These were "both" -- one full-width stack at every window size --
+            -- so widening the window stretched the rows instead of using the space.
+            -- ⚠ layoutColFill IS WHAT MAKES THEM TRACK THE COLUMN. The layout pass only
+            -- resizes an indented widget otherwise, so a band placed in a column would
+            -- keep the width it was built at and overhang its neighbour. With the flag it
+            -- takes GUI.ColumnWidth() in two-column mode and the full usable width when
+            -- the page folds back to one -- so this is a presentation of the same page,
+            -- not a second layout to maintain.
+            -- ⚠ NOTHING IS HIDDEN BY THE NARROWER COLUMN. A row's hoisted controls WRAP:
+            -- two per line while a cell is still draggable, one per line below that, and
+            -- the row simply grows taller. They only fold away under ~144px of plate,
+            -- which a column (minCol 285) cannot reach. See PopoutRow's perLine.
+            -- ⚠ Classic is untouched: it does its own two-column Add above, with fixed
+            -- 280 boxes that must NOT be stretched to the column.
+            layoutBand.layoutColFill = true
+            appearanceGroup.layoutColFill = true
+            permMoverBand.layoutColFill = true
+            Add(layoutBand, nil, 1)
+            Add(appearanceGroup, nil, 2)
+            Add(permMoverBand, nil, 1)
         end
 
         -- See Also links

@@ -776,7 +776,10 @@ if GUI.CreateBorderShadowControls then
         -- is pinned by test_popout_page_tools. The claim here is unchanged: this
         -- band asks for the width the layout pass will stretch it to rather than
         -- naming a literal.
-        pageHas("GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })",
+        -- ⚠ BandWidth(2): the Appearance band is a COLUMN band now, so it asks the
+        -- helper for a column's width. The claim is unchanged -- it asks, rather than
+        -- naming a literal.
+        pageHas("GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })",
                 "the band is built at the width the layout pass will stretch it to, with no box chrome")
         check(pageSrc:find("GUI:CreateSettingsGroup(self.child, 280, { chromeless", 1, true) == nil,
               "band: ...and never at a literal")

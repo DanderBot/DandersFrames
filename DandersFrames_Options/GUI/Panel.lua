@@ -114,6 +114,32 @@ end
 -- built at its constructed 280 and only widened by the layout pass would lay its
 -- children out at 260 on the build and not correct them until the next refresh.
 -- Derived here rather than copied there, for the reason PageChildWidth exists.
+-- ★ DOES THE PAGE HAVE TWO COLUMNS RIGHT NOW? Lifted out of the layout pass so a
+-- widget that has to be CONSTRUCTED at a column width can ask the same question the
+-- pass will answer when it places that widget.
+-- ☠ NOT "collapse when the columns touch" but "collapse when either column stops
+-- fitting" -- minCol deliberately exceeds a box's own width so the page folds back to
+-- one column BEFORE the two would overlap, leaving a gutter at the cutover.
+function GUI.UsesTwoColumns()
+    local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
+    local childWidth = GUI.PageChildWidth(contentWidth)
+    return contentWidth >= (GUI.SettingsBox.minCol * 2 + GUI.SettingsBox.colGutter)
+       and (math.floor(contentWidth / 2) + GUI.SettingsBox.group) <= childWidth
+end
+
+-- ★ THE WIDTH ONE COLUMN GETS. The same arithmetic the layout pass uses for an
+-- indented widget, published so a band can be built at it rather than built wide and
+-- shrunk -- a group cannot be widened or narrowed for free, because LayoutChildren
+-- sizes its children off the group's CURRENT width (see tools.BandWidth).
+-- ⚠ Floored at a box's width for the same reason BandWidth is: a page built before
+-- the content frame has a size still gets a sane container.
+function GUI.ColumnWidth()
+    local usable = GUI.PageUsableWidth(GUI.PageChildWidth(
+        GUI.contentFrame and GUI.contentFrame:GetWidth() or 0))
+    return math.max(math.floor((usable - GUI.SettingsBox.colGutter) / 2),
+                    GUI.SettingsBox.group)
+end
+
 function GUI.PageUsableWidth(childWidth)
     return (childWidth or 0) - 2 * SettingsBox.colMargin
 end
@@ -339,10 +365,11 @@ local function PageRefreshStates(self)
     -- either column stops fitting", so it now says so.
     local contentWidth = GUI.contentFrame and GUI.contentFrame:GetWidth() or 540
     local childWidth = GUI.PageChildWidth(contentWidth)
-    local minColumnWidth = SettingsBox.minCol
-    local usesTwoColumns =
-        contentWidth >= (minColumnWidth * 2 + SettingsBox.colGutter)
-        and (math.floor(contentWidth / 2) + SettingsBox.group) <= childWidth
+    -- ⚠ THROUGH THE SHARED PREDICATE, not a second copy of the test. A band that
+    -- BUILDS itself at a column width has to agree with the pass that POSITIONS it
+    -- about whether there are two columns at all, and two copies of this condition
+    -- is how they would come to disagree by one pixel at the cutover.
+    local usesTwoColumns = GUI.UsesTwoColumns()
 
     -- The width a page's widgets actually have, DERIVED rather than a literal:
     -- the scroll child (see GUI.PageChildWidth) less the page's own left and
@@ -468,6 +495,13 @@ local function PageRefreshStates(self)
                 if indentOffset > 0 and widget.SetWidth then
                     local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
                     widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
+                elseif widget.layoutColFill and widget.SetWidth then
+                    -- ☠ OPT-IN, AND THAT IS THE WHOLE POINT. A classic page's boxes are
+                    -- built at a FIXED width and sit in a column wider than themselves --
+                    -- sizing those to the column would restyle a layout this is not
+                    -- allowed to touch. Only a band that declares it wants to FILL its
+                    -- column gets resized, which today is the reworked page's bands.
+                    widget:SetWidth(SnapLen(widget, GUI.ColumnWidth()))
                 end
                 y2 = y2 - h
             else
@@ -477,6 +511,14 @@ local function PageRefreshStates(self)
                 if indentOffset > 0 and widget.SetWidth then
                     local defaultColWidth = math.floor((usableWidth - SettingsBox.colGutter) / 2)
                     widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
+                elseif widget.layoutColFill and widget.SetWidth then
+                    -- ⚠ AND THE COLLAPSE IS HERE. When the page folds back to one column
+                    -- a filling band takes the WHOLE usable width again, which is what
+                    -- makes the two-column layout a presentation of the same page rather
+                    -- than a second one: narrow the window and it is the single stack it
+                    -- always was, at full width.
+                    widget:SetWidth(SnapLen(widget,
+                        usesTwoColumns and GUI.ColumnWidth() or usableWidth))
                 end
                 y1 = y1 - h
             end

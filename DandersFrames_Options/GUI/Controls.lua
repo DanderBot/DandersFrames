@@ -5195,11 +5195,21 @@ function GUI:CreatePopoutPageTools(page)
     -- on the build and only correct them on the next refresh. Floored at a box's
     -- width so a page built before the content frame has a size still gets a sane
     -- container.
-    local function BandWidth()
-        return math.max(
+    -- ⚠ `col` ASKS FOR A COLUMN'S WIDTH RATHER THAN THE PAGE'S. A band that is going to
+    -- be placed in column 1 or 2 has to be BUILT at the column width for the same reason
+    -- the note above gives: its rows lay out against the group's width at build time, so
+    -- a band built full-width and narrowed by the layout pass would draw one pass wrong.
+    -- Answers the full width when the page is in one column, which is also what the pass
+    -- will resize it to -- the two agree because both read GUI.UsesTwoColumns.
+    local function BandWidth(col)
+        local full = math.max(
             GUI.PageUsableWidth(GUI.PageChildWidth(
                 GUI.contentFrame and GUI.contentFrame:GetWidth() or 0)),
             GUI.SettingsBox.group)
+        if col and GUI.UsesTwoColumns and GUI.UsesTwoColumns() then
+            return GUI.ColumnWidth()
+        end
+        return full
     end
 
     return {

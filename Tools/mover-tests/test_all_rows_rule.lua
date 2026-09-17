@@ -88,14 +88,18 @@ do
 
                 -- The band skin, and the chromeless band, may only be asked for at
                 -- the width the layout pass will hand a "both" widget.
+                -- ⚠ `tools.BandWidth(` WITH OR WITHOUT AN ARGUMENT. The claim being
+                -- policed is that a band ASKS the helper rather than naming a literal;
+                -- the optional column argument says WHICH width it is asking for (the
+                -- page's, or one column's) and is not a way round the helper.
                 if rest:find("INLINE_BOX", 1, true) then
                     skinned = skinned + 1
-                    check(rest:find("tools.BandWidth()", 1, true) ~= nil,
+                    check(rest:find("tools.BandWidth(", 1, true) ~= nil,
                           "alignment: " .. page .. " wears the band skin at the band's width")
                 end
                 if rest:find("chromeless", 1, true) then
                     chromeless = chromeless + 1
-                    check(rest:find("tools.BandWidth()", 1, true) ~= nil,
+                    check(rest:find("tools.BandWidth(", 1, true) ~= nil,
                           "alignment: " .. page .. " builds its chromeless band at the band's width")
                 end
             end

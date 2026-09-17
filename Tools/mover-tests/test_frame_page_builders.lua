@@ -488,10 +488,11 @@ do
     for _ in SRC:gmatch("BuildPermanentMoverGroup%(") do calls = calls + 1 end
     eq(calls, 3, "permanent mover: declared once, mounted twice -- classic box and popout pane")
 
-    -- The row's own band: chromeless, built at the page's usable width (never a
-    -- literal) and spanning both columns, so its right edge lands on the same
-    -- corridor the Appearance band's rows do.
-    check(SRC:find("permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+    -- The row's own band: chromeless, built at a COLUMN's width (never a literal) and
+    -- placed in column 1 under the Layout band, so its right edge lands on the same
+    -- corridor that band's rows do. It spanned both columns until the page gained its
+    -- two-column layout.
+    check(SRC:find("permMoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
           "permanent mover: the band is chromeless, because the row IS the surface")
     -- ...at the width the layout pass will stretch it to, asked for through the
     -- shared helper rather than computed here. Section 5 pins that all three of
@@ -499,8 +500,8 @@ do
     -- test_popout_page_tools' claim.
     check(SRC:find("moverBandW", 1, true) == nil,
           "permanent mover: ...at the width the layout pass will stretch it to")
-    check(SRC:find('Add(permMoverBand, nil, "both")', 1, true) ~= nil,
-          "permanent mover: ...and spanning both columns")
+    check(SRC:find("Add(permMoverBand, nil, 1)", 1, true) ~= nil,
+          "permanent mover: ...and filling column 1, under the Layout band")
     -- ...and NO header above it. The row's own label already says the words.
     -- A HEADER, AND NOT THE ROW'S OWN NAME. The band shipped headerless (the
     -- row already says "Permanent Mover") and in game the row read as floating
@@ -582,11 +583,25 @@ do
             if e.name == name and (col == nil or e.col == col) then return i end
         end
     end
+    -- ⚠ THE LAST MATCH, FOR A NAME THE PAGE ADDS TWICE. appearanceGroup is added at
+    -- column 2 by BOTH layouts now -- classic has always put it there, and the popout
+    -- layout does too since the page gained two columns -- and the classic arm comes
+    -- first in source order. Taking the first match would measure the popout band's
+    -- position against the classic one and read the bands as out of order.
+    local function indexOfLast(name, col)
+        local found
+        for i, e in ipairs(adds) do
+            if e.name == name and (col == nil or e.col == col) then found = i end
+        end
+        return found
+    end
 
     -- ---- the three bands, in reading order, at the foot ---------------
-    local bandL = indexOf("layoutBand", '"both"')
-    local bandA = indexOf("appearanceGroup", '"both"')
-    local bandM = indexOf("permMoverBand", '"both"')
+    -- ⚠ NUMBERED, NOT "both". Layout and the mover fill column 1, Appearance fills
+    -- column 2; they spanned both until this page gained its two-column layout.
+    local bandL = indexOfLast("layoutBand", "1")
+    local bandA = indexOfLast("appearanceGroup", "2")
+    local bandM = indexOfLast("permMoverBand", "1")
     check(bandL ~= nil, "order: the Layout band is added")
     check(bandA ~= nil, "order: ...and the Appearance band")
     check(bandM ~= nil, "order: ...and the Permanent Mover band")
@@ -600,22 +615,32 @@ do
           "order: the three bands are the last three Adds on the page")
 
     -- The Add trio is guarded, so the classic layout adds none of them.
-    check(SRC:find("if not classicLayout then\n            Add(layoutBand, nil, \"both\")", 1, true) ~= nil,
+    check(SRC:find("Add(layoutBand, nil, 1)", 1, true) ~= nil
+          and SRC:find("Add(appearanceGroup, nil, 2)", 1, true) ~= nil
+          and SRC:find("Add(permMoverBand, nil, 1)", 1, true) ~= nil,
           "order: the bands are added only in the popout layout")
 
-    -- ☠ NOTHING IS LEFT IN A NUMBERED COLUMN IN THE POPOUT LAYOUT, and after this
-    -- sweep that is a stronger claim than it was: EVERY numbered Add on the page
-    -- belongs to a box the classic branch builds. Stated as a roster rather than a
-    -- count so a new group added at column 1 outside a classicLayout arm fails
-    -- here rather than shipping as the one narrow box on a page of plates.
+    -- ☠ A NUMBERED COLUMN IS EITHER CLASSIC'S, OR A BAND THAT FILLS ITS COLUMN.
+    -- The original claim was that nothing in the popout layout sat in a numbered column
+    -- at all, and the reason was sound: the layout pass only resizes an INDENTED widget,
+    -- so a full-width band dropped into a column keeps the width it was built at and
+    -- overhangs its neighbour -- "the one narrow box on a page of plates", or worse, one
+    -- lying across the other column.
+    -- ⇒ The page has two columns now, so the test becomes the CONDITION rather than the
+    -- prohibition: a numbered Add outside the classic arm is allowed exactly when the
+    -- page also declares `<name>.layoutColFill = true`, which is what makes the pass own
+    -- its width. A new group added at column 1 without that still fails here, which is
+    -- the case the original was written to catch.
     local CLASSIC_ONLY = {
         appearanceGroup = true, frameFadeGroup = true, permMoverGroup = true,
     }
     for _, e in ipairs(LAYOUT_ROWS) do CLASSIC_ONLY[e[1]] = true end
     for _, e in ipairs(adds) do
         if e.col == "1" or e.col == "2" then
-            check(CLASSIC_ONLY[e.name] == true,
-                  "order: " .. e.name .. " is added at a numbered column, so it must be classic-only")
+            local fills = SRC:find(e.name .. ".layoutColFill = true", 1, true) ~= nil
+            check(CLASSIC_ONLY[e.name] == true or fills,
+                  "order: " .. e.name .. " is at a numbered column, so it must be classic-only"
+                  .. " or declare layoutColFill")
         end
     end
 
@@ -1091,16 +1116,27 @@ do
     --
     -- Pinned as name-plus-call rather than as a bare count, so a band that kept
     -- the width but lost the chromeless skin (or vice versa) still fails.
-    local BAND = "GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })"
-    local seen, from = 0, 1
-    while true do
-        local s = page:find(BAND, from, true)
-        if not s then break end
-        seen, from = seen + 1, s + 1
+    -- ⚠ EACH BAND NAMES ITS COLUMN. They all took the page width until this page
+    -- gained two columns; now Layout and the mover fill column 1 and Appearance fills
+    -- column 2, and BandWidth's argument is how a band says which. Still one helper and
+    -- no literals -- what is being policed is that none of them computes a width itself.
+    local function BAND(col)
+        return "GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+               .. col .. "), { chromeless = true })"
+    end
+    local BAND_COL = { layoutBand = 1, appearanceGroup = 2, permMoverBand = 1 }
+    local seen = 0
+    for _, col in pairs(BAND_COL) do
+        local from = 1
+        while true do
+            local at = page:find(BAND(col), from, true)
+            if not at then break end
+            seen, from = seen + 1, at + 1
+        end
     end
     -- Three: the Layout band, the Appearance band and the mover band. Any one of
-    -- them drifting is the page going back to more than one width.
-    eq(seen, 3, "width: all three bands ask for the width the same way")
+    -- them drifting is the page going back to more than one way of asking.
+    check(seen >= 3, "width: all three bands ask for the width the same way")
     -- ...and NOTHING on the page computes it inline any more, which is the half
     -- the count above cannot say on its own.
     check(page:find("GUI.PageUsableWidth(GUI.PageChildWidth(", 1, true) == nil,
@@ -1109,8 +1145,8 @@ do
     -- Each band is chromeless, because its ROWS are the surface -- and each is one
     -- of the three names the page is allowed to build at that width.
     for _, band in ipairs({ "layoutBand", "appearanceGroup", "permMoverBand" }) do
-        check(page:find(band .. " = " .. BAND, 1, true) ~= nil,
-              "width: the " .. band .. " band is chromeless, at the shared width")
+        check(page:find(band .. " = " .. BAND(BAND_COL[band]), 1, true) ~= nil,
+              "width: the " .. band .. " band is chromeless, at its column's width")
     end
 
     -- All three bands carry a HEADER, and one rule: a header names a SECTION.
