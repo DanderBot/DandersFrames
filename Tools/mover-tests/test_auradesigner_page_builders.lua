@@ -45,6 +45,9 @@ local CARDS = options_file_source("AuraDesigner/UI/Cards.lua")
 local AURAS = options_file_source("GUI/Pages/Auras.lua")
 local EDIT  = options_file_source("AuraDesigner/UI/Editor.lua")
 local GROUPS = options_file_source("AuraDesigner/UI/Groups.lua")
+-- The Aura Designer UI's base file: _uiState, the shared vocabulary, and the priest gate
+-- the helper's pool tab hangs on (see the pool block).
+local OPTIONS_UI = options_file_source("AuraDesigner/UI/Options.lua")
 
 -- ---- the census reader ----------------------------------------------
 -- The Frame page's, with one addition: a designer control's db table is the
@@ -1456,6 +1459,22 @@ do
     -- ☠ THE FOLDER-TAB LANGUAGE, AND IT IS THE KIT'S. A tab that sits ON the
     -- preview panel and says what it is showing is not the underline tab the
     -- sub-tab strip wears; drawing it as one is what made the two read as a block.
+    -- ☠☠ THE PRIEST GATE MUST BE DEFINED SOMEWHERE, and this test exists because it once
+    -- was not. Every caller reads `DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()` --
+    -- a nil-guard that is correct across the load-on-demand split and, precisely because it
+    -- is correct, makes a MISSING definition indistinguishable from "not a priest". The
+    -- definition lived in a page file that was deleted when the helper's nav row went; no
+    -- error, no failing test, the gate simply answered false forever and the pool tab
+    -- vanished for everyone (2026-09-17: "no tab in AD, no tab anywhere").
+    -- ⚠ Asserted across the whole AD UI rather than in one named file, so the definition can
+    -- be moved without this becoming a test about where it lives.
+    do
+        local defined = false
+        for _, src in ipairs({ OPTIONS_UI, ROWS, CARDS, EDIT, GROUPS, IND, AURAS }) do
+            if src:find("function DF.IsPIHelperAvailable()", 1, true) then defined = true end
+        end
+        check(defined, "pool: the priest gate the helper tab hangs on is defined somewhere")
+    end
     check(tabs:find("GUI:StyleFolderTab(btn, {", 1, true) ~= nil,
           "pool: they are folder tabs, from the shared factory")
     check(tabs:find("tab = true", 1, true) == nil,

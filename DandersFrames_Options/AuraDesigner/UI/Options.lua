@@ -200,6 +200,31 @@ end
 P.ApplyBackdrop = ApplyBackdrop
 
 -- ============================================================
+-- IS THE HELPER OFFERED AT ALL?
+-- ============================================================
+-- ☠ CLASS, NOT SPEC, AND CONSTANT FOR THE LOGIN. Power Infusion is a priest ability and a
+-- character cannot change class in session -- which is what every caller wants: PoolDefs
+-- decides whether the pool tab exists at all, and the two sweep hooks decide whether a
+-- migration that only touches priest records is worth running.
+-- ⚠ Deliberately NOT gated on the helper EXISTING. A tab that appears only once you have
+-- already added the helper is a tab you cannot use to add it.
+-- ☠☠ IT LIVED IN AuraDesigner/UI/PIHelperPage.lua AND WENT WITH IT, which broke the
+-- feature silently. Every caller reads `DF.IsPIHelperAvailable and DF.IsPIHelperAvailable()`
+-- -- the nil-guard that makes it safe across the LoD split also makes a MISSING definition
+-- indistinguishable from "not a priest". So deleting the page did not error, it just
+-- answered false forever: no pool tab, no sweep, the helper gone from the addon entirely
+-- (field report, 2026-09-17: "no tab in AD, no tab anywhere"). The file's own removal note
+-- named the three symbols it exported for OTHER files and not this one, which is why a grep
+-- of that list came back clean.
+-- ⇒ Here, because this is the Aura Designer UI's base file and the helper is one of its
+-- pool tabs. Every caller resolves it at CALL time, inside a builder, so nothing depends on
+-- where this sits in the TOC.
+function DF.IsPIHelperAvailable()
+    local _, class = UnitClass("player")
+    return class == "PRIEST"
+end
+
+-- ============================================================
 -- COLLAPSIBLE CARD SHELL
 -- The effects list, the groups list and the debuff-category list each build the
 -- same thing: a card pinned to the parent's width, a 30px header button on top,
