@@ -4837,21 +4837,57 @@ function GUI:CreatePopoutPageTools(page)
                 local g = inline.group
                 if not g then return 0 end
                 width = math.max(math.floor(width or 0), 1)
-                if inline.width ~= width then
+                -- ⚠ THE FLAG IS THE RE-ENTRANCY GUARD, not bookkeeping.
+                -- LayoutChildren can reach a widget that converges its own
+                -- height and calls GUI:RelayoutHost, whose walk comes
+                -- straight back through the holder's dfReflowPane -- and
+                -- that would ask the row to lay out the plate it is in the
+                -- middle of laying out.
+                -- ☠ ARMED FOR THE WHOLE MEASURE, and it used to be armed only
+                -- inside the width branch. On a cache hit the guard was down, so
+                -- a nested dfReflowPane could re-enter plateLayout from inside
+                -- plateLayout -- and the inner pass clears and refills the SAME
+                -- row._shownKeys table the outer pass is about to hand to
+                -- applyShown (the table is deliberately shared; see PopoutRow).
+                -- Restores rather than clears, so a genuinely nested measure
+                -- does not disarm the outer one on its way out.
+                local wasMeasuring = inline.measuring
+                inline.measuring = true
+                -- ☠☠ THE COUNT IS PART OF THE KEY, NOT JUST THE WIDTH, and this
+                -- was the blanking bug (Compact layout only, reported 2026-09-16:
+                -- "all the contents go blank, it only shows the headings, and it
+                -- fixes itself as soon as you scroll").
+                -- LayoutChildren is the ONLY thing that Show()s a placed child and
+                -- Hide()s an unplaced one, and it lived inside the width memo --
+                -- while CountVisibleChildren below is a LIVE predicate over the
+                -- entries' gates, deliberately independent of any layout having
+                -- run. So on a width cache hit this could answer "five visible
+                -- children, here is a positive height" about five children that
+                -- applyShown had hidden since the last layout. The row then sized
+                -- and showed a correctly-proportioned, completely empty holder
+                -- under its title, which is exactly the reported picture.
+                -- ⇒ Re-layout when EITHER moved. Scrolling repaired it because a
+                -- scroll re-drives the measure at a width that had changed.
+                -- ⚠ Scale reaches this through rounding, not through any layout of
+                -- its own: the scale path runs none (verified). Every width here
+                -- comes through SnapLen, which rounds to whole DEVICE pixels via
+                -- GetEffectiveScale, so a scale change can move the snapped width
+                -- across a boundary -- or not. Hence "intermittent, and not at any
+                -- particular scale number".
+                local n = g:CountVisibleChildren()
+                if inline.width ~= width or inline.count ~= n then
                     inline.width = width
-                    -- ⚠ THE FLAG IS THE RE-ENTRANCY GUARD, not bookkeeping.
-                    -- LayoutChildren can reach a widget that converges its own
-                    -- height and calls GUI:RelayoutHost, whose walk comes
-                    -- straight back through the holder's dfReflowPane -- and
-                    -- that would ask the row to lay out the plate it is in the
-                    -- middle of laying out.
-                    inline.measuring = true
                     inline.holder:SetWidth(width)
                     g:SetWidth(width)
                     g:LayoutChildren()
                     g:RefreshChildStates()
-                    inline.measuring = false
+                    -- Re-read: RefreshChildStates can gate a child away, so the
+                    -- count the memo stores has to be the one this layout left
+                    -- behind rather than the one that got us in here.
+                    n = g:CountVisibleChildren()
+                    inline.count = n
                 end
+                inline.measuring = wasMeasuring
                 -- ☠ AN EMPTY GROUP MEASURES NOTHING, NOT ONE PIXEL.
                 -- LayoutChildren floors its own height at 1 (a zero-height frame
                 -- is a frame the client will not draw children into), so a pane
@@ -4859,7 +4895,9 @@ function GUI:CreatePopoutPageTools(page)
                 -- and the row would wrap it in the 10px of air above and below
                 -- that a real group earns. Zero is what "there is nothing to
                 -- show" means to the row, and it folds on it.
-                if g:CountVisibleChildren() <= 0 then return 0 end
+                -- `n`, not a third call: it is the count this measure settled on,
+                -- and asking again could answer about a gate that moved in between.
+                if n <= 0 then return 0 end
                 return math.max(g:GetHeight() or 1, 1)
             end)
         end

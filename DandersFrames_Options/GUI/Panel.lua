@@ -156,8 +156,45 @@ function GUI:RegisterScaledSurface(f)
     f:SetScale((ws and ws.scale) or 1)
 end
 
-local function ApplyGUIScale(frame, value)
+-- ☠☠ keepPlace: SCALE ABOUT THE WINDOW, NOT ABOUT THE SCREEN CENTRE.
+-- The window carries a single CENTER-to-UIParent point, so SetScale multiplies the
+-- anchor OFFSET along with everything else and the window walks toward or away from
+-- the middle of the screen as you drag the slider. Reported 2026-09-16: "it always
+-- scales from the center of the screen -- can it scale independently?"
+-- ⇒ Read the centre in UIParent units before, then re-anchor to the same screen point
+-- after. A SetPoint offset is in the ANCHORED frame's OWN units, so the displacement
+-- has to be divided back by the new effective scale -- that conversion is the whole
+-- trick, and getting it backwards moves the window the wrong way by the ratio.
+-- ⚠ OPT-IN, AND THAT IS NOT TIDINESS. This function also runs once at build time
+-- (ApplyGUIScale(frame, savedScale)) right after the saved position is restored, where
+-- "keep the on-screen place" would re-anchor the window away from the very position it
+-- was just given. Only the slider asks for it.
+-- ⚠ THE MAIN FRAME ONLY. TestPanel, DFPopupFrame and the registered surfaces place
+-- themselves and must not be re-anchored.
+-- ⚠ THE CALLER SAVES. The re-anchor rewrites point/relPoint/x/y, so whoever asks for
+-- keepPlace has to persist the new position or the saved one is stale until the next
+-- drag; the slider calls SaveWindowPos for exactly that reason.
+local function ApplyGUIScale(frame, value, keepPlace)
+    local cx, cy, ue
+    if frame and keepPlace and frame.GetCenter then
+        local fx, fy = frame:GetCenter()
+        ue = UIParent:GetEffectiveScale()
+        if fx and ue and ue > 0 then
+            local fe = frame:GetEffectiveScale()
+            -- The window's centre, in UIParent units, before anything moves.
+            cx, cy = fx * fe / ue, fy * fe / ue
+        end
+    end
     if frame then frame:SetScale(value) end
+    if cx then
+        local fe = frame:GetEffectiveScale()
+        local ux, uy = UIParent:GetCenter()
+        if fe and fe > 0 and ux then
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", UIParent, "CENTER",
+                           (cx - ux) * ue / fe, (cy - uy) * ue / fe)
+        end
+    end
     if DF.TestPanel then DF.TestPanel:SetScale(value) end
     local popup = _G and _G.DFPopupFrame
     if popup then popup:SetScale(value) end
@@ -537,6 +574,20 @@ function DF:CreateGUI()
     -- Main frame (matching old addon approach - no BackdropTemplate in CreateFrame)
     local frame = CreateFrame("Frame", "DandersFramesGUI", UIParent)
     frame:SetSize(savedWidth, savedHeight)
+    -- ☠ NEVER OFF THE EDGE. The same call the popouts make (DandersUI/Popout.lua's
+    -- constructor), and for the same reason: Blizzard enforces it live during
+    -- StartMoving, so every drag handle on this window -- the title bar, the bottom
+    -- bar, deck 2 -- is covered without any of them knowing about it.
+    -- ⚠ BEFORE THE RESTORE BELOW, ON PURPOSE. A position saved at one resolution and
+    -- restored at a smaller one comes back off-screen, and that path trusts the saved
+    -- numbers with no bounds check at all -- which is why /df resetgui is advertised in
+    -- the login message as the fix for a window nobody can find. Setting the clamp
+    -- first gives the restore a chance to be pulled back on.
+    -- ⚠ UNVERIFIED that the clamp fires for a programmatic SetPoint rather than only
+    -- for StartMoving. If a saved off-screen position still comes back off-screen, this
+    -- needs explicit arithmetic instead, and there is nothing in the kit to reuse for it
+    -- (the only explicit clamp there is y-only and wants a window+row pair).
+    frame:SetClampedToScreen(true)
     -- Restore saved position, or default to center
     if guiDb.point and guiDb.x then
         frame:SetPoint(guiDb.point, UIParent, guiDb.relPoint or "CENTER", guiDb.x, guiDb.y)
@@ -1959,7 +2010,12 @@ function DF:CreateGUI()
                 -- Apply scale only on mouse release to avoid cursor drift issues
                 scaleSlider:SetScript("OnMouseUp", function(self)
                     local value = math.floor(self:GetValue() * 20 + 0.5) / 20
-                    ApplyGUIScale(frame, value)
+                    -- keepPlace: hold the window where it is on screen rather than
+                    -- letting the scale walk it toward the middle. See ApplyGUIScale.
+                    ApplyGUIScale(frame, value, true)
+                    -- ...and persist what that re-anchor just wrote, or the saved
+                    -- position stays on the pre-scale point until the next drag.
+                    SaveWindowPos()
                     DF:GetWindowState().scale = value
                     -- A new scale changes how many device pixels a UI unit covers, so
                     -- every border on screen has to be re-derived at the new thickness.
