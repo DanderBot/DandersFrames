@@ -942,7 +942,8 @@ end
 -- ============================================================
 print("-- Filter Designer: the picker's new home")
 do
-    check(SRC:find("parent = GUI.contentFrame or parent,", 1, true) ~= nil,
+    check(SRC:find("local pickerParent = GUI.contentFrame or parent", 1, true) ~= nil
+          and SRC:find("parent = pickerParent,", 1, true) ~= nil,
           "picker: the band arm parents the overlay to the viewport")
     -- ⚠ AND THE SELECTION MOVES WITH IT. RefreshAll closes the picker whenever the
     -- page's selection is not its target, and nothing else in the band arm moves
@@ -952,4 +953,25 @@ do
     local all = SRC:match("RefreshAll = function%(%)(.-)\n    end") or ""
     check(all:find("selKind == \"custom\" and selKey == pickerTarget", 1, true) ~= nil,
           "picker: ...which is the guard that would otherwise close it")
+
+    -- ☠ THE PICKER TAKES THE TETHER WITH IT, as the Aura Designer's does. The
+    -- button that opens it lives in the custom filter's own panel, so that panel
+    -- is open and outlining its row -- in the panel's strata, over the window --
+    -- and the outline landed on whichever spell row sat in that slot.
+    --
+    -- ⚠ SCOPED TO THE BAND ARM'S OPEN, WITH COMMENTS STRIPPED: a file-wide find is
+    -- satisfied by the comment explaining the fix, so it would pass with both
+    -- calls deleted.
+    local a = SRC:find('selKind, selKey = "custom", cfId', 1, true)
+    local b = a and SRC:find("\n        end", a, true)
+    local open = (a and b) and SRC:sub(a, b):gsub("%-%-[^\n]*", "") or ""
+    local iOpen  = open:find("R:OpenSpellPicker({", 1, true)
+    local iSet   = open:find("GUI:SetPopoutTetherOverride(pickerParent)", 1, true)
+    local iClear = open:find("onClose = function() GUI:ClearPopoutTetherOverride() end", 1, true)
+    check(iSet ~= nil,
+          "picker: the band arm points every open panel at the surface the picker covers")
+    check(iOpen ~= nil and iSet ~= nil and iOpen < iSet,
+          "picker: ...AFTER the open, so a picker that failed to open leaves nothing to restore")
+    check(iClear ~= nil,
+          "picker: ...and its close hook puts every panel's own target back")
 end

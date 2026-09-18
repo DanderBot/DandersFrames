@@ -5003,8 +5003,13 @@ end
         OpenPicker = function(cfId)
             pickerTarget = cfId
             selKind, selKey = "custom", cfId
+            local pickerParent = GUI.contentFrame or parent
             pickerHandle = R:OpenSpellPicker({
-                parent = GUI.contentFrame or parent,
+                parent = pickerParent,
+                -- Fires on ANY close (back/ESC/programmatic/ancestor hide): every open
+                -- panel goes back to outlining its own row, restoring whatever the kit
+                -- stashed on the way in. Same hook the Aura Designer's picker uses.
+                onClose = function() GUI:ClearPopoutTetherOverride() end,
                 title = L["Add from Database"],
                 -- Re-evaluated per refresh, so a rename while the picker is up keeps
                 -- the header current.
@@ -5030,6 +5035,15 @@ end
                     },
                 },
             })
+            -- ☠ THE PICKER COVERS THE SURFACE THE OPEN PANEL IS TETHERED TO. The
+            -- "Add from Database" button lives in the custom filter's own panel, so
+            -- that panel is open and outlining its row -- and the outline is drawn in
+            -- the panel's strata, ABOVE the window, so it lands on whichever spell
+            -- row sits in that slot and reads as "this spell is selected". Point every
+            -- open panel at the covered surface instead, exactly as the Aura
+            -- Designer's picker does. AFTER the open, so a picker that failed to open
+            -- leaves nothing to restore. Undone by onClose above.
+            GUI:SetPopoutTetherOverride(pickerParent)
         end
 
         -- The freshness note needs a host of its own: it is a FontString, and the
