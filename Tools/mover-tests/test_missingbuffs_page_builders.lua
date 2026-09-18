@@ -184,8 +184,13 @@ do
           "tools: ...nor the search row map")
 
     -- ---- the two bands ------------------------------------------------
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Content fills column 1, Icon column 2. A band
+    -- has to be BUILT at the width the layout pass will give it, because a group sizes
+    -- its rows off its width at build time; BandWidth's argument says which width.
+    local BAND_COL = { contentBand = 1, iconBand = 2 }
     for _, b in ipairs({ "contentBand", "iconBand" }) do
-        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[b] .. "), { chromeless = true })", 1, true) ~= nil,
               "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
     end
     for _, pair in ipairs({ { "contentBand", "Content" }, { "iconBand", "Icon" } }) do
@@ -541,9 +546,18 @@ do
           "boxes: no control row -- every group on this page has more than one setting")
 
     -- ---- the Add order ------------------------------------------------
-    local a = PAGE:find('Add(contentBand, nil, "both")', 1, true)
-    local b = PAGE:find('Add(iconBand, nil, "both")', 1, true)
-    check(a and b and a < b, "order: the two bands span both columns, in reading order")
+    -- Content left, Icon right, still ADDED in reading order, because that is the
+    -- order a narrow window folds them back into when the page drops to one column.
+    local a = PAGE:find("Add(contentBand, nil, 1)", 1, true)
+    local b = PAGE:find("Add(iconBand, nil, 2)", 1, true)
+    check(a and b and a < b, "order: the two bands sit in their columns, added in reading order")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "contentBand", "iconBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"missingBuff"}, L["Missing Buffs"], "auras_missingbuffs")', 1, true) ~= nil,

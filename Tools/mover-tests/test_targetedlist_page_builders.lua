@@ -208,8 +208,14 @@ do
           "tools: ...nor the search row map")
 
     -- ---- the three bands ----------------------------------------------
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Content and Appearance fill column 1, Text
+    -- column 2 -- Appearance is on the left for balance (see the page). A band has to
+    -- be BUILT at the width the layout pass will give it, because a group sizes its
+    -- rows off its width at build time; BandWidth's argument says which width.
+    local BAND_COL = { contentBand = 1, appearanceBand = 1, textBand = 2 }
     for _, b in ipairs({ "contentBand", "appearanceBand", "textBand" }) do
-        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[b] .. "), { chromeless = true })", 1, true) ~= nil,
               "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
     end
     for _, pair in ipairs({ { "contentBand", "Content" },
@@ -620,11 +626,21 @@ do
           "order: the Timing row is mounted into the Appearance band from the foot of the page")
 
     -- ---- the Add order of the bands ------------------------------------
-    local b1 = PAGE:find('Add(contentBand, nil, "both")', 1, true)
-    local b2 = PAGE:find('Add(appearanceBand, nil, "both")', 1, true)
-    local b3 = PAGE:find('Add(textBand, nil, "both")', 1, true)
+    -- Three bands in two columns -- Content and Appearance left, Text right --
+    -- still ADDED in reading order, because that is the order a narrow window folds
+    -- them back into when the page drops to one column.
+    local b1 = PAGE:find("Add(contentBand, nil, 1)", 1, true)
+    local b2 = PAGE:find("Add(appearanceBand, nil, 1)", 1, true)
+    local b3 = PAGE:find("Add(textBand, nil, 2)", 1, true)
     check(b1 and b2 and b3 and b1 < b2 and b2 < b3,
-          "order: the three bands span both columns, in reading order")
+          "order: the three bands sit in their columns, added in reading order")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "contentBand", "appearanceBand", "textBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"targetedList"}, L["Targeted List"], "indicators_targetedlist")', 1, true) ~= nil,

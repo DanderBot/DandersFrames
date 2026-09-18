@@ -1729,13 +1729,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local contentBand, iconBand, textBand, factoryBand
         if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
-            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
-            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
@@ -3517,15 +3517,25 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- impossibility are worse than no controls. See BuildAuraRowConfig in
         -- Features/Auras.lua for the render-side gate that matches this.)
 
-        -- ===== THE FOUR BANDS, IN READING ORDER ===========================
-        -- Added at the foot rather than in place: every band is full width, so there
-        -- is no column flow left to unbalance and the order below is purely the order
-        -- the page reads in.
+        -- ===== THE FOUR BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
+        -- The Buffs page's split: Content and the Factory's duration bar down the left,
+        -- Icon and Text down the right. On a narrow window the page folds back to one
+        -- column and reads in exactly the order below, which is the order it always had.
+        -- ⚠ THE COLUMNS ARE NOT EVEN, AND NO BAND CAN EVEN THEM. Five rows against
+        -- eight; sending Text left only turns that into eight against five, so the
+        -- rule settles the tie and every band stays on its own side.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(contentBand, nil, "both")
-            Add(iconBand, nil, "both")
-            Add(textBand, nil, "both")
-            Add(factoryBand, nil, "both")
+            contentBand.layoutColFill = true
+            iconBand.layoutColFill = true
+            textBand.layoutColFill = true
+            factoryBand.layoutColFill = true
+            Add(contentBand, nil, 1)
+            Add(iconBand, nil, 2)
+            Add(textBand, nil, 2)
+            Add(factoryBand, nil, 1)
         end
 
         -- See Also links
@@ -3611,9 +3621,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local contentBand, iconBand
         if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
         end
 
@@ -4112,13 +4122,18 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             borderRow.disableOn = MissingOffRow
         end
 
-        -- ===== THE TWO BANDS, IN READING ORDER ============================
-        -- Added at the foot rather than in place: both bands are full width, so
-        -- there is no column flow left to unbalance and the order below is purely
-        -- the order the page reads in.
+        -- ===== THE TWO BANDS: TWO COLUMNS WHEN THERE IS ROOM ===============
+        -- The Frame page's rule: what the page DOES down the left, how it LOOKS down
+        -- the right -- Content left, Icon right, two rows against three. On a narrow
+        -- window the page folds back to one column in the order below.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(contentBand, nil, "both")
-            Add(iconBand, nil, "both")
+            contentBand.layoutColFill = true
+            iconBand.layoutColFill = true
+            Add(contentBand, nil, 1)
+            Add(iconBand, nil, 2)
         end
 
         -- See Also links
@@ -4183,13 +4198,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local contentBand, iconBand, textBand, factoryBand
         if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
-            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
-            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
@@ -5248,15 +5263,25 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             durBarRow.disableOn = DefensiveOffRow
         end
 
-        -- ===== THE FOUR BANDS, IN READING ORDER ===========================
-        -- Added at the foot rather than in place: every band is full width, so there
-        -- is no column flow left to unbalance and the order below is purely the
-        -- order the page reads in.
+        -- ===== THE FOUR BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
+        -- Content, Text and the Factory's duration bar down the left, Icon down the
+        -- right. On a narrow window the page folds back to one column and reads in
+        -- exactly the order below, which is the order it always had.
+        -- ⚠ TEXT IS LEFT FOR BALANCE, which is where this page parts from Buffs. Its
+        -- Content band is two rows, not three, so the Buffs split would leave three
+        -- rows against six; with Text on the left the columns hold five and four.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(contentBand, nil, "both")
-            Add(iconBand, nil, "both")
-            Add(textBand, nil, "both")
-            Add(factoryBand, nil, "both")
+            contentBand.layoutColFill = true
+            iconBand.layoutColFill = true
+            textBand.layoutColFill = true
+            factoryBand.layoutColFill = true
+            Add(contentBand, nil, 1)
+            Add(iconBand, nil, 2)
+            Add(textBand, nil, 1)
+            Add(factoryBand, nil, 1)
         end
 
         -- See Also links
@@ -5355,11 +5380,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             local contentBand, appearanceBand, textBand
             if tools then
-                contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+                contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
                 contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-                appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+                appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
                 appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-                textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+                textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
                 textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
             end
 
@@ -6452,14 +6477,23 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 timingRow.disableOn = TLOffRow
             end
 
-            -- ===== THE THREE BANDS, IN READING ORDER ==========================
-            -- Added at the foot rather than in place: all three are full width, so
-            -- there is no column flow left to unbalance and the order below is
-            -- purely the order the page reads in.
+            -- ===== THE THREE BANDS: TWO COLUMNS WHEN THERE IS ROOM =============
+            -- Content and Appearance down the left, Text down the right. On a narrow
+            -- window the page folds back to one column in the order below.
+            -- ⚠ APPEARANCE IS LEFT FOR BALANCE. By the rule it belongs on the right, but
+            -- there it would leave Content alone at two rows against eleven; on the left
+            -- the columns hold seven and six. Of the two visual bands it is the one that
+            -- also carries a behaviour row (Timing), so it is the one that moves.
+            -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+            -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+            -- width it was built at and it overhangs its neighbour.
             if not classicLayout then
-                Add(contentBand, nil, "both")
-                Add(appearanceBand, nil, "both")
-                Add(textBand, nil, "both")
+                contentBand.layoutColFill = true
+                appearanceBand.layoutColFill = true
+                textBand.layoutColFill = true
+                Add(contentBand, nil, 1)
+                Add(appearanceBand, nil, 1)
+                Add(textBand, nil, 2)
             end
 
             -- See Also links
@@ -6522,11 +6556,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local contentBand, appearanceBand, effectsBand
         if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
-            effectsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            effectsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             effectsBand:AddWidget(GUI:CreateHeader(self.child, L["Effects"]), 40)
         end
 
@@ -7323,14 +7357,23 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             xMarkRow.disableOn = InterruptOffRow
         end
 
-        -- ===== THE THREE BANDS, IN READING ORDER ==========================
-        -- Added at the foot rather than in place: all three are full width, so
-        -- there is no column flow left to unbalance and the order below is purely
-        -- the order the page reads in.
+        -- ===== THE THREE BANDS: TWO COLUMNS WHEN THERE IS ROOM =============
+        -- Content and Effects down the left, Appearance down the right. On a narrow
+        -- window the page folds back to one column in the order below.
+        -- ⚠ EFFECTS IS LEFT FOR BALANCE. Its rows are what the page does when a cast
+        -- lands or is interrupted as much as how that looks, and on the right they
+        -- would leave Content alone at two rows against seven; on the left the
+        -- columns hold five and four.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(contentBand, nil, "both")
-            Add(appearanceBand, nil, "both")
-            Add(effectsBand, nil, "both")
+            contentBand.layoutColFill = true
+            appearanceBand.layoutColFill = true
+            effectsBand.layoutColFill = true
+            Add(contentBand, nil, 1)
+            Add(appearanceBand, nil, 2)
+            Add(effectsBand, nil, 1)
         end
 
         -- See Also links
