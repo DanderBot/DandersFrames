@@ -4887,8 +4887,23 @@ function GUI:CreatePopoutPageTools(page)
                 -- across a boundary -- or not. Hence "intermittent, and not at any
                 -- particular scale number".
                 local n = g:CountVisibleChildren()
-                if inline.width ~= width or inline.count ~= n then
+                -- ☠ AND THE SCALE IS PART OF THE KEY TOO (2026-09-18, after the
+                -- width+count key above shipped in alpha.9 and the blanking did
+                -- not stop). `width` is in UI units, and a scale change does not
+                -- move it -- the window is the same number of units wide at 90%
+                -- as at 100%. But every offset, width and height LayoutChildren
+                -- chose went through SnapLen at the OLD pixels-per-unit, so after
+                -- a rescale the group is sitting on numbers derived for a scale
+                -- it is no longer drawn at, and a width+count key calls that a
+                -- hit. The Scale slider now re-lays the page once the scale is
+                -- applied (see ApplyGUIScale's caller in Panel.lua) -- and that
+                -- relayout would stop dead at this memo for every inline pane
+                -- on the page without this. Read off the group, because the
+                -- group is what SnapLen measures.
+                local scale = g.GetEffectiveScale and g:GetEffectiveScale()
+                if inline.width ~= width or inline.count ~= n or inline.scale ~= scale then
                     inline.width = width
+                    inline.scale = scale
                     inline.holder:SetWidth(width)
                     g:SetWidth(width)
                     g:LayoutChildren()

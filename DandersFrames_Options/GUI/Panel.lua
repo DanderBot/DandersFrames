@@ -2067,6 +2067,24 @@ function DF:CreateGUI()
                     -- This is the ONLY action that does: nothing else in the GUI writes
                     -- windowState.scale, and moving or resizing the window leaves it alone.
                     GUI:RefreshPixelBorders()
+                    -- ☠ AND THE PAGE IS RE-LAID AT THE NEW SCALE, because until now
+                    -- nothing did (the Compact-layout blanking, reported 2026-09-16,
+                    -- still there after the alpha.9 memo fix). Every offset, width and
+                    -- height on the page was chosen through SnapLen at the OLD pixels-
+                    -- per-unit, and neither this path nor a scroll -- the two things
+                    -- the user reports as trigger and repair -- runs a line of layout.
+                    -- So after a rescale the page was left on geometry derived for a
+                    -- scale it is no longer drawn at, and whatever was wrong stayed
+                    -- wrong until something unrelated happened to re-anchor it. A
+                    -- relayout re-places every widget (ClearAllPoints + SetPoint) at
+                    -- numbers snapped for the scale actually on screen, which is the
+                    -- state a resize already leaves the page in.
+                    -- ⚠ RE-LAY, NEVER REBUILD: RefreshCurrentPage leaks the whole page
+                    -- into GUI._trashFrame. See RelayoutCurrentPage.
+                    -- ⚠ The inline panes only follow because their memo now carries
+                    -- the scale (see SetInlineContent's measure in Controls.lua);
+                    -- keyed on width alone, this relayout stopped at every one of them.
+                    if GUI.RelayoutCurrentPage then GUI.RelayoutCurrentPage() end
                 end)
 
                 -- The shell derives the popout's height from what build mounted
