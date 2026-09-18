@@ -511,6 +511,24 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         
     elseif mode == "ANIMATED" or mode == "DASHED" then
         DF:InitAnimatedBorder(ch)
+        -- ☠ WHOLE DEVICE PIXELS, OR THE ANTS LOSE A ROW AT SOME INSETS. The snap above
+        -- multiplies by the effective scale only, so its "pixels" are UI units at
+        -- scale 1 -- a real device pixel is also physicalHeight/768 of those. At
+        -- 1440p / 0.5333 that leaves thickness 2 as 3.75px and inset -9 or -10 (both
+        -- snap to the same value) as 9.375px, and the renderer rounds each dash's
+        -- outer and inner edge separately: 9.375 -> 9 and 5.625 -> 6 is 3px, where
+        -- every other inset draws 4 ("-9 or -10 loses 1px", 2026-09). Rounding both
+        -- to whole device pixels here makes the two edges share one fraction, so the
+        -- drawn thickness cannot depend on the inset. ANIMATED/DASHED only: SOLID
+        -- shares the maths but is left as it looks today.
+        local _, physH = GetPhysicalScreenSize()
+        local ppu = (physH and physH > 0 and scale and scale > 0) and (physH / 768) * scale
+        if ppu then
+            thickness = math.max(1, math.floor(thickness * ppu + 0.5)) / ppu
+            if inset and inset ~= 0 then
+                inset = math.floor(inset * ppu + 0.5) / ppu
+            end
+        end
         ch.animThickness = thickness
         ch.animInset = inset
         ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
