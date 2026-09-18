@@ -149,13 +149,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local contentBand, iconBand, textBand, factoryBand
         if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            iconBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             iconBand:AddWidget(GUI:CreateHeader(self.child, L["Icon"]), 40)
-            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            textBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             textBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
-            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            factoryBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
@@ -1633,15 +1633,29 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end
 
-        -- ===== THE FOUR BANDS, IN READING ORDER ===========================
-        -- Added at the foot rather than in place: every band is full width, so there
-        -- is no column flow left to unbalance and the order below is purely the order
-        -- the page reads in.
+        -- ===== THE FOUR BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
+        -- The Frame page's rule: what the page DOES down the left, how it LOOKS down
+        -- the right -- here Content and the Factory's duration bar and pandemic on the
+        -- left, Icon and Text on the right. On a narrow window the page folds back to
+        -- one column and reads in exactly the order below, which is the order it
+        -- always had.
+        -- ⚠ THE FACTORY BAND IS LEFT FOR BALANCE, and that is the tiebreak rather than
+        -- the rule. Its two rows are visual enough to argue for the right, but there
+        -- they would leave Content alone at three rows against eight; on the left the
+        -- columns hold five and six. A band that could go either way goes to the
+        -- shorter side.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(contentBand, nil, "both")
-            Add(iconBand, nil, "both")
-            Add(textBand, nil, "both")
-            Add(factoryBand, nil, "both")
+            contentBand.layoutColFill = true
+            iconBand.layoutColFill = true
+            textBand.layoutColFill = true
+            factoryBand.layoutColFill = true
+            Add(contentBand, nil, 1)
+            Add(iconBand, nil, 2)
+            Add(textBand, nil, 2)
+            Add(factoryBand, nil, 1)
         end
 
         -- See Also links
