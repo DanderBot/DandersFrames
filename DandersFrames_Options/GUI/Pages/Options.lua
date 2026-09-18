@@ -3466,7 +3466,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- ===== THE PAGE'S ONE BAND ========================================
-        -- Full-width and chromeless: a feature row's popout docks outside the
+        -- Column 1 (full width when the page folds to one column) and chromeless,
+        -- never a 280 box: a feature row's popout docks outside the
         -- WINDOW and runs a beam back to the row, so a row that stopped 280px in
         -- would leave that beam crossing half the page.
         --
@@ -3479,7 +3480,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- banner above already says the one thing that IS true of the whole page.
         local settingsBand
         if tools then
-            settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
         end
 
         -- ===== FRAME MODES (a 280 box in classic, the band's first row) =====
@@ -3763,7 +3764,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 ApplyMinimapButton()
             end
 
-            minimapBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            minimapBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             local minimapRow = minimapBand:AddWidget(GUI:CreateControlRow(self.child, {
                 label = L["Show Minimap Button"],
                 kind  = "checkbox",
@@ -4120,7 +4121,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 260), 60)
             Add(languageGroup, nil, 2)
         else
-            languageBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            languageBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             local languageRow = languageBand:AddWidget(GUI:CreateControlRow(self.child, {
                 -- ⚠ THE CONTROL'S OWN NAME, NOT THE BOX'S TITLE. "Language" named a
                 -- SECTION; the row IS the setting, and "Addon Language" is what the
@@ -4211,14 +4212,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(notifyRow, notifyContent)
         end
 
-        -- The page's three bands -- see the Minimap note for why the trio is added
-        -- here rather than in place. With every one of them full width there is no
-        -- column flow left to unbalance, so the order below is purely reading
-        -- order, and it is the order the page has always read in.
+        -- ===== THE THREE BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
+        -- See the Minimap note for why the trio is added here rather than in place.
+        -- The Frame page's rule: what the page DOES down the left, how it LOOKS down
+        -- the right -- here the five feature rows on the left, the Minimap tick and
+        -- the Language dropdown on the right. On a narrow window the page folds back
+        -- to one column and reads in exactly the order below, which is the order it
+        -- always had.
+        -- ⚠ THE COLUMNS ARE NOT BALANCED, AND CANNOT BE BY COLUMN CHOICE ALONE: five
+        -- rows against two. The five live in ONE band (see its note), so the only
+        -- splits on offer are 5/2, 6/1 and 7/0, and 5/2 is the closest.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(settingsBand, nil, "both")
-            Add(minimapBand, nil, "both")
-            Add(languageBand, nil, "both")
+            settingsBand.layoutColFill = true
+            minimapBand.layoutColFill = true
+            languageBand.layoutColFill = true
+            Add(settingsBand, nil, 1)
+            Add(minimapBand, nil, 2)
+            Add(languageBand, nil, 2)
         end
     end)
 

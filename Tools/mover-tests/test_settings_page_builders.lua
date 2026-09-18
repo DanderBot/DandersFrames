@@ -660,8 +660,14 @@ do
     check(PAGE:find("bandStyle", 1, true) == nil,
           "control rows: the skin is taken from the tools, never restated as a literal")
 
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. The feature-row band fills column 1, the
+    -- Minimap and Language bands column 2 -- the page's two-column split. A band has
+    -- to be BUILT at the width the layout pass will give it, because a group sizes its
+    -- rows off its width at build time; BandWidth's argument says which width that is.
+    local BAND_COL = { settingsBand = 1, minimapBand = 2, languageBand = 2 }
     for _, band in ipairs({ "minimapBand", "languageBand" }) do
-        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[band] .. "), { chromeless = true })", 1, true) ~= nil,
               "control rows: " .. band .. " is chromeless, at the width the layout pass will give it")
         check(PAGE:find(band .. ":AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
               "control rows: ...carrying its one control row")
@@ -707,7 +713,8 @@ do
           "control rows: ...and the language row adopts the entry its dropdown registered")
 
     -- ---- the band ----------------------------------------------------
-    check(PAGE:find("settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+    check(PAGE:find("settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                    .. BAND_COL.settingsBand .. "), { chromeless = true })", 1, true) ~= nil,
           "band: the band is chromeless, at the width the layout pass will give it")
     -- ☠ NO HEADER, AND ONE BAND. These five rows share no word that none of them
     -- says alone, and splitting them would mean inventing two section names the
@@ -748,11 +755,19 @@ do
     end
     -- ☠ EVERY BAND IS ADDED AFTER ITS LAST ROW. `Add` resolves a widget's slot
     -- height on the spot, so a band added before its rows would be measured empty
-    -- -- which is why all three go in together here rather than in place. With
-    -- every one of them full width there is no column flow left to unbalance, so
-    -- the sync-point hole the old note was about cannot arise.
-    check(PAGE:find("if not classicLayout then\n            Add(settingsBand, nil, \"both\")\n            Add(minimapBand, nil, \"both\")\n            Add(languageBand, nil, \"both\")\n        end", 1, true) ~= nil,
-          "order: the popout arm adds the three bands, all of them spanning")
+    -- -- which is why all three go in together here rather than in place.
+    -- Three bands in two columns -- the feature rows left, Minimap and Language
+    -- right -- still ADDED in reading order, because that is the order a narrow
+    -- window folds them back into when the page drops to one column.
+    check(PAGE:find("if not classicLayout then\n            settingsBand.layoutColFill = true\n            minimapBand.layoutColFill = true\n            languageBand.layoutColFill = true\n            Add(settingsBand, nil, 1)\n            Add(minimapBand, nil, 2)\n            Add(languageBand, nil, 2)\n        end", 1, true) ~= nil,
+          "order: the popout arm adds the three bands to their columns, in reading order")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "settingsBand", "minimapBand", "languageBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
 
     -- ...and the CLASSIC order and columns are exactly what they were: modes,
     -- Blizzard and Minimap and Rendering in column 1; Appearance, Language and
