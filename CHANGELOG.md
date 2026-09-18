@@ -16,6 +16,8 @@
 
 ### Bug Fixes
 
+- (Highlights) Changes to Selection, Hover and Aggro Highlight settings now show on your frames straight away, instead of only after you hover the frame or change target.
+- (Settings) Fix memory building up each time you resize the settings window.
 - (Settings) The settings window can no longer be dragged off the edge of the screen. It now stops at the edge, so it cannot be lost somewhere you can't reach it.
 - (Settings) Changing the settings scale no longer slides the window towards the middle of the screen. It now scales where it sits.
 - (Settings) Fix the settings window freezing the game for several seconds every time you opened or closed it after using the search box.
