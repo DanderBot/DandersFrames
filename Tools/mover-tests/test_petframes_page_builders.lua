@@ -190,12 +190,18 @@ do
     -- ⚠ COUNTED BY THE CHROMELESS SKIN, not by the band width alone. The two boxes
     -- that stay boxes are built at the SAME width now (see section 2), so a count
     -- of BandWidth() call sites answers five rather than three.
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Layout and Text fill column 1, Frame column
+    -- 2 (Text is left for balance -- see the page). A band has to be BUILT at the
+    -- width the layout pass will give it, because a group sizes its rows off its
+    -- width at build time; BandWidth's argument says which width that is.
+    local BAND_COL = { petLayoutBand = 1, petFrameBand = 2, petTextBand = 1 }
     local bands = 0
-    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%(%), { chromeless = true }%)") do bands = bands + 1 end
+    for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, tools%.BandWidth%([12]%), { chromeless = true }%)") do bands = bands + 1 end
     eq(bands, 3, "band: three bands, which is how eight rows stop being one list")
     for band, header in pairs({ petLayoutBand = "Layout", petFrameBand = "Frame", petTextBand = "Text" }) do
-        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-              "band: " .. band .. " is chromeless, at the width the layout pass will give it")
+        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[band] .. "), { chromeless = true })", 1, true) ~= nil,
+              "band: " .. band .. " is chromeless, at its column's width")
         check(PAGE:find(band .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. header .. '"]), 40)', 1, true) ~= nil,
               "band: ...and is headed " .. header)
     end
@@ -764,9 +770,16 @@ do
     -- ---- the bands go in after their last row --------------------------
     -- ☠ `Add` resolves a widget's slot height on the spot, so a band has to be
     -- added AFTER the last row has been put into it.
+    -- Layout and Text in column 1, Frame in column 2 (the page's two-column split).
+    local BAND_COL = { petLayoutBand = 1, petFrameBand = 2, petTextBand = 1 }
     for band, rows in pairs({ petLayoutBand = 3, petFrameBand = 3, petTextBand = 2 }) do
-        local bandAdd = PAGE:find("Add(" .. band .. ', nil, "both")', 1, true)
-        check(bandAdd ~= nil, "order: " .. band .. " spans both columns")
+        local bandAdd = PAGE:find("Add(" .. band .. ", nil, " .. BAND_COL[band] .. ")", 1, true)
+        check(bandAdd ~= nil, "order: " .. band .. " sits in column " .. BAND_COL[band])
+        -- ☠ AND FILLS IT. The layout pass only resizes an indented widget
+        -- otherwise, so a band placed in a column without this keeps the width it
+        -- was built at and overhangs its neighbour.
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
         local lastRow, at = nil, 1
         while true do
             local s = PAGE:find(band .. ":AddWidget(GUI:CreatePopoutRow(", at, true)
@@ -783,7 +796,7 @@ do
     -- ...and the bands go in AFTER the two inline boxes, which is what keeps the
     -- page's own enable the first thing on it.
     local generalAdd = PAGE:find("Add(generalGroup, nil, 1)", 1, true)
-    local firstBand  = PAGE:find('Add(petLayoutBand, nil, "both")', 1, true)
+    local firstBand  = PAGE:find("Add(petLayoutBand, nil, 1)", 1, true)
     check(generalAdd ~= nil and firstBand ~= nil and generalAdd < firstBand,
           "order: the enable box is added before the first band")
 

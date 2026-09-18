@@ -806,9 +806,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- rather than any of the rows under it.
         local frameBand, auraBand
         if tools then
-            frameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            frameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             frameBand:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame"]), 40)
-            auraBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            auraBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             auraBand:AddWidget(GUI:CreateHeader(self.child, L["Auras"]), 40)
         end
 
@@ -1425,8 +1425,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ⚠ CONSTRUCTED HERE, ADDED WITH THE BANDS. `Add` resolves a widget's slot
         -- height on the spot, so a band has to go in AFTER the last row is put into
         -- it -- which is why the trio is added together at the foot rather than in
-        -- place. With all three full width there is no column flow left to
-        -- unbalance, so the order below is purely reading order.
+        -- place.
         local resBand
         if classicLayout then
             local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -1434,7 +1433,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             resTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Resurrection Icon Tooltips"], db, "tooltipResurrectionEnabled", nil), 30)
             Add(resTooltipGroup, nil, 2)
         else
-            resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             local resRow = resBand:AddWidget(GUI:CreateControlRow(self.child, {
                 label = L["Resurrection Icon Tooltips"],
                 kind  = "checkbox",
@@ -1452,10 +1451,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- The three bands. See the Resurrection note above for why the trio is
         -- added here rather than in place.
+        -- TWO COLUMNS WHEN THERE IS ROOM: Unit Frame and the Resurrection row down
+        -- the left, Auras down the right. On a narrow window the page folds back to
+        -- one column in the order below, which is the order it always had.
+        -- ⚠ THE RESURRECTION ROW IS LEFT FOR BALANCE. It is a frame icon's tooltip,
+        -- so it could sit either side, and on the right it would leave Unit Frame
+        -- alone at two rows against five; on the left the columns hold three and four.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(frameBand, nil, "both")
-            Add(auraBand, nil, "both")
-            Add(resBand, nil, "both")
+            frameBand.layoutColFill = true
+            auraBand.layoutColFill = true
+            resBand.layoutColFill = true
+            Add(frameBand, nil, 1)
+            Add(auraBand, nil, 2)
+            Add(resBand, nil, 1)
         end
 
         -- Sync point before See Also
@@ -2202,11 +2213,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- three words already ship in enUS; nothing is invented.
         local petLayoutBand, petFrameBand, petTextBand
         if tools then
-            petLayoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            petLayoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             petLayoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
-            petFrameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            petFrameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             petFrameBand:AddWidget(GUI:CreateHeader(self.child, L["Frame"]), 40)
-            petTextBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            petTextBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             petTextBand:AddWidget(GUI:CreateHeader(self.child, L["Text"]), 40)
         end
 
@@ -3267,10 +3278,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- widget's slot height on the spot, so a band has to go in after the last
         -- row has been put into it -- and all three go in after the two full-width
         -- boxes above, which is what keeps the page's own enable first.
+        -- TWO COLUMNS WHEN THERE IS ROOM, under those boxes: Layout and Text down
+        -- the left, Frame down the right. On a narrow window the page folds back to
+        -- one column in the order below.
+        -- ⚠ TEXT IS LEFT FOR BALANCE. The rule would put it with Frame, but Layout
+        -- is two rows in the default attached mode (Group Settings is grouped-only),
+        -- so that would leave two against five; with Text on the left it is four and
+        -- three (five and three when grouped). Its rows are mostly anchors and
+        -- offsets -- where the words sit -- which is what makes it the borderline one.
+        -- ⚠ The two boxes stay full width: each is a control plus the sentence
+        -- explaining it, and "both" is a sync point, so the columns start level
+        -- beneath them.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(petLayoutBand, nil, "both")
-            Add(petFrameBand, nil, "both")
-            Add(petTextBand, nil, "both")
+            petLayoutBand.layoutColFill = true
+            petFrameBand.layoutColFill = true
+            petTextBand.layoutColFill = true
+            Add(petLayoutBand, nil, 1)
+            Add(petFrameBand, nil, 2)
+            Add(petTextBand, nil, 1)
         end
     end)
     

@@ -163,10 +163,14 @@ do
           "tools: ...nor the search row map")
 
     -- ---- the two bands -----------------------------------------------
-    check(PAGE:find("frameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "bands: the Unit Frame band is chromeless, at the width the layout pass will give it")
-    check(PAGE:find("auraBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "bands: ...and so is the Auras band")
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Unit Frame fills column 1, Auras column 2.
+    -- A band has to be BUILT at the width the layout pass will give it, because a
+    -- group sizes its rows off its width at build time; BandWidth's argument says
+    -- which width that is.
+    check(PAGE:find("frameBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
+          "bands: the Unit Frame band is chromeless, at column 1's width")
+    check(PAGE:find("auraBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })", 1, true) ~= nil,
+          "bands: ...and the Auras band at column 2's")
     -- Both hold more than one row, so both name their SECTION. Neither header is
     -- a new locale string.
     check(PAGE:find('frameBand:AddWidget(GUI:CreateHeader(self.child, L["Unit Frame"]), 40)', 1, true) ~= nil,
@@ -523,8 +527,9 @@ do
     -- checkbox wears the row plate, in a chromeless band at the same width.
     check(PAGE:find('label%s*=%s*L%["Resurrection Icon Tooltips"%],\n%s*kind%s*=%s*"checkbox"') ~= nil,
           "control row: Resurrection Icon Tooltips is a checkbox control row")
-    check(PAGE:find("resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "control row: ...in a chromeless band at the width the layout pass will give it")
+    -- Column 1, under the Unit Frame band, for balance (see the page).
+    check(PAGE:find("resBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
+          "control row: ...in a chromeless band at column 1's width")
     check(PAGE:find("resBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
           "control row: ...mounted into that band")
     -- ⚠ NO HEIGHT PASSED. The factory owns the slot (fixedRowHeight plus the
@@ -558,16 +563,23 @@ do
     eq(bare, 7, "boxes: seven bare 280 boxes left, and they are the classic branch's own")
 
     -- ---- the Add order ------------------------------------------------
-    -- Three full-width bands in reading order. With nothing left in a column
-    -- there is no flow to unbalance, so this is purely the order the page reads
-    -- in -- the sync-point hole the old note was about cannot arise.
-    local a = PAGE:find('Add(frameBand, nil, "both")', 1, true)
-    local b = PAGE:find('Add(auraBand, nil, "both")', 1, true)
-    local c = PAGE:find('Add(resBand, nil, "both")', 1, true)
+    -- Three bands in two columns -- Unit Frame and the Resurrection row left, Auras
+    -- right -- still ADDED in reading order, because that is the order a narrow
+    -- window folds them back into when the page drops to one column.
+    local a = PAGE:find("Add(frameBand, nil, 1)", 1, true)
+    local b = PAGE:find("Add(auraBand, nil, 2)", 1, true)
+    local c = PAGE:find("Add(resBand, nil, 1)", 1, true)
     check(a ~= nil and b ~= nil and a < b,
-          "order: the two bands span both columns, hover band first")
+          "order: the two bands sit in their columns, hover band first")
     check(c ~= nil and b ~= nil and b < c,
-          "order: ...and the Resurrection band spans them too, last of the three")
+          "order: ...and the Resurrection band goes in column 1, last of the three")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "frameBand", "auraBand", "resBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
     -- Classic still adds its box at its own slot, in column 2.
     check(PAGE:find("Add(resTooltipGroup, nil, 2)", 1, true) ~= nil,
           "order: classic adds the Resurrection box at its own slot, column 2")
