@@ -796,7 +796,14 @@ local function BuildEffectsTabRows(ctx, shell)
         build  = addMount,
         -- See the effect rows' note: the dependent grey is a real gate here.
         gateWhenDisabled = true,
-        footerStrip = true,
+        -- ☠ COMPACT, NOT A STRIP ROW. This row is a BUTTON: nothing sits on its
+        -- plate, it only opens a panel. A strip row ignores clicks on its plate on
+        -- purpose -- so a drag on a hoisted slider does not also pop the panel -- and
+        -- on a row with nothing to protect that just made it look like a button you
+        -- could only press along the bottom edge (reported 2026-09-18). Compact is
+        -- the kit's one-line row that opens from anywhere, and it is what the Filter
+        -- Designer's rows already use, so an action row now reads like one.
+        compact = true,
     }))
     -- ...and where Sync is called FROM. The kit exposes no per-open hook, so the
     -- row's own OpenPopout is wrapped: it is the one door every open goes through,
@@ -1288,7 +1295,14 @@ local function BuildLayoutTabRows(ctx, shell)
         build  = addMount,
         -- See the effect rows' note: the dependent grey is a real gate here.
         gateWhenDisabled = true,
-        footerStrip = true,
+        -- ☠ COMPACT, NOT A STRIP ROW. This row is a BUTTON: nothing sits on its
+        -- plate, it only opens a panel. A strip row ignores clicks on its plate on
+        -- purpose -- so a drag on a hoisted slider does not also pop the panel -- and
+        -- on a row with nothing to protect that just made it look like a button you
+        -- could only press along the bottom edge (reported 2026-09-18). Compact is
+        -- the kit's one-line row that opens from anywhere, and it is what the Filter
+        -- Designer's rows already use, so an action row now reads like one.
+        compact = true,
     }))
     if not ctx.adEnabled then addRow.disableOn = function() return true end end
     Add(addBand, nil, "both")
