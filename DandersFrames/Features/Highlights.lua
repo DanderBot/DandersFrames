@@ -1156,6 +1156,29 @@ end
 -- Expose for external use
 DF.UpdateAllHighlights = UpdateAllHighlights
 
+-- ☠ A SETTINGS COMMIT NEVER REPAINTED THE LIVE HIGHLIGHTS. Every settings widget
+-- commits through DF:UpdateAll (slider release / typed value, dropdown pick, colour
+-- picker close), which lands in UpdateAll_Now. In Test Mode that reaches
+-- RefreshTestFrames -> UpdateTestFrame -> UpdateHighlights, so the preview was right.
+-- On LIVE frames it reaches UpdateAllFrames_Now / UpdateRaidLayout_Now, which only run
+-- ApplyFrameLayout -- no highlight paint -- so the selected frame kept whatever the
+-- drag-time LightweightUpdateHighlight left behind (four solid lines; no Mode, no Frame
+-- Level, nothing for Corners/Glow/Animated/Dashed) until a hover or target change
+-- repainted it. Changing Mode repainted nothing at all.
+-- ★ The same repaint PLAYER_TARGET_CHANGED uses, not a copy of it. Test Mode is skipped:
+-- UpdateAll_Now already repainted the test frames, and UpdateHighlights on a LIVE frame
+-- during Test Mode takes its forced-selection-by-index branch.
+-- ⚠ No combat guard needed: highlights are plain UIParent children, and this is the
+-- exact path the target-change event already runs in combat. In practice the scheduler
+-- holds UpdateAll_Now until PLAYER_REGEN_ENABLED anyway, and that event repaints too.
+if DF.UpdateAll_Now then
+    hooksecurefunc(DF, "UpdateAll_Now", function()
+        -- partyHeader: the same "initialised yet" gate the event handler below uses.
+        if not DF.partyHeader or DF.testMode or DF.raidTestMode then return end
+        UpdateAllHighlights()
+    end)
+end
+
 -- ============================================================
 -- EVENT-DRIVEN HIGHLIGHTS (Replaces timer-based updates)
 -- ============================================================
