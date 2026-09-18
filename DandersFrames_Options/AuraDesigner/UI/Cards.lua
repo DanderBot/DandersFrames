@@ -3813,10 +3813,30 @@ end
 -- (the memo over it persists across row rebinds while the picker is up),
 -- hide the tab surfaces the overlay replaces, and open the shared picker
 -- over the right panel.
+-- ☠☠ ONE OVERLAY AT A TIME, ENFORCED -- the note on OpenADFilterPicker below says only one
+-- of the two can be up, and nothing made it true. Both pickers store themselves in the SAME
+-- S.adPickerHandle, so opening one over the other did not just overlap them: it overwrote
+-- the only handle to the first, and CloseADPicker could never reach it again. The first
+-- stayed on screen, orphaned. Reported 2026-09-18: Add Indicator -> Select Spell -> Select
+-- Filter left both lists showing on top of each other.
+-- ⚠ THE DIRTY FLAG IS CARRIED, NOT SPENT. Closing a picker runs ADPickerClosed, which
+-- re-runs SwitchTab when something was added through it -- and doing that mid-swap would
+-- rebuild the pane whose button started the swap, out from under the picker about to open
+-- on it. So the outgoing close is told nothing is dirty, and the flag moves to the picker
+-- that replaces it; its own close runs the refresh once, at the end.
+local function SwapOutADPicker()
+    local carry = S.adPickerDirty and true or false
+    if S.adPickerHandle and S.adPickerHandle:IsOpen() then
+        S.adPickerDirty = false
+        S.adPickerHandle:Close()
+    end
+    return carry
+end
 local function OpenADPicker(opts)
+    local carry = SwapOutADPicker()
     S.spellPickerBlockedIDs = CrossPoolTrackedIDs()
     wipe(spellPickerBlockCache)
-    S.adPickerDirty = false
+    S.adPickerDirty = carry
     if S.tabBar then S.tabBar:Hide() end
     if S.tabScrollFrame then S.tabScrollFrame:Hide() end
     -- ☠ THE PICKER TAKES A HOST TO COVER, AND THE POPOUT LAYOUT HAS NO RIGHT
@@ -3867,7 +3887,7 @@ end
 -- remember to close, and the one nobody remembered would be the one that leaked.
 -- Only one of the two overlays can be up at a time -- both cover the whole host.
 local function OpenADFilterPicker(opts)
-    S.adPickerDirty = false
+    S.adPickerDirty = SwapOutADPicker()
     if S.tabBar then S.tabBar:Hide() end
     if S.tabScrollFrame then S.tabScrollFrame:Hide() end
     opts.parent = S.rightPanel or (GUI and GUI.contentFrame)
