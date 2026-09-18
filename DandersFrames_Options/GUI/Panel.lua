@@ -946,7 +946,13 @@ function DF:CreateGUI()
     -- never the display text, which changes with the client's language.
     local LAYOUT_OPTIONS = {
         _order  = { "compact", "classic" },
-        compact = { value = "compact", text = L["Compact"] },
+        -- ⚠ SHOWN AS "MODERN", STILL KEYED "compact". The value is the menu's stable
+        -- identifier and nothing persists it (the saved field is the classicSettings
+        -- boolean), so only the word the user reads changed. "Compact" undersold it:
+        -- this is the ROOMIER layout -- two columns, settings inline -- and read like
+        -- the smaller option. Its own label, because L["Compact"] also names an
+        -- unrelated Indicators option that keeps its word.
+        compact = { value = "compact", text = L["Modern"] },
         classic = { value = "classic", text = L["Classic"] },
     }
     local layoutChip = GUI:CreateDropdown(

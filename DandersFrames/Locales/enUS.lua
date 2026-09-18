@@ -1313,6 +1313,7 @@ L["Missing Health Alpha"] = true
 L["Missing Health Color"] = true
 L["Missing Health Only"] = true
 L["Missing Health Texture"] = true
+L["Modern"] = true
 L["Melee DPS"] = true
 L["Match ALL groups"] = true
 L["Match ANY group"] = true
