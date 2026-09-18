@@ -1562,8 +1562,11 @@ function DF:CreateGUI()
             if DF.ClickCast and DF.ClickCast.RefreshSpellGrid then
                 DF.ClickCast:RefreshSpellGrid(true)
             end
-        elseif GUI.RefreshCurrentPage then
-            GUI:RefreshCurrentPage()
+        elseif GUI.RelayoutCurrentPage then
+            -- ☠ RE-LAY, NEVER REBUILD. A resize changes the page's SIZE, not its content,
+            -- and RefreshCurrentPage rebuilds -- leaking the whole previous page into
+            -- GUI._trashFrame on every release of this grip. See RelayoutCurrentPage.
+            GUI.RelayoutCurrentPage()
         end
     end)
     
@@ -3057,6 +3060,48 @@ function DF:CreateGUI()
     -- helper is reached as a pool tab of the designer, so nothing needs the rail to disagree
     -- with the page any more. Grepped across all four addon folders plus *.xml and *.toc
     -- before removing: no callers.
+
+    -- ★★★ RE-LAY THE CURRENT PAGE WITHOUT REBUILDING IT -- for a change of SIZE, not of
+    -- content.
+    --
+    -- ☠☠ WHY THIS EXISTS: RefreshCurrentPage REBUILDS, AND EVERY REBUILD LEAKS. It calls
+    -- page:Refresh(), which is DoBuild: every widget on the page is hidden and parked in
+    -- GUI._trashFrame, and a fresh set is built. WoW never collects a frame, and nothing
+    -- ever empties the trash -- so each rebuild keeps the whole previous page, and the Lua
+    -- tables and closures hanging off it, alive until /reload. Measured in game
+    -- (2026-09-18): the rebuild allocates ~804 KB a call; the relayout below, 35 KB.
+    -- The resize grip ran the rebuild on every release -- one click on it leaked a page.
+    -- Reported as "memory climbs in both Options and DandersMover when resizing, and
+    -- only /reload gives it back": the kit's options half bills to Options, its base
+    -- half to whichever addon's embedded copy won the load race.
+    --
+    -- ⚠ RefreshStates IS RUN TWICE, AND THE SECOND PASS IS NOT A MISTAKE. Inside it the
+    -- groups lay their rows out FIRST and the layout loop sets their widths AFTER. After a
+    -- resize that order lays every row out against the OLD width and only then widens the
+    -- group around it -- the rows are a pass behind. The rebuild used to hide that, because
+    -- it constructs each band at the new width to begin with. The second pass lays the rows
+    -- out against the widths the first pass just set. Two relayouts still cost a fraction
+    -- of one rebuild, and leak nothing.
+    -- ⚠ WHAT IT SKIPS, ON PURPOSE: the rebuild itself, the theme recolour and the modified-
+    -- setting marks. A resize changes none of what those read.
+    -- ⚠ A PAGE THAT BAKES A WIDTH INTO ITS BUILD needs its own OnSizeChanged to follow a
+    -- resize now, because nothing rebuilds it any more. The Filter Designer and the Aura
+    -- Designer already carry one; a page that reads wrong after a resize and fixes itself
+    -- on a tab change is the symptom of one that does not.
+    GUI.RelayoutCurrentPage = function()
+        if DF.Search and DF.Search.LayoutResults
+            and DF.Search.ResultsPanel and DF.Search.ResultsPanel:IsShown() then
+            DF.Search:LayoutResults()
+        end
+        if GUI.SelectedMode == "clicks" then return end
+        local page = GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName]
+        if not page then return end
+        GUI:AdoptPage(page)
+        if page.RefreshStates then
+            page:RefreshStates()
+            page:RefreshStates()
+        end
+    end
 
     GUI.RefreshCurrentPage = function()
         -- ☠ THE SEARCH RESULTS RE-FLOW HERE TOO, and this is the only place they can.
