@@ -399,14 +399,30 @@ end
 -- They coincide only when the user runs the "pixel perfect" UI scale exactly, which
 -- is why this hid for so long. See the pre-snap note in DF:UpdateHighlights.
 --
+-- ☠ BUT THE EFFECTIVE SCALE ALONE IS NOT A DEVICE PIXEL. value * scale is UI units at
+-- scale 1; a real pixel is also physicalHeight/768 of those. Snapping to the former
+-- left thickness 2 at 1440p / 0.5333 as 3.75px and Inset -9/-10 as 9.375px, and the
+-- renderer rounds each edge of a line on its own -- so the drawn thickness changed
+-- with the inset ("Inset -9 or -10 loses 1px", 2026-09). Pixels per unit is the
+-- kit's DandersUI/Theme.lua PixelsPerUnit, identical maths: eff * physH / 768. Keep
+-- the two in step. If the screen size is unusable, fall back to the old scale-only
+-- snap rather than erroring.
+local function HighlightPixelsPerUnit(scale)
+    if not scale or scale <= 0 then return nil end
+    local _, physH = GetPhysicalScreenSize()
+    if not physH or physH <= 0 then return scale end
+    return scale * physH / 768
+end
+
 -- Round UP (with an epsilon for exact integers) rather than to nearest: a thickness
 -- of 1 must never round to 0 device pixels and vanish, and every +1 step on the
 -- slider has to be visible.
 function DF:SnapHighlightThickness(thickness, scale)
-    if not scale or scale <= 0 then return thickness end
-    local px = (thickness or 0) * scale                -- desired thickness in device pixels
+    local ppu = HighlightPixelsPerUnit(scale)
+    if not ppu then return thickness end
+    local px = (thickness or 0) * ppu                  -- desired thickness in device pixels
     px = math.max(1, math.ceil(px - 0.01))
-    return px / scale
+    return px / ppu
 end
 
 -- Inset lands on the physical grid too: a fractional inset makes a 1px edge straddle
@@ -414,8 +430,9 @@ end
 -- minimum and 0 must stay 0.
 function DF:SnapHighlightInset(inset, scale)
     if not inset or inset == 0 then return inset end
-    if not scale or scale <= 0 then return inset end
-    return math.floor(inset * scale + 0.5) / scale
+    local ppu = HighlightPixelsPerUnit(scale)
+    if not ppu then return inset end
+    return math.floor(inset * ppu + 0.5) / ppu
 end
 
 -- ☠ THE SIGNATURE MUST INCLUDE THE THREE IMPLICIT INPUTS, not just the arguments.
@@ -511,24 +528,8 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         
     elseif mode == "ANIMATED" or mode == "DASHED" then
         DF:InitAnimatedBorder(ch)
-        -- ☠ WHOLE DEVICE PIXELS, OR THE ANTS LOSE A ROW AT SOME INSETS. The snap above
-        -- multiplies by the effective scale only, so its "pixels" are UI units at
-        -- scale 1 -- a real device pixel is also physicalHeight/768 of those. At
-        -- 1440p / 0.5333 that leaves thickness 2 as 3.75px and inset -9 or -10 (both
-        -- snap to the same value) as 9.375px, and the renderer rounds each dash's
-        -- outer and inner edge separately: 9.375 -> 9 and 5.625 -> 6 is 3px, where
-        -- every other inset draws 4 ("-9 or -10 loses 1px", 2026-09). Rounding both
-        -- to whole device pixels here makes the two edges share one fraction, so the
-        -- drawn thickness cannot depend on the inset. ANIMATED/DASHED only: SOLID
-        -- shares the maths but is left as it looks today.
-        local _, physH = GetPhysicalScreenSize()
-        local ppu = (physH and physH > 0 and scale and scale > 0) and (physH / 768) * scale
-        if ppu then
-            thickness = math.max(1, math.floor(thickness * ppu + 0.5)) / ppu
-            if inset and inset ~= 0 then
-                inset = math.floor(inset * ppu + 0.5) / ppu
-            end
-        end
+        -- Thickness and inset are already whole device pixels (snapped above), which
+        -- is what keeps the dashes' thickness independent of the inset.
         ch.animThickness = thickness
         ch.animInset = inset
         ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
