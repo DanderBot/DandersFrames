@@ -3465,22 +3465,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             Add(banner, banner.layoutHeight, "both")
         end
 
-        -- ===== THE PAGE'S ONE BAND ========================================
-        -- Column 1 (full width when the page folds to one column) and chromeless,
-        -- never a 280 box: a feature row's popout docks outside the
+        -- ===== THE PAGE'S TWO FEATURE-ROW BANDS ===========================
+        -- Chromeless and column-width (full width when the page folds to one
+        -- column), never a 280 box: a feature row's popout docks outside the
         -- WINDOW and runs a beam back to the row, so a row that stopped 280px in
         -- would leave that beam crossing half the page.
         --
-        -- ⚠ NO HEADER ON IT, and ONE band rather than two. A header names a
-        -- SECTION, and these five rows share no word that none of them says
-        -- alone: "Frame Modes", "Blizzard Frames" and "Rendering" are not a
-        -- section anyone would call anything, and neither are "Settings Panel
-        -- Appearance" and "Notifications". Splitting them would mean inventing two
-        -- section names -- and the classic page never had them either; the info
-        -- banner above already says the one thing that IS true of the whole page.
-        local settingsBand
+        -- ⚠ TWO BANDS NOW, SPLIT FOR THE TWO COLUMNS -- and still NO HEADER ON
+        -- EITHER. Frame Modes, Blizzard Frames and Notifications (what the addon
+        -- DOES) go down the left in settingsBand; Rendering and Settings Panel
+        -- Appearance (how things LOOK) go down the right in looksBand, above the
+        -- Minimap and Language rows. That is the rule every converted page follows,
+        -- and it is also the only way to balance the columns: kept as one band the
+        -- page stood at five rows against two, split it stands at three against
+        -- four. The split is by COLUMN, not by section, so neither band is a
+        -- section anyone would call anything, and a header would mean inventing a
+        -- name the classic page never had; the info banner above already says the
+        -- one thing that IS true of the whole page.
+        local settingsBand, looksBand
         if tools then
             settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
+            looksBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
         end
 
         -- ===== FRAME MODES (a 280 box in classic, the band's first row) =====
@@ -3915,7 +3920,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local renderMount, renderContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildRenderingGroup({ group = group, parent = holder, refreshStates = reflow })
             end, nil, { inline = true })
-            local renderRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+            local renderRow = looksBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Rendering"],
                 -- ⚠ THE ACCOUNT-WIDE TABLE, because that is where the one key the
                 -- summary reads lives. This group is genuinely split across two
@@ -4055,7 +4060,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local appearanceMount, appearanceContent = tools.PopoutContent(function(group, holder, reflow)
                 BuildPanelAppearanceGroup({ group = group, parent = holder, refreshStates = reflow })
             end, nil, { inline = true })
-            local appearanceRow = settingsBand:AddWidget(GUI:CreatePopoutRow(self.child, {
+            local appearanceRow = looksBand:AddWidget(GUI:CreatePopoutRow(self.child, {
                 label   = L["Settings Panel Appearance"],
                 -- The profile ROOT again: settingsFont and settingsFontOutline are
                 -- stored there, not per mode.
@@ -4212,24 +4217,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.ClaimKeys(notifyRow, notifyContent)
         end
 
-        -- ===== THE THREE BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
-        -- See the Minimap note for why the trio is added here rather than in place.
+        -- ===== THE FOUR BANDS: TWO COLUMNS WHEN THERE IS ROOM ===============
+        -- See the Minimap note for why they are added here rather than in place.
         -- The Frame page's rule: what the page DOES down the left, how it LOOKS down
-        -- the right -- here the five feature rows on the left, the Minimap tick and
-        -- the Language dropdown on the right. On a narrow window the page folds back
-        -- to one column and reads in exactly the order below, which is the order it
-        -- always had.
-        -- ⚠ THE COLUMNS ARE NOT BALANCED, AND CANNOT BE BY COLUMN CHOICE ALONE: five
-        -- rows against two. The five live in ONE band (see its note), so the only
-        -- splits on offer are 5/2, 6/1 and 7/0, and 5/2 is the closest.
+        -- the right -- here Frame Modes, Blizzard Frames and Notifications on the
+        -- left (three rows), Rendering, Settings Panel Appearance, the Minimap tick
+        -- and the Language dropdown on the right (four).
+        -- ⚠ THE LOOKS BAND IS ADDED STRAIGHT AFTER settingsBand. On a narrow window
+        -- the page folds back to one column in Add order, so it reads: the three
+        -- feature rows, the two looks rows, then the two single-control rows --
+        -- every feature row together, and the plain controls last, as before.
         -- ⚠ layoutColFill is what makes each band track its column (see the Frame
         -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
         -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
             settingsBand.layoutColFill = true
+            looksBand.layoutColFill = true
             minimapBand.layoutColFill = true
             languageBand.layoutColFill = true
             Add(settingsBand, nil, 1)
+            Add(looksBand, nil, 2)
             Add(minimapBand, nil, 2)
             Add(languageBand, nil, 2)
         end

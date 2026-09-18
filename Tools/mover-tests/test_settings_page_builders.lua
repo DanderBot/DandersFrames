@@ -660,11 +660,11 @@ do
     check(PAGE:find("bandStyle", 1, true) == nil,
           "control rows: the skin is taken from the tools, never restated as a literal")
 
-    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. The feature-row band fills column 1, the
-    -- Minimap and Language bands column 2 -- the page's two-column split. A band has
-    -- to be BUILT at the width the layout pass will give it, because a group sizes its
-    -- rows off its width at build time; BandWidth's argument says which width that is.
-    local BAND_COL = { settingsBand = 1, minimapBand = 2, languageBand = 2 }
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. The DOES band fills column 1, the looks band
+    -- and the Minimap and Language bands column 2 -- the page's two-column split. A
+    -- band has to be BUILT at the width the layout pass will give it, because a group
+    -- sizes its rows off its width at build time; BandWidth's argument says which.
+    local BAND_COL = { settingsBand = 1, looksBand = 2, minimapBand = 2, languageBand = 2 }
     for _, band in ipairs({ "minimapBand", "languageBand" }) do
         check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
                         .. BAND_COL[band] .. "), { chromeless = true })", 1, true) ~= nil,
@@ -712,25 +712,35 @@ do
     check(PAGE:find('tools.RegisterControlRow(languageRow, "dropdown", "languageOverride")', 1, true) ~= nil,
           "control rows: ...and the language row adopts the entry its dropdown registered")
 
-    -- ---- the band ----------------------------------------------------
-    check(PAGE:find("settingsBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
-                    .. BAND_COL.settingsBand .. "), { chromeless = true })", 1, true) ~= nil,
-          "band: the band is chromeless, at the width the layout pass will give it")
-    -- ☠ NO HEADER, AND ONE BAND. These five rows share no word that none of them
-    -- says alone, and splitting them would mean inventing two section names the
-    -- classic page never had.
-    check(PAGE:find("settingsBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
-          "band: ...and carries no header, because its rows share no word")
-    local order = {}
-    for name in PAGE:gmatch("settingsBand:AddWidget%(GUI:CreatePopoutRow%(self%.child, {\n%s*label%s*=%s*L%[\"([^\"]+)\"%]") do
-        order[#order + 1] = name
+    -- ---- the two feature-row bands ------------------------------------
+    -- ⚠ TWO BANDS, SPLIT FOR THE TWO COLUMNS: what the page DOES (settingsBand,
+    -- column 1) and how things LOOK (looksBand, column 2). One band stood at five
+    -- rows against the right column's two; split, the columns hold three and four.
+    for _, band in ipairs({ "settingsBand", "looksBand" }) do
+        check(PAGE:find(band .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[band] .. "), { chromeless = true })", 1, true) ~= nil,
+              "band: " .. band .. " is chromeless, at the width the layout pass will give it")
+        -- ☠ NO HEADER ON EITHER. The split is by column, not by section, so a
+        -- header would mean inventing a section name the classic page never had.
+        check(PAGE:find(band .. ":AddWidget(GUI:CreateHeader", 1, true) == nil,
+              "band: ..." .. band .. " carries no header, because its rows share no word")
     end
-    eq(#order, 5, "band: five rows go into the band")
+    local function rowsOf(band)
+        local order = {}
+        for name in PAGE:gmatch(band .. ":AddWidget%(GUI:CreatePopoutRow%(self%.child, {\n%s*label%s*=%s*L%[\"([^\"]+)\"%]") do
+            order[#order + 1] = name
+        end
+        return order
+    end
+    local order = rowsOf("settingsBand")
+    eq(#order, 3, "band: three rows go into the left band")
     eq(order[1], "Frame Modes",               "band: the mode enables open it")
     eq(order[2], "Blizzard Frames",           "band: ...then Blizzard Frames")
-    eq(order[3], "Rendering",                 "band: ...then Rendering, closing classic's column 1")
-    eq(order[4], "Settings Panel Appearance", "band: ...then column 2's first box")
-    eq(order[5], "Notifications",             "band: ...and Notifications last, as in classic")
+    eq(order[3], "Notifications",             "band: ...and Notifications last, as in classic")
+    local looks = rowsOf("looksBand")
+    eq(#looks, 2, "band: two rows go into the looks band")
+    eq(looks[1], "Rendering",                 "band: the looks band opens with Rendering, closing classic's column 1")
+    eq(looks[2], "Settings Panel Appearance", "band: ...then column 2's first box")
 
     -- ---- the banner --------------------------------------------------
     -- Untouched, and still the first thing on the page: it is the sentence that
@@ -755,16 +765,17 @@ do
     end
     -- ☠ EVERY BAND IS ADDED AFTER ITS LAST ROW. `Add` resolves a widget's slot
     -- height on the spot, so a band added before its rows would be measured empty
-    -- -- which is why all three go in together here rather than in place.
-    -- Three bands in two columns -- the feature rows left, Minimap and Language
-    -- right -- still ADDED in reading order, because that is the order a narrow
-    -- window folds them back into when the page drops to one column.
-    check(PAGE:find("if not classicLayout then\n            settingsBand.layoutColFill = true\n            minimapBand.layoutColFill = true\n            languageBand.layoutColFill = true\n            Add(settingsBand, nil, 1)\n            Add(minimapBand, nil, 2)\n            Add(languageBand, nil, 2)\n        end", 1, true) ~= nil,
-          "order: the popout arm adds the three bands to their columns, in reading order")
+    -- -- which is why all four go in together here rather than in place.
+    -- Four bands in two columns -- the DOES rows left; the looks rows, Minimap and
+    -- Language right -- still ADDED in reading order, because that is the order a
+    -- narrow window folds them back into when the page drops to one column: every
+    -- feature row together, the plain controls last.
+    check(PAGE:find("if not classicLayout then\n            settingsBand.layoutColFill = true\n            looksBand.layoutColFill = true\n            minimapBand.layoutColFill = true\n            languageBand.layoutColFill = true\n            Add(settingsBand, nil, 1)\n            Add(looksBand, nil, 2)\n            Add(minimapBand, nil, 2)\n            Add(languageBand, nil, 2)\n        end", 1, true) ~= nil,
+          "order: the popout arm adds the four bands to their columns, in reading order")
     -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
     -- widget otherwise, so a band placed in a column without this keeps the width it
     -- was built at and overhangs its neighbour.
-    for _, band in ipairs({ "settingsBand", "minimapBand", "languageBand" }) do
+    for _, band in ipairs({ "settingsBand", "looksBand", "minimapBand", "languageBand" }) do
         check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
               "order: " .. band .. " fills its column rather than keeping its build width")
     end
