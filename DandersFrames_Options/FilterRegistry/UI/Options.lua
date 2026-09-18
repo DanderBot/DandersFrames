@@ -372,7 +372,54 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- DoBuild wipes child.ThemeListeners and retires Add()ed children on every
     -- rebuild, so the guard path re-adopts the height spacer and re-registers
     -- the theme listener before refreshing.
-    if pageRef._filterDesignerBuilt then
+    --
+    -- ☠☠ ONCE PER LAYOUT, NOT ONCE PER SESSION. The guard below used to test the built
+    -- flag alone, and the Classic/Modern choice is made further down (the `tools` read)
+    -- -- so it was made exactly ONCE, on the first build, and every later "rebuild" re-
+    -- adopted that first build's frames and returned. Switch layouts and the page stayed
+    -- in the one it was first built in, through tab changes too, until /reload cleared
+    -- the flag (reported 2026-09-18; every other page, having no such guard, switched
+    -- fine). Now the reuse path only runs when the frames were built for the layout
+    -- that is on now.
+    local classicNow = DF:IsClassicSettingsLayout() and true or false
+    if pageRef._filterDesignerBuilt and pageRef._fdBuiltClassic ~= classicNow then
+        -- ☠ THE LAYOUT CHANGED, SO THE OLD FRAMES HAVE TO BE RETIRED BY HAND. DoBuild only
+        -- retires what was Add()ed, and Classic's main panels (leftPanel, rightArea,
+        -- chipRow) sit straight on the page child WITHOUT being Add()ed -- the re-adopt
+        -- path only ever handed back the spacer. A fresh Modern build on top of them
+        -- would draw both layouts at once.
+        -- ⇒ Anything still on the page child that is not in THIS build's children list is
+        -- a leftover from the previous one. The only things this DoBuild has Add()ed by
+        -- now are the ones the page wrapper adds BEFORE calling here (the copy button);
+        -- everything the wrapper adds afterwards does not exist yet.
+        do
+            local keep = {}
+            for _, w in ipairs(pageRef.children or {}) do keep[w] = true end
+            local trash = guiRef and guiRef._trashFrame
+            for _, c in ipairs({ pageRef.child:GetChildren() }) do
+                if not keep[c] then
+                    c:Hide()
+                    c:ClearAllPoints()
+                    if trash then c:SetParent(trash) end
+                end
+            end
+        end
+        -- ⚠ AND ITS HOOKS WITH IT. Several are set by only ONE layout -- _fdAdoptBands by
+        -- Modern, _fdSpacer by Classic -- and the reuse path below reaches for them. Left
+        -- standing, a Modern adopter would re-add retired Modern bands onto a Classic page.
+        -- The fresh build reassigns every one its own layout uses.
+        pageRef._fdAdoptBands, pageRef._fdSpacer = nil, nil
+        pageRef._fdRefreshAll, pageRef._fdResolvePanelHeight = nil, nil
+        pageRef._fdThemeListener, pageRef._fdScrollToFilters = nil, nil
+        pageRef._fdOpenFilterPanel, pageRef._fdNewFilter = nil, nil
+        pageRef._fdFocusFilter, pageRef._fdFocusNewFilter = nil, nil
+    end
+    -- ⚠ KEYED ON THE LAYOUT, NOT ON THE BUILT FLAG ALONE -- and deliberately not by
+    -- clearing the flag. Clearing it is the rejected fix for a DIFFERENT problem (forcing a
+    -- rebuild whenever a filter is added snaps the user's open panel shut and leaks the
+    -- old frames); a layout switch is rare and genuinely needs different frames, so it
+    -- falls through here instead, and the full build below re-stamps both fields.
+    if pageRef._filterDesignerBuilt and pageRef._fdBuiltClassic == classicNow then
         local p = pageRef.child
         p.ThemeListeners = p.ThemeListeners or {}
         table.insert(p.ThemeListeners, pageRef._fdThemeListener)
@@ -397,6 +444,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef, Add, AddSpace)
         return
     end
     pageRef._filterDesignerBuilt = true
+    -- Which layout these frames belong to -- the guard above compares against it.
+    pageRef._fdBuiltClassic = classicNow
 
     local GUI = guiRef
     local parent = pageRef.child

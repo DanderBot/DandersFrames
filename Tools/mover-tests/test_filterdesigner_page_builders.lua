@@ -168,7 +168,9 @@ do
     -- once has to hand its roots back through the fresh Add it is given.
     check(SRC:find("pageRef._fdAdoptBands = AdoptBands", 1, true) ~= nil,
           "bands: the adopt pass is published for the rebuild guard")
-    local guard = SRC:match("if pageRef%._filterDesignerBuilt then(.-)\n        return\n    end")
+    -- The reuse guard is keyed on the layout as well as the built flag (see the
+    -- "built for the current layout" checks below), so its first line names both.
+    local guard = SRC:match("if pageRef%._filterDesignerBuilt and pageRef%._fdBuiltClassic == classicNow then(.-)\n        return\n    end")
     check(guard ~= nil, "bands: the rebuild guard can be read")
     guard = guard or ""
     check(guard:find("pageRef._fdAdoptBands(Add)", 1, true) ~= nil,
@@ -315,6 +317,20 @@ do
     -- user is working in would snap shut each time.
     check(SRC:find("pageRef._filterDesignerBuilt = nil", 1, true) == nil,
           "rows: nothing forces a page rebuild to show a new filter")
+
+    -- ☠☠ BUT THE BUILD-ONCE GUARD IS KEYED ON THE LAYOUT. It tested the built flag alone,
+    -- and the Classic/Modern choice is made inside the full build -- so the page kept the
+    -- layout it was first built in until /reload, through every layout switch and tab
+    -- change (2026-09-18). A layout switch genuinely needs different frames, so the reuse
+    -- path must only run when the frames on the page were built for the layout that is on.
+    check(SRC:find("if pageRef._filterDesignerBuilt and pageRef._fdBuiltClassic == classicNow then", 1, true) ~= nil,
+          "rows: the frames are reused only when they were built for the current layout")
+    check(SRC:find("pageRef._fdBuiltClassic = classicNow", 1, true) ~= nil,
+          "rows: ...and the full build records which layout that was")
+    -- ...and the switch retires the previous layout's frames by hand, because Classic's
+    -- main panels sit on the page child without being Add()ed, so DoBuild never sees them.
+    check(SRC:find("if pageRef._filterDesignerBuilt and pageRef._fdBuiltClassic ~= classicNow then", 1, true) ~= nil,
+          "rows: a layout switch retires the old layout's frames before building the new one")
 
     local refresh = SRC:match("RefreshFilterRows = function%(%)(.-)\n        end")
     check(refresh ~= nil, "rows: the list refresh can be read on its own")
