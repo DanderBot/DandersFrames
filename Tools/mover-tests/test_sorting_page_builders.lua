@@ -432,14 +432,17 @@ do
     check(a ~= nil and b ~= nil and b > a, "the Sorting page builder is locatable by its own ends")
     local PAGE = SRC:sub(a or 1, b or 1)
 
-    -- ---- the box that is left is FULL WIDTH -------------------------
+    -- ---- the box that is left is BAND WIDTH -------------------------
     -- FrameSort Integration is a tick plus its paragraph, so it cannot be a
-    -- control row -- but it stops standing in a column, which is the alignment
-    -- rule. One site, one skin, and the width comes from the tools.
+    -- control row -- but it stops being a 280 box, which is the alignment rule:
+    -- it fills its column like the bands beside it. One site, one skin, and the
+    -- width comes from the tools.
     local narrow = 0
     for _ in PAGE:gmatch("GUI:CreateSettingsGroup%(self%.child, 280, tools") do narrow = narrow + 1 end
     eq(narrow, 0, "inline: no box on this page is still mounted at a column's 280")
-    check(PAGE:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)", 1, true) ~= nil,
+    -- ⚠ BandWidth(1): the box sits in column 1 now, so it asks the helper for that
+    -- column's width. The claim is unchanged -- it asks, rather than naming a literal.
+    check(PAGE:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), tools.INLINE_BOX)", 1, true) ~= nil,
           "inline: FrameSort Integration is built at the band's width, wearing the band skin")
     check(PAGE:find("local frameSortGroup = GUI:CreateSettingsGroup(self.child, 280)", 1, true) ~= nil,
           "inline: ...and classic still builds the bare 280 box it always built")
@@ -460,8 +463,8 @@ do
           "control row: no popout row -- a pane holding one dropdown buys nothing")
     check(PAGE:find('label     = L["Self Position"],\n                kind      = "dropdown",', 1, true) ~= nil,
           "control row: Self Position is a dropdown control row")
-    check(PAGE:find("local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "control row: ...in a chromeless band at the width the layout pass will give it")
+    check(PAGE:find("local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
+          "control row: ...in a chromeless band at column 1's width")
     check(PAGE:find("selfPosBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
           "control row: ...mounted into that band")
     check(PAGE:find("selfPosBand:AddWidget(GUI:CreateHeader", 1, true) == nil,
@@ -501,10 +504,11 @@ do
           "control row: ...and both of the box's own gates")
 
     -- ---- the two bands ----------------------------------------------
-    check(SRC:find("sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "bands: the sorting band is chromeless, at the width the layout pass will give it")
-    check(SRC:find("priorityBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "bands: ...and so is the priority band")
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH: sorting in column 1, Priority in column 2.
+    check(SRC:find("sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
+          "bands: the sorting band is chromeless, at column 1's width")
+    check(SRC:find("priorityBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })", 1, true) ~= nil,
+          "bands: ...and the priority band at column 2's")
     -- A header names a SECTION. One row that already says its own name gets
     -- none; two rows that share a word get that word.
     check(SRC:find('priorityBand:AddWidget(GUI:CreateHeader(self.child, L["Priority"]), 40)', 1, true) ~= nil,
@@ -522,23 +526,45 @@ do
             if e.name == name and (col == nil or e.col == col) then return i end
         end
     end
-    -- ☠ EVERY TOP-LEVEL OBJECT IS "both" NOW, which is the alignment rule stated
-    -- as an Add: two bands, one full-width box and one control row's band, all
-    -- sync points. With no column flow left there is no hole for one to strand,
-    -- so the order below is purely the page's own reading order -- and it is the
-    -- order it always read in.
-    check(indexOf("sortBand", '"both"') ~= nil, "order: the sorting band spans both columns")
-    check(indexOf("priorityBand", '"both"') ~= nil, "order: ...and so does the priority band")
-    check(indexOf("frameSortGroup", '"both"') ~= nil, "order: ...and so does the FrameSort box")
-    check(indexOf("selfPosBand", '"both"') ~= nil, "order: ...and so does the Self Position band")
-    check(indexOf("frameSortGroup", "1") ~= nil, "order: classic still puts the FrameSort box in column 1")
+    -- ⚠ THE LAST MATCH, FOR A NAME THE PAGE ADDS TWICE. frameSortGroup is added at
+    -- column 1 by BOTH layouts now, and the classic arm comes first in source order,
+    -- so a first-match lookup would find the classic Add and measure against it.
+    local function indexOfLast(name, col)
+        local found
+        for i, e in ipairs(adds) do
+            if e.name == name and (col == nil or e.col == col) then found = i end
+        end
+        return found
+    end
+    -- ★ TWO COLUMNS WHEN THERE IS ROOM, in the split classic has always drawn:
+    -- sorting, FrameSort and Self Position down column 1, Priority down column 2.
+    -- They were all "both" until the page gained two columns. Still ADDED in the
+    -- page's reading order, because that is the order a narrow window folds them
+    -- back into.
+    local sortAt  = indexOfLast("sortBand", "1")
+    local fsAt    = indexOfLast("frameSortGroup", "1")
+    local selfAt  = indexOfLast("selfPosBand", "1")
+    local prioAt  = indexOfLast("priorityBand", "2")
+    check(sortAt ~= nil, "order: the sorting band fills column 1")
+    check(prioAt ~= nil, "order: ...the priority band column 2")
+    check(fsAt ~= nil, "order: ...the FrameSort box column 1")
+    check(selfAt ~= nil, "order: ...and the Self Position band column 1")
+    check(indexOf("frameSortGroup", "1") ~= nil and fsAt ~= nil and indexOf("frameSortGroup", "1") < fsAt,
+          "order: classic still puts the FrameSort box in column 1, in its own Add")
     check(indexOf("selfPosGroup", "1") ~= nil, "order: ...and the Self Position box too")
-    check(indexOf("sortBand", '"both"') < indexOf("frameSortGroup", '"both"'),
+    check(sortAt and fsAt and sortAt < fsAt,
           "order: the sorting band reads first")
-    check(indexOf("frameSortGroup", '"both"') < indexOf("selfPosBand", '"both"'),
+    check(fsAt and selfAt and fsAt < selfAt,
           "order: ...then FrameSort, then Self Position")
-    check(indexOf("selfPosBand", '"both"') < indexOf("priorityBand", '"both"'),
+    check(selfAt and prioAt and selfAt < prioAt,
           "order: ...with the priority band last, which is the page's old reading order")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "sortBand", "frameSortGroup", "selfPosBand", "priorityBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
 
     -- The classic column assignments, unchanged -- the one thing this pass was
     -- not allowed to move.

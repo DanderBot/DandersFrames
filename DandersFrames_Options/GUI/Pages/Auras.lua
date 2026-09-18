@@ -138,8 +138,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- rows share.
         local sortBand, priorityBand
         if tools then
-            sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
-            priorityBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            sortBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
+            priorityBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             priorityBand:AddWidget(GUI:CreateHeader(self.child, L["Priority"]), 40)
         end
 
@@ -313,10 +313,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- own hideOns empty it out, and the row itself stays where the user
             -- last saw it.
             --
-            -- The band is added here rather than at the foot: Add's "both" is a
-            -- sync point, so a band dropped in below the two column-1 boxes would
-            -- leave a hole beside them. Above them there is no flow to unbalance.
-            Add(sortBand, nil, "both")
+            -- ★ TWO COLUMNS WHEN THERE IS ROOM, and the split classic has always
+            -- drawn: sorting itself, FrameSort and Self Position down the left, the
+            -- Priority band down the right. Every band is still added in place and
+            -- in reading order, which is the order a narrow window folds them back
+            -- into. That is also the balanced split: two rows against the Priority
+            -- band's two and its header, the FrameSort box joining the left when the
+            -- addon is installed. Sorting and Priority together on the left would
+            -- have left Self Position alone on the right, three rows against one.
+            -- ⚠ layoutColFill is what makes each band track its column (see the
+            -- Frame page and GUI.ColumnWidth). Without it the layout pass leaves a
+            -- band at the width it was built at and it overhangs its neighbour.
+            sortBand.layoutColFill = true
+            Add(sortBand, nil, 1)
         end
 
         -- ===== FRAMESORT INTEGRATION GROUP (a 280 box in column 1 in classic, a
@@ -352,12 +361,14 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- sentence on this page that must not be behind a hover.
         --
         -- What changes is the single thing that made it read as a second visual
-        -- language: it is constructed at the BAND's width and added as a sync
-        -- point, so its left and right edges are the bands' edges. A box built at
-        -- the band width but added to a COLUMN would be worse than what it
-        -- replaced -- the layout pass only stretches a "both" widget and never
-        -- narrows a column one (GUI/Panel.lua's LayoutPage), so on a widened
-        -- two-column window it would run straight over column 2.
+        -- language: it is constructed at the width of the column it sits in and
+        -- FILLS that column, so its left and right edges are the bands' edges.
+        -- ⚠ layoutColFill IS WHAT MAKES A COLUMN SAFE FOR IT. Without the flag the
+        -- layout pass never resizes a column widget (GUI/Panel.lua's LayoutPage),
+        -- so a box built wide and dropped in a column would run straight over
+        -- column 2. It was full width -- a sync point -- until the page gained two
+        -- columns; left there it would strand the sorting band with a hole beside
+        -- it.
         --
         -- ⚠ THE BLURB KEEPS ITS 250 AND ITS PINNED SLOT. Widening the BOX does not
         -- widen the paragraph inside it: at the band's width a sentence would run
@@ -372,10 +383,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })
                 Add(frameSortGroup, nil, 1)
             else
-                local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), tools.INLINE_BOX)
+                local frameSortGroup = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), tools.INLINE_BOX)
                 frameSortGroup:AddWidget(GUI:CreateHeader(self.child, L["FrameSort Integration"]), 40)
                 BuildFrameSortGroup({ group = frameSortGroup, parent = self.child })
-                Add(frameSortGroup, nil, "both")
+                frameSortGroup.layoutColFill = true
+                Add(frameSortGroup, nil, 1)
             end
         end
 
@@ -434,7 +446,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             selfPosGroup.disableChildrenOn = DisableSortOptions
             Add(selfPosGroup, nil, 1)
         else
-            local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local selfPosBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             local selfPosRow = selfPosBand:AddWidget(GUI:CreateControlRow(self.child, {
                 label     = L["Self Position"],
                 kind      = "dropdown",
@@ -446,7 +458,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             }))
             selfPosRow.disableOn = DisableSortOptions
             tools.RegisterControlRow(selfPosRow, "dropdown", "sortSelfPosition")
-            Add(selfPosBand, nil, "both")
+            selfPosBand.layoutColFill = true
+            Add(selfPosBand, nil, 1)
         end
         
         -- ===== ROLE PRIORITY (a 280 box in classic, a priority-band row) =====
@@ -590,7 +603,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             classRow.hideOn = function(d) return (d.useFrameSort and FrameSortApi) or not d.sortByClass end
             classRow.disableOn = DisableSortOptions
 
-            Add(priorityBand, nil, "both")
+            priorityBand.layoutColFill = true
+            Add(priorityBand, nil, 2)
         end
 
         -- See Also links
@@ -2790,11 +2804,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local generalBand, layoutBand, styleBand
         if tools then
-            generalBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            generalBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             generalBand:AddWidget(GUI:CreateHeader(self.child, L["General"]), 40)
-            layoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            layoutBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             layoutBand:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
-            styleBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            styleBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             styleBand:AddWidget(GUI:CreateHeader(self.child, L["Style"]), 40)
         end
 
@@ -3543,7 +3557,17 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- this box either, so nothing is lost by saying no.
             classFilterRow.disableOn = ResourceOffRow
 
-            Add(generalBand, nil, "both")
+            -- ★ TWO COLUMNS WHEN THERE IS ROOM. The Frame page's rule: what the bar
+            -- DOES down the left -- General, Layout and the Frame Level row -- and
+            -- how it LOOKS down the right, the Style band. Three bands against one
+            -- reads lopsided but is not: five rows against four. Every band is still
+            -- added in place and in reading order, which is the order a narrow
+            -- window folds them back into.
+            -- ⚠ layoutColFill is what makes each band track its column (see the
+            -- Frame page and GUI.ColumnWidth). Without it the layout pass leaves a
+            -- band at the width it was built at and it overhangs its neighbour.
+            generalBand.layoutColFill = true
+            Add(generalBand, nil, 1)
         end
 
         if classicLayout then
@@ -3632,7 +3656,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.WireFooter(positionRow, ApplyResourcePosition)
             positionRow.disableOn = ResourceOffRow
 
-            Add(layoutBand, nil, "both")
+            layoutBand.layoutColFill = true
+            Add(layoutBand, nil, 1)
         end
 
         if classicLayout then
@@ -3828,7 +3853,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             frameLevelGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "resourceBarFrameLevel", nil, function() DF:LightweightUpdateResourceBarFrameLevel() end, true)), 55)
             Add(frameLevelGroup, nil, 1)
         else
-            local frameLevelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            local frameLevelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             local frameLevelRow = frameLevelBand:AddWidget(GUI:CreateControlRow(self.child, {
                 label       = L["Frame Level"],
                 kind        = "slider",
@@ -3840,7 +3865,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             }))
             frameLevelRow.disableOn = ResourceOffRow
             tools.RegisterControlRow(frameLevelRow, "slider", "resourceBarFrameLevel")
-            Add(frameLevelBand, nil, "both")
+            frameLevelBand.layoutColFill = true
+            Add(frameLevelBand, nil, 1)
         end
 
         if classicLayout then
@@ -3887,7 +3913,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.WireFooter(colorsRow, ApplyResourceColors)
             colorsRow.disableOn = ResourceOffRow
 
-            Add(styleBand, nil, "both")
+            styleBand.layoutColFill = true
+            Add(styleBand, nil, 2)
         end
     end)
     

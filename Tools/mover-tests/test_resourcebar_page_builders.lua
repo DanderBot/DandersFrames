@@ -226,9 +226,15 @@ do
     check(PAGE:find("_popoutRowForKey", 1, true) == nil,
           "tools: ...nor the search row map")
 
-    -- ---- three bands, all chromeless, all at the layout pass's own width ----
+    -- ---- three bands, all chromeless, each at its column's width ----------
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. General and Layout fill column 1 (with the
+    -- Frame Level band below), Style column 2. A band has to be BUILT at the width
+    -- the layout pass will give it, because a group sizes its rows off its width at
+    -- build time; BandWidth's argument says which width that is.
+    local BAND_COL = { generalBand = 1, layoutBand = 1, styleBand = 2 }
     for _, b in ipairs({ "generalBand", "layoutBand", "styleBand" }) do
-        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
+        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[b] .. "), { chromeless = true })", 1, true) ~= nil,
               "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
     end
 
@@ -731,8 +737,8 @@ do
     -- ---- the row -----------------------------------------------------
     check(PAGE:find('label       = L["Frame Level"],\n                kind        = "slider",', 1, true) ~= nil,
           "frame level: it is a slider control row")
-    check(PAGE:find("local frameLevelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-          "frame level: ...in a chromeless band at the width the layout pass will give it")
+    check(PAGE:find("local frameLevelBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })", 1, true) ~= nil,
+          "frame level: ...in a chromeless band at column 1's width")
     check(PAGE:find("frameLevelBand:AddWidget(GUI:CreateControlRow(", 1, true) ~= nil,
           "frame level: ...mounted into that band")
     -- ⚠ NO BAND HEADER. The box was headed "Frame Level" over a slider captioned
@@ -805,12 +811,21 @@ do
     -- ☠ THE BANDS ARE ADDED AT FOUR DIFFERENT POINTS, not in one block at the
     -- end, because the Frame Level band sits BETWEEN two of them -- in the slot
     -- classic gives its box (eighth), so neither layout has to move for the other.
-    -- Every one of the four is "both", which is the alignment rule as an Add.
-    local gen   = PAGE:find('Add(generalBand, nil, "both")', 1, true)
-    local lay   = PAGE:find('Add(layoutBand, nil, "both")', 1, true)
-    local level = PAGE:find('Add(frameLevelBand, nil, "both")', 1, true)
-    local style = PAGE:find('Add(styleBand, nil, "both")', 1, true)
-    check(gen and lay and level and style, "order: all four page-level Adds are present, all of them sync points")
+    -- Every one of the four was "both" until the page gained two columns; now the
+    -- first three fill column 1 and Style fills column 2, still ADDED in reading
+    -- order, because that is the order a narrow window folds them back into.
+    local gen   = PAGE:find("Add(generalBand, nil, 1)", 1, true)
+    local lay   = PAGE:find("Add(layoutBand, nil, 1)", 1, true)
+    local level = PAGE:find("Add(frameLevelBand, nil, 1)", 1, true)
+    local style = PAGE:find("Add(styleBand, nil, 2)", 1, true)
+    check(gen and lay and level and style, "order: all four page-level Adds are present, each in its column")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "generalBand", "layoutBand", "frameLevelBand", "styleBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
     check(gen and lay and gen < lay, "order: the General band goes in before the Layout band")
     check(lay and level and lay < level, "order: ...the Layout band before the Frame Level band")
     check(level and style and level < style, "order: ...and the Frame Level band before the Style band")
