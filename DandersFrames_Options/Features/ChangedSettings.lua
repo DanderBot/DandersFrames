@@ -21,6 +21,8 @@ local DF = DandersFrames
 -- followed by navigating back). A cached ledger would be a report that quietly
 -- describes a configuration the user no longer has, which is worse than no
 -- report at all.
+-- ⚠ A TAB SWITCH IS NOT A REFRESH -- it reuses the page's cached build. The
+-- ledger keeps that cache honest through a cache key; see THE PAGE CACHE KEY.
 --
 -- WHERE THE TWO HALVES COME FROM
 -- ------------------------------
@@ -363,6 +365,27 @@ function ChangedSettings.BuildText(report, opts)
     return tconcat(out, "\n")
 end
 
+-- The report reduced to one string that changes exactly when the rendered page
+-- would: which settings are listed, under which page, and the two value cells
+-- each row prints. Built from FormatValue's ascii spellings so it is the
+-- rendered text and not the stored data -- a nested table that changes inside
+-- its "..." renders identically and so, correctly, keys identically.
+-- A nil report keys on its reason ("combat", "building", ...), so the page
+-- also knows when the state it drew was not a list at all.
+function ChangedSettings.Signature(report, reason)
+    if not report then return "!" .. tostring(reason or "unbuilt") end
+    local out = { tostring(report.count) }
+    for _, group in ipairs(report.groups or {}) do
+        out[#out + 1] = "#" .. tostring(group.tab)
+        for _, row in ipairs(group.rows) do
+            out[#out + 1] = tostring(row.key) .. "="
+                .. ChangedSettings.FormatValue(row.current, true) .. ">"
+                .. ChangedSettings.FormatValue(row.default, true)
+        end
+    end
+    return tconcat(out, "\n")
+end
+
 -- ============================================================
 -- LIVE WIRING
 -- The two reads the pure half deliberately does not do.
@@ -448,4 +471,61 @@ function ChangedSettings:BuildReport(GUI)
     -- print the layout's override as the user's setting.
     local diffMap = DF.Defaults:DiffKeys(db, ChangedSettings.BoundKeys(registry))
     return ChangedSettings.Collect(registry, self:PageOrder(GUI), diffMap)
+end
+
+-- ============================================================
+-- THE PAGE CACHE KEY
+-- ------------------------------------------------------------
+-- ☠ THE REPORTED BUG ("Changed Settings not working" until a profile was
+-- created or switched, then fine in every profile). A TAB SWITCH DOES NOT
+-- REBUILD A PAGE: SelectTab goes through page:RefreshCached (GUI/Panel.lua),
+-- which re-lays the build it already has whenever the page was built for this
+-- mode. The header above says this page is rebuilt on every Refresh, and it is
+-- -- but a revisit is not a Refresh. So the ledger showed whatever it drew on
+-- its FIRST visit of the session, for the rest of the session:
+--   * a list from before the edits the user came back to check, or
+--   * "Building the list of settings..." forever, when the user left before
+--     the budgeted index build landed (the waiter in BuildReport only refreshes
+--     the page if it is still on screen, correctly -- and then nothing else
+--     ever rebuilt it).
+-- The only things that DID rebuild it were a Party/Raid switch and
+-- GUI:InvalidateAllPages -- which DF:FullProfileRefresh calls on every profile
+-- create, switch, import and reset. That is the whole of "creating a profile
+-- fixed it, and switching back fixed the old one too": the switch cleared the
+-- cache, and the index it rebuilt with is not per-profile, so it kept working.
+--
+-- ⇒ RefreshCached asks this for a key and rebuilds only when it moved, so an
+-- unchanged revisit still costs a re-lay and nothing more (a rebuild leaks the
+-- page's widgets into GUI._trashFrame; see RelayoutCurrentPage in Panel.lua).
+--
+-- ⚠ SIDE-EFFECT FREE, and that is why it does not just call BuildReport. On a
+-- stale index BuildReport STARTS a build and queues a waiter; doing that from a
+-- cache check would queue a second refresh of this page per revisit. So the
+-- not-ready states are named here without touching the index:
+--   "!building" -- a build is in flight; the waiter it already has will refresh
+--                  the page when it lands, if the page is still on screen.
+--   "!combat"   -- matches what the builder drew in combat.
+--   "!stale"    -- no build running and none drawn for: never equal to the
+--                  builder's own "building" key, so the revisit rebuilds, and
+--                  that rebuild is what starts the build.
+-- ============================================================
+function ChangedSettings:CacheKey(GUI)
+    local Search = DF.Search
+    if not Search then return "!unbuilt" end
+    if Search.RegistryBuilding then return "!building" end
+    if Search:RegistryIsStale() then
+        return InCombatLockdown() and "!combat" or "!stale"
+    end
+    return ChangedSettings.Signature(self:BuildReport(GUI))
+end
+
+-- Read by BuildPage's DoBuild / RefreshCached (GUI/Panel.lua), keyed by page id
+-- because the page itself is created in GUI/Pages/Modules.lua. DF.GUI is the
+-- resident addon's table and exists before this file loads; the guard is for
+-- the headless tests, which load this file against a bare host.
+if DF.GUI then
+    DF.GUI.PageCacheKeys = DF.GUI.PageCacheKeys or {}
+    DF.GUI.PageCacheKeys[ChangedSettings.PAGE_ID] = function()
+        return ChangedSettings:CacheKey(DF.GUI)
+    end
 end

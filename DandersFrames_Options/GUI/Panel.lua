@@ -3649,6 +3649,12 @@ function DF:CreateGUI()
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
             self.cacheValid = true
+            -- ★ A PAGE WHOSE CONTENT IS DERIVED FROM DATA ANOTHER PAGE EDITS can
+            -- register a key for what it drew (GUI.PageCacheKeys[tabName]);
+            -- RefreshCached rebuilds when the key has moved. Only the Changed
+            -- Settings ledger does -- see Features/ChangedSettings.lua.
+            local keyFn = GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName]
+            self.builtCacheKey = keyFn and keyFn() or nil
             self:RefreshStates()
         end
 
@@ -3668,9 +3674,13 @@ function DF:CreateGUI()
             if not db then return end
 
             local isDisabled = GUI:IsTabDisabledForCurrentMode(self.tabName)
+            -- ⚠ Asked only when everything else says the cache is good, so a page
+            -- with no key -- every page but one -- pays one table lookup for it.
+            local keyFn = GUI.PageCacheKeys and GUI.PageCacheKeys[self.tabName]
             if self.cacheValid
                and self.builtForMode == GUI.SelectedMode
-               and self.builtForDisabled == isDisabled then
+               and self.builtForDisabled == isDisabled
+               and (not keyFn or keyFn() == self.builtCacheKey) then
                 self:RefreshStates()
                 return
             end

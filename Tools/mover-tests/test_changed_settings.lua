@@ -649,6 +649,91 @@ do
           "glyphs: ...and builds the long escape, which is the only one that tints")
 end
 
+-- ============================================================
+-- THE PAGE CACHE KEY -- a revisit rebuilds exactly when the page would differ
+-- ------------------------------------------------------------
+-- ☠ The reported bug: a tab switch reuses a page's cached build, so the ledger
+-- showed its FIRST drawing of the session -- a list from before the user's
+-- edits, or "Building..." forever -- until a profile create/switch invalidated
+-- every page. The key is what RefreshCached compares against.
+-- ============================================================
+do
+    local S = CS.Signature
+    local function rep(cur)
+        return CS.Collect(fixture(), NAV, {
+            frameWidth = { current = cur, default = 72 },
+            borderSize = { current = 2, default = 1 },
+        })
+    end
+
+    eq(S(rep(90)), S(rep(90)), "cachekey: the same report keys the same")
+    check(S(rep(90)) ~= S(rep(91)), "cachekey: a changed value changes the key")
+    check(S(rep(90)) ~= S(CS.Collect(fixture(), NAV, { frameWidth = { current = 90, default = 72 } })),
+          "cachekey: a setting going back to default changes the key")
+    check(S(CS.Collect(fixture(), NAV, {})) ~= S(nil, "building"),
+          "cachekey: an empty list and a list still building never key the same")
+    check(S(nil, "building") ~= S(nil, "combat"), "cachekey: each not-ready reason keys apart")
+    -- A nested table renders as "..." whatever is inside it, so an inner change
+    -- draws an identical row -- and must not force a rebuild that leaks a page.
+    local function nested(v)
+        return CS.Collect(
+            { { dbKey = "auraBlock", label = "Block", tab = "t", tabLabel = "T" } },
+            { "t" }, { auraBlock = { current = { deep = v }, default = { deep = 0 } } })
+    end
+    eq(S(nested(1)), S(nested(2)), "cachekey: an inner change to an opaque table does not rebuild")
+
+    -- CacheKey is SIDE-EFFECT FREE on a stale index: it names the state and
+    -- never starts a build, which would queue a second refresh per revisit.
+    local savedSearch, savedICL = DF.Search, InCombatLockdown
+    local started = 0
+    local stale, inCombat = true, false
+    DF.Search = {
+        RegistryIsStale = function() return stale end,
+        EnsureRegistryAsync = function() started = started + 1 end,
+    }
+    InCombatLockdown = function() return inCombat end
+
+    eq(CS:CacheKey({}), "!stale", "cachekey: a stale index with no build running keys as stale")
+    DF.Search.RegistryBuilding = true
+    eq(CS:CacheKey({}), "!building", "cachekey: a build in flight keys as building")
+    DF.Search.RegistryBuilding = false
+    inCombat = true
+    eq(CS:CacheKey({}), "!combat", "cachekey: a stale index in combat keys as combat")
+    eq(started, 0, "cachekey: asking for the key never starts an index build")
+
+    -- ...and "!stale" is never what the builder drew, so a page left on
+    -- "Building..." whose waiter was dropped rebuilds on the next visit.
+    check(CS:CacheKey({}) ~= S(nil, "building") and "!stale" ~= S(nil, "building"),
+          "cachekey: the stale key can never match a drawn building state")
+
+    -- Fresh index: the key is the signature of the report BuildReport returns.
+    stale, inCombat = false, false
+    local savedBR = CS.BuildReport
+    CS.BuildReport = function() return rep(90) end
+    eq(CS:CacheKey({}), S(rep(90)), "cachekey: a fresh index keys on the live report")
+    CS.BuildReport = savedBR
+
+    DF.Search, InCombatLockdown = savedSearch, savedICL
+end
+
+-- The key is REGISTERED where Panel.lua reads it, and Panel.lua reads it on
+-- both halves: stamped after a build, compared on a revisit.
+do
+    local host = { L = DF.L, GUI = {} }
+    DandersFrames = host
+    load_options_file_into("Features/ChangedSettings.lua", NS)
+    check(type(host.GUI.PageCacheKeys) == "table"
+          and type(host.GUI.PageCacheKeys["profiles_changed"]) == "function",
+          "cachekey: the ledger registers its key under its page id")
+    DandersFrames = DF
+
+    local panel = options_file_source("GUI/Panel.lua")
+    check(panel:find("self.builtCacheKey = keyFn and keyFn() or nil", 1, true) ~= nil,
+          "cachekey: DoBuild stamps the key of what it just drew")
+    check(panel:find("and (not keyFn or keyFn() == self.builtCacheKey) then", 1, true) ~= nil,
+          "cachekey: RefreshCached rebuilds when the key has moved")
+end
+
 CreateFrame   = savedCreateFrame
 GetLocale     = savedGetLocale
 DandersFrames = savedDF
