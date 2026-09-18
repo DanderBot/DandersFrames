@@ -840,6 +840,8 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
                         mb.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
                     end
                 end
+                -- Re-raised on every open: see the texture dropdown below.
+                GUI:RaiseMenuOverOpener(menuFrame, btn)
                 menuFrame:Show()
                 S.currentOpenDropdown = menuFrame
             end
@@ -1237,6 +1239,12 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia textures
             RebuildMenu()
+            -- ☠ RE-RAISE ON EVERY OPEN. The FULLSCREEN_DIALOG set at creation does
+            -- not last: parking this page in the page dock and adopting it back
+            -- re-parents it, and a re-parent hands every descendant the new
+            -- parent's strata -- so after one tab round trip the menu drew on the
+            -- window's own strata, under the widgets beside and below it.
+            GUI:RaiseMenuOverOpener(menuFrame, btn)
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
             -- Focus search box
@@ -1614,6 +1622,8 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
             GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia fonts
             RebuildMenu()
+            -- Re-raised on every open: see the texture dropdown above.
+            GUI:RaiseMenuOverOpener(menuFrame, btn)
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
             -- Focus search box
@@ -1880,6 +1890,8 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
         else
             GUI:CloseAllMenus()
             RebuildMenu()
+            -- Re-raised on every open: see the texture dropdown above.
+            GUI:RaiseMenuOverOpener(menuFrame, btn)
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
             searchBox:SetFocus()

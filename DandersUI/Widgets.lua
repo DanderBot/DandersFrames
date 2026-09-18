@@ -2997,6 +2997,17 @@ local function RaiseMenuOverOpener(menu, opener)
     if (menu:GetFrameLevel() or 0) <= ol then menu:SetFrameLevel(ol + 1) end
 end
 
+-- ...and published, for the host's hand-rolled menus (the settings panel's font,
+-- texture, sound and growth dropdowns). They set FULLSCREEN_DIALOG once, at
+-- creation, and that does not survive: parking a page in the page dock and
+-- adopting it back RE-PARENTS the whole page, and a re-parent hands every
+-- descendant the new parent's strata. After one round trip the menu sits on the
+-- window's own strata, among the page's widgets instead of above them. The fix is
+-- the kit's own rule -- re-assert on every open -- so it lives here, once.
+function UI:RaiseMenuOverOpener(menu, opener)
+    RaiseMenuOverOpener(menu, opener)
+end
+
 -- ☠ Lives with the registry it iterates, deliberately. This was in a consumer
 -- for a while, which left the pack able to REGISTER a menu but not close one --
 -- and CreateDropdown below does register. Nothing broke, because one caller
