@@ -779,7 +779,17 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         menu:SetHeight(-y + 4)
     end
     ddBtn:SetScript("OnClick", function()
-        if menu:IsShown() then menu:Hide() else BuildMenu(); menu:Show() end
+        if menu:IsShown() then
+            menu:Hide()
+        else
+            BuildMenu()
+            -- ⚠ RE-RAISED ON EVERY OPEN, like the other hand-rolled menus. The strata
+            -- above is set once at build, and a page that is parked out of the window
+            -- and adopted back is REPARENTED, which drags this menu down to the
+            -- window's own strata -- level with the rows it is meant to cover.
+            if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(menu, ddBtn) end
+            menu:Show()
+        end
     end)
 
     -- SHARING MARKER. A template can be pointed at by the other mode, a pinned
@@ -1010,6 +1020,8 @@ function GUI:CreateDesignerPresetBar(parent, opts)
                 overflowMenu:Hide()
             else
                 BuildOverflow()
+                -- ⚠ Re-raised on every open; see the preset menu above.
+                if GUI.RaiseMenuOverOpener then GUI:RaiseMenuOverOpener(overflowMenu, overflowBtn) end
                 overflowMenu:Show()
             end
         end)
