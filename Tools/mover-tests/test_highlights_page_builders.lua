@@ -195,9 +195,15 @@ do
           "tools: ...nor the search row map")
 
     -- ---- the three bands ----------------------------------------------
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Aggro fills column 1, Selection and Hover
+    -- column 2 -- the page's two-column split. A band has to be BUILT at the width
+    -- the layout pass will give it, because a group sizes its rows off its width at
+    -- build time; BandWidth's argument says which width that is.
+    local BAND_COL = { selectionBand = 2, hoverBand = 2, aggroBand = 1 }
     for _, b in ipairs({ "selectionBand", "hoverBand", "aggroBand" }) do
-        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-              "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
+        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[b] .. "), { chromeless = true })", 1, true) ~= nil,
+              "bands: " .. b .. " is chromeless, at column " .. BAND_COL[b] .. "'s width")
     end
     for _, pair in ipairs({ { "selectionBand", "Selection Highlight" },
                             { "hoverBand", "Hover Highlight" },
@@ -430,11 +436,23 @@ do
           "boxes: the Threat Colors box keeps the gate its row now also carries")
 
     -- ---- the Add order ------------------------------------------------
-    local a = PAGE:find('Add(selectionBand, nil, "both")', 1, true)
-    local b = PAGE:find('Add(hoverBand, nil, "both")', 1, true)
-    local c = PAGE:find('Add(aggroBand, nil, "both")', 1, true)
+    -- Three bands in two columns -- Aggro left, Selection and Hover right -- still
+    -- ADDED in the order the three sections had, because that is the order a
+    -- narrow window folds them back into when the page drops to one column.
+    local a = PAGE:find("Add(selectionBand, nil, 2)", 1, true)
+    local b = PAGE:find("Add(hoverBand, nil, 2)", 1, true)
+    local c = PAGE:find("Add(aggroBand, nil, 1)", 1, true)
     check(a and b and c and a < b and b < c,
-          "order: the three bands span both columns, in the order the three sections had")
+          "order: the three bands sit in their columns, added in the order the three sections had")
+    check(PAGE:find('Band, nil, "both")', 1, true) == nil,
+          "order: no band spans both columns any more")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "selectionBand", "hoverBand", "aggroBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro"}, L["Highlights"], "indicators_highlights")', 1, true) ~= nil,

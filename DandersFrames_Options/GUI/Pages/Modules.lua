@@ -1139,11 +1139,11 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local selectionBand, hoverBand, aggroBand
         if tools then
-            selectionBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            selectionBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             selectionBand:AddWidget(GUI:CreateHeader(self.child, L["Selection Highlight"]), 40)
-            hoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            hoverBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             hoverBand:AddWidget(GUI:CreateHeader(self.child, L["Hover Highlight"]), 40)
-            aggroBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            aggroBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             aggroBand:AddWidget(GUI:CreateHeader(self.child, L["Aggro Highlight"]), 40)
         end
 
@@ -1542,14 +1542,26 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.WireFooter(threatRow, ApplyAggroHighlight)
         end
 
-        -- ===== THE THREE BANDS, IN READING ORDER ==========================
-        -- Added at the foot rather than in place: all three are full width, so
-        -- there is no column flow left to unbalance and the order below is purely
-        -- the order the page reads in -- the order the three sections had.
+        -- ===== THE THREE BANDS: TWO COLUMNS WHEN THERE IS ROOM ==============
+        -- Added at the foot rather than in place, because `Add` resolves a band's
+        -- slot height on the spot and a band has to go in after its last row.
+        -- The Frame page's rule: what the page DOES down the left, how it LOOKS
+        -- down the right -- here Aggro on the left, Selection and Hover on the
+        -- right. Aggro is the only highlight with behaviour of its own (Only Show
+        -- When Tanking, Hide on Tanks); Selection and Hover are a mode plus the
+        -- border's looks. That is also the balanced split, two rows against two.
+        -- On a narrow window the page folds back to one column and reads in
+        -- exactly the order below, which is the order the three sections had.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(selectionBand, nil, "both")
-            Add(hoverBand, nil, "both")
-            Add(aggroBand, nil, "both")
+            selectionBand.layoutColFill = true
+            hoverBand.layoutColFill = true
+            aggroBand.layoutColFill = true
+            Add(selectionBand, nil, 2)
+            Add(hoverBand, nil, 2)
+            Add(aggroBand, nil, 1)
         end
 
         -- See Also links
@@ -1632,9 +1644,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local contentBand, appearanceBand
         if tools then
-            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            contentBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(1), { chromeless = true })
             contentBand:AddWidget(GUI:CreateHeader(self.child, L["Content"]), 40)
-            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })
+            appearanceBand = GUI:CreateSettingsGroup(self.child, tools.BandWidth(2), { chromeless = true })
             appearanceBand:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
         end
 
@@ -2101,9 +2113,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- own gradient (Full Frame / Top Edge / Edge Glow), so it belongs with
         -- the overlay's display mode rather than with the border drawn over it.
         --
-        -- ⚠ CLASSIC ONLY, now. In the popout layout there are no columns to
-        -- balance: two full-width bands in reading order, and the gradient sits
-        -- last because it is the widest of the four things drawn.
+        -- ⚠ CLASSIC ONLY, now. In the popout layout the gradient is the last row
+        -- of the Appearance band (column 2 when there is room), and sits last
+        -- because it is the widest of the four things drawn.
         local function BuildDispelGradientGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -2241,13 +2253,24 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             gradientRow.disableOn = DispelOffRow
         end
 
-        -- ===== THE TWO BANDS, IN READING ORDER ============================
-        -- Added at the foot rather than in place: both bands are full width, so
-        -- there is no column flow left to unbalance and the order below is purely
-        -- the order the page reads in.
+        -- ===== THE TWO BANDS: TWO COLUMNS WHEN THERE IS ROOM ================
+        -- Added at the foot rather than in place, because `Add` resolves a band's
+        -- slot height on the spot and a band has to go in after its last row.
+        -- The Frame page's rule: what the page DOES down the left, how it LOOKS
+        -- down the right -- Content on the left, Appearance on the right. On a
+        -- narrow window the page folds back to one column and reads in exactly
+        -- the order below, which is the order it always had.
+        -- ⚠ NOT BALANCED: one row against four, and no band choice can fix it --
+        -- there are only the two bands, and Appearance is looks through and
+        -- through, so there is no behaviour/looks line to split it along.
+        -- ⚠ layoutColFill is what makes each band track its column (see the Frame
+        -- page and GUI.ColumnWidth). Without it the layout pass leaves a band at the
+        -- width it was built at and it overhangs its neighbour.
         if not classicLayout then
-            Add(contentBand, nil, "both")
-            Add(appearanceBand, nil, "both")
+            contentBand.layoutColFill = true
+            appearanceBand.layoutColFill = true
+            Add(contentBand, nil, 1)
+            Add(appearanceBand, nil, 2)
         end
 
         -- See Also links

@@ -206,9 +206,15 @@ do
           "tools: ...nor the search row map")
 
     -- ---- the two bands ------------------------------------------------
+    -- ⚠ EACH AT ITS OWN COLUMN'S WIDTH. Content fills column 1, Appearance column
+    -- 2 -- the page's two-column split. A band has to be BUILT at the width the
+    -- layout pass will give it, because a group sizes its rows off its width at
+    -- build time; BandWidth's argument says which width that is.
+    local BAND_COL = { contentBand = 1, appearanceBand = 2 }
     for _, b in ipairs({ "contentBand", "appearanceBand" }) do
-        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth(), { chromeless = true })", 1, true) ~= nil,
-              "bands: " .. b .. " is chromeless, at the width the layout pass will give it")
+        check(PAGE:find(b .. " = GUI:CreateSettingsGroup(self.child, tools.BandWidth("
+                        .. BAND_COL[b] .. "), { chromeless = true })", 1, true) ~= nil,
+              "bands: " .. b .. " is chromeless, at column " .. BAND_COL[b] .. "'s width")
     end
     for _, pair in ipairs({ { "contentBand", "Content" }, { "appearanceBand", "Appearance" } }) do
         check(PAGE:find(pair[1] .. ':AddWidget(GUI:CreateHeader(self.child, L["' .. pair[2] .. '"]), 40)', 1, true) ~= nil,
@@ -534,9 +540,21 @@ do
           "boxes: the band skin is never restated as a literal (this page needs none)")
 
     -- ---- the Add order ------------------------------------------------
-    local a = PAGE:find('Add(contentBand, nil, "both")', 1, true)
-    local b = PAGE:find('Add(appearanceBand, nil, "both")', 1, true)
-    check(a and b and a < b, "order: the two bands span both columns, in reading order")
+    -- Two bands in two columns -- Content left, Appearance right -- still ADDED in
+    -- reading order, because that is the order a narrow window folds them back
+    -- into when the page drops to one column.
+    local a = PAGE:find("Add(contentBand, nil, 1)", 1, true)
+    local b = PAGE:find("Add(appearanceBand, nil, 2)", 1, true)
+    check(a and b and a < b, "order: the two bands sit in their columns, added in reading order")
+    check(PAGE:find('Band, nil, "both")', 1, true) == nil,
+          "order: no band spans both columns any more")
+    -- ☠ AND EVERY ONE FILLS ITS COLUMN. The layout pass only resizes an indented
+    -- widget otherwise, so a band placed in a column without this keeps the width it
+    -- was built at and overhangs its neighbour.
+    for _, band in ipairs({ "contentBand", "appearanceBand" }) do
+        check(PAGE:find(band .. ".layoutColFill = true", 1, true) ~= nil,
+              "order: " .. band .. " fills its column rather than keeping its build width")
+    end
 
     -- ---- the page's own furniture is untouched -------------------------
     check(PAGE:find('CreateCopyButton(self.child, {"dispel"}, L["Dispel Overlay"], "auras_dispel")', 1, true) ~= nil,
