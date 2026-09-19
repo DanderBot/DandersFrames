@@ -28,7 +28,9 @@ ROOTS = ["DandersFrames", "DandersFrames_Options", "DandersMover", "DandersUI"]
 EXCLUDE_DIRS = {"Libs", "Locales"}
 
 LONG_OPEN = re.compile(r"\[(=*)\[")
-DIRECTIVE = re.compile(r"--(\[=*\[)?\s*@")
+# Packager directives have NO space before the @ (--@alpha@, --[===[@non-alpha@).
+# "-- @param" doc comments do, and are ordinary comments.
+DIRECTIVE = re.compile(r"--(\[=*\[)?@")
 
 
 def scan(src):
@@ -193,6 +195,7 @@ def run_selftest():
         ("--@do-not-package@\nL.x = true\n--@end-do-not-package@", "--@do-not-package@\nL.x = true\n--@end-do-not-package@"),
         ("local t = x[y[1]] -- gone\r\nz = 1", "local t = x[y[1]]\r\nz = 1"),
         ("-- only\n\t-- only\ncode()", "\n\ncode()"),
+        ("-- @param x number\nf()", "\nf()"),
     ]
     failed = 0
     for src, want in cases:
