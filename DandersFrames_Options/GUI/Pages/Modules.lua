@@ -242,12 +242,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             Add(textBand, nil, "both")
         end
 
-        -- ★ THE PER-ICON TEXT COLOURS USED TO LIVE HERE, as a flat list of seven pickers
-        -- ("Summon", "Resurrection", "AFK", …) divorced from the icons they colour
-        -- (Krathe, 2026-08-08: "odd having the text settings separate from each indicator
-        -- at the very least the colors"). Each now sits in its OWN icon's Settings group,
-        -- beside that icon's Show as Text and label controls, and hides when Show as Text
-        -- is off — so the control is where you are already looking when you turn text on.
+        -- ★ PER-ICON TEXT COLOURS DO NOT LIVE HERE. Each sits in its OWN icon's Settings
+        -- group, beside that icon's Show as Text and label controls, and hides when Show as
+        -- Text is off -- so the control is where you are already looking when you turn text on.
         -- ⚠ Adding a new status icon? Its text colour belongs in ITS section, not here.
         -- What remains in this section is genuinely SHARED typography: one font, size,
         -- outline and shadow for every status icon that renders as text.
@@ -1585,10 +1582,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- unified overlay every appearance control simply follows the toggle.
         local HideDispelOptions = HideIfDisabled
 
-        -- 12.1: the container factory owns the overlay unconditionally
-        -- (FactoryOwnsDispelOverlay == AuraContainer.IsSupported()), so the
-        -- Display/Icon/Border/Gradient groups are always live here. The legacy
-        -- "frost while the old path owns it" guards were unreachable and are gone.
+        -- 12.1: the container factory owns the overlay unconditionally, so the
+        -- Display/Icon/Border/Gradient groups are always live here.
 
         -- Every dispel-page callback funnels through here: the version bump
         -- breaks the 12.1 factory drive's fast-path latch, so structural changes
@@ -1651,9 +1646,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
-        -- These tables used to sit inside the box that offered them. The rows
-        -- print the chosen value as their SUMMARY, and a summary is written
-        -- OUTSIDE the group's builder — so the word has to come out of the same
+        -- The rows print the chosen value as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder -- so the word has to come out of the same
         -- table the dropdown offers, or a row could say one thing while the
         -- control behind it says another.
         --
@@ -1725,9 +1719,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Content band's only row) =====
         -- 12.1 unified overlay: ONE container-slot-driven system (Features/
         -- Dispel.lua factory path) covering normal AND private-aura dispels
-        -- natively. The old Off / DandersFrames / Blizzard / Hybrid source
-        -- selector collapsed into this single toggle when the Blizzard wrapper
-        -- retired (settings migrate: any non-Off source = enabled).
+        -- natively. The old Off / DandersFrames / Blizzard / Hybrid source selector
+        -- is now this single toggle (settings migrate: any non-Off source = enabled).
         --
         -- ☠ THE ROW CARRIES THE PAGE'S MASTER SWITCH, which is why this is a row
         -- rather than two control rows: a control row carries a SETTING rather
@@ -1834,14 +1827,10 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tools.RegisterHoistedToggle(settingsRow, L["Enable Dispel Overlay"], "dispelOverlayEnabled", OnDispelEnableToggle)
         end
 
-        -- The four boxes below used to sit under an "Appearance" collapsible
-        -- header -- the last section in the addon named for a CATEGORY rather
-        -- than for a thing. A header means "here is another one of these",
-        -- which is why Icons and Highlights keep theirs and this one goes.
-        --
-        -- It costs nothing to remove: every box already declares the same
-        -- hideOn it was inheriting from the section, so the whole block still
-        -- disappears when the overlay is off.
+        -- The four boxes below sit under NO "Appearance" collapsible header: a header
+        -- means "here is another one of these", which is why Icons and Highlights keep
+        -- theirs and this page has none. Every box declares the same hideOn for itself,
+        -- so the whole block still disappears when the overlay is off.
         --
         -- ⚠ AND THE POPOUT LAYOUT'S "Appearance" BAND IS NOT THAT HEADER COMING
         -- BACK. A band is the page's own top-level grouping — the shape "Content
@@ -1867,9 +1856,9 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 ApplyDispelSettings()
             end), 30)
             animate.hideOn = HideDispelOptions
-            -- (Color Name Text removed 2026-07-25 — see Features/Dispel.lua. Its only render
-            -- path was the legacy test-mode show, so it tinted the preview and did nothing
-            -- live; a real version needs an occlusion-safe name tint on the slot overlay.)
+            -- (Color Name Text is gone — see Features/Dispel.lua. Its only render path was
+            -- the legacy test-mode show, so it tinted the preview and did nothing live; a
+            -- real version needs an occlusion-safe name tint on the slot overlay.)
             displayGroup.hideOn = HideDispelOptions
             Add(displayGroup, nil, 1)
         else
@@ -2327,10 +2316,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         listGroup:AddWidget(GUI:CreateHeader(self.child, L["Available Profiles"]), 40)
         
         -- Container for the profile list. Width comes from the group rather than a
-        -- literal: this used to be a chain of three hardcoded numbers (240 container,
-        -- 210 scroll child, 206 button) inside a 280-wide group, so the rows stopped
-        -- ~54px short of the right edge and the whole block sat inset from everything
-        -- else on the page.
+        -- literal, so the rows reach the group's right edge.
         local maxListHeight = 180
         local contentHeight = #profiles * 28 + 10
         local listHeight = math.min(contentHeight, maxListHeight)
@@ -2447,8 +2433,6 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF:Err("Cannot delete Default profile.")
                 return
             end
-            -- The profile name rides the closure rather than the StaticPopup
-            -- `data` field it used to be poked onto after the fact.
             DF:ShowPopupAlert({
                 title   = L["Delete Profile"],
                 message = format(L["Delete profile '%s'?\n\nThis cannot be undone."], p),
@@ -3401,8 +3385,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     -- The firehoses are marked in the row itself, so "why is this
                     -- one off?" is answered where the user is looking rather than
                     -- only in the Default button's tooltip. The row renders it as
-                    -- the shared caution icon; it used to be a "(noisy)" suffix
-                    -- concatenated onto the description.
+                    -- the shared caution icon.
                     -- ⚠ L[cat.desc], mirroring L[group.name] a few lines up. The group
                     -- HEADINGS resolved through the locale table and the category
                     -- descriptions beneath them did not, so half this page translated

@@ -37,9 +37,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Mirror of the Show Buffs checkbox below, for its reason: the show/hide
                 -- gate lives in the UNIT_AURA-driven UpdateAuras path, so a layout-only
                 -- pass leaves the row in its previous state until the next aura event on
-                -- that unit. EVERY writer of showBuffs needs this, not just the checkbox
-                -- -- the Aura Designer's replace-buffs popup was the third writer and had
-                -- the same gap (Krathe, 2026-08-19).
+                -- that unit. EVERY writer of showBuffs needs this, not just the checkbox.
                 DF:RefreshAllVisibleFrames()
             elseif data == "openAD" then
                 if GUI.SelectTab then GUI.SelectTab("auras_auradesigner") end
@@ -159,12 +157,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
-        -- These tables used to sit inside the box that offered them. The rows print
-        -- the chosen value as their SUMMARY, and a summary is written OUTSIDE the
-        -- group's builder -- so the word has to come out of the same table the
-        -- dropdown offers, or a row could say one thing while the control behind it
-        -- says another. (The Health Bar and Tooltips pages hoisted their dropdown
-        -- tables for exactly this reason.)
+        -- The rows print the chosen value as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder -- so the word has to come out of the same table
+        -- the dropdown offers, or a row could say one thing while the control behind
+        -- it says another.
         --
         -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure captures
         -- the upvalue that exists when it is created -- so one declared above these
@@ -180,12 +176,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             APPLIED = L["Order Applied"],
             _order = { "DEFAULT", "TIME", "NAME", "APPLIED" },
         }
-        -- Icon-sized formats only: Number "14" / Seconds "14s" / Percent "45%".
-        -- FULL ("14 Seconds") overflows a 20px icon (never fit, delisted with #5's
-        -- percent work — a saved FULL still renders until the user re-picks); the
-        -- combined "12s (45%)" is AD-bar-only for the same reason.
-        -- The icon rows carry the three time formats plus Percent; FULL and the percent
-        -- composite stay on the Aura Designer bar, which has the width for them.
+        -- Icon-sized formats only: the three time formats plus Percent. FULL
+        -- ("14 Seconds") overflows a 20px icon and the combined "12s (45%)" is too
+        -- wide, so both stay on the Aura Designer bar -- a saved FULL still renders
+        -- until the user re-picks.
         local durationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
             TIMER = L["Timer"], PERCENT = L["Percent"],
             _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
@@ -211,10 +205,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== DURATION BAR / PANDEMIC ===== (12.1 factory rows only — the native
         -- container drains the strip render-side; the legacy renderer has no bar)
         --
-        -- The collapsible section used to carry this predicate and hide the bar with
-        -- itself; with the section gone the box declares it directly -- and in the
-        -- popout layout it is the ROW's hideOn, so the band collapses the slot
-        -- instead of drawing an empty plate.
+        -- The box declares this predicate directly; in the popout layout it is the
+        -- ROW's hideOn, so the band collapses the slot instead of drawing an empty
+        -- plate.
         local function HideDurationBar(d) return not DF:FactoryOwnsBuffRow(d) end
 
         -- ☠ THE PAGE GATE, ON THE ROWS. Show Buffs greys every group it greyed in
@@ -301,7 +294,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- What the whole page's gate costs when it moves, named once: the state pass,
         -- the aura re-scan the suppressed checkbox ran, and a repaint of every pane
-        -- standing open -- eleven of which grey with it.
+        -- standing open -- ten of which grey with it.
         local function OnShowBuffsToggle()
             self:RefreshStates()
             DF:RefreshAllVisibleFrames()
@@ -544,12 +537,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 function(v) local s = BuffSelection(); if s then s.uncategorised = v and true or false end end)
             uncatCb.tooltip = L["Buffs that belong to none of the filters above."]
 
-            -- ⚠ THE PAGE'S ONLY FEEDBACK LOOP above the frame level. Everything above
-            -- this line says what you switched ON; nothing said what that adds up to,
-            -- so a working selection and an empty one looked identical until you
-            -- joined a group. The Filter Designer's tab strip used to carry this
-            -- number and lost it when the tabs went; it belongs here now, beside the
-            -- switches that move it.
+            -- ⚠ THE PAGE'S ONLY FEEDBACK LOOP above the frame level: what the ticks above
+            -- add up to. Without it a working selection and an empty one look identical.
             --
             -- ⚠ R:CountSelection, NOT the size of ResolveSelection's map: that map is
             -- keyed by spell ID and one record can carry several, so counting it
@@ -772,13 +761,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== DEDUPLICATION (a 280 box in column 1 in classic, a CONTROL ROW in the
         -- Content band here) =====
-        -- The 12.1 alert banner that used to sit here is gone: both halves of the
-        -- toggle are expressible again (Aura Designer via excludeSpellIDs, the
-        -- Defensive Bar via its own resolved spell-ID map or a negated category —
-        -- see BuildDirectBuffFilters / BuildAuraRowConfig), and the multi-filter
-        -- duplicate it warned about cannot happen on a single-group buff row.
-        -- What the checkbox does now fits a tooltip; a danger banner would read as
-        -- "something is broken here".
+        -- No alert banner here: both halves of the toggle are expressible (Aura
+        -- Designer via excludeSpellIDs, the Defensive Bar via its own resolved
+        -- spell-ID map or a negated category — see BuildDirectBuffFilters /
+        -- BuildAuraRowConfig), and the multi-filter duplicate one would warn about
+        -- cannot happen on a single-group buff row. What the checkbox does fits a
+        -- tooltip; a danger banner would read as "something is broken here".
         --
         -- ⚠ ONE SETTING IS A CONTROL ROW -- not a pane, which would be a click that
         -- buys one tick, and not a 280 box either, which is the one shape a column of
@@ -826,9 +814,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== APPEARANCE (a 280 box in column 2 in classic, the Icon band's first
         -- row) =====
         -- Icon Size / Scale / Alpha are how the row LOOKS, so they sit with the other
-        -- styling, matching Missing Buffs and Defensive Icon. They used to live in
-        -- Settings above, which made this the only aura family where the same three
-        -- sliders were classed as geometry.
+        -- styling, matching Missing Buffs and Defensive Icon.
         local function ApplyBuffPosition() DF:LightweightUpdateAuraPosition("buff") end
 
         local function BuildBuffAppearanceGroup(tools2)
@@ -1052,9 +1038,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== BORDER (a 280 box in column 1 in classic, the Icon band's fourth
         -- row) =====
-        -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  No
-        -- class/role colour (aura indicators aren't unit-class).  Greys out when
-        -- buffs are off, like every other control on this page.
+        -- Full border toolkit via the unified helper. No class/role colour (aura
+        -- indicators aren't unit-class). Greys out when buffs are off.
         -- Border Animation is intentionally NOT offered on the buff/debuff rows:
         -- these containers can hold many icons and animating each border is a
         -- per-frame FPS cost, so DF exposes border animations only on the
@@ -1739,11 +1724,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
-        -- These tables used to sit inside the box that offered them. The rows print
-        -- the chosen value as their SUMMARY, and a summary is written OUTSIDE the
-        -- group's builder -- so the word has to come out of the same table the
-        -- dropdown offers, or a row could say one thing while the control behind it
-        -- says another. (The Buff Bar page hoisted its four for exactly this.)
+        -- The rows print the chosen value as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder -- so the word has to come out of the same table
+        -- the dropdown offers, or a row could say one thing while the control behind
+        -- it says another.
         --
         -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure captures
         -- the upvalue that exists when it is created -- so one declared above these
@@ -1937,7 +1921,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- What the whole page's gate costs when it moves, named once: the state pass,
         -- the aura re-scan the suppressed checkbox ran, and a repaint of every pane
-        -- standing open -- ten of which grey with it.
+        -- standing open -- eleven of which grey with it.
         local function OnShowDebuffsToggle()
             self:RefreshStates()
             DF:RefreshAllVisibleFrames()
@@ -2371,13 +2355,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
 
             -- ⚠ The four sibling boxes on this page (Duration Text, Stack Count, Dispel
-            -- Text, Duration Bar) all gate on showDebuffs; this one was simply missed, so
-            -- it stayed live while the row it orders was switched off (Krathe, 2026-08-09).
+            -- Text, Duration Bar) all gate on showDebuffs; this one must too, or it stays
+            -- live while the row it orders is switched off.
             group.disableChildrenOn = function(d) return not d.showDebuffs end
 
             group:AddWidget(GUI:CreateDropdown(parent, L["Sort Order"], debuffSortOptions, db, "directDebuffSortOrder", function()
                 DebuffFilterChanged()
-                tools2.refreshStates()   -- My Auras First greys while Sort Order = Default
+                tools2.refreshStates()  -- My Auras First greys on Default / Order Applied
             end), 55)
 
             local dfSortMine = group:AddWidget(GUI:CreateCheckbox(parent, L["My Auras First"], db, "directDebuffSortMineFirst", DebuffFilterChanged), 30)
@@ -2474,12 +2458,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the one that survives standing alone on a plate is the sentence, not the
         -- jargon, and naming it that keeps the search result identical in both
         -- layouts because it is the caption the classic checkbox registers.
-        --
-        -- This was inlined because the only refresh helper used to be declared with
-        -- the Order & Limits box FURTHER DOWN the function, so naming it here would
-        -- have been a nil global — legal Lua, parses clean, silently dead checkbox.
-        -- DebuffFilterChanged is page-scope now, above every group that needs it, so
-        -- the hazard is gone and this simply calls it.
         local DEDUP_TIP = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
 
         if classicLayout then
@@ -2737,7 +2715,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== BORDER (a 280 box in column 1 in classic, the Icon band's fourth
         -- row) =====
-        -- Full border toolkit via the unified helper (Stage 5.5 Phase 2).  When
+        -- Full border toolkit via the unified helper.  When
         -- "Color by Dispel Type" (below) is ON, the border is forced SOLID and
         -- recoloured per dispel type, so Style/Colour/Gradient here only take
         -- effect when it's OFF (Size/Inset always apply).  Border Animation is
@@ -3028,13 +3006,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 parent = self.child,
                 refreshStates = function() self:RefreshStates() end,
             })
-            -- ⚠ Crossed to column 2. It sat in column 1 as this page's counterweight to the
-            -- styling boxes on the right (same reasoning as the buff page's Border note) --
-            -- but column 1 has since gained Debuff Filters, Debuff Blacklist and Order &
-            -- Limits, so the imbalance it was correcting now runs the other way. Important
-            -- Debuffs is a mark drawn ON the icon, so column 2 is also where this page's
-            -- own doctrine puts it: the crossing was the exception, and it is no longer
-            -- needed to buy anything.
+            -- ⚠ Column 2, not column 1. Important Debuffs is a mark drawn ON the icon,
+            -- which is where this page's own doctrine puts it, and column 1 already
+            -- carries Debuff Filters, Debuff Blacklist and Order & Limits.
             Add(impGroup, nil, 2)
         else
             -- Eight: the size step, the marker tick, its size, corner, two offsets
@@ -3298,12 +3272,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ===== DISPEL TEXT (a 280 box in column 2 in classic, the Text band's third
         -- row) ===== — the dispel-type letters ("Ma", "Po", …), engine-written per
         -- aura (12.1 factory rows only; the legacy renderer has no source for them).
-        -- ★ 2026-07-31: no longer requires Colorblind Mode. The bind passes
-        -- customDispelTextMap, which takes Blizzard's direct SetText path instead of
-        -- the CVar-gated one (DF:GetGameDispelTextMap, Frames/Border.lua) — so the
-        -- old caution note and the CVar caveat in the tooltip are gone with it.
-        -- Renamed from "Dispel Symbol" the same day: that read as the dispel ICON,
-        -- which is a different native feature. DB keys stay debuffDispelSymbol*.
+        -- Colorblind Mode is not required: the bind passes customDispelTextMap, which
+        -- takes Blizzard's direct SetText path instead of the CVar-gated one
+        -- (DF:GetGameDispelTextMap, Frames/Border.lua).
+        -- Named "Dispel Text", not "Dispel Symbol", which read as the dispel ICON, a
+        -- different native feature. DB keys stay debuffDispelSymbol*.
         --
         -- ⚠ IT STAYS IN THE TEXT BAND even though it shares the Duration Bar's factory
         -- gate. The band above it still has Duration Text and Stack Count in it on a
@@ -3708,7 +3681,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             mbHideFromBar.tooltip = L["Stops the raid buffs tracked here from also taking up a slot in the normal buff row, so the missing-buff icon is the only place they appear."]
             -- (No Debug Mode checkbox: its trace narrated the legacy UnitHasBuff scan, which
             -- never runs on the read-free 12.1 widget -- presence is never known to Lua, so
-            -- there is nothing to print. Removed 2026-07-25 as its own comment long proposed.)
+            -- there is nothing to print.)
         end
 
         -- The two ticks the row does not carry, in their own words. Silent while
@@ -4022,7 +3995,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== BORDER (a 280 box in column 2 in classic, the Icon band's third
         -- row) =====
-        -- Stage 4.1: hand-rolled border block replaced by the unified helper.
         -- include set tailored for a "needs attention" alert: alpha / inset /
         -- offset / blendMode / gradient / shadow / animate (matches the
         -- Defensive Icon — Border Offset nudges the band relative to the icon).
@@ -4047,9 +4019,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 sizeMin = 0, sizeMax = 6, sizeStep = 1,  -- 0 = animation-only (no solid edge)
                 noShowToggle = tools2.hoistToggle or nil,
             })
-            -- No hideWhen: the group gate below is what handles the feature being
-            -- off, and it GREYS like every other box on this page. (This call used to
-            -- pass both, so the controls vanished before the grey could show.)
+            -- No hideWhen: the group gate below handles the feature being off and GREYS
+            -- like every other box on this page. Passing both hides the controls before
+            -- the grey can show.
             tools2.group.disableChildrenOn = HideMissingBuffOptions
         end
 
@@ -4208,11 +4180,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
-        -- These tables used to sit inside the box that offered them. The rows print
-        -- the chosen value as their SUMMARY, and a summary is written OUTSIDE the
-        -- group's builder -- so the word has to come out of the same table the
-        -- dropdown offers, or a row could say one thing while the control behind it
-        -- says another.
+        -- The rows print the chosen value as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder -- so the word has to come out of the same
+        -- table the dropdown offers, or a row could say one thing while the control
+        -- behind it says another.
         --
         -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure captures
         -- the upvalue that exists when it is created -- so one declared above these
@@ -4227,9 +4198,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             TIME = L["Most Urgent"],
             EXTERNALS = L["Externals First"],
         }
-        -- Duration Format (PTR-7 #5): previously hardcoded NUMBER; icon-sized
-        -- formats only (see the buff page's Duration Format note). No Hide Above
-        -- on this page, so no percent-grey needed.
+        -- Duration Format: icon-sized formats only (see the buff page's Duration
+        -- Format note). No Hide Above on this page, so no percent-grey needed.
         local defDurFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
             TIMER = L["Timer"], PERCENT = L["Percent"],
             _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
@@ -4688,9 +4658,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 refreshStates = tools2.refreshStates,
                 noShowToggle = tools2.hoistToggle or nil,
             })
-            -- No hideWhen: the group gate below is what handles the feature being
-            -- off, and it GREYS like every other box on this page. (This call used to
-            -- pass both, so the controls vanished before the grey could show.)
+            -- No hideWhen: the group gate below handles the feature being off and GREYS
+            -- like every other box on this page. Passing both hides the controls before
+            -- the grey can show.
             tools2.group.disableChildrenOn = HideDefensiveIconOptions
         end
 
@@ -4739,8 +4709,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             defDurFormat.hideOn = HideDefensiveDurationOptions
 
             -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
-            -- offsets/justify). The offsets/anchor honor the existing defensiveIconDurationX/Y
-            -- keys (previously config-only); the static colour greys while Color-by-Time owns it.
+            -- offsets/justify). The offsets/anchor honor the existing
+            -- defensiveIconDurationX/Y keys; the static colour greys while Color-by-Time owns it.
             GUI:CreateTextControls(group, db, "defensiveIconDuration", {
                 parent     = parent,
                 include    = { color = true },
@@ -4764,10 +4734,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end), 30)
             diDurHidePerm.hideOn = HideDefensiveDurationOptions
         end
-
-        -- (The old "Duration Position" group is gone: CreateTextControls above already
-        -- renders Anchor + Offset X/Y on the same defensiveIconDurationX/Y keys — the
-        -- separate group was a duplicate left behind by the TextStyle conversion.)
 
         -- Which of the four icon-sized formats the text is drawn in, in the
         -- dropdown's own words -- and the one option that takes the colour away
@@ -5301,10 +5267,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     
     -- (Removed) Indicators > Targeted Spells. The group-frame display it
     -- configured is gone - Blizzard's 2026-04-07 UnitIsUnit hotfix removed the
-    -- only way to tell which group member an enemy was casting at. The page had
-    -- already been pulled from the sidebar; this removes the page itself, its
-    -- api-blocked overlay, and GUI.RefreshTargetedSpellsOverlay (no callers).
-    -- Personal Targeted and the Targeted List below are unaffected.
+    -- only way to tell which group member an enemy was casting at. Personal
+    -- Targeted and the Targeted List below are unaffected.
 
     -- ============================================================
     -- Indicators > Targeted List
@@ -5389,11 +5353,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
 
             -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
-            -- These tables used to sit inside the box that offered them. The rows
-            -- print the chosen value as their SUMMARY, and a summary is written
-            -- OUTSIDE the group's builder -- so the word has to come out of the same
-            -- table the dropdown offers, or a row could say one thing while the
-            -- control behind it says another.
+            -- The rows print the chosen value as their SUMMARY, and a summary is
+            -- written OUTSIDE the group's builder -- so the word has to come out of
+            -- the same table the dropdown offers, or a row could say one thing while
+            -- the control behind it says another.
             --
             -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure
             -- captures the upvalue that exists when it is created -- so one declared
@@ -5843,8 +5806,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- third row) =====
             -- Border gets its own box, after Appearance (Bar Style + Bar Color)
             -- and before the element extras — the page-layout standard's column 2
-            -- order. It used to be appended to the Bar Style box, where it read as
-            -- part of the style preset it has nothing to do with.
+            -- order.
             --
             -- Targeted List is a list view (N bars), so animate is deliberately
             -- skipped (per-bar animation would be visual noise + a perf hit).
@@ -6565,11 +6527,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE PAGE'S VOCABULARY AND ITS GATES, AT PAGE SCOPE =========
-        -- The growth table used to sit inside the box that offered it. Its row
-        -- prints the chosen value as its SUMMARY, and a summary is written
-        -- OUTSIDE the group's builder -- so the word has to come out of the same
-        -- table the dropdown offers, or a row could say one thing while the
-        -- control behind it says another.
+        -- The growth table is at PAGE scope, not inside the box that offers it:
+        -- both layouts read it -- classic's dropdown and the control row below.
         --
         -- ⚠ AND ABOVE EVERY BUILDER. A builder is a CLOSURE, and a closure
         -- captures the upvalue that exists when it is created -- so one declared
@@ -6909,11 +6868,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== BORDER (a 280 box in column 2 in classic, the Appearance band's
         -- third row) =====
-        -- Stage 4.4: 3 hand-rolled border widgets
-        -- (Show / Size / Color) replaced by CreateBorderControls. include
-        -- set tailored for a "needs attention" alert surface (Personal
-        -- Targeted = spells targeting you). Skipped: offset (icon has its
-        -- own positioning), classColor / roleColor (spell alert, not unit
+        -- The include set is tailored for a "needs attention" alert surface
+        -- (Personal Targeted = spells targeting you). Skipped: offset (the icon
+        -- has its own positioning), classColor / roleColor (spell alert, not unit
         -- identity), colorByTime / colorByType (no aura-state context).
         --
         -- ⚠ noShowToggle IS THE HOIST -- the Buff Bar border row's move, verbatim.
@@ -7379,10 +7336,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
-            -- DEPRECATED-TARGETED-SPELLS: this used to point at Targeted Spells,
-            -- which was the page's only link. Repointed rather than removed —
-            -- Targeted List is the surviving answer to the same question ("what
-            -- is being cast at my group"), and an empty See Also bar is worse
+            -- DEPRECATED-TARGETED-SPELLS: repointed from Targeted Spells rather than
+            -- removed -- Targeted List is the surviving answer to the same question
+            -- ("what is being cast at my group"), and an empty See Also bar is worse
             -- than no bar.
             {pageId = "indicators_targetedlist", label = L["Targeted List"]},
         }), 30, "both")
@@ -7394,23 +7350,17 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- section then holds plain boxes (Settings / Appearance / Position, plus
     -- Timer Text on AFK) that are always open.
     --
-    -- Those boxes used to be collapsible too, each with its own collapseKey. It
-    -- read as two levels of the same control -- expanding "Leader Icon" got you
-    -- three more things to expand before you could see a setting -- and made a
-    -- page of ordinary sliders feel deep. The section header is the only place
-    -- a collapse earns its keep here, because that IS the choice being made:
-    -- which icon am I configuring. Everything under it is one screen of rows.
+    -- Those boxes are deliberately NOT collapsible: two levels of the same
+    -- control read as depth, and the section header is the only place a
+    -- collapse earns its keep here -- which icon am I configuring IS the choice.
     --
-    -- Section headers are 280 wide to match the boxes; they were 270, which
-    -- left the header bar visibly narrower than everything beneath it.
+    -- Section headers are 280 wide to match the boxes.
     --
     -- Their slot is 36 -- the same as every other collapsible section in the
-    -- addon (28 of header + 8 of gap). It used to be 28, with the gap supplied
-    -- by a spacer frame REGISTERED AS A SECTION CHILD, so the gap collapsed
-    -- along with the section: correct while expanded, but this page defaults
-    -- every section to collapsed, and 13 headers with no gap between them ran
-    -- their borders together into one block. The gap belongs to the slot, not
-    -- to the contents.
+    -- addon (28 of header + 8 of gap). The gap belongs to the SLOT, not to
+    -- the contents: a spacer registered as a section child collapses with the
+    -- section, and this page defaults every section to collapsed, so the
+    -- headers' borders would run together into one block.
     local pageIcons = CreateSubTab("indicators", "indicators_icons", L["Icons"])
     DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
 end

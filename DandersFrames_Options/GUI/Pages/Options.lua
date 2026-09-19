@@ -29,10 +29,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- section highlighted on arrival). `group` is the settings group the toggle sits in; `parent`
     -- is the page child frame. The link itself is GUI:CreateColorsPageLink (shared with the Aura Designer).
     local function AddColorsPageLink(group, parent)
-        -- Shared note-style cross-link to the Colors page Color-by-Time section (jump + whole-
-        -- section border flash). CreateLink is fixed-layout, so hand it the group's inner width
-        -- up front — its wrapped height is then known before AddWidget (the group advances Y by
-        -- the height we pass). Defined once in GUI:CreateColorsPageLink; shared with the Aura Designer.
+        -- CreateLink is fixed-layout, so hand it the group's inner width up front --
+        -- its wrapped height is then known before AddWidget (the group advances Y by
+        -- the height we pass).
         local note = GUI:CreateColorsPageLink(parent, GUI:GroupInnerWidth(group))
         group:AddWidget(note, (note.layoutHeight or 16) + 2)
         return note
@@ -48,7 +47,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- their template dropdown IS the sharing control, so they carry neither
     -- button. See GUI:CreateDesignerPresetBar.
     local function CreateCopyButton(parent, prefixes, sectionName, pageId)
-        -- Register section in the sync registry
         if pageId then
             DF.SectionRegistry[pageId] = prefixes
         end
@@ -84,10 +82,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         if pageId then
             linkBtn = CreateFrame("Button", nil, btn, "BackdropTemplate")
             linkBtn:SetSize(120, 26)
-            -- Snapped gap: the row is a CHAIN (Copy <- Sync <- Reset) and controls
-            -- are no longer nudged onto the grid after the fact, so the offset
-            -- itself has to be a whole number of device pixels or every button to
-            -- the left of this one inherits the fraction.
+            -- Snapped gap: the row is a CHAIN (Copy <- Sync <- Reset), so the offset
+            -- itself has to be a whole number of device pixels or every button to the
+            -- left of this one inherits the fraction.
             linkBtn:SetPoint("RIGHT", btn, "LEFT", GUI.SnapLen(linkBtn, -4), 0)
             -- Sync is a toggle (SetActive when linked) on the shared styler.
             -- fadeActiveText: the synced label recedes slightly while linked.
@@ -115,7 +112,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             btn.Text:SetTextColor(0.9, 0.9, 0.9)
             btn.Icon:SetVertexColor(0.9, 0.9, 0.9)
 
-            -- Update sync button appearance
             if linkBtn then
                 local dest = mode == "party" and L["Raid"] or L["Party"]
                 local isLinked = DF.db and DF.db.linkedSections and DF.db.linkedSections[pageId]
@@ -287,7 +283,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             })
         end)
 
-        -- Initial update
         UpdateAppearance()
 
         -- Register for theme updates
@@ -359,7 +354,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
     GUI.CreateResetOnlyButton = CreateResetOnlyButton
 
-    -- Define category order (updated structure)
+    -- Define category order
     GUI.CategoryOrder = {"general", "clickcast", "display", "bars", "text", "auras", "indicators", "profiles", "debug"}
     
     -- ========================================
@@ -646,8 +641,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tools.RegisterControlRow(hideSelfRow, "checkbox", "hidePlayerFrame")
 
             -- Both bands, in reading order. With nothing left in a column there is
-            -- no flow to unbalance -- the sync-point hole that used to force the
-            -- band above the lone column box cannot arise.
+            -- no flow to unbalance.
             Add(soloBand, nil, "both")
             Add(hideSelfBand, nil, "both")
         end
@@ -709,14 +703,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local TIP_VIS_OOC = L["When this tooltip appears while you are out of combat. Always shows it on hover; a Hold option requires that key; Never suppresses it."]
         local TIP_VIS_COMBAT = L["When this tooltip appears while you are in combat, independently of the out-of-combat setting. Set this to Never and no key will reveal it mid-fight. Press or release a Hold key while already hovering and the tooltip follows immediately."]
 
-        -- ★ THE FIVE "ANCHOR TO" VALUE LISTS, AT PAGE SCOPE. Each used to be
-        -- declared inside its own box, which was fine while the box was the only
-        -- thing that read it. The popout rows print the CHOSEN anchor as their
-        -- summary, and the summary is built outside the group's builder -- so the
-        -- word for FRAME has to come from the same table the dropdown offers, or
-        -- a row could say "Unit Frame" while the control under it says "Buff
-        -- Icon". Up here they sit beside anchorPositionValues, which has always
-        -- been shared by all five dropdowns for exactly this reason.
+        -- ★ THE FIVE "ANCHOR TO" VALUE LISTS, AT PAGE SCOPE. The popout rows print
+        -- the CHOSEN anchor as their summary, and the summary is built outside the
+        -- group's builder -- so the word for FRAME has to come from the same table
+        -- the dropdown offers, or a row could say "Unit Frame" while the control
+        -- under it says "Buff Icon". They sit beside anchorPositionValues, which is
+        -- shared by all five dropdowns for exactly this reason.
         --
         -- ⚠ FIVE TABLES, NOT THREE, even though Frame and Binding are identical
         -- today. They describe two different hovers and are free to diverge; one
@@ -1071,8 +1063,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- Buff Tooltips (a 280 box in column 1 in classic, the Auras band's first
-        -- row). RefreshAuraTooltips used to be declared here; see its note at
-        -- page scope for why the closures forced it up.
+        -- row).
         local function BuildBuffTooltipGroup(tools2)
             local group, parent = tools2.group, tools2.parent
 
@@ -1763,8 +1754,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local oorDispel = group:AddWidget(GUI:CreateSlider(parent, L["Dispel Overlay Alpha"], 0.0, 1.0, 0.05, db, "oorDispelOverlayAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorDispel.disableOn = HideOOROptions
 
-            -- My Buff Indicator OOR slider removed — feature deprecated
-
             local oorPower = group:AddWidget(GUI:CreateSlider(parent, L["Power Bar Alpha"], 0.0, 1.0, 0.05, db, "oorPowerBarAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorPower.disableOn = HideOOROptions
 
@@ -1773,13 +1762,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             local oorDefensive = group:AddWidget(GUI:CreateSlider(parent, L["Defensive Icon Alpha"], 0.0, 1.0, 0.05, db, "oorDefensiveIconAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorDefensive.disableOn = HideOOROptions
-
-            -- (Removed) the Targeted Spell Alpha slider on oorTargetedSpellAlpha. Its only
-            -- consumer was DF:UpdateTargetedSpellAppearance, which faded the group-frame
-            -- container and went with that display. Personal Targeted is a screen overlay
-            -- that never ran through ElementAppearance's out-of-range path, and the
-            -- Targeted List has its own container and colours — so the slider was moving
-            -- a value nothing read.
 
             local oorAuraDesigner = group:AddWidget(GUI:CreateSlider(parent, L["Aura Designer Alpha"], 0.0, 1.0, 0.05, db, "oorAuraDesignerAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
             oorAuraDesigner.disableOn = HideOOROptions
@@ -2010,9 +1992,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     DF:RefreshAllVisibleFrames()
                 end), 30)
                 hfEnable.keepEnabled = true
-                -- Was set on hfGroup, which is a SettingsGroup and has no tooltip support,
-                -- so this explanation had never once been seen. It belongs on the enable
-                -- toggle anyway — that's the control you hover to ask "what is this?".
+                -- A SettingsGroup has no tooltip support, so this belongs on the enable
+                -- toggle -- the control you hover to ask "what is this?".
                 hfEnable.tooltip = L["Fade frames or elements when a unit's health is above the set threshold (e.g. 100% or 80%)."]
             end
             group.disableChildrenOn = function(d) return not d.healthFadeEnabled end
@@ -2182,11 +2163,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- neither is a single control, so neither can be a control row -- but they
         -- are built at the BAND's width and added as sync points, so every
         -- top-level object on the page starts and ends on the same two edges.
-        -- That also disposes of what used to stand here: `Add`'s "both" is a sync
-        -- point, so a full-width band under a lone column-1 stack would have left a
-        -- two-box-tall hole beside it, and the answer was to fill column 2 with the
-        -- other shape box. With both of them spanning, there is no column flow left
-        -- to leave a hole in.
         --
         -- Every converted group's widgets live in a `Build<X>Group(tools2)` taking
         -- { group, parent, refreshStates } plus, where it matters, `popout` and
@@ -2807,7 +2783,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         if classicLayout then
-            -- ===== BORDER GROUP (Stage 4.3) =====
+            -- ===== BORDER GROUP (col2) =====
             local petBorderGroup = GUI:CreateSettingsGroup(self.child, 280)
             petBorderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
             petBorderGroup.disableChildrenOn = function(d) return not d.petEnabled end
@@ -3624,10 +3600,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
             -- Visual divider to separate the related sub-option (Show Side Menu only
             -- applies once a Blizzard frame is disabled).
-            --
-            -- This rule was hand-rolled here first; it is now GUI:CreateSeparator, so the
-            -- Buff Bar page's scope/filter split draws the identical line instead of a
-            -- second copy of the same five lines.
             group:AddWidget(GUI:CreateSeparator(parent), 14)
 
             local sideMenuCheck = group:AddWidget(GUI:CreateCheckbox(
@@ -4285,12 +4257,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- growDirection is that key for most people; do not read "only one setting
         -- moved" as "small blast radius".
         --
-        -- ⚠ This block used to cite the raid dropdown's INVERTED labels (HORIZONTAL
-        -- reading as "Columns" there and "Rows" on party/flat) as the clearest signal
-        -- these were never meant to be one shared setting. That inversion was a plain
-        -- labelling bug and is gone -- there is one dropdown now, see the note beside
-        -- it. The exclusion below stands on its own: the key is per-mode and edited
-        -- from both pages, which is what makes owning it here destructive.
         Add(CreateCopyButton(self.child, {"frame", "permanentMover", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
         
         -- Migration: Ensure new flat raid settings have defaults.
@@ -4336,7 +4302,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             if GUI.SelectedMode == "raid" then
                 DF:UpdateRaidLayout()
-                -- Update test mode frames if active
                 if DF.raidTestMode then DF:UpdateRaidTestFrames() end
             else
                 DF:UpdateAllFrames()
@@ -4353,19 +4318,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupsPerRowSlider, rowColSpacingSlider, playersPerRowSlider
         
         -- Function to update dynamic labels based on growth direction
-        -- ⚠ The two grouped-raid sliders USED to be re-labelled here on a direction change
-        -- (Groups Per Row <-> Groups Per Column, Row Spacing <-> Column Spacing). They are
-        -- now "Groups Before Wrap" and "Wrap Spacing", which describe the wrap rather than
-        -- the axis and so do not swap -- and leaving the writes in would have silently
-        -- restored the old names the first time anyone touched Growth Direction.
-        -- Only the flat grid's slider still names an axis.
+        -- ⚠ The two grouped-raid sliders are NOT re-labelled on a direction change:
+        -- "Groups Before Wrap" and "Wrap Spacing" name the wrap, not the axis, so
+        -- they do not swap. Only the flat grid's slider still names an axis.
         local function UpdateDynamicLabels()
             if playersPerRowSlider and playersPerRowSlider.label then
                 playersPerRowSlider.label:SetText(db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"])
             end
         end
         
-        -- Custom callback for growth direction
         local function OnGrowthDirectionChanged()
             UpdateDynamicLabels()
             UpdateFrames()
@@ -4453,17 +4414,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local classicLayout = DF:IsClassicSettingsLayout()
 
         -- ===== THE POPOUT-ROW MACHINERY, SHARED RATHER THAN OWNED =========
-        -- This page BUILT the first copy of all of it inline -- the eager
-        -- holders, the pane reflow, the key claim, the amber tick, the footer's
-        -- Reset Group / Hold: Defaults, the hoisted-toggle search repair and the
-        -- band width -- because it was the first page converted and there was
-        -- nothing yet to share. Five pages later there was, and every one of them
-        -- took GUI:CreatePopoutPageTools (Controls.lua); this page is the last to
-        -- come home, so the sweep ends with one copy instead of six.
-        --
-        -- Every essay that used to sit over each verb here went WITH the code and
-        -- is still the load-bearing half of it -- read them there, not from a
-        -- summary here that would drift the moment either side moved.
+        -- All of it -- the eager holders, the pane reflow, the key claim, the amber
+        -- tick, the footer's Reset Group / Hold: Defaults, the hoisted-toggle search
+        -- repair and the band width -- is shared through GUI:CreatePopoutPageTools
+        -- (Controls.lua). The essay over each verb lives there; do not restate it
+        -- here, a summary would drift the moment either side moved.
         --
         -- nil in classic, which is what every `if classicLayout then` arm below
         -- leans on: the classic page never reaches a `tools.` call, so nothing
@@ -4656,8 +4611,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end
 
         -- ===== APPEARANCE GROUP (Column 2, or the full-width band) =====
-        -- The container itself is built (and, for the band, added) above -- see
-        -- the note there. From here down the two layouts fill the SAME object.
+        -- The container itself is built above -- see the note there. From here down
+        -- the two layouts fill the SAME object.
         appearanceGroup:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), 40)
         -- Canonical border controls via the unified helper. Replaces the
         -- previous hand-rolled Show / Color / Style / Texture / Size block.
@@ -4681,8 +4636,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 include      = {
                     -- Frame Border is the outer chrome of the unit. It's a
                     -- structural element, not an alert surface, so animations
-                    -- don't fit the design — removed in Stage 4.0 after Stage
-                    -- 3 used it as a dev playground.
+                    -- don't fit the design.
                     inset = true, offset = true, blendMode = true,
                     gradient = true,
                     classColor = true, roleColor = true,
@@ -4924,8 +4878,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- disableOn on this page. The Border row has no dependency.
             shadowRow.disableOn = function(d) return (d or db).frameShowBorder == false end
         end
-        -- Classic only: the band was added at the top of the page (see the
-        -- container note above), and adding it twice would lay it out twice.
+        -- Classic only: in the popout layout the band is added at the foot of this
+        -- builder (see the container note above); adding it twice lays it out twice.
         if classicLayout then Add(appearanceGroup, nil, 2) end
 
         -- ===== FRAME FADE (Column 2 box, or the third row in the band) =======
@@ -5588,11 +5542,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             -- the full eight-group grid, so with five groups at four per row the bottom cell
             -- legitimately moves them to the bottom of that grid, not of the populated rows.
             local groupAnchorGrid = group:AddWidget(
-                -- ⚠ Plain UpdateFramesAndGates again. The pin toggle used to be a separate
-                -- row whose hideOn only a page layout pass could re-evaluate, so a cell click
-                -- that changed the centre-ness had to force GUI:RefreshCurrentPage or the
-                -- checkbox appeared a click late. The toggle now lives inside this widget and
-                -- its own Refresh runs on every cell click, so that machinery is gone.
+                -- ⚠ Plain UpdateFramesAndGates: the pin toggle lives inside this widget and
+                -- its own Refresh runs on every cell click, so a cell click that changes the
+                -- centre-ness needs no GUI:RefreshCurrentPage.
                 GUI:CreateAnchorGrid(parent, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFramesAndGates, {
                     verticalInertFn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end,
                     -- ☠ In Rows growth the two keys swap screen axes -- raidGroupAnchor moves
@@ -5824,7 +5776,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             local groupVisHintLabel = group:AddWidget(GUI:CreateLabel(parent, L["Choose which groups to display."], 250), 25)
             groupVisHintLabel.fullRow = true
 
-            -- Initialize raidGroupVisible if it doesn't exist
             if not db.raidGroupVisible then
                 db.raidGroupVisible = {[1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[7]=true,[8]=true}
             end
@@ -5931,7 +5882,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end), 25)
             playerGroupFirstCheck.tooltip = L["When enabled, the group you are in will always be displayed first."]
 
-            -- Initialize raidGroupDisplayOrder if it doesn't exist
             if not db.raidGroupDisplayOrder then
                 db.raidGroupDisplayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
             end
@@ -6142,10 +6092,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- ===== PERMANENT MOVER (Column 2 box, or a row of its own) ===========
         -- The page's textbook conversion: ONE checkbox that means "am I doing
-        -- anything", and thirteen controls that grey behind it. That is exactly
+        -- anything", and fifteen controls that grey behind it. That is exactly
         -- what a feature row is -- the tick comes up onto the row, the rest goes
-        -- into the panel, and the fifteen-deep box that used to carry column 2 on
-        -- its own becomes one line.
+        -- into the panel, and the box that used to carry column 2 on its own
+        -- becomes one line.
         --
         -- Declared out here rather than inside the builder because the SUMMARY
         -- reads it too: the row says which corner the handle sits in, and there

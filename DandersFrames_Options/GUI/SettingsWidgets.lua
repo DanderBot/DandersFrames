@@ -617,12 +617,6 @@ function GUI:CreateButton(parent, text, width, height, func, iconName)
     return btn
 end
 
--- Standard close/dismiss button: a small square danger-toned button showing a
--- "×" glyph. Replaces the many hand-rolled red close buttons on dialogs/panels.
--- opts = { size (20), onClick, tooltip, tone }.
---   tone = nil      → dim grey "×" at rest → white on hover (close/dismiss; default)
---   tone = "danger" → RED "×" at rest → brighter red on hover (inline destructive
---                     removes: list-item / tag removes). Both keep the red hover wash.
 -- A horizontal row of buttons, chained left-to-right with one gap, sized as a
 -- single layout slot. Pages were building this by hand every time -- a bare
 -- CreateFrame, then SetPoint("LEFT", prev, "RIGHT", 6, 0) per button, plus the
@@ -793,9 +787,9 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end)
 
     -- SHARING MARKER. A template can be pointed at by the other mode, a pinned
-    -- set or an auto layout, and editing it then changes every one of them —
-    -- which nothing on this bar used to say. The dropdown is a fixed 150px, so
-    -- the FACT rides as a glyph and the NAMES go in the tooltip, which is free.
+    -- set or an auto layout, and editing it then changes every one of them --
+    -- which nothing on this bar used to say. The dropdown has no room for the
+    -- names, so the FACT rides as a glyph and the NAMES go in the tooltip.
     --
     -- Deliberately NOT clickable. Splitting a shared template off for this mode
     -- is exactly what Duplicate does, two buttons to the right, and Duplicate
@@ -1753,11 +1747,11 @@ end
 -- (a pooled row is a different filter every refresh) and a captured dbKey would go
 -- stale the moment the pool rebinds.
 --
--- ⚠ Clicks deliberately do NOT propagate. The override marker above lets them fall
--- through because it is a passive marker; this is a control, and on a clickable row
--- the two gestures must stay separate — tick the box to switch the filter on, click
--- anywhere else to select it. Nothing here calls SetPropagateMouseClicks, which is
--- PROTECTED on 12.1 anyway (see the note in CreateOverrideMarker).
+-- ⚠ Clicks deliberately do NOT propagate. GUI:CreateOverrideMarker (DandersUI/
+-- Widgets.lua) lets them fall through because it is a passive marker; this is a
+-- control, and on a clickable row the two gestures must stay separate — tick the
+-- box to switch the filter on, click anywhere else to select it. Nothing here calls
+-- SetPropagateMouseClicks, which is PROTECTED on 12.1 anyway (see that marker).
 --
 -- ⚠ The BOX ITSELF is GUI:StyleCheckButton, the addon's one checkbox look — do not
 -- hand-roll it again. This was hand-rolled once and drifted four ways: it drew the
@@ -1999,8 +1993,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     container:SetScript("OnShow", UpdateState)
     -- Re-read the source and repaint the box, for a caller that changed the value
     -- behind the widget's back (a "set all" button). Same contract as
-    -- CreateSegmentToggle:Refresh(); before this, call sites reached for a
-    -- Hide()/Show() bounce to fire the OnShow above.
+    -- CreateSegmentToggle:Refresh().
     container.Refresh = UpdateState
     -- ...and under the group-wide value sweep's one name (DandersUI Sections'
     -- RefreshChildValues), for a caller that wrote the key behind this widget's
@@ -2008,8 +2001,6 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     container.refreshValue = UpdateState
     cb:SetScript("OnClick", function(self)
         local val = self:GetChecked()
-        -- Was gated on DF.debugEnabled and printed straight to CHAT, bypassing the
-        -- console entirely. GUI is the right category and it is already declared.
         DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
             tostring(dbKey), tostring(overrideKey), tostring(val))
 
@@ -2082,11 +2073,10 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     UpdateState()
     
     -- SEARCH: Register this setting
-    -- ⚠ opts.noSearch exists for the ONE checkbox that lives outside any page --
-    -- the title bar's Classic Layout toggle (GUI/Panel.lua) -- because a search
-    -- result must be able to navigate to the widget it names, and that widget is
-    -- on no page. Page-resident checkboxes must NEVER pass it: skipping the
-    -- registration makes the setting invisible to settings search.
+    -- ⚠ opts.noSearch skips the registration, which makes the setting invisible
+    -- to settings search. It exists only for a checkbox that lives outside any
+    -- page, because a search result must be able to navigate to the widget it
+    -- names. No call site passes it today, and a page-resident checkbox never may.
     if DF.Search and not (opts and opts.noSearch) then
         local hasCustomGetSet = (customGet ~= nil or customSet ~= nil)
         if dbKey and type(dbKey) == "string" then
@@ -2347,11 +2337,8 @@ function GUI:CreateInput(parent, label, width)
     end
 
     frame.EditBox = editbox
-    -- Tooltip: shared attach on the LABEL only. This factory carried no tooltip
-    -- support at all, so a caller that set .tooltip on it got silence —
-    -- Options.lua's custom range-spell input did exactly that, and its
-    -- explanation never appeared. Keeping it off the edit box also means it can't
-    -- cover what you are typing.
+    -- Tooltip: shared attach on the LABEL only. Keeping it off the edit box also
+    -- means it can't cover what you are typing.
     GUI:AttachTooltip(frame, label, lbl)
     return frame
 end
@@ -2411,10 +2398,10 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     local function SaveValue()
         if dbTable and dbKey then
             local val = editbox:GetText()
-            -- The host bracket, for the reason spelled out on CreateCheckbox
-            -- above: the redirect gate and the override record used to be written
-            -- out here by hand, which kept this widget's writes out of sight of
-            -- everything hooked to the bracket -- the undo engine included.
+            -- The host bracket, for the reason spelled out on CreateCheckbox above:
+            -- spelling the redirect gate and the override record out by hand here would
+            -- keep this widget's writes out of sight of everything hooked to the
+            -- bracket -- the undo engine included.
             --
             -- ⚠ OnEditFocusLost calls this whether or not anything was typed, so
             -- clicking through a box "saves" the value already in it. Nothing
@@ -2488,9 +2475,8 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     -- the font button's (GUI/Controls.lua), and a no-op on a page.
     frame.refreshValue = RefreshDisplay
 
-    -- Grey-when-disabled: the grey loop (RefreshChildStates) calls widget:SetEnabled,
-    -- but this frame had none, so a disabled group left the input full-bright AND
-    -- editable. Dim the whole widget + block editing, matching the other helpers.
+    -- Grey-when-disabled: the grey loop (RefreshChildStates) calls widget:SetEnabled.
+    -- Dim the whole widget + block editing, matching the other helpers.
     frame.SetEnabled = function(self, enabled)
         self:SetAlpha(enabled and 1 or 0.4)
         editbox:SetEnabled(enabled)
@@ -2820,9 +2806,8 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
     end)
 
-    -- Tooltip: shared attach on the LABEL only. This factory carried none, across
-    -- 87 colour pickers. The btn keeps its own hover scripts untouched — the hit
-    -- frame is over the text, not the swatch.
+    -- Tooltip: shared attach on the LABEL only. The btn keeps its own hover
+    -- scripts untouched — the hit frame is over the text, not the swatch.
     GUI:AttachTooltip(container, label, txt)
 
     btn:SetScript("OnClick", function()
@@ -3148,7 +3133,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     }
     -- Optional caller filter: drop any excluded type from both the value map and
     -- the display order (e.g. the Aura Designer border offers only the taint-safe,
-    -- overlay-recoverable animations — no LCG glows).
+    -- overlay-recoverable animations).
     if excludeTypes then
         for k in pairs(excludeTypes) do animTypeOptions[k] = nil end
         local filteredOrder = {}
@@ -3196,8 +3181,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     end
 
     -- Min 0: DF_DASH reads Frequency as march speed, so 0 = static dashed.
-    -- The LCG glows treat 0 as their default rate (clamped in StartAnimation),
-    -- and the OnUpdate effects fall back to a sensible default period at 0.
+    -- The OnUpdate effects fall back to a sensible default period at 0.
     w.animationFrequency = group:AddWidget(GUI:CreateSlider(parent, L["Animation Frequency"],
         0, 4, 0.05, dbTable, aKey("Frequency"),
         fullUpdate, lightUpdate, true), 55)
@@ -3251,12 +3235,9 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         fullUpdate, lightUpdate, true), 55)
     w.animationOffsetY.hideOn = hideUnless(hasPositioning)
 
-    -- ★★ ANIMATION BLEND MODE (2026-09-10). Krathe: "if I've set it to red it will show orange
-    -- when over a yellow border... I'm sure we used to offer up a blend mode for animation?"
-    -- We never did -- what exists is Border Blend Mode, which governs the border's own EDGES
-    -- and not the effect drawn over them. The effects had a mode each, chosen by hand when
-    -- c4b4e5eb replaced LibCustomGlow: DF Chase and DF Proc additive, the rest not. Same colour
-    -- picker, two different meanings, and nothing anywhere saying which you had.
+    -- ★★ ANIMATION BLEND MODE. Border Blend Mode is a different control: it governs
+    -- the border's own EDGES, not the effect drawn over them. Each effect also has a
+    -- built-in mode of its own -- DF Chase and DF Proc additive, the rest not.
     -- ⚠ NO DEFAULT VALUE IN THE DB. An unset key means "this effect's own default", so every
     -- existing profile keeps exactly the look it has -- see ANIM_BLEND_DEFAULT in Border.lua.
     -- That is why this dropdown is not seeded and why its first entry is not Blend.
@@ -3511,12 +3492,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     -- Gradient pickers — only visible under Style = GRADIENT.  Grouped here
     -- (between Texture and the Colour Source dropdown) so all style-dependent
     -- widgets sit directly under the Style dropdown that controls them.
-    -- The standalone "Border Gradient" checkbox was removed when Style
-    -- absorbed it; Style is now the single source of truth so it's not
-    -- possible to pick "Solid + Class Color" then have a Gradient checkbox
-    -- stomp the class colour (the previous UX bug).  Legacy
-    -- `<prefix>BorderGradientEnabled = true` profiles are migrated to
-    -- `<prefix>BorderStyle = "GRADIENT"` on db load.
+    -- There is no standalone "Border Gradient" checkbox: Style is the single
+    -- source of truth, so a gradient toggle can never stomp the class colour of a
+    -- "Solid + Class Color" pick.  Legacy `<prefix>BorderGradientEnabled = true`
+    -- profiles are migrated to `<prefix>BorderStyle = "GRADIENT"` on db load.
     if include.gradient then
         local function gradHide() return hideOff() or not isGradient() end
 
@@ -3637,9 +3616,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         -- other Offset slider in the addon (~60 of them): an offset is a well
         -- understood control and a tooltip restating it is noise. Inset is the
         -- one that needs explaining, so the Thickness / Inset / Offset
-        -- distinction is spelled out THERE, once. Krathe's call, 2026-07-27 —
-        -- these two briefly had tooltips and Border Shadow's offsets did not,
-        -- which is the inconsistency that prompted it.
+        -- distinction is spelled out THERE, once.
     end
 
     if include.blendMode then

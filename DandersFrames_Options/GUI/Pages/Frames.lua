@@ -1013,8 +1013,6 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             if not DF.PinnedFrames then return end
             -- Capture the edited mode at click time (robust if the GUI mode changes
             -- while the confirm popup is open). Party/raid set lists are independent.
-            -- The closure replaces what used to travel as the StaticPopup `data`
-            -- payload, which is the field whose behaviour varies across clients.
             local mode = GUI.SelectedMode
             DF:ShowPopupAlert({
                 title   = L["Remove Pinned Set"],
@@ -2266,7 +2264,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         })
         layoutGroup:AddWidget(matchInfoBanner, matchInfoBanner.layoutHeight or 44)
 
-        -- Match (Stage 2a): which mode's main frames this pinned set inherits its
+        -- Match: which mode's main frames this pinned set inherits its
         -- baseline look from. Defaults to the page's OWN mode (a party set mirrors
         -- party frames, a raid set mirrors raid frames); pick the opposite mode to
         -- cross-match it (e.g. raid pinned frames sized/styled like party frames).

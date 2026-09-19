@@ -390,21 +390,11 @@ end
 -- ============================================================
 -- CORNER SWITCHER -- the radius workbench.
 --
--- ⚠ WHAT THIS USED TO BE, because the shape of the code changed completely and
--- the old shape is what a reader will be expecting. It used to reach INTO the
--- library: it swapped the row plate's SetBackdropColor / SetBackdropBorderColor
--- for shims that painted a rounded surface, shadowed the popout instance's
--- _ApplyAccent to repaint its chrome after the base had run, shadowed
--- _UpdateSourceOutline to suppress an outline the shell had no rounded version
--- of, and wrapped row.OpenPopout to install the pair on a pooled panel the first
--- time it appeared. Five shadows, all of them per-instance, all of them things
--- the real settings pages could not have.
---
--- Every one of those is now a first-class option and the shadows are gone. The
--- rounded paint, the rounded title strip, the rounded source outline and the
--- cross's clearance from the arc all live INSIDE the shells, driven by
--- `opts.surface` -- so what this button exercises is exactly the code path the
--- settings window runs, which is the only way a workbench is worth having.
+-- The rounded paint, the rounded title strip, the rounded source outline and
+-- the cross's clearance from the arc all live INSIDE the shells, driven by
+-- `opts.surface`, not by per-instance shadows here. What this button exercises
+-- is exactly the code path the settings window runs, which is the only way a
+-- workbench is worth having.
 --
 -- The window is the one surface still painted here, and that is correct: it is
 -- not a kit object. It uses the same three shared moves the real window uses
@@ -480,9 +470,8 @@ end
 -- replays its own state paint through it (so a hovered or ACTIVE plate comes
 -- back in the colour it should be), re-declares its radius on the tether
 -- contract, and forwards the style to every panel it has open -- pinned ones
--- included. That last step is what repaints the popout's chrome, its title strip
--- and the outline it lays over the active row, all of which used to need
--- shadows here.
+-- included. That last step is what repaints the popout's chrome, its title
+-- strip and the outline it lays over the active row.
 local function applyCorners(f, btn)
     local style = cornerStyle()
     for _, r in pairs(rows) do r:SetSurface(style) end
@@ -666,12 +655,9 @@ local function buildWindow()
         -- row's box model moves this list with it.
         y = y + (row.preferredHeight or UI.PopoutRow.slot)
 
-        -- ⚠ AND NOTHING ELSE. There used to be an OpenPopout wrapper here that
-        -- installed the corner shadows on the pooled panel the first time it
-        -- appeared, plus two immediate re-runs to catch the chrome the shell had
-        -- already painted before the shadows existed. The row forwards its style
-        -- to every panel it opens, so a panel is the right shape when it arrives
-        -- and there is no window in which it is the wrong one.
+        -- ⚠ AND NOTHING ELSE: the row forwards its style to every panel it opens, so a
+        -- panel is the right shape when it arrives and there is no window in which it
+        -- is the wrong one. No OpenPopout wrapper belongs here.
 
         rows[def.name] = row
     end

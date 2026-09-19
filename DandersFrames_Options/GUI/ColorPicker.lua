@@ -29,11 +29,8 @@ local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 
--- Colour-picker tracing. This used to hang off a persisted db.party.colorPickerDebug
--- toggled by "/df debug colorhook debug" — the last boolean logging flag in the addon; it
--- survived the console consolidation only because it lived in the DB rather than on
--- DF, so the flag sweep did not see it. Now a console category (COLORPICKER, noisy:
--- the Blizzard sync below fires on every drag frame).
+-- Colour-picker tracing through the COLORPICKER console category (noisy: the
+-- Blizzard sync below fires on every drag frame).
 --
 -- It stays on this side of the split: every one of its call sites is in the
 -- Blizzard-override machinery below.
@@ -393,9 +390,8 @@ local function HookedSetupColorPickerAndShow(self, info)
         return
     end
 
-    -- Account-wide settings, NOT db.party. These used to read the party table while
-    -- the checkboxes rendered on BOTH mode tabs, so ticking on Raid wrote a value
-    -- nothing ever read. GetGlobalDB seeds its own defaults, so no nil-fixup here.
+    -- Account-wide settings, NOT db.party. GetGlobalDB seeds its own defaults, so
+    -- no nil-fixup here.
     local dfGlobal = DandersFrames
     local db = dfGlobal and dfGlobal.GetGlobalDB and dfGlobal:GetGlobalDB()
     if not db then
@@ -518,11 +514,9 @@ function GUI:IsColorPickerHookInstalled()
 end
 
 -- Always install the hook - the hook itself checks settings when invoked.
--- This used to wait a second past the login PLAYER_ENTERING_WORLD so that
--- ColorPickerFrame was ready. In the companion neither is needed: nothing loads
--- this file until the player opens the settings panel, by which point the login
--- events are long past and ColorPickerFrame exists. Waiting for the next zoning
--- would leave the hook uninstalled for the first swatch clicked.
+-- No PLAYER_ENTERING_WORLD wait: nothing loads this file until the player opens
+-- the settings panel, by which point ColorPickerFrame exists. Waiting for the
+-- next zoning would leave the hook uninstalled for the first swatch clicked.
 --
 -- ⚠ A user with "Use DF Color Picker for All Addons" on never opens the panel to
 -- get here -- DandersFrames/GUI/LoadOptions.lua loads this companion at login for

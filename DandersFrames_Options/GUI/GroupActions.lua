@@ -188,7 +188,7 @@ end
 -- undo has no caller to do that for it, and a group whose apply was only the
 -- generic sweep would move thirteen values and repaint none of the work the
 -- caller's own apply does. Optional; without one the entry falls back to the
--- sweep, exactly as it did before this argument existed.
+-- sweep.
 function GroupActions:ResetKeys(host, db, keys, mode, label, applyFn)
     local changes = {}
     if type(db) ~= "table" or type(keys) ~= "table" then return changes end

@@ -25,7 +25,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Harmless, kept so the intent of the list stays readable.)
         Add(CreateCopyButton(self.child, {"sort", "useFrameSort", "selfPosition", "rolePriority", "classPriority"}, L["Sorting"], "general_sorting"), 25, 2)
         
-        -- Helper function to trigger sort for current mode
         local function TriggerSortForCurrentMode()
             if DF.testMode or DF.raidTestMode then
                 if DF.RefreshTestFramesWithLayout then DF:RefreshTestFramesWithLayout() end
@@ -40,10 +39,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end
             elseif GUI.SelectedMode == "raid" then
                 -- Raid sorting is applied by DF:ApplyHeaderSettings above, which routes
-                -- to ApplyRaidGroupSorting / ApplyRaidFlatSorting. The SecureSort push
-                -- and trigger that used to sit here returned false on their first guard
-                -- (no handler is ever created), so they did nothing. This branch stays
-                -- so raid mode does not fall into the party resort below.
+                -- to ApplyRaidGroupSorting / ApplyRaidFlatSorting. This branch stays so
+                -- raid mode does not fall into the party resort below.
             else
                 if DF.Sort then DF.Sort:TriggerResort() end
             end
@@ -95,8 +92,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- banner after UpdateCombatBanner had hidden it -- a white, tone-less box.
         combatBanner.hideOn = function(d) return HideSortOptions(d) or not d.sortEnabled end
         -- Reapply tone + text on every page refresh. RefreshStates calls
-        -- refreshContent (not the old custom UpdateBanner method), so the banner
-        -- never shows without a tone (the backdrop defaults to white until toned).
+        -- refreshContent, so the banner never shows without a tone (the backdrop
+        -- defaults to white until toned).
         combatBanner.refreshContent = UpdateCombatBanner
         Add(combatBanner, combatBanner.layoutHeight, "both")
 
@@ -990,7 +987,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local group, parent = tools2.group, tools2.parent
             group:AddWidget(GUI:CreateLabel(parent, L["Customize class colors used throughout DandersFrames. Changes apply to health bars, name text, borders, and all other class-colored elements."], 260), 50)
 
-            -- Reset All button
             local resetAllBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
             GUI:StyleButton(resetAllBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
             resetAllBtn:SetScript("OnClick", function()
@@ -1493,7 +1489,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- it follows) — which brings the whole dialog stack along (cancel restore,
         -- Default button, ElvUI hook, spurious open-fire suppression) instead of
         -- reimplementing any of it. The "Starts at" caption the merge dropped lives on
-        -- as a tooltip on the stepper controls.
+        -- as a tooltip on the value box.
         local desc = cbtSorted(true)
         for i = 1, #desc do
             local bp = desc[i]
@@ -1821,12 +1817,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE PAGE'S DROPDOWN VOCABULARY, AT PAGE SCOPE ==============
-        -- Every one of these tables used to be declared inside the box that
-        -- offered it. The rows print the chosen value as their SUMMARY, and a
-        -- summary is written OUTSIDE the group's builder -- so the word has to
-        -- come out of the same table the dropdown offers, or a row could say one
-        -- thing while the control behind it says another. (The Tooltips page
-        -- hoisted its five Anchor To tables for exactly this reason.)
+        -- The rows print the chosen value as their SUMMARY, and a summary is
+        -- written OUTSIDE the group's builder -- so the word has to come out of
+        -- the same table the dropdown offers, or a row could say one thing while
+        -- the control behind it says another. (The Tooltips page hoisted its five
+        -- Anchor To tables for exactly this reason.)
         local colorModes = { CLASS= L["Class Color"], CUSTOM= L["Custom Color"], PERCENT= L["Health Gradient"] }
         local orientOptions = {
             HORIZONTAL= L["Left to Right"], HORIZONTAL_INV= L["Right to Left"],
@@ -2236,9 +2231,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     cap:SetPoint("RIGHT", row, "RIGHT", -6, 0)
                 end
 
-                -- ⚠ NO PER-STOP CLASS TICKBOX. One toggle for the whole ramp sits below
-                -- the rows instead -- a box on every row was heavy, and the picker's own
-                -- Class tab cannot stand in for it (see that toggle's note).
                 gradGroup:AddWidget(row, 28)
             end
 
@@ -2766,7 +2758,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Bars > Resource Bar
     local pageResource = CreateSubTab("bars", "bars_resource", L["Resource Bar"])
     BuildPage(pageResource, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Copy button at top
         Add(CreateCopyButton(self.child, {"resourceBar"}, L["Resource Bar"], "bars_resource"), 25, 2)
 
         -- ===== THE PAGE'S TWO LAYOUTS =====================================
@@ -3025,7 +3016,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             group.disableChildrenOn = function(d) return not d.resourceBarEnabled end
 
             local rbMatch = group:AddWidget(GUI:CreateCheckbox(parent, L["Match Health Bar Width"], db, "resourceBarMatchWidth", function()
-                -- RefreshStates so the Adjust For Border row appears/disappears with the tick.
+                -- RefreshStates so the Adjust For Frame Border row appears/disappears with the tick.
                 tools2.refreshStates()
                 DF:UpdateAllFrames()
             end), 30)
@@ -3227,8 +3218,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== BORDER (a 280 box in column 2 in classic, the Style band's third
         -- row) =====
-        -- Stage 4.2: hand-rolled Show + Colour block expanded to the full
-        -- unified helper. include set tailored for a resource indicator:
+        -- Include set tailored for a resource indicator:
         -- alpha / inset / blendMode / gradient / shadow keep the visual
         -- toolkit; classColor / roleColor match the bar's optional class
         -- tinting (resourceBarClassColor) for cohesion. Skipped: animate
@@ -3378,7 +3368,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 end, true), 30)
             end
 
-            -- Reset button
             local resetPowerBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
             GUI:StyleButton(resetPowerBtn, { width = 260, height = 24, text = L["Reset All to Default"] })
             resetPowerBtn:SetScript("OnClick", function()
@@ -3926,7 +3915,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Bars > Absorbs (combined Absorb Shield + Heal Absorb with collapsible sections)
     local pageAbsorb = CreateSubTab("bars", "bars_absorb", L["Absorbs"])
     BuildPage(pageAbsorb, function(self, db, Add, AddSpace)
-        -- Copy button at top
         Add(CreateCopyButton(self.child, {"absorbBar", "healAbsorb"}, L["Absorbs"], "bars_absorb"), 25, 2)
 
         local currentSection = nil
@@ -3999,17 +3987,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         -- ===== THE PAGE'S DROPDOWN VOCABULARY, AT PAGE SCOPE ==============
-        -- The two mode tables used to be declared beside the dropdown that offered
-        -- them. The rows print the chosen mode as their SUMMARY, and a summary is
-        -- written OUTSIDE the group's builder -- so the word has to come out of the
-        -- same table the dropdown offers, or a row could say one thing while the
-        -- control behind it says another. (The Health Bar page hoisted its six
-        -- dropdown tables for exactly this reason.)
+        -- The rows print the chosen mode as their SUMMARY, and a summary is written
+        -- OUTSIDE the group's builder -- so the word has to come out of the same table
+        -- the dropdown offers, or a row could say one thing while the control behind
+        -- it says another. (The Health Bar page hoisted its six dropdown tables for
+        -- exactly this reason.)
         --
-        -- ⚠ Orientation and Anchor move for a SECOND reason: they were declared in
-        -- the absorb-shield block and READ by the heal-absorb one, which was fine
-        -- while both were straight-line page code and is not once each is a closure
-        -- of its own. Same tables, same values, one declaration.
+        -- ⚠ Orientation and Anchor must be page-scope for a SECOND reason: the absorb
+        -- shield and the heal absorb builders BOTH read them, and each is a closure of
+        -- its own. Same tables, same values, one declaration.
         local modeOptions = {
             OVERLAY = L["Overlay (on health bar)"],
             ATTACHED = L["Attached to Health"],
@@ -4065,7 +4051,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end), 55, 1)
 
             local textureOptions = DF:GetTextureList()
-            -- Add stripe textures if not already present
             local stripeTextures = {
                 ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft"]= "DF Stripes Soft",
                 ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft_Wide"]= "DF Stripes Soft Wide",
@@ -4262,7 +4247,6 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end), 55, 1)
 
             local healTextureOptions = DF:GetTextureList()
-            -- Add stripe textures if not already present
             local healStripeTextures = {
                 ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft"]= "DF Stripes Soft",
                 ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Soft_Wide"]= "DF Stripes Soft Wide",
@@ -4454,11 +4438,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function HealPredFloatingHiddenOn(d) return d.healPredictionMode ~= "FLOATING" end
 
         -- ===== THE PAGE'S VOCABULARY, AT PAGE SCOPE =======================
-        -- These four tables used to sit inside the box that offered them. The rows
-        -- print the chosen value as their SUMMARY, and a summary is written
+        -- The rows print the chosen value as their SUMMARY, and a summary is written
         -- OUTSIDE the group's builder -- so the word has to come out of the same
-        -- table the dropdown offers, or a row could say one thing while the
-        -- control behind it says another.
+        -- table the dropdown offers, or a row could say one thing while the control
+        -- behind it says another.
         local modeOptions = { OVERLAY= L["Attached to Health"], FLOATING= L["Floating Bar"] }
         local showModeOptions = {
             ALL = L["All Incoming"], MINE = L["My Heals"], OTHERS = L["Others' Heals"],
@@ -4765,11 +4748,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local bgColorPicker = group:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], db, "healPredictionBackgroundColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
             bgColorPicker.disableOn = function(d) return not d.healPredictionEnabled end
 
-            -- ⚠ healPredictionFrameLevel has existed and been honoured since the ladder work
-            -- (Features/Auras.lua reads it, DF:ResolveHealPredictionBarLevel resolves it) but
-            -- had NO control anywhere — the only key of the eighteen in Config that a user
-            -- could not reach. Same shape and range as the absorb bar's, and FLOATING-only for
-            -- the same reason: the bound modes take the ladder's slot, not a slider.
+            -- ⚠ healPredictionFrameLevel is read by the bar code and resolved by
+            -- DF:ResolveHealPredictionBarLevel (Frames/Bars.lua). Same shape and range as the
+            -- absorb bar's, and FLOATING-only for the same reason: the bound modes take the
+            -- ladder's slot, not a slider.
             local hpLevel = group:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, db, "healPredictionFrameLevel", nil, function() DF:UpdateAllFrames() end, true)), 55)
             hpLevel.disableOn = function(d) return not d.healPredictionEnabled end
         end
@@ -4846,14 +4828,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     CreateCategory("text", L["Text"])
     
     -- LEGACY-TEXT-CLEANUP (v4.4.x): Name/Health/Status built-in text settings are
-    -- replaced by the Text Designer. These three pages are hidden via `if false`
-    -- (not deleted, so they can be restored). Remove this block, the legacy text
-    -- render path (see DF:IsLegacyTextHidden in Frames/Core.lua), and the legacy
-    -- *Text* defaults in Config.lua in a future release once the Text Designer
-    -- fully supersedes them.
+    -- replaced by the Text Designer, and their settings pages are gone. Remove this
+    -- block, the legacy text render path (see DF:IsLegacyTextHidden in
+    -- Frames/Core.lua), and the legacy *Text* defaults in Config.lua in a future
+    -- release once the Text Designer fully supersedes them.
 
     -- Text > Text Designer
-    -- See spec at docs/superpowers/specs/2026-05-22-text-designer-phase1-design.md
     local pageTextDesigner = CreateSubTab("text", "text_designer", L["Text Designer"])
     -- ONE BUILD, NOT ONE PER MODE (page.singleModeBuild -- see ONE RETAINED BUILD PER
     -- MODE in GUI/Panel.lua): rebuilt on every party/raid switch, as before.
@@ -4905,23 +4885,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         })
     end
 
-    -- Auras > Aura Filters (the merged page: pick filters AND edit their spells)
+    -- Auras > Filter Designer (the page where aura filters are designed)
     --
-    -- Keeps the FAMILIAR NAME while the page id stays "auras_filterdesigner". That is
+    -- The page id stays "auras_filterdesigner" whatever the label says. That is
     -- deliberate: every cross-link, Search entry and _fdSelect* entry point already
-    -- targets that id, so relabelling costs nothing whereas renaming the id would mean
-    -- chasing all of them. The old "auras_filters" page is gone -- its filter switches
-    -- moved into this page's left-hand list, its ordering and duration controls onto
-    -- the Buffs and Debuffs pages.
+    -- targets that id, so relabelling costs nothing whereas renaming the id would
+    -- mean chasing all of them.
     --
-    -- SECTION KEYS, spelled out rather than stemmed. Ownership is longest-prefix-wins
-    -- (DF:SectionOwnsKey), so:
-    --   * "buffFilterSelection" beats the Buffs page's broad "buff"
-    --   * "debuffFilter" / "debuffBlacklist" beat the Debuffs page's broad "debuff"
-    --   * the three scope keys are listed INDIVIDUALLY because the sort keys that just
-    --     moved away (directBuffSortOrder, directDebuffSort*) share the "directBuff" /
-    --     "directDebuff" stems. A stem here would drag them back, and this page's
-    --     Copy/Reset would silently reach into the bar pages.
     -- "Filter Designer" — the label finally matches the page id it has always had.
     -- It was called Aura Filters while it did two jobs, one of which was choosing
     -- which filters each bar used; that job moved to the bars, so what is left is
@@ -4981,15 +4951,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- absolutely and reports its height through an Add()ed spacer, so anything
         -- Add()ed afterwards lands below them -- which is where a footer belongs.
         --
-        -- ⚠ This was REMOVED once, on the argument that the consumer chip row at the
-        -- top of the page had replaced it and a second copy of the same links was
-        -- redundant. That was wrong on two counts, and it is recorded here because
-        -- the argument is tempting enough to be made again:
+        -- ⚠ DO NOT DROP THIS ON THE ARGUMENT THAT THE CONSUMER CHIP ROW AT THE TOP OF
+        -- THE PAGE MAKES IT REDUNDANT. It is wrong on two counts:
         --
         --   * Every other page under Auras carries a See Also. This page having none
         --     is not "one fewer duplicate", it is the one page that breaks the
-        --     pattern -- which is exactly why the bar was added here in the first
-        --     place.
+        --     pattern.
         --   * The chips and this footer answer different questions. A chip says WHAT
         --     IS USING these filters right now, with a live count, and greys out when
         --     nothing is; See Also says WHERE ELSE YOU MIGHT GO, unconditionally. The

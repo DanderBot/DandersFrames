@@ -101,10 +101,9 @@ GUI.PageBox = PageBox
 local SettingsBox = GUI.SettingsBox
 
 -- The page viewport's width, and therefore its scroll child's, for a given
--- content-box width. THREE sites need it -- CreateSubTab sizes the child at
--- build time, PageRefreshStates re-sizes it on every layout, and the column
--- maths measures its widgets against it -- and all three used to carry their own
--- copy of the arithmetic (`- 30`, `- 30`, `- 40`).
+-- content-box width. THREE sites need it -- CreateSubTab at build time,
+-- PageRefreshStates on every layout, and the column maths -- so none of them
+-- may carry its own copy of the arithmetic.
 function GUI.PageChildWidth(contentWidth)
     return (contentWidth or 0) - PageBox.inset - PageBox.gutter
 end
@@ -373,12 +372,9 @@ local function PageRefreshStates(self)
 
     -- The width a page's widgets actually have, DERIVED rather than a literal:
     -- the scroll child (see GUI.PageChildWidth) less the page's own left and
-    -- right margins. It was `contentWidth - 40`, "extra padding for scrollbar" —
-    -- a number that had to be kept in step by hand with the child's own `- 30`
-    -- and with the scrollbar room inside it, which is the arrangement that let
-    -- the gutter be counted twice.
+    -- right margins.
     --
-    -- Through GUI.PageUsableWidth, because a PAGE needs the same number now: a
+    -- Through GUI.PageUsableWidth, because a PAGE needs the same number: a
     -- full-width feature band has to be BUILT at the width this loop is about to
     -- stretch it to, or its first layout runs at the constructed 280.
     local usableWidth = GUI.PageUsableWidth(childWidth)
@@ -412,17 +408,12 @@ local function PageRefreshStates(self)
     
     -- Reserve space below the right-aligned row (Reset Page / Sync / Copy).
     --
-    -- This used to subtract a flat 40 with the comment "button height ~26 +
-    -- 14 padding" -- a GUESS, not a measurement. Any page whose row is not
-    -- exactly 26 tall got a different gap under it, so the first box sat at
-    -- a different height on every page and the row appeared to shift.
-    -- Measure the row instead and add a fixed pad, so the gap below the
-    -- buttons is identical everywhere by construction.
+    -- MEASURE the row and add a fixed pad rather than assuming a height, so the
+    -- gap below the buttons is identical on every page by construction.
     --
-    -- The scan is ALSO gated on IsShown() now, matching the positioning loop
-    -- above. It was not, so a page carrying a HIDDEN right-aligned widget
-    -- still reserved the 40 and opened with an empty band above its first
-    -- box -- the pages Krathe saw "starting further down" with nothing there.
+    -- The scan is gated on IsShown(), matching the positioning loop above: a
+    -- page carrying a HIDDEN right-aligned widget must not reserve space for it
+    -- and open with an empty band above its first box.
     local RIGHT_ROW_PAD = 14
     local rightRowH = 0
     for _, widget in ipairs(self.children) do
@@ -592,9 +583,8 @@ function DF:CreateGUI()
     -- ...and the RESIZE FLOOR is untouched at 520x400, deliberately: the default
     -- is not a minimum, and a user who wants it smaller than it opens should
     -- keep being able to drag it there. See normalMinWidth below, and
-    -- ApplyPageWidthBounds, which raises the floor to 850 on the four wide pages
-    -- -- opening one of those from a 640 window widens it, exactly as it already
-    -- did from 760.
+    -- ApplyPageWidthBounds, which raises the floor to 850 on the wide pages --
+    -- opening one of those from a 640 window widens it.
     --
     -- ⚠ THE NUMBERS THEMSELVES LIVE IN THE RESIDENT GUI.lua (GUI.WindowDefaults).
     -- `/df resetgui` writes the default back into the window state from Core.lua,
@@ -636,8 +626,8 @@ function DF:CreateGUI()
     else
         frame:SetPoint("CENTER")
     end
-    frame:SetFrameStrata("DIALOG")  -- Match old addon
-    frame:SetToplevel(true)         -- Match old addon
+    frame:SetFrameStrata("DIALOG")
+    frame:SetToplevel(true)
     frame:SetMovable(true)
     frame:SetResizable(true)
     frame:SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
@@ -781,10 +771,9 @@ function DF:CreateGUI()
     local titleBar = CreateFrame("Frame", nil, frame)
     titleBar:SetHeight(30)
     titleBar:SetPoint("TOPLEFT", 0, 0)
-    -- Full width now, where it used to stop 30px short to keep off the close
-    -- button. The whole right-hand cluster sits at frame level 210 against this
-    -- strip's 200, so every control still takes its own clicks and every GAP
-    -- between them drags the window.
+    -- Full width. The whole right-hand cluster sits at frame level 210 against
+    -- this strip's 200, so every control still takes its own clicks and every
+    -- GAP between them drags the window.
     titleBar:SetPoint("TOPRIGHT", 0, 0)
     titleBar:EnableMouse(true)
     titleBar:RegisterForDrag("LeftButton")
@@ -908,12 +897,9 @@ function DF:CreateGUI()
     -- on the left and none on the right).
     -- =========================================================================
 
-    -- ⤢ UI SCALE. The slider used to sit in the toolbar row, permanently on
-    -- screen, spending 155px of the window's widest strip on a control that is
-    -- touched once and then never again. It is a WINDOW option, so it now lives
-    -- where the window's own options live: behind this glyph, in a popout.
-    -- Forward-declared because the popout is built further down, after the
-    -- pieces it docks against exist.
+    -- ⤢ UI SCALE. A WINDOW option, so it lives where the window's own options
+    -- live: behind this glyph, in a popout. Forward-declared because the popout
+    -- is built further down, after the pieces it docks against exist.
     local OpenScalePopout
     local scaleBtn = GUI:CreateGlyphButton(frame, {
         texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\open_in_full",
@@ -1099,21 +1085,18 @@ function DF:CreateGUI()
     -- =========================================================================
     -- CHANGELOG — RENDERED, NOT DUMPED
     -- =========================================================================
-    -- ★ This used to be one EditBox holding the whole markdown as colour-coded
-    -- text: every release, every section, every entry at the same size and
-    -- weight — a wall. It now renders the same CHANGELOG.md structure as typed
-    -- pieces (the shape EllesmereUI's patch-notes page uses, reached from the
-    -- same complaint): a version title with a hairline underline, caps section
-    -- labels, feature CARDS (category as the accent-coloured title, wrapping
-    -- body, faint panel behind, 2px accent line on top) and compact fix ROWS
-    -- (accent bullet, category chip, wrapping dim body). Hierarchy comes from
-    -- size and alpha, and from actual space between things.
+    -- ★ Renders the CHANGELOG.md structure as typed pieces: a theme-tinted
+    -- version BAND per release, caps section headings over a hairline, feature
+    -- CALLOUTS (left accent rail with a star, category as the title, wrapping
+    -- body, and a chevron only when the category links to a settings page) and
+    -- compact fix ROWS (accent bullet, wrapping dim body) grouped under one
+    -- caps sub-heading per category. Hierarchy comes from size and alpha, and
+    -- from actual space between things.
     --
-    -- The data pipeline is untouched: DF.CHANGELOG_TEXT is still the generated
-    -- markdown, parsed here into version → section → entry. Only the newest
-    -- releases render up front (frames cost more than a text box); "Show older
-    -- releases" appends the next batch. All pieces are pooled so reopening or
-    -- resizing rebuilds without leaking frames.
+    -- DF.CHANGELOG_TEXT is the generated markdown, parsed here into version →
+    -- section → entry. Only the newest releases render up front (frames cost
+    -- more than a text box); "Show older releases" appends the next batch. All
+    -- pieces are pooled so reopening or resizing rebuilds without leaking frames.
     -- =========================================================================
     local CL_INITIAL_VERSIONS = 5
     local CL_BATCH_VERSIONS   = 5
@@ -1162,8 +1145,8 @@ function DF:CreateGUI()
     -- the changelog's own "(Category)" tags, normalised to lowercase alnum, so
     -- "Click-Casting" / "Click Casting" / "click casting" all resolve. Targets
     -- are either a sub-tab id (party/raid mode) or the "clicks" mode.
-    -- ⚠ Not every category has a page (Test Mode is a toolbar button; Debug
-    -- has a console tab): those cards stay static, on purpose.
+    -- ⚠ Not every category has a page (Test Mode is a toolbar button): those
+    -- cards stay static, on purpose.
     local CL_NAV = {
         auradesigner = "auras_auradesigner",
         auras = "auras_buffs", buffs = "auras_buffs", buffbar = "auras_buffs",
@@ -1221,8 +1204,8 @@ function DF:CreateGUI()
     clChild:SetWidth(100)
     clScroll:SetScrollChild(clChild)
 
-    -- Pools. Kinds: "fs" (FontString), "tex" (Texture), "card" (backdrop frame),
-    -- "sep" (separator frame). Everything is parented to clChild.
+    -- Pools. Kinds: "fs" (FontString), "tex" (Texture), "card" (callout Button),
+    -- "sep" (separator), "band" (version band). Everything is parented to clChild.
     local clPool, clUsed = {}, {}
     local function acquire(kind)
         local p = clPool[kind]; if not p then p = {}; clPool[kind] = p end
@@ -1435,14 +1418,11 @@ function DF:CreateGUI()
                         end
                         y = y - 4
                     else
-                        -- ROWS, GROUPED BY CATEGORY. The tag used to sit inline at the
-                        -- start of every sentence, so "Bars" appeared six times in a row
-                        -- and each line began with a coloured word the eye had to parse
-                        -- past. Now: a stable sort by category (authored order kept within
-                        -- one), ONE small caps sub-heading per category, and plain
-                        -- wrapping bullets under it with a little leading. Same scan-
-                        -- ability a category column would give, without spending a fixed
-                        -- column's width on every row.
+                        -- ROWS, GROUPED BY CATEGORY: a stable sort by category (authored order
+                        -- kept within one), ONE small caps sub-heading per category, and plain
+                        -- wrapping bullets under it with a little leading. Same scannability a
+                        -- category column would give, without spending a fixed column's width on
+                        -- every row.
                         local ordered = {}
                         for i, e in ipairs(sec.entries) do ordered[i] = { e = e, i = i } end
                         table.sort(ordered, function(a, b)
@@ -1559,7 +1539,6 @@ function DF:CreateGUI()
     end)
     resizeHandle:SetScript("OnMouseUp", function(self, button)
         frame:StopMovingOrSizing()
-        -- Save new size
         local ws = DF:GetWindowState()
         ws.width, ws.height = frame:GetWidth(), frame:GetHeight()
         -- Update content layout
@@ -1634,10 +1613,8 @@ function DF:CreateGUI()
     -- =========================================================================
     -- DECK 2 RIGHT CLUSTER: undo / redo / Test / Unlock / override marker
     -- -------------------------------------------------------------------------
-    -- The verbs. They used to trail the mode tabs on the LEFT -- Party, Raid,
-    -- Binds, then Test and Unlock, one undifferentiated run of five buttons in
-    -- which "which mode am I in" and "do the thing" looked identical. Split to
-    -- opposite ends of the deck, the tabs read as tabs and the verbs as verbs.
+    -- The verbs. They sit at the opposite end of the deck from the mode tabs, so
+    -- the tabs read as tabs and the verbs as verbs.
     --
     -- ⚠ ANCHORED RIGHT-TO-LEFT, and the marker anchors AFTER the button it
     -- belongs to, so the cluster's right edge is fixed while a translated
@@ -1840,7 +1817,6 @@ function DF:CreateGUI()
     end
 
 
-    -- Function to update position override indicator
     local function UpdatePositionOverrideIndicator()
         -- Debug mode shows indicator
         if S.overrideDebugMode then
@@ -1919,7 +1895,6 @@ function DF:CreateGUI()
             btnLock.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         end
         
-        -- Update position override indicator
         UpdatePositionOverrideIndicator()
     end
     GUI.UpdateLockButtonState = UpdateLockButtonState
@@ -1980,10 +1955,8 @@ function DF:CreateGUI()
     -- UI SCALE — A POPOUT, NOT A PERMANENT ROW
     -- -------------------------------------------------------------------------
     -- ★ THE WINDOW'S OWN OPTIONS GO IN THE POPOUT CONTAINER, the same one a
-    -- feature row on a page opens. This slider used to occupy 155px of the
-    -- header FOREVER -- a control almost every user touches once and then never
-    -- again, permanently in front of every user who has already finished with
-    -- it. Behind the ⤢ in deck 1 it costs 20px and reappears in one click.
+    -- feature row on a page opens. Behind the ⤢ in deck 1 the scale slider costs
+    -- 20px and reappears in one click.
     --
     -- The control itself is a VERBATIM move: same range, same 0.05 step, same
     -- split between OnValueChanged (text + panels, live) and OnMouseUp (the
@@ -2277,12 +2250,11 @@ function DF:CreateGUI()
         if GUI.SelectedMode == "raid" then
             -- Lock raid frames if unlocked. LockRaidFrames owns the WHOLE transition:
             -- the db flag, the container, the mover, grid, panel and pinned chrome.
-            -- ⚠ This block used to stamp raidLocked = true and poke the container
-            -- ITSELF before calling -- so when LockRaidFrames' combat guard refused,
-            -- the db said locked while every mover stayed on screen for the rest of
-            -- the fight, and the Lock button then offered Unlock. In combat the state
-            -- now stays consistently UNLOCKED (the guard says so in chat) and the
-            -- user locks after regen; the direct SetMovable poke also fought
+            -- ⚠ Do NOT stamp raidLocked or poke the container here before calling: when
+            -- LockRaidFrames' combat guard refuses, the db would say locked while every
+            -- mover stayed on screen for the rest of the fight, and the Lock button then
+            -- offered Unlock. In combat the state stays UNLOCKED (the guard says so in
+            -- chat) and the user locks after regen. A direct SetMovable poke also fights
             -- UpdatePermanentMoverVisibility, which owns container movability.
             local raidDb = DF:GetRaidDB()
             if not raidDb.raidLocked then
@@ -2848,9 +2820,8 @@ function DF:CreateGUI()
         if content then content:Show() end
 
         -- Restore the minimum width FOR THE PAGE WE ARE RETURNING TO -- not a blanket
-        -- normalMinWidth. This used to reset to 520 unconditionally, so coming back from
-        -- BINDS onto a wide page (Aura Filters, AD/TD, Pinned) left that page draggable
-        -- down to 520 and squashed.
+        -- normalMinWidth: resetting to 520 unconditionally leaves a wide page we are
+        -- returning to draggable down to 520 and squashed.
         ApplyPageWidthBounds(GUI.CurrentPageName)
 
         -- Update tab availability for current mode (greys out tabs for disabled modes)
@@ -3086,14 +3057,6 @@ function DF:CreateGUI()
         UpdateThemeColors()
     end
     GUI.SelectTab = SelectTab
-
-    -- (Removed) GUI.SetNavHighlight -- lighting a nav row that is NOT the row owning the page
-    -- on screen. Its one caller was the Power Infusion Helper's nav row, which built no page
-    -- of its own: it jumped into the Aura Designer and then called this to keep the sidebar
-    -- lighting the row the user had left. That row is gone (see GUI/Pages/Auras.lua) and the
-    -- helper is reached as a pool tab of the designer, so nothing needs the rail to disagree
-    -- with the page any more. Grepped across all four addon folders plus *.xml and *.toc
-    -- before removing: no callers.
 
     -- ★★★ RE-LAY THE CURRENT PAGE WITHOUT REBUILDING IT -- for a change of SIZE, not of
     -- content.
@@ -3372,9 +3335,7 @@ function DF:CreateGUI()
         -- problem; the surface they are clipped against was.
         --
         -- Nothing corrects it afterwards -- this frame is anchored by TWO
-        -- corners, so even the geometry correction that used to exist skipped it
-        -- (nudging a two-corner frame resizes it rather than moving it). The one
-        -- surface every page is measured against was the one it could not touch.
+        -- corners, and nudging a two-corner frame resizes it rather than moving it.
         -- Snapping the OFFSETS is the fix that works for a two-corner frame:
         -- correct the numbers going in, since the box itself can't be nudged.
         --
@@ -3594,10 +3555,6 @@ function DF:CreateGUI()
     -- Store category order
     GUI.CategoryOrder = {}
     
-    -- (Removed) CreateTab — "legacy single tab support", a thin wrapper over
-    -- CreateSubTab("tools", ...). Every page registers through CreateSubTab directly
-    -- now, so it had no callers.
-
     -- ============================================================
     -- ONE RETAINED BUILD PER MODE
     -- ------------------------------------------------------------
@@ -4031,7 +3988,7 @@ end
 
 -- ============================================================
 -- FADED CLOSE FOR /df
--- DF:ToggleGUI (GUI/Controls.lua:3616) hides an open window instantly on the
+-- DF:ToggleGUI (GUI/Controls.lua) hides an open window instantly on the
 -- close half of its toggle. Wrap it here -- this file loads after Controls.lua
 -- (companion TOC order) -- so `/df` on an open window fades it out (0.25s,
 -- DandersUI UI.Fx) before hiding, matching the close button above.

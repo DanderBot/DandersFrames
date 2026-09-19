@@ -505,9 +505,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     nameText:SetJustifyH("LEFT")
 
     -- ⚠ ONE tooltip for the name AND the range badge, because they open the SAME
-    -- dialog. They used to describe themselves separately ("Click to edit range"),
-    -- which promised less than the click delivers now that the dialog carries both
-    -- fields -- and two descriptions of one destination drift apart. House shape:
+    -- dialog -- two descriptions of one destination drift apart. House shape:
     -- title plus a describing line, not a bare title.
     local function ShowRowEditTip(owner)
         GUI:ShowTooltip(owner, {
@@ -1056,13 +1054,10 @@ function AutoProfilesUI:ShowProfileDialog(contentType, profile, profileIndex, pa
     -- Set title
     if dialog.isEditMode then
         -- ★ EDIT MODE SHOWS THE NAME TOO, so this is where a layout gets renamed.
-        -- The field was hidden here and the dialog was titled "Edit Layout Range",
-        -- which left no way to rename a layout at all once it existed -- the name was
-        -- fixed at creation for the life of the layout. Same geometry as create mode
-        -- now, so the two states differ only in their title and button text.
-        -- ⚠ The duplicate-name check downstream already excluded the edited layout's
-        -- own index (written for this and previously unreachable), so re-saving with
-        -- the name untouched is not a conflict.
+        -- Same geometry as create mode, so the two states differ only in their title
+        -- and button text.
+        -- ⚠ The duplicate-name check downstream already excludes the edited layout's
+        -- own index, so re-saving with the name untouched is not a conflict.
         dialog.title:SetText(L["Edit Layout"])
         dialog.createBtnText:SetText(L["Save Changes"])
         dialog.nameLabel:Show()
@@ -1707,9 +1702,6 @@ function AutoProfilesUI:CreateEditingBanner(parent)
     exitBtn:SetScript("OnClick", function()
         AutoProfilesUI:ExitEditing()
     end)
-
-    -- (The per-layout "Reset to Global" Aura Designer button was retired when the
-    -- preset dropdown gained an "Inherit (Global)" entry that does the same job.)
 
     editingBanner = banner
     return banner

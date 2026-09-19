@@ -623,11 +623,6 @@ function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
     return container
 end
 
--- (GUI:CreateExpiringControls removed 2026-07-25 with the pre-12.1 Expiring system:
---  it drove the remaining-time border/tint panel, which is unreadable on the 12.1
---  container path. The 12.1-safe panel is GUI:CreateExpirationControls above --
---  note the near-identical name; that one is current and engine-backed.)
-
 -- ============================================================
 -- GROWTH DIRECTION CONTROL
 -- Three linked dropdowns (Orientation, Wrap, Direction) that
@@ -1136,7 +1131,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Hide scrollbar if not needed
+        -- Dead branch: `scrollBar` is never assigned, so this never runs.
         if scrollBar then
             if #sortedOptions <= MAX_VISIBLE then
                 scrollBar:Hide()
@@ -1184,11 +1179,10 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             menuBtn.Highlight:SetColorTexture(c.r, c.g, c.b, 0.3)
             
             menuBtn:SetScript("OnClick", function()
-                -- The host bracket (GUI.lua's interceptWrite / onSettingWritten),
-                -- replacing the hand-written copy of it that stood here: the
-                -- redirect gate and the override record are the same two rules,
-                -- and going through the hooks is what makes the write visible to
-                -- everything else wired to them -- the undo engine among them.
+                -- The host bracket (GUI.lua's interceptWrite / onSettingWritten): the
+                -- redirect gate and the override record. Going through the hooks is
+                -- what makes the write visible to everything else wired to them --
+                -- the undo engine among them.
                 if GUI:Call("interceptWrite", dbTable, dbKey, opt.key) then
                     UpdateText()
                     menuFrame:Hide()
@@ -1518,7 +1512,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
         menuFrame:SetHeight(menuHeight)
         scrollChild:SetHeight(#sortedOptions * ITEM_HEIGHT)
         
-        -- Hide scrollbar if not needed
+        -- Dead branch: `scrollBar` is never assigned, so this never runs.
         if scrollBar then
             if #sortedOptions <= MAX_VISIBLE then
                 scrollBar:Hide()
@@ -1931,7 +1925,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
     local draggingItem = nil
     local dragOffsetY = 0
     
-    -- Check if we should show separate melee/ranged
     local function IsSeparateMeleeRanged()
         if separateMeleeRangedKey and dbTable then
             return dbTable[separateMeleeRangedKey]
@@ -1939,7 +1932,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return true
     end
     
-    -- Get the roles to display
     local function GetDisplayRoles()
         if IsSeparateMeleeRanged() then
             return { "TANK", "HEALER", "MELEE", "RANGED" }
@@ -1982,7 +1974,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return displayRoles
     end
     
-    -- Save order to db
     local function SaveOrder(newOrder)
         if dbTable and dbKey then
             local saveOrder = {}
@@ -2009,7 +2000,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         end
     end
     
-    -- Get index from Y position
     local function GetIndexFromY(y)
         local containerTop = container:GetTop()
         if not containerTop then return 1 end
@@ -2019,7 +2009,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return math.max(1, math.min(index, #order))
     end
     
-    -- Update visual positions
     local function UpdateItemPositions()
         local order = GetCurrentOrder()
         local numRoles = #order
@@ -2067,7 +2056,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return grip
     end
     
-    -- Create a single role item
     local function CreateRoleItem(role)
         local info = ROLE_INFO[role]
         if not info then return nil end
@@ -2211,7 +2199,6 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         return item
     end
     
-    -- Create all role items
     for _, role in ipairs({"TANK", "HEALER", "MELEE", "RANGED", "DAMAGER"}) do
         roleItems[role] = CreateRoleItem(role)
     end
@@ -2323,7 +2310,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return ALL_CLASSES
     end
     
-    -- Save order to db
     local function SaveOrder(newOrder)
         if dbTable and dbKey then
             dbTable[dbKey] = newOrder
@@ -2341,7 +2327,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         end
     end
     
-    -- Get index from Y position
     local function GetIndexFromY(y)
         local containerTop = container:GetTop()
         if not containerTop then return 1 end
@@ -2351,7 +2336,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return math.max(1, math.min(index, #order))
     end
     
-    -- Update visual positions
     local function UpdateItemPositions()
         local order = GetCurrentOrder()
         local numClasses = #order
@@ -2399,7 +2383,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return grip
     end
     
-    -- Create a single class item
     local function CreateClassItem(class)
         local info = CLASS_INFO[class]
         if not info then return nil end
@@ -2542,7 +2525,6 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         return item
     end
     
-    -- Create all class items
     for _, class in ipairs(ALL_CLASSES) do
         classItems[class] = CreateClassItem(class)
     end
@@ -2638,7 +2620,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return {1, 2, 3, 4, 5, 6, 7, 8}
     end
     
-    -- Save order to db
     local function SaveOrder(newOrder)
         if dbTable and dbKey then
             dbTable[dbKey] = newOrder
@@ -2656,7 +2637,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         end
     end
     
-    -- Get index from Y position
     local function GetIndexFromY(y)
         local containerTop = container:GetTop()
         if not containerTop then return 1 end
@@ -2665,7 +2645,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return math.max(1, math.min(index, 8))
     end
     
-    -- Update visual positions
     local function UpdateItemPositions()
         local order = GetCurrentOrder()
         
@@ -2710,7 +2689,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return grip
     end
     
-    -- Create a single group item
     local function CreateGroupItem(groupNum)
         local color = GROUP_COLORS[groupNum]
         
@@ -2853,7 +2831,6 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         return item
     end
     
-    -- Create all group items
     for i = 1, 8 do
         groupItems[i] = CreateGroupItem(i)
     end
@@ -2996,8 +2973,8 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     -- Snapped; see CreateRoleOrderList.
     local ITEM_HEIGHT = SnapLen(parent, 26) or 26
     local ITEM_GAP = SnapLen(parent, 2) or 2
-    local COL_WIDTH = 224  -- Wider columns
-    local COL_GAP = 12     -- Smaller gap between columns
+    local COL_WIDTH = 224
+    local COL_GAP = 12
     
     -- State
     local rosterItems = {}
@@ -3061,7 +3038,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
 
     -- ========== HELPER FUNCTIONS ==========
     
-    -- Get current group roster
     local function GetGroupRoster()
         local roster = {}
         local numMembers = GetNumGroupMembers()
@@ -3144,7 +3120,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return roster
     end
     
-    -- Check if player is in highlighted list
     local function IsPlayerHighlighted(fullName)
         local players = getPlayersFunc()
         for _, p in ipairs(players) do
@@ -3153,7 +3128,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return false
     end
     
-    -- Check if player is in current group
     local function IsPlayerInGroup(fullName)
         for _, p in ipairs(currentRoster) do
             if p.fullName == fullName or p.name == fullName then
@@ -3163,7 +3137,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return false, nil
     end
     
-    -- Add player to highlight list
     local function AddPlayer(fullName)
         local players = getPlayersFunc()
         if not IsPlayerHighlighted(fullName) then
@@ -3173,7 +3146,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         end
     end
     
-    -- Remove player from highlight list
     local function RemovePlayer(fullName)
         local players = getPlayersFunc()
         for i, p in ipairs(players) do
@@ -3186,7 +3158,6 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         end
     end
     
-    -- Create grip texture
     local function CreateGripTexture(parentFrame)
         local grip = CreateFrame("Frame", nil, parentFrame)
         grip:SetSize(12, 14)
@@ -4003,11 +3974,10 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
         local usable = (f:GetWidth() or 0) - 4
         if usable <= 0 then return end
 
-        -- ⚠ SEGMENTS ARE PLACED BY THRESHOLD, NOT BY EQUAL SHARE. The old loop gave every
-        -- segment `usable / numSegments`, which was only right because weights produced
-        -- evenly spaced points. Stops carry their own positions, so a 0/50/90 ramp has a
-        -- wide band and a narrow one -- dividing equally would draw a plausible gradient
-        -- that simply is not the one being rendered on the frames.
+        -- ⚠ SEGMENTS ARE PLACED BY THRESHOLD, NOT BY EQUAL SHARE. Stops carry their own
+        -- positions, so a 0/50/90 ramp has a wide band and a narrow one -- dividing the
+        -- width equally would draw a plausible gradient that simply is not the one being
+        -- rendered on the frames.
         for i = 1, #stops - 1 do
             local s1, s2 = stops[i], stops[i + 1]
             local x0 = 2 + s1.pos * usable
@@ -4083,12 +4053,10 @@ function DF:ToggleGUI()
         end
         GUI:SetAccent(GUI.GetThemeColorFor(GUI.SelectedMode == "raid"))
         
-        -- Update theme colors to match selected mode
         if GUI.UpdateThemeColors then
             GUI.UpdateThemeColors()
         end
         
-        -- Show correct content for the selected mode
         if GUI.ShowNormalContent then
             GUI:ShowNormalContent()
         end
@@ -4201,14 +4169,10 @@ end
 -- ============================================================
 -- THE POPOUT PAGE'S SHARED MACHINERY
 -- ------------------------------------------------------------
--- Everything a settings page needs to mount its groups as popout feature rows,
--- lifted out of the Frame page, which built the first copy of it inline because
--- it was the first page converted and there was nothing yet to share. Five more
--- pages needed the same eight verbs; five more copies would drift, and the first
--- thing to drift would be one of the load-bearing notes rather than the code
--- under it. The Frame page came home last, in its own commit -- its census tests
--- pin that page's source line by line -- so this is now the ONLY copy, and the
--- essays below are the only place each piece is explained.
+-- Everything a settings page needs to mount its groups as popout feature rows.
+-- This is the ONLY copy: a per-page fork would drift, and the first thing to
+-- drift would be one of the load-bearing notes rather than the code under it.
+-- The essays below are the only place each piece is explained.
 --
 -- USAGE, at the top of a BuildPage builder and unconditionally:
 --
@@ -4228,14 +4192,14 @@ end
 --                                       the row's plate instead of behind it
 --   ClaimKeys(row, group, extra)
 --   WireModifiedTick(row)
---   WireFooter(row, apply)
+--   WireFooter(row, apply, rowDB)
 --   RegisterHoistedToggle(row, label, key, onToggle)   -- the hoisted TICK
 --   RegisterHoistedToggle(row, { <control declaration>, ... })  -- ...and the
 --                                                       hoisted CONTROLS
 --   RegisterControlRow(row, kind, key, custom, callback)
 --   ReflowMounted(values)
 --   RowDB()
---   BandWidth()
+--   BandWidth(col)
 --   INLINE_BOX          -- the full-width box's band skin
 -- ============================================================
 function GUI:CreatePopoutPageTools(page)
