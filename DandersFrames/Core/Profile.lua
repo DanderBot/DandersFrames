@@ -42,15 +42,10 @@ end
 -- SETTINGS-WINDOW STATE (ACCOUNT-WIDE, NOT PROFILE CONTENT)
 -- ============================================================
 -- Scale, size and position of the settings window are machine state, not
--- settings -- ExportCategories has declared them local-only for as long as
--- exports have existed. They used to be STORED in db.party anyway, which meant
--- a profile carried them: a freshly created profile is born from PartyDefaults,
--- so its guiScale was 1 while the already-open window kept the old scale. The
--- Test Mode and Unlock windows re-read the db on every OnShow, so they snapped
--- to 100% and only the UI Scale slider (the single writer) could put them back
--- in step. Holding the state account-wide is what actually enforces the
--- declared intent -- switching or creating a profile can no longer move,
--- resize or rescale the window out from under the user.
+-- settings -- ExportCategories declares them local-only. Holding that state
+-- account-wide rather than in db.party is what enforces the declared intent:
+-- switching or creating a profile can no longer move, resize or rescale the
+-- window out from under the user.
 --
 -- Fields: scale, width, height, point, relPoint, x, y. All optional; every
 -- reader supplies its own fallback.
@@ -1205,17 +1200,13 @@ function DF:ValidateImportString(str)
 end
 
 -- ★ ONE LINE FOR TWELVE SILENT REJECTIONS. ValidateImportString bails with a distinct
--- reason in twelve places -- Invalid encoding, Decompression failed, Deserialization
--- failed, Missing required libraries, Legacy format, Corrupt data and the rest -- and
--- logged none of them. "My import string doesn't work" therefore produced a completely
--- empty log, while the function had the exact reason in hand and handed it only to the UI.
+-- reason in twelve places and hands it only to the UI, so it is WRAPPED rather than
+-- edited at each return: the wrapper cannot be bypassed, needs no maintenance, and a
+-- future thirteenth return is covered too.
 --
--- Wrapped rather than edited at each return: twelve separate edits to add the same line is
--- twelve chances to drift, and a future thirteenth return would miss it. The wrapper cannot
--- be bypassed and needs no maintenance.
---
--- Length is included because the common causes are a truncated paste and a string mangled
--- by a chat client, and both show up as a plausible-looking prefix with the wrong size.
+-- Length is included because the common causes are a truncated paste and a string
+-- mangled by a chat client, and both show up as a plausible-looking prefix with the
+-- wrong size.
 local ValidateImportStringInner = DF.ValidateImportString
 function DF:ValidateImportString(str)
     local data, err = ValidateImportStringInner(self, str)
@@ -1294,11 +1285,9 @@ local function ResetTDForLegacyImport(payloads)
     for mode, payload in pairs(payloads) do
         -- A payload is LEGACY only if it carries neither the inline TD table
         -- (pre-library exports) NOR a preset-name ref (post-library exports).
-        -- The old check looked only at the inline table — but the preset
-        -- migration deletes the inline table from mode DBs, so EVERY modern
-        -- export has textDesigner == nil while legacy keys (nameFont etc.)
-        -- are still present for pets. That misfired this reset on every
-        -- modern import and wiped the just-imported Text Designer elements.
+        -- Checking only the inline table is not enough: the preset migration
+        -- deletes it from mode DBs, so EVERY modern export has textDesigner ==
+        -- nil while legacy keys (nameFont etc.) are still present for pets.
         if type(payload) == "table" and payload.textDesigner == nil
             and payload.textDesignerPreset == nil
             and (payload.nameFont ~= nil or payload.nameFontSize ~= nil
@@ -1699,7 +1688,6 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
 
     -- If it's a full export (legacy or "all categories"), use direct replacement
     if importInfo.isFullExport and not selectedCategories then
-        -- Legacy behavior: replace entire profile sections
         if importData.party and selectedFrameTypes.party then 
             DF.db.party = importData.party 
         end
@@ -2044,11 +2032,6 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
 
     return true
 end
-
--- DF:ImportProfile(str) used to live here — a dead wholesale-replacement
--- import with zero callers that bypassed the custom-filter/remap machinery.
--- The real import path is DF:ApplyImportedProfile (above), which the GUI
--- and API.lua both use.
 
 -- ============================================================
 -- SPEC AUTO-SWITCH (per-character settings)

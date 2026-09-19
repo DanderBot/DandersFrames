@@ -216,24 +216,13 @@ function DF:CmdPath(word)
     return (DF.EVERYDAY_COMMANDS[word] and "/df " or "/df debug ") .. word
 end
 
--- (Removed) DF:IsDebugCommand. Written so "the listing, the Siblings footer and the
--- help text can never disagree", but each of those was subsequently rewritten to
--- read what it needs directly — the listing walks the two registries itself and
--- Out:Siblings uses DF:CmdPath — leaving it with zero callers.
-
 -- ============================================================
 -- /df SUBCOMMAND REGISTRY
 -- ============================================================
 -- The /dfXXX half of "/df debug" is generated from DebugCommands above, so it
--- cannot drift. The /df SUBCOMMAND half used to be eight hand-written print()
--- lines carrying the comment "keep in sync with this handler" — and it had
--- drifted BOTH ways: it advertised "/df debug auratimer", which was never
--- implemented, while omitting ~45 subcommands that were (pixelcheck, gapcheck,
--- navprobe, idgate, ppdump, zorder, localewarn, every test*, …).
---
--- This registry is now the single source for that listing. Adding a branch to
--- the dispatcher without registering it here means it stays invisible, so
--- register alongside the branch.
+-- cannot drift. This registry is the single source for the /df SUBCOMMAND half:
+-- adding a branch to the dispatcher without registering it here means it stays
+-- invisible, so register alongside the branch.
 --
 -- `args` documents the argument shape for the listing ("<sec>", "on|off"),
 -- nil for bare commands. `dev` hides it on release builds, matching the slash
@@ -421,19 +410,15 @@ DF.COMMAND_SIBLINGS = {
     auras     = { "<unit>" },
     auradata  = { "<unit>" },
     dispel    = { "<unit>", "ids", "render" },
-    -- No args. NOT here to avoid a nil index -- Out:Siblings opens with
-    -- `if not list then return self end`, so a missing key was always safe; the
-    -- rationale this pair used to carry was describing a hazard the function does not
-    -- have. They stay because both ARE looked up, and an explicit empty list says
-    -- "checked, takes nothing" where a missing key says nothing at all.
+    -- No args, and NOT here to avoid a nil index -- Out:Siblings opens with
+    -- `if not list then return self end`, so a missing key is always safe. All three
+    -- ARE looked up, and an explicit empty list says "checked, takes nothing" where
+    -- a missing key says nothing at all.
     idgate    = {},
     guiwidth  = {},
     adpin     = {},
     gapcheck  = { "all", "clear" },
     guiperf   = { "start", "stop", "report" },
-    -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
-    -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
-    -- asked.
     admissing = { "mark" },
     -- The dev list here MUST stay in step with HEADER_MUTATORS in Frames/Headers.lua,
     -- which is what actually refuses them on a release build. Listing one without
@@ -442,8 +427,6 @@ DF.COMMAND_SIBLINGS = {
     pinned    = { "info", "test", "reinit", "bosstest <1-8>", "bossspawn demo" },
     range     = { "stats", "spell", "dump", "clear" },
     sort      = { "refresh", "clear" },
-    -- /dfsecure was retired with the secure-sort half (its handler never armed); no
-    -- sibling entry, so nothing advertises a command that no longer registers.
     flatraid  = { "info", "reinit", "test" },
     -- (No "cc" entry.) /df debug cc's BARE form already prints its full subcommand
     -- table — that is its entire job — so a Siblings footer would repeat it.
@@ -508,13 +491,6 @@ end
 -- ============================================================
 -- DEBUG COMMAND GROUPING
 -- ============================================================
--- /df debug used to print three sections split by REGISTRATION MECHANISM —
--- "Support / diagnostics" and "Dev tools" (both from RegisterDebugSlash) and
--- "/df diagnostics" (from RegisterDebugSub). That is an implementation detail
--- nobody reading the list cares about: it put /df debug auras and /df debug auradata in
--- different sections while they answer the same question, and it made the
--- first and third sections look like they should be one list.
---
 -- The split that matters is WHO RUNS IT (dev gate) and WHAT IT IS ABOUT
 -- (subsystem). Both registries resolve their group from the one map below, so
 -- there is a single place to edit and anything unmapped lands visibly in
@@ -562,22 +538,17 @@ DF.DEBUG_GROUP_OF = {
 }
 
 -- `hidden` keeps a command ANSWERING, and registered here, but off the /df debug
--- listing. Two reasons qualify:
+-- listing. One reason qualifies: it is an everyday command already listed by
+-- /df help (test, reset, lock...). Each command should be documented in exactly
+-- ONE list -- the one its audience reads -- or the two drift apart.
 --
 -- ⚠ REGISTERING IS WHAT PUTS THE WORD IN DEBUG_SUB_KNOWN -- that is the real,
 -- checkable reason to register a hidden command, and it is why /df debug <word> does
--- not load the settings companion for a branch that lives in this addon. These notes
--- used to say "for the drift check"; there is no drift check. Nothing anywhere
--- compares the two registries against the dispatcher, so four comments were leaning
--- on a safety net that does not exist. (auditspells and exportaudit ARE drift checks,
--- of curation data and export categories -- unrelated to command registration.)
---   1. It is an everyday command already listed by /df help (test, reset, lock...).
---      Each command should be documented in exactly ONE list — the one its audience
---      reads — or the two drift apart, which is how pixelcheck ended up in both.
---   2. (Removed 2026-07-29) There used to be a second reason: console-migration
---      signposts that toggled nothing. Those commands are gone rather than hidden
---      — a command whose whole job is to say "this moved" is one more spelling to
---      learn, and the console page already says where tracing lives.
+-- not load the settings companion for a branch that lives in this addon. Do NOT
+-- register "for the drift check": there is no drift check. Nothing anywhere
+-- compares the two registries against the dispatcher. (auditspells and exportaudit
+-- ARE drift checks, of curation data and export categories -- unrelated to command
+-- registration.)
 function DF:RegisterDebugSub(cmd, desc, devOnly, args, hidden)
     table.insert(DF.DebugSubCommands, { cmd = cmd, desc = desc, dev = devOnly, args = args, hidden = hidden })
     -- Registering IS the gate. Populated here rather than at the branch so a
@@ -650,8 +621,6 @@ end
 -- Optimizes slider dragging by only updating the specific property being changed.
 -- During slider drag: only update the one property (e.g., just frame height)
 -- On slider release: perform full frame update to ensure everything is in sync
-
--- Debug flag for slider updates (enable the GUI category in the debug console)
 
 -- Track active slider dragging state.
 --
@@ -744,19 +713,12 @@ function DF:OnSliderDragStop()
 end
 
 -- ⚠ DEPRECATED -- A PLAIN ALIAS FOR DF:UpdateAll(), and deleted next minor.
+-- Point new code at DF:UpdateAll() directly.
 --
 -- The throttle it is named for is the apply scheduler's job now: DF:UpdateAll()
 -- is an arm-stub, so repeat calls inside one rendered frame coalesce on their
--- own (Core\ApplyScheduler.lua). The drag branch that used to live here -- swap
--- in the slider's lightweight function, or skip entirely -- is gone: the widget
--- kit no longer routes per-tick refresh through the host during a drag. It
--- pumps its own preview once per rendered frame and commits once on release,
--- so there is nothing left for this to decide.
---
--- Callers reaching this through the GUI `refresh` hook during someone ELSE's
--- drag now request a full "all" per call instead of a lightweight one. That is
--- bounded, not unbounded: the sink collapses every request in a frame into one
--- pass. Point new code at DF:UpdateAll() directly.
+-- own (Core\ApplyScheduler.lua). Callers reaching this through the GUI `refresh`
+-- hook request a full "all" per call, which the sink collapses into one pass.
 function DF:ThrottledUpdateAll()
     DF:UpdateAll()
 end
@@ -1994,8 +1956,6 @@ function DF:LightweightUpdateFrameLevel(elementType)
         vehicle      = "vehicleIcon",
         raidRole     = "raidRoleIcon",
         summon       = "summonIcon",
-        -- These two had a slider and an export entry but no live consumer: their
-        -- Frame Level only ever applied in test mode. Wired here 2026-07-25.
         bgCarrier    = "bgCarrierIcon",
         combat       = "combatIcon",
         ping         = "pingIcon",
@@ -2856,11 +2816,6 @@ function DF:LightweightUpdateResourceBarFrameLevel()
     IterateFramesInMode(mode, UpdateFrame)
 end
 
--- Update dispel overlay colors directly (for test mode preview only)
--- IMPORTANT: Only updates test mode frames to preserve secret color handling on live frames
--- (DF:LightweightUpdateDispelColors was removed with the dispel Custom Colors
--- mode, 2026-07-11 — its per-type picker callbacks were its only callers.)
-
 
 -- ============================================================
 -- UTF-8 STRING HELPERS
@@ -3064,8 +3019,6 @@ function DF:DebugAuraFilters(unit)
             pcall(function() spellId = auraData.spellId or "?" end)
 
             -- Real signature: ShouldDisplayBuff(unitCaster, spellId, canApplyAura).
-            -- The old call passed the whole auraData table as unitCaster, which
-            -- fell through to the final `else` and returned false for everything.
             if AuraUtil.ShouldDisplayBuff then
                 local ok, result = pcall(function()
                     return AuraUtil.ShouldDisplayBuff(auraData.sourceUnit, auraData.spellId, auraData.canApplyAura)
@@ -3234,8 +3187,7 @@ end
 -- ⚠ The "/dfarena" alias below is the REGISTRY SPELLING, not a working bind: it is
 -- /df-prefixed, so RegisterDebugSlash routes it to DebugSlashBySub["arena"] and
 -- deliberately creates no SLASH_ global (only non-/df aliases like "/rl" get one).
--- Typing "/dfarena" does nothing. That is the intended shape — one command form —
--- but it read as a promise, so both the comment above and CLAUDE.md claimed it worked.
+-- Typing "/dfarena" does nothing. That is the intended shape: one command form.
 -- Requires being in a raid group to see frames
 -- ============================================================
 DF:RegisterDebugSlash("DFARENA", "Toggle arena test mode (raid group)", false, "/dfarena")
@@ -3290,7 +3242,6 @@ function DF:GetCurrentMode()
     return "party"
 end
 
--- Deep copy helper (also defined in Profile.lua, but needed here too)
 -- Note: DeepCopy, ResetProfile and CopyProfile are defined in Profile.lua
 
 -- (Removed) DF:ApplySavedCVarSettings — it force-stamped Blizzard's
@@ -3767,9 +3718,6 @@ function DF:MigrateAuraBorderKeys(modeDb)
             modeDb[p .. "BorderSize"] = modeDb[p .. "BorderThickness"]
         end
     end
-    -- (The buffExpiringBorderPulsate -> ...AnimationType migration was removed with the
-    -- pre-12.1 Expiring system on 2026-07-25 — both keys are gone, so there is nothing
-    -- left to migrate between.)
 end
 
 -- ============================================================
@@ -4527,8 +4475,8 @@ function DF:MigrateAbsoluteFrameLevels()
         -- stored 51 that nothing would ever revisit -- Config defaults only fill MISSING
         -- keys. Correct that one value in place.
         --
-        -- Deliberately NOT folded into V1: V1 also shifts targetedSpell by +30 and the AD
-        -- default by +40, so re-running it under a new flag would double-shift both.
+        -- Deliberately NOT folded into V1: V1 also shifts the AD default by +40, so
+        -- re-running it under a new flag would double-shift it.
         --
         -- Only touches the exact broken value, and only on a profile V1 has stamped, so a
         -- fresh install (already 65) and a deliberate non-51 choice are both left alone.
@@ -4634,8 +4582,7 @@ end
 -- profile did not carry it and got shifted:
 --   * MigrateAbsoluteFrameLevels  -- auraDesigner.defaults.indicatorFrameLevel
 --     40 -> 80 (already ABSOLUTE in Config; the render's own `or 40` fallback proves
---     it). It also shifted targetedSpellFrameLevel until that key's reader went with
---     the group display and the addend was removed.
+--     it).
 --   * MigratePersonalContainerPosition -- personalTargetedSpellX 0 -> 92.
 -- On a fresh install the AD value was then folded into the Party/Raid designer
 -- preset on first login, making it permanent.
@@ -4770,14 +4717,10 @@ function DF:MigrateTargetedSpellImportantBorder()
     end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
         if type(profile) == "table" then
-            -- Group/party Targeted Spells. Guarded independently from personal so a
-            -- profile already through this step still receives the personal one.
-            -- (Removed) the group half, mapHighlight(m, "targetedSpell"). It mapped the
-            -- old highlight keys onto targetedSpellImportantBorder*, which has no
-            -- readers now the group display is gone. Conditional on the legacy key, so
-            -- unlike the frame-level addend it only touched old profiles — but it still
-            -- wrote keys nothing will read. The _tsImportantBorderV1 flag is left on
-            -- profiles that already have it; it is never read again.
+            -- (Removed) the group half, mapHighlight(m, "targetedSpell"). It wrote
+            -- targetedSpellImportantBorder* keys that have no readers now the group
+            -- display is gone. The _tsImportantBorderV1 flag is left on profiles that
+            -- already have it; it is never read again.
             -- Personal Targeted Spell — LIVE, do not touch.
             if not profile._personalTsImportantBorderV1 then
                 for _, modeKey in ipairs({ "party", "raid" }) do
@@ -5218,8 +5161,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
         DF.loadedPartyEnabled = DF.db.partyEnabled ~= false
         DF.loadedRaidEnabled  = DF.db.raidEnabled  ~= false
 
-        -- Apply user's Settings Panel font (safe no-op if GUI/DFFonts.lua hasn't loaded yet;
-        -- SetupGUIPages also calls this again after the GUI frame exists)
+        -- Apply user's Settings Panel font (safe no-op until DandersUI's Fonts module has
+        -- loaded; the Settings Font dropdowns re-apply it via GUI:RefreshSettingsFont)
         if DF.GUI and DF.GUI.ApplySettingsFont then
             DF.GUI:ApplySettingsFont()
         end
@@ -5348,16 +5291,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- are stripped by the v5 legacy-aura cleanup below.
 
 
-        -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to
-        -- live here and below. Unlike every other migration they were not
-        -- no-ops on fresh defaults: a profile reset wipes the migration flags
-        -- along with everything else, so on the next reload both stamps
-        -- re-fired and overwrote the freshly reset filters with 4.0.9-era
-        -- values (All Debuffs off, Big/External Defensives on). Their one-time
-        -- job is long done — upgraded profiles carry the flags, fresh/reset
-        -- profiles get the current Config defaults. Migrations added here MUST
-        -- be no-ops on a fresh default profile (derive from legacy values;
-        -- never unconditional writes behind a profile-stored flag).
+        -- (Removed) The v4.0.9 / v4.0.9b one-time FORCED filter stamps used to live
+        -- here and below. Unlike every other migration they were not no-ops on fresh
+        -- defaults: a profile reset wipes the migration flags, so both stamps re-fired
+        -- and overwrote the freshly reset filters. Migrations added here MUST be
+        -- no-ops on a fresh default profile (derive from legacy values; never
+        -- unconditional writes behind a profile-stored flag).
 
         -- Migrate the single border dropdown to the Style + Texture split.
         -- Previously borderTexture held either "SOLID" (the built-in border) or an
@@ -5742,7 +5681,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Stage 5.1b: rename per-aura icon border keys to canonical
         -- ShowBorder / BorderSize / BorderInset.  Idempotent; safe to
         -- run on already-migrated configs.  Defined in
-        -- AuraDesigner/Options.lua; load order guarantees that file
+        -- AuraDesigner/Migrations.lua; load order guarantees that file
         -- has registered DF.MigrateAuraDesignerIconBorderKeys by here.
         if DF.MigrateAuraDesignerIconBorderKeys then
             DF.MigrateAuraDesignerIconBorderKeys(DF.db.party)
@@ -6262,7 +6201,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Expose the v5 legacy passes for the profile-import path (mirrors the
         -- MigrateAuraDesignerToInstances export above). Without this, a v4
         -- export imported at runtime shows a wrong dispel-enable state and
-        -- retired animation values until the next reload (all four passes only
+        -- retired animation values until the next reload (these passes only
         -- re-ran at ADDON_LOADED). Walks the RAW profile tables only — DF.db
         -- is proxied by the time an import runs, and the current profile is in
         -- DandersFramesDB_v2.profiles anyway. Each pass is flag-gated or
@@ -6378,15 +6317,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
 
     elseif event == "PLAYER_LOGIN" then
-        -- (Removed) a disabled third-party compatibility popup that ran here. It had been
-        -- gated off behind a literal `false` once the issue it existed for was resolved, and
-        -- kept in case it were ever needed again — but git keeps it perfectly well, and the
-        -- dead flag did not stop its text shipping in readable addon Lua.
+        -- (Removed) a disabled third-party compatibility popup that ran here.
         -- Restore with: git log -S nephUIPopupEnabled
-        -- ⚠ The remaining mentions of that addon elsewhere are INTEROPERABILITY, not this:
-        -- ClickCasting/Core.lua names it among addons that register into ClickCastFrames,
-        -- and Frames.lua carries its frame-name patterns so click casting works with it.
-        -- Those stay.
+        -- ⚠ The remaining mentions of that addon elsewhere are INTEROPERABILITY, not
+        -- this: ClickCasting/Core.lua names it among addons that register into
+        -- ClickCastFrames, and ClickCasting/Frames.lua carries its frame-name patterns
+        -- so click casting works with it. Those stay.
         
         -- ☠ (Removed) DF.raidBuffFilteringReady = true, and its claim to "enable raid
         -- buff filtering now that we're past ADDON_LOADED (avoids secret value errors
@@ -6418,11 +6354,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Frame state
         -- headers and dispel are registered in BOTH registries — RegisterDebugSlash
         -- (which supplies the /dfXXX alias) and here (which supplies the argument
-        -- hint). The old three-section listing printed each one twice and it read as
-        -- deliberate because the copies sat in different sections; grouping by
-        -- subsystem put them side by side and the duplication was obvious. Hidden
-        -- here, with the argument hint folded into the slash description, so the
-        -- entry survives in the registries but appears once in the listing.
+        -- hint). Hidden here, with the argument hint folded into the slash
+        -- description, so the entry survives in the registries but appears once.
         sub("headers",      "secure header state dump, or a /dfheaders subcommand", nil, "[cmd]", true)
         sub("attached",     "foreign frames anchored to ours")
         sub("zorder",       "frame level / strata / alpha map (add a test frame index)", nil, "[index]")
@@ -6485,11 +6418,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("casthistory",  "cast history")
         sub("clearhistory", "clear the cast history buffer")
         -- Ongoing traces still on their own flag (console migration pending)
-        -- (Removed) a "HIDDEN: both are console-migration signposts" rationale that
-        -- described two sub() entries below it. There were none -- the entries it
-        -- justified were deleted on 2026-07-29, and RegisterDebugSub's own header
-        -- records that decision ("Those commands are gone rather than hidden"). The
-        -- block outlived them and read as documentation for the next two entries.
         -- Config repair
         sub("resetgui",     "reset GUI scale, size and position", nil, nil, true)
         sub("resetconflict", "moved to /df debug cc resetconflict", nil, nil, true)
@@ -7248,11 +7176,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 cmd("/df reset", L["reset party + raid profiles to defaults"], "BAD")
                 cmd("/df console", L["open the debug console page"])
                 cmd("/df debug", L["list debug commands (on/off toggles debug logging)"])
-                -- pixelcheck / navprobe / gapcheck used to be listed here as well
-                -- as in the generated /df debug listing. They are dev diagnostics,
-                -- not everyday commands, so help now points at the one list that
-                -- is generated and cannot drift instead of duplicating a subset
-                -- of it by hand.
+                -- Dev diagnostics (pixelcheck / navprobe / gapcheck) are deliberately not
+                -- listed here: help points at the one generated /df debug listing rather
+                -- than duplicating a subset of it by hand.
             elseif msg == "test" then
                 -- The test panel lives in the load-on-demand companion.
                 -- Deliberate user command -> load it; the old nil-guard made
@@ -7347,10 +7273,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if dev then printSection(true, L["Dev tools (alpha/beta builds only)"]) end
             elseif msg == "debug on" or msg == "debug off" then
                 local newState = msg == "debug on"
-                -- The else branch used to set DF.debugEnabled, which nothing read,
-                -- and then reported success either way — so with the console module
-                -- missing this said "Debug logging enabled" while enabling nothing.
-                -- Say what actually happened instead.
+                -- With the console module missing there is nothing to enable, so report
+                -- the failure rather than claiming success.
                 if not DF.DebugConsole then
                     DF:Err(L["Debug console module not loaded."])
                     return
@@ -7373,14 +7297,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.DebugRestedIndicator then
                     DF:DebugRestedIndicator()
                 end
-            -- (Removed) /df debug debugraidbuffs. It dumped DF:GetRaidBuffIcons() and
-            -- checked the player's buffs against it. That cache existed for ONE
-            -- purpose — matching raid buffs by icon texture when the spell ID is
-            -- secret — and that fallback was never wired to anything: the cache had
-            -- no reader but this dump. 12.1 solved the same problem the other way,
-            -- via the native excludeSpellIDs union with real spell IDs
-            -- (missingBuffHideFromBar, Features/Auras.lua), so the icon-matching
-            -- approach is superseded, not merely unused. Helper deleted with it.
             elseif msg == "auradata" then
                 -- Live aura DATA enumeration (pre-container: reads via C_UnitAuras).
                 -- Renamed off "auras" so /df debug auras can be the container-era pipeline
@@ -7991,10 +7907,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
         -- Add convenient /rl reload command
-        -- (Removed) a superseded paragraph that argued the opposite of the one below --
-        -- that /rl "was the only one absent from /df debug" and that "being listed
-        -- costs nothing". The code implements the decision below, not that one, and
-        -- two stacked rationales reading in opposite directions is worse than either.
         -- NOT via RegisterDebugSlash: /rl is universal muscle memory, so listing it
         -- under /df debug spends a row telling people something they already know.
         -- It is also the one command with no "/df debug <name>" form, which made it
@@ -8185,16 +8097,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end)
 
-        -- ⚰ DEPRECATED-TARGETED-SPELLS — the once-per-account Targeted Spells
-        -- setup wizard used to fire here, 5s after login, offering to turn the
-        -- feature on. It could not stay: the feature was force-disabled at load and
-        -- its settings page had left the sidebar, so the wizard would have sold a
-        -- feature that could neither run nor be configured, and its "Open settings"
-        -- button would have landed on a page with no nav row.
-        --
-        -- 2026-07-30: DF:ShowTargetedSpellSetupWizard is now gone too, with the rest
-        -- of the group-frame feature, so there is nothing left to restore here. The
-        -- saved flag DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left
+        -- (Removed) Targeted Spells setup wizard: the group-frame feature and
+        -- DF:ShowTargetedSpellSetupWizard are both gone, so there is nothing to restore.
+        -- The saved flag DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left
         -- alone (stripping saved keys is a separate call).
 
     elseif event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
@@ -8703,8 +8608,6 @@ function DF:UpdateAll_Now()
         end
     end
     
-    -- FIX 2025-01-20: Refresh private aura anchors (boss debuffs) when settings change
-    -- This is needed for profile switches where overlay size may have changed
 end
 
 -- ============================================================
@@ -8974,8 +8877,6 @@ function DF:FullProfileRefresh()
         DF:UpdateAllAuras()
     end
     
-    -- === REFRESH PRIVATE AURAS ===
-    
     -- === UPDATE RESTED INDICATOR ===
     if DF.UpdateRestedIndicator then
         DF:UpdateRestedIndicator()
@@ -9018,9 +8919,6 @@ function DF:FullProfileRefresh()
     end
 end
 
--- (Removed) WIZARD SETTINGS APPLICATION — DF:ApplyWizardSettingsMap and its
--- orphaned local strsplit. It applied a wizard's settingsMap to the DB, was
--- called only from the popup wizard's CompleteWizard, and went with that runtime.
 -- ============================================================
 -- MINIMAP BUTTON (using LibDBIcon)
 -- ============================================================

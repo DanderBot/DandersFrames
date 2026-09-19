@@ -21,17 +21,13 @@ local format = string.format
 
 -- ============================================================
 -- OVERRIDE KEY LABELS
--- The override tooltip and /df debug overrides both list which settings a layout has
--- overridden. They used to print the RAW saved key -- "auraDesignerPreset",
--- "buffBorderSize" -- so users were shown internal camelCase identifiers. Noise at
--- best, and actively misleading where a key's wording no longer matches the UI:
--- the designer keys still say "preset" ON PURPOSE (they are exported, so renaming
--- them would cost a saved-profile migration to change a name nobody should have
--- been seeing) while the UI now calls those Templates.
---
--- Derived labels can't be translated -- they come from an identifier, not a string
--- table -- but that is no worse than the raw key they replace, and the cases where
--- the wording actually matters are pinned to real locale keys below.
+-- The override tooltip and /df debug overrides both list which settings a layout
+-- has overridden, as derived labels rather than the raw camelCase keys.
+-- The designer keys still say "preset" ON PURPOSE -- they are exported, so
+-- renaming them would cost a saved-profile migration -- while the UI now calls
+-- those Templates.
+-- Derived labels can't be translated (they come from an identifier, not a string
+-- table); the cases where the wording matters are pinned to real locale keys below.
 -- ============================================================
 
 -- Prettifying these would be WRONG, not merely ugly.
@@ -359,7 +355,7 @@ local function RaidTextMigrated()
     -- The TD legacy migration flags migratedFromLegacy on whatever owns raid text.
     -- Preset build: the current raid preset, OR the canonical "Raid" preset the
     -- migration always materialises (covers a raid mode repointed elsewhere).
-    -- Pre-preset build (alpha.6): inline db.raid.textDesigner.
+    -- Pre-preset build: inline db.raid.textDesigner.
     if DF.GetTextDesignerPresets then
         if DF.GetModeTextDesigner then
             local td = DF:GetModeTextDesigner("raid")
@@ -1013,8 +1009,7 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     -- If a key is nil, backfill a default so both the snapshot and set are consistent.
     -- Only `enabled` is overridable (PINNED_OVERRIDABLE = {enabled}), and the loop
     -- below reads PINNED_DEFAULTS only for the keys it iterates — so this table needs
-    -- just `enabled`. (It previously listed ~13 dead keys, incl. a keepOfflinePlayers
-    -- default that contradicted the real Config/Options default.)
+    -- just `enabled`.
     local PINNED_DEFAULTS = {
         enabled = false,
     }
@@ -2500,8 +2495,8 @@ end
 -- Defining them as no-ops here is what lets those call sites stay untouched;
 -- the companion overwrites all four with the real versions when it loads.
 --
--- Written out one by one rather than generated in a loop so that grep and
--- lod_gate_check.py can both see them, same as TestMode/Shim.lua.
+-- Written out one by one rather than generated in a loop so that grep can see
+-- them, same as TestMode/Shim.lua.
 function AutoProfilesUI:RefreshEditingUI() end
 function AutoProfilesUI:RefreshTabOverrideStars() end
 function AutoProfilesUI:ShowSidebarHint() end

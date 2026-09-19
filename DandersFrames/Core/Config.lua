@@ -537,9 +537,8 @@ local fontValidationString = fontValidationFrame:CreateFontString(nil, "OVERLAY"
 -- Memoised per path. This runs on EVERY DF:SafeSetFont call, and SafeSetFont is one of
 -- the hottest functions in the addon (5.7% of a boss trace's allocation just here), but
 -- a path only ever needs loading once -- the file does not unload and the mapping from
--- path to file never changes. Keyed on ATTEMPTED rather than succeeded, which matches
--- the old behaviour exactly: the pcall result was discarded, so a failed load was never
--- retried anyway.
+-- path to file never changes. Keyed on ATTEMPTED rather than succeeded, so a failed
+-- load is never retried.
 --
 -- pcall(fn, args...) not pcall(function() ... end): the closure form allocated one
 -- closure per call on that same hot path.
@@ -709,7 +708,7 @@ local function GetOrCreateFontFamily(fontPath, outline, useShadow, size)
     return nil
 end
 
--- ★ Exposed for the settings-UI font objects (GUI/DFFonts.lua). The DFFont* objects
+-- ★ Exposed for the settings-UI font objects (DandersUI/Fonts.lua). The DFFont* objects
 -- are Font OBJECTS, not FontStrings, so SafeSetFont (which also scales/re-renders a
 -- FontString) does not fit them — but they need the same multi-alphabet family, or
 -- every widget inheriting a DFFont renders tofu on a CJK client whenever the chosen
@@ -995,8 +994,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         end
         -- Normalize "NONE" to empty string (NONE is not a valid WoW font flag)
         if flags == "NONE" then flags = "" end
-        -- The SLUG variant is derived from `flags` alone, so it caches with it --
-        -- the concat below used to run per call for every slug-eligible element.
+        -- The SLUG variant is derived from `flags` alone, so it caches with it.
         parsed = {
             shadow = shadow,
             flags  = flags,
@@ -1078,7 +1076,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
             -- (hundreds/minute in PvP instances on live); on 12.1 this runs in
             -- the SecureGroupHeader's child-refresh path, so the taint poisoned
             -- the secure header + aura containers and froze auras in combat
-            -- (taint.log: 168× Config.lua:773). Skip the re-render for secret
+            -- (taint.log: 168× in SafeSetFont). Skip the re-render for secret
             -- text: issecretvalue runs BEFORE any boolean use of the value, and
             -- secret-text fontstrings rewrite on every update anyway, so the
             -- font change lands on the next natural SetText. The old `~= ""`
@@ -1152,8 +1150,7 @@ DF.GlobalDefaults = {
     showLoginMessage = true,
     -- Colour picker. Account-wide, not per-mode: "use DF's picker" is a UI-chrome
     -- preference with no party/raid meaning, and the hooks that consume it are
-    -- installed once for the whole session. Previously these lived in PartyDefaults,
-    -- which generated an independent (and permanently ignored) raid copy.
+    -- installed once for the whole session.
     --   colorPickerOverride       -- DF's own colour swatches use DF's picker
     --   colorPickerGlobalOverride -- every OTHER addon's picker becomes DF's too
     colorPickerOverride = true,
@@ -1408,8 +1405,8 @@ DF.PartyDefaults = {
     buffShowBorder = true,
     buffBorderInset = 0,
     buffBorderSize = 1,
-    -- Canonical border toolkit (Stage 5.5 Phase 2): plugs into BuildSpec +
-    -- CreateBorderControls.  Colour alpha 0.8 preserves the legacy opacity.
+    -- Canonical border toolkit: plugs into BuildSpec + CreateBorderControls.
+    -- Colour alpha 0.8 preserves the legacy opacity.
     buffBorderColor = {r = 0, g = 0, b = 0, a = 0.8},
     buffBorderStyle = "SOLID",
     buffBorderTexture = "SOLID",
@@ -1502,7 +1499,6 @@ DF.PartyDefaults = {
     buffPandemicBorderShadowSize = 1,
     buffPandemicBorderShadowOffsetX = 1,
     buffPandemicBorderShadowOffsetY = -1,
-    -- Expiring Animation (AD-style full toolkit) — replaces the legacy
 
     -- Aura Source Mode
 
@@ -1589,7 +1585,7 @@ DF.PartyDefaults = {
         [447960] = true,  -- Ride Along Inactive
         [206151] = true,  -- Challenger's Burden
     },
-    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (native DISPELLABLE token). "ANY" is a retired legacy value: same token as ALL, dropdown row removed 2026-08-22; Core.lua rewrites stored ones and the engine still accepts strays from imports.
+    directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (native DISPELLABLE token). "ANY" is a retired legacy value: same token as ALL, dropdown row removed; Core.lua rewrites stored ones and the engine still accepts strays from imports.
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
     debuffMaxDurationKeepImportant = true,    -- ... but keep Boss/Role/Priority visible
@@ -2574,10 +2570,9 @@ DF.PartyDefaults = {
     statusTextColor = {r = 1, g = 1, b = 1, a = 1},
     statusTextEnabled = true,
     statusTextFont = "DF Roboto SemiBold",
-    -- 12 (Krathe, 2026-08-08; was 14). This is the "Dead / Offline / Ghost" size for
-    -- BOTH surfaces: the legacy status text, and the Text Designer's `status_text`
-    -- element — TextDesigner/Migration.lua seeds that element's fontSize from this key,
-    -- so one value is the default for both by construction.
+    -- The "Dead / Offline / Ghost" size for BOTH surfaces: the legacy status text, and
+    -- the Text Designer's `status_text` element — TextDesigner/Migration.lua seeds that
+    -- element's fontSize from this key, so one value is the default for both.
     statusTextFontSize = 12,
     statusTextOutline = "SHADOW",
     statusTextX = 0,

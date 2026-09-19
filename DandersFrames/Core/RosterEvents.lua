@@ -47,7 +47,6 @@ local addonName, DF = ...
 --   doesn't recognize for `RegisterUnitEvent`. The dispatcher does NOT and
 --   CAN NOT fire for test units. Test mode populates frame data via direct
 --   function calls (DF:UpdateTestFrame / DF:RefreshTestFrames), bypassing the event
---   system. (It named DF:UpdateAllTestFrames, which does not exist in either addon.)
 --   This is intentional and pre-existing behavior.
 --
 -- Pet / vehicle support:
